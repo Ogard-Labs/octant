@@ -5,7 +5,7 @@ import {
   type ThreadExternalContentClearOutcome,
   type ThreadExternalContentState,
 } from "@octant/contracts/content-provenance";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { absoluteTimeFormatter } from "../lib/relativeTime";
@@ -285,6 +285,50 @@ describe("outside content notice", () => {
       expect(within(dialog).getByRole("button", { name: "Clear the mark" })).toBeEnabled(),
     );
     expect(within(dialog).queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("keeps the notice gone when a read begun before the clear answers after it", async () => {
+    let answerLate: (state: ThreadExternalContentState) => void = () => undefined;
+    const late = new Promise<ThreadExternalContentState>((resolve) => {
+      answerLate = resolve;
+    });
+    const read = vi
+      .fn<() => Promise<ThreadExternalContentState>>()
+      .mockResolvedValueOnce(stateOf())
+      .mockResolvedValueOnce(stateOf())
+      .mockReturnValue(late);
+    const { client, clearExternalContent } = fakeClient({
+      read,
+      clear: async () =>
+        decodeThreadExternalContentClearOutcome({
+          kind: "cleared",
+          state: stateOf({
+            externalContentIngested: false,
+            version: 4,
+            ingestionCount: 0,
+            sources: [],
+          }),
+        }),
+    });
+    const { setBusy } = renderNotice(client);
+    await screen.findByRole("button", { name: "Review" });
+    // A turn starts and settles; the read that settling begins is still in flight.
+    setBusy(true);
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    setBusy(false);
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(3));
+
+    const dialog = await openReview();
+    await userEvent.setup().click(within(dialog).getByRole("button", { name: "Clear the mark" }));
+    await waitFor(() => expect(clearExternalContent).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    await act(async () => {
+      answerLate(stateOf());
+      await late;
+    });
+    expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("reads the mark again when a turn starts or settles", async () => {

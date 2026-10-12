@@ -5,11 +5,12 @@ import type {
   ThreadExternalContentSource,
   ThreadExternalContentState,
 } from "@octant/contracts/content-provenance";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { absoluteTimeFormatter } from "../lib/relativeTime";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { describeSource } from "./outsideContentSources";
 import "./outside-content-notice.css";
 
 /**
@@ -46,6 +47,16 @@ export function ComposerOutsideContentNotice(props: {
 export function OutsideContentNotice(props: OutsideContentThread & { readonly busy: boolean }) {
   const { client, mode, threadId, busy } = props;
   const [state, setState] = useState<ThreadExternalContentState>();
+  // The newest version the notice has accepted. A read answers whenever it
+  // likes, so one begun before a clear can arrive after it; the aggregate
+  // version says it is older, and it is dropped instead of bringing the
+  // notice back.
+  const acceptedVersion = useRef(-1);
+  const accept = useCallback((next: ThreadExternalContentState) => {
+    if (next.version < acceptedVersion.current) return;
+    acceptedVersion.current = next.version;
+    setState(next);
+  }, []);
   const [reviewing, setReviewing] = useState<ThreadExternalContentState>();
   const reviewButton = useRef<HTMLButtonElement>(null);
 
@@ -56,13 +67,13 @@ export function OutsideContentNotice(props: OutsideContentThread & { readonly bu
     client
       .readExternalContent({ mode, threadId }, controller.signal)
       .then((next) => {
-        if (!controller.signal.aborted) setState(next);
+        if (!controller.signal.aborted) accept(next);
       })
       // Without a read the notice keeps what it last knew; the clear itself
       // names the version it needs and the host refuses a stale one.
       .catch(() => undefined);
     return () => controller.abort();
-  }, [client, mode, threadId, busy]);
+  }, [client, mode, threadId, busy, accept]);
 
   return (
     <>
@@ -92,7 +103,7 @@ export function OutsideContentNotice(props: OutsideContentThread & { readonly bu
           mode={mode}
           onClose={() => setReviewing(undefined)}
           onSettled={(next) => {
-            setState(next);
+            accept(next);
             setReviewing(undefined);
           }}
           restoreFocus={reviewButton}
@@ -213,28 +224,6 @@ const REFUSAL_COPY: Record<ThreadExternalContentClearRefusal, string> = {
   unauthorized: "The mark cannot be cleared from this window.",
   "thread-unavailable": "This thread cannot be reached from this window, so its mark stays.",
 };
-
-/** Plain words for the labels the host records; an unknown label shows as it is. */
-const SOURCE_WORDS: Readonly<Record<string, string>> = {
-  "web-fetch": "Web pages",
-  "web-search": "Web search results",
-  "browser-observation": "Pages seen in the browser",
-  "browser-page": "A browser page sent as feedback",
-  "simulator-screen": "A simulator screen sent as feedback",
-  "mcp-tool": "Results from connected tools",
-  "github-issue": "A GitHub issue",
-  "github-issues": "GitHub issues",
-  "github-pull-requests": "GitHub pull requests",
-  "github-projects": "GitHub projects",
-  "linear-issue": "A Linear issue",
-  "agent-message": "A message from another agent",
-  "subagent-result": "A subagent's result",
-  "fork-merge-back": "Changes merged back from a fork",
-};
-
-export function describeSource(label: string): string {
-  return SOURCE_WORDS[label] ?? label;
-}
 
 /** How often and when a source was read; a row recorded before times were kept shows none. */
 export function describeReads(source: ThreadExternalContentSource): string {
