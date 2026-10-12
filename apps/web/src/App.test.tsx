@@ -99,6 +99,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   automationGate.enabled = false;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   try {
     window.sessionStorage.clear();
@@ -761,7 +762,12 @@ describe("App", () => {
   });
 
   it("hands off a sidebar thread without inserting operation text into the Project list", async () => {
-    const user = userEvent.setup();
+    // Fake timers from the start, so any timer the toast schedules is fake and
+    // the 8.2 s wait below elapses instantly. A real 8.2 s sleep outlived the
+    // default 5 s test timeout and left its act() scope open, which stopped the
+    // following tests in this file from rendering at all.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const handOff = deferred<Response>();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -797,7 +803,7 @@ describe("App", () => {
     );
     expect(progress.closest(".toast")).not.toBeNull();
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 8200));
+      await vi.advanceTimersByTimeAsync(8200);
     });
     expect(progress).toBeVisible();
     expect(within(projectsNavigation).queryByText(/Writing the hand-off document/)).toBeNull();
