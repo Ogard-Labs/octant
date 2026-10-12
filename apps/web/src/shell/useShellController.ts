@@ -1157,6 +1157,7 @@ export function useShellController(options: ShellControllerOptions) {
     tabActivation,
     updateSettings,
     workspace: authoritative?.workspace,
+    workspaceVersion: authoritative?.workspaceVersion,
   };
 }
 

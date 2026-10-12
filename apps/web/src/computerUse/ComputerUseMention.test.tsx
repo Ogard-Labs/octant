@@ -33,7 +33,8 @@ function Composer(props: { readonly providerCarriesTools?: boolean }) {
         onKeyDown={computer.handleKeyDown}
       />
       <ComputerUseMention controller={computer} />
-      <output>{computer.selection?.kind ?? "none"}</output>
+      <output aria-label="selection">{computer.selection?.kind ?? "none"}</output>
+      <output aria-label="staged">{computer.stagedSelection?.kind ?? "none"}</output>
     </>
   );
 }
@@ -71,9 +72,9 @@ describe("Computer plugin mention", () => {
     });
     fireEvent.click(screen.getByRole("option", { name: /Computer/ }));
     expect(screen.getByRole("textbox")).toHaveValue("Use ");
-    expect(screen.getByText("plugin")).toBeVisible();
+    expect(screen.getByLabelText("selection")).toHaveTextContent("plugin");
     fireEvent.click(screen.getByRole("button", { name: "Remove Computer" }));
-    expect(screen.getByText("none")).toBeVisible();
+    expect(screen.getByLabelText("selection")).toHaveTextContent("none");
   });
 
   it("drops a chosen @Computer once the composer moves to a runtime without Octant tools", () => {
@@ -82,9 +83,10 @@ describe("Computer plugin mention", () => {
       target: { value: "Use @Com", selectionStart: 8 },
     });
     fireEvent.click(screen.getByRole("option", { name: /Computer/ }));
-    expect(screen.getByText("plugin")).toBeVisible();
+    expect(screen.getByLabelText("selection")).toHaveTextContent("plugin");
     rerender(<Composer providerCarriesTools={false} />);
-    expect(screen.getByText("none")).toBeVisible();
+    expect(screen.getByLabelText("selection")).toHaveTextContent("none");
+    expect(screen.getByLabelText("staged")).toHaveTextContent("plugin");
   });
 
   it("does not offer @Computer on a runtime that carries no Octant tools", () => {
@@ -93,7 +95,7 @@ describe("Computer plugin mention", () => {
       target: { value: "Use @Com", selectionStart: 8 },
     });
     expect(screen.queryByRole("option", { name: /Computer/ })).not.toBeInTheDocument();
-    expect(screen.getByText("none")).toBeVisible();
+    expect(screen.getByLabelText("selection")).toHaveTextContent("none");
   });
 
   it("does not turn ordinary computer text into tool authority", () => {
@@ -102,7 +104,7 @@ describe("Computer plugin mention", () => {
       target: { value: "My computer is slow", selectionStart: 19 },
     });
     expect(screen.queryByRole("option")).not.toBeInTheDocument();
-    expect(screen.getByText("none")).toBeVisible();
+    expect(screen.getByLabelText("selection")).toHaveTextContent("none");
   });
 });
 

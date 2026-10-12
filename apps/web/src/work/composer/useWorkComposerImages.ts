@@ -4,12 +4,21 @@ import {
   WORK_ATTACHMENT_MEDIA_TYPES,
 } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   clipboardHasImage,
   collectPastedImages,
   pastedImageName,
 } from "../../chat/composerImagePaste";
+import { NewTaskDraftsContext, NewTaskDraftScopeContext } from "../../composer/useNewTaskPrompt";
 
 /**
  * Whether the selected model reads images.
@@ -65,19 +74,82 @@ const SUPPORTED = new Set<string>(WORK_ATTACHMENT_MEDIA_TYPES);
  * them to the create path, which stages them on the host before the first
  * turn names their ids. filesForSend leaves the chips in place until
  * clearAfterAccepted, so a failed create or turn can retry the same images.
+ * A draft-scoped composer also keeps the File list in the new-task store so
+ * a Settings remount restores the same chips.
  */
+function stagePersistedFiles(files: ReadonlyArray<File>): ReadonlyArray<StagedWorkImage> {
+  return files.map((file) => ({
+    id: globalThis.crypto.randomUUID(),
+    file,
+    displayName: pastedImageName(file),
+    previewUrl: URL.createObjectURL(file),
+  }));
+}
+
+const NO_IMAGES: ReadonlyArray<File> = [];
+const emptySubscribe = () => () => {};
+
+function sameDraftFiles(left: ReadonlyArray<File>, right: ReadonlyArray<File>): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return left.every((file, index) => file === right[index]);
+}
+
 export function useWorkComposerImages(): WorkComposerImages {
-  const [staged, setStaged] = useState<ReadonlyArray<StagedWorkImage>>([]);
-  const [message, setMessage] = useState<string | undefined>(undefined);
+  const drafts = useContext(NewTaskDraftsContext);
+  const scope = useContext(NewTaskDraftScopeContext);
   const previews = useRef(new Set<string>());
   const current = useRef<ReadonlyArray<StagedWorkImage>>([]);
+  const [staged, setStaged] = useState<ReadonlyArray<StagedWorkImage>>([]);
+  const [message, setMessage] = useState<string | undefined>(undefined);
+  current.current = staged;
+  const storedFiles = useSyncExternalStore(
+    drafts?.subscribe ?? emptySubscribe,
+    () => (scope === undefined || drafts === undefined ? NO_IMAGES : drafts.readImages(scope)),
+    () => NO_IMAGES,
+  );
+
+  // Restore after commit so StrictMode's discarded initializer cannot mint
+  // object URLs or a second ID list that the Remove control cannot see.
+  // Skip when this instance already holds the stored files so a write from
+  // this pane does not remint IDs, while a sibling pane on the same scope
+  // still picks the change up.
+  useLayoutEffect(() => {
+    if (
+      sameDraftFiles(
+        storedFiles,
+        current.current.map((attachment) => attachment.file),
+      )
+    ) {
+      return;
+    }
+    for (const attachment of current.current) {
+      if (!previews.current.delete(attachment.previewUrl)) continue;
+      URL.revokeObjectURL(attachment.previewUrl);
+    }
+    if (storedFiles.length === 0) {
+      current.current = [];
+      setStaged([]);
+      return;
+    }
+    const restored = stagePersistedFiles(storedFiles);
+    current.current = restored;
+    for (const attachment of restored) previews.current.add(attachment.previewUrl);
+    setStaged(restored);
+  }, [storedFiles]);
 
   const apply = useCallback(
     (next: (list: ReadonlyArray<StagedWorkImage>) => ReadonlyArray<StagedWorkImage>) => {
       current.current = next(current.current);
       setStaged(current.current);
+      if (scope !== undefined && drafts !== undefined) {
+        drafts.writeImages(
+          scope,
+          current.current.map((attachment) => attachment.file),
+        );
+      }
     },
-    [],
+    [drafts, scope],
   );
 
   const forget = useCallback((previewUrl: string) => {

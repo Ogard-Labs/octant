@@ -1,5 +1,11 @@
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
-import { useNewTaskPrompt } from "../../composer/useNewTaskPrompt";
+import {
+  mentionChipsFromDraft,
+  mentionChipsToDraft,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+  useNewTaskPrompt,
+} from "../../composer/useNewTaskPrompt";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -53,8 +59,10 @@ import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
 import { FolderOpen } from "lucide-react";
 import {
   useCallback,
+  useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -140,6 +148,8 @@ export interface CodeComposerAdapterProps {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => void;
+  /** Opens Providers & Models from the start composer while none is ready. */
+  readonly onOpenSettings?: () => void;
   readonly onCreateThread: (
     input: CodeComposerSubmitInput,
   ) => boolean | void | Promise<boolean | void>;
@@ -240,6 +250,19 @@ const LAST_RESORT_BASE_BRANCH = "development";
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const suggestionDescriptionId = useId();
   const [prompt, setPrompt] = useNewTaskPrompt();
+  const drafts = useContext(NewTaskDraftsContext);
+  const draftScope = useContext(NewTaskDraftScopeContext);
+  const storedCheckout =
+    draftScope === undefined ? undefined : drafts?.readCodeCheckout(draftScope);
+  const storedMentionChips = mentionChipsFromDraft(
+    draftScope === undefined || drafts === undefined ? [] : drafts.readMentionChips(draftScope),
+  );
+  const storedExtensionReceipts =
+    draftScope === undefined || drafts === undefined
+      ? []
+      : drafts.readExtensionReceipts(draftScope);
+  const storedComputerSelection =
+    draftScope === undefined ? undefined : drafts?.readComputerSelection(draftScope);
   const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
     props.providerGroups ?? [],
     props.selectedProviderInstanceId,
@@ -261,6 +284,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     onDraftChange: setPrompt,
     scopeKey: "code-draft",
     providerCarriesTools: runtimeCarriesTools,
+    ...(storedComputerSelection === undefined ? {} : { initialSelection: storedComputerSelection }),
   });
   const selectedFamily = providerFamilyForThread(
     props.providerGroups,
@@ -272,6 +296,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     providerCarriesTools: runtimeCarriesTools,
     projectId: props.projectId ?? null,
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
+    ...(storedExtensionReceipts.length === 0 ? {} : { initialReceipts: storedExtensionReceipts }),
   });
   const browser = useBrowserUseMention({
     textarea: () => textareaRef.current,
@@ -352,6 +377,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
+    ...(storedMentionChips.length === 0 ? {} : { initialChips: storedMentionChips }),
   });
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
@@ -365,9 +391,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     onDraftChange: (next) => setPrompt(next),
     attachDroppedThread: threadMentions.attachDroppedThread,
   });
-  const [executionPolicy, setExecutionPolicy] = useState(props.defaultExecutionPolicy);
+  const [executionPolicy, setExecutionPolicy] = useState(
+    storedCheckout?.executionPolicy ?? props.defaultExecutionPolicy,
+  );
   const [permissionPersistence, setPermissionPersistence] = useState(
-    props.defaultPermissionPersistence,
+    storedCheckout?.permissionPersistence ?? props.defaultPermissionPersistence,
   );
   // F2: the default delivery branch must never collide with the base branch
   // (e.g. `development`), which normally exists. Derive a unique
@@ -380,7 +408,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // Unknown until the host says. Neither caller supplies a branch for a
   // Project-bound composer, so seeding a literal here meant the tray asserted
   // `development` for every repository, including the ones on `main`.
-  const initialBaseBranch = props.branchName ?? props.baseBranch ?? "";
+  const skipProjectReset = useRef(storedCheckout !== undefined);
+  const initialBaseBranch =
+    storedCheckout?.baseBranch ?? props.branchName ?? props.baseBranch ?? "";
   // The delivery target is derived from the tray, not typed into a form: the
   // base branch is the branch picker, the base repository is the connected
   // GitHub repository (or the local Project), and the remote is the one the
@@ -398,7 +428,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // opened for is already chosen; read as a seed, the head replaced it and Start
   // a fix created the thread from `main` while the tray named the failing branch.
   const handedBranch = props.branchName;
-  const baseBranchChosen = useRef(handedBranch !== undefined);
+  const baseBranchChosen = useRef(storedCheckout?.baseBranchChosen ?? handedBranch !== undefined);
   // F4: remote facts are server-authoritative. When the server has not
   // provided them, fail closed with no remotes so Start from origin is
   // disabled rather than fabricated.
@@ -407,7 +437,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     [props.worktreeRemoteFacts],
   );
   const preferredRemote = selectWorktreeRemote(worktreeRemoteFacts);
-  const [startFromOriginOverride, setStartFromOriginOverride] = useState<boolean>();
+  const [startFromOriginOverride, setStartFromOriginOverride] = useState<boolean | undefined>(
+    storedCheckout?.startFromOriginOverride,
+  );
   // The Project habit is the preselection; the user may override it for this
   // one thread. Switching Projects drops the override so the next Project's
   // own habit is honored rather than the previous Project's choice.
@@ -416,13 +448,14 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const handedWorkspace: CodeNewThreadWorkspace | undefined =
     handedBranch === undefined ? undefined : "managed-worktree";
   const [workspaceOverride, setWorkspaceOverride] = useState<CodeNewThreadWorkspace | undefined>(
-    handedWorkspace,
+    storedCheckout?.workspaceOverride ?? handedWorkspace,
   );
   const workspace =
     workspaceOverride ?? props.newThreadWorkspace ?? DEFAULT_CODE_NEW_THREAD_WORKSPACE;
   const startFromOrigin = startFromOriginOverride ?? defaultStartFromOrigin(worktreeRemoteFacts);
   const [worktreeRemote, setWorktreeRemote] = useState<string | undefined>(
-    preferredRemote.status === "selected" ? preferredRemote.remoteName : undefined,
+    storedCheckout?.worktreeRemote ??
+      (preferredRemote.status === "selected" ? preferredRemote.remoteName : undefined),
   );
   const resolvedWorktreeRemote =
     worktreeRemote ??
@@ -496,6 +529,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     projectIdRef.current = projectId;
     setWorktreeRefs(undefined);
     setRefsLoading(false);
+    if (skipProjectReset.current) {
+      skipProjectReset.current = false;
+      return;
+    }
     setWorkspaceOverride(handedWorkspace);
     // A ref the reader picked belongs to the Project they picked it in. Left
     // standing, it both kept the previous Project's branch on screen and told
@@ -504,8 +541,55 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     // never lists refs still has that to show.
     baseBranchChosen.current = handedBranch !== undefined;
     setBaseBranch(props.branchName ?? props.baseBranch ?? "");
+    setStartFromOriginOverride(undefined);
+    setWorktreeRemote(
+      preferredRemote.status === "selected" ? preferredRemote.remoteName : undefined,
+    );
     // Only a change of Project resets this; the seed is read as it stands then.
   }, [projectId]);
+  useEffect(() => {
+    if (draftScope === undefined || drafts === undefined) return;
+    drafts.writeCodeCheckout(draftScope, {
+      baseBranch,
+      baseBranchChosen: baseBranchChosen.current,
+      executionPolicy,
+      permissionPersistence,
+      ...(workspaceOverride === undefined ? {} : { workspaceOverride }),
+      ...(worktreeRemote === undefined ? {} : { worktreeRemote }),
+      ...(startFromOriginOverride === undefined ? {} : { startFromOriginOverride }),
+    });
+  }, [
+    baseBranch,
+    drafts,
+    draftScope,
+    executionPolicy,
+    permissionPersistence,
+    startFromOriginOverride,
+    worktreeRemote,
+    workspaceOverride,
+  ]);
+  const structuredDraftScope = useRef(draftScope);
+  useLayoutEffect(() => {
+    if (drafts === undefined || draftScope === undefined) return;
+    if (structuredDraftScope.current === draftScope) return;
+    structuredDraftScope.current = draftScope;
+    threadMentions.restore(mentionChipsFromDraft(drafts.readMentionChips(draftScope)));
+    extensionDraft.restore(drafts.readExtensionReceipts(draftScope));
+    computer.restore(drafts.readComputerSelection(draftScope));
+  }, [computer, drafts, draftScope, extensionDraft, threadMentions]);
+  useEffect(() => {
+    if (draftScope === undefined || drafts === undefined) return;
+    if (structuredDraftScope.current !== draftScope) return;
+    drafts.writeMentionChips(draftScope, mentionChipsToDraft(threadMentions.chips));
+    drafts.writeExtensionReceipts(draftScope, extensionDraft.stagedReceipts);
+    drafts.writeComputerSelection(draftScope, computer.stagedSelection);
+  }, [
+    computer.stagedSelection,
+    drafts,
+    draftScope,
+    extensionDraft.stagedReceipts,
+    threadMentions.chips,
+  ]);
   const loadWorktreeRefs = useCallback(() => {
     if (projectId === undefined || execute === undefined) return;
     const requestedProjectId = projectId;
@@ -878,6 +962,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       <ComposerModelPicker
                         ariaLabel="Provider and model"
                         groups={props.providerGroups}
+                        disabled={props.creating === true || submitting}
                         modelOptionValues={modelOptionValues}
                         onModelOptionChange={(id, value) => {
                           const remaining = Object.fromEntries(
@@ -890,6 +975,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                         }}
                         menuSide="bottom"
                         onSelect={props.onSelectProvider}
+                        {...(props.onOpenSettings === undefined
+                          ? {}
+                          : { onOpenSettings: props.onOpenSettings })}
                         {...(props.selectedModelId === undefined
                           ? {}
                           : { selectedModelId: props.selectedModelId })}

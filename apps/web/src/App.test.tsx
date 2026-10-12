@@ -18,6 +18,7 @@ import {
 import type { NavigatorAssistantClient } from "@octant/client-runtime/navigator-assistant-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
+import type { ShellClient } from "@octant/client-runtime/shell-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
@@ -31,6 +32,7 @@ import { decodeChatCommandResult, type ChatThread } from "@octant/contracts/chat
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { OctantHostBridge } from "./shell/hostBridge";
 import { App } from "./App";
+import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import {
   threadUtilityDockKey,
   writeUtilityDockPresentation,
@@ -1013,7 +1015,32 @@ describe("App", () => {
     );
     expect(sendCallOrder).toBeDefined();
     expect(openCallOrder).toBeDefined();
-    expect(sendCallOrder!).toBeLessThan(openCallOrder!);
+    expect(openCallOrder!).toBeLessThan(sendCallOrder!);
+  });
+
+  it("does not restore the Chat welcome prompt after a thread is created", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "New chat");
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Exact created chat" }),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "New chat" }));
+    expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue("");
   });
 
   it.each(["accepted", "refused"] as const)(
@@ -1242,6 +1269,152 @@ describe("App", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The first message could not be sent. Retry from the open thread.",
     );
+    expect(await screen.findByRole("textbox", { name: "Message" })).toHaveValue(
+      "Prepare launch brief",
+    );
+  });
+
+  it("keeps the created Project Chat thread unsent when opening it is refused", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const chatProject = {
+      id: projectId,
+      type: "chat",
+      name: "Launch planning",
+      lifecycle: "active",
+      pinned: true,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-20T08:00:00.000Z",
+      updatedAt: "2026-07-20T08:00:00.000Z",
+    } as never;
+    const projectApi = projects({
+      active: [chatProject],
+      archived: [],
+      availability: [],
+      memory: [],
+    });
+    projectApi.memory = vi.fn(async () => ({ projectId, active: [], history: [] }) as never);
+    const initial = chatShellBootstrap();
+    const layout = initial.workspace.layouts.chat;
+    if (layout.kind !== "pane") throw new Error("Expected the default Chat pane.");
+    const shellApi = client({
+      ...initial,
+      workspace: applyWorkspaceOperation(initial.workspace, {
+        kind: "open-surface",
+        mode: "chat",
+        paneId: layout.paneId,
+        surface: {
+          kind: "project",
+          id: "00000000-0000-4000-8000-000000000891" as never,
+          projectId,
+          mode: "chat",
+          title: "Launch planning",
+        },
+      }),
+    });
+    const shellExecute = vi.mocked(shellApi.execute);
+    const baseShell = shellExecute.getMockImplementation();
+    if (baseShell === undefined) throw new Error("Expected a shell fixture");
+    const continueShell = baseShell as ShellClient["execute"];
+    shellExecute.mockImplementation(async (command) => {
+      if (
+        command.kind === "apply-workspace-operation" &&
+        command.operation.kind === "open-surface" &&
+        command.operation.surface.kind === "chat-thread"
+      ) {
+        throw {
+          category: "invalid",
+          message: "Workspace changed. Try again.",
+        };
+      }
+      return await continueShell(command);
+    });
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={shellApi}
+      />,
+    );
+
+    const quickStart = await screen.findByRole("region", { name: "Chat quick start" });
+    await user.type(
+      within(quickStart).getByRole("textbox", { name: "Start a new Chat thread" }),
+      "Prepare launch brief",
+    );
+    await user.click(within(quickStart).getByRole("button", { name: "Start thread" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The chat was created, but it could not be opened. Open it from the sidebar to continue.",
+    );
+    expect(screen.queryByRole("region", { name: "Workspace pane: Exact created chat" })).toBeNull();
+    expect(chatApi.execute).toHaveBeenCalledWith({
+      kind: "create-chat-thread",
+      projectId,
+      title: "Prepare launch brief",
+    });
+    expect(chatApi.execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "send-chat-turn" }),
+    );
+    expect(composerThreadDrafts.read("chat", createdChatThreadId)?.text).toBe(
+      "Prepare launch brief",
+    );
+  });
+
+  it("clears the Chat welcome composer after create succeeds but opening is refused", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const shellApi = client(chatShellBootstrap());
+    const shellExecute = vi.mocked(shellApi.execute);
+    const baseShell = shellExecute.getMockImplementation();
+    if (baseShell === undefined) throw new Error("Expected a shell fixture");
+    const continueShell = baseShell as ShellClient["execute"];
+    shellExecute.mockImplementation(async (command) => {
+      if (
+        command.kind === "apply-workspace-operation" &&
+        command.operation.kind === "open-surface" &&
+        command.operation.surface.kind === "chat-thread"
+      ) {
+        throw {
+          category: "invalid",
+          message: "Workspace changed. Try again.",
+        };
+      }
+      return await continueShell(command);
+    });
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={shellApi}
+      />,
+    );
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "Keep going");
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+
+    const remainingWelcome = await screen.findByRole("region", { name: "Chat welcome" });
+    expect(await within(remainingWelcome).findByRole("alert")).toHaveTextContent(
+      "The chat was created, but it could not be opened. Open it from the sidebar to continue.",
+    );
+    expect(within(remainingWelcome).getByRole("textbox", { name: "First message" })).toHaveValue(
+      "",
+    );
+    expect(within(remainingWelcome).getByRole("button", { name: "Start chat" })).toBeDisabled();
+    expect(chatApi.execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "send-chat-turn" }),
+    );
+    expect(composerThreadDrafts.read("chat", createdChatThreadId)?.text).toBe("Keep going");
   });
 
   it("applies the selected Chat provider and model before starting the first turn", async () => {
@@ -1831,6 +2004,91 @@ describe("App", () => {
         }),
       }),
     );
+  });
+
+  it("opens the created Work thread when the first turn cannot start", async () => {
+    const user = userEvent.setup();
+    const shellApi = client(workShellBootstrap());
+    const createdWorkThread = decodeWorkThread({
+      id: workThreadId,
+      projectId: workProjectId,
+      title: "Draft brief",
+      lifecycle: "active",
+      providerInstanceId: "90000000-0000-4000-8000-000000000001" as never,
+      modelId: "gpt-5" as never,
+      bindingRevisionId: "30000000-0000-4000-8000-000000000001" as never,
+      workingDirectory: "." as never,
+      version: 1,
+      createdAt: "2026-07-26T09:30:00.000Z" as never,
+      updatedAt: "2026-07-26T09:30:00.000Z" as never,
+    });
+    const workThreadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [createdWorkThread] })),
+      execute: vi.fn(async () => ({
+        kind: "thread-created" as const,
+        thread: createdWorkThread,
+      })),
+    };
+    const workTurnClient = {
+      startFirstTurn: vi.fn(async () => {
+        throw new Error("The first turn could not start.");
+      }),
+      lookupFirstTurn: vi.fn(),
+      cancelFirstTurn: vi.fn(),
+      transcript: vi.fn(async () => ({ threadId: workThreadId, turns: [] })),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/work/overview")) {
+          return new Response(
+            JSON.stringify({
+              projectId: workProjectId,
+              filesAndArtifacts: [],
+              workflowsAndThreads: [],
+              approvals: [],
+              versions: [],
+              validation: [],
+              exports: [],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        const canvasResponse = canvasFetchPassthrough(url);
+        if (canvasResponse !== undefined) {
+          return canvasResponse;
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    render(
+      <App
+        contextClient={contextClient()}
+        workThreadClient={workThreadClient as never}
+        workTurnClient={workTurnClient as never}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={workProjects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={shellApi}
+      />,
+    );
+
+    await user.type(
+      await screen.findByRole("textbox", { name: "Start a new task" }),
+      "Draft brief",
+    );
+    await user.click(screen.getByRole("button", { name: "Start task" }));
+
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Draft brief" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Start a new task" })).toBeNull();
+    expect(await screen.findByRole("textbox", { name: "Work prompt" })).toHaveValue("Draft brief");
   });
 
   it("preserves the Work overview draft when authoritative create fails", async () => {

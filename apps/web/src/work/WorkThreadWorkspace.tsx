@@ -56,6 +56,7 @@ import {
 } from "react";
 import {
   applyComposerCaret,
+  COMPOSER_STAGED_DROPPED_NOTE,
   type ComposerThreadDraftStore,
 } from "../composer/composerThreadDraftStore";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
@@ -1842,6 +1843,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             />
             <TrackerReferenceComposerHints draft={prompt} />
             <WorkImageAttachmentChips images={images} />
+            {composerDraft.stagedDropped === true ? (
+              <p className="work-thread-workspace__hint" role="status">
+                {COMPOSER_STAGED_DROPPED_NOTE}
+              </p>
+            ) : null}
             {composerDraft.persistError === undefined ? null : (
               <p className="work-thread-workspace__hint" role="status">
                 {composerDraft.persistError}

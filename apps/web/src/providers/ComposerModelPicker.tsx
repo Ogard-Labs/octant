@@ -60,6 +60,13 @@ export interface ComposerModelPickerProps {
   /** Existing threads return the promise that confirms or refuses the model change. */
   readonly onSelect: (selection: ModelPickerSelection) => void | Promise<void>;
   readonly onOpenSettings?: () => void;
+  /**
+   * Empty `groups` can mean no instance is ready, or a Project policy hid
+   * every ready one. Setup is only the first of those; pass true when ready
+   * instances exist before policy so the picker does not send the user to
+   * add another provider.
+   */
+  readonly providersReady?: boolean;
   /** Opens Model roles on Settings › Octant Harness, linked from the Octant entry's note. */
   readonly onOpenHarnessSettings?: () => void;
   readonly disabled?: boolean;
@@ -94,6 +101,21 @@ type RailId =
 function railIdFor(group: PickerGroup | undefined): RailId | undefined {
   if (group === undefined) return undefined;
   return group.runtime === "octant-harness" ? OCTANT_RAIL_ID : group.instance.id;
+}
+
+export function pickerHasListedModel(groups: ReadonlyArray<PickerGroup>): boolean {
+  return groups.some((group) => group.sections.some((section) => section.models.length > 0));
+}
+
+/** A ready or degraded instance can answer even when every model is hidden. */
+export function pickerHasReadyInstance(groups: ReadonlyArray<PickerGroup>): boolean {
+  return groups.some((group) => group.readiness === "ready" || group.readiness === "degraded");
+}
+
+function pickerHasBoundCurrent(groups: ReadonlyArray<PickerGroup>): boolean {
+  return groups.some(
+    (group) => group.hiddenCurrent !== undefined || group.unavailableCurrent !== undefined,
+  );
 }
 
 interface ModelRow {
@@ -155,25 +177,39 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
     });
   }, [open, props.groups, selectedGroup, harnessGroups.length]);
 
-  if (props.groups.length === 0) {
+  if (!pickerHasListedModel(props.groups) && !pickerHasBoundCurrent(props.groups)) {
+    const offerSetup =
+      props.onOpenSettings !== undefined &&
+      props.providersReady !== true &&
+      !pickerHasReadyInstance(props.groups);
+    if (!offerSetup) {
+      return (
+        <div className="composer-model-picker composer-model-picker--empty">
+          <OctantButton
+            aria-label={ariaLabel}
+            className="composer-model-picker__trigger window-no-drag"
+            disabled
+            size="sm"
+            title="Configure and check a provider in Settings."
+            type="button"
+            variant="ghost"
+          >
+            <span className="composer-model-picker__trigger-label">No provider ready</span>
+          </OctantButton>
+        </div>
+      );
+    }
     return (
       <div className="composer-model-picker composer-model-picker--empty">
         <OctantButton
-          aria-label={ariaLabel}
-          className="composer-model-picker__trigger window-no-drag"
-          disabled={props.disabled || props.onOpenSettings === undefined}
+          aria-label="Set up a provider"
+          className="window-no-drag"
+          disabled={controlsDisabled}
           onClick={props.onOpenSettings}
           size="sm"
-          title={
-            props.onOpenSettings === undefined
-              ? "Configure and check a provider in Settings."
-              : "Open provider settings"
-          }
           type="button"
-          variant="ghost"
         >
-          <span className="composer-model-picker__trigger-label">No provider ready</span>
-          <ChevronDown aria-hidden="true" className="composer-model-picker__chevron" size={12} />
+          Set up a provider
         </OctantButton>
       </div>
     );

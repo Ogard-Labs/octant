@@ -136,6 +136,11 @@ describe("draft extension selections", () => {
         status: { kind: "blocked", reason: "no Octant tools on this runtime" },
       },
     ]);
+    // The blocked chip has no selection, so persisting `receipts` would drop
+    // the staged Browser choice across a Settings remount. `stagedReceipts`
+    // keeps the original so the next runtime that carries tools can send it.
+    expect(result.current.stagedReceipts[0]?.status).toEqual({ kind: "selected" });
+    expect(result.current.stagedReceipts[0]?.selection).toBeDefined();
     rerender({ providerCarriesTools: true });
     expect(result.current.receipts[0]?.status).toEqual({ kind: "selected" });
   });

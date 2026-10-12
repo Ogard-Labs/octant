@@ -7,6 +7,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CodeComposerAdapter } from "./CodeComposerAdapter";
 import type { ProjectId } from "@octant/contracts/projects";
 import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts/host";
+import {
+  createNewTaskDrafts,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+} from "../../composer/useNewTaskPrompt";
 
 const twoHosts = [
   {
@@ -332,6 +337,30 @@ describe("CodeComposerAdapter", () => {
     expect(onCreateThread.mock.calls[0]?.[0]).toMatchObject({
       permissionPersistence: "project-default",
     });
+  });
+
+  it("shows Set up a provider on the Code start composer until a provider is ready", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    render(
+      <CodeComposerAdapter {...defaultProps} providerGroups={[]} onOpenSettings={onOpenSettings} />,
+    );
+    const setup = screen.getByRole("button", { name: "Set up a provider" });
+    expect(setup).toBeEnabled();
+    await user.click(setup);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Set up a provider locked while the Code start composer is creating", () => {
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        creating
+        providerGroups={[]}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeDisabled();
   });
 
   it("puts the Project picker first on the upper tray when none is selected", () => {
@@ -996,5 +1025,71 @@ describe("CodeComposerAdapter interactions", () => {
       "The selected model does not accept images. Choose an image-capable model.",
     );
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
+  });
+
+  it("keeps Code checkout choices after Settings remounts the draft", async () => {
+    const user = userEvent.setup();
+    const drafts = createNewTaskDrafts();
+    drafts.writeCodeCheckout("code:pane", {
+      baseBranch: "fix/login",
+      baseBranchChosen: true,
+      workspaceOverride: "managed-worktree",
+      worktreeRemote: "origin",
+      startFromOriginOverride: true,
+    });
+    const view = (
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="code:pane">
+          <CodeComposerAdapter
+            {...defaultProps}
+            newThreadWorkspace="current-checkout"
+            worktreeRemoteFacts={{ remotes: ["origin"], defaultRemote: "origin" }}
+          />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>
+    );
+    const rendered = render(view);
+    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/login");
+    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Managed worktree");
+    expect(screen.getByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    rendered.unmount();
+    render(view);
+
+    expect(screen.getByRole("button", { name: "Base branch" })).toHaveTextContent("fix/login");
+    expect(screen.getByRole("button", { name: "Workspace" })).toHaveTextContent("Managed worktree");
+    expect(screen.getByRole("switch", { name: /Start from origin/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await user.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(await screen.findByRole("menuitemradio", { name: /Managed worktree/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("keeps a pane's access posture after Settings remounts the draft", async () => {
+    const user = userEvent.setup();
+    const drafts = createNewTaskDrafts();
+    const view = (
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="code:pane">
+          <CodeComposerAdapter {...defaultProps} defaultExecutionPolicy="full-access" />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>
+    );
+    const rendered = render(view);
+    await user.click(screen.getByRole("button", { name: "Access policy" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: /Plan/ }));
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
+
+    rendered.unmount();
+    render(view);
+
+    expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
   });
 });

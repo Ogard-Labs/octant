@@ -7,6 +7,11 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { OctantCommandProvider } from "../palette/CommandRegistry";
+import {
+  createNewTaskDrafts,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+} from "../composer/useNewTaskPrompt";
 import { ChatWelcome } from "./ChatWelcome";
 
 describe("ChatWelcome", () => {
@@ -173,13 +178,34 @@ describe("ChatWelcome", () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the first-message draft after the welcome remounts", async () => {
+    const user = userEvent.setup();
+    const drafts = createNewTaskDrafts();
+    function view() {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="chat-welcome:test">
+            <ChatWelcome onCreateChat={vi.fn()} />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    const rendered = render(view());
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Keep this draft");
+    rendered.unmount();
+    render(view());
+
+    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("Keep this draft");
+  });
+
   it("keeps provider and model selection visible in the new Chat composer", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();
     render(<ChatWelcome onCreateChat={vi.fn()} onOpenSettings={onOpenSettings} />);
 
-    const providerControl = screen.getByRole("button", { name: "Provider and model" });
-    expect(providerControl).toHaveTextContent("No provider ready");
+    const providerControl = screen.getByRole("button", { name: "Set up a provider" });
+    expect(providerControl).toBeEnabled();
     await user.click(providerControl);
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });

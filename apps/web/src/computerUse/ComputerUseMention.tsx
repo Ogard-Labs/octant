@@ -37,6 +37,8 @@ export function useComputerUseMention(input: {
   readonly onChoose?: () => void;
   readonly onSelectionEdited?: () => void;
   readonly textarea?: () => HTMLTextAreaElement | null;
+  /** Restored with a persisted new-task draft after Settings unmounts. */
+  readonly initialSelection?: ExtensionSelection;
 }) {
   const { providerCarriesTools, ...mention } = input;
   const hostScreen =
@@ -56,6 +58,8 @@ export function useBrowserUseMention(input: {
   readonly onChoose?: () => void;
   readonly onSelectionEdited?: () => void;
   readonly textarea?: () => HTMLTextAreaElement | null;
+  /** Restored with a persisted new-task draft after Settings unmounts. */
+  readonly initialSelection?: ExtensionSelection;
 }) {
   return useApplicationMention(input, {
     kind: "browser",
@@ -73,6 +77,7 @@ function useApplicationMention(
     readonly onChoose?: () => void;
     readonly onSelectionEdited?: () => void;
     readonly textarea?: () => HTMLTextAreaElement | null;
+    readonly initialSelection?: ExtensionSelection;
   },
   app: {
     readonly kind: "computer" | "browser";
@@ -82,16 +87,24 @@ function useApplicationMention(
 ) {
   const listId = useId();
   const [token, setToken] = useState<Token>();
-  const [chosen, setChosen] = useState<{
-    readonly scope: string;
-    readonly selection: ExtensionSelection;
-  }>();
+  const [chosen, setChosen] = useState<
+    | {
+        readonly scope: string;
+        readonly selection: ExtensionSelection;
+      }
+    | undefined
+  >(() =>
+    input.initialSelection === undefined
+      ? undefined
+      : { scope: input.scopeKey, selection: input.initialSelection },
+  );
   const computerEnabled = useComputerUseEnabled();
   const enabled = app.kind === "browser" ? input.available === true : computerEnabled;
   const available = enabled && (input.available ?? app.available);
   // A mention chosen before the composer moved to a runtime that cannot carry
   // it (or before the application went away) must not ride the next send.
-  const selection = available && chosen?.scope === input.scopeKey ? chosen.selection : undefined;
+  const stagedSelection = chosen?.scope === input.scopeKey ? chosen.selection : undefined;
+  const selection = available ? stagedSelection : undefined;
   const scopeKey = input.scopeKey;
   const currentScope = useRef(scopeKey);
   currentScope.current = scopeKey;
@@ -142,6 +155,7 @@ function useApplicationMention(
     open,
     available,
     selection,
+    stagedSelection,
     choose,
     clear,
     listId,

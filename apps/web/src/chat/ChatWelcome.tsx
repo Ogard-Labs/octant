@@ -4,6 +4,7 @@ import {
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
 import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
+import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
 import { useCallback, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { ChatControllerStatus } from "./useChatController";
 import { HostSelector } from "../shell/HostSelector";
@@ -90,7 +91,7 @@ const starterIdeas = [
 export function ChatWelcome(props: ChatWelcomeProps) {
   const ready = props.status === undefined || props.status === "ready";
   const presentation = draftThreadModePresentation("chat");
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useNewTaskPrompt();
   const [attachmentNotice, setAttachmentNotice] = useState<string>();
   // This composer has no suggestion list, so a capability token typed here can
   // only ever leave as unattached prose; the refusal says where one attaches.

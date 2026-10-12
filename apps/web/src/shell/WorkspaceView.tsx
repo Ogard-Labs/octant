@@ -1,5 +1,15 @@
 import type { WorkspaceContentTabs } from "./workspaceContentTabs";
-import { NewTaskDraftScopeContext } from "../composer/useNewTaskPrompt";
+import {
+  discardNewTaskDraftForOverview,
+  discardNewTaskDraftForPane,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+  paneDraftsToDiscard,
+  projectOverviewDraftsToDiscard,
+  type NewTaskDrafts,
+  type PaneDraftRef,
+  type ProjectOverviewDraftRef,
+} from "../composer/useNewTaskPrompt";
 import { ComposerNoticeProvider } from "../composer/ComposerNotice";
 import { ComposerSubagentsContext } from "../composer/ComposerSubagents";
 import { OutsideContentContext, type OutsideContentThread } from "../composer/OutsideContentNotice";
@@ -11,6 +21,7 @@ import {
 import type {
   LayoutNodeId,
   PaneId,
+  ShellBootstrap,
   WindowWorkspace,
   WorkspaceLayoutNode,
   WorkspacePane,
@@ -48,6 +59,7 @@ import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
 import { SplitWorkspace, type PaneFacts } from "./SplitWorkspace";
 import { ProjectOverview } from "../projects/ProjectOverview";
 import { providerGroupsForProject } from "../projects/ProjectProviderPolicySection";
+import { pickerHasReadyInstance } from "../providers/ComposerModelPicker";
 import type { OctantHostBridge } from "./hostBridge";
 import type { ProviderController } from "../providers/useProviderController";
 import { ShellState } from "./ShellState";
@@ -59,8 +71,11 @@ import {
   lazy,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -186,8 +201,11 @@ export interface WorkspaceViewProps {
    * pane grips feed the same drag. Its root ref lands on the split workspace.
    */
   readonly drag: WorkspaceSurfaceDragHandle;
-  /** Remounts an already-open draft when the global New thread action starts over. */
-  readonly draftResetRevision?: number;
+  /**
+   * Remounts one already-open draft when New thread starts over in that pane.
+   * Other split drafts keep their local composer state.
+   */
+  readonly draftResetRevisions?: Readonly<Record<string, number>>;
   /**
    * The Project each mode's unbound draft composer last targeted. The draft
    * unmounts while Settings covers the workspace; without this the composer
@@ -217,6 +235,7 @@ export interface WorkspaceViewProps {
   readonly onCreateChat: (
     prompt?: string,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
+    paneId?: PaneId,
   ) => void;
   readonly onCreateChatProjectThread?: (
     projectId: ProjectId,
@@ -351,6 +370,11 @@ export interface WorkspaceViewProps {
     placement: "before" | "after",
   ) => void;
   readonly workspace: WindowWorkspace;
+  /**
+   * The shell's committed workspace version. Optimistic open/close previews
+   * reuse this value until the host accepts or rolls the mutation back.
+   */
+  readonly workspaceVersion?: ShellBootstrap["workspaceVersion"];
   readonly crossContextOffer?: {
     readonly message: string;
     readonly canOpenInNewWindow: boolean;
@@ -455,6 +479,7 @@ export interface WorkspaceViewProps {
     executionPolicy?: import("@octant/contracts/providers").ProviderExecutionPolicy,
     permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
+    initiatingPaneId?: PaneId,
   ) => boolean | void | Promise<boolean | void>;
   readonly githubPluginEnabled?: boolean;
   readonly linearClient?: import("@octant/client-runtime/integration-client").IntegrationClient;
@@ -504,6 +529,43 @@ export interface WorkspaceViewProps {
 }
 
 export function WorkspaceView(props: WorkspaceViewProps) {
+  const newTaskDrafts = useContext(NewTaskDraftsContext);
+  const previousProjectOverviews = useRef<ReadonlyArray<ProjectOverviewDraftRef>>([]);
+  const previousPaneDrafts = useRef<ReadonlyArray<PaneDraftRef>>([]);
+  const previousWorkspaceVersion = useRef<ShellBootstrap["workspaceVersion"] | undefined>(
+    undefined,
+  );
+  useLayoutEffect(() => {
+    const currentOverviews = collectProjectOverviews(props.workspace);
+    const currentPaneDrafts = collectPaneDrafts(props.workspace);
+    const droppedOverviews = projectOverviewDraftsToDiscard(
+      previousProjectOverviews.current,
+      currentOverviews,
+      previousWorkspaceVersion.current,
+      props.workspaceVersion,
+    );
+    const droppedPanes = paneDraftsToDiscard(
+      previousPaneDrafts.current,
+      currentPaneDrafts,
+      previousWorkspaceVersion.current,
+      props.workspaceVersion,
+    );
+    if (
+      previousWorkspaceVersion.current === undefined ||
+      props.workspaceVersion === undefined ||
+      String(previousWorkspaceVersion.current) !== String(props.workspaceVersion)
+    ) {
+      previousProjectOverviews.current = currentOverviews;
+      previousPaneDrafts.current = currentPaneDrafts;
+      previousWorkspaceVersion.current = props.workspaceVersion;
+    }
+    for (const surface of droppedOverviews) {
+      discardNewTaskDraftForOverview(newTaskDrafts, surface.mode, surface.projectId);
+    }
+    for (const surface of droppedPanes) {
+      discardNewTaskDraftForPane(newTaskDrafts, surface.mode, surface.paneId);
+    }
+  }, [newTaskDrafts, props.workspace, props.workspaceVersion]);
   const [pendingCanvasSelections, setPendingCanvasSelections] = useState<
     ReadonlyArray<CanvasContextSelection>
   >([]);
@@ -561,6 +623,22 @@ export function WorkspaceView(props: WorkspaceViewProps) {
       const closed = await props.onClosePane(paneId);
       if (closed === false) return false;
       if (
+        surface !== undefined &&
+        (surface.kind === "draft-thread" || surface.kind === "welcome")
+      ) {
+        discardNewTaskDraftForPane(newTaskDrafts, surface.mode, String(paneId));
+      }
+      if (surface?.kind === "project" && (surface.mode === "chat" || surface.mode === "work")) {
+        const stillOpenElsewhere =
+          collectProjectOverviews(props.workspace).filter(
+            (overview) =>
+              overview.mode === surface.mode && overview.projectId === String(surface.projectId),
+          ).length > 1;
+        if (!stillOpenElsewhere) {
+          discardNewTaskDraftForOverview(newTaskDrafts, surface.mode, String(surface.projectId));
+        }
+      }
+      if (
         surface?.kind === "browser" &&
         surface.threadId !== undefined &&
         props.browserAutomationClient !== undefined
@@ -578,7 +656,13 @@ export function WorkspaceView(props: WorkspaceViewProps) {
       }
       return true;
     },
-    [props.browserAutomationClient, props.codeController, props.onClosePane, props.workspace],
+    [
+      newTaskDrafts,
+      props.browserAutomationClient,
+      props.codeController,
+      props.onClosePane,
+      props.workspace,
+    ],
   );
 
   const activePaneId = props.workspace.activePaneIds[props.mode];
@@ -696,7 +780,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
                         {onWelcomeGround(
                           surface,
                           props.welcomeBackdrop,
-                          renderTab(surface, props, paneId, canvasContext),
+                          renderTab(surface, props, paneId, canvasContext, newTaskDrafts),
                         )}
                       </OutsideContentContext>
                     </SurfaceLinkActionsProvider>
@@ -891,6 +975,7 @@ function renderTab(
     readonly onAttachCanvasContext: (selection: CanvasContextSelection) => void;
     readonly onRemoveCanvasSelection: (selectionId: CanvasContextSelectionId) => void;
   },
+  drafts: NewTaskDrafts | undefined,
 ): React.ReactNode {
   const openProviderSettings = props.onOpenProviderSettings ?? props.onOpenSettings;
   if (isCodeWorkspaceTab(tab)) {
@@ -900,7 +985,7 @@ function renderTab(
       </CodeThreadTabSurface>
     );
   }
-  return renderNonCodeTab(tab, props, paneId, canvasContext, openProviderSettings);
+  return renderNonCodeTab(tab, props, paneId, canvasContext, openProviderSettings, drafts);
 }
 
 /**
@@ -1287,6 +1372,7 @@ function renderNonCodeTab(
     readonly onRemoveCanvasSelection: (selectionId: CanvasContextSelectionId) => void;
   },
   openProviderSettings: (() => void) | undefined,
+  drafts: NewTaskDrafts | undefined,
 ): React.ReactNode {
   // Code's welcome tab is only a routing placeholder. Keep one start surface
   // so a split or restored fallback never sends the reader through a second
@@ -1308,6 +1394,7 @@ function renderNonCodeTab(
       paneId,
       canvasContext,
       openProviderSettings,
+      drafts,
     );
   }
   if (tab.kind === "draft-thread") {
@@ -1317,7 +1404,7 @@ function renderNonCodeTab(
       <NewTaskDraftScopeContext.Provider value={`${tab.mode}:${String(paneId)}`}>
         <DraftThreadWorkspace
           greetingName={props.greetingName}
-          key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevision ?? 0)}`}
+          key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevisions?.[String(paneId)] ?? 0)}`}
           {...(recentThreads.length === 0 ? {} : { recentThreads })}
           mode={tab.mode}
           {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
@@ -1440,6 +1527,7 @@ function renderNonCodeTab(
               executionPolicy,
               permissionPersistence,
               modelOptionValues,
+              paneId,
             );
           }}
           {...(props.onCreateProject === undefined
@@ -1449,6 +1537,7 @@ function renderNonCodeTab(
           {...(props.onOpenCodeSettings === undefined
             ? {}
             : { onOpenCodeSettings: props.onOpenCodeSettings })}
+          {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
           {...(props.codeDefaultFolderThreads === undefined
             ? {}
             : { codeDefaultFolderThreads: props.codeDefaultFolderThreads })}
@@ -1456,7 +1545,10 @@ function renderNonCodeTab(
             ? {}
             : { onEnsureDefaultProject: props.onEnsureDefaultProject })}
           onCancel={() => {
-            void props.onClosePane(paneId);
+            void Promise.resolve(props.onClosePane(paneId)).then((closed) => {
+              if (closed === false) return;
+              discardNewTaskDraftForPane(drafts, tab.mode, String(paneId));
+            });
           }}
           {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
           {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
@@ -1784,60 +1876,65 @@ function renderNonCodeTab(
         {...(project.type === "chat"
           ? {
               chatOverview: (
-                <ChatProjectOverview
-                  client={props.chatClient}
-                  controller={props.chatController}
-                  {...(project.lifecycle === "active" &&
-                  props.chatController.status === "ready" &&
-                  props.onCreateChatProjectThread !== undefined
-                    ? {
-                        onCreateThread: (draft, modelOptionValues) =>
-                          props.onCreateChatProjectThread?.(project.id, draft, modelOptionValues) ??
-                          false,
-                      }
-                    : {})}
-                  {...(props.onOpenChatThread === undefined
-                    ? {}
-                    : {
-                        onOpenThread: (threadId: string) => {
-                          const thread = props.chatController.bootstrap?.threads.find(
-                            (candidate) => String(candidate.id) === threadId,
-                          );
-                          if (thread !== undefined) {
-                            props.onOpenChatThread?.(thread.id, thread.title, project.id);
-                          }
-                        },
-                      })}
-                  {...(project.lifecycle !== "active" ||
-                  props.onViewAllChatProjectThreads === undefined
-                    ? {}
-                    : {
-                        onViewAllProjectThreads: () =>
-                          props.onViewAllChatProjectThreads?.(project.id),
-                      })}
-                  {...(props.projectClient === undefined
-                    ? {}
-                    : { projectClient: props.projectClient })}
-                  {...(props.memoryRevision === undefined
-                    ? {}
-                    : { memoryRevision: props.memoryRevision })}
-                  {...(props.draftProviderGroups === undefined
-                    ? {}
-                    : { providerGroups: props.draftProviderGroups })}
-                  {...(props.draftSelectedProviderInstanceId === undefined
-                    ? {}
-                    : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-                  {...(props.draftSelectedModelId === undefined
-                    ? {}
-                    : { selectedModelId: props.draftSelectedModelId })}
-                  {...(props.onDraftSelectProvider === undefined
-                    ? {}
-                    : { onSelectProvider: props.onDraftSelectProvider })}
-                  {...(props.onOpenSettings === undefined
-                    ? {}
-                    : { onOpenSettings: props.onOpenSettings })}
-                  projectId={project.id}
-                />
+                <NewTaskDraftScopeContext.Provider value={`chat-overview:${String(project.id)}`}>
+                  <ChatProjectOverview
+                    client={props.chatClient}
+                    controller={props.chatController}
+                    {...(project.lifecycle === "active" &&
+                    props.chatController.status === "ready" &&
+                    props.onCreateChatProjectThread !== undefined
+                      ? {
+                          onCreateThread: (draft, modelOptionValues) =>
+                            props.onCreateChatProjectThread?.(
+                              project.id,
+                              draft,
+                              modelOptionValues,
+                            ) ?? false,
+                        }
+                      : {})}
+                    {...(props.onOpenChatThread === undefined
+                      ? {}
+                      : {
+                          onOpenThread: (threadId: string) => {
+                            const thread = props.chatController.bootstrap?.threads.find(
+                              (candidate) => String(candidate.id) === threadId,
+                            );
+                            if (thread !== undefined) {
+                              props.onOpenChatThread?.(thread.id, thread.title, project.id);
+                            }
+                          },
+                        })}
+                    {...(project.lifecycle !== "active" ||
+                    props.onViewAllChatProjectThreads === undefined
+                      ? {}
+                      : {
+                          onViewAllProjectThreads: () =>
+                            props.onViewAllChatProjectThreads?.(project.id),
+                        })}
+                    {...(props.projectClient === undefined
+                      ? {}
+                      : { projectClient: props.projectClient })}
+                    {...(props.memoryRevision === undefined
+                      ? {}
+                      : { memoryRevision: props.memoryRevision })}
+                    {...(props.draftProviderGroups === undefined
+                      ? {}
+                      : { providerGroups: props.draftProviderGroups })}
+                    {...(props.draftSelectedProviderInstanceId === undefined
+                      ? {}
+                      : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+                    {...(props.draftSelectedModelId === undefined
+                      ? {}
+                      : { selectedModelId: props.draftSelectedModelId })}
+                    {...(props.onDraftSelectProvider === undefined
+                      ? {}
+                      : { onSelectProvider: props.onDraftSelectProvider })}
+                    {...(openProviderSettings === undefined
+                      ? {}
+                      : { onOpenSettings: openProviderSettings })}
+                    projectId={project.id}
+                  />
+                </NewTaskDraftScopeContext.Provider>
               ),
             }
           : {})}
@@ -1955,6 +2052,11 @@ function renderNonCodeTab(
                     : { onSelectProvider: props.onDraftSelectProvider })}
                   projectId={project.id}
                   projectName={project.name}
+                  {...(pickerHasReadyInstance(
+                    props.workProviderGroups ?? props.draftProviderGroups ?? [],
+                  )
+                    ? { providersReady: true }
+                    : {})}
                   providerGroups={providerGroupsForProject(
                     project,
                     props.workProviderGroups ?? props.draftProviderGroups ?? [],
@@ -2023,62 +2125,66 @@ function renderNonCodeTab(
     const recentThreads = draftRecentThreads("chat", props);
     const home = props.homeStart;
     return (
-      <ChatWelcome
-        greetingName={props.greetingName}
-        {...(home?.composerTabs === undefined ? {} : { composerTabs: home.composerTabs })}
-        {...(home?.cards === undefined
-          ? {}
-          : {
-              homeStart: (
-                <HomeStart
-                  actions={[]}
-                  dashboard={
-                    <HomeDashboard
-                      cards={home.cards}
-                      customization={home.cardCustomization}
-                      onCustomizationChange={home.onCardCustomizationChange}
-                    />
-                  }
-                />
-              ),
-            })}
-        {...(recentThreads.length === 0 ? {} : { recentThreads })}
-        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-        {...(props.selectedCreateHostId === undefined
-          ? {}
-          : { selectedHostId: props.selectedCreateHostId })}
-        {...(props.lastSelectedHealthyHostId === undefined
-          ? {}
-          : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-        {...(props.createHostViewScope === undefined
-          ? {}
-          : { viewScope: props.createHostViewScope })}
-        {...(props.onSelectCreateHost === undefined
-          ? {}
-          : { onSelectHost: props.onSelectCreateHost })}
-        {...(props.chatWelcomeError === undefined
-          ? props.chatController.errorMessage === undefined
+      <NewTaskDraftScopeContext.Provider value={`chat-welcome:${String(paneId)}`}>
+        <ChatWelcome
+          greetingName={props.greetingName}
+          {...(home?.composerTabs === undefined ? {} : { composerTabs: home.composerTabs })}
+          {...(home?.cards === undefined
             ? {}
-            : { errorMessage: props.chatController.errorMessage }
-          : { errorMessage: props.chatWelcomeError })}
-        {...(props.chatWelcomeCreating === undefined
-          ? {}
-          : { creating: props.chatWelcomeCreating })}
-        onCreateChat={props.onCreateChat}
-        providerGroups={props.draftProviderGroups ?? []}
-        {...(props.draftSelectedProviderInstanceId === undefined
-          ? {}
-          : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-        {...(props.draftSelectedModelId === undefined
-          ? {}
-          : { selectedModelId: props.draftSelectedModelId })}
-        {...(props.onDraftSelectProvider === undefined
-          ? {}
-          : { onSelectProvider: props.onDraftSelectProvider })}
-        {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
-        onRetry={props.chatController.retry}
-        status={props.chatController.status}
-      />
+            : {
+                homeStart: (
+                  <HomeStart
+                    actions={[]}
+                    dashboard={
+                      <HomeDashboard
+                        cards={home.cards}
+                        customization={home.cardCustomization}
+                        onCustomizationChange={home.onCardCustomizationChange}
+                      />
+                    }
+                  />
+                ),
+              })}
+          {...(recentThreads.length === 0 ? {} : { recentThreads })}
+          {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+          {...(props.selectedCreateHostId === undefined
+            ? {}
+            : { selectedHostId: props.selectedCreateHostId })}
+          {...(props.lastSelectedHealthyHostId === undefined
+            ? {}
+            : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+          {...(props.createHostViewScope === undefined
+            ? {}
+            : { viewScope: props.createHostViewScope })}
+          {...(props.onSelectCreateHost === undefined
+            ? {}
+            : { onSelectHost: props.onSelectCreateHost })}
+          {...(props.chatWelcomeError === undefined
+            ? props.chatController.errorMessage === undefined
+              ? {}
+              : { errorMessage: props.chatController.errorMessage }
+            : { errorMessage: props.chatWelcomeError })}
+          {...(props.chatWelcomeCreating === undefined
+            ? {}
+            : { creating: props.chatWelcomeCreating })}
+          onCreateChat={(prompt, modelOptionValues) => {
+            props.onCreateChat(prompt, modelOptionValues, paneId);
+          }}
+          providerGroups={props.draftProviderGroups ?? []}
+          {...(props.draftSelectedProviderInstanceId === undefined
+            ? {}
+            : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+          {...(props.draftSelectedModelId === undefined
+            ? {}
+            : { selectedModelId: props.draftSelectedModelId })}
+          {...(props.onDraftSelectProvider === undefined
+            ? {}
+            : { onSelectProvider: props.onDraftSelectProvider })}
+          {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
+          onRetry={props.chatController.retry}
+          status={props.chatController.status}
+        />
+      </NewTaskDraftScopeContext.Provider>
     );
   }
   return (
@@ -2349,6 +2455,47 @@ function ChatThreadWorkspace(props: {
   );
 }
 
+function collectProjectOverviews(
+  workspace: WorkspaceViewProps["workspace"],
+): ReadonlyArray<ProjectOverviewDraftRef> {
+  const found: ProjectOverviewDraftRef[] = [];
+  visitWorkspacePanes(workspace, (_paneId, surface) => {
+    if (surface.kind === "project" && (surface.mode === "chat" || surface.mode === "work")) {
+      found.push({ mode: surface.mode, projectId: String(surface.projectId) });
+    }
+  });
+  return found;
+}
+
+function collectPaneDrafts(
+  workspace: WorkspaceViewProps["workspace"],
+): ReadonlyArray<PaneDraftRef> {
+  const found: PaneDraftRef[] = [];
+  visitWorkspacePanes(workspace, (paneId, surface) => {
+    if (surface.kind === "draft-thread" || surface.kind === "welcome") {
+      found.push({ mode: surface.mode, paneId });
+    }
+  });
+  return found;
+}
+
+function visitWorkspacePanes(
+  workspace: WorkspaceViewProps["workspace"],
+  visitPane: (paneId: string, surface: WorkspaceTab) => void,
+): void {
+  const visit = (layout: WorkspaceLayoutNode): void => {
+    if (layout.kind === "pane") {
+      visitPane(String(layout.paneId), layout.surface);
+      return;
+    }
+    visit(layout.first);
+    visit(layout.second);
+  };
+  visit(workspace.layouts.chat);
+  visit(workspace.layouts.work);
+  visit(workspace.layouts.code);
+}
+
 function findWorkspacePane(
   workspace: WorkspaceViewProps["workspace"],
   paneId: PaneId,
@@ -2405,6 +2552,7 @@ function WorkProjectOverviewSlot(props: {
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
   ) => boolean | Promise<boolean>;
   readonly onOpenSettings?: () => void;
+  readonly providersReady?: boolean;
   readonly onOpenThread?: (threadId: string) => void;
   readonly onSelectProvider?: (selection: {
     readonly providerInstanceId: import("@octant/contracts/providers").ProviderInstanceId;
@@ -2485,51 +2633,54 @@ function WorkProjectOverviewSlot(props: {
     [controller, createStarterArtifactAvailable, props.mutationClient, props.projectId],
   );
   return (
-    <WorkOverview
-      projectId={props.projectId}
-      {...(props.researchClient === undefined
-        ? {}
-        : {
-            research: (
-              <WorkResearchPanel
-                briefs={researchController.briefs}
-                status={researchController.status}
-                onRetry={researchController.reload}
-                onCreateBrief={researchController.createBrief}
-                onAddSource={researchController.addSource}
-                onRevokeSource={researchController.revokeSource}
-                onRecordEvidence={researchController.recordEvidence}
-                onRecordClaim={researchController.recordClaim}
-                {...(props.mutationClient === undefined
-                  ? {}
-                  : { onFinalizeReport: researchController.finalizeReport })}
-              />
-            ),
-          })}
-      createStarterArtifactAvailable={createStarterArtifactAvailable}
-      createThreadAvailable={props.createThreadAvailable}
-      {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-      {...(props.selectedHostId === undefined ? {} : { selectedHostId: props.selectedHostId })}
-      {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-      {...(props.lastSelectedHealthyHostId === undefined
-        ? {}
-        : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-      {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-      {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
-      model={model}
-      onCreateStarterArtifact={handleCreateStarterArtifact}
-      onCreateThread={props.onCreateThread}
-      {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
-      {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
-      {...(props.onSelectProvider === undefined
-        ? {}
-        : { onSelectProvider: props.onSelectProvider })}
-      projectName={props.projectName}
-      providerGroups={props.providerGroups}
-      {...(props.selectedModelId === undefined ? {} : { selectedModelId: props.selectedModelId })}
-      {...(props.selectedProviderInstanceId === undefined
-        ? {}
-        : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-    />
+    <NewTaskDraftScopeContext.Provider value={`work-overview:${String(props.projectId)}`}>
+      <WorkOverview
+        projectId={props.projectId}
+        {...(props.researchClient === undefined
+          ? {}
+          : {
+              research: (
+                <WorkResearchPanel
+                  briefs={researchController.briefs}
+                  status={researchController.status}
+                  onRetry={researchController.reload}
+                  onCreateBrief={researchController.createBrief}
+                  onAddSource={researchController.addSource}
+                  onRevokeSource={researchController.revokeSource}
+                  onRecordEvidence={researchController.recordEvidence}
+                  onRecordClaim={researchController.recordClaim}
+                  {...(props.mutationClient === undefined
+                    ? {}
+                    : { onFinalizeReport: researchController.finalizeReport })}
+                />
+              ),
+            })}
+        createStarterArtifactAvailable={createStarterArtifactAvailable}
+        createThreadAvailable={props.createThreadAvailable}
+        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+        {...(props.selectedHostId === undefined ? {} : { selectedHostId: props.selectedHostId })}
+        {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+        {...(props.lastSelectedHealthyHostId === undefined
+          ? {}
+          : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+        {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+        {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
+        model={model}
+        onCreateStarterArtifact={handleCreateStarterArtifact}
+        onCreateThread={props.onCreateThread}
+        {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+        {...(props.providersReady === undefined ? {} : { providersReady: props.providersReady })}
+        {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
+        {...(props.onSelectProvider === undefined
+          ? {}
+          : { onSelectProvider: props.onSelectProvider })}
+        projectName={props.projectName}
+        providerGroups={props.providerGroups}
+        {...(props.selectedModelId === undefined ? {} : { selectedModelId: props.selectedModelId })}
+        {...(props.selectedProviderInstanceId === undefined
+          ? {}
+          : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+      />
+    </NewTaskDraftScopeContext.Provider>
   );
 }
