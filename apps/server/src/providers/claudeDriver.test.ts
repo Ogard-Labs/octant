@@ -26,7 +26,7 @@ import {
   type ClaudeEnvironmentScope,
   type ClaudeEnvironmentScopeOptions,
 } from "./claudeEnvironment";
-import type { ClaudeProcessPort } from "./claudeProcess";
+import { claudeLoginKeychainPath, type ClaudeProcessPort } from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000701");
@@ -4298,7 +4298,7 @@ describe("Claude account sign-in", () => {
     expect(f.opens[0]?.authEnvironment.CLAUDE_CONFIG_DIR).toBe(accountDirectory);
   });
 
-  it("refuses an isolated Plan launch that cannot sign in from its directory", async () => {
+  it("refuses a Plan launch whose sign-in cannot be read inside the Plan sandbox", async () => {
     const accountDirectory = "/Users/example/.claude-accounts/work";
     const f = harness("subscription", "current-session", { configDirectory: accountDirectory });
     vi.mocked(f.process.probeSubscription).mockReturnValue(Effect.succeed("unauthenticated"));
@@ -4307,11 +4307,73 @@ describe("Claude account sign-in", () => {
       const exit = await Effect.runPromiseExit(
         acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
       );
+      expect(String(exit)).toContain(
+        "Claude could not read this account's sign-in inside the Plan sandbox.",
+      );
+    } finally {
+      await acquired.close();
+    }
+    // The check ran inside the confinement the launch would have used, and
+    // nothing was launched on a sign-in the sandbox could not read.
+    expect(vi.mocked(f.process.probeSubscription).mock.calls[0]?.[2]).toEqual({
+      projectRoot,
+      executionPolicy: "plan",
+    });
+    expect(f.opens).toHaveLength(0);
+  });
+
+  it("checks sign-in outside the sandbox for a launch Octant does not confine", async () => {
+    const f = harness();
+    vi.mocked(f.process.probeSubscription).mockReturnValue(Effect.succeed("unauthenticated"));
+    const acquired = await acquire(f.driver);
+    try {
+      const exit = await Effect.runPromiseExit(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
       expect(String(exit)).toContain("Claude authentication is required.");
     } finally {
       await acquired.close();
     }
+    expect(vi.mocked(f.process.probeSubscription).mock.calls[0]?.[2]).toBeUndefined();
     expect(f.opens).toHaveLength(0);
+  });
+
+  it("refuses a file tool that names the login keychain folder, even from inside the Project", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    try {
+      await Effect.runPromise(
+        acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+      );
+      const open = f.opens[0]!;
+      const signal = new AbortController().signal;
+      // The harness judges confinement by prefix, so this path counts as
+      // inside the Project, the way the real file would for a Project that
+      // contains the home folder. It resolves to the login keychain file.
+      const keychainThroughProject = `${projectRoot}/../..${claudeLoginKeychainPath()}`;
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: { file_path: keychainThroughProject },
+          toolUseId: "read-keychain",
+          signal,
+        }),
+      ).resolves.toMatchObject({ behavior: "deny" });
+      await expect(
+        open.preToolUse({
+          sessionId: "sdk-session-1",
+          projectRoot,
+          toolName: "Read",
+          input: { file_path: `${projectRoot}/README.md` },
+          toolUseId: "read-project-file",
+          signal,
+        }),
+      ).resolves.toEqual({ behavior: "allow" });
+    } finally {
+      await acquired.close();
+    }
   });
 
   it("refuses a Plan turn whose isolated account directory is inside the checkout", async () => {

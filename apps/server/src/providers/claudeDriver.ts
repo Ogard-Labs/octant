@@ -2,7 +2,7 @@ import type { ManagedToolAnswer } from "./managedMcpTools";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 import {
   decodeProviderFailure,
@@ -63,7 +63,11 @@ import {
   type ClaudeEnvironmentScope,
   type ClaudeEnvironmentScopeOptions,
 } from "./claudeEnvironment";
-import { CONFINED_CLAUDE_EXECUTION_POLICIES, type ClaudeProcessPort } from "./claudeProcess";
+import {
+  claudeLoginKeychainPath,
+  CONFINED_CLAUDE_EXECUTION_POLICIES,
+  type ClaudeProcessPort,
+} from "./claudeProcess";
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -166,6 +170,13 @@ function claudeSandboxSettings(
       allowWrite: [projectRoot],
     },
   };
+}
+
+/** Whether a file tool's target resolves to the login keychain folder or a file in it. */
+function claudeToolPathIsInKeychainFolder(candidate: string): boolean {
+  const folder = dirname(claudeLoginKeychainPath());
+  const target = canonicalClaudeAccountDirectory(candidate).path;
+  return target === folder || target.startsWith(`${folder}/`);
 }
 
 function claudeAccountDirectoryBroadensPlan(
@@ -1313,12 +1324,26 @@ function makeConnection(
           signal,
         );
         if (options.authentication === "subscription") {
+          // A confined launch reads its sign-in from inside the sandbox, so the
+          // check runs there too. An unconfined check said "signed in" while
+          // the confined runtime could not reach the Keychain, and the turn
+          // then failed after it had started.
+          const confined = CONFINED_CLAUDE_EXECUTION_POLICIES.has(input.executionPolicy);
           const status = await runSetupEffect(
-            options.process.probeSubscription(options.binaryPath, environment.environment),
+            options.process.probeSubscription(
+              options.binaryPath,
+              environment.environment,
+              confined ? { projectRoot, executionPolicy: input.executionPolicy } : undefined,
+            ),
             signal,
           );
           if (status === "unauthenticated") {
-            throw failure("unauthenticated", "Claude authentication is required.");
+            throw failure(
+              "unauthenticated",
+              confined
+                ? "Claude could not read this account's sign-in inside the Plan sandbox. Sign in with the account's command in Settings › Providers, then try again."
+                : "Claude authentication is required.",
+            );
           }
         }
         const executionOptions = claudeExecutionOptions(
@@ -1589,6 +1614,16 @@ function makeConnection(
                   : requestInput?.file_path;
           if (typeof candidate !== "string") {
             return deny("Claude tool request has no authoritative confined path.");
+          }
+          // A confined subscription launch may read the login keychain file so
+          // the runtime can sign in. That grant is not the model's: a Project
+          // that contains the folder (a home directory opened as a Project)
+          // would otherwise let a file tool name it.
+          if (
+            CLAUDE_READ_TOOLS.has(request.toolName) &&
+            claudeToolPathIsInKeychainFolder(candidate)
+          ) {
+            return deny("Claude tool request is outside the Project.");
           }
           let confined = false;
           try {
