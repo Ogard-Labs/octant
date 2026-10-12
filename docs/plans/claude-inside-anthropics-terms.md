@@ -102,15 +102,17 @@ the Plan launch path of PR 1142 (`makeClaudeProcessLive().spawn` with
 rules. Only `loggedIn` and exit codes were read; `security` ran without
 `-w` and its output was discarded.
 
-| Rules added to the Plan profile                                           | `security` finds the item | `claude` signed in |
-| ------------------------------------------------------------------------- | ------------------------- | ------------------ |
-| Unconfined                                                                | yes                       | yes                |
-| PR 1142: exec `/usr/bin/security`, two security-server lookups            | no (exit 44)              | no                 |
-| The above, read `~/Library/Keychains`                                     | yes                       | no                 |
-| The above, `process-fork`                                                 | not rerun                 | yes                |
-| Read and write `~/Library/Keychains`, exec `/bin/sh`, no `process-fork`   | not run                   | no                 |
-| Exec `/bin/sh`, `process-fork`, read Keychains, no exec of `security`     | not run                   | no                 |
-| Exec `/usr/bin/security`, exec `/bin/sh`, `process-fork`, Keychain denied | not run                   | no                 |
+| Rules added to the Plan profile                                            | `security` finds the item | `claude` signed in |
+| -------------------------------------------------------------------------- | ------------------------- | ------------------ |
+| Unconfined                                                                 | yes                       | yes                |
+| PR 1142: exec `/usr/bin/security`, two security-server lookups             | no (exit 44)              | no                 |
+| The above, read `~/Library/Keychains`                                      | yes                       | no                 |
+| The above, `process-fork`                                                  | not rerun                 | yes                |
+| PR 1142, `process-fork`, read only `~/Library/Keychains/login.keychain-db` | not run                   | yes                |
+| The row above without the two security-server lookups                      | not run                   | no                 |
+| Read and write `~/Library/Keychains`, exec `/bin/sh`, no `process-fork`    | not run                   | no                 |
+| Exec `/bin/sh`, `process-fork`, read Keychains, no exec of `security`      | not run                   | no                 |
+| Exec `/usr/bin/security`, exec `/bin/sh`, `process-fork`, Keychain denied  | not run                   | no                 |
 
 What this settles:
 
@@ -121,8 +123,10 @@ What this settles:
   open the login keychain, and the runtime cannot start a child without
   `process-fork`.
 - The smallest set that signs in is exec of `/usr/bin/security`,
-  `process-fork`, read of `~/Library/Keychains`, and the two
-  security-server lookups. No shell and no Keychain write are needed.
+  `process-fork`, read of the one file
+  `~/Library/Keychains/login.keychain-db`, and the two security-server
+  lookups. No shell, no Keychain write, and no other file in that folder
+  is needed.
 - Measurement 5: on this build `CLAUDE_SECURESTORAGE_CONFIG_DIR` names the
   directory that keys the Keychain entry and holds the fallback file.
   When it is unset, `CLAUDE_CONFIG_DIR` does. The entry is
