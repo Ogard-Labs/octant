@@ -93,6 +93,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
   [
+    "packages/domain/src/siblingThreadPolicy.ts",
+    "Eligibility, reference, and per-turn bounds for the sibling-threads tool, landed ahead of the host actions that call them. Remove once the server's sibling-threads tool imports it.",
+  ],
+  [
     "packages/domain/src/toolEgressPolicy.ts",
     "The harness tool egress decision lands before the host proxy that calls it, as the delivery phases in docs/architecture.md § Harness tool egress rules order them. Remove once the proxy imports decideToolEgress.",
   ],

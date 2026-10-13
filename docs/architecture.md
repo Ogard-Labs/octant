@@ -1342,6 +1342,59 @@ record; this section is the effective rule, and it is narrower than the record.
   has no tool to read what became of a message; the Agents center shows the
   host's counts and latest refusal. 0049 remains the Chat mention path.
 
+Seeing sibling threads is the read-only companion to messaging, approved by
+the maintainer on 2026-10-13. The `octant_threads` tool lets a Code turn see
+the other threads of its own Project before it messages one or while it waits
+for one to finish. No action creates, messages, steers, completes, archives,
+or stops a thread.
+
+- **Who may see whom.** The caller is a Code thread's turn; the targets are
+  the other Code threads of the same Project that are neither completed nor
+  archived. Threads of another Project, the caller itself, child runs (they
+  have the managed `status` and `wait`), deleted threads, and every Chat or
+  Work thread are never listed or readable. The host decides the set from the
+  caller's own thread on every call; the model supplies no Project, path, or
+  window.
+- **Actions.** `list` returns, for each target, a reference, the title, the
+  state (`working`, `waiting-for-person`, or `idle`), and when the state last
+  changed: at most 32 rows, most recently changed first, with `truncated`.
+  `read` returns one target's title, state, and the same bounded transcript
+  window a `#thread` mention resolves (12 messages within 8,000 characters,
+  truncation stated), and no tool payloads beyond that window, files, or diff.
+  `wait` returns when the target leaves `working`, or after the caller's
+  timeout, 30 seconds by default and at most 120 like a child run's `wait`,
+  with the state only; `working` in its answer means the time ran out.
+- **References.** A reference is `<thread id>@<project id>`: the thread part
+  is the id messaging addresses. It grants nothing; `read` and `wait` re-decide
+  the set at the call, so a reference refuses once its thread is completed,
+  archived, deleted, or in another Project than the one it was listed in, and
+  it never resolves to a different thread. The thread's working state is not
+  part of it, since `wait` exists to see that state change. Every reference
+  outside the set, malformed text included, refuses `unauthorized` with one
+  sentence, so a refusal confirms nothing outside the caller's Project. A call
+  whose input fails the tool's schema (an unknown action, an extra field, a
+  timeout out of range, a reference over 128 characters) or whose turn was
+  cancelled refuses `policy`; neither depends on any thread. Inside
+  it, `list` makes the set visible on purpose; a `sent` answer from messaging
+  already confirmed it.
+- **Taint and framing.** `read` text joins the turn inside the shared
+  external-data frame, like a delivered agent message. `read` and `list` (a
+  title is text a person or an agent wrote) mark the caller with
+  `thread.external-content-ingested@1` before the result returns, every time;
+  a call that cannot be marked returns `unavailable` and nothing else. `wait`
+  returns a closed set of states and does not mark. A thread that lists its
+  siblings therefore asks for single-use confirmation on risky actions
+  afterwards, and that mark clears only by a person.
+- **Offer and bounds.** The tool is offered in Plan, since no action changes
+  anything outside the caller's own context, and omitted from a turn whose
+  profile allowlist leaves it out. A turn may make 8 `read` and 4 `wait`
+  calls; the next refuses `rate-limited`. `list` is not counted. Each `read`
+  and `wait` is journaled on the reader's thread with reader, target, action,
+  time, and the size returned, never the text.
+- **Not built.** The contract and the pure rules exist; the host actions, the
+  journal record, and the registration on Code turns do not, so no turn is
+  offered the tool yet.
+
 ## Agent task display
 
 Providers that report their own task plans (Claude, Codex, ACP, OpenCode) emit
