@@ -40,6 +40,11 @@ interface ServerSpawnSpecOptions {
   readonly port: number;
   readonly instanceId: string;
   readonly packaged: boolean;
+  /**
+   * Version of the running app. A packaged launch passes it to the host;
+   * a development launch does not.
+   */
+  readonly appVersion?: string;
   readonly execPath: string;
   readonly env: NodeJS.ProcessEnv;
 }
@@ -73,8 +78,26 @@ export function resolvePackagedServerPath(
   return [...new Set([...entries, ...trustedMacOsExecutablePaths])].join(":");
 }
 
+// The owner receipt rejects a server version longer than 64 characters.
+const MAX_PACKAGED_APP_VERSION_LENGTH = 64;
+
+function packagedArtifactVersion(version: string | undefined): {
+  readonly OCTANT_ARTIFACT_VERSION?: string;
+} {
+  const trimmed = version?.trim();
+  if (
+    trimmed === undefined ||
+    trimmed.length === 0 ||
+    trimmed.length > MAX_PACKAGED_APP_VERSION_LENGTH
+  ) {
+    return {};
+  }
+  return { OCTANT_ARTIFACT_VERSION: trimmed };
+}
+
 export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
   const inherited = { ...options.env };
+  delete inherited.OCTANT_ARTIFACT_VERSION;
   delete inherited.OCTANT_COMPUTER_USE_BROKER_URL;
   delete inherited.OCTANT_COMPUTER_USE_BROKER_TOKEN;
   delete inherited.OCTANT_SIMULATOR_DEVICE_BROKER_URL;
@@ -134,6 +157,7 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
     env: {
       ...env,
       ...(packagedPath === undefined ? {} : { PATH: packagedPath }),
+      ...packagedArtifactVersion(options.appVersion),
       ELECTRON_RUN_AS_NODE: "1",
       OCTANT_PACKAGED_RUNTIME: "1",
     },

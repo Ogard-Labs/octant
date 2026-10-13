@@ -146,6 +146,24 @@ describe("writeBridgeSecretFile / readBridgeSecretFile", () => {
 });
 
 describe("writeHostInfoFile / readHostInfoFile", () => {
+  it("records the artifact version on the host receipt", async () => {
+    await withTempDir(async (directory) => {
+      const input = {
+        env: { OCTANT_DATA_DIR: directory, OCTANT_ARTIFACT_VERSION: "0.1.1" },
+        platform: filesystemTestPlatform,
+        home: directory,
+      };
+      await writeHostInfoFile(input, {
+        url: "http://127.0.0.1:13773",
+        instanceId: "11111111-1111-4111-8111-111111111111",
+      });
+      const receipt = JSON.parse(await readFile(resolveHostInfoFilePath(input), "utf8")) as {
+        serverVersion: string;
+      };
+      expect(receipt.serverVersion).toBe("0.1.1");
+    });
+  });
+
   it("writes and reads the host info with 0600 permissions", async () => {
     await withTempDir(async (directory) => {
       const input = {

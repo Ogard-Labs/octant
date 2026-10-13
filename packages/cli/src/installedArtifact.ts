@@ -1,7 +1,10 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HEADLESS_ARTIFACT_MANIFEST_FILENAME } from "@octant/host-runtime";
+
+// The owner receipt rejects a server version longer than 64 characters.
+const MAX_ARTIFACT_VERSION_LENGTH = 64;
 
 // In a headless artifact the CLI bundle is `bin/octant` and the server is
 // `lib/server/main.mjs` beside it, with no repository checkout around them.
@@ -32,18 +35,37 @@ export function resolveInstalledArtifactRoot(
 /**
  * Runs the artifact's own server under the runtime running this CLI. The
  * server verifies the artifact named by `OCTANT_ARTIFACT_ROOT` before it opens
- * anything, and serves the artifact's web assets.
+ * anything, serves the artifact's web assets, and reports the version stamped
+ * on that artifact.
  */
 export function installedArtifactServerStartCommand(
   artifactRoot: string,
   runtimeExecutable: string,
 ): ServerStartCommand {
+  const artifactVersion = readInstalledArtifactVersion(artifactRoot);
   return {
     command: runtimeExecutable,
     args: [join(artifactRoot, "lib", "server", "main.mjs")],
     env: {
       OCTANT_ARTIFACT_ROOT: artifactRoot,
+      ...(artifactVersion === undefined ? {} : { OCTANT_ARTIFACT_VERSION: artifactVersion }),
       OCTANT_WEB_DIST_PATH: join(artifactRoot, "share", "web"),
     },
   };
+}
+
+function readInstalledArtifactVersion(artifactRoot: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(
+      readFileSync(join(artifactRoot, HEADLESS_ARTIFACT_MANIFEST_FILENAME), "utf8"),
+    );
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+    const version = (parsed as { readonly artifactVersion?: unknown }).artifactVersion;
+    if (typeof version !== "string") return undefined;
+    const trimmed = version.trim();
+    if (trimmed.length === 0 || trimmed.length > MAX_ARTIFACT_VERSION_LENGTH) return undefined;
+    return trimmed;
+  } catch {
+    return undefined;
+  }
 }

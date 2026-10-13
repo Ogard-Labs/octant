@@ -1762,6 +1762,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           port,
           instanceId,
           packaged: app.isPackaged,
+          ...(app.isPackaged ? { appVersion: app.getVersion() } : {}),
           execPath: process.execPath,
           env: { ...process.env, OCTANT_DATA_DIR: desktopDataDirectory },
         });

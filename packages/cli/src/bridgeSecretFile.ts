@@ -7,6 +7,7 @@ import {
   deriveHostRuntimeHostId,
   prepareHostRuntimePaths,
   resolveHostRuntimePaths,
+  resolveReportedHostVersion,
   writeBridgeSecretProjection,
   writeHostInfoReceipt,
   type HostRuntimePaths,
@@ -155,7 +156,7 @@ export async function writeHostInfoFile(
     url: info.url,
     controlEndpoint: paths.socketPath,
     serviceMode: "web",
-    serverVersion: "0.0.0-dev",
+    serverVersion: resolveReportedHostVersion(input.env),
     wireVersion: "1",
     updatedAt: new Date().toISOString(),
   });

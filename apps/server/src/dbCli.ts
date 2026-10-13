@@ -9,6 +9,7 @@ import {
   prepareHostRuntimePaths,
   readHostRuntimeProcessStart,
   resolveHostRuntimePaths,
+  resolveReportedHostVersion,
   type HostRuntimeAttachment,
   type HostRuntimeOwner,
 } from "@octant/host-runtime";
@@ -356,7 +357,7 @@ async function runCli(): Promise<number> {
       paths,
       hostId: deriveHostRuntimeHostId(paths.dataDirectory),
       instanceId: randomUUID(),
-      serverVersion: process.env.npm_package_version ?? "0.0.0-dev",
+      serverVersion: resolveReportedHostVersion(process.env),
       wireVersion: "1",
       serviceMode: "maintenance",
       processStart: await readHostRuntimeProcessStart(process.pid),
