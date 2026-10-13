@@ -277,6 +277,13 @@ describe("what the renderer may attach", () => {
     expect(window.tryAttach({ src: page }).cancelled).toBe(false);
   });
 
+  it("accepts the address a shared snapshot's prototype is given, built the way the client builds it", () => {
+    // The client resolves the host's `/api/canvas/design-page?ticket=` path
+    // against its base address, which the desktop gives with a trailing slash.
+    const address = new URL(`${CANVAS_DESIGN_PAGE_PATH}?ticket=${ticket}`, `${server}/`).toString();
+    expect(designPageTicket(address, `${server}/`)).toBe(ticket);
+  });
+
   it("knows no design page while the host is unknown", () => {
     expect(designPageTicket(page, undefined)).toBeUndefined();
     expect(designPageTicket(page, server)).toBe(ticket);

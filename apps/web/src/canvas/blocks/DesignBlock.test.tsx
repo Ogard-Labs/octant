@@ -47,7 +47,10 @@ function prototype(size: CanvasDesignBlock["size"] = "phone"): CanvasDesignBlock
 
 function runRuntime(fields: Partial<DesignRunRuntime> = {}) {
   const start = vi.fn<DesignRunRuntime["start"]>(async () => ({ kind: "ready", url: PAGE }));
-  return { start, runtime: { start, contained: false, runsOnOpen: false, ...fields } };
+  return {
+    start,
+    runtime: { start, contained: false, drawnIn: "frame" as const, runsOnOpen: false, ...fields },
+  };
 }
 
 /** What the desktop's surface for a prototype reports for its page, as the element delivers it. */
@@ -450,7 +453,12 @@ describe("running prototype", () => {
   });
 
   it("runs on open in the sidebar without taking focus, and in the desktop app says it has no network and what still leaves", async () => {
-    const { start, runtime } = runRuntime({ runsOnOpen: true, contained: true });
+    installDesktopBridge({ prepareCanvasPrototypeSurface: async () => ({ status: "ready" }) });
+    const { start, runtime } = runRuntime({
+      runsOnOpen: true,
+      contained: true,
+      drawnIn: "desktop-surface",
+    });
     render(
       <CanvasDocument
         definition={{ ...canvasFixture, blocks: [prototype()] }}
@@ -631,7 +639,10 @@ describe("running prototype", () => {
 
 describe("running prototype in the desktop app", () => {
   function runDesktop(fields: Partial<DesignRunRuntime> = {}, size?: CanvasDesignBlock["size"]) {
-    const run = runRuntime({ contained: true, ...fields });
+    if ((window as { octantHost?: unknown }).octantHost === undefined) {
+      installDesktopBridge({ prepareCanvasPrototypeSurface: async () => ({ status: "ready" }) });
+    }
+    const run = runRuntime({ contained: true, drawnIn: "desktop-surface", ...fields });
     render(
       <CanvasDocument
         definition={{ ...canvasFixture, blocks: [prototype(size)] }}
@@ -756,6 +767,7 @@ describe("running prototype in the desktop app", () => {
   it("hands focus to Stop when the desktop's reserved shortcut fires while the prototype holds it", async () => {
     let escape: (() => void) | undefined;
     installDesktopBridge({
+      prepareCanvasPrototypeSurface: async () => ({ status: "ready" }),
       subscribeCanvasFrameFocusEscape: (listener: () => void) => {
         escape = listener;
         return () => {
@@ -775,6 +787,7 @@ describe("running prototype in the desktop app", () => {
   it("stops a prototype that takes the keyboard straight back after the reserved shortcut", async () => {
     let escape: (() => void) | undefined;
     installDesktopBridge({
+      prepareCanvasPrototypeSurface: async () => ({ status: "ready" }),
       subscribeCanvasFrameFocusEscape: (listener: () => void) => {
         escape = listener;
         return () => undefined;
@@ -796,7 +809,7 @@ describe("running prototype in the desktop app", () => {
   });
 });
 
-describe("running a prototype in the desktop app needs its contained surface", () => {
+describe("where a running prototype is drawn", () => {
   const client = () => {
     const runDesign = vi.fn(async () => ({ kind: "ready" as const, url: PAGE }));
     return {
@@ -812,7 +825,49 @@ describe("running a prototype in the desktop app needs its contained surface", (
     };
   };
 
-  it("asks the host for a ticket only after the desktop has closed the surface's network", async () => {
+  function runFromThread(runtime: DesignRunRuntime) {
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+        placement="thread"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+  }
+
+  it("draws on the desktop's own surface only in the desktop app, and in a frame in a browser", () => {
+    installDesktopBridge();
+    expect(client().runtime).toMatchObject({ contained: true, drawnIn: "desktop-surface" });
+    delete (window as { octantHost?: unknown }).octantHost;
+    expect(client().runtime).toMatchObject({ contained: false, drawnIn: "frame" });
+  });
+
+  it("draws the preview browser's prototype in a frame, because that browser has no route out and no desktop surface", async () => {
+    // The preview page says it is contained and draws a frame: ordinary
+    // Chromium does not know a webview, so a surface there would never load.
+    const prepare = vi.fn(async () => ({ status: "ready" as const }));
+    installDesktopBridge({ prepareCanvasPrototypeSurface: prepare });
+    const { start, runtime } = runRuntime({ contained: true, drawnIn: "frame", runsOnOpen: true });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    const frame = await screen.findByTitle<HTMLIFrameElement>("Checkout, running prototype");
+    expect(frame.tagName).toBe("IFRAME");
+    expect(frame.getAttribute("src")).toBe(PAGE);
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(views(document)).toHaveLength(0);
+    expect(start).toHaveBeenCalledOnce();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(screen.queryByText(/not network-contained/)).toBeNull();
+    expect(screen.queryByText(/look up host names/)).toBeNull();
+    expect(screen.getByText(/no network connection/)).toBeVisible();
+  });
+
+  it("closes the desktop surface's network before it asks any runtime for a page", async () => {
     const order: Array<string> = [];
     installDesktopBridge({
       prepareCanvasPrototypeSurface: async () => {
@@ -825,46 +880,66 @@ describe("running a prototype in the desktop app needs its contained surface", (
       order.push("ticket");
       return { kind: "ready" as const, url: PAGE };
     });
-    expect(runtime?.contained).toBe(true);
-    await expect(runtime?.start("checkout")).resolves.toEqual({ kind: "ready", url: PAGE });
+    runFromThread(runtime!);
+    expect(await screen.findByTitle("Checkout, running prototype")).toHaveAttribute("src", PAGE);
     expect(order).toEqual(["surface", "ticket"]);
   });
 
-  it("does not run, and never asks for a ticket, when the surface cannot be made", async () => {
-    installDesktopBridge({
-      prepareCanvasPrototypeSurface: async () => ({
-        status: "unavailable",
-        reason: "Octant could not close the prototype surface's network, so it does not run.",
-      }),
-    });
-    const refused = client();
-    await expect(refused.runtime?.start("checkout")).resolves.toEqual({
-      kind: "refused",
-      reason: "Octant could not close the prototype surface's network, so it does not run.",
-    });
-    expect(refused.runDesign).not.toHaveBeenCalled();
+  it("does not run a prototype drawn on the surface, and never asks for a page, when the surface cannot be made", async () => {
+    const cases: Array<[string, Record<string, unknown>]> = [
+      [
+        "Octant could not close the prototype surface's network, so it does not run.",
+        {
+          prepareCanvasPrototypeSurface: async () => ({
+            status: "unavailable",
+            reason: "Octant could not close the prototype surface's network, so it does not run.",
+          }),
+        },
+      ],
+      [
+        "Octant could not start the prototype surface, so it does not run.",
+        {
+          prepareCanvasPrototypeSurface: async () => {
+            throw new Error("ipc failed");
+          },
+        },
+      ],
+      ["This version of Octant cannot contain a prototype, so it does not run.", {}],
+    ];
+    for (const [reason, bridgeFields] of cases) {
+      cleanup();
+      installDesktopBridge(bridgeFields);
+      const { runDesign, runtime } = client();
+      runFromThread(runtime!);
+      expect(await screen.findByText(reason)).toBeVisible();
+      expect(runDesign).not.toHaveBeenCalled();
+      expect(frames(document)).toHaveLength(0);
+      expect(views(document)).toHaveLength(0);
+    }
+  });
 
-    installDesktopBridge({
-      prepareCanvasPrototypeSurface: async () => {
-        throw new Error("ipc failed");
-      },
-    });
-    const failed = client();
-    await expect(failed.runtime?.start("checkout")).resolves.toMatchObject({ kind: "refused" });
-    expect(failed.runDesign).not.toHaveBeenCalled();
-
-    // A desktop that predates the surface cannot hold a prototype either.
-    installDesktopBridge();
-    const old = client();
-    await expect(old.runtime?.start("checkout")).resolves.toMatchObject({ kind: "refused" });
-    expect(old.runDesign).not.toHaveBeenCalled();
+  it("prepares for a runtime built anywhere else that says it draws on the surface", async () => {
+    // A shared snapshot builds its own runtime; the block, not each builder,
+    // is what makes sure the surface exists first.
+    const prepare = vi.fn(async () => ({
+      status: "unavailable" as const,
+      reason: "Closed for repairs.",
+    }));
+    installDesktopBridge({ prepareCanvasPrototypeSurface: prepare });
+    const { start, runtime } = runRuntime({ contained: true, drawnIn: "desktop-surface" });
+    runFromThread(runtime);
+    expect(await screen.findByText("Closed for repairs.")).toBeVisible();
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(start).not.toHaveBeenCalled();
   });
 
   it("runs in a frame, with no surface to prepare, where there is no desktop app", async () => {
     const { runDesign, runtime } = client();
-    expect(runtime?.contained).toBe(false);
-    await expect(runtime?.start("checkout")).resolves.toEqual({ kind: "ready", url: PAGE });
+    runFromThread(runtime!);
+    const frame = await screen.findByTitle<HTMLIFrameElement>("Checkout, running prototype");
+    expect(frame.tagName).toBe("IFRAME");
     expect(runDesign).toHaveBeenCalledOnce();
+    expect(screen.getByText(/can still connect to another computer/)).toBeVisible();
   });
 });
 

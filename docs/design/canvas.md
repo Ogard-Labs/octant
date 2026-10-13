@@ -705,8 +705,13 @@ listener from a sandboxed frame. So the prototype is a `<webview>` whose guest
 lives in a session of its own with no route out, the same boundary the preview
 browser has:
 
-- **Preparing.** Before it asks the host for a ticket the renderer asks the main
-  process to prepare the surface. The main process points the surface's session
+- **Preparing.** A run is two separate facts: whether it is contained (what the
+  person is told) and where it is drawn (the desktop's own surface, or a frame).
+  Whatever builds the run, a prototype drawn on the surface is not asked for a
+  ticket until the renderer has asked the main process to prepare the surface;
+  a shared snapshot's prototype takes the same path as a live one. The agent's
+  preview browser is contained and draws a frame, because it is an ordinary
+  browser with no such surface. The main process points the surface's session
   at a SOCKS address that is never a proxy, with `<-loopback>` so loopback is
   not exempt, reads back that a public and a loopback address both resolve to
   it and neither to `DIRECT`, and refuses every permission, device, screen

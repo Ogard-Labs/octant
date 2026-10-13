@@ -7,7 +7,7 @@ import type {
 import { commitsByHourExample, hottestFilesExample, repositoryMapExample } from "@octant/domain";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { chooseSelectFieldOption } from "../test/chooseSelectFieldOption.test-support";
 import { CanvasSharePanel } from "./CanvasSharePanel";
 
@@ -257,6 +257,115 @@ describe("CanvasSharePanel", () => {
         runDesign: { blockId: "cart" },
       }),
     );
+  });
+
+  describe("on the desktop", () => {
+    const cartSnapshot = () => {
+      const page = `/api/canvas/design-page?ticket=${"a".repeat(43)}`;
+      const shared = {
+        ...exportDocument(),
+        schemaVersion: 10,
+        blocks: [
+          {
+            blockId: "cart",
+            schemaVersion: 18,
+            kind: "design",
+            title: "Cart",
+            size: "phone",
+            runsScript: true,
+            frames: [{ frameId: "cart", title: "Cart", html: "<button>Add</button>" }],
+          },
+        ],
+      };
+      const onOpen = vi.fn(
+        async (request: { readonly runDesign?: unknown }) =>
+          ({
+            kind: "allowed",
+            document: shared,
+            event: { eventId: "x" },
+            ...(request.runDesign === undefined ? {} : { designPage: page }),
+          }) as never,
+      );
+      return { page, shared, onOpen };
+    };
+
+    afterEach(() => {
+      delete (window as { octantHost?: unknown }).octantHost;
+    });
+
+    // The renderer recognises the desktop bridge by its credential methods.
+    const desktopBridge = (fields: Record<string, unknown>) => {
+      (window as { octantHost?: unknown }).octantHost = {
+        setProviderCredential: () => undefined,
+        providerCredentialStatus: () => undefined,
+        clearProviderCredential: () => undefined,
+        listProviderApiKeys: () => undefined,
+        addProviderApiKey: () => undefined,
+        renameProviderApiKey: () => undefined,
+        replaceProviderApiKey: () => undefined,
+        removeProviderApiKey: () => undefined,
+        setActiveProviderApiKey: () => undefined,
+        moveProviderApiKey: () => undefined,
+        ...fields,
+      };
+    };
+
+    it("prepares the prototype surface before it takes a ticket, and draws the snapshot's prototype on it", async () => {
+      const order: Array<string> = [];
+      desktopBridge({
+        prepareCanvasPrototypeSurface: async () => {
+          order.push("surface");
+          return { status: "ready" };
+        },
+      });
+      const { page, shared, onOpen } = cartSnapshot();
+      onOpen.mockImplementation(async (request) => {
+        if (request.runDesign !== undefined) order.push("ticket");
+        return {
+          kind: "allowed",
+          document: shared,
+          event: { eventId: "x" },
+          ...(request.runDesign === undefined ? {} : { designPage: page }),
+        } as never;
+      });
+      renderPanel({
+        overview: overview({ snapshots: [activeSnapshot()] }),
+        onOpen,
+        resolveDesignPage: (path) => `http://127.0.0.1:3773${path}`,
+      });
+      fireEvent.click(screen.getByTestId(`canvas-share-open-${snapshotId}`));
+      const view = await screen.findByTestId("canvas-share-snapshot-view");
+      fireEvent.click(within(view).getByRole("button", { name: "Run" }));
+      const running = await within(view).findByTitle("Cart, running prototype");
+      expect(running.tagName).toBe("WEBVIEW");
+      // The address is the one the main process accepts: this host's origin,
+      // the design-page path, and one 43-character ticket.
+      expect(running.getAttribute("src")).toBe(`http://127.0.0.1:3773${page}`);
+      expect(order).toEqual(["surface", "ticket"]);
+    });
+
+    it("says why a snapshot's prototype does not run when the surface is unavailable, and takes no ticket", async () => {
+      desktopBridge({
+        prepareCanvasPrototypeSurface: async () => ({
+          status: "unavailable",
+          reason: "Octant could not close the prototype surface's network, so it does not run.",
+        }),
+      });
+      const { onOpen } = cartSnapshot();
+      renderPanel({
+        overview: overview({ snapshots: [activeSnapshot()] }),
+        onOpen,
+        resolveDesignPage: (path) => `http://127.0.0.1:3773${path}`,
+      });
+      fireEvent.click(screen.getByTestId(`canvas-share-open-${snapshotId}`));
+      const view = await screen.findByTestId("canvas-share-snapshot-view");
+      fireEvent.click(within(view).getByRole("button", { name: "Run" }));
+      expect(await within(view).findByText(/could not close the prototype surface/)).toBeVisible();
+      expect(within(view).queryByTitle("Cart, running prototype")).toBeNull();
+      expect(onOpen.mock.calls.filter(([request]) => request.runDesign !== undefined)).toHaveLength(
+        0,
+      );
+    });
   });
 
   it("says plainly when the host does not share and offers no control", () => {

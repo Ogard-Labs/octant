@@ -39,6 +39,7 @@ import {
   RUNNING_DESIGN_MAX_ERRORS,
   RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND,
   RUNNING_DESIGN_MIN_HEIGHT,
+  prepareDesktopSurface,
   RUNNING_DESIGN_SANDBOX,
   type DesignBridgeMessage,
   type DesignRunRuntime,
@@ -614,7 +615,16 @@ function RunningDesignBlock({
       setState({ kind: "starting", byPerson });
       let next: RunState;
       try {
-        const started = await runtime.start(String(block.blockId));
+        // On the desktop's own surface a prototype is asked for only after the
+        // desktop has closed that surface's network, whoever built the runtime.
+        const prepared =
+          runtime.drawnIn === "desktop-surface"
+            ? await prepareDesktopSurface()
+            : ({ status: "ready" } as const);
+        const started =
+          prepared.status === "ready"
+            ? await runtime.start(String(block.blockId))
+            : ({ kind: "refused", reason: prepared.reason } as const);
         next =
           started.kind === "ready"
             ? { kind: "running", url: started.url, byPerson }
@@ -699,6 +709,7 @@ function RunningDesignBlock({
   }, [heldFocus]);
 
   const contained = runtime?.contained === true;
+  const onDesktopSurface = runtime?.drawnIn === "desktop-surface";
   return (
     <section
       aria-label={`${block.title}, ${SIZE_NAME[block.size]} prototype`}
@@ -761,11 +772,13 @@ function RunningDesignBlock({
       {/* A page's policy does not cover a peer connection, and a browser has no
           way to stop one, so a prototype there can still connect to another
           computer. The desktop app gives the page no network at all; only the
-          names it asks the app to look up leave. */}
+          names it asks the app to look up leave. The preview browser has no
+          route out either, and says only that. */}
       {runtime === undefined ? null : contained ? (
         <p className="canvas-design__notice">
-          A prototype runs with no network connection. Its script can still make Octant look up host
-          names, which can carry a little of what the prototype holds.
+          {onDesktopSurface
+            ? "A prototype runs with no network connection. Its script can still make Octant look up host names, which can carry a little of what the prototype holds."
+            : "A prototype runs with no network connection."}
         </p>
       ) : (
         <p className="canvas-design__notice">
@@ -786,7 +799,7 @@ function RunningDesignBlock({
       {state.kind === "running" ? (
         <RunningFrame
           block={block}
-          contained={contained}
+          onDesktopSurface={onDesktopSurface}
           focusable={state.byPerson}
           frameRef={frameRef}
           key={state.url}
@@ -880,7 +893,7 @@ function useBridgeWatchdog(onStop: (why: RunStopReason) => void) {
 function RunningFrame({
   block,
   url,
-  contained,
+  onDesktopSurface,
   focusable,
   frameRef,
   onStop,
@@ -888,7 +901,7 @@ function RunningFrame({
 }: {
   readonly block: CanvasDesignBlock;
   readonly url: string;
-  readonly contained: boolean;
+  readonly onDesktopSurface: boolean;
   readonly focusable: boolean;
   readonly frameRef: RefObject<HTMLElement | null>;
   readonly onStop: (why: RunStopReason) => void;
@@ -920,7 +933,7 @@ function RunningFrame({
 
   // A frame in a browser posts to this window; only its own window counts.
   useEffect(() => {
-    if (contained) return;
+    if (onDesktopSurface) return;
     const onMessage = (event: MessageEvent) => {
       const element = frameRef.current;
       const page = element instanceof HTMLIFrameElement ? element.contentWindow : null;
@@ -929,14 +942,14 @@ function RunningFrame({
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [admit, contained, frameRef, take]);
+  }, [admit, onDesktopSurface, frameRef, take]);
 
   // A surface of its own has no window to post to: its preload forwards the
   // page's bridge messages as events of the element, and the element reports
   // its loads and its renderer going away.
   useEffect(() => {
     const element = frameRef.current;
-    if (!contained || element === null) return;
+    if (!onDesktopSurface || element === null) return;
     const onBridge = (event: Event) => {
       const { channel, args } = event as Event & { channel?: unknown; args?: unknown };
       if (channel !== CANVAS_DESIGN_SURFACE_BRIDGE_EVENT || !Array.isArray(args) || !admit())
@@ -952,10 +965,10 @@ function RunningFrame({
       element.removeEventListener("did-navigate", countLoad);
       element.removeEventListener("render-process-gone", onGone);
     };
-  }, [admit, contained, countLoad, frameRef, onStop, take]);
+  }, [admit, onDesktopSurface, countLoad, frameRef, onStop, take]);
 
   const frame = (style: CSSProperties, className: string) =>
-    contained ? (
+    onDesktopSurface ? (
       <webview
         className={className}
         ref={attach}

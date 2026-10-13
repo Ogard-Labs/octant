@@ -44,37 +44,56 @@ export const RUNNING_DESIGN_MAX_ERRORS = 3;
 export const RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND = 250;
 
 /**
- * How a surface reaches the host to run a design. `contained` is true in the
- * desktop app, which draws a running design in a surface of its own with no
- * route out; in a browser the page is drawn in a frame, which cannot be held
- * that way, and the Run control says so. `runsOnOpen` lets the sidebar start a
- * prototype as soon as it is shown; the thread waits for Run.
+ * How a surface reaches the host to run a design, and two separate facts about
+ * it.
+ *
+ * `contained` is what the person is told: the prototype has no route out, so
+ * there is no warning about connecting to another computer. The desktop app and
+ * the agent's preview browser are contained.
+ *
+ * `drawnIn` is how the page is drawn, which is not the same question. The
+ * desktop app draws it on its own surface (`desktop-surface`), a webview its
+ * main process makes and holds to the host's page; the preview browser and a
+ * web browser draw a frame (`frame`), because only the desktop app has that
+ * surface. A runtime that draws on the desktop surface is never run before the
+ * desktop has prepared it, whoever built the runtime.
+ *
+ * `runsOnOpen` lets the sidebar start a prototype as soon as it is shown; the
+ * thread waits for Run.
  */
 export interface DesignRunRuntime {
   readonly start: (blockId: string, frameId?: string) => Promise<CanvasDesignRunStart>;
   readonly contained: boolean;
+  readonly drawnIn: DesignDrawnIn;
   readonly runsOnOpen: boolean;
+}
+
+export type DesignDrawnIn = "desktop-surface" | "frame";
+
+/**
+ * Where a prototype is drawn in the client this code runs in: the desktop
+ * app's own surface there, a frame anywhere else. The one place that decides,
+ * so a runtime built for a snapshot cannot disagree with one built for a live
+ * Canvas.
+ */
+export function designDrawnInHere(): DesignDrawnIn {
+  return runsInDesktopApp() ? "desktop-surface" : "frame";
 }
 
 /**
  * The run runtime for one Canvas version on a surface, or `undefined` when the
  * host cannot serve prototypes. Only the desktop app can close a prototype's
- * network, so only there is one contained. There, a prototype is asked for only
- * after the desktop has closed the surface it will be drawn in, and when that
- * cannot be done it does not run: it is never drawn in a frame instead.
+ * network, so only there is one contained, and there it is drawn on the
+ * desktop's surface, never in a frame.
  */
 export function designRunRuntimeFor(
   client: Pick<CanvasClient, "runDesign"> | undefined,
   input: { readonly canvasId: CanvasId; readonly versionId: string; readonly runsOnOpen: boolean },
 ): DesignRunRuntime | undefined {
   if (client?.runDesign === undefined) return undefined;
-  const contained = runsInDesktopApp();
+  const drawnIn = designDrawnInHere();
   return {
     start: async (blockId, frameId) => {
-      if (contained) {
-        const prepared = await prepareContainedSurface();
-        if (prepared.status !== "ready") return { kind: "refused", reason: prepared.reason };
-      }
       const started = await client.runDesign?.({
         canvasId: input.canvasId,
         versionId: input.versionId,
@@ -83,12 +102,17 @@ export function designRunRuntimeFor(
       });
       return started ?? { kind: "refused", reason: "This host does not run prototypes." };
     },
-    contained,
+    contained: drawnIn === "desktop-surface",
+    drawnIn,
     runsOnOpen: input.runsOnOpen,
   };
 }
 
-async function prepareContainedSurface(): Promise<CanvasPrototypeSurfacePreparation> {
+/**
+ * Asks the desktop to close the network of the surface a prototype is drawn
+ * on. Any failure is a refusal with its reason; nothing falls back to a frame.
+ */
+export async function prepareDesktopSurface(): Promise<CanvasPrototypeSurfacePreparation> {
   const unavailable = (reason: string): CanvasPrototypeSurfacePreparation => ({
     status: "unavailable",
     reason,
