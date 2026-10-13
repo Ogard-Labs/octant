@@ -41,9 +41,11 @@ describe("installed artifact layout", () => {
         join(root, HEADLESS_ARTIFACT_MANIFEST_FILENAME),
         JSON.stringify({ artifactVersion: "   " }),
       );
-      expect(installedArtifactServerStartCommand(root, "/usr/local/bin/runtime").env).toMatchObject({
-        OCTANT_ARTIFACT_VERSION: "",
-      });
+      expect(installedArtifactServerStartCommand(root, "/usr/local/bin/runtime").env).toMatchObject(
+        {
+          OCTANT_ARTIFACT_VERSION: "",
+        },
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
