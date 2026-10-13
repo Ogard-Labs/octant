@@ -2338,7 +2338,10 @@ aggregate version before it asks for the summary and commits only if the
 version is unchanged when the summary returns. A pin or an exclusion edited in
 between fails the compaction as `context-changed` with nothing committed, so a
 summary planned from the earlier state can never undo that edit; the person can
-compact again.
+compact again. Automatic maintenance (`maintainContext`) holds the same
+guard: a pin, an exclusion, or a new plan between the ledger read and the
+summary's return ends the pass with the typed result `context-changed`, commits
+no summary, and leaves the turn on its deterministic reduction.
 
 _Authority._ Compaction is a command on the thread, not a tool call, and the
 server checks it before any side effect:
