@@ -2935,8 +2935,11 @@ native harness in `apps/server/src/harness`:
   ordinary approvals; the catalog's `resultTaintsThread` marks each tool and
   `nativeHarnessResultTaintsThread` decides, failing closed for a name it does
   not know. A command under OS-level `allow` egress keeps today's posture and
-  its output does not taint; under the approved, unbuilt `proxied` level a `bash` call
-  taints when its launch received bytes from an outside host, as the
+  its output does not taint: the host cannot see what such a command received,
+  so this is a stated exception to the thread-taint rule, recorded in the
+  [threat model](security/security-architecture-threat-model.md), and standing
+  approvals stay active after it. Under the approved, unbuilt `proxied` level
+  a launch taints when it received bytes from an outside host, as the
   [egress rules](#harness-tool-egress-rules) describe. Once tainted, `bash`, `edit`,
   `write`, `goal-check`, and `web-fetch` need a person's confirmation for every
   call even under Full access, and refuse when no approval surface exists;
@@ -3278,7 +3281,12 @@ listener per confined launch:
   `proxied` launch of every thread in that Code Project). A child with network
   authority uses its parent's live rules and holds none of its own, so it is
   never wider than its parent, and a parent's revocation or expiry reaches it
-  at once; a child without network authority stays `none`. Rules are local to
+  at once; a child without network authority stays `none`. Taint reaches it
+  the same way: a child's launch is checked against its parent's taint as well
+  as its own, and when either thread is tainted the standing rules are
+  suspended for that launch, so the single-use confirmation described under
+  Taint below is asked on the parent's thread, where the child's proposals
+  already surface. Rules are local to
   the host that granted them: they are never exported, synced, or replicated,
   and a paired device sees them only as the host reports them.
 - **Expiry.** Every rule expires; there is no permanent rule. Thread rules
@@ -3296,8 +3304,12 @@ listener per confined launch:
   anyone who may already answer that thread's approvals, a paired device
   included under its existing clamps. Project rules need the person at a local
   window whose workspace holds the Project, like remembered Full access. The
-  planned reviewer (0110) may answer a per-call `network-access` prompt but
-  cannot mint a rule of any scope.
+  planned reviewer (0110) may answer a per-call `network-access` prompt on a
+  thread that is not tainted. Its answer produces `call` rules for that one
+  launch and nothing wider, journaled as `thread.egress-rule-granted@1` with
+  the reviewer as the granting principal; it cannot grant a thread or Project
+  rule. A tainted thread's single-use confirmation needs a person, so the
+  reviewer cannot answer it.
 - **Taint.** Taint suspends standing rules, matching the rule that a
   remembered "always" approval stops covering its class once a thread is
   tainted. On a tainted thread every `bash` call already needs a single-use
@@ -3309,15 +3321,20 @@ listener per confined launch:
   and an allowed host that accepts anonymous or attacker-supplied writes
   cannot carry data out without a person seeing that host for that command.
 - **Output taints.** Bytes a command receives from an outside host are
-  untrusted content, so a `proxied` `bash` call whose launch received any
-  taints the thread, consistent with the rule that a harness result bringing in
+  untrusted content, so every `proxied` launch that received any, a `bash`
+  call or a repository test run alike, taints the thread, consistent with the
+  rule that a harness result bringing in
   outside content taints. The proxy counts bytes received per launch, from
   every allowed destination, including entries beyond the summary's 64-entry
   cap, and the launch summary carries that total. The server appends the
   thread's taint event from the total, before the tool result returns to the
   model and in the same step as the summary; when the taint cannot be
   recorded the call reports `unavailable`, so the model never reads output
-  the journal has not marked. A refused request, and a launch that received
+  the journal has not marked. The two events are on different aggregates and
+  a server can exit between them, so the summary is the durable fact: at
+  startup, any summarized launch whose total is above zero and whose thread
+  carries no taint event taints that thread before a turn is admitted. A
+  refused request, and a launch that received
   nothing, do not taint. The taint is the thread-lifetime one and never
   clears, so a package install or a clone taints the thread and later `bash`
   calls need the single-use confirmation above; that is the accepted cost of
@@ -3370,7 +3387,8 @@ or body:
   Its record holds what the batches captured and says the tail is unknown.
   Because the bytes received are then unknown too, recovery taints the thread
   unless the recorded batches show the launch received none and ended before
-  its first allowed connection.
+  its first allowed connection. Recovery also taints the thread for a launch
+  that was summarized with bytes received but whose taint event is missing.
 
 **Failure modes.** Each fails closed:
 
@@ -3387,6 +3405,7 @@ or body:
 | Launch start cannot be journaled                               | The launch refuses before the command runs                                 |
 | Decision batch cannot be journaled                             | New requests refuse (`audit-unavailable`); open tunnels run to their end   |
 | Server exits mid-launch                                        | Recovery marks the launch incomplete and taints the thread                 |
+| Server exits after the summary and before the taint event      | Recovery taints the thread from the summary's bytes received               |
 
 **Inference stays separate.** Harness inference leaves from the server
 process to the configured base URL with the credential, as today; it never
@@ -3438,17 +3457,23 @@ proofs that suite already holds:
    device cannot grant a Project rule; a tainted thread can grant only `call`
    rules and its standing rules stop applying; a grant that cannot be
    journaled is not in force; output received through the proxy taints the
-   thread before the result returns; a crash mid-launch loses at most one
-   decision batch and recovery marks the launch incomplete; and rendered QA
+   thread before the result returns, for a test run as for `bash`; a child of
+   a tainted parent cannot use the parent's standing rules; a reviewer's
+   answer yields only `call` rules and cannot answer a tainted thread; a crash
+   mid-launch loses at most one decision batch and recovery marks the launch
+   incomplete; a crash between the summary and the taint event still leaves
+   the thread tainted after restart; and rendered QA
    covers the proposal card and the rules lists.
 4. **Confinement wiring and the switch.** The `proxied` OS level in the
    Seatbelt builder and the bubblewrap capsule with its forwarder, and the
-   harness ports that launch with it. This phase is what changes approval-gated
-   Code harness commands from open network to ruled network, and it lands only
+   harness ports that launch with it. This phase is what changes Code harness
+   commands on approval-gated and auto-accept-edits threads from open network
+   to ruled network, and it lands only
    after phases 2 and 3 are in, so no release has those commands on `proxied`
    without a way to grant a host; until it lands they stay on `allow`, and
    the user guide changes with it. Accepted when native probes under real
-   Seatbelt on macOS and real `bwrap` on Linux show: a direct connection to a
+   Seatbelt on macOS and real `bwrap` on Linux, run for an approval-gated
+   thread and for an auto-accept-edits thread, show: a direct connection to a
    public fixture fails; a name lookup fails; another loopback listener is
    unreachable; the proxy is reachable and an allowed host works; a client
    that ignores the proxy variables fails; and a launch whose listener cannot

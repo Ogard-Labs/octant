@@ -468,7 +468,12 @@ guidance instead.
   `allow`) with broker-level host allowlists (Henrik decision 2026-08-12); a local egress proxy is
   deferred. Where Seatbelt cannot express a host allowlist, the finer host-level policy is
   enforced by the Octant-owned brokered tools (browser origin allowlist, research backends);
-  this limitation is stated honestly rather than simulated.
+  this limitation is stated honestly rather than simulated. One consequence is an exception to
+  decision 3 below: the output of a command launched under OS-level `allow` does not taint its
+  thread, because the host cannot observe what the command received, so standing approvals stay
+  active after it. The harness tool egress rules remove the exception for native-harness tool
+  processes on `provider-endpoints-only` threads once built; it remains under `unrestricted`,
+  where the person accepted open network.
 - **Harness tool egress rules (approved 2026-10-13, not built).** For native-harness tool processes
   on a `provider-endpoints-only` thread, a host-owned per-launch forward proxy will replace OS
   `allow` with a third OS level, `proxied`: Seatbelt opens only the proxy's loopback port and
@@ -607,7 +612,10 @@ Waived or skipped rows never count as passing (consistent with the Phase 4/16 ev
   window.
 - Network egress from a tool subprocess whose resolved egress policy was `none`.
 - Under the harness tool egress rules, once built, a connection from a `proxied` launch to a
-  destination no live rule for that thread covers, after its rule expired, or to a private address.
+  destination no live applicable rule covers, after its rule expired, or to a private address.
+  Applicable means a `call` rule of that launch, a rule of that thread, a rule of its Project, or,
+  for a child, its parent's live rules; none applies while the thread or its parent is tainted,
+  except `call` rules a person confirmed for that launch.
 
 ### Medium
 
