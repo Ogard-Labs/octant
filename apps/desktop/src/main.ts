@@ -3949,7 +3949,9 @@ else {
     processId: replacedProcessId,
     boundMs: REPLACED_PROCESS_WAIT_BOUND_MS,
     pollMs: REPLACED_PROCESS_POLL_MS,
-    now: () => Date.now(),
+    // Elapsed time, not the wall clock: a clock correction or a sleep while the
+    // old instance stops must not spend, or stretch, the bound.
+    now: () => performance.now(),
     isAlive: defaultProcessIsAlive(),
     sleep: (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)),
   }).then(startDesktopInstance, handleFatalStartup);

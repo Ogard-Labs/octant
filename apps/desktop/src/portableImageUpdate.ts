@@ -469,6 +469,7 @@ export async function waitForReplacedProcessExit(input: {
   readonly processId: number;
   readonly boundMs: number;
   readonly pollMs: number;
+  /** Elapsed milliseconds from a clock that never jumps; not the wall clock. */
   readonly now: () => number;
   readonly isAlive: (processId: number) => boolean;
   readonly sleep: (ms: number) => Promise<void>;
