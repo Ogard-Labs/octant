@@ -13,7 +13,9 @@ import {
   type CodeThread,
   type ToolActionAuthority,
 } from "@octant/contracts";
+import { runMcpCommand } from "@octant/cli/mcp";
 import { Schema } from "effect";
+import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserAutomationService } from "../browser/browserAutomationService";
 import type { BrowserRuntimePort } from "../browser/browserRuntimePort";
@@ -928,5 +930,124 @@ describe("terminal Browser grant", () => {
     expect(
       fixture.grantEvents().map((event) => (event.payload as { reason?: string }).reason),
     ).toEqual([undefined, "terminal-not-started"]);
+  });
+});
+
+/** The two variables as the terminal's shell would hold them. */
+function envOf(fixture: Harness, opening: TerminalBrowserGrantOpening) {
+  const { url, token } = environmentOf(fixture, opening);
+  return { OCTANT_BROWSER_MCP_URL: url, OCTANT_BROWSER_MCP_TOKEN: token };
+}
+
+/**
+ * A provider CLI pointed at `octant mcp` inside the terminal: the real command
+ * module, speaking stdio, against the real endpoint the grant started.
+ */
+function typedCli(environment: Readonly<Record<string, string>>) {
+  const input = new PassThrough();
+  const frames: Array<Record<string, any>> = [];
+  const waiting: Array<() => void> = [];
+  const stderr: string[] = [];
+  let id = 0;
+  const finished = runMcpCommand({
+    environment,
+    input,
+    stdout: {
+      write: (chunk) => {
+        for (const line of chunk.split("\n").filter((candidate) => candidate !== "")) {
+          frames.push(JSON.parse(line));
+        }
+        for (const wake of waiting.splice(0)) wake();
+      },
+    },
+    stderr: { write: (chunk) => stderr.push(chunk) },
+  });
+  const request = async (method: string, params: unknown = {}) => {
+    const requestId = ++id;
+    input.write(`${JSON.stringify({ jsonrpc: "2.0", id: requestId, method, params })}\n`);
+    for (;;) {
+      const answer = frames.find((frame) => frame["id"] === requestId);
+      if (answer !== undefined) return answer;
+      await new Promise<void>((resolve) => waiting.push(resolve));
+    }
+  };
+  return {
+    request,
+    finished,
+    stderr: () => stderr.join(""),
+    initialize: async () => {
+      const answer = await request("initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "typed-cli", version: "1" },
+      });
+      input.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+      return answer;
+    },
+    call: (args: Readonly<Record<string, unknown>>) =>
+      request("tools/call", { name: "octant_browser", arguments: args }),
+    close: () => input.end(),
+  };
+}
+
+describe("octant mcp against a terminal Browser grant", () => {
+  it("lists the thread's Browser tool and runs a call the person approves", async (context) => {
+    const fixture = harness();
+    const opening = await open(fixture);
+    if (opening.kind === "refused")
+      return void context.skip("loopback listeners are not permitted");
+    const cli = typedCli(envOf(fixture, opening));
+
+    expect(await cli.initialize()).toMatchObject({ result: { serverInfo: { name: "octant" } } });
+    const listed = await cli.request("tools/list");
+    expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).toEqual([
+      "octant_browser",
+    ]);
+    const navigating = cli.call({ operation: "navigate", url: "https://example.com/docs" });
+    expect(await approveNext(fixture)).toMatchObject({ origin: "https://example.com" });
+    expect(await navigating).toMatchObject({ result: { isError: false } });
+    cli.close();
+    expect(await cli.finished).toBe(0);
+    expect(cli.stderr()).toBe("");
+  });
+
+  it("refuses a call as unauthorized and ends once the person switches the grant off", async (context) => {
+    const fixture = harness();
+    const opening = await open(fixture);
+    if (opening.kind === "refused")
+      return void context.skip("loopback listeners are not permitted");
+    const cli = typedCli(envOf(fixture, opening));
+    await cli.initialize();
+    expect(await cli.call({ operation: "help" })).toMatchObject({ result: { isError: false } });
+
+    await fixture.service.switchOff({ windowId, threadId: threadA, terminalId: terminalA });
+
+    const refused = await cli.call({ operation: "help" });
+    expect(refused["result"]).toMatchObject({
+      isError: true,
+      content: [{ text: '{"error":"unauthorized"}' }],
+    });
+    expect(await cli.finished).toBe(1);
+    expect(cli.stderr().trim().split("\n")).toHaveLength(1);
+  });
+
+  it("ends when the endpoint itself answers a call unauthorized because the thread was archived", async (context) => {
+    const fixture = harness();
+    const opening = await open(fixture);
+    if (opening.kind === "refused")
+      return void context.skip("loopback listeners are not permitted");
+    const cli = typedCli(envOf(fixture, opening));
+    await cli.initialize();
+    // A lifecycle notice that never arrived: only the call itself finds the thread gone.
+    fixture.threads.set(ids.threadA, codeThread(ids.threadA, { lifecycle: "archived" }));
+
+    const refused = await cli.call({ operation: "help" });
+
+    expect(refused["result"]).toMatchObject({
+      isError: true,
+      content: [{ text: '{"error":"unauthorized"}' }],
+    });
+    expect(await cli.finished).toBe(1);
+    expect(cli.stderr()).toContain("ended this terminal's Browser grant");
   });
 });
