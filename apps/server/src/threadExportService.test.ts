@@ -403,4 +403,26 @@ describe("ThreadExportService", () => {
     ]);
     expect(outcome.bundle.evidence.completion?.satisfactionEvidence).toBe("The brief is on disk.");
   });
+
+  it("exports every turn of a Work thread longer than one transcript answer carries", async () => {
+    const fixture = workFixture();
+    const turns = Array.from({ length: 65 }, (_, index) => ({
+      ...fixture.turns[0]!,
+      requestId: `aaaaaaaa-aaaa-4aaa-8aaa-${String(index + 1).padStart(12, "0")}`,
+      prompt: `Prompt ${index + 1}`,
+      transcript: [{ role: "user", text: `Prompt ${index + 1}` }],
+    })) as unknown as ReadonlyArray<WorkTurnState>;
+
+    const outcome = await service({ work: { thread: fixture.thread, turns } }).exportThread(
+      windowId as never,
+      "local-window",
+      { mode: "work", threadId: workThreadId },
+    );
+
+    expect(outcome.kind).toBe("exported");
+    if (outcome.kind !== "exported") return;
+    expect(outcome.bundle.transcript.entries).toHaveLength(65);
+    expect(outcome.bundle.transcript.entries.at(0)?.text).toBe("Prompt 1");
+    expect(outcome.bundle.transcript.entries.at(-1)?.text).toBe("Prompt 65");
+  });
 });

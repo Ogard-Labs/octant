@@ -110,6 +110,13 @@ for never), re-deciding against each mode's authoritative record and
 journaling the ordinary thread update as the `system` actor. It archives only;
 see [decisions/0088-completed-and-snoozed-threads.md](../decisions/0088-completed-and-snoozed-threads.md).
 
+Not built yet: the state people see as **Completed**, beside Done, is renamed
+**Put away**. It is a name change only; the stored `completedAt` field and the
+rules above do not change, and it is a different state from a Work thread
+marked Done. Until the rename is built, every client, and the user guide, still
+say Completed. How the **Done today** tile and the **Complete** action are
+worded once the state is Put away is settled when the rename is built.
+
 The **Review page** lists the threads the sidebar's To review count counts, by
 the same predicate (`isWaitingForReview`: unread, not working, not on a shelf),
 so the tile's number and the page's rows never disagree. A Code thread's
@@ -303,13 +310,15 @@ row. In Work and Code the frame also holds **Open in sidebar**, which opens
 the same Canvas in the dock tool, and a row opens it there too. Chat has no
 dock, so there the frame holds **Open Canvas**, and the frame and a row open
 the Canvas as a content tab beside the thread. Editing, comments, and sharing stay there.
-A design that runs script is a prototype: wherever it is drawn, it says that
-its script can still connect to another computer, on every client and in
-every state, until a prototype's peer connections are contained, and its header
+A design that runs script is a prototype. Wherever it is drawn, a note under its
+header says what it can still send out: on desktop that it runs with no network
+connection and can still make Octant look up host names, and in a browser that
+its script can still connect to another computer. Its header
 shows a **Running** label and **Stop** while it runs, and **Run again** with
-the reason once it stops (stopped responding, loaded another page, or kept
-taking the keyboard back). In the thread it starts only when the person
-presses **Run**; the sidebar runs it when it is shown, and the frame takes no
+the reason once it stops (stopped responding, loaded another page, kept
+taking the keyboard back, or, on desktop, could not be started in its contained
+surface). In the thread it starts only when the person
+presses **Run**; the sidebar runs it when it is shown, and the prototype takes no
 focus until the person presses Run or clicks into it. On desktop,
 Command-Escape (Control-Escape elsewhere) moves focus from a running prototype
 to its Stop. In a browser the Run control says the prototype is not
@@ -425,7 +434,9 @@ ordinary Review views.
 
 Work and Code have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
-Chat has no board. Code also has a Project-scoped Pull requests workspace that
+Chat has no board. Not built yet: a person may mark a Work thread Done; a Code
+thread reaches Done only by its objectively satisfied delivery target
+([Architecture: modes](../architecture.md#modes-chat-work-and-code)). Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
 Projects. The same cached read backs the right dock's Pull requests tool and
 each Code thread's Environment group, scoped to the active Code thread's

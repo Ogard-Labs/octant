@@ -31,7 +31,7 @@ Users work across repositories and document projects with long-running threads, 
 - The interface must remain usable with many Projects and concurrent runs.
 - Tool regions must never obscure ownership or starve the active thread.
 - Unsupported, stale, denied, unavailable, and failed states must remain explicit.
-- No core capability may depend on one provider.
+- The app-managed core tools stay provider-neutral. Beyond them, a first-class provider may offer a capability in full while every other provider gets a documented degraded form or reports the capability unsupported ([architecture](docs/architecture.md#overview-and-principles)).
 
 ## Brand Commitments
 

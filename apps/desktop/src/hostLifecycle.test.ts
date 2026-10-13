@@ -1,8 +1,11 @@
+import { resolveUpdateInstallReadiness } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
   createHostLifecycleController,
   shouldConfirmQuit,
+  workInFlight,
   type LocalHostDescriptor,
+  type LocalHostSnapshot,
 } from "./hostLifecycle";
 
 const desktopHost: LocalHostDescriptor = {
@@ -165,5 +168,67 @@ describe("desktop host lifecycle", () => {
         attentionRequired: true,
       }),
     ).toBe(false);
+  });
+
+  it("lets an update install and quit proceed when a provider only needs sign-in", async () => {
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const lifecycle = createHostLifecycleController({
+      attach: vi.fn().mockResolvedValue(undefined),
+      start: vi.fn().mockResolvedValue(desktopHost),
+      stop,
+    });
+    await lifecycle.ensureRunning();
+    // What the host reports for an installed provider CLI that is not signed
+    // in: nothing is running, but the menu bar still shows the provider.
+    lifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+
+    const snapshot = lifecycle.snapshot();
+    expect(snapshot.state).toBe("attention-required");
+    expect(resolveUpdateInstallReadiness(workInFlight(snapshot))).toEqual({ kind: "ready" });
+    const confirm = vi.fn(() => false);
+    await expect(lifecycle.prepareQuit(confirm)).resolves.toBe("stopped");
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("makes an update install wait while an agent is running", () => {
+    const running: LocalHostSnapshot = {
+      state: "running",
+      ownership: "desktop-owned",
+      activeAgentCount: 1,
+      attentionRequired: false,
+    };
+    expect(resolveUpdateInstallReadiness(workInFlight(running))).toEqual({
+      kind: "wait",
+      activeAgentCount: 1,
+      attentionRequired: false,
+    });
+    expect(shouldConfirmQuit(running)).toBe(true);
+  });
+
+  it("keeps waiting and confirming when the desktop could not confirm what the host is running", () => {
+    const unconfirmed: LocalHostSnapshot = {
+      state: "attention-required",
+      ownership: "desktop-owned",
+      activeAgentCount: 0,
+      attentionRequired: true,
+      activityUnconfirmed: true,
+    };
+    expect(resolveUpdateInstallReadiness(workInFlight(unconfirmed))).toMatchObject({
+      kind: "wait",
+    });
+    expect(shouldConfirmQuit(unconfirmed)).toBe(true);
+  });
+
+  it("treats a managed host that cannot be re-attached as unconfirmed work", async () => {
+    const attach = vi.fn().mockResolvedValueOnce(managedHost).mockResolvedValueOnce(undefined);
+    const lifecycle = createHostLifecycleController({
+      attach,
+      start: vi.fn().mockResolvedValue(desktopHost),
+      stop: vi.fn().mockResolvedValue(undefined),
+    });
+    await lifecycle.ensureRunning();
+    await lifecycle.reattachManagedHost();
+
+    expect(lifecycle.snapshot()).toMatchObject({ activityUnconfirmed: true });
   });
 });

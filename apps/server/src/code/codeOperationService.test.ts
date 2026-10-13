@@ -17,6 +17,7 @@ import {
   type CodeFileId,
   type WindowId,
 } from "@octant/contracts";
+import { turnBlocksInPlaceRestore } from "@octant/domain/code-policy";
 import { describe, expect, it, vi } from "vitest";
 import {
   CodeOperationService,
@@ -1437,6 +1438,189 @@ describe("CodeOperationService", () => {
       paths: ["src/file.ts"],
       expectedStateToken: "f".repeat(64),
       executionPolicy: "auto-accept-edits",
+    });
+  });
+
+  describe("restoring files in place", () => {
+    const restoredCheckpoint = { worktree: "c".repeat(40), index: "d".repeat(40) };
+    const restoreCommand = {
+      kind: "restore-git-checkpoint",
+      operationId: ids.operation,
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      gitOperationId: decodeCodeOperationId("53535353-5353-4535-8535-535353535353"),
+      checkpoint: restoredCheckpoint,
+    } as const;
+    const writerProject = "66666666-6666-4666-8666-666666666666";
+    const otherProject = "abababab-abab-4bab-8bab-abababababab";
+
+    function liveTurn(input: {
+      readonly title?: string;
+      readonly projectId?: string;
+      readonly posture?: CodeThread["executionPolicy"];
+      readonly checkoutRoot?: string;
+      readonly threadId?: CodeThread["id"];
+      readonly state?: "running" | "waiting" | "completed";
+    }) {
+      return {
+        thread: decodeCodeThread({
+          ...thread(),
+          id: input.threadId ?? decodeCodeThreadId("12121212-1212-4212-8212-121212121212"),
+          projectId: input.projectId ?? writerProject,
+          title: input.title ?? "Rewrite the parser",
+          executionPolicy: input.posture ?? "approval-gated",
+        }),
+        checkoutRoot: input.checkoutRoot ?? "/tmp/repo",
+        state: input.state ?? "running",
+      };
+    }
+
+    function restoreFixture(
+      live: ReadonlyArray<ReturnType<typeof liveTurn>>,
+      requester: CodeThread = thread(),
+    ) {
+      const restoreCheckpoint = vi.fn(async () => ({
+        status: "applied" as const,
+        undo: { worktree: "e".repeat(40), index: "f".repeat(40) },
+      }));
+      const service = new CodeOperationService({
+        authority: {
+          readThread: vi.fn(() => requester),
+          readCheckout: vi.fn(() =>
+            decodeCodeCheckoutIdentity({
+              id: ids.checkout,
+              repositoryId: requester.repositoryId,
+              kind: "existing-worktree",
+              availability: "available",
+              head: { kind: "branch", name: "development", oid: "a".repeat(40) },
+              observedAt: "2026-07-21T10:00:00.000Z",
+            }),
+          ),
+          canAccessProject: vi.fn(async () => true),
+          approvalContextDigest: vi.fn(async () => "a".repeat(64)),
+          resolveCheckoutRoot: vi.fn(async () => ({
+            checkoutRoot: "/tmp/repo",
+            credentialReferences: [],
+          })),
+        } as never,
+        approvals: { validate: vi.fn(async () => true) },
+        terminals: {} as never,
+        repositoryTests: {} as never,
+        git: { restoreCheckpoint } as never,
+        pullRequests: {} as never,
+        reviewFindings: {} as never,
+        turns: {
+          start: vi.fn(),
+          answerInput: vi.fn(),
+          answerApproval: vi.fn(),
+          cancel: vi.fn(),
+          threadsWritingIn: (checkoutRoot: string, exceptThreadId: CodeThread["id"]) =>
+            live
+              .filter((turn) =>
+                turnBlocksInPlaceRestore(
+                  {
+                    threadId: String(turn.thread.id),
+                    checkoutRoot: turn.checkoutRoot,
+                    state: turn.state,
+                    posture: turn.thread.executionPolicy,
+                  },
+                  { threadId: String(exceptThreadId), checkoutRoot },
+                ),
+              )
+              .map((turn) => turn.thread),
+        },
+        evidence: { put: vi.fn(), read: vi.fn() } as never,
+        events: {
+          replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
+          append: vi.fn(),
+        } as never,
+      });
+      return { service, restoreCheckpoint };
+    }
+
+    it("refuses to restore while another thread is writing in the same checkout and names it", async () => {
+      const { service, restoreCheckpoint } = restoreFixture([liveTurn({})]);
+
+      await expect(service.execute(ids.window, restoreCommand)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message:
+            'Another thread is writing in this checkout: "Rewrite the parser". Wait for its turn to finish or stop it, then restore.',
+        },
+      });
+      expect(restoreCheckpoint).not.toHaveBeenCalled();
+    });
+
+    it("refuses while another thread's turn waits on an approval", async () => {
+      const { service, restoreCheckpoint } = restoreFixture([liveTurn({ state: "waiting" })]);
+
+      await expect(service.execute(ids.window, restoreCommand)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "conflict" },
+      });
+      expect(restoreCheckpoint).not.toHaveBeenCalled();
+    });
+
+    it("does not name a writing thread that belongs to another Project", async () => {
+      const { service, restoreCheckpoint } = restoreFixture([
+        liveTurn({ projectId: otherProject, title: "Private plans" }),
+      ]);
+
+      const result = await service.execute(ids.window, restoreCommand);
+
+      expect(result).toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message:
+            "A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then restore.",
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain("Private plans");
+      expect(restoreCheckpoint).not.toHaveBeenCalled();
+    });
+
+    it("restores when the other thread's turn is a Plan turn", async () => {
+      const { service, restoreCheckpoint } = restoreFixture([liveTurn({ posture: "plan" })]);
+
+      await expect(service.execute(ids.window, restoreCommand)).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        state: "completed",
+      });
+      expect(restoreCheckpoint).toHaveBeenCalledOnce();
+    });
+
+    it("restores when the other thread works in a different checkout root", async () => {
+      const { service, restoreCheckpoint } = restoreFixture([
+        liveTurn({ checkoutRoot: "/tmp/repo-worktree" }),
+      ]);
+
+      await expect(service.execute(ids.window, restoreCommand)).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        state: "completed",
+      });
+      expect(restoreCheckpoint).toHaveBeenCalledOnce();
+    });
+
+    it("restores when the only live turn is the requesting thread's own", async () => {
+      const { service, restoreCheckpoint } = restoreFixture([liveTurn({ threadId: ids.thread })]);
+
+      await expect(service.execute(ids.window, restoreCommand)).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        state: "completed",
+      });
+      expect(restoreCheckpoint).toHaveBeenCalledOnce();
+    });
+
+    it("never restores from a Plan thread", async () => {
+      const planThread = decodeCodeThread({ ...thread(), executionPolicy: "plan" });
+      const { service, restoreCheckpoint } = restoreFixture([], planThread);
+
+      await expect(service.execute(ids.window, restoreCommand)).resolves.toMatchObject({
+        kind: "operation-failed",
+      });
+      expect(restoreCheckpoint).not.toHaveBeenCalled();
     });
   });
 

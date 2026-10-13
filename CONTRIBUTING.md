@@ -29,6 +29,20 @@ local unsigned developer-package smoke: it uses a clean `OCTANT_DATA_DIR`,
 records the smoked commit, and is not the signed technical-preview release
 gate.
 
+A rendered check that needs a thread that already holds a finished turn with a
+Canvas in it (an inline Canvas card, a prototype's **Run** button in the
+transcript) does not need a paid model turn. `bun run seed:canvas-fixtures
+--data-dir /absolute/scratch/path` writes a Chat Project and one Chat thread per
+fixture (a document, a static design, and a running design at document size and
+at phone size), each with a settled turn and the Canvas that turn left, through
+the host's own services and journal and without contacting a provider. It
+refuses a relative path, a real data directory, and any directory that is not
+empty or one it seeded earlier. Start a host on the directory with
+`OCTANT_DATA_DIR=/absolute/scratch/path bun --cwd packages/cli src/bin.ts
+server run`. A document or static design is drawn inline in its thread; a
+running design is a row that you expand in the thread and then start with
+**Run**, because an agent cannot place a design that runs script inline.
+
 ## Check your work
 
 | Command             | What it does                                                      |

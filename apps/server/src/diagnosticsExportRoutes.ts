@@ -1,5 +1,6 @@
 import { decodeDiagnosticsExportRequest, type DiagnosticsExportOutcome } from "@octant/contracts";
 import { authorizeDiagnosticsExportActor } from "@octant/domain";
+import { resolveReportedHostVersion } from "@octant/host-runtime";
 import { isLoopbackHostname } from "./shellRoutes";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -115,7 +116,7 @@ export function createDiagnosticsExportRouteHandler(
     const outcome: DiagnosticsExportOutcome = exportDiagnosticsEvidence(exportRequest, {
       connection: dependencies.connection,
       journal: dependencies.journal,
-      octantVersion: dependencies.octantVersion ?? "0.0.0-dev",
+      octantVersion: dependencies.octantVersion ?? resolveReportedHostVersion(process.env),
       clock,
     });
 

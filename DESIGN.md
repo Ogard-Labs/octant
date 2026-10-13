@@ -109,6 +109,11 @@ nothing essential sits under 12px at the default. The roles live in
 | Meta          | 12   | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                              |
 | Identifier    | 12   | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                             |
 
+Not built yet: a Settings section's label takes the Section label role above
+(600, secondary ink), the same as a section label anywhere else, instead of
+the Row label role it has now (500, primary ink). Until it is built, the
+Settings section label stays 500 in primary ink.
+
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
 labels and controls, 600 (`--oct-weight-strong`) for emphasis (section labels,
@@ -1093,7 +1098,7 @@ executing), To review (finished turns not opened since), and Done today
 (threads completed since local midnight). Each tile is one button whose name
 carries its count ("Running, 2"); Inbox opens the Inbox, Running opens the
 Board (the Activity feed in Chat, which has no board), To review opens the
-Review page, and Done today opens the Completed shelf. With the tiles on,
+Review page, and Done today opens the Completed shelf (renamed Put away, not built yet; see [Workspace](docs/design/workspace.md#thread-visibility-and-completion)). With the tiles on,
 the Inbox and Board rows are left out because their tiles go to the same
 place. Settings › Sidebar › Count tiles turns them off and brings the rows
 back. Tiles are neutral faces in the Default style; under Vivid each takes a
@@ -1687,7 +1692,8 @@ request from the person.
   only holds the keyboard (menu, dialog, listbox, preview card) shows no edge;
   the item inside it does, and menu items keep their highlighted fill. A text
   field set inside a frame that is itself the field (the composer, an inline
-  search) shows its caret inside that frame. Feature CSS never suppresses,
+  search) shows its caret inside that frame; the composer frame draws no focus
+  edge. Feature CSS never suppresses,
   recolours, or adds a second ring, and the `--octant-focus-ring` theme role is
   never painted as the indicator.
 - Every app-owned form declares `noValidate`; Octant owns validation copy,
@@ -1708,7 +1714,8 @@ request from the person.
   through the providers. Renderer state is presentation only.
 - The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
   Fully quit share one guarded shutdown: refresh current host activity, ask for
-  confirmation when a turn is active or needs attention, then stop only the
+  confirmation when a turn is active or the desktop cannot confirm what the host
+  is running, then stop only the
   desktop-owned host and its child resources. Cancellation leaves both app and
   host running.
 

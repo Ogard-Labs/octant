@@ -7,6 +7,16 @@ import {
 
 const DEFAULT_APPROVAL_TTL_MS = 5 * 60_000;
 
+/**
+ * Waiting MCP tool prompts. Each one keeps the call's input text until it is
+ * answered, aborted, or times out, so a turn that calls tools in a loop would
+ * otherwise stack them without bound. The cap is host-wide: every thread and
+ * window shares this one waiting set, as the browser tool-approval service's
+ * cap of 32 already does, so one busy thread can use slots another thread
+ * would otherwise get. A call past it is denied at once and is not stored.
+ */
+export const MAX_PENDING_APPROVALS = 32;
+
 interface PendingApproval {
   readonly view: ExtensionToolApproval;
   readonly windowId: WindowId;
@@ -66,6 +76,7 @@ export class ExtensionToolApprovalService {
     readonly signal?: AbortSignal;
   }): Promise<boolean> {
     if (input.signal?.aborted) return Promise.resolve(false);
+    if (this.#pending.size >= MAX_PENDING_APPROVALS) return Promise.resolve(false);
     const approvalId = this.options.uuid();
     const view = decodeExtensionToolApproval({
       approvalId,

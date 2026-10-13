@@ -12,7 +12,11 @@ import {
   createComputerUseDesktopService,
   type ComputerUseDesktopService,
 } from "./computerUseDesktopService";
-import { CUA_DRIVER_FILENAME, DEVICE_HELPER_FILENAME } from "./runtimePaths";
+import {
+  CANVAS_PROTOTYPE_PRELOAD_FILENAME,
+  CUA_DRIVER_FILENAME,
+  DEVICE_HELPER_FILENAME,
+} from "./runtimePaths";
 import { createManagedToolService, type ManagedToolService } from "./managedToolService";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -31,6 +35,7 @@ import {
   nativeImage,
   nativeTheme,
   Notification,
+  protocol,
   powerMonitor,
   screen,
   session,
@@ -69,7 +74,14 @@ import {
 import { type AppVersion, isAppReleaseRing } from "@octant/contracts/app-updates";
 import { decodeCodeOperationApprovalRequest } from "@octant/contracts/code-operations";
 import { createAppUpdateService } from "./appUpdateService";
-import { createPortableImagePort } from "./portableImageUpdate";
+import {
+  createPortableImagePort,
+  defaultProcessIsAlive,
+  REPLACED_PROCESS_POLL_MS,
+  REPLACED_PROCESS_WAIT_BOUND_MS,
+  takeReplacedProcessId,
+  waitForReplacedProcessExit,
+} from "./portableImageUpdate";
 import { buildApplicationMenuTemplate } from "./applicationMenu";
 import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
 import {
@@ -150,7 +162,11 @@ import {
   shutdownManagedServer,
   waitForStorageReady,
 } from "./serverProcess";
-import { createHostLifecycleController, type LocalHostDescriptor } from "./hostLifecycle";
+import {
+  createHostLifecycleController,
+  workInFlight,
+  type LocalHostDescriptor,
+} from "./hostLifecycle";
 import { createDesktopBackendSupervisor } from "./desktopBackendSupervision";
 import {
   buildMenuBarItems,
@@ -206,6 +222,15 @@ import {
   isolateEachCanvasFrameDocument,
   type CanvasFrameGuardWebContentsPort,
 } from "./canvasFrameGuard";
+import {
+  canvasPrototypeGuestPort,
+  canvasPrototypeHostPort,
+  canvasPrototypeSessionPort,
+  CANVAS_PROTOTYPE_PARTITION,
+  createCanvasPrototypeSurface,
+  registerCanvasPrototypeScheme,
+  type CanvasPrototypeSurface,
+} from "./canvasPrototypeSurface";
 
 const IPC_CHANNELS = {
   nativeMenu: "octant:menu:popup",
@@ -227,6 +252,7 @@ const IPC_CHANNELS = {
   browserSurfaceDetach: "octant:browser-surface:detach",
   browserSurfaceOpenExternal: "octant:browser-surface:open-external",
   browserSurfaceTab: "octant:browser-surface:tab",
+  canvasPrototypeSurface: "octant:canvas:prototype-surface:prepare",
   appUpdateState: "octant:app-update:state",
   appUpdateCheck: "octant:app-update:check",
   appUpdateDownload: "octant:app-update:download",
@@ -1174,6 +1200,7 @@ function readStoredDesktopBridgeSecret(directory: string): string | undefined {
 
 app.setName("Octant");
 isolateEachCanvasFrameDocument(app.commandLine);
+registerCanvasPrototypeScheme(protocol);
 const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
   process.env.OCTANT_DATA_DIR,
   app.getPath("appData"),
@@ -1191,6 +1218,7 @@ let serveAvdBroker: ServeAvdBroker | undefined;
 let computerUseService: ComputerUseDesktopService | undefined;
 let managedToolService: ManagedToolService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
+let canvasPrototypeSurface: CanvasPrototypeSurface | undefined;
 let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
 let desktopBridgeSecret =
@@ -1530,6 +1558,10 @@ export function createMainBrowserWindowOptions(options: {
       preload: options.preloadPath,
       sandbox: true,
       webSecurity: true,
+      // Only to draw a running Canvas prototype in a surface with no route
+      // out. Every `<webview>` this window attaches is checked by
+      // `admitWebview`, which cancels anything but a ticketed design page.
+      webviewTag: true,
     },
   };
 }
@@ -1762,6 +1794,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           port,
           instanceId,
           packaged: app.isPackaged,
+          ...(app.isPackaged ? { appVersion: app.getVersion() } : {}),
           execPath: process.execPath,
           env: { ...process.env, OCTANT_DATA_DIR: desktopDataDirectory },
         });
@@ -1976,7 +2009,11 @@ async function restartDesktopHost(): Promise<LocalHostDescriptor> {
     refreshWindowAuthorities: refreshDesktopWindowAuthorities,
   });
   if (outcome.windowAuthorities === "attention-required") {
-    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    hostLifecycle.setActivity({
+      activeAgentCount: 0,
+      attentionRequired: true,
+      activityUnconfirmed: true,
+    });
     updateHostTray();
   }
   return outcome.host;
@@ -1992,7 +2029,11 @@ const desktopBackendSupervisor = createDesktopBackendSupervisor({
       "Octant could not restart its local server",
       formatDesktopStartupFailure(error),
     );
-    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    hostLifecycle.setActivity({
+      activeAgentCount: 0,
+      attentionRequired: true,
+      activityUnconfirmed: true,
+    });
     updateHostTray();
   },
 });
@@ -2175,8 +2216,8 @@ async function createWindow(): Promise<void> {
       );
       installCanvasFrameGuards(canvasFrameGuardWebContents(window), {
         serverUrl: () => activeServerUrl,
-        platform: process.platform,
       });
+      desktopCanvasPrototypeSurface().admitWebview(canvasPrototypeHostPort(window.webContents));
       const stopThermalPerformance = observeThermalPerformance({
         platform: process.platform,
         powerMonitor,
@@ -2428,8 +2469,8 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         );
         installCanvasFrameGuards(canvasFrameGuardWebContents(window), {
           serverUrl: () => activeServerUrl,
-          platform: process.platform,
         });
+        desktopCanvasPrototypeSurface().admitWebview(canvasPrototypeHostPort(window.webContents));
         window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
           if (!isMainFrame || isInPlace) return;
           menuBarOpenThreads.delete(window.id);
@@ -2656,7 +2697,11 @@ async function refreshHostActivity(): Promise<void> {
     }
   }
   if (probe === undefined || probe.instanceId !== snapshot.instanceId) {
-    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    hostLifecycle.setActivity({
+      activeAgentCount: 0,
+      attentionRequired: true,
+      activityUnconfirmed: true,
+    });
     updateHostTray();
     return;
   }
@@ -2665,7 +2710,11 @@ async function refreshHostActivity(): Promise<void> {
     snapshot.instanceId === undefined ||
     snapshot.ownership === undefined
   ) {
-    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    hostLifecycle.setActivity({
+      activeAgentCount: 0,
+      attentionRequired: true,
+      activityUnconfirmed: true,
+    });
     updateHostTray();
     return;
   }
@@ -2676,7 +2725,11 @@ async function refreshHostActivity(): Promise<void> {
       ownership: snapshot.ownership,
     });
   } catch {
-    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    hostLifecycle.setActivity({
+      activeAgentCount: 0,
+      attentionRequired: true,
+      activityUnconfirmed: true,
+    });
     updateHostTray();
     return;
   }
@@ -3270,12 +3323,10 @@ function installIpcHandlers(): void {
     // Read here rather than taken from the renderer: this is the same activity
     // the quit guard already trusts to decide whether stopping would interrupt
     // something, and a second notion of "busy" would disagree with it exactly
-    // when it mattered.
-    const host = hostLifecycle.snapshot();
-    return appUpdates().install({
-      activeAgentCount: host.activeAgentCount,
-      attentionRequired: host.attentionRequired,
-    });
+    // when it mattered. `workInFlight` is that shared reading; the host's
+    // `attentionRequired` is not, because a provider that only needs sign-in
+    // sets it with nothing running.
+    return appUpdates().install(workInFlight(hostLifecycle.snapshot()));
   });
   ipcMain.handle(IPC_CHANNELS.appUpdateAutomatic, (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
@@ -3306,6 +3357,10 @@ function installIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.browserSurfaceOpenExternal, async (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
     await shell.openExternal(validateExternalBrowserUrl(value));
+  });
+  ipcMain.handle(IPC_CHANNELS.canvasPrototypeSurface, async (event) => {
+    ownedTopLevelWindowContext(event);
+    return await desktopCanvasPrototypeSurface().prepare();
   });
   ipcMain.handle(IPC_CHANNELS.resetBounds, async (event) => {
     const context = ownedWindowContext(event);
@@ -3691,7 +3746,7 @@ function rendererNavigationPolicyOptions() {
   } as const;
 }
 
-/** The window's own contents, as the running Canvas frame guards see them. */
+/** The window's own contents, as the Canvas frame guard sees them. */
 function canvasFrameGuardWebContents(window: BrowserWindow): CanvasFrameGuardWebContentsPort {
   const contents = window.webContents;
   return {
@@ -3700,18 +3755,39 @@ function canvasFrameGuardWebContents(window: BrowserWindow): CanvasFrameGuardWeb
         listener({
           url: details.url,
           isMainFrame: details.isMainFrame,
-          frame: details.frame,
           preventDefault: () => details.preventDefault(),
         });
       });
     },
-    onKeyInput: (listener) => {
-      contents.on("before-input-event", (event, input) => listener(event, input));
-    },
-    focusedFrame: () => contents.focusedFrame,
-    send: (channel) => contents.send(channel),
     setWebRTCIPHandlingPolicy: (policy) => contents.setWebRTCIPHandlingPolicy(policy),
   };
+}
+
+/**
+ * The surface a running Canvas prototype is drawn in, made when the first
+ * window needs it. A guest is held to its page as it is created, before it
+ * loads anything.
+ */
+function desktopCanvasPrototypeSurface(): CanvasPrototypeSurface {
+  if (canvasPrototypeSurface !== undefined) return canvasPrototypeSurface;
+  const surfaceSession = session.fromPartition(CANVAS_PROTOTYPE_PARTITION);
+  const surface = createCanvasPrototypeSurface({
+    session: canvasPrototypeSessionPort(surfaceSession),
+    serverUrl: () => activeServerUrl,
+    fetch: globalThis.fetch,
+    preloadPath: resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      CANVAS_PROTOTYPE_PRELOAD_FILENAME,
+    ),
+    platform: process.platform,
+  });
+  app.on("web-contents-created", (_event, contents) => {
+    if (contents.getType() === "webview") {
+      surface.guardGuest(canvasPrototypeGuestPort(contents, surfaceSession));
+    }
+  });
+  canvasPrototypeSurface = surface;
+  return surface;
 }
 
 function rendererNavigationWebContents(window: BrowserWindow): RendererNavigationWebContentsPort {
@@ -3902,9 +3978,12 @@ function acceptCodeDeepLink(value: string): void {
   }
 }
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
-if (!hasSingleInstanceLock) app.quit();
-else {
+function startDesktopInstance(): void {
+  const hasSingleInstanceLock = app.requestSingleInstanceLock();
+  if (!hasSingleInstanceLock) {
+    app.quit();
+    return;
+  }
   app.setAsDefaultProtocolClient("octant");
   app.on("open-url", (event, url) => {
     event.preventDefault();
@@ -3925,6 +4004,26 @@ else {
       return requestActiveWindow();
     })
     .catch(handleFatalStartup);
+}
+
+// A launch started by a self-update waits for the instance it replaces to stop
+// before asking for the lock. It does not release the lock early or retry it:
+// the first would let two hosts share one data directory, the second would
+// raise `second-instance` on an instance that is shutting down. An ordinary
+// launch takes the synchronous path it always has.
+const replacedProcessId = takeReplacedProcessId(process.env);
+if (replacedProcessId === undefined) startDesktopInstance();
+else {
+  void waitForReplacedProcessExit({
+    processId: replacedProcessId,
+    boundMs: REPLACED_PROCESS_WAIT_BOUND_MS,
+    pollMs: REPLACED_PROCESS_POLL_MS,
+    // Elapsed time, not the wall clock: a clock correction or a sleep while the
+    // old instance stops must not spend, or stretch, the bound.
+    now: () => performance.now(),
+    isAlive: defaultProcessIsAlive(),
+    sleep: (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)),
+  }).then(startDesktopInstance, handleFatalStartup);
 }
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {

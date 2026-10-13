@@ -5,10 +5,14 @@ import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createNodePortableImageFiles,
+  defaultProcessIsAlive,
   createPortableImagePort,
   isPortableImageBytes,
   readPortableImageLocation,
+  REPLACED_PROCESS_VARIABLE,
   relaunchPortableImage,
+  takeReplacedProcessId,
+  waitForReplacedProcessExit,
   replacePortableImage,
   type PortableImageChild,
   type PortableImageFiles,
@@ -352,6 +356,28 @@ describe("relaunching a portable image", () => {
     expect(seen?.detached).toBe(true);
   });
 
+  it("tells the new image which process it replaces and does not pass on an older answer", async () => {
+    let seen: PortableImageSpawnOptions | undefined;
+    const child: PortableImageChild = {
+      once: (event, listener) => {
+        if (event === "spawn") listener();
+      },
+      unref: () => undefined,
+    };
+
+    await relaunchPortableImage("/opt/Octant.AppImage", {
+      env: { [REPLACED_PROCESS_VARIABLE]: "111", PATH: "/usr/bin" },
+      replacedProcessId: 4242,
+      spawnImpl: (_path, _args, options) => {
+        seen = options;
+        return child;
+      },
+    });
+
+    expect(seen?.env[REPLACED_PROCESS_VARIABLE]).toBe("4242");
+    expect(seen?.env.PATH).toBe("/usr/bin");
+  });
+
   it("quits only after the replaced image has been accepted", async () => {
     const { path } = await imageDir();
     const next = imageBytes("replacement");
@@ -386,5 +412,176 @@ describe("image bytes", () => {
     expect(isPortableImageBytes(imageBytes("ok"))).toBe(true);
     expect(isPortableImageBytes(Buffer.from("short"))).toBe(false);
     expect(isPortableImageBytes(Buffer.alloc(16))).toBe(false);
+  });
+});
+
+describe("starting after the instance being replaced", () => {
+  it("reads the replaced process once and leaves nothing for children to inherit", () => {
+    const env: Record<string, string | undefined> = { [REPLACED_PROCESS_VARIABLE]: " 4242 " };
+
+    expect(takeReplacedProcessId(env)).toBe(4242);
+    expect(env[REPLACED_PROCESS_VARIABLE]).toBeUndefined();
+    expect(takeReplacedProcessId(env)).toBeUndefined();
+  });
+
+  it("ignores a value that is not a positive whole number, and still removes it", () => {
+    for (const value of ["", "0", "-5", "12.5", "1e3", "abc", "12abc", "99999999999999999999"]) {
+      const env: Record<string, string | undefined> = { [REPLACED_PROCESS_VARIABLE]: value };
+      expect(takeReplacedProcessId(env)).toBeUndefined();
+      expect(env[REPLACED_PROCESS_VARIABLE]).toBeUndefined();
+    }
+  });
+
+  it("returns as soon as the replaced process has exited", async () => {
+    let now = 0;
+    let alive = true;
+    const polls: number[] = [];
+    const result = await waitForReplacedProcessExit({
+      processId: 4242,
+      boundMs: 60_000,
+      pollMs: 100,
+      now: () => now,
+      isAlive: (pid) => {
+        polls.push(pid);
+        return alive;
+      },
+      sleep: async (ms) => {
+        now += ms;
+        if (now >= 500) alive = false;
+      },
+    });
+
+    expect(result).toEqual({ kind: "exited", waitedMs: 500 });
+    expect(polls.length).toBe(6);
+    expect(new Set(polls)).toEqual(new Set([4242]));
+  });
+
+  it("does not wait at all for a process that is already gone", async () => {
+    let slept = 0;
+    const result = await waitForReplacedProcessExit({
+      processId: 4242,
+      boundMs: 60_000,
+      pollMs: 100,
+      now: () => 0,
+      isAlive: () => false,
+      sleep: async () => {
+        slept += 1;
+      },
+    });
+
+    expect(result).toEqual({ kind: "exited", waitedMs: 0 });
+    expect(slept).toBe(0);
+  });
+
+  it("gives up at the bound so the normal lock request decides", async () => {
+    let now = 0;
+    const result = await waitForReplacedProcessExit({
+      processId: 4242,
+      boundMs: 1_000,
+      pollMs: 100,
+      now: () => now,
+      isAlive: () => true,
+      sleep: async (ms) => {
+        now += ms;
+      },
+    });
+
+    expect(result).toEqual({ kind: "timed-out", waitedMs: 1_000 });
+  });
+
+  describe("reading whether a process is still running", () => {
+    const signalSaysRunning = (): true => true;
+    const signalSaysGone = (): never => {
+      throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+    };
+    const signalRefused = (): never => {
+      throw Object.assign(new Error("not permitted"), { code: "EPERM" });
+    };
+    const statOf = (state: string, command = "Octant"): string =>
+      `4242 (${command}) ${state} 1 4242 4242 0 -1 4194560 12345 0 0 0 10 5 0 0 20 0 25 0 99\n`;
+
+    it("treats a process it may not signal as still running, and only a missing one as gone", () => {
+      const options = { platform: "darwin" } as const;
+
+      expect(defaultProcessIsAlive({ ...options, kill: signalRefused })(1)).toBe(true);
+      expect(defaultProcessIsAlive({ ...options, kill: signalSaysGone })(1)).toBe(false);
+      expect(defaultProcessIsAlive({ ...options, kill: signalSaysRunning })(1)).toBe(true);
+    });
+
+    it("counts a process that has exited but not been reaped as gone", () => {
+      for (const state of ["Z", "X"]) {
+        const isAlive = defaultProcessIsAlive({
+          platform: "linux",
+          kill: signalSaysRunning,
+          readProcessStat: () => statOf(state),
+        });
+
+        expect(isAlive(4242)).toBe(false);
+      }
+    });
+
+    it("counts a running, sleeping, waiting or stopped process as still running", () => {
+      for (const state of ["R", "S", "D", "T", "t", "I"]) {
+        const isAlive = defaultProcessIsAlive({
+          platform: "linux",
+          kill: signalSaysGone,
+          readProcessStat: () => statOf(state),
+        });
+
+        expect(isAlive(4242)).toBe(true);
+      }
+    });
+
+    it("reads the state after the last parenthesis so a command name cannot fake it", () => {
+      const isAlive = (command: string, state: string) =>
+        defaultProcessIsAlive({
+          platform: "linux",
+          kill: signalSaysRunning,
+          readProcessStat: () => statOf(state, command),
+        })(4242);
+
+      expect(isAlive("evil) Z (name", "S")).toBe(true);
+      expect(isAlive("a b) X (c", "R")).toBe(true);
+      expect(isAlive("evil) S (name", "Z")).toBe(false);
+    });
+
+    it("falls back to the signal answer when the stat file cannot be read or understood", () => {
+      const unreadable = (code: string) => (): never => {
+        throw Object.assign(new Error("unreadable"), { code });
+      };
+      for (const reader of [
+        unreadable("EACCES"),
+        unreadable("ENOENT"),
+        () => "",
+        () => "garbage",
+      ]) {
+        expect(
+          defaultProcessIsAlive({
+            platform: "linux",
+            kill: signalSaysRunning,
+            readProcessStat: reader,
+          })(1),
+        ).toBe(true);
+        expect(
+          defaultProcessIsAlive({
+            platform: "linux",
+            kill: signalSaysGone,
+            readProcessStat: reader,
+          })(1),
+        ).toBe(false);
+      }
+    });
+
+    it("does not read /proc where it is not the source of truth", () => {
+      const reader = (): string => statOf("Z");
+
+      expect(
+        defaultProcessIsAlive({
+          platform: "darwin",
+          kill: signalSaysRunning,
+          readProcessStat: reader,
+        })(1),
+      ).toBe(true);
+    });
   });
 });

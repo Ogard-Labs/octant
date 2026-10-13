@@ -101,6 +101,7 @@
     "./content-provenance": "./src/contentProvenance.ts",
     "./tool-actions": "./src/toolActions.ts",
     "./tool-catalog": "./src/toolCatalog.ts",
+    "./tool-egress": "./src/toolEgress.ts",
     "./usage-rpc": "./src/usageRpc.ts",
     "./spend-ceiling": "./src/spendCeiling.ts",
     "./apple-toolchain": "./src/appleToolchain.ts",

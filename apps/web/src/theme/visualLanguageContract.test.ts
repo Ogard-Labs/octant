@@ -175,18 +175,11 @@ describe("the public-block visual language", () => {
     expect(input).toMatch(/padding:\s*18px var\(--oct-composer-gutter\) 12px/);
   });
 
-  it("keeps composer focus on the same quiet surface", () => {
+  it("draws no focus edge, border change, or lift on the composer frame", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
-    const focus =
-      system.match(
-        /\.composer:focus-within:has\(\.composer-input:focus-visible\)\s*\{[^}]+\}/,
-      )?.[0] ?? "";
 
-    expect(focus).toBe("");
-    expect(system).not.toMatch(/\.composer:focus-within:has\(\.composer-input:focus-visible\)/);
-    expect(system).toMatch(
-      /\.composer:focus-within\s*\{\s*box-shadow:\s*var\(--octant-shadow-md\)/,
-    );
+    expect(system).not.toMatch(/\.composer[\w.-]*:focus-within/);
+    expect(system).not.toMatch(/\.thread-composer__surface:focus-within/);
   });
 
   it("wraps the model picker's catalog filters instead of hiding the later ones behind a sideways scroll", () => {

@@ -21,6 +21,7 @@ import {
 } from "@octant/domain/extension-tool-grant-policy";
 import { Schema } from "effect";
 import { readAggregateVersion } from "../persistence/chatProjection";
+import { readExtensionRecord } from "../persistence/extensionProjection";
 import {
   extensionToolGrantId,
   readActiveExtensionToolGrants,
@@ -57,7 +58,10 @@ export interface ExtensionToolGrantStoreOptions {
  * The journal side of remembered MCP tool approvals. It writes what it is
  * told and decides nothing: who may record a grant is settled by the approval
  * prompt before `record` is reached, and whether a stored grant covers a call
- * is `decideExtensionToolGrant`.
+ * is `decideExtensionToolGrant`. It does report a grant as revoked once the
+ * package's lifecycle has committed an uninstall, rollback, or trust
+ * withdrawal after the grant was journaled, so a host that stopped before
+ * appending the revocation cannot leave the grant standing for a later install.
  */
 export class ExtensionToolGrantStore {
   readonly #journal: Pick<Journal, "append">;
@@ -76,14 +80,18 @@ export class ExtensionToolGrantStore {
 
   /** The Project's stored grant for a tool, revoked or not. */
   read(subject: ExtensionToolGrantSubject): ProjectedExtensionToolGrant | undefined {
-    return readExtensionToolGrant(this.#connection, extensionToolGrantId(subject));
+    const grant = readExtensionToolGrant(this.#connection, extensionToolGrantId(subject));
+    return grant === undefined ? undefined : this.#standing(grant);
   }
 
   /** Every grant a call could still use, across Projects. */
   list(): ReadonlyArray<ExtensionToolGrant> {
-    return readActiveExtensionToolGrants(this.#connection).map(
-      ({ revocationReason: _revocationReason, ...grant }) => grant,
-    );
+    return readActiveExtensionToolGrants(this.#connection)
+      .map((grant) => this.#standing(grant))
+      .filter((grant) => grant.revocationReason === undefined)
+      .map(
+        ({ revocationReason: _revocationReason, lastSequence: _lastSequence, ...grant }) => grant,
+      );
   }
 
   record(grant: ExtensionToolGrantSubject & ExtensionToolBinding): "recorded" | "refused" {
@@ -112,7 +120,8 @@ export class ExtensionToolGrantStore {
 
   /** A person takes one grant away. */
   revoke(grantId: string): "revoked" | "not-found" {
-    const grant = readExtensionToolGrant(this.#connection, grantId);
+    const stored = readExtensionToolGrant(this.#connection, grantId);
+    const grant = stored === undefined ? undefined : this.#standing(stored);
     if (grant === undefined || grant.revocationReason !== undefined) return "not-found";
     return this.#revoke([grant], "person") > 0 ? "revoked" : "not-found";
   }
@@ -142,6 +151,21 @@ export class ExtensionToolGrantStore {
     const reason = extensionToolGrantRevocationReason(change);
     if (reason === undefined || change.extensionId === undefined) return 0;
     return this.revokeExtension(change.extensionId, reason);
+  }
+
+  /**
+   * A grant journaled before its extension's latest uninstall, rollback, or
+   * trust withdrawal is revoked for that reason, though its own revocation may
+   * never have been appended: the lifecycle commit and the revocation are two
+   * journal appends, and the host can stop between them. Without this, the
+   * same package installed again would find an approval nobody gave it.
+   */
+  #standing(grant: ProjectedExtensionToolGrant): ProjectedExtensionToolGrant {
+    if (grant.revocationReason !== undefined) return grant;
+    const ended = readExtensionRecord(this.#connection, grant.extensionId)?.grantsEnded;
+    return ended !== undefined && grant.lastSequence < ended.sequence
+      ? { ...grant, revocationReason: ended.reason }
+      : grant;
   }
 
   #revoke(

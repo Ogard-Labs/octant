@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
-import { ExtensionToolApprovalService } from "./extensionToolApprovalService";
+import {
+  ExtensionToolApprovalService,
+  MAX_PENDING_APPROVALS,
+} from "./extensionToolApprovalService";
 
 const windowId = "44000000-0000-4000-8000-000000000001" as never;
 const threadId = "44000000-0000-4000-8000-000000000002" as never;
@@ -133,6 +136,67 @@ describe("extension tool approval service", () => {
       await expect(pending).resolves.toBe(false);
       expect(service.list(windowId)).toEqual([]);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("denies a tool approval past the waiting cap at once, and frees a slot when one is answered or expires", async () => {
+    vi.useFakeTimers();
+    const consoleMethods = ["debug", "error", "info", "log", "warn"] as const;
+    const spies = consoleMethods.map((method) =>
+      vi.spyOn(console, method).mockImplementation(() => {}),
+    );
+    try {
+      let minted = 0;
+      const service = new ExtensionToolApprovalService({
+        uuid: () => {
+          minted += 1;
+          return `44000000-0000-4000-8000-${String(minted).padStart(12, "0")}`;
+        },
+        now: () => Date.parse("2026-08-09T06:00:00.000Z"),
+        ttlMs: 1_000,
+      });
+      const earliest = request(service);
+      await vi.advanceTimersByTimeAsync(500);
+      const rest = Array.from({ length: MAX_PENDING_APPROVALS - 1 }, () => request(service));
+      expect(service.list(windowId)).toHaveLength(MAX_PENDING_APPROVALS);
+
+      const mintedAtCap = minted;
+      let outcome: boolean | "pending" = "pending";
+      const overflow = request(service).then((approved) => {
+        outcome = approved;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toBe(false);
+      await overflow;
+      // No approval id is minted, so the refused call is not stored or recorded.
+      expect(minted).toBe(mintedAtCap);
+      expect(service.list(windowId)).toHaveLength(MAX_PENDING_APPROVALS);
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(500);
+      await expect(earliest).resolves.toBe(false);
+      expect(service.list(windowId)).toHaveLength(MAX_PENDING_APPROVALS - 1);
+      const afterExpiry = request(service);
+      expect(service.list(windowId)).toHaveLength(MAX_PENDING_APPROVALS);
+
+      const answeredId = `44000000-0000-4000-8000-${String(minted).padStart(12, "0")}`;
+      expect(
+        service.decide(windowId, {
+          approvalId: answeredId,
+          decision: "denied",
+        }),
+      ).toBe(true);
+      await expect(afterExpiry).resolves.toBe(false);
+      expect(service.list(windowId)).toHaveLength(MAX_PENDING_APPROVALS - 1);
+      const afterAnswer = request(service);
+      expect(service.list(windowId)).toHaveLength(MAX_PENDING_APPROVALS);
+
+      service.revokeWindow(windowId);
+      await expect(afterAnswer).resolves.toBe(false);
+      await Promise.all(rest);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
       vi.useRealTimers();
     }
   });

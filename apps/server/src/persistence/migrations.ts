@@ -2102,6 +2102,19 @@ ALTER TABLE code_runtime_projection
     sql: `ALTER TABLE thread_external_content_ingestion_projection
       ADD COLUMN ingested_at TEXT CHECK(ingested_at IS NULL OR length(trim(ingested_at)) > 0);`,
   },
+  {
+    version: 76,
+    name: "record_extension_grant_end",
+    // The package projection now notes the latest uninstall, rollback, or
+    // trust withdrawal so a grant journaled before it stops standing. An
+    // upgraded database has its checkpoint at the journal head and the
+    // projection ignores events at or below a row's version, so the rows are
+    // cleared along with the checkpoint to replay that history into them.
+    sql: `
+      DELETE FROM extension_package_projection;
+      DELETE FROM projection_checkpoints WHERE projection_name = 'extensions';
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

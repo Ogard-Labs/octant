@@ -6,12 +6,20 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import {
+  AggregateId,
   EventActor,
+  ToolEgressLaunchId,
+  ToolEgressRuleId,
   type AgentRunAuthority,
   type CodeThread,
   type ProviderExecutionPolicy,
   type ToolActionAuthority,
 } from "@octant/contracts";
+import {
+  decideToolEgress,
+  type ToolEgressLaunchFacts,
+  type ToolEgressRule,
+} from "@octant/domain/tool-egress-policy";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
@@ -976,5 +984,146 @@ describe("native harness child egress", () => {
     await tools.execute({ name: "bash", inputJson: JSON.stringify({ command: "bun test" }) });
     expect(networked.commands).toEqual(["bun test"]);
     expect(offline.commands).toEqual([]);
+  });
+});
+
+describe("native harness tool egress rules", () => {
+  const aggregateId = Schema.decodeUnknownSync(AggregateId);
+  const leadThread = aggregateId("00000000-0000-4000-8000-0000000000f1");
+  const otherThread = aggregateId("00000000-0000-4000-8000-0000000000f2");
+  const childThread = aggregateId("00000000-0000-4000-8000-0000000000f3");
+  const project = aggregateId(authority.projectId);
+  const launchId = Schema.decodeUnknownSync(ToolEgressLaunchId)(
+    "00000000-0000-4000-8000-0000000000f4",
+  );
+  const later = "2026-10-08T08:00:00.000Z";
+  const lead: ToolEgressLaunchFacts = {
+    launchId,
+    threadId: leadThread,
+    projectId: project,
+    threadTainted: false,
+  };
+  const allowed = (
+    scope: ToolEgressRule["scope"],
+    host = "registry.npmjs.org",
+    expiresAt = later,
+  ): ToolEgressRule => ({
+    id: Schema.decodeUnknownSync(ToolEgressRuleId)(randomUUID()),
+    scope,
+    host,
+    port: 443,
+    expiresAt,
+  });
+  const reach = (
+    host: string,
+    rules: ReadonlyArray<ToolEgressRule>,
+    launch: ToolEgressLaunchFacts = lead,
+  ) => decideToolEgress({ launch, destination: { host, port: 443 }, rules, now });
+
+  it("refuses a name spelled to pass for an allowed host", () => {
+    const rules = [allowed({ kind: "thread", threadId: leadThread })];
+    for (const host of [
+      "registry.npmjs.org.collector.invalid",
+      "evilregistry.npmjs.org",
+      "evil.registry.npmjs.org",
+      // A Cyrillic "е" in place of the Latin one.
+      "r\u0435gistry.npmjs.org",
+    ]) {
+      expect([host, reach(host, rules)]).toEqual([
+        host,
+        expect.objectContaining({ reason: "no-rule" }),
+      ]);
+    }
+    // Delimiters that would make a URL parser read another host never get that far.
+    for (const host of [
+      "registry.npmjs.org@collector.invalid",
+      "collector.invalid#.registry.npmjs.org",
+      "collector.invalid/.registry.npmjs.org",
+      "collector.invalid\\.registry.npmjs.org",
+      "collector.invalid%2f.registry.npmjs.org",
+      "collector.invalid?.registry.npmjs.org",
+    ]) {
+      expect([host, reach(host, rules)]).toEqual([
+        host,
+        { kind: "refuse", reason: "invalid-name" },
+      ]);
+    }
+  });
+
+  it("refuses loopback, metadata, and LAN addresses in any spelling even under a wildcard rule", () => {
+    const rules = [
+      allowed({ kind: "project", projectId: project }, "*.example.com"),
+      allowed({ kind: "thread", threadId: leadThread }, "*.registry.npmjs.org"),
+    ];
+    for (const host of [
+      "127.0.0.1",
+      "2130706433",
+      "0x7f.1",
+      "0177.0.0.1",
+      "169.254.169.254",
+      "10.0.0.5",
+      "[::1]",
+      "::ffff:127.0.0.1",
+    ]) {
+      expect([host, reach(host, rules)]).toEqual([host, { kind: "refuse", reason: "ip-literal" }]);
+    }
+    for (const host of ["localhost", "localhost.", "api.localhost", "metadata"]) {
+      expect([host, reach(host, rules)]).toEqual([
+        host,
+        { kind: "refuse", reason: "invalid-name" },
+      ]);
+    }
+    expect(reach("example.com", rules)).toMatchObject({ reason: "no-rule" });
+  });
+
+  it("refuses a host another thread was allowed, and an allowance at the instant it expires", () => {
+    expect(
+      reach("registry.npmjs.org", [allowed({ kind: "thread", threadId: otherThread })]),
+    ).toMatchObject({
+      reason: "no-rule",
+    });
+    expect(
+      reach("registry.npmjs.org", [
+        allowed({ kind: "thread", threadId: leadThread }, undefined, now),
+      ]),
+    ).toMatchObject({ reason: "expired" });
+  });
+
+  it("stops an injected command inheriting a host allowed before the thread was tainted", () => {
+    const standing = [
+      allowed({ kind: "thread", threadId: leadThread }),
+      allowed({ kind: "project", projectId: project }),
+    ];
+    expect(reach("registry.npmjs.org", standing)).toMatchObject({ kind: "allow" });
+    expect(reach("registry.npmjs.org", standing, { ...lead, threadTainted: true })).toMatchObject({
+      reason: "no-rule",
+    });
+    // A child of the tainted thread cannot reach them either, and holds none of its own.
+    const child: ToolEgressLaunchFacts = {
+      ...lead,
+      threadId: childThread,
+      parent: { threadId: leadThread, tainted: true },
+    };
+    expect(
+      reach(
+        "registry.npmjs.org",
+        [...standing, allowed({ kind: "thread", threadId: childThread })],
+        child,
+      ),
+    ).toMatchObject({ reason: "no-rule" });
+    // Only what a person confirmed for this one launch applies.
+    expect(
+      reach(
+        "registry.npmjs.org",
+        [allowed({ kind: "call", threadId: leadThread, launchId })],
+        child,
+      ),
+    ).toMatchObject({ kind: "allow", scope: "call" });
+  });
+
+  it("grants nothing however often a refused host is retried", () => {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      expect(reach("collector.invalid", [])).toMatchObject({ kind: "refuse", reason: "no-rule" });
+    }
   });
 });

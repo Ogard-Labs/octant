@@ -6,11 +6,17 @@ import { PassThrough } from "node:stream";
 import { decodeWindowId, type WindowId } from "@octant/contracts";
 import type { ExtensionEffectiveSnapshot } from "@octant/contracts/extension-rpc";
 import { EXTENSION_TOOL_GRANT_EVENT_NAMES } from "@octant/contracts/extension-events";
+import type { ExtensionLifecycleEvent } from "@octant/contracts/extension-events";
 import { AGENT_PLUGINS_MCP_SCHEMA } from "@octant/plugin-host/agent-plugins";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import { readAggregateVersion } from "../persistence/chatProjection";
+import {
+  EXTENSION_AGGREGATE_TYPE,
+  EXTENSION_LIFECYCLE_EVENT,
+} from "../persistence/extensionProjection";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ExtensionToolGrantProjection } from "../persistence/extensionToolGrantProjection";
@@ -310,6 +316,75 @@ function effectiveSnapshot(
     ],
     collisions: [],
   } as never;
+}
+
+const installedDigest = `sha256:${"c".repeat(64)}`;
+
+/** The package lifecycle as the journal holds it, without the lifecycle service's other work. */
+function lifecycle(host: ReturnType<typeof openHost>) {
+  const append = (payload: ExtensionLifecycleEvent["payload"]) => {
+    host.journal.append({
+      aggregate: { aggregateType: EXTENSION_AGGREGATE_TYPE, aggregateId: extensionId as never },
+      expectedVersion: readAggregateVersion(
+        host.connection,
+        EXTENSION_AGGREGATE_TYPE,
+        extensionId as never,
+      ) as never,
+      events: [
+        {
+          eventId: randomUUID() as never,
+          eventName: EXTENSION_LIFECYCLE_EVENT as never,
+          eventVersion: 1,
+          correlationId: randomUUID() as never,
+          actor: { kind: "local-user", actorId } as never,
+          occurredAt: now as never,
+          payload: { eventVersion: 1, extensionId, payload } as never,
+        },
+      ],
+    });
+  };
+  const manifest = {
+    manifestVersion: 1,
+    extensionId,
+    packageId,
+    slug: "notes-plugin",
+    displayName: "notes-plugin",
+    version: "1.0.0",
+    digest: installedDigest,
+    source: { kind: "local-folder", sourceRef: "local-test" },
+    provenance: {
+      canonicalUrl: "https://example.test/notes-plugin",
+      publisher: "Example Publisher",
+      reviewed: false,
+    },
+    license: { kind: "spdx", identifier: "MIT" },
+    compatibility: { platforms: ["macos"], modes: ["work"], providerFamilies: [] },
+    declaredCapabilities: ["mcp"],
+    components: [
+      {
+        id: "mcp-notes",
+        kind: "mcp-server",
+        displayName: "notes",
+        declaredCapabilities: ["mcp"],
+        entryPoint: "mcp.json",
+      },
+    ],
+  };
+  return {
+    install() {
+      const transactionId = randomUUID();
+      const fields = { transactionId, packageId, version: "1.0.0", digest: installedDigest };
+      append({ kind: "install-prepared", ...fields, manifest } as never);
+      append({ kind: "install-committed", ...fields, manifest } as never);
+    },
+    /** Only the uninstall's own commit: the host stopped before it revoked the grants. */
+    uninstall() {
+      append({ kind: "package-uninstalled", packageId } as never);
+    },
+    setTrust(trusted: boolean) {
+      append({ kind: "source-trust-changed", trusted } as never);
+    },
+  };
 }
 
 /** Approves `search` in Project A from thread one and remembers the answer. */
@@ -663,6 +738,115 @@ describe("an MCP tool a person always allows in a Project", () => {
     await rememberSearch(host);
 
     expect(host.grants.revokeForLifecycleChange(change)).toBe(0);
+    await host.unprompted({ threadId: threadTwo, projectId: projectA });
+  });
+});
+
+describe("a remembered grant across an uninstall the host did not finish revoking", () => {
+  async function askedAgain(host: ReturnType<typeof openHost>, threadId: string) {
+    const call = host.call({ threadId, projectId: projectA });
+    expect(await host.prompt()).toMatchObject({ mcpToolName: "search", rememberable: true });
+    expect(await host.answer(false)).toBe(true);
+    await call;
+  }
+
+  it("does not apply, or list, a grant whose uninstall committed before its revocation", async () => {
+    const directory = temporaryDirectory();
+    const first = openHost(directory);
+    const packageLifecycle = lifecycle(first);
+    packageLifecycle.install();
+    await rememberSearch(first);
+    packageLifecycle.uninstall();
+    await first.close();
+
+    const restarted = openHost(directory);
+    expect(restarted.grants.list()).toEqual([]);
+    await askedAgain(restarted, threadTwo);
+  });
+
+  it("asks again when the same package is installed again after the unrevoked uninstall", async () => {
+    const directory = temporaryDirectory();
+    const first = openHost(directory);
+    const packageLifecycle = lifecycle(first);
+    packageLifecycle.install();
+    await rememberSearch(first);
+    packageLifecycle.uninstall();
+    packageLifecycle.install();
+    await first.close();
+
+    const restarted = openHost(directory);
+    expect(restarted.grants.list()).toEqual([]);
+    await askedAgain(restarted, threadTwo);
+  });
+
+  it("covers a grant given to the reinstalled package once the person answers it again", async () => {
+    const host = openHost(temporaryDirectory());
+    const packageLifecycle = lifecycle(host);
+    packageLifecycle.install();
+    await rememberSearch(host);
+    packageLifecycle.uninstall();
+    packageLifecycle.install();
+
+    const again = host.call({ threadId: threadFour, projectId: projectA });
+    expect(await host.answer(true)).toBe(true);
+    await again;
+    expect(host.grants.list()).toHaveLength(1);
+    await host.unprompted({ threadId: threadTwo, projectId: projectA });
+  });
+
+  it("asks again when trust was withdrawn and given back before the revocation was journaled", async () => {
+    const host = openHost(temporaryDirectory());
+    const packageLifecycle = lifecycle(host);
+    packageLifecycle.install();
+    packageLifecycle.setTrust(true);
+    await rememberSearch(host);
+    packageLifecycle.setTrust(false);
+    packageLifecycle.setTrust(true);
+
+    expect(host.grants.list()).toEqual([]);
+    await askedAgain(host, threadTwo);
+  });
+
+  it("still revokes and journals a normal uninstall once, and answers the same after replay", async () => {
+    const host = openHost(temporaryDirectory());
+    const packageLifecycle = lifecycle(host);
+    packageLifecycle.install();
+    await rememberSearch(host);
+    packageLifecycle.uninstall();
+
+    expect(host.grants.revokeForLifecycleChange({ kind: "uninstall-package", extensionId })).toBe(
+      1,
+    );
+    expect(host.grants.revokeForLifecycleChange({ kind: "uninstall-package", extensionId })).toBe(
+      0,
+    );
+    const rows = () =>
+      host.connection
+        .prepare("SELECT revocation_reason FROM extension_tool_grant_projection")
+        .all();
+    expect(rows()).toEqual([{ revocation_reason: "plugin-uninstalled" }]);
+
+    packageLifecycle.install();
+    expect(host.grants.list()).toEqual([]);
+    for (let replay = 0; replay < 2; replay += 1) {
+      rebuildProjection({
+        connection: host.connection,
+        journal: host.journal,
+        projection: new ExtensionToolGrantProjection(),
+        clock: () => now,
+      });
+      expect(rows()).toEqual([{ revocation_reason: "plugin-uninstalled" }]);
+      expect(host.grants.list()).toEqual([]);
+    }
+    await askedAgain(host, threadTwo);
+  });
+
+  it("keeps a grant standing while the package it was given to stays installed", async () => {
+    const host = openHost(temporaryDirectory());
+    lifecycle(host).install();
+    await rememberSearch(host);
+
+    expect(host.grants.list()).toHaveLength(1);
     await host.unprompted({ threadId: threadTwo, projectId: projectA });
   });
 });

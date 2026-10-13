@@ -34,7 +34,7 @@ import {
   type CanvasPlacedReadingItem,
 } from "@octant/domain/canvas-dashboard-layout";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
-import { runsInDesktopApp, type DesignRunRuntime } from "./blocks/designRunningFrame";
+import { designDrawnInHere, type DesignRunRuntime } from "./blocks/designRunningFrame";
 import { CanvasLayoutGroup } from "./blocks/LayoutGroups";
 import { DashboardBlock } from "./blocks/DashboardBlock";
 
@@ -139,6 +139,7 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
   const { onOpen, resolveDesignPage } = props;
   const snapshotRun = useMemo<DesignRunRuntime | undefined>(() => {
     if (openedAccess === undefined || resolveDesignPage === undefined) return undefined;
+    const drawnIn = designDrawnInHere();
     return {
       start: async (blockId, frameId) => {
         const refused = {
@@ -160,7 +161,8 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
           ? { kind: "ready", url: resolveDesignPage(result.designPage) }
           : refused;
       },
-      contained: runsInDesktopApp(),
+      contained: drawnIn === "desktop-surface",
+      drawnIn,
       // Like the thread, a snapshot waits for the person to press Run.
       runsOnOpen: false,
     };

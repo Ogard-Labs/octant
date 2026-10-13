@@ -11,6 +11,7 @@ import {
   ActorId,
   CorrelationId,
   EventId,
+  MAX_WORK_TRANSCRIPT_TURNS,
   ProviderSessionId,
   UtcTimestamp,
   WORK_TURN_CAPABILITIES,
@@ -971,9 +972,29 @@ export class WorkTurnService {
     }
     return decodeWorkThreadTranscript({
       threadId,
-      turns: this.#projection.listForThread(threadId).map((turn) => this.#withLive(turn)),
+      turns: this.#projection
+        .listForThread(threadId)
+        .slice(-MAX_WORK_TRANSCRIPT_TURNS)
+        .map((turn) => this.#withLive(turn)),
       liveCursor: this.#liveUpdates.head(threadId),
     });
+  }
+
+  /**
+   * Every turn of the thread, oldest first, for host-side readers such as
+   * export and mentions that must not stop at the transcript route's window.
+   * It is not a route; it applies the same authority check as `transcript`.
+   */
+  async turns(
+    authenticatedWindowId: WindowId,
+    threadId: WorkThreadId,
+  ): Promise<ReadonlyArray<WorkTurnState>> {
+    this.#assertReady();
+    const thread = await this.#threads.read(authenticatedWindowId, threadId);
+    if (thread === undefined) {
+      throw this.#failure("unauthorized", "Work thread is unavailable for this window.");
+    }
+    return this.#projection.listForThread(threadId).map((turn) => this.#withLive(turn));
   }
 
   async *subscribe(

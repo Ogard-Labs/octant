@@ -59,7 +59,12 @@ The design rests on a small set of invariants that every package obeys:
   duplicate answers, and settles the underlying callback only when complete.
 - **Capabilities are honest and fail closed.** Every provider reports what it
   supports in every mode; an unsupported capability is disabled or refused,
-  never silently emulated. No core capability may require a specific provider.
+  never silently emulated. A first-class provider may offer a capability in
+  full; every other provider gets a documented degraded form, listed in the
+  "degraded on" matrix, or reports the capability unsupported. Not built yet:
+  the matrix is not written, and which providers are first-class is not yet
+  named. The app-managed tools below stay provider-neutral, and a seam is never
+  widened for one vendor.
 - **Install ≠ trust ≠ enable.** Extensions contribute nothing until each of
   those steps has been taken explicitly, and even then only within the mode,
   Project, thread, and provider policy that applies.
@@ -104,9 +109,10 @@ under the desktop bridge secret and gives the renderer only a single-use
 receipt bound to its window, so a renderer can act on a path only the person
 picked. It attaches to the canonical host at
 `http://127.0.0.1:13773`, or starts that independently runnable host when it is
-absent, then probes storage readiness before showing a window. It passes only
+absent, then probes storage readiness before showing a window. It passes
 native broker coordinates and the desktop bridge secret that native-only
-operations require. It also runs loopback-only
+operations require. A packaged launch also passes the app's version in
+`OCTANT_ARTIFACT_VERSION`; a development launch does not. It also runs loopback-only
 brokers the server talks back to: the credential broker (Keychain access by
 opaque reference), the browser runtime broker, and on macOS the Simulator
 device broker, behind which one native device helper per Simulator delivers
@@ -133,8 +139,13 @@ it carries the bundled CLI (`bin/octant`), the bundled server (`lib/server`), th
 web assets, and a top-level `node_modules` holding the third-party and native
 dependencies both bundles leave external, built on the target platform itself.
 An installed CLI starts that server under its own Bun runtime with
-`OCTANT_ARTIFACT_ROOT` set, so the server verifies every listed file before it
-opens the store. For Code,
+`OCTANT_ARTIFACT_ROOT` and `OCTANT_ARTIFACT_VERSION` set. The server verifies
+every listed file before it opens the store, and reports that version on
+`/health`, in a diagnostics export, and on the owner receipt. When the stamped
+version is missing or unusable, the CLI still sets `OCTANT_ARTIFACT_VERSION`
+to empty so a value inherited from the parent process cannot replace it. The
+host treats an empty or over-long value as unset and reports the package
+version a development script exports, or `0.0.0-dev` when that is absent. For Code,
 verified remote requests carry their principal through an async request scope:
 the paired device may reach existing active Code Projects without a desktop
 workspace, while services retain thread, checkout, provider, and approval checks.
@@ -454,10 +465,17 @@ document as a future version. Frames follow the
   `allow-same-origin`, `allow-top-navigation`, `allow-popups`, or
   `allow-forms`. A host-written bridge reports size, script errors, and a
   heartbeat, grants no tool, journal, or file capability, and a frame that
-  stops answering or loads a second page is removed. Desktop runs these frames
-  out of process, cancels any navigation away from the frame's own page, and
-  reserves a shortcut frame script cannot intercept to return focus to host
-  chrome. A remote browser cannot cancel a frame's own navigation, so there a
+  stops answering or loads a second page is removed. Desktop does not draw a
+  running design in a frame: a page policy does not cover WebRTC, so the
+  prototype is a `<webview>` in a session of its own whose every connection,
+  loopback included, goes to a proxy that is never a proxy. The main process
+  attaches that surface only for a ticketed design page it was named, serves the
+  page itself under a private scheme, refuses new windows, navigation,
+  permissions, and downloads, and reserves a shortcut page script cannot
+  intercept to return focus to host chrome. If the surface cannot be made the
+  prototype does not run. A name lookup the page asks the resolver for can still
+  leave the app, and the notice under the prototype says so. A remote browser cannot
+  cancel a frame's own navigation or contain its peer connections, so there a
   running frame is not network-contained; that exposure is accepted, bounded
   by what the frame holds, and the Run control there says so. This tier has
   shipped.
@@ -633,6 +651,14 @@ threads without a Project need the further `allowDefaultFolderThreads` switch,
 which the host accepts only while Git is not required. See
 [decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md](decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md).
 
+Not built yet: two decisions change this paragraph, and the shipped host keeps
+the behavior above until they land. The default folder moves from
+`~/Documents/Octant` to `~/Octant`. The `requireGitRepository` and
+`allowDefaultFolderThreads` switches, and the row Work offers to start a thread
+in the default folder instead of a Project, fold into one choice. Both were
+decided together; the choice's wording, and what happens to values stored under
+the old default and the two old switches, are settled when it is built.
+
 Code task creation accepts a plain-folder checkout when the server admits it under
 Code settings. The renderer preserves its proposed branch as delivery intent without
 claiming a checked-out branch; detached Git checkouts remain refused. Git-dependent
@@ -671,7 +697,10 @@ read the same file on demand; nothing about its content is journaled. While
 disabled, Octant reads nothing from the folder for this purpose, adds no
 instruction, and writes nothing there; turning the setting off leaves an
 existing file untouched. Octant never writes an agent brief (`AGENTS.md`,
-`CLAUDE.md`, or similar) into a user folder. This narrows the always-on
+`CLAUDE.md`, or similar) into a user folder, and a Work turn does not read an
+existing one. Not built yet for Codex: a Codex Work turn starts at the Project
+root, and Codex still loads an `AGENTS.md` it finds there; Claude Work turns
+load no project settings or instruction files. This narrows the always-on
 behavior first recorded in
 [decisions/0119-a-work-project-keeps-its-status-in-its-folder.md](decisions/0119-a-work-project-keeps-its-status-in-its-folder.md).
 
@@ -710,6 +739,27 @@ selectable from that thread through the named turn right now. A fork or
 Restore from here whose handoff cannot be built is refused with the reason
 before any worktree is prepared, because the text handoff is the one
 conversation transfer every fork can fall back to.
+
+An in-place restore (`restore-git-checkpoint`, sent by both Restore files to
+this point and Undo restore) overwrites a checkout other threads may share, so
+the host refuses it, as a `conflict` before Git is touched and before any undo
+point is taken, while another thread has a live turn that may write there: a
+turn in state `running` or `waiting` whose posture is not Plan. A turn parked
+on an approval counts, because it writes as soon as it is answered. "The same
+checkout" is the same resolved checkout root path, not the same checkout id:
+the id derives from Project and binding revision, so two Projects on one folder
+have different ids for one directory, and a managed worktree has its own path
+and so never matches. The refusal names the other thread by title (cut to 100
+characters) only when it is in the requesting thread's Project; otherwise it
+says a thread in another Project is writing. The check sees only turns the
+runtime has registered as live. A turn whose checkpoint capture begins after a
+restore has started queues behind it for the same checkout id, so it starts from
+the restored files. A writing turn that already captured its checkpoint but is
+still preparing to start (credentials, session seeding, fork preparation) is
+not yet live: a restore that arrives then is not refused, and that turn runs
+from files captured before the restore. Restore from here and
+Fork from here create a thread on its own worktree and are not subject to the
+check. Discard and revert also overwrite files and are not yet covered.
 
 A child AgentRun starts only when the thread's agent delegates through the
 Octant Harness `delegate` tool or a provider harness's `octant_agents` tool.
@@ -939,7 +989,10 @@ Done); Chat has no board. Code lists active open and draft pull requests from
 connected Projects in a manually refreshed workspace and joins exact
 thread-owned PR status onto Code board cards. A Work or Code thread is Done
 only when its user-confirmed delivery target is objectively satisfied;
-ambiguous state resolves to Waiting.
+ambiguous state resolves to Waiting. Not built yet: a person may also mark a
+Work thread Done, and a Work thread so marked is Done. A Code thread keeps the objective rule, with no
+person's mark that overrides it. Until this is built, a Work thread reaches
+Done only through the rule above.
 
 **Pull-request merge.** The person at a local desktop window may merge one
 open pull request from its review (`POST /api/code/project-pull-requests/merge`).
@@ -1386,7 +1439,11 @@ flowchart LR
 - **Untrusted-content taint.** Browser observations, tool results, and imported
   external content that already carry tainting provenance append
   `thread.external-content-ingested@1` with thread identity and bounded source
-  labels. Raw bodies never enter the payload. The thread-lifetime taint
+  labels. Raw bodies never enter the payload. A provider runtime's own built-in
+  web search or page fetch does not append this event. Where the runtime reports
+  the call, Octant records ordinary tool activity. The call sits outside the
+  mark and outside the gate that mark applies to computer-use, MCP, and the
+  native harness. The thread-lifetime taint
   projection rebuilds from the journal; session, turn, and restart boundaries
   never clear it. Irreversible or authority-bearing actions on a tainted thread
   still require fresh confirmation after replay.
@@ -1486,7 +1543,9 @@ flowchart LR
   conversation evidence is read in bounded batches and page results paint as
   they arrive; live Code operation frames carry bounded display text beside
   their durable evidence references. Work uses a bounded delta feed over its
-  durable transcript. One post-commit Machine change feed invalidates mode
+  durable transcript. The Work transcript route answers with the newest 64
+  turns of a longer thread, oldest first; export and `#thread` mentions read the
+  whole thread on the host. One post-commit Machine change feed invalidates mode
   navigation and Project/extension projections instead of independent polling
   timers. A running turn's start time and latest step (a tool name and one
   redacted, truncated argument, or a wait on approval or an answer) ride on the
@@ -2832,7 +2891,8 @@ ledger row however it ended — completed, failed, cancelled, or interrupted —
 and Work keeps usage the provider reports after a cancel. A turn that reached
 the provider and reported nothing (an ACP agent in Code reports no usage) is
 recorded as unreported and unpriced, so token and money ceilings refuse after
-it; a turn refused or failed before the provider leaves no row. A Code turn
+it (see the not-yet-built change below); a turn refused or failed before the
+provider leaves no row. A Code turn
 reaches the provider once its `provider-session-ready` frame is journaled,
 just before the prompt is sent, or when it completes. Any unpriced row in the
 window — a model with no price, a provider that reports no cost or no usage,
@@ -2842,6 +2902,15 @@ offers clearing the ceiling, waiting out a Project's calendar window, Usage,
 or pausing; a raise cannot price the usage, so it is not offered. Turns from
 before this behaviour that left no ledger row at all, including every child
 run's, are not counted.
+
+Not built yet: a provider that reports no usage is not counted against a
+ceiling. Its unreported turns neither raise spend nor refuse a later turn for
+that reason, and the composer and Usage say visibly that the provider is not
+measured, so a person is not led to read the ceiling as covering it. The rule
+concerns usage a provider does not report; a model with no known price, or
+usage journaled before the ledger carried cost, is a different case and still
+makes a money ceiling refuse `unknown-spend` as described above. Until this is
+built, the host refuses as the paragraph above describes.
 
 Money is checked between turns, like turns and run time, not reserved like
 tokens. A provider reports cost only when a turn settles and no per-turn price
@@ -3022,7 +3091,8 @@ native harness in `apps/server/src/harness`:
   hosted third-party search provider ships. A tool the thread was not offered
   refuses as `tool-unavailable` without reaching policy or a person. The harness has no
   per-host network rules, rule expiry, or learn mode yet: a tool process gets the
-  thread's OS-level `none` or `allow`. The approved design for them, not yet built, is
+  thread's OS-level `none` or `allow`. The approved design for them, with only its pure
+  decision and event schemas built so far, is
   [Harness tool egress rules](#harness-tool-egress-rules). `nativeHarnessEgress.hostile.test.ts` holds the
   adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
   Seatbelt and shows only the networked one reaching a loopback listener.
@@ -3225,8 +3295,11 @@ composer. The web shows open offers as cards above the chips.
 
 ### Harness tool egress rules
 
-**Status: design approved by the maintainer on 2026-10-13. Nothing in this
-section is implemented.** Today a harness tool process gets the thread's
+**Status: design approved by the maintainer on 2026-10-13. Phase 1 is in:
+the rule model and decision (`decideToolEgress` in
+`packages/domain/src/toolEgressPolicy.ts`) and the event schemas
+(`packages/contracts/src/toolEgress.ts`). Nothing calls them yet, so nothing
+that runs has changed.** Today a harness tool process gets the thread's
 OS-level `none` or `allow` (see Egress and hostile content above). This is the
 approved-but-unfinished design, and the phases below track its delivery. Its
 approval replaces the "no local egress proxy in this release" decision in the
@@ -3416,13 +3489,14 @@ confirmed call. A child's proposals surface on its parent's thread with the
 child named, and granting them grants the parent. With learn mode off, the
 refusal reaches the command's output and nothing is proposed.
 
-**Audit journal.** On the thread aggregate unless noted; payloads carry host,
+**Audit journal.** On the thread's own `thread-egress` aggregate unless noted,
+not on the thread aggregate; payloads carry host,
 port, scope, `expiresAt`, rule and launch identity, the server-resolved
 principal, and the thread's taint at the time, never a token, URL path, header,
 or body:
 
 - `thread.egress-rule-granted@1`, `thread.egress-rule-revoked@1`, and on the
-  Project aggregate `project.egress-rule-granted@1` and
+  Project's `project-egress` aggregate `project.egress-rule-granted@1` and
   `project.egress-rule-revoked@1`. A grant is journal-first: a rule whose event
   cannot be appended is not in force.
 - `thread.egress-proposal-raised@1` and `thread.egress-proposal-declined@1`.
@@ -3584,6 +3658,11 @@ prompt, schema, tool, route, model, or capability.
 - Skills are discovered only from valid `.agents/skills/` packages between the
   working directory and the Project or repository root, plus the user-global
   `~/.agents/skills/`.
+  Not built yet: discovery also reads an allow-listed set of extra skill roots
+  (for example `.claude/skills`), each entering the same activation ladder as
+  `.agents/skills/` (indexed disabled, then reviewed, then enabled; a
+  discovered skill is never trusted or active because of where it was found).
+  Until this is built, only `.agents/skills/` is read.
 - Marketplace network is on user action: curated catalog search is in-memory;
   inspect/install fetches the pinned GitHub tree; standalone skill search
   queries skills.sh and npm with the typed text; Agent Plugins search queries
@@ -3600,7 +3679,11 @@ prompt, schema, tool, route, model, or capability.
   that scope, offers only the selected tools, and refuses the turn when the
   provider or model cannot carry Octant's tools. Every call waits for an
   approval in the turn's window, shown in the open thread, unless a
-  remembered approval covers it (next item). An MCP
+  remembered approval covers it (next item). At most 32 of those approvals
+  wait at once across the whole host; the cap is shared by every thread and
+  window, not counted per thread. A call past that cap is denied immediately
+  with the refusal a declined call already uses, and answering or expiry
+  frees the slot. An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
   carried it.
@@ -3637,7 +3720,12 @@ prompt, schema, tool, route, model, or capability.
   - Disabling the plugin or component, archiving the Project, or switching a
     mode off leaves grants stored and unused. Uninstall, withdrawn source
     trust, and rollback revoke them (`extension.tool-grant-revoked@1`), so
-    installing or trusting the package again restores nothing. A person
+    installing or trusting the package again restores nothing. The
+    revocation is a second append after the lifecycle commit, so a grant also
+    stops standing when its extension's latest uninstall, rollback, or trust
+    withdrawal is later in the journal than the grant, whether or not the
+    host stopped before appending the revocation; Settings does not list it
+    and a call asks again. A person
     revokes one through the local-only `/api/extensions/tool-grants`, which
     lists and revokes and has no request that adds a grant. Settings › Data &
     privacy lists them by Project with Revoke, and the prompt offers "always
@@ -4058,6 +4146,10 @@ mechanisms are:
   an exception. Octant-owned tools those threads reach stay confined either
   way. A runtime's own built-in tools (Codex's shell, Claude's Bash on the
   postures that write) run under that runtime's sandbox, not Octant's.
+  A runtime's own built-in web search or page fetch does not append
+  `thread.external-content-ingested@1`, and the gate that mark applies to
+  Octant's computer-use, MCP, and native-harness calls does not cover a tool
+  the runtime executes itself.
   A confined Claude Plan launch may write only the assigned leaf of that
   account's state directory (`~/.claude` or
   `~/.claude-accounts/<instanceId>`) and the launch temporary directory.
@@ -4664,8 +4756,14 @@ there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
   checks the code signature as an independent second gate. A Linux AppImage
   is not code-signed, so the feed signature and artifact hash are its whole
   trust root: Octant replaces only the image it was launched from (`APPIMAGE`)
-  atomically, and refuses a package or archive launch before any request. A
-  platform with no signed channel (`supportsSignedDesktopUpdateChannel`:
+  atomically, and refuses a package or archive launch before any request. The
+  relaunched image is told which process it replaces
+  (`OCTANT_REPLACED_PROCESS_ID`, removed from its environment as it starts) and
+  waits, for at most a minute, until that process has exited (on Linux, exited but
+  not yet reaped counts) before it asks for
+  the single-instance lock, so it never starts a host while the old one is
+  still stopping; the old instance keeps its lock until it exits. A platform
+  with no signed channel (`supportsSignedDesktopUpdateChannel`:
   macOS and Linux today) refuses with "untrusted-signature".
 - Unverifiable is refused, never downgraded: an unparseable feed, unknown key,
   version that is not strictly newer, wrong platform or ring, unreachable
@@ -4682,8 +4780,13 @@ there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
   most 4,096 characters) and fail with it; notes for the running build are a
   bundled file read from disk, so What's New never adds a request.
 - The person controls application: an update is staged and applied on a
-  relaunch they start, and install waits while agents are active or a thread
-  needs attention. Automatic checks are a setting; the host starts with them
+  relaunch they start, and install waits while agents are active (a thread
+  parked on an approval or question is still an active agent) or while the
+  desktop cannot confirm what the host is running. A provider that is not
+  signed in, not installed, or disabled never holds an install back: quitting
+  asks on the same terms, because both read the one `workInFlight` reading of
+  the host rather than its `attentionRequired` flag, which also marks the menu
+  bar for provider readiness. Automatic checks are a setting; the host starts with them
   off until the persisted choice arrives, then checks daily. A check is a
   plain GET carrying only version, platform, and architecture (the ring is in
   the path); it is not a telemetry channel.
@@ -4750,7 +4853,8 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   helpers. A dogfood AppImage is not code-signed. An AppImage launch checks
   the signed `<base>/<ring>/linux-x64.json` feed, verifies the signature and
   hash before use, replaces the image atomically (write beside, fsync,
-  rename), and relaunches. A bad signature, a non-writable location, or a
+  rename), and relaunches; the new build starts after the old one has stopped.
+  A bad signature, a non-writable location, or a
   launch that is not that image fails closed, and the reason is shown in
   Settings. Windows stays out. Override with
   `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64` on a matching host only.
