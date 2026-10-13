@@ -138,6 +138,27 @@ describe("thread egress rule grants", () => {
     }
   });
 
+  it("refuses any reviewer grant on a tainted thread, which needs a person to confirm", () => {
+    for (const scope of [{ kind: "call", launchId }, { kind: "thread" }]) {
+      expect(() =>
+        decodeThreadEgressRuleGrantedPayload({
+          ...threadGrant,
+          scope,
+          principal: { kind: "reviewer" },
+          threadTainted: true,
+        }),
+      ).toThrow(/reviewer cannot grant on a tainted thread/);
+    }
+    expect(
+      decodeThreadEgressRuleGrantedPayload({
+        ...threadGrant,
+        scope: { kind: "call", launchId },
+        principal: { kind: "local-window" },
+        threadTainted: true,
+      }),
+    ).toMatchObject({ threadTainted: true });
+  });
+
   it("records a revocation with the person who made it", () => {
     const revoked = { ruleId, threadId, principal: { kind: "local-window" }, threadTainted: true };
     expect(decodeThreadEgressRuleRevokedPayload(revoked)).toEqual(revoked);

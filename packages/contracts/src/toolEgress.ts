@@ -166,7 +166,9 @@ const requestCount = Schema.Int.pipe(Schema.positive());
 
 /**
  * A reviewer's answer yields only `call` rules, and a tainted thread may be
- * granted only `call` rules, so neither can widen past the launch at hand.
+ * granted only `call` rules, so neither can widen past the launch at hand. A
+ * tainted thread's confirmation needs a person, so a reviewer grants nothing
+ * there.
  */
 export const ThreadEgressRuleGrantedPayload = Schema.Struct({
   ruleId: ToolEgressRuleId,
@@ -183,9 +185,13 @@ export const ThreadEgressRuleGrantedPayload = Schema.Struct({
   .pipe(
     Schema.filter(
       (payload) =>
-        payload.scope.kind === "call" ||
-        (payload.principal.kind !== "reviewer" && !payload.threadTainted),
-      { message: () => "Only call rules may come from a reviewer or a tainted thread." },
+        payload.principal.kind === "reviewer"
+          ? payload.scope.kind === "call" && !payload.threadTainted
+          : payload.scope.kind === "call" || !payload.threadTainted,
+      {
+        message: () =>
+          "Only call rules may come from a reviewer or a tainted thread, and a reviewer cannot grant on a tainted thread.",
+      },
     ),
   );
 export type ThreadEgressRuleGrantedPayload = typeof ThreadEgressRuleGrantedPayload.Type;
