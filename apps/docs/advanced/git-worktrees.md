@@ -68,6 +68,11 @@ confirmation when work may remain. Ambiguous identity or inventory becomes
 Read-only observation and mutation are separate ports. Mutation serializes
 per checkout and refuses an active Git index lock.
 
+Serializing does not make a restore safe against another thread's turn. Restoring
+files in place refuses while a different thread has a writing turn in flight on
+the same checkout path. A thread on its own managed worktree has its own path
+and is never held up by, or holding up, the Project's checkout.
+
 **Unavailable in V1:** broad staging, shared stash, reset, checkout-based
 discard, rebase, history rewriting, and force push options. Staging always
 receives an explicit normalized path set.
