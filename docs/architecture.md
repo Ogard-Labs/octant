@@ -300,6 +300,7 @@ through the transport its adapter verified:
 | ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate |
 | Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                              |
 | Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                     |
+| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant; partly built ([detail](design/terminal-browser-grant.md))         |
 
 No transport edits a person's provider MCP, hook, or global configuration;
 OpenCode's per-launch posture stays in its connection-private configuration.
@@ -4176,6 +4177,26 @@ mechanisms are:
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
+- **Terminal Browser grant (partly built).** A person may start a Code thread
+  terminal with a Browser grant, so a provider CLI they type there can drive
+  that thread's Browser and nothing else. It is off by default, asked for per
+  terminal, and honored only from a local window: a paired device, a routine, or
+  an agent is refused and no terminal starts. Only an active Code thread has
+  one; Work has no shell, and the Project terminal cannot ask. The host mints a
+  grant bound to one host run, thread, terminal session, and window, holds it in
+  memory only, and starts the terminal with two variables through its brokered
+  credential path: the address of a loopback endpoint of that grant's own
+  (unguessable path, bearer token, `Host` check) and the token. Calls run as the
+  thread through the same Browser tool set a managed turn gets, so the per-action
+  policy, origin approval, taint, and Plan refusal are unchanged, no screenshot is
+  kept as a thread capture, and the desktop bridge secret is never involved.
+  The grant ends when the terminal closes, the person switches it off, the
+  thread is completed, archived, or purged, its window loses authority, or the
+  host stops; a revoked or unknown grant answers every call `unauthorized`. Issue
+  and end are journaled without the token or address. Built: the grant, its
+  endpoint, its lifecycle, and its refusals. Not built: the `octant mcp` command,
+  the window switch and approval wording, and desktop packaging. Detail is in
+  [Terminal Browser grant](design/terminal-browser-grant.md).
 - **Terminal shell configuration.** On macOS a thread or Project terminal is
   the person's login shell (`-l`), and its read roots add, read-only and only
   where they exist, the shell's rc and login files, the framework trees they

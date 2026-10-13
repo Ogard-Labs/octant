@@ -36,6 +36,7 @@ import { ScaffoldDirectoryName, ScaffoldId, ScaffoldRun, ScaffoldRunId } from ".
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { UsageCost } from "./context";
 import { ProjectId } from "./projects";
+import { TerminalBrowserGrantOutcome } from "./terminalBrowserGrants";
 import {
   PermissionPersistence,
   ProviderExecutionPolicy,
@@ -289,6 +290,12 @@ const StartTerminal = Schema.Struct({
   terminalId: CodeTerminalId,
   ...TerminalGeometry,
   credentialRefs: uniqueArray(CredentialReference, 64),
+  /**
+   * Start this thread terminal with its Browser grant on. Absent means the
+   * terminal is started as before. Only the person at a local window can ask:
+   * the host refuses it for any other caller and then starts no terminal.
+   */
+  browserGrant: Schema.optional(Schema.Literal("on")),
 }).annotations(strict);
 const AttachTerminal = Schema.Struct({
   kind: Schema.Literal("attach-terminal"),
@@ -311,6 +318,15 @@ const ResizeTerminal = Schema.Struct({
 }).annotations(strict);
 const StopTerminal = Schema.Struct({
   kind: Schema.Literal("stop-terminal"),
+  ...OperationScope,
+  terminalId: CodeTerminalId,
+}).annotations(strict);
+/**
+ * Switch a live terminal Browser grant off without closing the terminal. It
+ * only narrows authority, so it is never gated.
+ */
+const RevokeTerminalBrowserGrant = Schema.Struct({
+  kind: Schema.Literal("revoke-terminal-browser-grant"),
   ...OperationScope,
   terminalId: CodeTerminalId,
 }).annotations(strict);
@@ -703,6 +719,7 @@ export const CodeOperationCommand = Schema.Union(
   WriteTerminal,
   ResizeTerminal,
   StopTerminal,
+  RevokeTerminalBrowserGrant,
   RunRepositoryTest,
   CancelRepositoryTest,
   RunScaffold,
@@ -781,6 +798,8 @@ const TerminalStateFields = {
   operationId: CodeOperationId,
   terminalId: CodeTerminalId,
   transcript: Schema.optional(CodeEvidenceReference),
+  /** Present when the command asked for, or switched off, the terminal's Browser grant. */
+  browserGrant: Schema.optional(TerminalBrowserGrantOutcome),
 } as const;
 const TerminalStateResult = Schema.Union(
   Schema.Struct({

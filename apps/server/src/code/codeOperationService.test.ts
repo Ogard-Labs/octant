@@ -2868,3 +2868,334 @@ describe("CodeOperationService terminal readers", () => {
     expect(terminals.terminate).toHaveBeenCalledWith(ids.terminal);
   });
 });
+
+describe("CodeOperationService terminal Browser grant", () => {
+  const granted = {
+    status: "granted",
+    grantId: "66666666-6666-4666-8666-666666666666",
+    threadId: ids.thread,
+    terminalId: ids.terminal,
+    issuedAt: "2026-10-13T09:00:00.000Z",
+  } as const;
+  const references = [
+    { environmentName: "OCTANT_BROWSER_MCP_URL", reference: "terminal-browser-grant:g:endpoint" },
+    { environmentName: "OCTANT_BROWSER_MCP_TOKEN", reference: "terminal-browser-grant:g:token" },
+  ];
+  const startWithGrant = {
+    kind: "start-terminal",
+    operationId: ids.operation,
+    threadId: ids.thread,
+    checkoutId: ids.checkout,
+    terminalId: ids.terminal,
+    columns: 80,
+    rows: 24,
+    credentialRefs: [],
+    browserGrant: "on",
+  } as const;
+
+  const revokeCommand = {
+    kind: "revoke-terminal-browser-grant",
+    operationId: ids.operation,
+    threadId: ids.thread,
+    checkoutId: ids.checkout,
+    terminalId: ids.terminal,
+  } as const;
+
+  function grantsFixture(opening: unknown) {
+    const grants = {
+      open: vi.fn(async () => opening),
+      abandon: vi.fn(),
+      switchOff: vi.fn(),
+      terminalClosed: vi.fn(),
+    };
+    return grants;
+  }
+
+  function fixture(
+    opening: unknown,
+    withGrants = true,
+    conditions: {
+      readonly checkoutAvailability?: "available" | "unavailable";
+      readonly canAccess?: boolean;
+      readonly launchStatus?: "running" | "exited";
+    } = {},
+  ) {
+    const grants = grantsFixture(opening);
+    let listener: ((emission: unknown) => void) | undefined;
+    const terminals = {
+      launch: vi.fn(async () => ({
+        terminalId: ids.terminal,
+        status: conditions.launchStatus ?? ("running" as const),
+        canRerun: false,
+        transcript: { chunks: [], byteLength: 0, truncated: false, characters: 0 },
+      })),
+      attach: vi.fn(),
+      observe: vi.fn((_id: unknown, next: (emission: unknown) => void) => {
+        listener = next;
+        return vi.fn();
+      }),
+      write: vi.fn(),
+      resize: vi.fn(),
+      terminate: vi.fn(),
+    };
+    const events = {
+      replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
+      append: vi.fn(),
+      historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+    };
+    const authority = {
+      readThread: vi.fn(() => thread()),
+      readCheckout: vi.fn(() =>
+        decodeCodeCheckoutIdentity({
+          id: ids.checkout,
+          repositoryId: `repo_${"8".repeat(64)}`,
+          kind: "existing-worktree",
+          availability: conditions.checkoutAvailability ?? "available",
+          head: { kind: "branch", name: "feature/exact", oid: "b".repeat(40) },
+          observedAt: "2026-07-21T10:00:00.000Z",
+        }),
+      ),
+      canAccessProject: vi.fn(async () => conditions.canAccess ?? true),
+      approvalContextDigest: vi.fn(async () => "a".repeat(64)),
+      resolveCheckoutRoot: vi.fn(async () => ({
+        checkoutRoot: "/private/exact-checkout",
+        workingDirectory: "/private/exact-checkout",
+        shell: "/bin/zsh",
+        credentialReferences: [],
+        environment: {},
+      })),
+    };
+    const service = new CodeOperationService({
+      authority: authority as never,
+      approvals: { validate: vi.fn(async () => true) } as never,
+      terminals: terminals as never,
+      ...(withGrants ? { terminalBrowserGrants: grants as never } : {}),
+      repositoryTests: {} as never,
+      git: {} as never,
+      pullRequests: {} as never,
+      reviewFindings: {} as never,
+      turns: {} as never,
+      evidence: {
+        put: vi.fn(() =>
+          decodeCodeEvidenceReference({
+            contentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            digest: "a".repeat(64),
+            byteLength: 1,
+          }),
+        ),
+        read: vi.fn(async () => ""),
+      } as never,
+      events: events as never,
+    } as CodeOperationServiceOptions);
+    return {
+      service,
+      grants,
+      terminals,
+      authority,
+      exit: () =>
+        listener?.({
+          text: "",
+          replace: false,
+          snapshot: {
+            terminalId: ids.terminal,
+            status: "exited",
+            exitCode: 0,
+            canRerun: true,
+            transcript: { chunks: [], byteLength: 0, truncated: false, characters: 0 },
+          },
+        }),
+    };
+  }
+
+  it("starts the person's terminal with the grant's two variables and reports the grant", async () => {
+    const { service, grants, terminals } = fixture({
+      kind: "granted",
+      outcome: granted,
+      credentialReferences: references,
+    });
+
+    const result = await service.execute(ids.window, startWithGrant, { initiator: "user" });
+
+    expect(grants.open).toHaveBeenCalledWith({
+      caller: "local-window",
+      windowId: ids.window,
+      threadId: ids.thread,
+      terminalId: ids.terminal,
+    });
+    expect(terminals.launch).toHaveBeenCalledWith(
+      expect.objectContaining({ credentialReferences: references }),
+    );
+    expect(result).toMatchObject({
+      kind: "terminal-state",
+      state: "running",
+      browserGrant: granted,
+    });
+    expect(JSON.stringify(result)).not.toContain("terminal-browser-grant:");
+  });
+
+  it("starts no terminal when the host refuses the grant, so it never looks as if it has one", async () => {
+    const refusal = { status: "refused", reason: "not-local-window" } as const;
+    const { service, grants, terminals } = fixture({ kind: "refused", outcome: refusal });
+
+    const result = await service.execute(ids.window, startWithGrant);
+
+    expect(grants.open).toHaveBeenCalledWith(expect.objectContaining({ caller: "remote-device" }));
+    expect(terminals.launch).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      kind: "terminal-state",
+      state: "unavailable",
+      browserGrant: refusal,
+    });
+  });
+
+  it("refuses a grant on a host that lends no Browser and starts no terminal", async () => {
+    const { service, terminals } = fixture(undefined, false);
+    const result = await service.execute(ids.window, startWithGrant, { initiator: "user" });
+    expect(terminals.launch).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      state: "unavailable",
+      browserGrant: { status: "refused", reason: "browser-unavailable" },
+    });
+  });
+
+  it("asks for no grant when the start does not ask for one", async () => {
+    const { service, grants, terminals } = fixture({ kind: "refused", outcome: granted });
+    const { browserGrant: _off, ...plain } = startWithGrant;
+    await service.execute(ids.window, plain, { initiator: "user" });
+    expect(grants.open).not.toHaveBeenCalled();
+    expect(terminals.launch).toHaveBeenCalledWith(
+      expect.objectContaining({ credentialReferences: [] }),
+    );
+  });
+
+  it("gives the grant back when the shell fails to start", async () => {
+    const { service, grants, terminals } = fixture({
+      kind: "granted",
+      outcome: granted,
+      credentialReferences: references,
+    });
+    terminals.launch.mockRejectedValueOnce(new Error("no shell"));
+    await service.execute(ids.window, startWithGrant, { initiator: "user" });
+    expect(grants.abandon).toHaveBeenCalledWith(ids.terminal);
+  });
+
+  it("ends the grant when the terminal it was minted for stops being followed", async () => {
+    const { service, grants, exit } = fixture({
+      kind: "granted",
+      outcome: granted,
+      credentialReferences: references,
+    });
+    await service.execute(ids.window, startWithGrant, { initiator: "user" });
+    exit();
+    expect(grants.terminalClosed).toHaveBeenCalledWith(ids.terminal);
+  });
+
+  it("switches a live grant off and reports it revoked", async () => {
+    const outcome = {
+      status: "revoked",
+      grantId: granted.grantId,
+      threadId: ids.thread,
+      terminalId: ids.terminal,
+      reason: "switched-off",
+      revokedAt: "2026-10-13T09:01:00.000Z",
+    } as const;
+    const { service, grants, terminals } = fixture(undefined);
+    grants.switchOff.mockResolvedValue(outcome);
+    terminals.attach.mockReturnValue({
+      terminalId: ids.terminal,
+      status: "running",
+      canRerun: false,
+      transcript: { chunks: [], byteLength: 0, truncated: false, characters: 0 },
+    });
+
+    const result = await service.execute(ids.window, {
+      kind: "revoke-terminal-browser-grant",
+      operationId: ids.operation,
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      terminalId: ids.terminal,
+    });
+
+    expect(grants.switchOff).toHaveBeenCalledWith({
+      windowId: ids.window,
+      threadId: ids.thread,
+      terminalId: ids.terminal,
+    });
+    expect(result).toMatchObject({
+      kind: "terminal-state",
+      state: "running",
+      browserGrant: outcome,
+    });
+  });
+  it("switches a grant off after the thread's checkout became unavailable", async () => {
+    const outcome = {
+      status: "revoked",
+      grantId: granted.grantId,
+      threadId: ids.thread,
+      terminalId: ids.terminal,
+      reason: "switched-off",
+      revokedAt: "2026-10-13T09:01:00.000Z",
+    } as const;
+    const { service, grants, authority } = fixture(undefined, true, {
+      checkoutAvailability: "unavailable",
+    });
+    grants.switchOff.mockResolvedValue(outcome);
+
+    const result = await service.execute(ids.window, revokeCommand);
+
+    expect(grants.switchOff).toHaveBeenCalledWith({
+      windowId: ids.window,
+      threadId: ids.thread,
+      terminalId: ids.terminal,
+    });
+    expect(authority.resolveCheckoutRoot).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ kind: "terminal-state", browserGrant: outcome });
+  });
+
+  it("still refuses a window that cannot open the thread, and an unknown thread, when switching off", async () => {
+    const blocked = fixture(undefined, true, {
+      checkoutAvailability: "unavailable",
+      canAccess: false,
+    });
+    expect(await blocked.service.execute(ids.window, revokeCommand)).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unauthorized" },
+    });
+    expect(blocked.grants.switchOff).not.toHaveBeenCalled();
+
+    const unknown = fixture(undefined);
+    unknown.authority.readThread.mockReturnValue(undefined as never);
+    expect(await unknown.service.execute(ids.window, revokeCommand)).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "invalid" },
+    });
+    expect(unknown.grants.switchOff).not.toHaveBeenCalled();
+  });
+
+  it("ends the grant and does not report it granted when the shell had already exited at launch", async () => {
+    const revoked = {
+      status: "revoked",
+      grantId: granted.grantId,
+      threadId: ids.thread,
+      terminalId: ids.terminal,
+      reason: "terminal-not-started",
+      revokedAt: "2026-10-13T09:01:00.000Z",
+    } as const;
+    const { service, grants } = fixture(
+      { kind: "granted", outcome: granted, credentialReferences: references },
+      true,
+      { launchStatus: "exited" },
+    );
+    grants.abandon.mockReturnValue(revoked);
+
+    const result = await service.execute(ids.window, startWithGrant, { initiator: "user" });
+
+    expect(grants.abandon).toHaveBeenCalledWith(ids.terminal);
+    expect(result).toMatchObject({
+      kind: "terminal-state",
+      state: "exited",
+      browserGrant: revoked,
+    });
+    expect(JSON.stringify(result)).not.toContain('"granted"');
+  });
+});

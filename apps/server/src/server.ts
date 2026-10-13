@@ -46,6 +46,7 @@ import {
   decodeCodeRepositoryId,
   decodeCodeThreadId,
   decodeWorkThreadId,
+  THREAD_RETENTION_EVENT_NAMES,
   ThreadCreationRootId,
   decodeThreadWorkingDirectory,
   decodeThreadMessageQueueScope,
@@ -428,6 +429,7 @@ import { CodeProjectAccess } from "./codeProjectAccess";
 import { isRoutineHostScope } from "./routineHostScope";
 import { ProjectRootPort } from "./projectRootPort";
 import { ProjectTerminalService } from "./code/projectTerminalService";
+import { TerminalBrowserGrantService } from "./code/terminalBrowserGrantService";
 import { ProjectBrowserService } from "./browser/projectBrowserService";
 import { WorkProjectStatusFiles } from "./work/workProjectStatusFiles";
 import { WorkProjectStatusReader, listWorkFolderTopLevel } from "./work/workProjectStatusReader";
@@ -1920,6 +1922,7 @@ export function startOctantServer(
       },
     });
     let browserToolApprovalService: BrowserToolApprovalService | undefined;
+    let terminalBrowserGrants: TerminalBrowserGrantService | undefined;
     const codeSessionAuthority = new CodeSessionAuthorityStore();
     const agentRunExecutionWindows = new Map<
       AgentRun["requestId"],
@@ -1996,6 +1999,7 @@ export function startOctantServer(
         androidInputGrants.revokeWindow(String(windowId));
         extensionToolApprovalService.revokeWindow(windowId);
         browserToolApprovalService?.revokeWindow(windowId);
+        terminalBrowserGrants?.revokeWindow(windowId);
         codeSessionAuthority.revokeWindow(windowId);
         for (const [requestId, binding] of agentRunExecutionWindows) {
           if (String(binding.windowId) === String(windowId))
@@ -4888,8 +4892,73 @@ export function startOctantServer(
           };
         },
       });
+      // A grant lets a provider CLI the person types into one thread terminal
+      // drive that thread's Browser. It is served from this host's memory only,
+      // through the same Browser, approval, and authority services a managed
+      // turn uses, and the terminal's own running state is read live.
+      const grants = new TerminalBrowserGrantService({
+        readThread: persistence.readCodeThread,
+        canAccessProject: canAccessCodeProject,
+        terminalIsRunning: (terminalId) => {
+          try {
+            return codeOperationRuntime?.terminals?.attach(String(terminalId)).status === "running";
+          } catch {
+            return false;
+          }
+        },
+        browser: {
+          resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
+          automation: {
+            inspectThread: (windowId, threadId) =>
+              requireBrowserAutomationService().inspectThread(windowId, threadId),
+            create: (input) => requireBrowserAutomationService().create(input),
+            act: (input) => requireBrowserAutomationService().act(input),
+            releaseThread: (windowId, threadId) =>
+              requireBrowserAutomationService().releaseThread(windowId, threadId),
+          },
+          approvals: requireBrowserToolApprovalService(),
+        },
+        journal: persistence.journal,
+        personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      });
+      terminalBrowserGrants = grants;
+      const unsubscribeTerminalBrowserGrants = persistence.journal.subscribeCommitted((append) => {
+        for (const event of append.events) {
+          if (
+            event.eventName === "code.thread-updated@1" &&
+            event.aggregateType === "code-thread"
+          ) {
+            // An archive or completion ends the grants a thread holds at once;
+            // the next call would find it too, but the record should not wait.
+            const thread = persistence.readCodeThread(decodeCodeThreadId(event.aggregateId));
+            if (thread?.lifecycle !== "active") {
+              grants.threadSettled(event.aggregateId, "thread-archived");
+            } else if (thread.completedAt !== undefined) {
+              grants.threadSettled(event.aggregateId, "thread-completed");
+            }
+          } else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
+            const purged = event.payload as {
+              readonly mode?: unknown;
+              readonly threadId?: unknown;
+            };
+            if (purged.mode === "code" && typeof purged.threadId === "string") {
+              grants.threadSettled(purged.threadId, "thread-deleted");
+            }
+          }
+        }
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          unsubscribeTerminalBrowserGrants();
+          await grants.close();
+        }),
+      );
       codeOperationRuntime = createCodeOperationRuntime({
         liveTurns,
+        terminalBrowserGrants: grants,
         onPendingRequestWithdrawn: () => machineChangeFeed.publish(["code-navigation"]),
         gitMutationPort,
         agentRuns: agentRunPersistence,

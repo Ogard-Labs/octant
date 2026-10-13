@@ -155,6 +155,7 @@ import { TerminalProcessPort } from "./terminalProcessPort";
 import { liveCodeTestSourcePort, type CodeTestSourcePort } from "./codeDirectoryPort";
 import { createCodeAcpClientTools, type CodeAcpTerminalConfinement } from "./codeAcpClientTools";
 import { makeProcessConfinementLive } from "../process/seatbeltProfile";
+import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
 import { TerminalService } from "./terminalService";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { boundedDiff, draftGitText, type CodeGitDraftResult } from "./codeGitDraftService";
@@ -256,6 +257,15 @@ export interface CodeOperationRuntimeOptions {
   readonly resolveCheckoutRoot: CodeOperationAuthorityPort["resolveCheckoutRoot"];
   readonly resolveProviderDriver: (thread: CodeThread) => Awaitable<ProviderDriver | undefined>;
   readonly credentialResolver: CredentialResolver;
+  /**
+   * Mints the Browser grant a thread terminal can be started with. Its two
+   * variables reach the shell through the terminal's credential path, so the
+   * grant is resolved here before the host's own credentials are asked.
+   */
+  readonly terminalBrowserGrants?: Pick<
+    TerminalBrowserGrantService,
+    "open" | "abandon" | "switchOff" | "terminalClosed" | "resolveCredential"
+  >;
   readonly resolvePullRequestTarget: (
     threadId: CodeThreadId,
   ) => Promise<GhDeliveryTarget | undefined>;
@@ -674,9 +684,14 @@ export function createCodeOperationRuntime(
     inheritedEnvironment: options.inheritedEnvironment ?? process.env,
     credentials: {
       resolve: async (reference) => {
-        const value = await options.credentialResolver.resolve(reference);
-        if (value === undefined) throw new Error("Credential is unavailable.");
-        return value;
+        const hostCredential = async (hostReference: string) => {
+          const value = await options.credentialResolver.resolve(hostReference);
+          if (value === undefined) throw new Error("Credential is unavailable.");
+          return value;
+        };
+        return options.terminalBrowserGrants === undefined
+          ? hostCredential(reference)
+          : options.terminalBrowserGrants.resolveCredential(reference, hostCredential);
       },
     },
   });
@@ -820,6 +835,9 @@ export function createCodeOperationRuntime(
     },
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
     terminals: terminal,
+    ...(options.terminalBrowserGrants === undefined
+      ? {}
+      : { terminalBrowserGrants: options.terminalBrowserGrants }),
     repositoryTests,
     ...(scaffolds === undefined ? {} : { scaffolds }),
     git,

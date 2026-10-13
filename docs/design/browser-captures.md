@@ -20,6 +20,9 @@ the Browser pane
   tools name themselves, the take route names the person, and a caller that names
   no one keeps nothing. A paired device keeps nothing.
 - The thread-less Project browser keeps nothing.
+- A CLI the person types into a thread terminal that holds a Browser grant keeps
+  nothing: no journal actor describes it, so it names no one
+  ([Terminal Browser grant](terminal-browser-grant.md)).
 - Keeping writes only under the data directory, never a Project. Plan mode still
   refuses the agent's Browser operations as the architecture states.
 

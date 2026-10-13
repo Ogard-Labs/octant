@@ -124,6 +124,9 @@ import {
   ProjectTerminalEnded,
   ProjectTerminalStarted,
   ProductFeedbackDiscarded,
+  TERMINAL_BROWSER_GRANT_EVENT_NAMES,
+  TerminalBrowserGrantIssued,
+  TerminalBrowserGrantRevoked,
   ThreadCheckpointForgotten,
   ThreadCheckpointMarked,
   ThreadCheckpointRestored,
@@ -419,6 +422,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(PRODUCT_FEEDBACK_DELIVERED, 1, ProductFeedbackDelivered)
     .register(PROJECT_TERMINAL_EVENT_NAMES.started, 1, ProjectTerminalStarted)
     .register(PROJECT_TERMINAL_EVENT_NAMES.ended, 1, ProjectTerminalEnded)
+    .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, 1, TerminalBrowserGrantIssued)
+    .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
     .register(THREAD_CHECKPOINT_MARKED, 1, ThreadCheckpointMarked)
     .register(THREAD_CHECKPOINT_FORGOTTEN, 1, ThreadCheckpointForgotten)
     .register(THREAD_CHECKPOINT_RESTORED, 1, ThreadCheckpointRestored)

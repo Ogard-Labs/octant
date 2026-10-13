@@ -81,6 +81,7 @@ export * from "./previews";
 export * from "./productFeedback";
 export * from "./projectBrowser";
 export * from "./projectTerminals";
+export * from "./terminalBrowserGrants";
 export * from "./projects";
 export * from "./projectView";
 export * from "./sidebarThreadStatus";
