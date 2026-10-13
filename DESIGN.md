@@ -1708,7 +1708,8 @@ request from the person.
   through the providers. Renderer state is presentation only.
 - The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
   Fully quit share one guarded shutdown: refresh current host activity, ask for
-  confirmation when a turn is active or needs attention, then stop only the
+  confirmation when a turn is active or the desktop cannot confirm what the host
+  is running, then stop only the
   desktop-owned host and its child resources. Cancellation leaves both app and
   host running.
 

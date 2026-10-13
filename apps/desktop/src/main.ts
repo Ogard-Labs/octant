@@ -155,7 +155,11 @@ import {
   shutdownManagedServer,
   waitForStorageReady,
 } from "./serverProcess";
-import { createHostLifecycleController, type LocalHostDescriptor } from "./hostLifecycle";
+import {
+  createHostLifecycleController,
+  workInFlight,
+  type LocalHostDescriptor,
+} from "./hostLifecycle";
 import { createDesktopBackendSupervisor } from "./desktopBackendSupervision";
 import {
   buildMenuBarItems,
@@ -1997,7 +2001,11 @@ async function restartDesktopHost(): Promise<LocalHostDescriptor> {
     refreshWindowAuthorities: refreshDesktopWindowAuthorities,
   });
   if (outcome.windowAuthorities === "attention-required") {
-    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    hostLifecycle.setActivity({
+      activeAgentCount: 0,
+      attentionRequired: true,
+      activityUnconfirmed: true,
+    });
     updateHostTray();
   }
   return outcome.host;
@@ -2013,7 +2021,11 @@ const desktopBackendSupervisor = createDesktopBackendSupervisor({
       "Octant could not restart its local server",
       formatDesktopStartupFailure(error),
     );
-    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    hostLifecycle.setActivity({
+      activeAgentCount: 0,
+      attentionRequired: true,
+      activityUnconfirmed: true,
+    });
     updateHostTray();
   },
 });
@@ -2677,7 +2689,11 @@ async function refreshHostActivity(): Promise<void> {
     }
   }
   if (probe === undefined || probe.instanceId !== snapshot.instanceId) {
-    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    hostLifecycle.setActivity({
+      activeAgentCount: 0,
+      attentionRequired: true,
+      activityUnconfirmed: true,
+    });
     updateHostTray();
     return;
   }
@@ -2686,7 +2702,11 @@ async function refreshHostActivity(): Promise<void> {
     snapshot.instanceId === undefined ||
     snapshot.ownership === undefined
   ) {
-    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    hostLifecycle.setActivity({
+      activeAgentCount: 0,
+      attentionRequired: true,
+      activityUnconfirmed: true,
+    });
     updateHostTray();
     return;
   }
@@ -2697,7 +2717,11 @@ async function refreshHostActivity(): Promise<void> {
       ownership: snapshot.ownership,
     });
   } catch {
-    hostLifecycle.setActivity({ activeAgentCount: 0, attentionRequired: true });
+    hostLifecycle.setActivity({
+      activeAgentCount: 0,
+      attentionRequired: true,
+      activityUnconfirmed: true,
+    });
     updateHostTray();
     return;
   }
@@ -3291,12 +3315,10 @@ function installIpcHandlers(): void {
     // Read here rather than taken from the renderer: this is the same activity
     // the quit guard already trusts to decide whether stopping would interrupt
     // something, and a second notion of "busy" would disagree with it exactly
-    // when it mattered.
-    const host = hostLifecycle.snapshot();
-    return appUpdates().install({
-      activeAgentCount: host.activeAgentCount,
-      attentionRequired: host.attentionRequired,
-    });
+    // when it mattered. `workInFlight` is that shared reading; the host's
+    // `attentionRequired` is not, because a provider that only needs sign-in
+    // sets it with nothing running.
+    return appUpdates().install(workInFlight(hostLifecycle.snapshot()));
   });
   ipcMain.handle(IPC_CHANNELS.appUpdateAutomatic, (event, value: unknown) => {
     ownedTopLevelWindowContext(event);

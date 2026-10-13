@@ -3843,6 +3843,22 @@ describe("ProviderService", () => {
     expect(missing.runtime.observedState(instanceId)).toBeUndefined();
   });
 
+  it("stops reporting a provider that needs sign-in once the person switches it off", async () => {
+    const fixture = serviceFixture({ instances: [provider()] });
+    fixture.runtime.setObservedState(observation({ readiness: "unauthenticated" }));
+    expect(fixture.runtime.attentionRequired()).toBe(true);
+
+    await fixture.service.execute(windowId, {
+      kind: "set-provider-enabled",
+      instanceId,
+      expectedVersion: 1,
+      enabled: false,
+    });
+
+    expect(fixture.runtime.observedState(instanceId)).toBeUndefined();
+    expect(fixture.runtime.attentionRequired()).toBe(false);
+  });
+
   it("probes through a scoped provider driver when one is registered", async () => {
     const fixture = serviceFixture({ instances: [provider()] });
     const probe = vi.fn(() => Effect.succeed(observation()));

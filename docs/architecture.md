@@ -4636,8 +4636,13 @@ there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
   most 4,096 characters) and fail with it; notes for the running build are a
   bundled file read from disk, so What's New never adds a request.
 - The person controls application: an update is staged and applied on a
-  relaunch they start, and install waits while agents are active or a thread
-  needs attention. Automatic checks are a setting; the host starts with them
+  relaunch they start, and install waits while agents are active (a thread
+  parked on an approval or question is still an active agent) or while the
+  desktop cannot confirm what the host is running. A provider that is not
+  signed in, not installed, or disabled never holds an install back: quitting
+  asks on the same terms, because both read the one `workInFlight` reading of
+  the host rather than its `attentionRequired` flag, which also marks the menu
+  bar for provider readiness. Automatic checks are a setting; the host starts with them
   off until the persisted choice arrives, then checks daily. A check is a
   plain GET carrying only version, platform, and architecture (the ring is in
   the path); it is not a telemetry channel.
