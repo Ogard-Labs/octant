@@ -220,7 +220,14 @@ export type CompactionSummaryOutcome =
 export interface CompactSessionInput {
   readonly subject: ContextSubjectRef;
   readonly compactionId: ContextCompactionId;
+  /** The conversation as it stood when the request was journaled. */
   readonly conversation: ReadonlyArray<SessionConversationMessage>;
+  /**
+   * The ledger version {@link ContextHarnessService.requestCompaction} returned.
+   * The commit expects it, so anything journaled after the request, however
+   * soon, fails the compaction instead of being undone by it.
+   */
+  readonly plannedVersion: number;
   readonly generateSummary: (
     request: GenerateContextSummaryRequest,
   ) => Promise<CompactionSummaryOutcome>;
@@ -797,7 +804,13 @@ export class ContextHarnessService {
     readonly subject: ContextSubjectRef;
     readonly compactionId: ContextCompactionId;
     readonly executor: ContextCompactionExecutor;
-  }): { readonly kind: "requested" | "existing"; readonly record: ContextCompactionRecord } {
+  }):
+    | {
+        readonly kind: "requested";
+        readonly record: ContextCompactionRecord;
+        readonly version: number;
+      }
+    | { readonly kind: "existing"; readonly record: ContextCompactionRecord } {
     this.#assertReady();
     const existing = this.compaction(input.subject, input.compactionId);
     if (existing !== undefined) return { kind: "existing", record: existing };
@@ -823,6 +836,9 @@ export class ContextHarnessService {
         executor: input.executor,
         requestedAt,
       }),
+      // Read in the same turn of the event loop as the append, so a plan
+      // journaled while the summary is being set up is not folded into it.
+      version: this.#aggregateVersion(input.subject.aggregateId),
     };
   }
 
@@ -845,7 +861,13 @@ export class ContextHarnessService {
     if (current === undefined) {
       return this.#failCompaction(input.subject, input.compactionId, "subject-unavailable");
     }
-    const plannedVersion = this.#aggregateVersion(input.subject.aggregateId);
+    const { plannedVersion } = input;
+    // The request fixed the version and the conversation it summarizes. A plan,
+    // pin or exclusion journaled since then means the person's state is no
+    // longer the one the request saw, so nothing is sent for it.
+    if (this.#aggregateVersion(input.subject.aggregateId) !== plannedVersion) {
+      return this.#failCompaction(input.subject, input.compactionId, "context-changed");
+    }
     const selected = this.#selectCompaction(current, input.conversation);
     if (selected.kind === "nothing-to-compact") {
       // The conversation was compactable when the command was admitted.
@@ -858,112 +880,128 @@ export class ContextHarnessService {
       materials: selected.materials,
     });
     const usage = input.reportedUsage();
-    const availability = input.subjectAvailability();
+    try {
+      const availability = input.subjectAvailability();
 
-    // A purge erases the request with the thread; nothing may bring it back.
-    // The summary's own spend is host accounting and stays, or a purged
-    // thread would understate what the provider was asked to do.
-    const latest = this.compaction(input.subject, input.compactionId);
-    if (latest === undefined) {
-      this.#recordCompactionUsage(input.subject, current, usage, selected.materialTokens);
-      return { kind: "discarded" };
-    }
-    if (latest.status !== "running") return { kind: "settled", record: latest };
-    const fail = (reason: ContextCompactionFailureReason) =>
-      this.#failCompaction(input.subject, input.compactionId, reason, {
+      // A purge erases the request with the thread; nothing may bring it back.
+      // The summary's own spend is host accounting and stays, or a purged
+      // thread would understate what the provider was asked to do.
+      const latest = this.compaction(input.subject, input.compactionId);
+      if (latest === undefined) {
+        this.#recordCompactionUsage(input.subject, current, usage, selected.materialTokens);
+        return { kind: "discarded" };
+      }
+      if (latest.status !== "running") return { kind: "settled", record: latest };
+      const fail = (reason: ContextCompactionFailureReason) =>
+        this.#failCompaction(input.subject, input.compactionId, reason, {
+          usage,
+          basePlan: current,
+          materialTokens: selected.materialTokens,
+        });
+      // An ordinary delete keeps the thread's ledger until a purge, so the
+      // request must end here: left running, it would hold the subject until the
+      // next start closed it as interrupted. The summary is discarded either way.
+      if (availability === "deleted") return fail("subject-unavailable");
+      if (availability === "context-changed") return fail("context-changed");
+      if (outcome.kind === "failed") return fail(outcome.reason);
+      if (availability === "mode-disabled") return fail("subject-unavailable");
+      if (this.#aggregateVersion(input.subject.aggregateId) !== plannedVersion) {
+        return fail("context-changed");
+      }
+      const summaryTokens = outcome.summary.summaryTokens;
+      if (summaryTokens.kind !== "known" || summaryTokens.tokens >= selected.materialTokens) {
+        return fail("summary-not-smaller");
+      }
+      const summary = decodeContextSummary({
+        id: this.#uuid(),
+        sourceEntryIds: selected.entryIds,
+        providerInstanceId: manifest.providerInstanceId,
+        modelId: manifest.modelId,
+        createdAt: decodeTimestamp(this.#clock()),
+        usageCount: 0,
+        summaryTokens,
+        originalTokens: {
+          kind: "known",
+          tokens: selected.materialTokens,
+          accuracy: "conservative-heuristic",
+        },
+        estimatedSavingsTokens: selected.materialTokens - summaryTokens.tokens,
+        replacedSummaryIds: selected.replacedSummaryIds,
+      });
+      const usageReconciliation =
+        usage === undefined
+          ? undefined
+          : this.#compactionUsage(current, usage, selected.materialTokens);
+      let snapshot: ContextInspectorSnapshot;
+      try {
+        snapshot = this.#commitSummary(current, summary, outcome.summary.content, {
+          expectedVersion: plannedVersion,
+          events: ({ plan, timestamp }) => {
+            const tokensBefore = current.next.plan.plannedInputTokens;
+            const tokensAfter = plan.plannedInputTokens;
+            const receipt = decodeContextCompactionReceipt({
+              compactionId: input.compactionId,
+              subject: input.subject,
+              executor: hostExecutor(current),
+              trigger: "requested",
+              // Both figures are the planner's own estimate of the same request
+              // before and after, so their difference is an estimate too.
+              tokensBefore: {
+                kind: "known",
+                tokens: tokensBefore,
+                accuracy: "conservative-heuristic",
+              },
+              tokensAfter: {
+                kind: "known",
+                tokens: tokensAfter,
+                accuracy: "conservative-heuristic",
+              },
+              tokensFreed: {
+                kind: "estimated",
+                tokens: Math.max(0, tokensBefore - tokensAfter),
+                accuracy: "conservative-heuristic",
+              },
+              summary: {
+                visibility: "stored",
+                summaryId: summary.id,
+                summaryTokens,
+                throughTurnId: selected.throughExchangeKey,
+              },
+              usage: compactionUsageOf(usageReconciliation),
+              completedAt: timestamp,
+            });
+            return [
+              ...(usageReconciliation === undefined
+                ? []
+                : [
+                    this.#pending("context.usage-reconciled@1", {
+                      reconciliation: usageReconciliation,
+                    }),
+                  ]),
+              this.#pending(CONTEXT_COMPACTION_EVENT_NAMES.completed, { receipt }),
+            ];
+          },
+        });
+      } catch (error) {
+        if (error instanceof ConcurrencyConflict) return fail("context-changed");
+        throw error;
+      }
+      const completed = this.compaction(input.subject, input.compactionId);
+      if (completed === undefined) {
+        throw new ContextHarnessError("unavailable", "Compaction was not recorded.");
+      }
+      return { kind: "settled", record: completed, snapshot };
+    } catch (error) {
+      // Everything above that can throw runs after the provider was paid. A
+      // request still running here had nothing journaled for it, usage
+      // included, so the failure carries what the provider reported.
+      if (this.compaction(input.subject, input.compactionId)?.status !== "running") throw error;
+      return this.#failCompaction(input.subject, input.compactionId, "summary-failed", {
         usage,
         basePlan: current,
         materialTokens: selected.materialTokens,
       });
-    // An ordinary delete keeps the thread's ledger until a purge, so the
-    // request must end here: left running, it would hold the subject until the
-    // next start closed it as interrupted. The summary is discarded either way.
-    if (availability === "deleted") return fail("subject-unavailable");
-    if (availability === "context-changed") return fail("context-changed");
-    if (outcome.kind === "failed") return fail(outcome.reason);
-    if (availability === "mode-disabled") return fail("subject-unavailable");
-    if (this.#aggregateVersion(input.subject.aggregateId) !== plannedVersion) {
-      return fail("context-changed");
     }
-    const summaryTokens = outcome.summary.summaryTokens;
-    if (summaryTokens.kind !== "known" || summaryTokens.tokens >= selected.materialTokens) {
-      return fail("summary-not-smaller");
-    }
-    const summary = decodeContextSummary({
-      id: this.#uuid(),
-      sourceEntryIds: selected.entryIds,
-      providerInstanceId: manifest.providerInstanceId,
-      modelId: manifest.modelId,
-      createdAt: decodeTimestamp(this.#clock()),
-      usageCount: 0,
-      summaryTokens,
-      originalTokens: {
-        kind: "known",
-        tokens: selected.materialTokens,
-        accuracy: "conservative-heuristic",
-      },
-      estimatedSavingsTokens: selected.materialTokens - summaryTokens.tokens,
-      replacedSummaryIds: selected.replacedSummaryIds,
-    });
-    const usageReconciliation =
-      usage === undefined
-        ? undefined
-        : this.#compactionUsage(current, usage, selected.materialTokens);
-    let snapshot: ContextInspectorSnapshot;
-    try {
-      snapshot = this.#commitSummary(current, summary, outcome.summary.content, {
-        expectedVersion: plannedVersion,
-        events: ({ plan, timestamp }) => {
-          const tokensBefore = current.next.plan.plannedInputTokens;
-          const tokensAfter = plan.plannedInputTokens;
-          const receipt = decodeContextCompactionReceipt({
-            compactionId: input.compactionId,
-            subject: input.subject,
-            executor: hostExecutor(current),
-            trigger: "requested",
-            // Both figures are the planner's own estimate of the same request
-            // before and after, so their difference is an estimate too.
-            tokensBefore: {
-              kind: "known",
-              tokens: tokensBefore,
-              accuracy: "conservative-heuristic",
-            },
-            tokensAfter: { kind: "known", tokens: tokensAfter, accuracy: "conservative-heuristic" },
-            tokensFreed: {
-              kind: "estimated",
-              tokens: Math.max(0, tokensBefore - tokensAfter),
-              accuracy: "conservative-heuristic",
-            },
-            summary: {
-              visibility: "stored",
-              summaryId: summary.id,
-              summaryTokens,
-              throughTurnId: selected.throughExchangeKey,
-            },
-            usage: compactionUsageOf(usageReconciliation),
-            completedAt: timestamp,
-          });
-          return [
-            ...(usageReconciliation === undefined
-              ? []
-              : [
-                  this.#pending("context.usage-reconciled@1", {
-                    reconciliation: usageReconciliation,
-                  }),
-                ]),
-            this.#pending(CONTEXT_COMPACTION_EVENT_NAMES.completed, { receipt }),
-          ];
-        },
-      });
-    } catch (error) {
-      if (error instanceof ConcurrencyConflict) return fail("context-changed");
-      throw error;
-    }
-    const completed = this.compaction(input.subject, input.compactionId);
-    if (completed === undefined) {
-      throw new ContextHarnessError("unavailable", "Compaction was not recorded.");
-    }
-    return { kind: "settled", record: completed, snapshot };
   }
 
   /** Records a requested compaction that ended without changing the session. */

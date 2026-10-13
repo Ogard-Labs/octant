@@ -9,7 +9,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { ContextHarnessError } from "./context/contextHarnessService";
-import { ContextCompactionRefused } from "./context/sessionCompaction";
+import type { ContextCompactionRefusal } from "./context/sessionCompaction";
 import { readPrincipalRouteContext } from "./principalRouteContext";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
 import { isLoopbackHostname } from "./shellRoutes";
@@ -31,7 +31,7 @@ export interface ContextRouteService {
   readonly execute: (
     command: ContextCommand,
     principal: ContextRoutePrincipal,
-  ) => ContextCommandResult;
+  ) => ContextCommandResult | ContextCompactionRefusal;
 }
 
 export interface ContextRouteDependencies {
@@ -141,19 +141,20 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
           origin,
         );
       }
-      return response(dependencies.service.execute(command, principal), 200, origin);
-    } catch (error) {
-      if (error instanceof ContextCompactionRefused) {
+      const result = dependencies.service.execute(command, principal);
+      if (result.kind === "compaction-refused") {
         return response(
           {
             category: "compaction-refused",
             message: "Octant cannot compact this session now.",
-            reason: error.reason,
+            reason: result.reason,
           } satisfies ContextFailure,
           409,
           origin,
         );
       }
+      return response(result, 200, origin);
+    } catch (error) {
       if (error instanceof ContextHarnessError) return harnessFailure(error, origin);
       if (isDecodeError(error)) {
         return failure("invalid", "Context request is invalid.", 400, origin);

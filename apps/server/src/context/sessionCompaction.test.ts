@@ -9,19 +9,22 @@ import {
   decodeContextEntry,
   decodeContextSubjectRef,
   decodeModelContextLimits,
+  decodeProviderInstance,
   decodeProviderInstanceId,
   decodeProviderModelId,
   decodeProviderServiceLimits,
   type ContextCompactionRefusalReason,
   type ContextSubjectRef,
+  type ProjectProviderPolicy,
+  type ProviderInstance,
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { deriveCatalogEpoch } from "./capabilityCatalog";
 import { ContextHarnessService, type SessionConversationMessage } from "./contextHarnessService";
 import { makeProviderCapacityScheduler } from "./contextRuntime";
 import {
-  ContextCompactionRefused,
   SessionCompactionService,
+  type SessionCompactionStart,
   type SessionCompactionThread,
 } from "./sessionCompaction";
 import { Journal } from "../persistence/journal";
@@ -38,6 +41,10 @@ const modelId = decodeProviderModelId("model-a");
 const threadId = "82000000-0000-4000-8000-000000000002";
 const subject = decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: threadId });
 const compactionId = decodeContextCompactionId("82000000-0000-4000-8000-000000000003");
+const workSubject = decodeContextSubjectRef({
+  aggregateType: "work-thread",
+  aggregateId: threadId,
+});
 const activeScope = {
   mode: { referenceId: "mode:chat", revision: 1 },
   project: { referenceId: "project:none", revision: 1 },
@@ -117,6 +124,10 @@ describe("compacting a session on request", () => {
       "User: And the cache?",
       "Assistant: Invalidate it after the new key is published.",
     ]);
+    // A summary request is text in, text out: it offers the model no tool,
+    // and the session it starts names none.
+    expect(world.provider.sentTools).toEqual([]);
+    expect(world.provider.started).not.toHaveProperty("tools");
     world.close();
   });
 
@@ -190,6 +201,49 @@ describe("compacting a session on request", () => {
         .inspect(subject)
         .next.manifest.entries.some((entry) => entry.state === "summarized"),
     ).toBe(false);
+    world.close();
+  });
+
+  it("fails rather than undo a turn planned before the summary request was sent", async () => {
+    const world = createWorld();
+    planSession(world);
+
+    world.service.start(command(), "local-window");
+    // The request is journaled and the summary not yet asked for.
+    planSession(world);
+    await world.service.settled();
+
+    expect(world.harness.latestCompaction(subject)).toMatchObject({
+      status: "failed",
+      reason: "context-changed",
+    });
+    expect(world.provider.sends).toBe(0);
+    expect(
+      world.harness
+        .inspect(subject)
+        .next.manifest.entries.some((entry) => entry.state === "summarized"),
+    ).toBe(false);
+    world.close();
+  });
+
+  it("records what the provider reported when the compaction fails after the summary returned", async () => {
+    const world = createWorld({
+      onSend: () => {
+        world.state.readThrows = true;
+      },
+    });
+    planSession(world);
+
+    world.service.start(command(), "local-window");
+    await world.service.settled();
+
+    expect(world.harness.latestCompaction(subject)).toMatchObject({
+      status: "failed",
+      reason: "summary-failed",
+    });
+    expect(reportedCompactionUsage(world.fixture.connection)).toEqual([
+      { input_tokens: 40, output_tokens: 12 },
+    ]);
     world.close();
   });
 
@@ -510,6 +564,138 @@ describe("compacting a session on request", () => {
     world.close();
   });
 
+  describe("a Work thread's Project provider policy", () => {
+    const otherProvider = decodeProviderInstanceId("82000000-0000-4000-8000-0000000000ff");
+    const workThread = (providerPolicy?: ProjectProviderPolicy): SessionCompactionThread => ({
+      mode: "work",
+      projectId: "82000000-0000-4000-8000-0000000000aa",
+      providerInstanceId,
+      modelId,
+      ...(providerPolicy === undefined ? {} : { providerPolicy }),
+    });
+
+    it.each<{ readonly name: string; readonly policy: ProjectProviderPolicy }>([
+      {
+        name: "an allow-list that leaves it out",
+        policy: { mode: "whitelist", providerInstanceIds: [otherProvider] },
+      },
+      {
+        name: "an EU or zero-retention policy it does not meet",
+        policy: { mode: "eu-zdr", providerInstanceIds: [] },
+      },
+    ])(
+      "refuses to compact when $name before anything is journaled, reserved, or sent",
+      ({ policy }) => {
+        const world = createWorld();
+        planSession(world, workSubject);
+        world.state.thread = workThread(policy);
+        const head = world.fixture.journal.headSequence();
+
+        // The window is never offered a compaction the command would refuse.
+        expect(world.service.inspect(workSubject, undefined, "local-window").compaction).toEqual({
+          status: "refused",
+          reason: "provider-unavailable",
+        });
+        expect(refusalOf(() => world.service.start(command(workSubject), "local-window"))).toBe(
+          "provider-unavailable",
+        );
+        expect(world.fixture.journal.headSequence()).toBe(head);
+        expect(world.harness.latestCompaction(workSubject)).toBeUndefined();
+        expect(world.reads.spendAdmissions).toBe(0);
+        expect(world.capacity.snapshot(providerInstanceId)).toEqual({
+          allocated: { requests: 0, tokens: 0, concurrency: 0 },
+          queue: [],
+        });
+        // The provider's driver is never even built, so it cannot be asked.
+        expect(world.reads.drivers).toBe(0);
+        expect(world.provider.sends).toBe(0);
+        world.close();
+      },
+    );
+
+    it.each<{
+      readonly name: string;
+      readonly policy: ProjectProviderPolicy | undefined;
+      readonly dataTags?: ReadonlyArray<"eu" | "zdr">;
+    }>([
+      { name: "a Project that set no policy", policy: undefined },
+      {
+        name: "an allow-list that names it",
+        policy: { mode: "whitelist", providerInstanceIds: [providerInstanceId] },
+      },
+      {
+        name: "an EU policy it meets",
+        policy: { mode: "eu-zdr", providerInstanceIds: [] },
+        dataTags: ["eu"],
+      },
+    ])("compacts as before under $name", async ({ policy, dataTags }) => {
+      const world = createWorld();
+      planSession(world, workSubject);
+      world.state.thread = workThread(policy);
+      world.state.provider = providerInstance(dataTags === undefined ? {} : { dataTags });
+
+      expect(world.service.inspect(workSubject, undefined, "local-window").compaction).toEqual({
+        status: "available",
+      });
+      world.service.start(command(workSubject), "local-window");
+      await world.service.settled();
+
+      expect(world.harness.latestCompaction(workSubject)).toMatchObject({ status: "completed" });
+      expect(world.provider.sends).toBe(1);
+      world.close();
+    });
+  });
+
+  it.each<{
+    readonly name: string;
+    readonly arrange: (world: World) => void;
+    readonly principal?: "local-window" | "remote-device";
+    readonly readsConversation: boolean;
+  }>([
+    {
+      name: "a paired device",
+      arrange: () => undefined,
+      principal: "remote-device",
+      readsConversation: false,
+    },
+    {
+      name: "a thread whose mode is disabled",
+      arrange: (world) => {
+        world.state.modeEnabled = false;
+      },
+      readsConversation: false,
+    },
+    {
+      name: "a thread whose runtime owns its conversation",
+      arrange: (world) => {
+        world.state.ownership = "provider";
+      },
+      readsConversation: false,
+    },
+    {
+      name: "a thread with a turn running",
+      arrange: (world) => {
+        world.state.turnRunning = true;
+      },
+      readsConversation: true,
+    },
+  ])(
+    "inspects $name without building a provider driver or reading the spend ceiling",
+    ({ arrange, principal, readsConversation }) => {
+      const world = createWorld();
+      planSession(world);
+      arrange(world);
+
+      const { compaction } = world.service.inspect(subject, undefined, principal ?? "local-window");
+
+      expect(compaction?.status).toBe("refused");
+      expect(world.reads.drivers).toBe(0);
+      expect(world.reads.spendSnapshots).toBe(0);
+      expect(world.reads.conversations > 0).toBe(readsConversation);
+      world.close();
+    },
+  );
+
   it("offers compaction to the window when nothing stands in the way", () => {
     const world = createWorld();
     planSession(world);
@@ -582,9 +768,34 @@ interface WorldState {
   driverThrows: boolean;
   ownership: "host" | "provider";
   conversation: ReadonlyArray<SessionConversationMessage>;
+  /** The provider's stored facts, as the Project's provider policy reads them. */
+  provider: ProviderInstance;
+  /** Makes the thread read throw, as the host's storage can. */
+  readThrows: boolean;
 }
 
 type World = ReturnType<typeof createWorld>;
+
+function providerInstance(overrides: { readonly dataTags?: ReadonlyArray<"eu" | "zdr"> } = {}) {
+  return decodeProviderInstance({
+    id: providerInstanceId,
+    displayName: "Test endpoint",
+    driverKind: "openai-compatible",
+    configuration: {
+      kind: "openai-compatible-http",
+      baseUrl: "https://example.invalid/v1/",
+      authentication: "bearer",
+      protocol: "responses",
+      manualModelIds: ["model-a"],
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    ...(overrides.dataTags === undefined ? {} : { dataTags: overrides.dataTags }),
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
 
 function createWorld(providerOptions: FakeProviderOptions = {}) {
   const fixture = createFixture();
@@ -597,7 +808,10 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
     driverThrows: false,
     ownership: "host",
     conversation,
+    provider: providerInstance(),
+    readThrows: false,
   };
+  const reads = { drivers: 0, conversations: 0, spendAdmissions: 0, spendSnapshots: 0 };
   const capacity = makeProviderCapacityScheduler({
     now: () => Date.parse(now),
     random: () => 0,
@@ -612,19 +826,26 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
     threadExists: () => true,
     projectExists: () => true,
   });
+  const threadsFor = () => ({
+    read: () => {
+      if (state.readThrows) throw new Error("The thread store is unavailable.");
+      return state.thread;
+    },
+    turnRunning: () => state.turnRunning,
+    conversation: () => {
+      reads.conversations += 1;
+      return state.conversation;
+    },
+    scratchRoot: async () => "/tmp/octant-session-compaction/thread",
+  });
   const service = new SessionCompactionService({
     harness: fixture.harness,
-    threads: {
-      "chat-thread": {
-        read: () => state.thread,
-        turnRunning: () => state.turnRunning,
-        conversation: () => state.conversation,
-        scratchRoot: async () => "/tmp/octant-session-compaction/thread",
-      },
-    },
+    threads: { "chat-thread": threadsFor(), "work-thread": threadsFor() },
     modeEnabled: () => state.modeEnabled,
     conversationOwner: () => (state.ownership === "provider" ? "runtime" : "host"),
+    providerFacts: () => ({ provider: state.provider }),
     availableDriver: () => {
+      reads.drivers += 1;
       if (state.driverThrows) throw new Error("Provider driver is not effective.");
       if (!state.providerAvailable) return undefined;
       return state.ownership === "provider"
@@ -632,7 +853,17 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
         : provider.driver;
     },
     capacity,
-    spendCeiling: spend,
+    spendCeiling: {
+      admit: (input) => {
+        reads.spendAdmissions += 1;
+        return spend.admit(input);
+      },
+      settle: (input) => spend.settle(input),
+      snapshot: (input) => {
+        reads.spendSnapshots += 1;
+        return spend.snapshot(input);
+      },
+    },
     uuid: fixture.uuid,
     summaryTimeoutMs: 100,
     summaryShutdownTimeoutMs: 50,
@@ -643,6 +874,7 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
     harness: fixture.harness,
     provider,
     state,
+    reads,
     capacity,
     spend,
     service,
@@ -650,9 +882,9 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
   };
 }
 
-function planSession(world: World): void {
+function planSession(world: World, target: ContextSubjectRef = subject): void {
   world.harness.planTurn({
-    subject,
+    subject: target,
     displayLabel: "Signing keys",
     requestShape: "chat-turn",
     modelLimitObservations: [modelLimits()],
@@ -699,14 +931,11 @@ function reportedCompactionUsage(
     .all() as ReadonlyArray<{ readonly input_tokens: number; readonly output_tokens: number }>;
 }
 
-function refusalOf(start: () => unknown): ContextCompactionRefusalReason | undefined {
-  try {
-    start();
-  } catch (error) {
-    if (error instanceof ContextCompactionRefused) return error.reason;
-    throw error;
-  }
-  return undefined;
+function refusalOf(
+  start: () => SessionCompactionStart,
+): ContextCompactionRefusalReason | undefined {
+  const result = start();
+  return result.kind === "compaction-refused" ? result.reason : undefined;
 }
 
 function message(
@@ -803,15 +1032,27 @@ interface FakeProviderOptions {
 
 /** A summary provider that answers one prompt with a fixed summary and usage report. */
 function fakeProvider(options: FakeProviderOptions) {
-  const recorded = { sends: 0, materials: [] as ReadonlyArray<string> };
+  const recorded = {
+    sends: 0,
+    materials: [] as ReadonlyArray<string>,
+    started: undefined as object | undefined,
+    sentTools: undefined as ReadonlyArray<unknown> | undefined,
+  };
   const queue = Effect.runSync(Queue.unbounded<never>());
   const connection = {
     subscribe: Effect.succeed(Stream.fromQueue(queue)),
-    start: (input: { readonly sessionId: string }) =>
-      Effect.succeed({ sessionId: input.sessionId }),
-    send: (input: { readonly sessionId: string; readonly prompt: string }) =>
+    start: (input: { readonly sessionId: string }) => {
+      recorded.started = input;
+      return Effect.succeed({ sessionId: input.sessionId });
+    },
+    send: (input: {
+      readonly sessionId: string;
+      readonly prompt: string;
+      readonly tools: ReadonlyArray<unknown>;
+    }) =>
       Effect.suspend(() => {
         recorded.sends += 1;
+        recorded.sentTools = input.tools;
         recorded.materials = input.prompt
           .split("\n")
           .filter((line) => /^(User|Assistant): /.test(line));
@@ -851,6 +1092,12 @@ function fakeProvider(options: FakeProviderOptions) {
     },
     get materials() {
       return recorded.materials;
+    },
+    get started() {
+      return recorded.started;
+    },
+    get sentTools() {
+      return recorded.sentTools;
     },
   };
 }

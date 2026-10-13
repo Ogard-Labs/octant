@@ -6,8 +6,11 @@ import {
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { ContextHarnessError } from "./context/contextHarnessService";
-import { ContextCompactionRefused } from "./context/sessionCompaction";
-import { createContextRouteHandler, type ContextRoutePrincipal } from "./contextRoutes";
+import {
+  createContextRouteHandler,
+  type ContextRoutePrincipal,
+  type ContextRouteService,
+} from "./contextRoutes";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -178,9 +181,7 @@ describe("context routes", () => {
 
   it("answers a refused compaction with its reason and no private detail", async () => {
     const route = handler({
-      execute: () => {
-        throw new ContextCompactionRefused("turn-running");
-      },
+      execute: () => ({ kind: "compaction-refused", reason: "turn-running" }),
     });
 
     const response = await route(
@@ -197,7 +198,9 @@ describe("context routes", () => {
 
   it("tells the service a paired device is asking, so it refuses that device a compaction", async () => {
     const execute = vi.fn((_command: unknown, principal: ContextRoutePrincipal) => {
-      if (principal === "remote-device") throw new ContextCompactionRefused("remote-client");
+      if (principal === "remote-device") {
+        return { kind: "compaction-refused", reason: "remote-client" } as const;
+      }
       return { kind: "compaction-started" } as never;
     });
     const route = handler({ execute });
@@ -245,7 +248,10 @@ function handler(
       afterSequence: number | undefined,
       principal: ContextRoutePrincipal,
     ) => never;
-    execute: (command: unknown, principal: ContextRoutePrincipal) => never;
+    execute: (
+      command: unknown,
+      principal: ContextRoutePrincipal,
+    ) => ReturnType<ContextRouteService["execute"]>;
   }> = {},
   windowCanOpenThread: (
     windowId: WindowId,

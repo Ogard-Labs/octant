@@ -8,10 +8,17 @@ import {
   type ContextCompactionRefusalReason,
   type ContextInspectorSnapshot,
   type ContextSubjectRef,
+  type ProjectProviderPolicy,
+  type ProviderInstance,
   type ProviderInstanceId,
+  type ProviderModel,
   type ProviderModelId,
 } from "@octant/contracts";
-import { decideSessionCompaction } from "@octant/domain/context-compaction";
+import { isProviderAllowedByProjectPolicy } from "@octant/domain";
+import {
+  decideSessionCompaction,
+  type SessionCompactionFacts,
+} from "@octant/domain/context-compaction";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import type {
@@ -32,19 +39,31 @@ import {
 export type CompactSessionCommand = Extract<ContextCommand, { readonly kind: "compact-session" }>;
 
 /** A refusal decided before anything was journaled, reserved, or sent. */
-export class ContextCompactionRefused extends Error {
-  override readonly name = "ContextCompactionRefused";
-
-  constructor(readonly reason: ContextCompactionRefusalReason) {
-    super("Octant refused to compact this session.");
-  }
+export interface ContextCompactionRefusal {
+  readonly kind: "compaction-refused";
+  readonly reason: ContextCompactionRefusalReason;
 }
+
+export type SessionCompactionStart = ContextCommandResult | ContextCompactionRefusal;
+
+const refused = (reason: ContextCompactionRefusalReason): ContextCompactionRefusal => ({
+  kind: "compaction-refused",
+  reason,
+});
 
 export interface SessionCompactionThread {
   readonly mode: "chat" | "work";
   readonly projectId?: string;
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
+  /**
+   * The provider policy of the Project the thread's turns are admitted under.
+   * Only a Work Project carries one; a Chat Project is a virtual container
+   * with none, so a Chat thread supplies none and its provider is never
+   * policy-refused. Absent on a Project that never set one, and read as
+   * allow-all there, as a turn reads it.
+   */
+  readonly providerPolicy?: ProjectProviderPolicy;
 }
 
 /** What one thread kind lends a compaction of its own threads. */
@@ -72,6 +91,15 @@ export interface SessionCompactionOptions {
   readonly conversationOwner: (
     providerInstanceId: ProviderInstanceId,
   ) => "runtime" | "host" | undefined;
+  /**
+   * The instance and model facts the Project's provider policy is judged on
+   * (their EU and zero-retention tags); undefined for an instance that no
+   * longer exists.
+   */
+  readonly providerFacts: (
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+  ) => { readonly provider: ProviderInstance; readonly model?: ProviderModel } | undefined;
   /** The instance's driver; undefined when it is disabled, signed out or unreachable. */
   readonly availableDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   readonly capacity: Pick<
@@ -132,20 +160,20 @@ export class SessionCompactionService {
     return { ...snapshot, compaction: this.#admission(subject, principal).availability };
   }
 
-  start(command: CompactSessionCommand, principal: Principal): ContextCommandResult {
+  start(command: CompactSessionCommand, principal: Principal): SessionCompactionStart {
     const { harness } = this.#options;
     const subject = command.subject;
     // A paired device is refused even for an id it repeats: it may not learn
     // or steer a local window's compaction.
-    if (principal !== "local-window") throw new ContextCompactionRefused("remote-client");
+    if (principal !== "local-window") return refused("remote-client");
     const existing = harness.compaction(subject, command.compactionId);
     if (existing !== undefined) return started(existing);
 
     const admission = this.#admission(subject, principal);
     if (admission.availability.status === "refused") {
-      throw new ContextCompactionRefused(admission.availability.reason);
+      return refused(admission.availability.reason);
     }
-    if (admission.run === undefined) throw new ContextCompactionRefused("no-session");
+    if (admission.run === undefined) return refused("no-session");
     const { thread, threads, driver } = admission.run;
     const planned = harness.inspect(subject);
     const safeInputBudget = planned.next.plan.safeInputBudget;
@@ -162,9 +190,7 @@ export class SessionCompactionService {
       turnUpperBoundTokens: safeInputBudget,
       countsAsTurn: false,
     });
-    if (spend?.status === "refused") {
-      throw new ContextCompactionRefused("spend-ceiling-reached");
-    }
+    if (spend?.status === "refused") return refused("spend-ceiling-reached");
     const releaseSpend = () => {
       if (spend?.status === "admitted") {
         this.#options.spendCeiling?.settle({ reservationId: spendReservationId });
@@ -196,15 +222,14 @@ export class SessionCompactionService {
       });
     } catch (error) {
       releaseSpend();
-      if (error instanceof ProviderCapacitySchedulerRejected) {
-        throw new ContextCompactionRefused("provider-unavailable");
-      }
+      if (error instanceof ProviderCapacitySchedulerRejected)
+        return refused("provider-unavailable");
       throw error;
     }
     if (submission.status !== "dispatched") {
       capacity.recordTerminal({ reservationId: capacityReservationId, outcome: "cancelled" });
       releaseSpend();
-      throw new ContextCompactionRefused("provider-unavailable");
+      return refused("provider-unavailable");
     }
     // Before the request is journaled nothing has reached the provider, so
     // both reservations return whole instead of ending as unmeasured work.
@@ -233,6 +258,10 @@ export class SessionCompactionService {
       return started(requested.record);
     }
     capacity.markRunning(capacityReservationId);
+    // Fixed in the turn of the event loop that journaled the request: a plan
+    // appended while the summary is being set up must fail this compaction,
+    // not be folded into it.
+    const conversation = threads.conversation(String(subject.aggregateId));
     const release = (usage?: ReportedCompactionUsage) => {
       const spent = usage === undefined ? 0 : usage.inputTokens + usage.outputTokens;
       // Reconcile only against usage the provider reported; an unmeasured
@@ -250,7 +279,14 @@ export class SessionCompactionService {
       }
     };
     const key = subjectKey(subject);
-    const run = this.#run(command, thread, threads, driver, release).finally(() => {
+    const run = this.#run(
+      command,
+      thread,
+      threads,
+      driver,
+      { conversation, version: requested.version },
+      release,
+    ).finally(() => {
       this.#running.delete(key);
     });
     this.#running.set(key, run);
@@ -267,6 +303,10 @@ export class SessionCompactionService {
     thread: SessionCompactionThread,
     threads: SessionCompactionThreads,
     driver: ProviderDriver,
+    basis: {
+      readonly conversation: ReadonlyArray<SessionConversationMessage>;
+      readonly version: number;
+    },
     release: (usage?: ReportedCompactionUsage) => void,
   ): Promise<void> {
     const { harness } = this.#options;
@@ -293,7 +333,8 @@ export class SessionCompactionService {
       await harness.compactSession({
         subject: command.subject,
         compactionId: command.compactionId,
-        conversation: threads.conversation(threadId),
+        conversation: basis.conversation,
+        plannedVersion: basis.version,
         generateSummary: async (request): Promise<CompactionSummaryOutcome> => {
           try {
             // Nothing cancels a requested compaction: it is no turn's child,
@@ -342,6 +383,13 @@ export class SessionCompactionService {
     }
   }
 
+  /**
+   * Decides in the order the domain names its refusals, and reads only what
+   * the answer still depends on: the facts that cost nothing first, then the
+   * conversation, and the provider driver and the spend ceiling only for a
+   * request nothing has refused yet. Inspecting a thread runs this on every
+   * read, including a paired device's, which is refused before any of it.
+   */
   #admission(subject: ContextSubjectRef, principal: Principal): Admission {
     const { harness } = this.#options;
     const kind = String(subject.aggregateType);
@@ -349,6 +397,54 @@ export class SessionCompactionService {
     const threads =
       kind === "chat-thread" || kind === "work-thread" ? this.#options.threads[kind] : undefined;
     const thread = threads?.read(threadId);
+    // Code threads are planned by Octant Harness or a runtime, and neither
+    // offers a compaction request through its connection yet.
+    const owner =
+      threads === undefined ||
+      (thread !== undefined &&
+        this.#options.conversationOwner(thread.providerInstanceId) === "runtime")
+        ? "runtime"
+        : "host";
+    const facts = {
+      principal,
+      modeEnabled: thread === undefined || this.#options.modeEnabled(thread.mode),
+      owner,
+      runtimeCompaction: "unsupported",
+      compactionRunning: false,
+      turnRunning: false,
+      hasSession: true,
+      providerAvailable: true,
+      spendCeilingReached: false,
+      somethingToCompact: true,
+    } as const satisfies SessionCompactionFacts;
+    // These refusals come before any fact that needs a read.
+    const permanent = decideSessionCompaction(facts);
+    if (permanent.status === "refused") return { availability: permanent };
+
+    const preview =
+      owner === "host" && thread !== undefined && threads !== undefined
+        ? harness.previewSessionCompaction({
+            subject,
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+            conversation: threads.conversation(threadId),
+          })
+        : undefined;
+    // The provider policy is judged before a driver is built for the provider:
+    // a driver for a provider the Project excludes must never exist to be
+    // asked, and the policy needs only stored facts.
+    const policyAllows = thread === undefined || this.#policyAllowsProvider(thread);
+    const transient = decideSessionCompaction({
+      ...facts,
+      hasSession: preview !== undefined && preview.kind !== "no-session",
+      compactionRunning:
+        this.#running.has(subjectKey(subject)) ||
+        harness.latestCompaction(subject)?.status === "running",
+      turnRunning: thread !== undefined && threads !== undefined && threads.turnRunning(threadId),
+      providerAvailable: policyAllows,
+    });
+    if (transient.status === "refused") return { availability: transient };
+
     // A driver that cannot be constructed is unavailable. Letting the throw
     // out would fail the whole inspection, not only compaction.
     let driver: ProviderDriver | undefined;
@@ -359,29 +455,12 @@ export class SessionCompactionService {
         driver = undefined;
       }
     }
-    // Code threads are planned by Octant Harness or a runtime, and neither
-    // offers a compaction request through its connection yet.
-    const owner =
-      threads === undefined ||
-      (thread !== undefined &&
-        this.#options.conversationOwner(thread.providerInstanceId) === "runtime")
-        ? "runtime"
-        : "host";
-    const preview =
-      owner === "host" && thread !== undefined && threads !== undefined
-        ? harness.previewSessionCompaction({
-            subject,
-            providerInstanceId: thread.providerInstanceId,
-            modelId: thread.modelId,
-            conversation: threads.conversation(threadId),
-          })
-        : undefined;
     const compactionBound =
-      preview?.kind === "summarize"
+      driver !== undefined && preview?.kind === "summarize"
         ? harness.inspect(subject).next.plan.safeInputBudget
         : undefined;
     const spend =
-      thread === undefined
+      thread === undefined || driver === undefined
         ? undefined
         : this.#options.spendCeiling?.snapshot({
             principalKind: "local-window",
@@ -391,15 +470,7 @@ export class SessionCompactionService {
             ...(compactionBound === undefined ? {} : { turnUpperBoundTokens: compactionBound }),
           });
     const availability = decideSessionCompaction({
-      principal,
-      modeEnabled: thread === undefined || this.#options.modeEnabled(thread.mode),
-      owner,
-      runtimeCompaction: "unsupported",
-      hasSession: preview !== undefined && preview.kind !== "no-session",
-      compactionRunning:
-        this.#running.has(subjectKey(subject)) ||
-        harness.latestCompaction(subject)?.status === "running",
-      turnRunning: thread !== undefined && threads !== undefined && threads.turnRunning(threadId),
+      ...facts,
       providerAvailable: driver !== undefined,
       spendCeilingReached: spend !== undefined && "refusal" in spend && spend.refusal !== undefined,
       somethingToCompact: preview?.kind === "summarize",
@@ -410,6 +481,23 @@ export class SessionCompactionService {
       driver !== undefined
       ? { availability, run: { thread, threads, driver } }
       : { availability };
+  }
+
+  /**
+   * Whether the Project's provider policy lets this thread's provider and model
+   * see its conversation: the rule a Work turn passes before it sends, judged
+   * by the same function. A provider that no longer exists is not allowed.
+   */
+  #policyAllowsProvider(thread: SessionCompactionThread): boolean {
+    const facts = this.#options.providerFacts(thread.providerInstanceId, thread.modelId);
+    return (
+      facts !== undefined &&
+      isProviderAllowedByProjectPolicy(
+        { providerPolicy: thread.providerPolicy },
+        facts.provider,
+        facts.model,
+      )
+    );
   }
 }
 

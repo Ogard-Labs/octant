@@ -8234,16 +8234,23 @@ export function startOctantServer(
         "work-thread": {
           read: (threadId) => {
             const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
-            return thread === undefined ||
+            if (
+              thread === undefined ||
               thread.lifecycle === "deleting" ||
               thread.lifecycle === "deleted"
-              ? undefined
-              : {
-                  mode: "work",
-                  projectId: String(thread.projectId),
-                  providerInstanceId: thread.providerInstanceId,
-                  modelId: thread.modelId,
-                };
+            ) {
+              return undefined;
+            }
+            // The policy a Work turn on this thread is admitted under.
+            const project = persistence.readProject(thread.projectId);
+            const providerPolicy = project?.type === "work" ? project.providerPolicy : undefined;
+            return {
+              mode: "work",
+              projectId: String(thread.projectId),
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+              ...(providerPolicy === undefined ? {} : { providerPolicy }),
+            };
           },
           turnRunning: (threadId) => workTurnService.isTurnActive(decodeWorkThreadId(threadId)),
           conversation: (threadId) =>
@@ -8266,6 +8273,14 @@ export function startOctantServer(
         const instance = persistence.readProviderInstance(providerInstanceId);
         if (instance === undefined) return undefined;
         return providerKeepsConversation(instance.driverKind) ? "runtime" : "host";
+      },
+      providerFacts: (providerInstanceId, modelId) => {
+        const provider = persistence.readProviderInstance(providerInstanceId);
+        if (provider === undefined) return undefined;
+        const model = persistence
+          .readProviderCatalog?.(providerInstanceId)
+          ?.models.find((candidate) => String(candidate.id) === String(modelId));
+        return { provider, ...(model === undefined ? {} : { model }) };
       },
       availableDriver: (providerInstanceId) => {
         const instance = persistence.readProviderInstance(providerInstanceId);

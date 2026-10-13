@@ -2342,7 +2342,8 @@ and reports `sessionCompaction: "unsupported"` until that record exists.
 Every runtime also refuses, before anything is journaled, with `turn-running`
 (a turn is in flight; compaction never runs inside one), `compaction-running`,
 `no-session` (nothing has been sent, so there is no session to compact),
-`provider-unavailable` (the instance is disabled, signed out or unreachable),
+`provider-unavailable` (the instance is disabled, signed out or unreachable, or
+the Project's provider policy does not allow it),
 `spend-ceiling-reached`, `mode-disabled`, or `remote-client`. The Claude decoder
 today refuses `compact_boundary` as an unsupported runtime message, so accepting
 it is part of the Claude work, not an assumption of this design.
@@ -2357,8 +2358,10 @@ far as it fits, and the rest stays as it was. A requested
 compaction skips the reuse economics that automatic maintenance applies
 (`not-net-positive`), because the person asked, but still requires the summary
 to be smaller than what it replaces. The host path records the context ledger's
-aggregate version before it asks for the summary and commits only if the
-version is unchanged when the summary returns. A pin or an exclusion edited in
+aggregate version, and the conversation it summarizes, in the same step that
+journals the request, and commits only if the version is unchanged when the
+summary returns; a plan journaled before the summary is even requested fails the
+compaction without sending anything. A pin or an exclusion edited in
 between fails the compaction as `context-changed` with nothing committed, so a
 summary planned from the earlier state can never undo that edit; the person can
 compact again. Automatic maintenance (`maintainContext`) holds the same
@@ -2379,6 +2382,14 @@ server checks it before any side effect:
 - It needs no tool approval. It reads only the thread's own conversation, sends
   it to the provider and model the thread already uses, and writes no files and
   runs no commands. The confirm dialog is the person's consent.
+- The thread's provider must pass the rule a turn on that thread passes before
+  it sends anything. For Work that is the Project's provider policy, judged by
+  the same function a Work turn uses (`isProviderAllowedByProjectPolicy`): an
+  allow-list that leaves the provider out, or an EU or zero-retention policy it
+  does not meet, refuses `provider-unavailable` before a driver is built and
+  before anything is journaled, reserved, or sent, and the thread's
+  `compaction` status reports the same refusal. A Chat Project is a virtual
+  container with no provider policy, so a Chat thread has none to pass.
 - The summarizer is always the thread's own provider instance and model. The
   command carries no summarizer choice, and the domain's
   `cross-vendor-opt-in-required` refusal stays the guard on the host path.
@@ -2435,7 +2446,9 @@ the inspector snapshot as `latestCompaction`:
   on the host path, where the text is the existing `ContextSummaryContent`; or
   `{ visibility: "runtime-only" }` where the runtime keeps the text (Codex's
   item carries none).
-- `usage`: the compaction request's own tokens and cost, as reconciled.
+- `usage`: the compaction request's own tokens and cost, as reconciled. A
+  compaction that fails after the provider reported usage journals that usage
+  with the failure, so the ledger and the spend ceilings count what was spent.
 
 Refusals answer the command as the existing `ContextFailure` with a
 `compaction-refused` category and one reason from the closed set above.

@@ -593,6 +593,9 @@ describe("WorkTurnService", () => {
         },
         modeEnabled: () => true,
         conversationOwner: () => "host",
+        providerFacts: () => ({
+          provider: fixture.persistence.readProviderInstance(),
+        }),
         availableDriver: () => summaryDriver("The brief's first turn set the launch scope."),
         capacity: makeProviderCapacityScheduler({
           now: () => Date.parse(now),
