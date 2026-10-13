@@ -2963,7 +2963,8 @@ native harness in `apps/server/src/harness`:
   hosted third-party search provider ships. A tool the thread was not offered
   refuses as `tool-unavailable` without reaching policy or a person. The harness has no
   per-host network rules, rule expiry, or learn mode yet: a tool process gets the
-  thread's OS-level `none` or `allow`. The approved design for them, not yet built, is
+  thread's OS-level `none` or `allow`. The approved design for them, with only its pure
+  decision and event schemas built so far, is
   [Harness tool egress rules](#harness-tool-egress-rules). `nativeHarnessEgress.hostile.test.ts` holds the
   adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
   Seatbelt and shows only the networked one reaching a loopback listener.
@@ -3166,8 +3167,11 @@ composer. The web shows open offers as cards above the chips.
 
 ### Harness tool egress rules
 
-**Status: design approved by the maintainer on 2026-10-13. Nothing in this
-section is implemented.** Today a harness tool process gets the thread's
+**Status: design approved by the maintainer on 2026-10-13. Phase 1 is in:
+the rule model and decision (`decideToolEgress` in
+`packages/domain/src/toolEgressPolicy.ts`) and the event schemas
+(`packages/contracts/src/toolEgress.ts`). Nothing calls them yet, so nothing
+that runs has changed.** Today a harness tool process gets the thread's
 OS-level `none` or `allow` (see Egress and hostile content above). This is the
 approved-but-unfinished design, and the phases below track its delivery. Its
 approval replaces the "no local egress proxy in this release" decision in the
