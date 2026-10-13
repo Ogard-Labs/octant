@@ -52,6 +52,12 @@ export interface SpendCeilingTurnRequest {
   readonly projectId?: string;
   readonly turnUpperBoundTokens?: number;
   readonly childSubjectIds?: ReadonlyArray<string>;
+  /**
+   * False for spend that is not a turn of its own, such as a requested context
+   * compaction: its tokens count against the ceilings, but it uses up no turn
+   * and no run time.
+   */
+  readonly countsAsTurn?: boolean;
 }
 
 interface InFlightTurn {
@@ -220,7 +226,7 @@ export class SpendCeilingService {
 
   admit(request: SpendCeilingTurnRequest): SpendCeilingAdmission {
     const admission = this.#admit(request);
-    if (admission.status === "admitted") {
+    if (admission.status === "admitted" && request.countsAsTurn !== false) {
       this.#turns.set(String(request.reservationId), {
         threadType: request.threadType,
         threadId: request.threadId,
