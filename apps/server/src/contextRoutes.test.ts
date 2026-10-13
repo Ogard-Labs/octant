@@ -1,4 +1,9 @@
-import { decodeWindowId, type ContextSubjectRef } from "@octant/contracts";
+import {
+  decodeContextSubjectRef,
+  decodeWindowId,
+  type ContextSubjectRef,
+  type WindowId,
+} from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { ContextHarnessError } from "./context/contextHarnessService";
 import { createContextRouteHandler } from "./contextRoutes";
@@ -6,10 +11,24 @@ import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const windowId = decodeWindowId("82000000-0000-4000-8000-000000000001");
-const subject = {
-  aggregateType: "project",
-  aggregateId: "82000000-0000-4000-8000-000000000002",
-} as const;
+const subjectId = "82000000-0000-4000-8000-000000000002";
+const subjectOf = (aggregateType: string): ContextSubjectRef =>
+  decodeContextSubjectRef({ aggregateType, aggregateId: subjectId });
+const subject = subjectOf("chat-thread");
+const manifestId = "82000000-0000-4000-8000-000000000003";
+const commandsFor = (commandSubject: ContextSubjectRef) =>
+  [
+    {
+      kind: "update-context-overrides",
+      subject: commandSubject,
+      expectedManifestId: manifestId,
+      overrides: {
+        pinnedEntryIds: ["82000000-0000-4000-8000-000000000004"],
+        excludedEntryIds: [],
+      },
+    },
+    { kind: "rebuild-context-plan", subject: commandSubject, expectedManifestId: manifestId },
+  ] as const;
 
 describe("context routes", () => {
   it("authenticates strict inspect and command bodies without accepting supplied window identity", async () => {
@@ -100,6 +119,59 @@ describe("context routes", () => {
     });
   });
 
+  it.each(commandsFor(subject))(
+    "refuses a $kind command for a thread this window cannot open before it has any effect",
+    async (command) => {
+      const execute = vi.fn(() => ({ kind: "context-rebuilt", snapshot: { subject } }) as never);
+      const windowCanOpenThread = vi.fn(async () => false);
+      const route = handler({ execute }, windowCanOpenThread);
+
+      const response = await route(request("/api/context/commands", command));
+
+      expect(response?.status).toBe(403);
+      await expect(response?.json()).resolves.toEqual({
+        category: "unauthorized",
+        message: "Context subject is not available to this window.",
+      });
+      expect(windowCanOpenThread).toHaveBeenCalledWith(windowId, "chat-thread", subjectId);
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["chat-thread", "work-thread", "code-thread"] as const)(
+    "runs context commands on a %s the window can open",
+    async (aggregateType) => {
+      const threadSubject = subjectOf(aggregateType);
+      const execute = vi.fn(
+        () => ({ kind: "context-rebuilt", snapshot: { subject: threadSubject } }) as never,
+      );
+      const windowCanOpenThread = vi.fn(async () => true);
+      const route = handler({ execute }, windowCanOpenThread);
+
+      for (const command of commandsFor(threadSubject)) {
+        const response = await route(request("/api/context/commands", command));
+        expect(response?.status).toBe(200);
+        expect(execute).toHaveBeenLastCalledWith(command);
+      }
+      expect(windowCanOpenThread).toHaveBeenCalledWith(windowId, aggregateType, subjectId);
+    },
+  );
+
+  it.each(["project", "agent-run", "context-subject"])(
+    "refuses context commands on a %s subject, which is no thread any window can open",
+    async (aggregateType) => {
+      const execute = vi.fn(() => ({ kind: "context-rebuilt", snapshot: { subject } }) as never);
+      const windowCanOpenThread = vi.fn(async () => true);
+      const route = handler({ execute }, windowCanOpenThread);
+
+      for (const command of commandsFor(subjectOf(aggregateType))) {
+        const response = await route(request("/api/context/commands", command));
+        expect(response?.status).toBe(403);
+      }
+      expect(execute).not.toHaveBeenCalled();
+    },
+  );
+
   it("answers a subject nothing has planned yet without claiming the service failed", async () => {
     const notPlanned = handler({
       inspect: () => {
@@ -122,6 +194,11 @@ function handler(
     inspect: (contextSubject: ContextSubjectRef, afterSequence?: number) => never;
     execute: (command: unknown) => never;
   }> = {},
+  windowCanOpenThread: (
+    windowId: WindowId,
+    threadKind: "chat-thread" | "work-thread" | "code-thread",
+    threadId: string,
+  ) => Promise<boolean> = async () => true,
 ) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 1 });
@@ -131,6 +208,7 @@ function handler(
       execute:
         service.execute ?? (() => ({ kind: "context-rebuilt", snapshot: { subject } }) as never),
     },
+    windowCanOpenThread,
     windowAuthorityStore: store,
     now: () => 2,
   });

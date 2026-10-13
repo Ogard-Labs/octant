@@ -6,6 +6,7 @@ import {
   type ContextFailure,
   type ContextInspectorSnapshot,
   type ContextSubjectRef,
+  type WindowId,
 } from "@octant/contracts";
 import { ContextHarnessError } from "./context/contextHarnessService";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
@@ -26,6 +27,15 @@ export interface ContextRouteService {
 
 export interface ContextRouteDependencies {
   readonly service: ContextRouteService;
+  /**
+   * Whether this window can open the thread, archived or not: the same read
+   * authority that lets it see the thread's kept images and captures.
+   */
+  readonly windowCanOpenThread: (
+    windowId: WindowId,
+    threadKind: "chat-thread" | "work-thread" | "code-thread",
+    threadId: string,
+  ) => Promise<boolean>;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
@@ -34,6 +44,17 @@ export interface ContextRouteDependencies {
 export function createContextRouteHandler(dependencies: ContextRouteDependencies) {
   const now = dependencies.now ?? Date.now;
   const bodyLimit = dependencies.maxRequestBodySize ?? DEFAULT_BODY_LIMIT;
+  const windowCanOpenSubject = async (
+    windowId: WindowId,
+    subject: ContextSubjectRef,
+  ): Promise<boolean> => {
+    const threadKind = String(subject.aggregateType);
+    return threadKind === "chat-thread" ||
+      threadKind === "work-thread" ||
+      threadKind === "code-thread"
+      ? dependencies.windowCanOpenThread(windowId, threadKind, String(subject.aggregateId))
+      : false;
+  };
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     const isInspect = url.pathname === "/api/context/inspect";
@@ -63,8 +84,9 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
     if (decoded.kind === "invalid") {
       return failure("invalid", "Request body must be valid JSON.", 400, origin);
     }
+    let windowId: WindowId;
     try {
-      authenticateProjectRequest({
+      windowId = authenticateProjectRequest({
         request,
         body: decoded.value,
         store: dependencies.windowAuthorityStore,
@@ -94,6 +116,18 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
         }
       }
       const command = decodeContextCommand(decoded.value);
+      // A command changes what a thread sends to its model, so it is the
+      // thread's own window that issues it. A subject that is not a thread
+      // this window can open, or not a thread at all, is refused before it can
+      // have any effect.
+      if (!(await windowCanOpenSubject(windowId, command.subject))) {
+        return failure(
+          "unauthorized",
+          "Context subject is not available to this window.",
+          403,
+          origin,
+        );
+      }
       return response(dependencies.service.execute(command), 200, origin);
     } catch (error) {
       if (error instanceof ContextHarnessError) return harnessFailure(error, origin);
