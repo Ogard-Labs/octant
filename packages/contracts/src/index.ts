@@ -32,6 +32,7 @@ export * from "./shipTarget";
 export * from "./threadPlan";
 export * from "./threadTasks";
 export * from "./agentMessage";
+export * from "./siblingThreads";
 export * from "./extensions";
 export * from "./extensionEvents";
 export * from "./extensionRpc";
