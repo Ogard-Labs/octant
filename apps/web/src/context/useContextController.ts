@@ -166,7 +166,9 @@ export function useContextController(options: UseContextControllerOptions): Cont
       setErrorMessage(undefined);
       try {
         const result = await client.execute(command, controller.signal);
-        if (!controller.signal.aborted) accept(result.snapshot);
+        if (controller.signal.aborted) return;
+        if (result.kind === "compaction-started") await reload(snapshotRef.current?.sequence);
+        else accept(result.snapshot);
       } catch (error) {
         if (controller.signal.aborted) return;
         if (error instanceof ContextClientFailure && error.category === "stale") {

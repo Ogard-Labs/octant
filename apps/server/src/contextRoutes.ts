@@ -9,6 +9,8 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { ContextHarnessError } from "./context/contextHarnessService";
+import { ContextCompactionRefused } from "./context/sessionCompaction";
+import { readPrincipalRouteContext } from "./principalRouteContext";
 import { authenticateProjectRequest } from "./projectBindingRoutes";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
@@ -17,12 +19,19 @@ const DEFAULT_BODY_LIMIT = 1_048_576;
 const METHODS = "POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 
+/** Who is asking: a local window, or a paired device the dispatch boundary forwarded. */
+export type ContextRoutePrincipal = "local-window" | "remote-device";
+
 export interface ContextRouteService {
   readonly inspect: (
     subject: ContextSubjectRef,
-    afterSequence?: number,
+    afterSequence: number | undefined,
+    principal: ContextRoutePrincipal,
   ) => ContextInspectorSnapshot;
-  readonly execute: (command: ContextCommand) => ContextCommandResult;
+  readonly execute: (
+    command: ContextCommand,
+    principal: ContextRoutePrincipal,
+  ) => ContextCommandResult;
 }
 
 export interface ContextRouteDependencies {
@@ -98,13 +107,17 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
       }
       return failure("invalid", "Context request is invalid.", 400, origin);
     }
+    const principal: ContextRoutePrincipal =
+      readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+        ? "remote-device"
+        : "local-window";
 
     try {
       if (isInspect) {
         const input = decodeContextInspectorRequest(decoded.value);
         try {
           return response(
-            dependencies.service.inspect(input.subject, input.afterSequence),
+            dependencies.service.inspect(input.subject, input.afterSequence, principal),
             200,
             origin,
           );
@@ -128,8 +141,19 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
           origin,
         );
       }
-      return response(dependencies.service.execute(command), 200, origin);
+      return response(dependencies.service.execute(command, principal), 200, origin);
     } catch (error) {
+      if (error instanceof ContextCompactionRefused) {
+        return response(
+          {
+            category: "compaction-refused",
+            message: "Octant cannot compact this session now.",
+            reason: error.reason,
+          } satisfies ContextFailure,
+          409,
+          origin,
+        );
+      }
       if (error instanceof ContextHarnessError) return harnessFailure(error, origin);
       if (isDecodeError(error)) {
         return failure("invalid", "Context request is invalid.", 400, origin);

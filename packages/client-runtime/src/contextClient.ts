@@ -138,6 +138,14 @@ export function createContextClient(options: ContextClientOptions): ContextClien
         decodeContextCommandResult,
         headers,
       );
+      // A compaction answers before it has changed anything, so it carries no
+      // snapshot; its receipt arrives on the next inspection.
+      if (result.kind === "compaction-started") {
+        if (command.kind !== "compact-session" || result.compactionId !== command.compactionId) {
+          throw protocol("Context service returned an invalid response.");
+        }
+        return result;
+      }
       if (!sameSubject(result.snapshot.subject, command.subject)) {
         throw protocol("Context service returned an invalid response.");
       }

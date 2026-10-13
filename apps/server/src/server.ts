@@ -319,6 +319,7 @@ import { createComputerUseValidationEvidenceRecorder } from "./computerUse/compu
 import { createComputerUseRouteHandler } from "./computerUseRoutes";
 import { CodeEnvironmentService } from "./codeEnvironmentService";
 import { ContextHarnessService } from "./context/contextHarnessService";
+import { SessionCompactionService } from "./context/sessionCompaction";
 import {
   makeProviderCapacityScheduler,
   makeUnobservedProviderCapacityFacts,
@@ -8186,8 +8187,94 @@ export function startOctantServer(
         return false;
       }
     };
+    // No route serves yet, so any compaction still running belongs to a host
+    // process that has gone.
+    contextHarness.closeInterruptedCompactions();
+    const modeEnabled = (mode: "chat" | "work") =>
+      enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+        mode,
+      );
+    const sessionCompaction = new SessionCompactionService({
+      harness: contextHarness,
+      threads: {
+        "chat-thread": {
+          read: (threadId) => {
+            const thread = persistence.readChatThread(decodeChatThreadId(threadId));
+            return thread === undefined ||
+              thread.lifecycle === "deleting" ||
+              thread.lifecycle === "deleted"
+              ? undefined
+              : {
+                  mode: "chat",
+                  ...(thread.projectId === undefined
+                    ? {}
+                    : { projectId: String(thread.projectId) }),
+                  providerInstanceId: thread.providerInstanceId,
+                  modelId: thread.modelId,
+                };
+          },
+          turnRunning: (threadId) => chatService.isTurnActive(decodeChatThreadId(threadId)),
+          conversation: (threadId) =>
+            chatService.sessionCompactionConversation(decodeChatThreadId(threadId)),
+          scratchRoot: (threadId) => chatService.scratchRoot(decodeChatThreadId(threadId)),
+        },
+        "work-thread": {
+          read: (threadId) => {
+            const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+            return thread === undefined ||
+              thread.lifecycle === "deleting" ||
+              thread.lifecycle === "deleted"
+              ? undefined
+              : {
+                  mode: "work",
+                  projectId: String(thread.projectId),
+                  providerInstanceId: thread.providerInstanceId,
+                  modelId: thread.modelId,
+                };
+          },
+          turnRunning: (threadId) => workTurnService.isTurnActive(decodeWorkThreadId(threadId)),
+          conversation: (threadId) =>
+            workTurnService.sessionCompactionConversation(decodeWorkThreadId(threadId)),
+          // A Work turn's provider session starts in the bound root; the
+          // tool-free summary request starts there too and gains nothing.
+          scratchRoot: async (threadId) => {
+            const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+            const project =
+              thread === undefined ? undefined : persistence.readProject(thread.projectId);
+            if (project === undefined || !("binding" in project)) {
+              throw new Error("Work project is unavailable.");
+            }
+            return project.binding.canonicalRoot;
+          },
+        },
+      },
+      modeEnabled,
+      availableDriver: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId);
+        if (instance === undefined || !instance.enabled) return undefined;
+        const readiness = providerRuntimeRegistry.observedState(providerInstanceId)?.readiness;
+        if (
+          readiness === "unavailable" ||
+          readiness === "unauthenticated" ||
+          readiness === "incompatible"
+        ) {
+          return undefined;
+        }
+        return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+      },
+      capacity: capacityScheduler,
+      spendCeiling: spendCeilingService,
+      uuid: randomUUID,
+    });
     const contextRoutes = createContextRouteHandler({
-      service: contextHarness,
+      service: {
+        inspect: (subject, afterSequence, principal) =>
+          sessionCompaction.inspect(subject, afterSequence, principal),
+        execute: (command, principal) =>
+          command.kind === "compact-session"
+            ? sessionCompaction.start(command, principal)
+            : contextHarness.execute(command),
+      },
       windowCanOpenThread,
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
