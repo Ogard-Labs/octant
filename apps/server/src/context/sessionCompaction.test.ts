@@ -719,7 +719,6 @@ function fakeProvider(options: FakeProviderOptions) {
     answerTool: () => Effect.void,
   };
   const driver = {
-    kind: "openai-compatible",
     acquire: () =>
       options.failAcquire === true
         ? Effect.fail({ _tag: "ProviderFailure", message: "Connection refused." })
