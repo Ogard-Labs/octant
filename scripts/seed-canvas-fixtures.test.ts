@@ -3,17 +3,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeChatThreadId, decodeProjectId } from "@octant/contracts";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { CanvasService } from "../apps/server/src/canvas/canvasService";
 import {
   Persistence,
   makePersistenceLive,
   type PersistenceService,
 } from "../apps/server/src/persistence/persistenceService";
-import { CANVAS_FIXTURE_NAMES, seedCanvasFixtures } from "./seed-canvas-fixtures";
+import { CHAT_SETTINGS_AGGREGATE_ID } from "../apps/server/src/persistence/chatProjection";
+import { OCTANT_LOCAL_ACTOR_ID } from "../apps/server/src/shellService";
+import { CANVAS_FIXTURE_NAMES, SEED_MARKER_FILE, seedCanvasFixtures } from "./seed-canvas-fixtures";
 
 const directories: Array<string> = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
 });
@@ -87,6 +91,70 @@ describe("seeding Canvas fixtures", () => {
 
     const again = await seedCanvasFixtures({ dataDirectory, fixtures: ["document"] });
     expect(again).toMatchObject({ status: "seeded", threads: [], alreadySeeded: ["document"] });
+  }, 60_000);
+
+  it("finishes a fixture on its existing thread when an earlier run stopped before the Canvas", async () => {
+    const dataDirectory = join(scratch(), "data");
+    vi.spyOn(CanvasService.prototype, "create").mockImplementationOnce(() => {
+      throw new Error("Stopped before the Canvas was written.");
+    });
+    await expect(seedCanvasFixtures({ dataDirectory, fixtures: ["document"] })).rejects.toThrow();
+
+    const outcome = await seedCanvasFixtures({ dataDirectory, fixtures: ["document"] });
+    if (outcome.status !== "seeded")
+      throw new Error(`Expected a seeded directory: ${outcome.message}`);
+    const threads = await inspect(dataDirectory, (persistence) =>
+      persistence.readChatThreads().map((thread) => ({
+        id: String(thread.id),
+        turns: persistence.readChatThreadView(thread.id)?.turns.length,
+      })),
+    );
+    expect(threads).toEqual([{ id: outcome.threads[0]?.threadId, turns: 1 }]);
+  }, 60_000);
+
+  it("seeds a directory whose Chat settings already exist without a default provider", async () => {
+    const dataDirectory = scratch();
+    chmodSync(dataDirectory, 0o700);
+    writeFileSync(
+      join(dataDirectory, SEED_MARKER_FILE),
+      `${JSON.stringify({ kind: "octant-canvas-fixtures" })}\n`,
+    );
+    const now = new Date(Date.now() - 60_000).toISOString();
+    await inspect(dataDirectory, (persistence) =>
+      persistence.journal.append({
+        aggregate: { aggregateType: "chat-settings", aggregateId: CHAT_SETTINGS_AGGREGATE_ID },
+        expectedVersion: 0,
+        events: [
+          {
+            eventId: crypto.randomUUID(),
+            eventName: "chat.settings-updated@1",
+            eventVersion: 1,
+            correlationId: crypto.randomUUID(),
+            actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+            occurredAt: now,
+            payload: {
+              kind: "settings-updated",
+              settings: {
+                defaultResearchEnabled: true,
+                defaultResearchRouting: "automatic",
+                defaultPersonalityInstructions: "Keep it short.",
+                version: 1,
+                updatedAt: now,
+              },
+            },
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      seedCanvasFixtures({ dataDirectory, fixtures: ["document"] }),
+    ).resolves.toMatchObject({ status: "seeded" });
+    const settings = await inspect(dataDirectory, (persistence) => persistence.readChatSettings());
+    expect(settings).toMatchObject({
+      aggregateVersion: 2,
+      settings: { defaultResearchEnabled: false, defaultPersonalityInstructions: "Keep it short." },
+    });
   }, 60_000);
 
   it("seeds an existing empty scratch directory that was created with open permissions", async () => {

@@ -9,11 +9,12 @@ import {
   realpathSync,
 } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import {
   decodeCanvasActor,
+  decodeChatSettings,
   decodeProjectId,
   decodeProviderInstanceId,
   decodeProviderModelId,
@@ -23,12 +24,12 @@ import {
   UtcTimestamp,
   type CanvasDefinition,
   type CanvasPresentation,
-  type ChatSettings,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { decodeCanvasBlock, type CanvasDesignBlock } from "@octant/contracts/canvas";
 import { cartPrototypeExampleBlock, searchSpecExampleBlock } from "@octant/domain";
+import { resolveHostRuntimePaths } from "@octant/host-runtime";
 import { Effect, Queue, Schema, Stream } from "effect";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { CanvasEventStore } from "../apps/server/src/canvas/canvasEventStore";
@@ -243,15 +244,15 @@ function isInside(directory: string, candidate: string): boolean {
   return path === "" || (!path.startsWith("..") && !isAbsolute(path));
 }
 
-/** Where the host keeps its data when nothing overrides it, without creating it. */
+/** Where the host keeps its data when `OCTANT_DATA_DIR` does not override it. */
 function defaultDataDirectory(environment: Readonly<Record<string, string | undefined>>): string {
-  const home = homedir();
-  if (process.platform === "darwin") return join(home, "Library", "Application Support", "Octant");
-  const dataHome = environment.XDG_DATA_HOME;
-  return join(
-    dataHome !== undefined && isAbsolute(dataHome) ? dataHome : join(home, ".local", "share"),
-    "octant",
-  );
+  return resolveHostRuntimePaths({
+    env: { ...environment, OCTANT_DATA_DIR: undefined },
+    platform: process.platform,
+    home: homedir(),
+    temporaryDirectory: tmpdir(),
+    uid: process.getuid?.() ?? 0,
+  }).dataDirectory;
 }
 
 /**
@@ -447,19 +448,25 @@ async function seedInto(input: {
   const clock = makeClock();
   const uuid = randomUUID;
 
-  if (persistence.readChatSettings()?.settings.defaultProviderInstanceId === undefined) {
-    const settings = {
-      defaultProviderInstanceId: decodeProviderInstanceId(FIXTURE_PROVIDER_INSTANCE),
-      defaultModelId: decodeProviderModelId(FIXTURE_MODEL),
-      defaultResearchEnabled: false,
+  const existingSettings = persistence.readChatSettings();
+  if (existingSettings?.settings.defaultProviderInstanceId === undefined) {
+    // A directory may already hold settings without a default provider (a host
+    // opened on it once), so the update keeps them and follows their version.
+    // Research stays off: the scripted provider cannot route a research turn.
+    const currentVersion = existingSettings?.aggregateVersion ?? 0;
+    const settings = decodeChatSettings({
       defaultResearchRouting: "automatic",
       defaultPersonalityInstructions: "Be concise.",
-      version: 1,
+      ...existingSettings?.settings,
+      defaultResearchEnabled: false,
+      defaultProviderInstanceId: FIXTURE_PROVIDER_INSTANCE,
+      defaultModelId: FIXTURE_MODEL,
+      version: currentVersion + 1,
       updatedAt: clock(),
-    } as ChatSettings;
+    });
     persistence.journal.append({
       aggregate: { aggregateType: "chat-settings", aggregateId: CHAT_SETTINGS_AGGREGATE_ID },
-      expectedVersion: 0,
+      expectedVersion: currentVersion,
       events: [
         {
           eventId: uuid(),
@@ -504,19 +511,26 @@ async function seedInto(input: {
     projectId = decodeProjectId(created);
   }
   const seededProjectId = projectId;
-  const isSeeded = (name: CanvasFixtureName): boolean =>
-    persistence.readChatThreads().some(
-      (thread) =>
-        thread.lifecycle === "active" &&
-        thread.title === FIXTURES[name].title &&
-        thread.projectId !== undefined &&
-        String(thread.projectId) === String(seededProjectId) &&
-        persistence.canvasProjection.byThread({
-          mode: "chat",
-          threadId: String(thread.id),
-          projectId: seededProjectId,
-        }).length > 0,
-    );
+  const existingThread = (name: CanvasFixtureName) =>
+    persistence
+      .readChatThreads()
+      .find(
+        (thread) =>
+          thread.lifecycle === "active" &&
+          thread.title === FIXTURES[name].title &&
+          thread.projectId !== undefined &&
+          String(thread.projectId) === String(seededProjectId),
+      );
+  const hasCanvas = (threadId: string): boolean =>
+    persistence.canvasProjection.byThread({
+      mode: "chat",
+      threadId,
+      projectId: seededProjectId,
+    }).length > 0;
+  const isSeeded = (name: CanvasFixtureName): boolean => {
+    const thread = existingThread(name);
+    return thread !== undefined && hasCanvas(String(thread.id));
+  };
   const alreadySeeded = input.fixtures.filter(isSeeded);
   const pending = input.fixtures.filter((name) => !isSeeded(name));
 
@@ -570,26 +584,34 @@ async function seedInto(input: {
   const threads: Array<SeededThread> = [];
   for (const name of pending) {
     const fixture = FIXTURES[name];
-    const created = await chat.execute({
-      kind: "create-chat-thread",
-      hostId: "local",
-      title: fixture.title,
-      projectId,
-    });
-    if (created.kind !== "thread-created") throw new Error("Expected a created Chat thread.");
-    reply = fixture.reply;
-    await chat.execute({
-      kind: "send-chat-turn",
-      threadId: created.thread.id,
-      expectedVersion: created.thread.version,
-      prompt: fixture.prompt,
-    });
-    const outcome = await settled(
-      () => chat.read(created.thread.id).turns[0]?.attempts[0]?.outcome,
-    );
+    // A run that stopped after the thread or its turn committed but before the
+    // Canvas did is completed on that thread rather than starting a second
+    // thread with the same title.
+    let thread = existingThread(name);
+    if (thread === undefined) {
+      const created = await chat.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: fixture.title,
+        projectId,
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected a created Chat thread.");
+      thread = created.thread;
+    }
+    const threadKey = thread.id;
+    if (chat.read(threadKey).turns.length === 0) {
+      reply = fixture.reply;
+      await chat.execute({
+        kind: "send-chat-turn",
+        threadId: threadKey,
+        expectedVersion: thread.version,
+        prompt: fixture.prompt,
+      });
+    }
+    const outcome = await settled(() => chat.read(threadKey).turns[0]?.attempts[0]?.outcome);
     if (outcome !== "completed") throw new Error(`The seeded turn ended as ${outcome}.`);
 
-    const threadId = String(created.thread.id);
+    const threadId = String(threadKey);
     const workspace = { kind: "chat-virtual", projectId: decodeProjectId(projectId) } as const;
     const result = canvases.create(
       {
@@ -723,7 +745,7 @@ async function runCli(argv: ReadonlyArray<string>): Promise<number> {
   }
   for (const name of outcome.alreadySeeded) console.log(`  ${name}: already seeded, left as is`);
   console.log(
-    `Open it with: OCTANT_DATA_DIR=${outcome.dataDirectory} bun run packages/cli/src/bin.ts server run`,
+    `Open it with: OCTANT_DATA_DIR=${outcome.dataDirectory} bun --cwd packages/cli src/bin.ts server run`,
   );
   return 0;
 }
