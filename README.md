@@ -225,7 +225,9 @@ instead of pairing a hand-started server with Vite:
 bun --cwd packages/cli src/bin.ts web --dev --no-open
 ```
 
-It starts only the Vite renderer and points it at the canonical host. Renderer
+It starts the Vite renderer and attaches it to the canonical host, starting that
+host from source when none is running; a running host that does not admit the
+renderer's origin is refused with an explanation. Renderer
 mode never selects another data directory: browser QA, Electron, and Vite show
 the same Projects and threads. Tests that need an isolated store must set an
 explicit `OCTANT_DATA_DIR`.
