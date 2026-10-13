@@ -208,6 +208,85 @@ describe("context RPC contracts", () => {
       decodeContextFailure({ category: "stale", message: "Reload context.", raw: "token=secret" }),
     ).toThrow();
   });
+
+  it("compacts by a window-chosen id, answers once journaled, and refuses with one closed reason", () => {
+    const compactionId = "60000000-0000-4000-8000-000000000001";
+    expect(decodeContextCommand({ kind: "compact-session", subject, compactionId })).toEqual({
+      kind: "compact-session",
+      subject,
+      compactionId,
+    });
+    // The summarizer is always the thread's own provider and model.
+    expect(() =>
+      decodeContextCommand({
+        kind: "compact-session",
+        subject,
+        compactionId,
+        providerInstanceId,
+      }),
+    ).toThrow();
+    const executor = { kind: "host", providerInstanceId, modelId: "model-a" };
+    expect(
+      decodeContextCommandResult({ kind: "compaction-started", compactionId, executor }),
+    ).toEqual({ kind: "compaction-started", compactionId, executor });
+    expect(
+      decodeContextFailure({
+        category: "compaction-refused",
+        message: "A turn is running.",
+        reason: "turn-running",
+      }).reason,
+    ).toBe("turn-running");
+    expect(() =>
+      decodeContextFailure({ category: "compaction-refused", message: "Refused." }),
+    ).toThrow();
+    expect(() =>
+      decodeContextFailure({ category: "stale", message: "Reload.", reason: "turn-running" }),
+    ).toThrow();
+  });
+
+  it("reports a compaction receipt whose freed figure is the difference it shows", () => {
+    const compactionId = "60000000-0000-4000-8000-000000000001";
+    const receipt = {
+      compactionId,
+      subject,
+      executor: { kind: "host", providerInstanceId, modelId: "model-a" },
+      trigger: "requested",
+      tokensBefore: { kind: "known", tokens: 900, accuracy: "conservative-heuristic" },
+      tokensAfter: { kind: "known", tokens: 300, accuracy: "conservative-heuristic" },
+      tokensFreed: { kind: "estimated", tokens: 600, accuracy: "conservative-heuristic" },
+      summary: {
+        visibility: "stored",
+        summaryId: "70000000-0000-4000-8000-000000000001",
+        summaryTokens: { kind: "known", tokens: 80, accuracy: "provider-reported" },
+        throughTurnId: "turn-3",
+      },
+      usage: { kind: "reported", inputTokens: 700, outputTokens: 80 },
+      completedAt: timestamp,
+    };
+    const latestCompaction = { status: "completed", receipt };
+    expect(
+      decodeContextInspectorSnapshot(
+        snapshot({ compaction: { status: "available" }, latestCompaction }),
+      ).latestCompaction,
+    ).toEqual(latestCompaction);
+    const rejects = (changed: Record<string, unknown>) =>
+      expect(() =>
+        decodeContextInspectorSnapshot(
+          snapshot({
+            latestCompaction: { status: "completed", receipt: { ...receipt, ...changed } },
+          }),
+        ),
+      ).toThrow();
+    rejects({
+      tokensFreed: { kind: "estimated", tokens: 700, accuracy: "conservative-heuristic" },
+    });
+    rejects({ summary: { visibility: "runtime-only" } });
+    rejects({
+      tokensAfter: { kind: "pending" },
+      tokensFreed: { kind: "estimated", tokens: 0, accuracy: "conservative-heuristic" },
+    });
+    rejects({ subject: { ...subject, aggregateId: "10000000-0000-4000-8000-000000000099" } });
+  });
 });
 
 function snapshot(overrides: Record<string, unknown> = {}) {

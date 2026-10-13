@@ -2,6 +2,11 @@ import { Schema } from "effect";
 import {
   CapacityReservation,
   ContextCapabilityCounts,
+  ContextCompactionAvailability,
+  ContextCompactionExecutor,
+  ContextCompactionId,
+  ContextCompactionRecord,
+  ContextCompactionRefusalReason,
   ContextManifest,
   ContextManifestId,
   ContextPlan,
@@ -59,6 +64,9 @@ export const ContextInspectorSnapshot = Schema.Struct({
   latestUsage: Schema.optional(UsageReconciliation),
   capacity: Schema.optional(CapacityReservation),
   capabilities: ContextCapabilityCounts,
+  /** Whether the server offers compaction for this thread; the window never decides it. */
+  compaction: Schema.optional(ContextCompactionAvailability),
+  latestCompaction: Schema.optional(ContextCompactionRecord),
 })
   .annotations(strict)
   .pipe(
@@ -91,7 +99,9 @@ export const ContextInspectorSnapshot = Schema.Struct({
             ))) &&
         (snapshot.capacity === undefined ||
           (subjectMatches(snapshot.capacity.subject) &&
-            providerMatches(snapshot.capacity.providerInstanceId, snapshot.capacity.modelId)))
+            providerMatches(snapshot.capacity.providerInstanceId, snapshot.capacity.modelId))) &&
+        (snapshot.latestCompaction?.status !== "completed" ||
+          subjectMatches(snapshot.latestCompaction.receipt.subject))
       );
     }),
   );
@@ -121,6 +131,13 @@ export const ContextCommand = Schema.Union(
     subject: ContextSubjectRef,
     expectedManifestId: ContextManifestId,
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("compact-session"),
+    subject: ContextSubjectRef,
+    // Chosen by the window when the person confirms. Repeating it returns the
+    // same compaction rather than compacting twice.
+    compactionId: ContextCompactionId,
+  }).annotations(strict),
 );
 export type ContextCommand = typeof ContextCommand.Type;
 
@@ -132,6 +149,13 @@ export const ContextCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("context-rebuilt"),
     snapshot: ContextInspectorSnapshot,
+  }).annotations(strict),
+  // A compaction is a model call that can outlast the request, so the command
+  // answers once it is journaled and the receipt follows on the thread.
+  Schema.Struct({
+    kind: Schema.Literal("compaction-started"),
+    compactionId: ContextCompactionId,
+    executor: ContextCompactionExecutor,
   }).annotations(strict),
 );
 export type ContextCommandResult = typeof ContextCommandResult.Type;
@@ -146,9 +170,17 @@ export const ContextFailure = Schema.Struct({
     // A subject nothing has planned yet is not a failed service. Collapsing the
     // two told a reader to retry a connection that was never down.
     "not-planned",
+    "compaction-refused",
   ),
   message: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
+  reason: Schema.optional(ContextCompactionRefusalReason),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (failure) => (failure.category === "compaction-refused") === (failure.reason !== undefined),
+    ),
+  );
 export type ContextFailure = typeof ContextFailure.Type;
 
 export const decodeContextInspectorRequest = Schema.decodeUnknownSync(ContextInspectorRequest);

@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { ImageUsageUnits } from "./imageGeneration";
 import { AggregateReference, UtcTimestamp } from "./events";
-import { ProviderInstanceId, ProviderModelId } from "./providers";
+import { ProviderDriverKind, ProviderInstanceId, ProviderModelId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -20,6 +20,8 @@ export const UsageReconciliationId = brandedUuid("UsageReconciliationId");
 export type UsageReconciliationId = typeof UsageReconciliationId.Type;
 export const CapacityReservationId = brandedUuid("CapacityReservationId");
 export type CapacityReservationId = typeof CapacityReservationId.Type;
+export const ContextCompactionId = brandedUuid("ContextCompactionId");
+export type ContextCompactionId = typeof ContextCompactionId.Type;
 
 export const ContextSubjectRef = AggregateReference;
 export type ContextSubjectRef = typeof ContextSubjectRef.Type;
@@ -609,6 +611,192 @@ export const ContextCapacityReservationUpdated = Schema.Struct({
 }).annotations(strict);
 export type ContextCapacityReservationUpdated = typeof ContextCapacityReservationUpdated.Type;
 
+/** The request shape a requested compaction's own model request is recorded under. */
+export const CONTEXT_COMPACTION_REQUEST_SHAPE = "context-compaction";
+
+/**
+ * Why a compaction was refused. Every refusal is decided before anything is
+ * journaled, reserved, or sent, so a refused request leaves no trace.
+ */
+export const ContextCompactionRefusalReason = Schema.Literal(
+  "nothing-to-compact",
+  "no-session",
+  "runtime-version-unsupported",
+  "runtime-cannot-compact",
+  "turn-running",
+  "compaction-running",
+  "provider-unavailable",
+  "spend-ceiling-reached",
+  "mode-disabled",
+  "remote-client",
+);
+export type ContextCompactionRefusalReason = typeof ContextCompactionRefusalReason.Type;
+
+/** Why a journaled compaction ended without changing what the model sees. */
+export const ContextCompactionFailureReason = Schema.Literal(
+  "runtime-failed",
+  "summary-failed",
+  "summary-not-smaller",
+  "context-changed",
+  "timed-out",
+  "subject-unavailable",
+  "interrupted",
+);
+export type ContextCompactionFailureReason = typeof ContextCompactionFailureReason.Type;
+
+export const ContextCompactionExecutor = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("host"),
+    providerInstanceId: ProviderInstanceId,
+    modelId: ProviderModelId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("runtime"),
+    driverKind: ProviderDriverKind,
+    providerInstanceId: ProviderInstanceId,
+    modelId: Schema.optional(ProviderModelId),
+  }).annotations(strict),
+);
+export type ContextCompactionExecutor = typeof ContextCompactionExecutor.Type;
+
+export const ContextCompactionTokensAfter = Schema.Union(
+  KnownTokenMeasurement,
+  Schema.Struct({ kind: Schema.Literal("pending") }).annotations(strict),
+);
+export type ContextCompactionTokensAfter = typeof ContextCompactionTokensAfter.Type;
+
+export const ContextCompactionTokensFreed = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("measured", "estimated"),
+    tokens: NonNegativeInt,
+    accuracy: KnownTokenMeasurement.fields.accuracy,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("unknown"),
+    reason: Schema.Literal("awaiting-next-report", "not-reported"),
+  }).annotations(strict),
+);
+export type ContextCompactionTokensFreed = typeof ContextCompactionTokensFreed.Type;
+
+export const ContextCompactionSummary = Schema.Union(
+  Schema.Struct({
+    visibility: Schema.Literal("stored"),
+    summaryId: ContextSummaryId,
+    summaryTokens: KnownTokenMeasurement,
+    throughTurnId: Schema.NonEmptyTrimmedString,
+  }).annotations(strict),
+  Schema.Struct({ visibility: Schema.Literal("runtime-only") }).annotations(strict),
+);
+export type ContextCompactionSummary = typeof ContextCompactionSummary.Type;
+
+export const ContextCompactionUsage = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("reported"),
+    inputTokens: NonNegativeInt,
+    outputTokens: NonNegativeInt,
+    cost: Schema.optional(UsageCost),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("unreported") }).annotations(strict),
+);
+export type ContextCompactionUsage = typeof ContextCompactionUsage.Type;
+
+export const ContextCompactionReceipt = Schema.Struct({
+  compactionId: ContextCompactionId,
+  subject: ContextSubjectRef,
+  executor: ContextCompactionExecutor,
+  trigger: Schema.Literal("requested", "automatic"),
+  tokensBefore: KnownTokenMeasurement,
+  tokensAfter: ContextCompactionTokensAfter,
+  tokensFreed: ContextCompactionTokensFreed,
+  summary: ContextCompactionSummary,
+  usage: ContextCompactionUsage,
+  completedAt: UtcTimestamp,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((receipt) => {
+      // The host keeps the text it wrote; a runtime keeps its own.
+      if ((receipt.executor.kind === "host") !== (receipt.summary.visibility === "stored")) {
+        return false;
+      }
+      if (receipt.tokensAfter.kind === "pending") {
+        return (
+          receipt.tokensFreed.kind === "unknown" &&
+          receipt.tokensFreed.reason === "awaiting-next-report"
+        );
+      }
+      // Freed is the difference of the two figures shown beside it, never a
+      // guess and never negative.
+      return (
+        receipt.tokensFreed.kind === "unknown" ||
+        receipt.tokensFreed.tokens ===
+          Math.max(0, receipt.tokensBefore.tokens - receipt.tokensAfter.tokens)
+      );
+    }),
+  );
+export type ContextCompactionReceipt = typeof ContextCompactionReceipt.Type;
+
+export const ContextCompactionRequested = Schema.Struct({
+  compactionId: ContextCompactionId,
+  subject: ContextSubjectRef,
+  executor: ContextCompactionExecutor,
+  // Context commands are local-window only; a paired device is refused first.
+  requestedBy: Schema.Literal("local-window"),
+  requestedAt: UtcTimestamp,
+}).annotations(strict);
+export type ContextCompactionRequested = typeof ContextCompactionRequested.Type;
+export const ContextCompactionCompleted = Schema.Struct({
+  receipt: ContextCompactionReceipt,
+}).annotations(strict);
+export type ContextCompactionCompleted = typeof ContextCompactionCompleted.Type;
+export const ContextCompactionFailed = Schema.Struct({
+  compactionId: ContextCompactionId,
+  subject: ContextSubjectRef,
+  reason: ContextCompactionFailureReason,
+  sessionMayHaveChanged: Schema.Boolean,
+  failedAt: UtcTimestamp,
+}).annotations(strict);
+export type ContextCompactionFailed = typeof ContextCompactionFailed.Type;
+
+/** Whether the server offers compaction for a thread right now, and why not. */
+export const ContextCompactionAvailability = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("available") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: ContextCompactionRefusalReason,
+  }).annotations(strict),
+);
+export type ContextCompactionAvailability = typeof ContextCompactionAvailability.Type;
+
+/** The thread's most recent compaction, folded from its journaled events. */
+export const ContextCompactionRecord = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("running"),
+    compactionId: ContextCompactionId,
+    executor: ContextCompactionExecutor,
+    requestedAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("completed"),
+    receipt: ContextCompactionReceipt,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("failed"),
+    compactionId: ContextCompactionId,
+    executor: ContextCompactionExecutor,
+    reason: ContextCompactionFailureReason,
+    sessionMayHaveChanged: Schema.Boolean,
+    failedAt: UtcTimestamp,
+  }).annotations(strict),
+);
+export type ContextCompactionRecord = typeof ContextCompactionRecord.Type;
+
+export const CONTEXT_COMPACTION_EVENT_NAMES = {
+  requested: "context.compaction-requested@1",
+  completed: "context.compaction-completed@1",
+  failed: "context.compaction-failed@1",
+} as const;
+
 export const CONTEXT_EVENT_NAMES = [
   "context.manifest-created@1",
   "context.overrides-updated@1",
@@ -616,6 +804,9 @@ export const CONTEXT_EVENT_NAMES = [
   "context.summary-created@1",
   "context.usage-reconciled@1",
   "context.capacity-reservation-updated@1",
+  CONTEXT_COMPACTION_EVENT_NAMES.requested,
+  CONTEXT_COMPACTION_EVENT_NAMES.completed,
+  CONTEXT_COMPACTION_EVENT_NAMES.failed,
 ] as const;
 
 export const decodeContextManifestId = Schema.decodeUnknownSync(ContextManifestId);
@@ -645,3 +836,13 @@ export const decodeContextUsageReconciled = Schema.decodeUnknownSync(ContextUsag
 export const decodeContextCapacityReservationUpdated = Schema.decodeUnknownSync(
   ContextCapacityReservationUpdated,
 );
+export const decodeContextCompactionId = Schema.decodeUnknownSync(ContextCompactionId);
+export const decodeContextCompactionReceipt = Schema.decodeUnknownSync(ContextCompactionReceipt);
+export const decodeContextCompactionRequested = Schema.decodeUnknownSync(
+  ContextCompactionRequested,
+);
+export const decodeContextCompactionCompleted = Schema.decodeUnknownSync(
+  ContextCompactionCompleted,
+);
+export const decodeContextCompactionFailed = Schema.decodeUnknownSync(ContextCompactionFailed);
+export const decodeContextCompactionRecord = Schema.decodeUnknownSync(ContextCompactionRecord);

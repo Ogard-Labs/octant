@@ -1,4 +1,9 @@
-import type { ContextEntryId, ProviderInstanceId, ProviderModelId } from "@octant/contracts";
+import type {
+  ContextCompactionAvailability,
+  ContextEntryId,
+  ProviderInstanceId,
+  ProviderModelId,
+} from "@octant/contracts";
 
 export type ContextCompactionRejectionCode =
   | "unsafe-arithmetic"
@@ -291,4 +296,126 @@ export function decideContextLengthRecovery(
     kind: "rebuild-once",
     nextMarginTokens: checkedAdd(currentMargin, marginIncrease, "Context recovery margin"),
   };
+}
+
+export interface SessionCompactionItem {
+  /** The latest plan's entry for this item; absent for material newer than that plan. */
+  readonly entryId?: ContextEntryId;
+  readonly kind: "message" | "summary";
+  /** The exchange the item belongs to. Items of one exchange are adjacent. */
+  readonly exchangeKey: string;
+  readonly tokens: number;
+  /** False for pinned, excluded, or already summarized entries. */
+  readonly summarizable: boolean;
+}
+
+export interface SessionCompactionSelectionInput {
+  /** The thread's conversation, oldest first. */
+  readonly items: ReadonlyArray<SessionCompactionItem>;
+  readonly safeInputBudget: number;
+}
+
+export type SessionCompactionSelection =
+  | {
+      readonly kind: "summarize";
+      readonly entryIds: ReadonlyArray<ContextEntryId>;
+      readonly materialTokens: number;
+      readonly throughExchangeKey: string;
+    }
+  | { readonly kind: "nothing-to-compact" };
+
+/**
+ * Picks what a requested compaction summarizes: the conversation before a tail
+ * of the most recent exchanges that fit a quarter of the safe input budget,
+ * always keeping the latest exchange. Material that does not fit one safe
+ * summary request is taken from the oldest end as far as it fits, and the rest
+ * stays as it was. A selection that would only re-summarize an earlier summary
+ * frees nothing, so it is nothing to compact.
+ */
+export function selectSessionCompaction(
+  input: SessionCompactionSelectionInput,
+): SessionCompactionSelection {
+  const safeInputBudget = checkedNonNegativeInteger(input.safeInputBudget, "Safe input budget");
+  const exchanges: Array<{ key: string; items: Array<SessionCompactionItem>; tokens: number }> = [];
+  for (const item of input.items) {
+    const tokens = checkedNonNegativeInteger(item.tokens, "Conversation item size");
+    const last = exchanges.at(-1);
+    if (last !== undefined && last.key === item.exchangeKey) {
+      last.items.push(item);
+      last.tokens = checkedAdd(last.tokens, tokens, "Exchange size");
+    } else {
+      exchanges.push({ key: item.exchangeKey, items: [item], tokens });
+    }
+  }
+  const latest = exchanges.at(-1);
+  if (latest === undefined) return { kind: "nothing-to-compact" };
+  const tailBudget = Math.floor(safeInputBudget / 4);
+  let tailStart = exchanges.length - 1;
+  let tailTokens = latest.tokens;
+  while (tailStart > 0) {
+    const previous = exchanges[tailStart - 1];
+    if (previous === undefined) break;
+    const withPrevious = checkedAdd(tailTokens, previous.tokens, "Tail size");
+    if (withPrevious > tailBudget) break;
+    tailTokens = withPrevious;
+    tailStart -= 1;
+  }
+  const entryIds: Array<ContextEntryId> = [];
+  let materialTokens = 0;
+  let throughExchangeKey: string | undefined;
+  const older = exchanges
+    .slice(0, tailStart)
+    .flatMap((exchange) => exchange.items.map((item) => ({ item, key: exchange.key })));
+  for (const { item, key } of older) {
+    if (!item.summarizable || item.entryId === undefined) continue;
+    const withItem = checkedAdd(materialTokens, item.tokens, "Summary material");
+    if (withItem > safeInputBudget) break;
+    entryIds.push(item.entryId);
+    materialTokens = withItem;
+    if (item.kind === "message") throughExchangeKey = key;
+  }
+  return throughExchangeKey === undefined
+    ? { kind: "nothing-to-compact" }
+    : { kind: "summarize", entryIds, materialTokens, throughExchangeKey };
+}
+
+export interface SessionCompactionFacts {
+  readonly principal: "local-window" | "remote-device";
+  readonly modeEnabled: boolean;
+  /** Who owns the conversation, and so who alone can change what it sends. */
+  readonly owner: "host" | "runtime";
+  /** The runtime's own compaction, reported by its adapter. Ignored for the host. */
+  readonly runtimeCompaction: "supported" | "unsupported" | "unavailable";
+  readonly hasSession: boolean;
+  readonly compactionRunning: boolean;
+  readonly turnRunning: boolean;
+  readonly providerAvailable: boolean;
+  readonly spendCeilingReached: boolean;
+  readonly somethingToCompact: boolean;
+}
+
+/**
+ * Whether a thread can be compacted now. Permanent refusals come before
+ * transient ones, so a window hides the action rather than offering a retry
+ * that can never succeed.
+ */
+export function decideSessionCompaction(
+  facts: SessionCompactionFacts,
+): ContextCompactionAvailability {
+  const refuse = (
+    reason: Extract<ContextCompactionAvailability, { status: "refused" }>["reason"],
+  ) => ({ status: "refused", reason }) as const;
+  if (facts.principal !== "local-window") return refuse("remote-client");
+  if (!facts.modeEnabled) return refuse("mode-disabled");
+  if (facts.owner === "runtime") {
+    if (facts.runtimeCompaction === "unsupported") return refuse("runtime-cannot-compact");
+    if (facts.runtimeCompaction === "unavailable") return refuse("runtime-version-unsupported");
+  }
+  if (!facts.hasSession) return refuse("no-session");
+  if (facts.compactionRunning) return refuse("compaction-running");
+  if (facts.turnRunning) return refuse("turn-running");
+  if (!facts.providerAvailable) return refuse("provider-unavailable");
+  if (facts.spendCeilingReached) return refuse("spend-ceiling-reached");
+  if (!facts.somethingToCompact) return refuse("nothing-to-compact");
+  return { status: "available" };
 }

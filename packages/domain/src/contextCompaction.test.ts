@@ -3,9 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   ContextCompactionRejected,
   decideContextLengthRecovery,
+  decideSessionCompaction,
   evaluateSemanticSummary,
   orderContextMaintenance,
   reconcileContextVariance,
+  selectSessionCompaction,
+  type SessionCompactionFacts,
+  type SessionCompactionItem,
 } from "./contextCompaction";
 
 const entryId = (value: string) => value as ContextEntryId;
@@ -363,5 +367,141 @@ describe("context compaction policy", () => {
         rebuilds: 0,
       }),
     ).toThrow(ContextCompactionRejected);
+  });
+});
+
+describe("session compaction on request", () => {
+  const message = (
+    id: string,
+    exchangeKey: string,
+    tokens: number,
+    summarizable = true,
+  ): SessionCompactionItem => ({
+    entryId: entryId(id),
+    kind: "message",
+    exchangeKey,
+    tokens,
+    summarizable,
+  });
+
+  it("summarizes the conversation before a tail that fits a quarter of the safe budget", () => {
+    const selection = selectSessionCompaction({
+      safeInputBudget: 800,
+      items: [
+        message("u1", "turn-1", 100),
+        message("a1", "turn-1", 100),
+        message("u2", "turn-2", 100),
+        message("a2", "turn-2", 100),
+        message("u3", "turn-3", 100),
+        message("a3", "turn-3", 90),
+      ],
+    });
+    // A 200-token tail keeps turn 3 (190); turn 2 would push it to 390.
+    expect(selection).toEqual({
+      kind: "summarize",
+      entryIds: ["u1", "a1", "u2", "a2"],
+      materialTokens: 400,
+      throughExchangeKey: "turn-2",
+    });
+  });
+
+  it("always keeps the latest exchange, even one newer than the plan or larger than the tail", () => {
+    expect(
+      selectSessionCompaction({
+        safeInputBudget: 400,
+        items: [
+          message("u1", "turn-1", 50),
+          message("a1", "turn-1", 50),
+          { kind: "message", exchangeKey: "turn-2", tokens: 900, summarizable: false },
+        ],
+      }),
+    ).toEqual({
+      kind: "summarize",
+      entryIds: ["u1", "a1"],
+      materialTokens: 100,
+      throughExchangeKey: "turn-1",
+    });
+    expect(
+      selectSessionCompaction({
+        safeInputBudget: 400,
+        items: [message("u1", "turn-1", 900), message("a1", "turn-1", 900)],
+      }),
+    ).toEqual({ kind: "nothing-to-compact" });
+  });
+
+  it("never summarizes pinned, excluded, or summarized entries, and leaves what does not fit", () => {
+    expect(
+      selectSessionCompaction({
+        safeInputBudget: 400,
+        items: [
+          message("pinned", "turn-1", 50, false),
+          message("a1", "turn-1", 300),
+          message("u2", "turn-2", 300),
+          message("a2", "turn-2", 50),
+          message("u3", "turn-3", 20),
+        ],
+      }),
+    ).toEqual({
+      kind: "summarize",
+      entryIds: ["a1"],
+      materialTokens: 300,
+      throughExchangeKey: "turn-1",
+    });
+  });
+
+  it("does not re-summarize an earlier summary on its own", () => {
+    expect(
+      selectSessionCompaction({
+        safeInputBudget: 400,
+        items: [
+          {
+            entryId: entryId("summary"),
+            kind: "summary",
+            exchangeKey: "summary",
+            tokens: 40,
+            summarizable: true,
+          },
+          message("u1", "turn-1", 20),
+        ],
+      }),
+    ).toEqual({ kind: "nothing-to-compact" });
+  });
+
+  const available: SessionCompactionFacts = {
+    principal: "local-window",
+    modeEnabled: true,
+    owner: "host",
+    runtimeCompaction: "unsupported",
+    hasSession: true,
+    compactionRunning: false,
+    turnRunning: false,
+    providerAvailable: true,
+    spendCeilingReached: false,
+    somethingToCompact: true,
+  };
+
+  it("offers compaction only when every fact allows it, naming permanent refusals first", () => {
+    expect(decideSessionCompaction(available)).toEqual({ status: "available" });
+    const cases: ReadonlyArray<readonly [Partial<SessionCompactionFacts>, string]> = [
+      [{ principal: "remote-device", modeEnabled: false }, "remote-client"],
+      [{ modeEnabled: false, owner: "runtime" }, "mode-disabled"],
+      [{ owner: "runtime", turnRunning: true }, "runtime-cannot-compact"],
+      [{ owner: "runtime", runtimeCompaction: "unavailable" }, "runtime-version-unsupported"],
+      [{ hasSession: false, turnRunning: true }, "no-session"],
+      [{ compactionRunning: true, turnRunning: true }, "compaction-running"],
+      [{ turnRunning: true, providerAvailable: false }, "turn-running"],
+      [{ providerAvailable: false, spendCeilingReached: true }, "provider-unavailable"],
+      [{ spendCeilingReached: true, somethingToCompact: false }, "spend-ceiling-reached"],
+      [{ somethingToCompact: false }, "nothing-to-compact"],
+    ];
+    for (const [facts, reason] of cases) {
+      expect(decideSessionCompaction({ ...available, ...facts })).toEqual({
+        status: "refused",
+        reason,
+      });
+    }
+    expect(
+      decideSessionCompaction({ ...available, owner: "runtime", runtimeCompaction: "supported" }),
+    ).toEqual({ status: "available" });
   });
 });
