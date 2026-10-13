@@ -4,10 +4,12 @@ import { buildNeedsYouCommands, type NeedsYouSources } from "./needsYouCommands"
 import {
   chatQuestion,
   codeApproval,
+  codeChildQuestion,
   codeDecision,
   codeQuestion,
   pendingIds,
   workApproval,
+  workChildApproval,
 } from "./pendingRequests.test-fixtures";
 
 const NOW = Date.parse("2026-10-06T08:04:30.000Z");
@@ -19,6 +21,7 @@ function sources(overrides: Partial<NeedsYouSources> = {}): NeedsYouSources {
     onOpenThread: vi.fn(),
     onAnswerApproval: vi.fn(),
     onAnswerDecision: vi.fn(),
+    onOpenSubagentRequest: vi.fn(),
     ...overrides,
   };
 }
@@ -116,6 +119,49 @@ describe("the Needs you commands", () => {
     );
     run(commands.find((command) => command.title === "Open it: Fix the parser"));
     expect(onAnswerDecision).toHaveBeenCalledExactlyOnceWith(decision, "Open it");
+  });
+
+  it("lists a waiting subagent as one Review request that opens it, with no Approve or Deny", () => {
+    const onOpenSubagentRequest = vi.fn();
+    const onOpenThread = vi.fn();
+    const onAnswerApproval = vi.fn();
+    const child = workChildApproval();
+    const commands = buildNeedsYouCommands(
+      sources({ requests: [child], onOpenSubagentRequest, onOpenThread, onAnswerApproval }),
+    );
+
+    expect(commands.map((command) => [command.title, command.detail])).toEqual([
+      ["Quarterly report", "Work · waiting on a subagent · <1m"],
+      [
+        "Review request: Quarterly report",
+        "Work · Research subagent needs your approval · shell: bun run collect",
+      ],
+    ]);
+    expect(commands.some((command) => /Approve|Deny/.test(command.title))).toBe(false);
+
+    for (const command of commands) run(command);
+    expect(onOpenSubagentRequest).toHaveBeenCalledTimes(2);
+    expect(onOpenSubagentRequest).toHaveBeenCalledWith(child);
+    expect(onOpenThread).not.toHaveBeenCalled();
+    expect(onAnswerApproval).not.toHaveBeenCalled();
+  });
+
+  it("opens the thread itself when a subagent is not the only thing it waits on", () => {
+    const onOpenSubagentRequest = vi.fn();
+    const onOpenThread = vi.fn();
+    const commands = buildNeedsYouCommands(
+      sources({
+        requests: [codeApproval(), codeChildQuestion()],
+        onOpenSubagentRequest,
+        onOpenThread,
+      }),
+    );
+
+    const row = commands.find((command) => command.id.startsWith("needs-you:thread:"));
+    expect(row?.detail).toBe("Code · waiting on approval and a subagent · 3m");
+    run(row);
+    expect(onOpenThread).toHaveBeenCalledOnce();
+    expect(onOpenSubagentRequest).not.toHaveBeenCalled();
   });
 
   it("offers nothing when nothing is waiting", () => {

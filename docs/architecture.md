@@ -386,7 +386,14 @@ probe (every 2 s while a window is visible, 10 s otherwise). Every row names its
   per bound window and the menu bar's own window binds no Code Project, so its
   Code rows are the requests and decisions each local window with a persisted
   Code binding could answer; a Code Project no local window binds stays out. A
-  thread that is both waiting and running is listed once, as needs you.
+  waiting subagent is read the same way. The menu bar's window binds no
+  Project, so its subagent rows are the waits that each saved local window with
+  a Work or Code Project binding could open, whether or not that window is open
+  now; a window bound to no Project adds none. Each parent is one needs-you
+  row whose `activitySource` is `session`, and like every fleet row it carries
+  the thread title, mode, Project name, state, and time, never the request
+  text, the child's task, or its role. A thread that is both waiting and
+  running is listed once, as needs you.
 - **Working** is each mode's own navigation run state, the journaled fold the
   sidebar and board already use, so it is `journal`.
 - **Done since you looked** is the one state the host cannot know, because only
@@ -884,7 +891,10 @@ live parent and child authority before and after the answer. A child approval
 permits only that request, never consumes or creates a remembered lead-session
 grant, and cannot approve an opaque provider action in Plan mode. Cancelled or
 expired requests and requests whose transport was lost at restart cannot be
-answered. The composer signals pending child input and opens its detail view.
+answered. The composer signals pending child input and opens its detail view. The same
+request is a Needs you row naming the parent thread and the child (see
+pending requests across modes); the row has one action, which opens the parent's
+Agents tab on that child, and no way to answer.
 
 Live child steering is optional on a provider connection. Codex uses its
 current-turn steering command; Octant's harness inserts a note after a complete
@@ -4066,14 +4076,35 @@ mechanisms are:
   answering it settles the turn interrupted. Excluded: Chat approvals (Chat
   declines every provider approval), hidden Side Chats, Work browser tool approvals
   (`/api/browser/approvals`), Computer Use approvals, extension tool approvals,
-  and native-harness session approvals; a native-harness question raised on a
-  Code turn is a Code question and is listed. A Code turn's Browser site ask
+  and a lead native-harness session approval (a request with no `source`); a
+  native-harness question raised on a Code turn is a Code question and is
+  listed. A child agent's approval or question (`source` set) is listed as a
+  `child-approval` or `child-question` row on a Work or Code parent: it carries
+  the parent thread, the child's run, role, task (at most 200 characters, with
+  a Work parent's task redacted of paths and URLs as its request text is),
+  provider, and model, and the request text, but no options and no answer
+  handle, so the read adds no answer route. It is listed only while a waiter in
+  this host can still settle it and the session view still holds the pending
+  item (a restart, an expiry, a decision, or an eviction past the view's 50
+  entries removes it), and only for a window bound to the parent's project,
+  the same binding that lets that window open the thread. The menu bar's own
+  window binds no Project, so its fleet read asks those persisted windows and
+  still lists the parent once. The harness session
+  route also requires the thread to be the open surface; the list does not,
+  because the row is how a person finds a request on a thread they are not
+  looking at. Answering still goes through that route after the row opens the
+  thread. A disabled parent mode is not listed. A Chat child is never listed because Chat has no Agents tab to
+  review it in. An approval a child raises still covers that request only and
+  never offers a remembered grant. A Code turn's Browser site ask
   is a Code approval and is listed with `browserOrigin`, the site it waits to
   open, which a provider's own approval never carries. Text keeps
   each mode's own bounds and sanitization. The read is local-window only: its
   path is outside every prefix the remote listener forwards, the remote action
   classifier names no action for it, and the route refuses a paired device's
-  principal. Freshness rides the Machine change feed: a Work request's
+  principal. Freshness rides the Machine change feed: a child agent's approval or
+  question asked or settled publishes `work-navigation` and `code-navigation`
+  (a lead's own request publishes nothing new),
+  a Work request's
   transitions and a Chat attempt's question are journaled, a Code request's ask,
   answer, and turn end are journaled stream events, and a Code browser-origin
   approval that expires or is abandoned — which journals nothing — publishes
@@ -4084,8 +4115,9 @@ mechanisms are:
   Project name, and `activitySource` (`journal`, `session`, or the reserved
   `screen`, which can never say needs you). It composes the pending-requests
   read, the Code requests and decisions each local window with a persisted Code
-  binding could answer, and each mode's own navigation run state, and adds no
-  authority or state.
+  binding could answer, the subagent waits each persisted local window bound to
+  the parent's project could open, and each mode's own navigation run state,
+  and adds no authority or state.
   It is local-window only under the same rules as pending requests: outside
   every forwarded prefix, no remote action, and a paired device's principal is
   refused. The [desktop menu bar](#desktop-menu-bar) is its reader.

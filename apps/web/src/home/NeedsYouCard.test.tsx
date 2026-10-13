@@ -3,7 +3,12 @@ import type { PendingRequest, PendingRequestList } from "@octant/contracts/pendi
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { codeDecision, workDecision } from "../palette/pendingRequests.test-fixtures";
+import {
+  codeChildQuestion,
+  codeDecision,
+  workChildApproval,
+  workDecision,
+} from "../palette/pendingRequests.test-fixtures";
 import { HomeDashboard } from "./HomeDashboard";
 import { createNeedsYouCard, type NeedsYouCardSource } from "./NeedsYouCard";
 
@@ -73,7 +78,10 @@ const chatChoice = {
   threadId: "chat-choice-thread",
   threadTitle: "Pick a colour",
   options: [{ label: "Red", description: "Warm" }, { label: "Blue" }],
-  answer: { ...(chatQuestion.answer as object), threadId: "chat-choice-thread" },
+  answer: {
+    ...(chatQuestion as { readonly answer: object }).answer,
+    threadId: "chat-choice-thread",
+  },
 } as unknown as PendingRequest;
 
 function reader(...reads: ReadonlyArray<ReadonlyArray<PendingRequest>>): PendingRequestClient {
@@ -190,6 +198,37 @@ describe("the Needs you card", () => {
       "Quarterly notes is waiting for you",
       "Trip ideas is waiting for you",
     ]);
+  });
+
+  it("lists a waiting subagent under its parent thread and opens its request without answering it", async () => {
+    const user = userEvent.setup();
+    const answerClients = clients();
+    const onOpenThread = vi.fn();
+    const request = workChildApproval();
+    renderCard(
+      createNeedsYouCard(
+        source({
+          answerClients: answerClients as never,
+          onOpenThread,
+          pendingRequestClient: reader([request, codeChildQuestion(), codeApproval]),
+        }),
+      ),
+    );
+    const card = await findCard();
+    const row = await within(card).findByRole("group", {
+      name: "Quarterly report has a subagent waiting for you",
+    });
+    expect(within(row).getByText("Research subagent needs your approval")).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Deny" })).toBeNull();
+    expect(
+      within(card).getByRole("group", { name: "Fix the parser has a subagent waiting for you" }),
+    ).toBeInTheDocument();
+
+    await user.click(within(row).getByRole("button", { name: "Review request" }));
+    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
+    expect(answerClients.workRequestClient.execute).not.toHaveBeenCalled();
+    expect(answerClients.codeClient.executeOperation).not.toHaveBeenCalled();
   });
 
   it("answers a Code approval and a Work approval through their own commands with the listed handle", async () => {
@@ -341,7 +380,8 @@ describe("the Needs you card", () => {
       threadId: workDecision().threadId,
       turnId: expect.any(String),
       prompt: "Headcount",
-      authority: (workDecision().answer as { readonly authority: unknown }).authority,
+      authority: (workDecision() as { readonly answer: { readonly authority: unknown } }).answer
+        .authority,
     });
     expect(answerClients.workRequestClient.execute).not.toHaveBeenCalled();
   });

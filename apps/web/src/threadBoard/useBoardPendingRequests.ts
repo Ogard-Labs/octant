@@ -3,6 +3,7 @@ import type { PendingRequest } from "@octant/contracts/pending-requests";
 import { useEffect, useMemo, useRef } from "react";
 import {
   pendingRequestKey,
+  type ChildPendingRequest,
   type PendingRequestAnswerResult,
   type PendingRequestResponse,
 } from "../pendingRequests/pendingRequests";
@@ -21,6 +22,8 @@ import {
 export interface BoardPendingRequestSource extends Omit<PendingRequestRowsSource, "modes"> {
   /** The clock the waits read, advanced once a minute by the shell. */
   readonly now: number;
+  /** Opens a waiting subagent's request in its parent thread's Agents tool. */
+  readonly onOpenSubagent?: (request: ChildPendingRequest) => void;
 }
 
 /** The oldest request a thread waits on, and how many more wait behind it. */
@@ -28,6 +31,7 @@ export interface BoardCardRequest {
   readonly entry: PendingRequestRowEntry;
   readonly moreWaiting: number;
   readonly now: number;
+  readonly onOpenSubagent?: ((request: ChildPendingRequest) => void) | undefined;
   readonly onAnswer: (
     request: PendingRequest,
     response: PendingRequestResponse,
@@ -126,6 +130,7 @@ export function useBoardPendingRequests(
         entry: shown,
         moreWaiting: entries.filter((entry) => entry !== shown && !entry.unlisted).length,
         now,
+        onOpenSubagent: source?.onOpenSubagent,
         onAnswer: answer,
       };
     },

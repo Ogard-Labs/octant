@@ -1,5 +1,6 @@
 import type { PendingRequest } from "@octant/contracts/pending-requests";
 import { createContext, useContext, type ReactNode } from "react";
+import type { ChildPendingRequest } from "../pendingRequests/pendingRequests";
 import type { CommandThread } from "./buildOctantCommands";
 import type { OctantCommand } from "./commandModel";
 import type {
@@ -53,6 +54,7 @@ export interface NeedsYouSource {
   readonly onOpenThread: (thread: CommandThread) => void;
   readonly onAnswerApproval: (request: ApprovalPendingRequest, decision: ApprovalDecision) => void;
   readonly onAnswerDecision: (request: DecisionPendingRequest, option: string) => void;
+  readonly onOpenSubagentRequest: (request: ChildPendingRequest) => void;
 }
 
 const NeedsYouContext = createContext<NeedsYouSource | undefined>(undefined);

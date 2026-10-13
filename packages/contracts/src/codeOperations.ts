@@ -1217,7 +1217,8 @@ const ToolEvent = Schema.Struct({
  * text under exactly these bounds, never looser ones.
  */
 export const CodeApprovalSummaryText = boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES);
-export const CodeQuestionPromptText = boundedNonEmptyText(8 * 1024);
+export const MAX_CODE_QUESTION_PROMPT_BYTES = 8 * 1024;
+export const CodeQuestionPromptText = boundedNonEmptyText(MAX_CODE_QUESTION_PROMPT_BYTES);
 export const CodeQuestionOptionText = boundedNonEmptyText(1_024);
 export const MAX_CODE_QUESTION_OPTIONS = 32;
 const ApprovalEvent = Schema.Struct({

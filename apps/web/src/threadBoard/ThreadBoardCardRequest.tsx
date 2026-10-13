@@ -1,5 +1,5 @@
 import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
-import { pendingRequestKey } from "../pendingRequests/pendingRequests";
+import { isChildPendingRequest, pendingRequestKey } from "../pendingRequests/pendingRequests";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { BoardCardRequest } from "./useBoardPendingRequests";
 
@@ -14,7 +14,15 @@ export function ThreadBoardCardRequest(props: {
   /** Opens the thread, where a typed answer goes in its composer. */
   readonly onOpenThread: () => void;
 }) {
-  const { entry, moreWaiting } = props.request;
+  const { entry, moreWaiting, onOpenSubagent } = props.request;
+  // A waiting subagent's request opens on that subagent; every other row opens the thread.
+  const open = () => {
+    if (isChildPendingRequest(entry.request) && onOpenSubagent !== undefined) {
+      onOpenSubagent(entry.request);
+      return;
+    }
+    props.onOpenThread();
+  };
   return (
     <div className="board-card-request">
       <PendingRequestRow
@@ -22,7 +30,7 @@ export function ThreadBoardCardRequest(props: {
         key={pendingRequestKey(entry.request)}
         now={props.request.now}
         onAnswer={props.request.onAnswer}
-        onOpenThread={props.onOpenThread}
+        onOpenThread={open}
         request={entry.request}
         settled={entry.unlisted}
       />

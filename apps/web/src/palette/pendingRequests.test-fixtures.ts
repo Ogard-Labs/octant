@@ -137,3 +137,39 @@ export function workDecision(): PendingRequest {
     },
   });
 }
+
+export const childRunId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+
+/** A research subagent of a Work thread, waiting on an approval. */
+export function workChildApproval(): PendingRequest {
+  return decodePendingRequest({
+    mode: "work",
+    kind: "child-approval",
+    projectId: pendingIds.project,
+    threadId: pendingIds.workThread,
+    threadTitle: "Quarterly report",
+    child: {
+      runId: childRunId,
+      role: "research",
+      task: "Collect last quarter's figures.",
+      providerName: "Local model",
+      modelId: "model-a",
+    },
+    text: "shell: bun run collect",
+    requestedAt: "2026-10-06T08:06:00.000Z",
+  });
+}
+
+/** A review subagent of a Code thread, waiting on a question. */
+export function codeChildQuestion(): PendingRequest {
+  return decodePendingRequest({
+    mode: "code",
+    kind: "child-question",
+    projectId: pendingIds.project,
+    threadId: pendingIds.codeThread,
+    threadTitle: "Fix the parser",
+    child: { runId: childRunId, role: "review", task: "Review the parser change." },
+    text: "Which fixture should I compare against?",
+    requestedAt: "2026-10-06T08:07:00.000Z",
+  });
+}

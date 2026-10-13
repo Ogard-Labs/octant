@@ -30,6 +30,94 @@ describe("MachineChangeFeed", () => {
     await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 
+  it("invalidates the Work and Code navigation reads only for a subagent's approval or question, asked and settled", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+    const harness = "native-harness-session";
+    const source = { runId: "00000000-0000-4000-8000-000000000090" };
+
+    // A lead's own request, a turn event, and a settle nobody listed publish nothing.
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: harness,
+          eventName: "native-harness-approval-asked@1",
+          payload: { id: "lead-approval" },
+        },
+        {
+          aggregateType: harness,
+          eventName: "native-harness-question-asked@1",
+          payload: { id: "lead-question" },
+        },
+        {
+          aggregateType: harness,
+          eventName: "native-harness-approval-settled@1",
+          payload: { approvalId: "lead-approval" },
+        },
+        {
+          aggregateType: harness,
+          eventName: "native-harness-question-settled@1",
+          payload: { questionId: "lead-question" },
+        },
+        { aggregateType: harness, eventName: "native-harness-turn-settled@1" },
+      ],
+    });
+    expect(feed.head()).toBe(0);
+
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: harness,
+          eventName: "native-harness-approval-asked@1",
+          payload: { id: "child-approval", source },
+        },
+      ],
+    });
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: harness,
+          eventName: "native-harness-question-asked@1",
+          payload: { id: "child-question", source },
+        },
+      ],
+    });
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: harness,
+          eventName: "native-harness-approval-settled@1",
+          payload: { approvalId: "child-approval" },
+        },
+        {
+          aggregateType: harness,
+          eventName: "native-harness-question-settled@1",
+          payload: { questionId: "child-question" },
+        },
+      ],
+    });
+    // The same settle again has nothing left to invalidate.
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: harness,
+          eventName: "native-harness-approval-settled@1",
+          payload: { approvalId: "child-approval" },
+        },
+      ],
+    });
+
+    for (const sequence of [1, 2, 3]) {
+      await expect(stream.next()).resolves.toMatchObject({
+        value: { sequence, topics: ["work-navigation", "code-navigation"] },
+      });
+    }
+    controller.abort();
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+    expect(feed.head()).toBe(3);
+  });
+
   it("requires a snapshot when the requested cursor fell outside replay", async () => {
     const feed = new MachineChangeFeed({ maxFrames: 1 });
     feed.publish(["chat-navigation"]);

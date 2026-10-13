@@ -166,7 +166,13 @@ opens the thread so the answer is typed in its composer; a question without
 choices offers Reply… alone. A decision is the ask a finished turn closed with:
 its row shows the ask clamped to two lines, one numbered button per option with
 the recommended option first (first number, first in focus order) and marked
-"Recommended" in words, and **Reply…**. At most five rows show, then **+N more**, which
+"Recommended" in words, and **Reply…**. A subagent waiting on an approval or question is a row too, headed "Research
+subagent needs your approval" or "Review subagent asked a question" (the
+child's role), under the parent thread's title, with the child's task and the
+request text. It has one action, **Review request**, which opens the parent
+thread on its Agents tab with that child selected; it offers no Approve, Deny,
+or choices, so the answer is given in the child's own detail view. If the window's thread list does not hold the parent yet, it reads the list once more and, when the parent is still missing, says it could not open the thread rather than doing nothing. Chat has no
+Agents tab, so a Chat subagent is never listed. At most five rows show, then **+N more**, which
 opens the Inbox. The card is hidden while nothing waits, and unavailable where
 this window has no reader (a remote window).
 
@@ -390,8 +396,9 @@ it reads. Each item names its mode, Project, thread and title, kind, text,
 options where the mode has them, and when it was asked, and carries the handle
 that mode's own answer command takes, so a surface answers in place through the
 commands the open thread already uses. An answered or ended request is gone
-from the host's next list. The Inbox lists each decision as the same row,
-answered in place, above its other waiting threads, and a thread with a
+from the host's next list. The Inbox lists each decision, and each waiting subagent, as the same row
+(a decision answered in place, a subagent request reviewed in its Agents tab),
+above its other waiting threads, and a thread with a
 decision is not listed again as a finished turn. The list is read at a local
 window only, so a remote window has no Needs you source. What it includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
@@ -403,7 +410,9 @@ a row opens the thread. It is described in
 The command palette opens on a **Needs you** group when this window can read
 that list. It has one row per waiting thread, titled with the thread and
 detailed with its mode, what it waits on, and how long, and Enter opens the
-thread. Each approval also gets **Approve** and **Deny** commands, so typing
+thread (when every request on a thread is a subagent's, Enter opens that
+child's Agents tab). A waiting subagent gets one **Review request** command and
+no Approve or Deny. Each approval also gets **Approve** and **Deny** commands, so typing
 "approve" finds them; they answer through the mode's own approval command
 without opening the thread,
 and a refusal shows as a notice. A question's choices are not listed, so its row

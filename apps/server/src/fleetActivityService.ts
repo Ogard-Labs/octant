@@ -9,8 +9,27 @@ import {
   type ProductSurfaceSettings,
   type ProjectId,
   type WindowId,
+  type WindowWorkspace,
 } from "@octant/contracts";
 import { enabledModes } from "@octant/domain";
+
+/**
+ * The windows the menu bar's fleet read asks about waiting subagents: every
+ * saved local window whose workspace binds a Work or Code Project, whether or
+ * not that window is open now, because the menu bar exists for the moment no
+ * window is. A window bound to no Project could open no parent and adds nothing.
+ */
+export function windowsBoundToAProject(
+  workspaces: ReadonlyArray<{ readonly workspace: WindowWorkspace }>,
+): ReadonlyArray<WindowId> {
+  return workspaces
+    .filter(
+      ({ workspace }) =>
+        workspace.contextByMode.code.projectId != null ||
+        workspace.contextByMode.work.projectId != null,
+    )
+    .map(({ workspace }) => workspace.windowId);
+}
 
 /** A thread whose turn the journal projects as queued or running. */
 export interface FleetRunningThread {
@@ -47,15 +66,25 @@ export interface FleetActivitySources {
   readonly boundCodeWindows: () => ReadonlyArray<WindowId>;
   /** Code approvals, questions, and decisions this window could answer. */
   readonly codePending: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
+  /**
+   * Local windows whose persisted workspace binds a Work or Code Project. A
+   * subagent's wait is visible only to a window bound to the parent's project,
+   * and the menu bar's own window binds none, so its rows are what each of
+   * these windows already lists.
+   */
+  readonly boundProjectWindows: () => ReadonlyArray<WindowId>;
+  /** Child approvals and questions this window could open. Answering stays on the session route. */
+  readonly childPending: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
   readonly projectName: (projectId: ProjectId) => string | undefined;
 }
 
 /**
  * Which threads need the person and which are running, across modes, for the
  * menu bar. It adds no authority and no state of its own: needs-you is the
- * pending-request read, working is each mode's journaled run state, and a
- * thread that is both is listed once as needs-you, because a held turn is
- * still running while it waits on an answer.
+ * pending-request read, plus the Code requests and the subagent waits each
+ * persisted local window could already open. Working is each mode's journaled
+ * run state, and a thread that is both is listed once as needs-you, because a
+ * held turn is still running while it waits on an answer.
  */
 export class FleetActivityService {
   readonly #sources: FleetActivitySources;
@@ -66,10 +95,13 @@ export class FleetActivityService {
 
   async list(windowId: WindowId): Promise<FleetActivity> {
     const modes = enabledModes(this.#sources.readSettings());
-    const [pending, boundCode, work, code] = await Promise.all([
+    const [pending, boundCode, boundChildren, work, code] = await Promise.all([
       this.#sources.pending(windowId),
       Promise.all(
         this.#sources.boundCodeWindows().map((bound) => this.#sources.codePending(bound)),
+      ),
+      Promise.all(
+        this.#sources.boundProjectWindows().map((bound) => this.#sources.childPending(bound)),
       ),
       modes.includes("work") ? this.#sources.work(windowId) : [],
       this.#sources.code(windowId),
@@ -77,7 +109,11 @@ export class FleetActivityService {
     const chat = modes.includes("chat") ? this.#sources.chat() : [];
 
     const rows = new Map<string, FleetRow>();
-    for (const request of [...pending.requests, ...boundCode.flat()]) {
+    for (const request of [
+      ...pending.requests,
+      ...boundCode.flat(),
+      ...boundChildren.flat().filter((request) => modes.includes(request.mode)),
+    ]) {
       const key = `${request.mode}:${String(request.threadId)}`;
       if (rows.has(key)) continue;
       rows.set(
@@ -182,9 +218,11 @@ export function runningThreadsFromNavigation(navigation: {
 /**
  * A Work request and any finished turn's decision are journaled records; a
  * Code approval or question and a Chat question live in the provider session
- * that is parked on them.
+ * that is parked on them. A subagent's wait is read from the parent thread's
+ * live harness session in every mode.
  */
 function pendingRequestSource(request: PendingRequest): FleetActivitySource {
+  if (request.kind === "child-approval" || request.kind === "child-question") return "session";
   if (request.kind === "decision" || request.mode === "work") return "journal";
   return "session";
 }

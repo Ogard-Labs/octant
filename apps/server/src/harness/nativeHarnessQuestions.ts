@@ -117,6 +117,17 @@ export class NativeHarnessQuestionStore {
     });
   }
 
+  /**
+   * The questions a tool call is blocked on right now. An expired or cancelled
+   * question, or one lost to a restart, has no waiter and is not here.
+   */
+  waiting(): ReadonlyArray<{ readonly threadId: string; readonly questionId: string }> {
+    return [...this.#waiters].map(([questionId, waiter]) => ({
+      threadId: waiter.threadId,
+      questionId,
+    }));
+  }
+
   /** Whether a pending question with this id belongs to the thread. */
   owns(threadId: string, questionId: string): boolean {
     return this.#waiters.get(questionId)?.threadId === threadId;

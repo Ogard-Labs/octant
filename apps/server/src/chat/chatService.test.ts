@@ -5801,7 +5801,9 @@ describe("ChatService", () => {
     await until(() => service.listPendingQuestions().length === 1);
 
     const [listed] = service.listPendingQuestions();
-    if (listed?.mode !== "chat") throw new Error("Expected a Chat question.");
+    if (listed?.mode !== "chat" || listed.kind !== "question") {
+      throw new Error("Expected a Chat question.");
+    }
     expect(listed).toMatchObject({
       kind: "question",
       threadId: created.thread.id,
@@ -5818,10 +5820,14 @@ describe("ChatService", () => {
     // The set's second question is a new request; the answered one is gone.
     await until(() => {
       const [next] = service.listPendingQuestions();
-      return next?.mode === "chat" && next.answer.requestId === "q-second";
+      return (
+        next?.mode === "chat" && next.kind === "question" && next.answer.requestId === "q-second"
+      );
     });
     const [second] = service.listPendingQuestions();
-    if (second?.mode !== "chat") throw new Error("Expected a Chat question.");
+    if (second?.mode !== "chat" || second.kind !== "question") {
+      throw new Error("Expected a Chat question.");
+    }
     await service.execute({
       kind: "answer-chat-turn-question",
       ...second.answer,

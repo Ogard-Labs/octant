@@ -7,7 +7,8 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
-import { defaultShellSettings } from "@octant/domain";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import { contextKeyForProject, defaultShellSettings, defaultWindowWorkspace } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { createFleetActivityRouteHandler } from "./fleetActivityRoutes";
@@ -15,6 +16,7 @@ import {
   FleetActivityService,
   type FleetActivitySources,
   type FleetRunningThread,
+  windowsBoundToAProject,
 } from "./fleetActivityService";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
@@ -49,7 +51,41 @@ const workApproval = decodePendingRequest({
   answer: { requestId: "00000000-0000-4000-8000-000000000903", expectedVersion: 1 },
 });
 
+const workThread = "00000000-0000-4000-8000-000000000902";
+const childRun = "00000000-0000-4000-8000-000000000a01";
+const waitingChild = (kind: "child-approval" | "child-question", requestedAt: string) =>
+  decodePendingRequest({
+    mode: "work",
+    kind,
+    projectId,
+    threadId: workThread,
+    threadTitle: "Quarterly report",
+    child: { runId: childRun, role: "research", task: "Collect the figures." },
+    text: kind === "child-approval" ? "Run `bun install`." : "Which quarter?",
+    requestedAt,
+  });
+
 describe("fleet activity route", () => {
+  it("lists a parent thread with waiting subagents as one needs-you row read from the session", async () => {
+    const { route } = fixture({
+      pending: [
+        waitingChild("child-approval", "2026-10-06T08:02:00.000Z"),
+        waitingChild("child-question", "2026-10-06T08:03:00.000Z"),
+      ],
+    });
+    expect((await (await route(request()))?.json()).threads).toEqual([
+      {
+        mode: "work",
+        threadId: workThread,
+        title: "Quarterly report",
+        projectName: "Reports",
+        state: "needs-you",
+        activitySource: "session",
+        since: "2026-10-06T08:02:00.000Z",
+      },
+    ]);
+  });
+
   it("lists needs-you before working, naming where each state was read", async () => {
     const { route } = fixture({
       chat: [{ threadId: "chat-1", title: "Trip plan", turnStartedAt: "2026-10-06T08:05:00.000Z" }],
@@ -106,6 +142,80 @@ describe("fleet activity route", () => {
       ],
       truncated: false,
     });
+  });
+
+  it("lists a waiting subagent a bound window could open when the menu bar's own read has none", async () => {
+    const boundWindow = decodeWindowId("00000000-0000-4000-8000-000000000802");
+    const otherWindow = decodeWindowId("00000000-0000-4000-8000-000000000803");
+    const child = decodePendingRequest({
+      mode: "code",
+      kind: "child-approval",
+      projectId,
+      threadId: codeThread,
+      threadTitle: "Fix the parser",
+      child: { runId: childRun, role: "implementation", task: "Check the grammar." },
+      text: "Allow `bun test`?",
+      requestedAt: "2026-10-06T08:04:00.000Z",
+    });
+    const { route, sources } = fixture({
+      pending: [],
+      boundProjectWindows: [boundWindow, otherWindow],
+      childPending: async () => [child],
+    });
+    const body = await (await route(request()))?.json();
+    expect(body.threads).toEqual([
+      {
+        mode: "code",
+        threadId: codeThread,
+        title: "Fix the parser",
+        projectName: "Reports",
+        state: "needs-you",
+        activitySource: "session",
+        since: "2026-10-06T08:04:00.000Z",
+      },
+    ]);
+    expect(sources.pending).toHaveBeenCalledExactlyOnceWith(windowId);
+    expect(sources.childPending).toHaveBeenNthCalledWith(1, boundWindow);
+    expect(sources.childPending).toHaveBeenNthCalledWith(2, otherWindow);
+    expect(sources.codePending).not.toHaveBeenCalled();
+  });
+
+  it("asks for a waiting subagent in every saved window bound to a Project, open or not, and in none bound to no Project", () => {
+    const unbound = decodeWindowId("00000000-0000-4000-8000-000000000811");
+    const codeBound = decodeWindowId("00000000-0000-4000-8000-000000000812");
+    const workBound = decodeWindowId("00000000-0000-4000-8000-000000000813");
+    const bind = (window: WindowId, mode: "code" | "work") => {
+      const empty = defaultWindowWorkspace(window);
+      return {
+        workspace: {
+          ...empty,
+          contextByMode: {
+            ...empty.contextByMode,
+            [mode]: contextKeyForProject(mode, LOCAL_HOST_ID, projectId, "/repo"),
+          },
+        },
+      };
+    };
+    expect(
+      windowsBoundToAProject([
+        { workspace: defaultWindowWorkspace(unbound) },
+        bind(codeBound, "code"),
+        bind(workBound, "work"),
+      ]),
+    ).toEqual([codeBound, workBound]);
+    expect(windowsBoundToAProject([{ workspace: defaultWindowWorkspace(unbound) }])).toEqual([]);
+  });
+
+  it("leaves a waiting subagent out of the menu bar when its mode is off", async () => {
+    const boundWindow = decodeWindowId("00000000-0000-4000-8000-000000000802");
+    const { route } = fixture({
+      settings: { ...defaultShellSettings(), workEnabled: false },
+      pending: [],
+      boundProjectWindows: [boundWindow],
+      childPending: async () => [waitingChild("child-approval", "2026-10-06T08:02:00.000Z")],
+    });
+    const body = await (await route(request()))?.json();
+    expect(body.threads).toEqual([]);
   });
 
   it("lists a Code request a bound local window could answer, and none from a Project no window binds", async () => {
@@ -209,6 +319,8 @@ function fixture(
       | (() => Promise<ReadonlyArray<FleetRunningThread>>);
     readonly boundCodeWindows?: ReadonlyArray<WindowId>;
     readonly codePending?: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
+    readonly boundProjectWindows?: ReadonlyArray<WindowId>;
+    readonly childPending?: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
   } = {},
 ) {
   const store = new WindowAuthorityStore();
@@ -225,6 +337,8 @@ function fixture(
     code: vi.fn(typeof code === "function" ? code : async () => code ?? []),
     boundCodeWindows: () => options.boundCodeWindows ?? [],
     codePending: vi.fn(options.codePending ?? (async () => [])),
+    boundProjectWindows: () => options.boundProjectWindows ?? [],
+    childPending: vi.fn(options.childPending ?? (async () => [])),
     projectName: (id) => (String(id) === String(projectId) ? "Reports" : undefined),
   } satisfies FleetActivitySources;
   const route = createFleetActivityRouteHandler({

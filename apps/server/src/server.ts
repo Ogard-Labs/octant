@@ -179,7 +179,11 @@ import { attachWorkRequestRuntime, WorkRequestRuntime } from "./work/workRequest
 import { WorkRequestService } from "./work/workRequestService";
 import { createWorkRequestRouteHandler } from "./workRequestRoutes";
 import { createFleetActivityRouteHandler } from "./fleetActivityRoutes";
-import { FleetActivityService, runningThreadsFromNavigation } from "./fleetActivityService";
+import {
+  FleetActivityService,
+  runningThreadsFromNavigation,
+  windowsBoundToAProject,
+} from "./fleetActivityService";
 import { createPendingRequestRouteHandler } from "./pendingRequestRoutes";
 import { PendingRequestService } from "./pendingRequestService";
 import { createWorkThreadRouteHandler } from "./workThreadRoutes";
@@ -383,6 +387,10 @@ import {
   type AgentRunProcessSupervisorPort,
   createInMemoryCapacityPort,
 } from "./agentRun/agentRunOrchestrationService";
+import {
+  listChildPendingRequests,
+  windowMayListChildThread,
+} from "./agentRun/childPendingRequests";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
 import { AgentRunDependencyScheduler } from "./agentRun/agentRunDependencyScheduler";
 import { AgentResultDeliveryService } from "./agentRun/agentResultDeliveryService";
@@ -10012,6 +10020,53 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const childPendingForWindow = (windowId: WindowId) =>
+      listChildPendingRequests(
+        {
+          approvals: nativeHarnessApprovals,
+          questions: nativeHarnessQuestionsLive,
+          readSession: (threadId) => nativeHarnessSessionsLive.read(threadId),
+          getRun: (id) => agentRunPersistence.getById(id),
+          parentThreadTitle: (run) =>
+            resolveAgentRunParentThreadTitle({
+              persistence,
+              workThreadProjection,
+              parentThreadId: run.parentThreadId,
+              mode: run.routingReceipt.mode,
+            }),
+          authorizeThread: (input) =>
+            windowMayListChildThread(
+              {
+                purged: (threadId) =>
+                  persistence.connection
+                    .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
+                    .get(threadId) !== undefined,
+                codeThread: (threadId) => {
+                  try {
+                    return persistence.readCodeThread(decodeCodeThreadId(threadId));
+                  } catch {
+                    // A Work thread id is not a Code thread id.
+                    return undefined;
+                  }
+                },
+                workThread: (threadId) => {
+                  try {
+                    return workThreadProjection.read(decodeWorkThreadId(threadId));
+                  } catch {
+                    // Neither mode owns this id.
+                    return undefined;
+                  }
+                },
+                workspace: (windowId) =>
+                  persistence.readWindowWorkspace(decodeWindowId(windowId))?.workspace,
+                hasActiveProject: (projectId, mode) =>
+                  projectService.hasActiveProject(projectId, mode),
+              },
+              input,
+            ),
+        },
+        String(windowId),
+      );
     const pendingRequestService = new PendingRequestService({
       readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
       work: async (windowId) => [
@@ -10030,13 +10085,16 @@ export function startOctantServer(
         ...(await codeTurnDecisions.listForWindow(windowId)),
       ],
       chat: () => chatService.listPendingQuestions(),
+      children: childPendingForWindow,
     });
     const pendingRequestRoutes = createPendingRequestRouteHandler({
       service: pendingRequestService,
       windowAuthorityStore,
     });
-    // The menu bar's roster: needs-you is the pending-request read, working is
-    // each mode's journaled run state. Nothing here reads a terminal's screen.
+    // The menu bar's roster: needs-you is the pending-request read, plus the
+    // Code requests and subagent waits each persisted local window could
+    // already open. The menu bar's own window binds no Project. Nothing here
+    // reads a terminal's screen.
     const fleetActivityRoutes = createFleetActivityRouteHandler({
       service: new FleetActivityService({
         readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -10050,6 +10108,8 @@ export function startOctantServer(
           ...((await codeOperationRuntime?.pendingRequests?.(windowId)) ?? []),
           ...(await codeTurnDecisions.listForWindow(windowId)),
         ],
+        boundProjectWindows: () => windowsBoundToAProject(persistence.readWindowWorkspaces()),
+        childPending: childPendingForWindow,
         chat: () =>
           chatService
             .navigation()

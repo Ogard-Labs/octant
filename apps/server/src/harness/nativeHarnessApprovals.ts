@@ -140,6 +140,18 @@ export class NativeHarnessApprovalStore {
     });
   }
 
+  /**
+   * The approvals a tool call is blocked on right now. A request that expired,
+   * was cancelled, or was lost to a restart has no waiter and is not here, so
+   * a reader listing what a person can still answer never lists a dead one.
+   */
+  waiting(): ReadonlyArray<{ readonly threadId: string; readonly approvalId: string }> {
+    return [...this.#waiters].map(([approvalId, waiter]) => ({
+      threadId: waiter.threadId,
+      approvalId,
+    }));
+  }
+
   decide(
     threadId: string,
     approvalId: string,

@@ -51,6 +51,17 @@
   white-space: nowrap;
 }
 
+.pending-request__subagent {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-request__subagent-headline {
+  color: var(--oct-fg);
+}
+
 .pending-request__text {
   display: -webkit-box;
   overflow: hidden;

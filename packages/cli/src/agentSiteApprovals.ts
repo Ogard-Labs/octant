@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { decodeBrowserToolApprovalList, type OctantMode } from "@octant/contracts";
-import { decodePendingRequestList } from "@octant/contracts/pending-requests";
+import { decodePendingRequest, type PendingRequest } from "@octant/contracts/pending-requests";
 import { refusalMessage, type HostRefusal } from "./agentHost";
 import type { OpenedLocalControlSession } from "./localControl";
 
@@ -65,7 +65,7 @@ export async function listAgentSiteApprovals(
   if (mode === "code") {
     const response = await session.send({ path: "/api/pending-requests", method: "GET" });
     if (response.status !== 200) return [];
-    return decodePendingRequestList(response.body).requests.flatMap((request) =>
+    return pendingRequestRows(response.body).flatMap((request) =>
       request.mode === "code" &&
       request.kind === "approval" &&
       request.browserOrigin !== undefined &&
@@ -83,6 +83,24 @@ export async function listAgentSiteApprovals(
     );
   }
   return [];
+}
+
+/**
+ * The rows of the host's pending-requests list this build understands. The
+ * list is read row by row because a newer host may carry a kind this build has
+ * never heard of, and one such row must not hide a Browser ask beside it: an
+ * ask nobody can see only ever expires.
+ */
+function pendingRequestRows(body: unknown): ReadonlyArray<PendingRequest> {
+  const rows = (body as { readonly requests?: unknown } | null)?.requests;
+  if (!Array.isArray(rows)) throw new Error("The host's pending requests were not a list.");
+  return rows.flatMap((row: unknown) => {
+    try {
+      return [decodePendingRequest(row)];
+    } catch {
+      return [];
+    }
+  });
 }
 
 /**

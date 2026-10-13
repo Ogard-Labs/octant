@@ -480,9 +480,14 @@ import type {
   ApprovalPendingRequest,
   DecisionPendingRequest,
 } from "./palette/needsYouCommands";
-import { answerPendingRequest } from "./pendingRequests/pendingRequests";
+import {
+  answerPendingRequest,
+  isChildPendingRequest,
+  type ChildPendingRequest,
+} from "./pendingRequests/pendingRequests";
 import type { InboxDecisionSource } from "./inbox/InboxView";
 import { usePendingRequests } from "./palette/usePendingRequests";
+import { usePendingRequests as usePendingRequestRead } from "./pendingRequests/usePendingRequests";
 import { useCommandExtensions } from "./palette/useCommandSkills";
 import { OctantAlert } from "./ui/base/OctantAlert";
 
@@ -1625,6 +1630,7 @@ function LaunchedShell(
           onOpenThread: openCommandThread,
           onAnswerApproval: answerNeedsYouApproval,
           onAnswerDecision: answerNeedsYouDecision,
+          onOpenSubagentRequest: openSubagentRequest,
         };
   const [updateReadyNotice, dismissUpdateReadyNotice] = useAppUpdateReadyNotice(
     props.hostBridge?.subscribeAppUpdateState,
@@ -1994,14 +2000,53 @@ function LaunchedShell(
   });
   // The row count mirrors the dock badge: distinct threads waiting, minus the
   // one the user is looking at, whose signal the open thread already answers.
+  // A thread whose subagent waits on the person counts too, once.
+  // Only Work and Code threads have subagent rows, and a subagent's ask or
+  // settle moves both of those topics. Chat navigation moves on every streaming
+  // delta, so following it would re-read pending requests for every token.
+  const subagentWaitRead = usePendingRequestRead(pendingRequestClient, {
+    feedRevision: machineChanges.workNavigation + machineChanges.codeNavigation,
+    settings: controller.settings,
+    workspace: controller.workspace,
+  }).read;
+  // A Review request pressed before this window's thread list held the parent
+  // waits here for one re-read: it opens once the parent is listed, and says so
+  // when the re-read still does not list it.
+  const [awaitedSubagentOpen, setAwaitedSubagentOpen] = useState<{
+    readonly request: ChildPendingRequest;
+    readonly refreshed: boolean;
+  }>();
+  useEffect(() => {
+    if (awaitedSubagentOpen === undefined) return;
+    if (subagentParentListed(awaitedSubagentOpen.request)) {
+      setAwaitedSubagentOpen(undefined);
+      openSubagentRequest(awaitedSubagentOpen.request);
+    } else if (awaitedSubagentOpen.refreshed) {
+      setAwaitedSubagentOpen(undefined);
+      setThreadExportNotice(
+        `Octant could not open ${awaitedSubagentOpen.request.threadTitle}: this window no longer lists that thread.`,
+      );
+    }
+    // The helpers read the lists named here; nothing else decides when to look again.
+  }, [awaitedSubagentOpen, workNavigation.navigation, codeController.navigation]);
+  const waitingThreadIds = useMemo(
+    () =>
+      subagentWaitRead.status === "ready"
+        ? subagentWaitRead.requests
+            .filter(isChildPendingRequest)
+            .map((request) => String(request.threadId))
+        : [],
+    [subagentWaitRead],
+  );
   const inboxCount = useMemo(
     () =>
       evaluateThreadAttention({
         signals: attentionSignals,
+        waitingThreadIds,
         windowFocused: true,
         ...(watchedThreadId === undefined ? {} : { watchedThreadId }),
       }).badgeCount,
-    [attentionSignals, watchedThreadId],
+    [attentionSignals, waitingThreadIds, watchedThreadId],
   );
   const activeProjectId =
     selectedProjectTabId ??
@@ -3405,6 +3450,52 @@ function LaunchedShell(
       );
     }
   }
+  function subagentParentListed(request: ChildPendingRequest): boolean {
+    const threadId = String(request.threadId);
+    return request.mode === "work"
+      ? workNavigation.navigation.some((thread) => String(thread.threadId) === threadId)
+      : codeController.navigation.some((thread) => String(thread.threadId) === threadId);
+  }
+  /**
+   * Choosing a waiting subagent's row shows its parent thread with the Agents
+   * tool open on that subagent. The dock keeps its own state per thread, so
+   * the tab is opened under the parent's key now and shows once the thread is
+   * the one on screen.
+   */
+  function openSubagentRequest(request: ChildPendingRequest) {
+    const threadId = String(request.threadId);
+    // The host lists this row only for a window that may open the parent, so a
+    // parent missing from this window's list is a list that has not caught up.
+    // Opening it anyway would leave the Agents tab over whatever thread is on
+    // screen, so the list is read once more first.
+    if (!subagentParentListed(request)) {
+      setAwaitedSubagentOpen({ request, refreshed: false });
+      const reread =
+        request.mode === "work" ? workNavigation.refresh() : codeController.refreshNavigation();
+      void reread.finally(() =>
+        setAwaitedSubagentOpen((current) =>
+          current?.request === request ? { request, refreshed: true } : current,
+        ),
+      );
+      return;
+    }
+    const key = threadUtilityDockKey(request.mode, threadId);
+    if (request.mode === "work") selectWorkThread(threadId);
+    else selectCodeThread(threadId);
+    setAddAgentInvokedByThread((current) => {
+      if (current.has(key)) return current;
+      return new Set(current).add(key);
+    });
+    setRequestedAgentView({
+      threadKey: key,
+      view: { kind: "child", runId: String(request.child.runId) },
+    });
+    if (bottomPanelPresentation.open) {
+      persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
+    }
+    setDockVisible(true);
+    setDockStatesByThread((current) => openThreadUtilityTab(current, key, "agents"));
+  }
   function openReviewForThread(threadId: string) {
     setRequestedAgentReview(undefined);
     const key = threadUtilityDockKey("code", threadId);
@@ -4384,7 +4475,8 @@ function LaunchedShell(
           now: minuteNow.getTime(),
           onOpenThread: (request) => {
             setInboxOpen(false);
-            if (request.mode === "work") selectWorkThread(String(request.threadId));
+            if (isChildPendingRequest(request)) openSubagentRequest(request);
+            else if (request.mode === "work") selectWorkThread(String(request.threadId));
             else if (request.mode === "code") selectCodeThread(String(request.threadId));
             else selectChatThread(String(request.threadId));
           },
@@ -4402,7 +4494,8 @@ function LaunchedShell(
       onOpenInbox: openInbox,
       onOpenThread: (request) => {
         pluginSidebarDestinationActionContext.closeOverlays();
-        if (request.mode === "chat") selectChatThread(String(request.threadId));
+        if (isChildPendingRequest(request)) openSubagentRequest(request);
+        else if (request.mode === "chat") selectChatThread(String(request.threadId));
         else if (request.mode === "work") selectWorkThread(String(request.threadId));
         else selectCodeThread(String(request.threadId));
       },
@@ -7199,6 +7292,7 @@ function LaunchedShell(
                   answerClients: { chatClient, codeClient, workRequestClient, workTurnClient },
                   feedRevision: pendingRequestFeedRevision,
                   now: minuteNow.getTime(),
+                  onOpenSubagent: openSubagentRequest,
                   pendingRequestClient,
                   settings: controller.settings,
                   workspace: controller.workspace,

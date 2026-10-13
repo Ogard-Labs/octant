@@ -89,6 +89,20 @@ function codeHost(result: unknown = { kind: "provider-turn-state", state: "runni
               text: "Run rm -rf build?",
               answer: { threadId, checkoutId, approvalId: "40000000-0000-4000-8000-000000000009" },
             },
+            {
+              mode: "code",
+              kind: "child-approval",
+              projectId,
+              threadId,
+              threadTitle: "Fix the docs site",
+              requestedAt,
+              child: {
+                runId: "40000000-0000-4000-8000-000000000010",
+                role: "research",
+                task: "Check the site.",
+              },
+              text: "Open https://example.com",
+            },
           ],
           truncated: false,
         },
@@ -128,6 +142,36 @@ describe("site approvals in the terminal", () => {
     expect(await listAgentSiteApprovals(host, "code", otherThreadId)).toEqual([]);
     expect(await listAgentSiteApprovals(host, "chat", threadId)).toEqual([]);
     expect(host.seen.filter((request) => request.path === "/api/pending-requests")).toHaveLength(2);
+  });
+
+  it("keeps a Code site ask when the same list holds a row of a kind this build does not know", async () => {
+    const host = session((request) => {
+      if (request.path !== "/api/pending-requests") return { status: 404, body: {} };
+      return {
+        status: 200,
+        body: {
+          requests: [
+            {
+              mode: "code",
+              kind: "approval",
+              projectId,
+              threadId,
+              threadTitle: "Fix the docs site",
+              requestedAt,
+              text: "Allow this thread to use an isolated browser session at https://example.com? Shell and file access stay unchanged.",
+              browserOrigin: "https://example.com",
+              answer: { threadId, checkoutId, approvalId },
+            },
+            { mode: "code", kind: "a-kind-from-a-newer-host", threadId, requestedAt },
+            "not a row at all",
+          ],
+          truncated: false,
+        },
+      };
+    });
+    expect(await listAgentSiteApprovals(host, "code", threadId)).toEqual([
+      expect.objectContaining({ id: approvalId, mode: "code", origin: "https://example.com" }),
+    ]);
   });
 
   it("prompts for a Work site ask and sends the allow the person typed", async () => {

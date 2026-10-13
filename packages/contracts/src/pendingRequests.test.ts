@@ -19,6 +19,7 @@ const ids = {
   operation: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   workTurn: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   binding: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  childRun: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
 } as const;
 const requestedAt = "2026-10-06T08:00:00.000Z";
 
@@ -75,6 +76,31 @@ const codeDecision = {
   ],
   requestedAt,
   answer: { threadId: ids.codeThread, checkoutId: ids.checkout, operationId: ids.operation },
+} as const;
+
+const childApproval = {
+  mode: "code",
+  kind: "child-approval",
+  projectId: ids.project,
+  threadId: ids.codeThread,
+  threadTitle: "Fix the parser",
+  child: {
+    runId: ids.childRun,
+    role: "research",
+    task: "Find where the parser drops trailing commas.",
+    providerName: "Local model",
+    modelId: "gpt-5",
+  },
+  text: "Run `bun test`.",
+  requestedAt,
+} as const;
+
+const childQuestion = {
+  ...childApproval,
+  mode: "work",
+  kind: "child-question",
+  threadId: ids.workThread,
+  text: "Which fixture should I use?",
 } as const;
 
 const workDecision = {
@@ -240,6 +266,91 @@ describe("pending request contract", () => {
     expect(() =>
       decodePendingRequest({ ...workApproval, answer: { ...workApproval.answer, extra: true } }),
     ).toThrow();
+  });
+
+  it("lists a waiting subagent's approval and question with no handle to answer them", () => {
+    const list = decodePendingRequestList({
+      requests: [childApproval, childQuestion],
+      truncated: false,
+    });
+    expect(list.requests.map((request) => `${request.mode}:${request.kind}`)).toEqual([
+      "code:child-approval",
+      "work:child-question",
+    ]);
+  });
+
+  it("refuses a subagent row that carries an answer, options, or a run detail it was not given", () => {
+    expect(() =>
+      decodePendingRequest({
+        ...childApproval,
+        answer: { threadId: ids.codeThread, checkoutId: ids.checkout, approvalId: ids.approval },
+      }),
+    ).toThrow();
+    expect(() => decodePendingRequest({ ...childQuestion, options: [{ label: "Yes" }] })).toThrow();
+    expect(() =>
+      decodePendingRequest({ ...childApproval, child: { ...childApproval.child, extra: true } }),
+    ).toThrow();
+  });
+
+  it("lists no subagent for a Chat thread, which has no Agents tab to answer in", () => {
+    expect(() => decodePendingRequest({ ...childApproval, mode: "chat" })).toThrow();
+  });
+
+  it("bounds a subagent row's task and text", () => {
+    const task = (length: number) => ({ ...childApproval.child, task: "t".repeat(length) });
+    expect(() => decodePendingRequest({ ...childApproval, child: task(201) })).toThrow();
+    expect(decodePendingRequest({ ...childApproval, child: task(200) })).toMatchObject({
+      kind: "child-approval",
+    });
+    expect(() => decodePendingRequest({ ...childApproval, text: "x".repeat(2049) })).toThrow();
+    expect(decodePendingRequest({ ...childApproval, text: "x".repeat(2048) })).toMatchObject({
+      kind: "child-approval",
+    });
+    expect(() => decodePendingRequest({ ...childApproval, text: " " })).toThrow();
+  });
+
+  it("keeps a subagent row's text to its parent mode's own bounds and sanitization", () => {
+    // Code counts bytes, as a Code approval summary does.
+    expect(() => decodePendingRequest({ ...childApproval, text: "é".repeat(1025) })).toThrow();
+    expect(
+      decodePendingRequest({ ...childApproval, kind: "child-question", text: "x".repeat(8192) }),
+    ).toMatchObject({ kind: "child-question" });
+    // Work refuses a path or URL and anything past a Work request's length.
+    expect(() =>
+      decodePendingRequest({ ...childQuestion, text: "Edit /Users/me/notes.md?" }),
+    ).toThrow();
+    expect(() =>
+      decodePendingRequest({ ...childQuestion, text: "Open https://example.com?" }),
+    ).toThrow();
+    expect(() => decodePendingRequest({ ...childQuestion, text: "x".repeat(2001) })).toThrow();
+    expect(decodePendingRequest({ ...childQuestion, text: "x".repeat(2000) })).toMatchObject({
+      kind: "child-question",
+    });
+  });
+
+  it("refuses a Work subagent row whose task names a path or URL, and shows a Code task as written", () => {
+    const workTask = (task: string) => ({ ...childQuestion.child, task });
+    expect(() =>
+      decodePendingRequest({
+        ...childQuestion,
+        child: workTask("Summarise /Users/me/clients/acme/report.xlsx"),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodePendingRequest({
+        ...childQuestion,
+        child: workTask("Read https://example.com/private"),
+      }),
+    ).toThrow();
+    expect(
+      decodePendingRequest({ ...childQuestion, child: workTask("Summarise the client report") }),
+    ).toMatchObject({ kind: "child-question" });
+    expect(
+      decodePendingRequest({
+        ...childApproval,
+        child: { ...childApproval.child, task: "Fix /src/parser.ts" },
+      }),
+    ).toMatchObject({ kind: "child-approval" });
   });
 
   it("bounds the list and requires the truncation flag", () => {

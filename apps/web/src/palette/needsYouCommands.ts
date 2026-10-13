@@ -1,6 +1,11 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import type { PendingRequest } from "@octant/contracts/pending-requests";
 import type { CommandThread } from "./buildOctantCommands";
+import {
+  childRequestHeadline,
+  isChildPendingRequest,
+  type ChildPendingRequest,
+} from "../pendingRequests/pendingRequests";
 import type { OctantCommand } from "./commandModel";
 
 export type ApprovalPendingRequest = Extract<PendingRequest, { readonly kind: "approval" }>;
@@ -20,6 +25,11 @@ export interface NeedsYouSources {
   readonly onAnswerApproval: (request: ApprovalPendingRequest, decision: ApprovalDecision) => void;
   /** Sends the option's words as the thread's next turn, as the card's button does. */
   readonly onAnswerDecision: (request: DecisionPendingRequest, option: string) => void;
+  /**
+   * Opens the parent thread's Agents tool on the waiting subagent. A subagent's
+   * request is answered there and nowhere else, so it has no answer command.
+   */
+  readonly onOpenSubagentRequest: (request: ChildPendingRequest) => void;
 }
 
 const MODE_LABEL: Record<OctantMode, string> = { chat: "Chat", work: "Work", code: "Code" };
@@ -33,8 +43,9 @@ const MAX_TEXT_CHARACTERS = 64;
  * typing an option's words finds it. A question's choices are not listed:
  * answering one needs the whole question on screen, so its row opens the
  * thread instead. A decision's options are short words the agent offered for
- * its next turn, and its row says the ask. Nothing is listed when nothing
- * waits, so the group never shows empty.
+ * its next turn, and its row says the ask. A waiting subagent gets one Review
+ * request command, which opens its request; it has no Approve or Deny here.
+ * Nothing is listed when nothing waits, so the group never shows empty.
  */
 export function buildNeedsYouCommands(sources: NeedsYouSources): ReadonlyArray<OctantCommand> {
   const threads = new Map<string, Array<PendingRequest>>();
@@ -73,9 +84,36 @@ export function buildNeedsYouCommands(sources: NeedsYouSources): ReadonlyArray<O
         first.threadTitle,
         ...requests.flatMap((request) => (request.kind === "decision" ? [request.text] : [])),
       ],
-      action: { kind: "run", run: () => sources.onOpenThread(thread) },
+      action: {
+        kind: "run",
+        run: () => {
+          // A thread that waits only on a subagent opens on that subagent.
+          if (isChildPendingRequest(first) && requests.every(isChildPendingRequest)) {
+            sources.onOpenSubagentRequest(first);
+            return;
+          }
+          sources.onOpenThread(thread);
+        },
+      },
     });
     for (const request of requests) {
+      if (isChildPendingRequest(request)) {
+        commands.push({
+          id: `needs-you:child:${key}:${String(request.child.runId)}:${request.kind}:${request.requestedAt}`,
+          title: `Review request: ${request.threadTitle}`,
+          group: "Needs you",
+          detail: `${MODE_LABEL[request.mode]} · ${childRequestHeadline(request)} · ${shorten(request.text)}`,
+          keywords: [
+            "review request",
+            "subagent",
+            request.kind === "child-approval" ? "approval" : "question",
+            request.threadTitle,
+            request.child.task,
+          ],
+          action: { kind: "run", run: () => sources.onOpenSubagentRequest(request) },
+        });
+        continue;
+      }
       if (request.kind === "decision") {
         const detail = `${MODE_LABEL[request.mode]} · ${shorten(request.text)}`;
         request.options.forEach((option, index) => {
@@ -109,12 +147,20 @@ export function buildNeedsYouCommands(sources: NeedsYouSources): ReadonlyArray<O
 }
 
 function waitingOn(requests: ReadonlyArray<PendingRequest>): string {
-  const approval = requests.some((request) => request.kind === "approval");
-  const question = requests.some((request) => request.kind === "question");
-  if (approval && question) return "waiting on approval and your answer";
-  if (approval) return "waiting on approval";
-  if (question) return "waiting on your answer";
-  return "waiting on your decision";
+  const direct = requests.filter((request) => !isChildPendingRequest(request));
+  const subagent = direct.length < requests.length;
+  if (direct.length === 0) return "waiting on a subagent";
+  const approval = direct.some((request) => request.kind === "approval");
+  const question = direct.some((request) => request.kind === "question");
+  const text =
+    approval && question
+      ? "waiting on approval and your answer"
+      : approval
+        ? "waiting on approval"
+        : question
+          ? "waiting on your answer"
+          : "waiting on your decision";
+  return subagent ? `${text} and a subagent` : text;
 }
 
 function waited(elapsedMs: number): string {

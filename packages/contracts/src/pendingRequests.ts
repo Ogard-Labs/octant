@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { AgentRunId, AgentRunParentThreadId, AgentRunRole } from "./agentRun";
 import { AnswerChatTurnQuestionCommand, ChatAttemptQuestion, ChatThreadId } from "./chat";
 import { CodeApprovalId, CodeCheckoutId, CodeThreadId } from "./code";
 import {
@@ -11,6 +12,7 @@ import {
 } from "./codeOperations";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
+import { ProviderModelId } from "./providers";
 import { MAX_WORK_REQUEST_OPTIONS, WorkRequestId, WorkRequestSanitizedText } from "./workRequests";
 import { WorkThreadId } from "./workThreads";
 import { WorkTurnAuthority, WorkTurnId } from "./workTurns";
@@ -150,6 +152,61 @@ const sameThread = (request: {
   readonly answer: { readonly threadId: unknown };
 }): boolean => String(request.threadId) === String(request.answer.threadId);
 
+/** A subagent's task, cut to what a row can name it by. */
+export const MAX_CHILD_PENDING_REQUEST_TASK_LENGTH = 200;
+
+/**
+ * A subagent waiting on the person. It exists so the request can be found from
+ * anywhere in the window, not so it can be answered there: there is no
+ * `answer` and no `options`. The answer stays in the parent thread's Agents
+ * tab, through the harness session's own route, which keeps an approval
+ * covering that one request.
+ */
+const ChildPendingRequestFields = {
+  ...PendingRequestFields,
+  /**
+   * Work or Code only: those are the modes whose threads have an Agents tab to
+   * answer in. A Chat thread has no dock, so a row for its subagent would send
+   * the person to a place with nothing to answer.
+   */
+  mode: Schema.Literal("work", "code"),
+  projectId: Schema.optional(ProjectId),
+  /** The parent thread the subagent works under. */
+  threadId: AgentRunParentThreadId,
+  child: Schema.Struct({
+    runId: AgentRunId,
+    role: AgentRunRole,
+    task: Schema.NonEmptyTrimmedString.pipe(
+      Schema.maxLength(MAX_CHILD_PENDING_REQUEST_TASK_LENGTH),
+    ),
+    providerName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+    modelId: Schema.optional(ProviderModelId),
+  }).annotations(strict),
+  text: Schema.NonEmptyTrimmedString,
+} as const;
+
+const isWorkRequestText = Schema.is(WorkRequestSanitizedText);
+const isCodeApprovalText = Schema.is(CodeApprovalSummaryText);
+const isCodeQuestionText = Schema.is(CodeQuestionPromptText);
+
+/**
+ * A subagent row is never looser than the parent mode's own rows: Work text and
+ * the delegated task are Work's sanitized request text, with no path or URL,
+ * and Code text keeps the byte bound of a Code approval summary or question
+ * prompt (a Code task is shown as written).
+ */
+const childTextKeepsModeBounds = (request: {
+  readonly mode: "work" | "code";
+  readonly kind: "child-approval" | "child-question";
+  readonly text: string;
+  readonly child: { readonly task: string };
+}): boolean =>
+  request.mode === "work"
+    ? isWorkRequestText(request.text) && isWorkRequestText(request.child.task)
+    : request.kind === "child-approval"
+      ? isCodeApprovalText(request.text)
+      : isCodeQuestionText(request.text);
+
 export const PendingRequest = Schema.Union(
   Schema.Struct({ ...WorkPendingRequestFields, kind: Schema.Literal("approval") }).annotations(
     strict,
@@ -207,6 +264,18 @@ export const PendingRequest = Schema.Union(
   })
     .annotations(strict)
     .pipe(Schema.filter(sameThread, { jsonSchema: {} })),
+  Schema.Struct({
+    ...ChildPendingRequestFields,
+    kind: Schema.Literal("child-approval"),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter(childTextKeepsModeBounds, { jsonSchema: {} })),
+  Schema.Struct({
+    ...ChildPendingRequestFields,
+    kind: Schema.Literal("child-question"),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter(childTextKeepsModeBounds, { jsonSchema: {} })),
   Schema.Struct({
     ...PendingRequestFields,
     mode: Schema.Literal("chat"),

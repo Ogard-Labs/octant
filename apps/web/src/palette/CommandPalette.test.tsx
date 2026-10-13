@@ -291,6 +291,7 @@ describe("CommandPalette", () => {
       onOpenThread,
       onAnswerApproval: vi.fn(),
       onAnswerDecision: vi.fn(),
+      onOpenSubagentRequest: vi.fn(),
     });
 
     await openPalette(user);
@@ -323,6 +324,7 @@ describe("CommandPalette", () => {
       onOpenThread,
       onAnswerApproval,
       onAnswerDecision: vi.fn(),
+      onOpenSubagentRequest: vi.fn(),
     });
 
     await openPalette(user);
@@ -343,6 +345,7 @@ describe("CommandPalette", () => {
       onOpenThread,
       onAnswerApproval: vi.fn(),
       onAnswerDecision,
+      onOpenSubagentRequest: vi.fn(),
     });
 
     await openPalette(user);
@@ -365,6 +368,7 @@ describe("CommandPalette", () => {
       onOpenThread: vi.fn(),
       onAnswerApproval: vi.fn(),
       onAnswerDecision: vi.fn(),
+      onOpenSubagentRequest: vi.fn(),
     });
 
     await openPalette(user);

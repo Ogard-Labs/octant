@@ -38,6 +38,11 @@ An answer goes through the mode's own command with the handle the host listed:
 | Decision option (Code)    | `start-provider-turn`, with the words kept as prompt evidence                                |
 | Decision option (Work)    | `start-work-thread-turn`, with the thread's current authority                                |
 
+A waiting subagent's request has no row here: it is listed with no answer
+handle, and its **Review request** action opens the parent thread's Agents tab,
+where the child's own approval or question controls answer through the
+harness session route.
+
 The command palette's **Approve** and **Deny** commands use
 `resolve-work-request` and `answer-provider-approval` without opening the
 thread.
