@@ -134,7 +134,9 @@ native receipts; desktop admin routes are loopback-only.
 ### Outside content
 
 When a thread reads content from outside, such as a web page, a tool's result,
-an issue, or a message from another agent, Octant marks it. While a thread is
+an issue, or a message from another agent, Octant marks it. A search or page
+fetch the provider runtime performs with its own built-in tool does not mark
+the thread. While a thread is
 marked, some actions ask each time and some remembered approvals stop applying.
 A notice above the message box says so, with a **Review** button. Review lists
 where the thread read from, how often, and when. **Clear the mark** tells Octant

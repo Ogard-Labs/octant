@@ -1340,7 +1340,11 @@ flowchart LR
 - **Untrusted-content taint.** Browser observations, tool results, and imported
   external content that already carry tainting provenance append
   `thread.external-content-ingested@1` with thread identity and bounded source
-  labels. Raw bodies never enter the payload. The thread-lifetime taint
+  labels. Raw bodies never enter the payload. A provider runtime's own built-in
+  web search or page fetch does not append this event. Where the runtime reports
+  the call, Octant records ordinary tool activity. The call sits outside the
+  mark and outside the gate that mark applies to computer-use, MCP, and the
+  native harness. The thread-lifetime taint
   projection rebuilds from the journal; session, turn, and restart boundaries
   never clear it. Irreversible or authority-bearing actions on a tainted thread
   still require fresh confirmation after replay.
@@ -4014,6 +4018,10 @@ mechanisms are:
   an exception. Octant-owned tools those threads reach stay confined either
   way. A runtime's own built-in tools (Codex's shell, Claude's Bash on the
   postures that write) run under that runtime's sandbox, not Octant's.
+  A runtime's own built-in web search or page fetch does not append
+  `thread.external-content-ingested@1`, and the gate that mark applies to
+  Octant's computer-use, MCP, and native-harness calls does not cover a tool
+  the runtime executes itself.
   A confined Claude Plan launch may write only the assigned leaf of that
   account's state directory (`~/.claude` or
   `~/.claude-accounts/<instanceId>`) and the launch temporary directory.
