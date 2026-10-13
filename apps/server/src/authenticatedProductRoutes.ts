@@ -217,11 +217,11 @@ export function classifyProductAction(request: Request): string | undefined {
     // The Extension API is POST-only — it answers 405 to any other method — so
     // a GET/HEAD-only classification denied every extension request the remote
     // route policy forwards. That forward list is already the read subset:
-    // lifecycle, skills, and tool approvals are local-only, and local folder
-    // import is never forwarded and stays local-window at the route. Each of
-    // these five carries exactly one read command, or no body at all for the
-    // snapshot. Admission is still only forwarding: the route resolves the
-    // authenticated principal before answering.
+    // lifecycle, skills, tool approvals, and tool grants are local-only, and
+    // local folder import is never forwarded and stays local-window at the
+    // route. Each of these five carries exactly one read command, or no body
+    // at all for the snapshot. Admission is still only forwarding: the route
+    // resolves the authenticated principal before answering.
     //
     // Inspect and preview take a caller-supplied source, so what keeps this
     // from becoming remote reach into arbitrary host directories is that a
