@@ -3211,11 +3211,6 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
-    const contextRoutes = createContextRouteHandler({
-      service: contextHarness,
-      windowAuthorityStore,
-      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
-    });
     const workThreadProjection = new WorkThreadProjection();
     const spendCeilingService = new SpendCeilingService({
       connection: persistence.connection,
@@ -8191,6 +8186,12 @@ export function startOctantServer(
         return false;
       }
     };
+    const contextRoutes = createContextRouteHandler({
+      service: contextHarness,
+      windowCanOpenThread,
+      windowAuthorityStore,
+      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+    });
     const browserAutomationRoutes = createBrowserAutomationRouteHandler({
       service: browserAutomationService,
       captures: browserCaptures,

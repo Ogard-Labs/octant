@@ -2004,7 +2004,12 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
 Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
-composition inspector for pin, exclude, and rebuild. Inspecting a thread that has no context plan yet is a successful empty answer, not a failed request. New context plans retain
+composition inspector for pin, exclude, and rebuild. Each of those commands
+(`update-context-overrides` and `rebuild-context-plan` on `/api/context/commands`)
+is refused `unauthorized`, before it is journaled, unless the subject is the
+context subject of a chat, work, or code thread the calling local window can
+open (the rule that lets it read the thread's kept images and Browser captures);
+a paired device never reaches the route. Inspecting a thread that has no context plan yet is a successful empty answer, not a failed request. New context plans retain
 model and service limit provenance and inspection metadata in the journal-backed
 plan projection. Inspection restores those saved facts after a host restart
 without querying the provider; saved observation timestamps remain unchanged.
@@ -2347,15 +2352,12 @@ _Authority._ Compaction is a command on the thread, not a tool call, and the
 server checks it before any side effect:
 
 - The caller is a local window that can open the thread. The context-command
-  route today resolves a window capability and then hands the service only the
-  command, so nothing ties that window to the subject's Project. Compaction
-  does not ride that as it is: the route passes the authenticated window to the
-  service, and the service refuses `unauthorized` unless the subject is the
-  context subject of a thread that window can open, under the rule that lets
-  the window read that thread. The check runs before anything is journaled,
-  reserved, or sent, so a window cannot compact another Project's thread, send
-  its conversation to a provider, or spend its budget by naming its subject.
-  The subject's mode must be enabled.
+  route already refuses `unauthorized` unless the subject is the context
+  subject of a thread that window can open, under the rule that lets the window
+  read that thread; compaction rides that check. It runs before anything is
+  journaled, reserved, or sent, so a window cannot compact another Project's
+  thread, send its conversation to a provider, or spend its budget by naming
+  its subject. The subject's mode must be enabled.
 - It needs no tool approval. It reads only the thread's own conversation, sends
   it to the provider and model the thread already uses, and writes no files and
   runs no commands. The confirm dialog is the person's consent.
