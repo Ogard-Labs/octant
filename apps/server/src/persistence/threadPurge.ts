@@ -8,7 +8,7 @@ import {
 } from "@octant/contracts";
 import { purgeAgentRunSubjectContent } from "./agentRunContentStore";
 import { purgeThreadContent } from "./chatProjection";
-import { purgeContextSubjectContent } from "./contextProjection";
+import { purgeContextCompactions, purgeContextSubjectContent } from "./contextProjection";
 import { THREAD_RETENTION_AGGREGATE } from "./threadRetentionProjection";
 import { REPLICA_ARTIFACT_EVENT_NAMES } from "../replica/replicaArtifactEvents";
 import { REPLICA_MEMBERSHIP_AGGREGATE_TYPE } from "../replica/replicaMembershipProjection";
@@ -499,6 +499,7 @@ function purgeDerivedContent(
     aggregateId: threadId,
   });
   purgeContextSubjectContent(connection, subject);
+  purgeContextCompactions(connection, subject);
   purgeAgentRunSubjectContent(connection, subject);
 }
 

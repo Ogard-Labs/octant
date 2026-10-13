@@ -1,5 +1,13 @@
 import {
   AGENT_RUN_USAGE_AGGREGATE_TYPE,
+  CONTEXT_COMPACTION_EVENT_NAMES,
+  CONTEXT_COMPACTION_REQUEST_SHAPE,
+  decodeContextCompactionCompleted,
+  decodeContextCompactionFailed,
+  decodeContextCompactionRecord,
+  decodeContextCompactionRequested,
+  type ContextCompactionId,
+  type ContextCompactionRecord,
   decodeCapacityReservation,
   decodeContextCapacityReservationUpdated,
   decodeContextManifest,
@@ -511,6 +519,30 @@ export function purgeContextSubjectContent(
     .run(subject.aggregateType, subject.aggregateId);
 }
 
+/**
+ * A purged thread's compactions leave with it. The rest of its context ledger
+ * stays as host accounting, but a compaction is an action on the thread, and a
+ * request left behind would read as one still running.
+ */
+export function purgeContextCompactions(
+  connection: SqliteConnection,
+  subject: ContextSubjectRef,
+): void {
+  const names = [
+    CONTEXT_COMPACTION_EVENT_NAMES.requested,
+    CONTEXT_COMPACTION_EVENT_NAMES.completed,
+    CONTEXT_COMPACTION_EVENT_NAMES.failed,
+  ];
+  const owned = `SELECT global_sequence FROM event_journal
+    WHERE aggregate_type = 'context-ledger' AND aggregate_id = ? AND event_name IN (?, ?, ?)`;
+  connection
+    .prepare(`DELETE FROM event_quarantine WHERE global_sequence IN (${owned})`)
+    .run(subject.aggregateId, ...names);
+  connection
+    .prepare(`DELETE FROM event_journal WHERE global_sequence IN (${owned})`)
+    .run(subject.aggregateId, ...names);
+}
+
 export function readContextUsage(
   connection: SqliteConnection,
   reconciliationId: UsageReconciliationId,
@@ -616,15 +648,19 @@ export function readContextSubjectProjection(
   const plan = readContextPlan(connection, planRow.plan_id as never);
   assertProjection(plan !== undefined);
 
+  // A compaction's own request is priced against the plan it compacted, but it
+  // measures the summary request, not what the thread's window holds.
   const usageRow = connection
     .prepare(
       `SELECT u.* FROM context_usage_projection u
        JOIN context_plan_projection p ON p.plan_id = u.plan_id
        JOIN context_manifest_projection m ON m.manifest_id = p.manifest_id
-       WHERE m.subject_type = ? AND m.subject_id = ?
+       WHERE m.subject_type = ? AND m.subject_id = ? AND u.request_shape != ?
        ORDER BY u.last_sequence DESC, u.reconciliation_id DESC LIMIT 1`,
     )
-    .get(subject.aggregateType, subject.aggregateId) as ContextUsageProjectionRow | undefined;
+    .get(subject.aggregateType, subject.aggregateId, CONTEXT_COMPACTION_REQUEST_SHAPE) as
+    | ContextUsageProjectionRow
+    | undefined;
   const latestUsage =
     usageRow === undefined
       ? undefined
@@ -684,4 +720,119 @@ export function readContextSubjectProjection(
     ...(latestUsage === undefined ? {} : { latestUsage }),
     ...(capacity === undefined ? {} : { capacity }),
   };
+}
+
+/**
+ * A subject's compactions, oldest first, folded straight from its journaled
+ * events. Compactions are few and carry no content, so the journal is read
+ * rather than projected; a thread purge that erases these events leaves
+ * nothing behind to resurrect them.
+ */
+export function readContextCompactions(
+  connection: SqliteConnection,
+  subject: ContextSubjectRef,
+): ReadonlyArray<ContextCompactionRecord> {
+  const rows = connection
+    .prepare(
+      `SELECT event_name, payload_json FROM event_journal
+       WHERE aggregate_type = 'context-ledger' AND aggregate_id = ?
+         AND event_name IN (?, ?, ?)
+       ORDER BY global_sequence`,
+    )
+    .all(
+      subject.aggregateId,
+      CONTEXT_COMPACTION_EVENT_NAMES.requested,
+      CONTEXT_COMPACTION_EVENT_NAMES.completed,
+      CONTEXT_COMPACTION_EVENT_NAMES.failed,
+    ) as ReadonlyArray<{ readonly event_name: string; readonly payload_json: string }>;
+  const records = new Map<string, ContextCompactionRecord>();
+  for (const row of rows) {
+    const payload: unknown = JSON.parse(row.payload_json);
+    if (row.event_name === CONTEXT_COMPACTION_EVENT_NAMES.requested) {
+      const requested = decodeProjection(() => decodeContextCompactionRequested(payload));
+      if (!sameSubject(requested.subject, subject)) continue;
+      records.set(
+        String(requested.compactionId),
+        decodeContextCompactionRecord({
+          status: "running",
+          compactionId: requested.compactionId,
+          executor: requested.executor,
+          requestedAt: requested.requestedAt,
+        }),
+      );
+    } else if (row.event_name === CONTEXT_COMPACTION_EVENT_NAMES.completed) {
+      const { receipt } = decodeProjection(() => decodeContextCompactionCompleted(payload));
+      if (!sameSubject(receipt.subject, subject)) continue;
+      records.delete(String(receipt.compactionId));
+      records.set(String(receipt.compactionId), { status: "completed", receipt });
+    } else {
+      const failed = decodeProjection(() => decodeContextCompactionFailed(payload));
+      const requested = records.get(String(failed.compactionId));
+      if (!sameSubject(failed.subject, subject) || requested?.status !== "running") continue;
+      records.delete(String(failed.compactionId));
+      records.set(
+        String(failed.compactionId),
+        decodeContextCompactionRecord({
+          status: "failed",
+          compactionId: failed.compactionId,
+          executor: requested.executor,
+          reason: failed.reason,
+          sessionMayHaveChanged: failed.sessionMayHaveChanged,
+          failedAt: failed.failedAt,
+        }),
+      );
+    }
+  }
+  return [...records.values()];
+}
+
+export function readContextCompaction(
+  connection: SqliteConnection,
+  subject: ContextSubjectRef,
+  compactionId: ContextCompactionId,
+): ContextCompactionRecord | undefined {
+  return readContextCompactions(connection, subject).find(
+    (record) => String(compactionIdOf(record)) === String(compactionId),
+  );
+}
+
+/** Requested compactions that never reached a terminal event, on every subject. */
+export function listRunningContextCompactions(connection: SqliteConnection): ReadonlyArray<{
+  readonly subject: ContextSubjectRef;
+  readonly compactionId: ContextCompactionId;
+}> {
+  const rows = connection
+    .prepare(
+      `SELECT DISTINCT aggregate_id FROM event_journal
+       WHERE aggregate_type = 'context-ledger' AND event_name = ?`,
+    )
+    .all(CONTEXT_COMPACTION_EVENT_NAMES.requested) as ReadonlyArray<{
+    readonly aggregate_id: string;
+  }>;
+  return rows.flatMap((row) => {
+    const requested = connection
+      .prepare(
+        `SELECT payload_json FROM event_journal
+         WHERE aggregate_type = 'context-ledger' AND aggregate_id = ? AND event_name = ?
+         ORDER BY global_sequence LIMIT 1`,
+      )
+      .get(row.aggregate_id, CONTEXT_COMPACTION_EVENT_NAMES.requested) as
+      | { readonly payload_json: string }
+      | undefined;
+    if (requested === undefined) return [];
+    const { subject } = decodeProjection(() =>
+      decodeContextCompactionRequested(JSON.parse(requested.payload_json)),
+    );
+    return readContextCompactions(connection, subject).flatMap((record) =>
+      record.status === "running" ? [{ subject, compactionId: record.compactionId }] : [],
+    );
+  });
+}
+
+export function compactionIdOf(record: ContextCompactionRecord): ContextCompactionId {
+  return record.status === "completed" ? record.receipt.compactionId : record.compactionId;
+}
+
+function sameSubject(left: ContextSubjectRef, right: ContextSubjectRef): boolean {
+  return left.aggregateType === right.aggregateType && left.aggregateId === right.aggregateId;
 }

@@ -3,7 +3,11 @@ import {
   ThreadMessageQueueProjection,
 } from "../messageQueue/threadMessageQueuePersistence";
 import {
+  CONTEXT_COMPACTION_EVENT_NAMES,
   ContextCapacityReservationUpdated,
+  ContextCompactionCompleted,
+  ContextCompactionFailed,
+  ContextCompactionRequested,
   ContextManifestCreated,
   ContextOverridesUpdated,
   ContextPlanCreated,
@@ -328,6 +332,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(USAGE_RESUME_CANCELLED, 1, UsageResumeCancelled)
     .register(USAGE_RESUME_SETTLED, 1, UsageResumeSettled)
     .register("context.capacity-reservation-updated@1", 1, ContextCapacityReservationUpdated)
+    .register(CONTEXT_COMPACTION_EVENT_NAMES.requested, 1, ContextCompactionRequested)
+    .register(CONTEXT_COMPACTION_EVENT_NAMES.completed, 1, ContextCompactionCompleted)
+    .register(CONTEXT_COMPACTION_EVENT_NAMES.failed, 1, ContextCompactionFailed)
     .register("chat.settings-updated@1", 1, ChatSettingsUpdated)
     .register("chat.thread-created@1", 1, ChatThreadCreated)
     .register("chat.thread-updated@1", 1, ChatThreadUpdated)
