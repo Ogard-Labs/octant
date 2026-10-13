@@ -27,6 +27,7 @@ const serverUrl = process.env.OCTANT_PROBE_SERVER_URL ?? "";
 const beaconUrl = process.env.OCTANT_PROBE_BEACON_URL ?? "";
 const preloadPath = process.env.OCTANT_PROBE_PRELOAD ?? "";
 const watchMs = Number(process.env.OCTANT_PROBE_WATCH_MS ?? "9000");
+const escapes: Array<string> = [];
 
 app.setPath("userData", mkdtempSync(join(tmpdir(), "octant-prototype-probe-")));
 
@@ -104,7 +105,14 @@ app.whenReady().then(async () => {
     });
     app.on("web-contents-created", (_event, contents) => {
       if (contents.getType() === "webview") {
-        surface.guardGuest(surfaceModule.canvasPrototypeGuestPort(contents, surfaceSession));
+        const port = surfaceModule.canvasPrototypeGuestPort(contents, surfaceSession);
+        surface.guardGuest({
+          ...port,
+          sendToHost: (channel) => {
+            escapes.push(channel);
+            port.sendToHost(channel);
+          },
+        });
       }
     });
     surface.admitWebview(surfaceModule.canvasPrototypeHostPort(window.webContents));
@@ -161,6 +169,12 @@ app.whenReady().then(async () => {
     partitions: contents.session.storagePath ?? "memory",
     url: contents.getURL().replace(/ticket=[^&]+/, "ticket=…"),
   }));
+  // The reserved shortcut and a plain Escape, sent to the page as a person's
+  // keys would be. The page listens for both and reports what it saw.
+  const reserved = process.platform === "darwin" ? "meta" : "control";
+  guests[0]?.sendInputEvent({ type: "keyDown", keyCode: "Escape", modifiers: [reserved] });
+  guests[0]?.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+  await new Promise((resolve) => setTimeout(resolve, 500));
   const proxyFor = async (target: string): Promise<string | undefined> =>
     guests[0]?.session.resolveProxy(target);
   refusals = {
@@ -177,6 +191,7 @@ app.whenReady().then(async () => {
     prepared: proxy,
     sessions,
     refusals,
+    focusEscapes: escapes.length,
     bridge: {
       heartbeats: bridge.filter((record) =>
         JSON.stringify(record.args[0] ?? {}).includes('"heartbeat"'),

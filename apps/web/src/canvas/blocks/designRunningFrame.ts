@@ -5,19 +5,24 @@ import {
   CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS,
   type CanvasId,
 } from "@octant/contracts/canvas";
-import { getInjectedHostBridge } from "../../shell/hostBridge";
+import {
+  getInjectedHostBridge,
+  type CanvasPrototypeSurfacePreparation,
+} from "../../shell/hostBridge";
 
 /**
- * How a running design's frame is held.
+ * How a running design is held.
  *
  * The page is served by the host under a policy that runs its inline script
- * and loads nothing. The frame repeats the sandbox: `allow-scripts` and no
- * other token, so the page's origin is opaque and it cannot reach Octant's
- * page, storage, or cookies, navigate the app, open a window, submit a form,
- * or raise a dialog. The page talks back only through a bridge the host wrote
- * first in it; every message is a claim the page could forge, so each is
- * checked and bounded here and none of them can do anything but resize the
- * frame, report an error, or keep it alive.
+ * and loads nothing. In a browser it is drawn in a frame that repeats the
+ * sandbox: `allow-scripts` and no other token, so the page's origin is opaque
+ * and it cannot reach Octant's page, storage, or cookies, navigate the app,
+ * open a window, submit a form, or raise a dialog. In the desktop app it is
+ * drawn in a surface of its own with no route out instead (see the desktop's
+ * prototype surface), because a page policy does not cover WebRTC. The page
+ * talks back only through a bridge the host wrote first in it; every message is
+ * a claim the page could forge, so each is checked and bounded here and none of
+ * them can do anything but resize the frame, report an error, or keep it alive.
  */
 export const RUNNING_DESIGN_SANDBOX = "allow-scripts";
 
@@ -39,10 +44,11 @@ export const RUNNING_DESIGN_MAX_ERRORS = 3;
 export const RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND = 250;
 
 /**
- * How a surface reaches the host to run a design. `contained` is true where
- * the host cancels every navigation of a running frame (the desktop app); in
- * a browser it cannot, and the Run control says so. `runsOnOpen` lets the
- * sidebar start a prototype as soon as it is shown; the thread waits for Run.
+ * How a surface reaches the host to run a design. `contained` is true in the
+ * desktop app, which draws a running design in a surface of its own with no
+ * route out; in a browser the page is drawn in a frame, which cannot be held
+ * that way, and the Run control says so. `runsOnOpen` lets the sidebar start a
+ * prototype as soon as it is shown; the thread waits for Run.
  */
 export interface DesignRunRuntime {
   readonly start: (blockId: string, frameId?: string) => Promise<CanvasDesignRunStart>;
@@ -52,16 +58,23 @@ export interface DesignRunRuntime {
 
 /**
  * The run runtime for one Canvas version on a surface, or `undefined` when the
- * host cannot serve prototypes. Only the desktop app cancels a running frame's
- * navigations, so only there is a prototype network-contained.
+ * host cannot serve prototypes. Only the desktop app can close a prototype's
+ * network, so only there is one contained. There, a prototype is asked for only
+ * after the desktop has closed the surface it will be drawn in, and when that
+ * cannot be done it does not run: it is never drawn in a frame instead.
  */
 export function designRunRuntimeFor(
   client: Pick<CanvasClient, "runDesign"> | undefined,
   input: { readonly canvasId: CanvasId; readonly versionId: string; readonly runsOnOpen: boolean },
 ): DesignRunRuntime | undefined {
   if (client?.runDesign === undefined) return undefined;
+  const contained = runsInDesktopApp();
   return {
     start: async (blockId, frameId) => {
+      if (contained) {
+        const prepared = await prepareContainedSurface();
+        if (prepared.status !== "ready") return { kind: "refused", reason: prepared.reason };
+      }
       const started = await client.runDesign?.({
         canvasId: input.canvasId,
         versionId: input.versionId,
@@ -70,9 +83,25 @@ export function designRunRuntimeFor(
       });
       return started ?? { kind: "refused", reason: "This host does not run prototypes." };
     },
-    contained: runsInDesktopApp(),
+    contained,
     runsOnOpen: input.runsOnOpen,
   };
+}
+
+async function prepareContainedSurface(): Promise<CanvasPrototypeSurfacePreparation> {
+  const unavailable = (reason: string): CanvasPrototypeSurfacePreparation => ({
+    status: "unavailable",
+    reason,
+  });
+  try {
+    const prepare = getInjectedHostBridge()?.prepareCanvasPrototypeSurface;
+    if (prepare === undefined) {
+      return unavailable("This version of Octant cannot contain a prototype, so it does not run.");
+    }
+    return await prepare();
+  } catch {
+    return unavailable("Octant could not start the prototype surface, so it does not run.");
+  }
 }
 
 export function runsInDesktopApp(): boolean {
@@ -100,7 +129,16 @@ export function readDesignBridgeMessage(
 ): DesignBridgeMessage | undefined {
   if (frame === null || frame === undefined || event.source !== frame) return undefined;
   if (event.origin !== "null") return undefined;
-  const data: unknown = event.data;
+  return readDesignBridgePayload(event.data);
+}
+
+/**
+ * The bridge message in a payload, whoever delivered it: the channel, a known
+ * type, and fields of the right kind. In the desktop app the surface's preload
+ * delivers it, so there is no window or origin to check; the payload is still
+ * only a claim the page made.
+ */
+export function readDesignBridgePayload(data: unknown): DesignBridgeMessage | undefined {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined;
   const record = data as Record<string, unknown>;
   if (record.channel !== CANVAS_DESIGN_BRIDGE_CHANNEL) return undefined;

@@ -453,10 +453,17 @@ document as a future version. Frames follow the
   `allow-same-origin`, `allow-top-navigation`, `allow-popups`, or
   `allow-forms`. A host-written bridge reports size, script errors, and a
   heartbeat, grants no tool, journal, or file capability, and a frame that
-  stops answering or loads a second page is removed. Desktop runs these frames
-  out of process, cancels any navigation away from the frame's own page, and
-  reserves a shortcut frame script cannot intercept to return focus to host
-  chrome. A remote browser cannot cancel a frame's own navigation, so there a
+  stops answering or loads a second page is removed. Desktop does not draw a
+  running design in a frame: a page policy does not cover WebRTC, so the
+  prototype is a `<webview>` in a session of its own whose every connection,
+  loopback included, goes to a proxy that is never a proxy. The main process
+  attaches that surface only for a ticketed design page it was named, serves the
+  page itself under a private scheme, refuses new windows, navigation,
+  permissions, and downloads, and reserves a shortcut page script cannot
+  intercept to return focus to host chrome. If the surface cannot be made the
+  prototype does not run. A name lookup the page asks the resolver for can still
+  leave the app, and the notice under the prototype says so. A remote browser cannot
+  cancel a frame's own navigation or contain its peer connections, so there a
   running frame is not network-contained; that exposure is accepted, bounded
   by what the frame holds, and the Run control there says so. This tier has
   shipped.

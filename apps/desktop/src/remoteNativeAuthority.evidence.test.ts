@@ -24,6 +24,7 @@ vi.mock("electron", () => ({
     shouldUseHighContrastColors: false,
   },
   powerMonitor: {},
+  protocol: { registerSchemesAsPrivileged: vi.fn() },
   screen: {},
   systemPreferences: {},
 }));

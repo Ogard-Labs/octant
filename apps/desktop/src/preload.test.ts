@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL } from "./canvasFrameGuard";
+import { CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL } from "./canvasPrototypeSurface";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({ contextBridge: {}, ipcRenderer: {} }));
@@ -212,6 +212,7 @@ describe("desktop preload bridge", () => {
       "openComputerUsePermissionSettings",
       "openInNewWindow",
       "popupNativeMenu",
+      "prepareCanvasPrototypeSurface",
       "previewHandoff",
       "projectWindowCapability",
       "providerCredentialStatus",
@@ -734,6 +735,28 @@ describe("desktop preload bridge", () => {
     expect(listener).toHaveBeenCalledWith();
     unsubscribe();
     expect(ipc.removeListener).toHaveBeenCalledWith(CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL, registered);
+  });
+
+  it("asks the main process to prepare the prototype surface and reports a malformed answer as unavailable", async () => {
+    const invoke = vi.fn(async () => ({ status: "ready" }));
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+    );
+    await expect(bridge.prepareCanvasPrototypeSurface()).resolves.toEqual({ status: "ready" });
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.canvasPrototypeSurface);
+
+    invoke.mockResolvedValueOnce({ status: "unavailable", reason: "Closed for repairs." } as never);
+    await expect(bridge.prepareCanvasPrototypeSurface()).resolves.toEqual({
+      status: "unavailable",
+      reason: "Closed for repairs.",
+    });
+    for (const malformed of [undefined, "ready", { status: "ok" }, { status: "ready-ish" }]) {
+      invoke.mockResolvedValueOnce(malformed as never);
+      await expect(bridge.prepareCanvasPrototypeSurface()).resolves.toMatchObject({
+        status: "unavailable",
+      });
+    }
   });
 
   it("relays only a valid replacement Project window capability", () => {

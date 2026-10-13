@@ -12,6 +12,7 @@ import {
 import { ChevronLeft, ChevronRight, Play, RotateCcw, Square, X } from "lucide-react";
 import {
   CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS,
+  CANVAS_DESIGN_SURFACE_BRIDGE_EVENT,
   CANVAS_DESIGN_VIEWPORT,
   type CanvasDesignAssetResolution,
   type CanvasDesignBlock,
@@ -32,12 +33,14 @@ import {
 import { installFrameFonts } from "./designFrameFonts";
 import {
   readDesignBridgeMessage,
+  readDesignBridgePayload,
   RUNNING_DESIGN_FIRST_HEARTBEAT_MS,
   RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS,
   RUNNING_DESIGN_MAX_ERRORS,
   RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND,
   RUNNING_DESIGN_MIN_HEIGHT,
   RUNNING_DESIGN_SANDBOX,
+  type DesignBridgeMessage,
   type DesignRunRuntime,
 } from "./designRunningFrame";
 import { getInjectedHostBridge } from "../../shell/hostBridge";
@@ -577,12 +580,14 @@ const FOCUS_RECAPTURE_MS = 1_000;
 
 /**
  * A design that runs its own script: a prototype a person can click through
- * with state. Its page is served by the host for a single-use ticket and
- * drawn in a frame sandboxed to `allow-scripts` alone. Octant's chrome around
- * the frame says it is running and holds Stop, which the frame cannot reach.
- * The frame is removed and shown as stopped when it misses its heartbeat or
- * loads a second page. In the thread it starts only when the person presses
- * Run; the sidebar may start it when it is shown.
+ * with state. Its page is served by the host for a single-use ticket. In the
+ * desktop app it is drawn in a surface of its own with no route out, and when
+ * that cannot be made it does not run; in a browser it is drawn in a frame
+ * sandboxed to `allow-scripts` alone. Octant's chrome around it says it is
+ * running and holds Stop, which the page cannot reach. It is removed and shown
+ * as stopped when it misses its heartbeat or loads a second page. In the thread
+ * it starts only when the person presses Run; the sidebar may start it when it
+ * is shown.
  */
 function RunningDesignBlock({
   block,
@@ -595,7 +600,7 @@ function RunningDesignBlock({
   const [errors, setErrors] = useState<ReadonlyArray<string>>([]);
   const stopButton = useRef<HTMLButtonElement>(null);
   const runButton = useRef<HTMLButtonElement>(null);
-  const frameRef = useRef<HTMLIFrameElement>(null);
+  const frameRef = useRef<HTMLElement | null>(null);
   // Each start or stop is a new generation, so a page asked for earlier
   // never replaces what the person did since.
   const generation = useRef(0);
@@ -753,13 +758,19 @@ function RunningDesignBlock({
           page can reach the network before Octant stops it.
         </p>
       ) : null}
-      {/* Shown on every client and in every state: a page's policy does not
-          cover a peer connection, and the desktop's WebRTC policy stops UDP
-          only, so a sandboxed frame still reached a TCP listener there. */}
-      {runtime === undefined ? null : (
+      {/* A page's policy does not cover a peer connection, and a browser has no
+          way to stop one, so a prototype there can still connect to another
+          computer. The desktop app gives the page no network at all; only the
+          names it asks the app to look up leave. */}
+      {runtime === undefined ? null : contained ? (
+        <p className="canvas-design__notice">
+          A prototype runs with no network connection. Its script can still make Octant look up host
+          names, which can carry a little of what the prototype holds.
+        </p>
+      ) : (
         <p className="canvas-design__notice">
           A prototype&apos;s script can still connect to another computer and send what the
-          prototype holds. Octant does not block that yet.
+          prototype holds. Octant does not block that in a browser.
         </p>
       )}
       {state.kind === "stopped" ? (
@@ -775,6 +786,7 @@ function RunningDesignBlock({
       {state.kind === "running" ? (
         <RunningFrame
           block={block}
+          contained={contained}
           focusable={state.byPerson}
           frameRef={frameRef}
           key={state.url}
@@ -795,14 +807,80 @@ function RunningDesignBlock({
 }
 
 /**
- * The frame a running page is drawn in, and its watchdog. A device size is
- * drawn at its viewport and scaled to the column; a document is as wide as
- * the column and as tall as the page says, within bounds. The page's first
- * load is its own; any later load is a page it navigated to, which is removed.
+ * The watch on a running page's bridge, whatever carries its messages: a page
+ * that stops beating for too long, or posts more than a renderer can afford to
+ * read, is stopped. `admit` counts one message and says whether to read it;
+ * `heard` records a heartbeat.
+ */
+function useBridgeWatchdog(onStop: (why: RunStopReason) => void) {
+  const account = useRef({
+    lastBeat: 0,
+    beating: false,
+    windowStart: 0,
+    received: 0,
+    flooded: false,
+  });
+  useEffect(() => {
+    const now = Date.now();
+    account.current = {
+      lastBeat: now,
+      beating: false,
+      windowStart: now,
+      received: 0,
+      flooded: false,
+    };
+    // A hidden tab slows every timer, the page's and this one, so a page is
+    // only judged while it can be seen, and gets a full allowance on return.
+    const watchdog = window.setInterval(() => {
+      if (document.visibilityState === "hidden") {
+        account.current.lastBeat = Date.now();
+        return;
+      }
+      const allowance = account.current.beating
+        ? RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS
+        : RUNNING_DESIGN_FIRST_HEARTBEAT_MS;
+      if (Date.now() - account.current.lastBeat > allowance) onStop({ kind: "unresponsive" });
+    }, CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS);
+    return () => window.clearInterval(watchdog);
+  }, [onStop]);
+  const admit = useCallback((): boolean => {
+    const current = account.current;
+    if (current.flooded) return false;
+    // Counted before the message is read, so malformed messages flood too.
+    const now = Date.now();
+    if (now - current.windowStart >= 1_000) {
+      current.windowStart = now;
+      current.received = 0;
+    }
+    current.received += 1;
+    if (current.received > RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND) {
+      current.flooded = true;
+      onStop({ kind: "flooded" });
+      return false;
+    }
+    return true;
+  }, [onStop]);
+  const heard = useCallback(() => {
+    account.current.lastBeat = Date.now();
+    account.current.beating = true;
+  }, []);
+  return { admit, heard };
+}
+
+/**
+ * The page a running design is drawn as, and its watchdog. In the desktop app
+ * it is a `<webview>` in the surface the main process made for prototypes: this
+ * names only the host's ticketed page, and the main process attaches the
+ * surface to nothing else and speaks for the page's bridge through its preload.
+ * In a browser it is a frame. A device size is drawn at its viewport and scaled
+ * to the column; a document is as wide as the column and as tall as the page
+ * says, within bounds. The page's first load is its own; any later load is a
+ * page it navigated to, which is removed.
  */
 function RunningFrame({
   block,
   url,
+  contained,
   focusable,
   frameRef,
   onStop,
@@ -810,83 +888,95 @@ function RunningFrame({
 }: {
   readonly block: CanvasDesignBlock;
   readonly url: string;
+  readonly contained: boolean;
   readonly focusable: boolean;
-  readonly frameRef: RefObject<HTMLIFrameElement | null>;
+  readonly frameRef: RefObject<HTMLElement | null>;
   readonly onStop: (why: RunStopReason) => void;
   readonly onError: (message: string) => void;
 }) {
   const [height, setHeight] = useState(RUNNING_DESIGN_MIN_HEIGHT);
   const loads = useRef(0);
   const [stageRef, stage] = useSize();
-
-  useEffect(() => {
-    let lastBeat = Date.now();
-    let beating = false;
-    let windowStart = Date.now();
-    let received = 0;
-    let flooded = false;
-    const onMessage = (event: MessageEvent) => {
-      const page = frameRef.current?.contentWindow;
-      if (flooded || page === null || page === undefined || event.source !== page) return;
-      // Counted before the message is read, so malformed messages flood too.
-      const now = Date.now();
-      if (now - windowStart >= 1_000) {
-        windowStart = now;
-        received = 0;
-      }
-      received += 1;
-      if (received > RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND) {
-        flooded = true;
-        onStop({ kind: "flooded" });
-        return;
-      }
-      const message = readDesignBridgeMessage(event, page);
+  const { admit, heard } = useBridgeWatchdog(onStop);
+  const attach = useCallback(
+    (node: HTMLElement | null) => {
+      frameRef.current = node;
+    },
+    [frameRef],
+  );
+  const take = useCallback(
+    (message: DesignBridgeMessage | undefined) => {
       if (message === undefined) return;
-      if (message.type === "heartbeat") {
-        lastBeat = Date.now();
-        beating = true;
-      } else if (message.type === "size") {
-        setHeight(message.height);
-      } else {
-        onError(message.message);
-      }
-    };
-    window.addEventListener("message", onMessage);
-    // A hidden tab slows every timer, the page's and this one, so a page is
-    // only judged while it can be seen, and gets a full allowance on return.
-    const watchdog = window.setInterval(() => {
-      if (document.visibilityState === "hidden") {
-        lastBeat = Date.now();
-        return;
-      }
-      const allowance = beating
-        ? RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS
-        : RUNNING_DESIGN_FIRST_HEARTBEAT_MS;
-      if (Date.now() - lastBeat > allowance) onStop({ kind: "unresponsive" });
-    }, CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS);
-    return () => {
-      window.removeEventListener("message", onMessage);
-      window.clearInterval(watchdog);
-    };
-  }, [frameRef, onError, onStop]);
-
-  const onLoad = () => {
+      if (message.type === "heartbeat") heard();
+      else if (message.type === "size") setHeight(message.height);
+      else onError(message.message);
+    },
+    [heard, onError],
+  );
+  const countLoad = useCallback(() => {
     loads.current += 1;
     if (loads.current > 1) onStop({ kind: "navigated" });
-  };
-  const frame = (style: CSSProperties, className: string) => (
-    <iframe
-      className={className}
-      onLoad={onLoad}
-      ref={frameRef}
-      referrerPolicy="no-referrer"
-      sandbox={RUNNING_DESIGN_SANDBOX}
-      src={url}
-      style={style}
-      tabIndex={focusable ? undefined : -1}
-      title={`${block.title}, running prototype`}
-    />
-  );
+  }, [onStop]);
+
+  // A frame in a browser posts to this window; only its own window counts.
+  useEffect(() => {
+    if (contained) return;
+    const onMessage = (event: MessageEvent) => {
+      const element = frameRef.current;
+      const page = element instanceof HTMLIFrameElement ? element.contentWindow : null;
+      if (page === null || event.source !== page || !admit()) return;
+      take(readDesignBridgeMessage(event, page));
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [admit, contained, frameRef, take]);
+
+  // A surface of its own has no window to post to: its preload forwards the
+  // page's bridge messages as events of the element, and the element reports
+  // its loads and its renderer going away.
+  useEffect(() => {
+    const element = frameRef.current;
+    if (!contained || element === null) return;
+    const onBridge = (event: Event) => {
+      const { channel, args } = event as Event & { channel?: unknown; args?: unknown };
+      if (channel !== CANVAS_DESIGN_SURFACE_BRIDGE_EVENT || !Array.isArray(args) || !admit())
+        return;
+      take(readDesignBridgePayload(args[0]));
+    };
+    const onGone = () => onStop({ kind: "unresponsive" });
+    element.addEventListener("ipc-message", onBridge);
+    element.addEventListener("did-navigate", countLoad);
+    element.addEventListener("render-process-gone", onGone);
+    return () => {
+      element.removeEventListener("ipc-message", onBridge);
+      element.removeEventListener("did-navigate", countLoad);
+      element.removeEventListener("render-process-gone", onGone);
+    };
+  }, [admit, contained, countLoad, frameRef, onStop, take]);
+
+  const frame = (style: CSSProperties, className: string) =>
+    contained ? (
+      <webview
+        className={className}
+        ref={attach}
+        src={url}
+        style={style}
+        tabIndex={focusable ? 0 : -1}
+        title={`${block.title}, running prototype`}
+      />
+    ) : (
+      <iframe
+        className={className}
+        onLoad={countLoad}
+        ref={attach}
+        referrerPolicy="no-referrer"
+        sandbox={RUNNING_DESIGN_SANDBOX}
+        src={url}
+        style={style}
+        tabIndex={focusable ? undefined : -1}
+        title={`${block.title}, running prototype`}
+      />
+    );
 
   if (block.size === "document") {
     return frame({ height }, "canvas-design__document");

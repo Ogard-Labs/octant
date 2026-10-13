@@ -9,7 +9,7 @@ import { ipcRenderer } from "electron";
  * anything and the embedder bounds and checks each claim again.
  *
  * The strings repeat `CANVAS_DESIGN_BRIDGE_CHANNEL` and
- * `CANVAS_PROTOTYPE_BRIDGE_EVENT`: a sandboxed preload cannot afford to load
+ * `CANVAS_DESIGN_SURFACE_BRIDGE_EVENT`: a sandboxed preload cannot afford to load
  * the contracts package for two constants, and a test holds them equal.
  */
 const PAGE_CHANNEL = "octant-design-frame@1";

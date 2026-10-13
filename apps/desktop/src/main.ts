@@ -12,7 +12,11 @@ import {
   createComputerUseDesktopService,
   type ComputerUseDesktopService,
 } from "./computerUseDesktopService";
-import { CUA_DRIVER_FILENAME, DEVICE_HELPER_FILENAME } from "./runtimePaths";
+import {
+  CANVAS_PROTOTYPE_PRELOAD_FILENAME,
+  CUA_DRIVER_FILENAME,
+  DEVICE_HELPER_FILENAME,
+} from "./runtimePaths";
 import { createManagedToolService, type ManagedToolService } from "./managedToolService";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -31,6 +35,7 @@ import {
   nativeImage,
   nativeTheme,
   Notification,
+  protocol,
   powerMonitor,
   screen,
   session,
@@ -206,6 +211,15 @@ import {
   isolateEachCanvasFrameDocument,
   type CanvasFrameGuardWebContentsPort,
 } from "./canvasFrameGuard";
+import {
+  canvasPrototypeGuestPort,
+  canvasPrototypeHostPort,
+  canvasPrototypeSessionPort,
+  CANVAS_PROTOTYPE_PARTITION,
+  createCanvasPrototypeSurface,
+  registerCanvasPrototypeScheme,
+  type CanvasPrototypeSurface,
+} from "./canvasPrototypeSurface";
 
 const IPC_CHANNELS = {
   nativeMenu: "octant:menu:popup",
@@ -227,6 +241,7 @@ const IPC_CHANNELS = {
   browserSurfaceDetach: "octant:browser-surface:detach",
   browserSurfaceOpenExternal: "octant:browser-surface:open-external",
   browserSurfaceTab: "octant:browser-surface:tab",
+  canvasPrototypeSurface: "octant:canvas:prototype-surface:prepare",
   appUpdateState: "octant:app-update:state",
   appUpdateCheck: "octant:app-update:check",
   appUpdateDownload: "octant:app-update:download",
@@ -1174,6 +1189,7 @@ function readStoredDesktopBridgeSecret(directory: string): string | undefined {
 
 app.setName("Octant");
 isolateEachCanvasFrameDocument(app.commandLine);
+registerCanvasPrototypeScheme(protocol);
 const desktopHostRuntimePaths = resolveDesktopHostRuntimePaths(
   process.env.OCTANT_DATA_DIR,
   app.getPath("appData"),
@@ -1191,6 +1207,7 @@ let serveAvdBroker: ServeAvdBroker | undefined;
 let computerUseService: ComputerUseDesktopService | undefined;
 let managedToolService: ManagedToolService | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
+let canvasPrototypeSurface: CanvasPrototypeSurface | undefined;
 let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
 let credentialBackendPromise: Promise<DesktopCredentialBackend> | undefined;
 let desktopBridgeSecret =
@@ -1530,6 +1547,10 @@ export function createMainBrowserWindowOptions(options: {
       preload: options.preloadPath,
       sandbox: true,
       webSecurity: true,
+      // Only to draw a running Canvas prototype in a surface with no route
+      // out. Every `<webview>` this window attaches is checked by
+      // `admitWebview`, which cancels anything but a ticketed design page.
+      webviewTag: true,
     },
   };
 }
@@ -2175,8 +2196,8 @@ async function createWindow(): Promise<void> {
       );
       installCanvasFrameGuards(canvasFrameGuardWebContents(window), {
         serverUrl: () => activeServerUrl,
-        platform: process.platform,
       });
+      desktopCanvasPrototypeSurface().admitWebview(canvasPrototypeHostPort(window.webContents));
       const stopThermalPerformance = observeThermalPerformance({
         platform: process.platform,
         powerMonitor,
@@ -2428,8 +2449,8 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         );
         installCanvasFrameGuards(canvasFrameGuardWebContents(window), {
           serverUrl: () => activeServerUrl,
-          platform: process.platform,
         });
+        desktopCanvasPrototypeSurface().admitWebview(canvasPrototypeHostPort(window.webContents));
         window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
           if (!isMainFrame || isInPlace) return;
           menuBarOpenThreads.delete(window.id);
@@ -3307,6 +3328,10 @@ function installIpcHandlers(): void {
     ownedTopLevelWindowContext(event);
     await shell.openExternal(validateExternalBrowserUrl(value));
   });
+  ipcMain.handle(IPC_CHANNELS.canvasPrototypeSurface, async (event) => {
+    ownedTopLevelWindowContext(event);
+    return await desktopCanvasPrototypeSurface().prepare();
+  });
   ipcMain.handle(IPC_CHANNELS.resetBounds, async (event) => {
     const context = ownedWindowContext(event);
     const window = context.window;
@@ -3691,7 +3716,7 @@ function rendererNavigationPolicyOptions() {
   } as const;
 }
 
-/** The window's own contents, as the running Canvas frame guards see them. */
+/** The window's own contents, as the Canvas frame guard sees them. */
 function canvasFrameGuardWebContents(window: BrowserWindow): CanvasFrameGuardWebContentsPort {
   const contents = window.webContents;
   return {
@@ -3700,18 +3725,39 @@ function canvasFrameGuardWebContents(window: BrowserWindow): CanvasFrameGuardWeb
         listener({
           url: details.url,
           isMainFrame: details.isMainFrame,
-          frame: details.frame,
           preventDefault: () => details.preventDefault(),
         });
       });
     },
-    onKeyInput: (listener) => {
-      contents.on("before-input-event", (event, input) => listener(event, input));
-    },
-    focusedFrame: () => contents.focusedFrame,
-    send: (channel) => contents.send(channel),
     setWebRTCIPHandlingPolicy: (policy) => contents.setWebRTCIPHandlingPolicy(policy),
   };
+}
+
+/**
+ * The surface a running Canvas prototype is drawn in, made when the first
+ * window needs it. A guest is held to its page as it is created, before it
+ * loads anything.
+ */
+function desktopCanvasPrototypeSurface(): CanvasPrototypeSurface {
+  if (canvasPrototypeSurface !== undefined) return canvasPrototypeSurface;
+  const surfaceSession = session.fromPartition(CANVAS_PROTOTYPE_PARTITION);
+  const surface = createCanvasPrototypeSurface({
+    session: canvasPrototypeSessionPort(surfaceSession),
+    serverUrl: () => activeServerUrl,
+    fetch: globalThis.fetch,
+    preloadPath: resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      CANVAS_PROTOTYPE_PRELOAD_FILENAME,
+    ),
+    platform: process.platform,
+  });
+  app.on("web-contents-created", (_event, contents) => {
+    if (contents.getType() === "webview") {
+      surface.guardGuest(canvasPrototypeGuestPort(contents, surfaceSession));
+    }
+  });
+  canvasPrototypeSurface = surface;
+  return surface;
 }
 
 function rendererNavigationWebContents(window: BrowserWindow): RendererNavigationWebContentsPort {

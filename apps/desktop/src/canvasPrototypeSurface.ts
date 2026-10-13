@@ -35,8 +35,6 @@ import type { Protocol, Session, WebContents, WebPreferences } from "electron";
 export const CANVAS_PROTOTYPE_SCHEME = "octant-prototype";
 /** In memory: not prefixed `persist:`, so nothing a page does outlives the app. */
 export const CANVAS_PROTOTYPE_PARTITION = "octant-canvas-prototype";
-/** What the guest's preload sends its embedder for each bridge message. */
-export const CANVAS_PROTOTYPE_BRIDGE_EVENT = "octant-canvas-prototype-bridge";
 export const CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL = "octant:canvas:frame-focus-escape";
 
 /**
@@ -158,16 +156,18 @@ function surfaceTicket(address: string): string | undefined {
   }
 }
 
+/** `disablePopups` is set by Electron for a webview but is not in its public type. */
+interface GuestWebPreferences extends WebPreferences {
+  readonly disablePopups: boolean;
+}
+
 /** The preferences every guest gets, whatever its element asked for. */
-function containedWebPreferences(
-  webPreferences: WebPreferences,
-  preloadPath: string,
-): WebPreferences {
+function containWebPreferences(webPreferences: WebPreferences, preloadPath: string): void {
   const kept = new Set<string>(["zoomFactor"]);
   for (const key of Object.keys(webPreferences)) {
     if (!kept.has(key)) Reflect.deleteProperty(webPreferences, key);
   }
-  return Object.assign(webPreferences, {
+  Object.assign(webPreferences, {
     contextIsolation: true,
     disableBlinkFeatures: "",
     disablePopups: true,
@@ -179,7 +179,7 @@ function containedWebPreferences(
     preload: preloadPath,
     sandbox: true,
     webSecurity: true,
-  } satisfies WebPreferences);
+  } satisfies GuestWebPreferences);
 }
 
 export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOptions) {
@@ -269,7 +269,7 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
           event.preventDefault();
           return;
         }
-        containedWebPreferences(webPreferences, options.preloadPath);
+        containWebPreferences(webPreferences, options.preloadPath);
         // Only the element's identity survives; every attribute that chooses
         // what the guest may do is replaced with its inert value.
         const instanceId = params.instanceId;
@@ -363,9 +363,9 @@ export function canvasPrototypeGuestPort(
   return {
     inSurfaceSession: () => contents.session === surfaceSession,
     onNavigation: (listener) => {
-      for (const name of ["will-navigate", "will-redirect", "will-frame-navigate"] as const) {
-        contents.on(name, (event) => listener(event));
-      }
+      contents.on("will-navigate", (event) => listener(event));
+      contents.on("will-redirect", (event) => listener(event));
+      contents.on("will-frame-navigate", (event) => listener(event));
     },
     onKeyInput: (listener) => {
       contents.on("before-input-event", (event, input) => listener(event, input));
