@@ -814,7 +814,10 @@ live parent and child authority before and after the answer. A child approval
 permits only that request, never consumes or creates a remembered lead-session
 grant, and cannot approve an opaque provider action in Plan mode. Cancelled or
 expired requests and requests whose transport was lost at restart cannot be
-answered. The composer signals pending child input and opens its detail view.
+answered. The composer signals pending child input and opens its detail view. The same
+request is a Needs you row naming the parent thread and the child (see
+pending requests across modes); the row has one action, which opens the parent's
+Agents tab on that child, and no way to answer.
 
 Live child steering is optional on a provider connection. Codex uses its
 current-turn steering command; Octant's harness inserts a note after a complete
@@ -3871,14 +3874,28 @@ mechanisms are:
   answering it settles the turn interrupted. Excluded: Chat approvals (Chat
   declines every provider approval), hidden Side Chats, Work browser tool approvals
   (`/api/browser/approvals`), Computer Use approvals, extension tool approvals,
-  and native-harness session approvals; a native-harness question raised on a
-  Code turn is a Code question and is listed. A Code turn's Browser site ask
+  and a lead native-harness session approval (a request with no `source`); a
+  native-harness question raised on a Code turn is a Code question and is
+  listed. A child agent's approval or question (`source` set) is listed as a
+  `child-approval` or `child-question` row on a Work or Code parent: it carries
+  the parent thread, the child's run, role, task (at most 200 characters),
+  provider, and model, and the request text, but no options and no answer
+  handle, so the read adds no answer route. It is listed only while a waiter in
+  this host can still settle it and the session view still holds the pending
+  item (a restart, an expiry, a decision, or an eviction past the view's 50
+  entries removes it), and only for a window that passes the check the harness
+  session route applies to the parent thread, while the parent's mode is
+  enabled. A Chat child is never listed because Chat has no Agents tab to
+  review it in. An approval a child raises still covers that request only and
+  never offers a remembered grant. A Code turn's Browser site ask
   is a Code approval and is listed with `browserOrigin`, the site it waits to
   open, which a provider's own approval never carries. Text keeps
   each mode's own bounds and sanitization. The read is local-window only: its
   path is outside every prefix the remote listener forwards, the remote action
   classifier names no action for it, and the route refuses a paired device's
-  principal. Freshness rides the Machine change feed: a Work request's
+  principal. Freshness rides the Machine change feed: a harness session's approval or
+  question asked or settled publishes `work-navigation` and `code-navigation`,
+  a Work request's
   transitions and a Chat attempt's question are journaled, a Code request's ask,
   answer, and turn end are journaled stream events, and a Code browser-origin
   approval that expires or is abandoned — which journals nothing — publishes
