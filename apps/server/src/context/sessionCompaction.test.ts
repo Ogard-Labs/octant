@@ -143,12 +143,17 @@ describe("compacting a session on request", () => {
     world.service.start(command(), "local-window");
     await world.service.settled();
     const record = world.harness.latestCompaction(subject);
+    const sequence = world.harness.inspect(subject).sequence;
     world.fixture.connection.close();
 
     const restarted = createFixture(world.path);
     expect(restarted.harness.closeInterruptedCompactions()).toBe(0);
     expect(restarted.harness.compaction(subject, compactionId)).toEqual(record);
-    expect(restarted.harness.inspect(subject).latestCompaction).toEqual(record);
+    const restored = restarted.harness.inspect(subject);
+    expect(restored.latestCompaction).toEqual(record);
+    // The restored sequence includes the compaction's own events, so a window
+    // that accepted the live snapshot does not see the restart as a regression.
+    expect(restored.sequence).toBe(sequence);
     restarted.connection.close();
   });
 
@@ -245,6 +250,9 @@ describe("compacting a session on request", () => {
     world.service.start(command(), "local-window");
     await world.service.settled();
     expect(world.harness.latestCompaction(subject)).toMatchObject({ status: "running" });
+    expect(reportedCompactionUsage(world.fixture.connection)).toEqual([
+      { input_tokens: 40, output_tokens: 12 },
+    ]);
 
     erasePurgedThread({
       connection: world.fixture.connection,
@@ -253,6 +261,74 @@ describe("compacting a session on request", () => {
     });
     expect(world.harness.latestCompaction(subject)).toBeUndefined();
     expect(world.harness.compaction(subject, compactionId)).toBeUndefined();
+    expect(reportedCompactionUsage(world.fixture.connection)).toEqual([
+      { input_tokens: 40, output_tokens: 12 },
+    ]);
+    world.close();
+  });
+
+  it("keeps reported usage when the thread is purged before the summary request ends", async () => {
+    const world = createWorld({
+      onSend: () => {
+        erasePurgedThread({
+          connection: world.fixture.connection,
+          mode: "chat",
+          threadId: threadId as never,
+        });
+      },
+    });
+    planSession(world);
+
+    world.service.start(command(), "local-window");
+    await world.service.settled();
+
+    expect(world.harness.compaction(subject, compactionId)).toBeUndefined();
+    expect(reportedCompactionUsage(world.fixture.connection)).toEqual([
+      { input_tokens: 40, output_tokens: 12 },
+    ]);
+    world.close();
+  });
+
+  it("fails when the thread moves to another model while the summary is being written", async () => {
+    const world = createWorld({
+      onSend: () => {
+        if (world.state.thread !== undefined) {
+          world.state.thread = { ...world.state.thread, modelId: decodeProviderModelId("model-b") };
+        }
+      },
+    });
+    planSession(world);
+
+    world.service.start(command(), "local-window");
+    await world.service.settled();
+
+    expect(world.harness.latestCompaction(subject)).toMatchObject({
+      status: "failed",
+      reason: "context-changed",
+    });
+    expect(
+      world.harness
+        .inspect(subject)
+        .next.manifest.entries.some((entry) => entry.state === "summarized"),
+    ).toBe(false);
+    world.close();
+  });
+
+  it("offers no compaction when the provider cannot be constructed", () => {
+    const world = createWorld();
+    planSession(world);
+    world.state.driverThrows = true;
+
+    expect(world.service.inspect(subject, undefined, "local-window").compaction).toEqual({
+      status: "refused",
+      reason: "provider-unavailable",
+    });
+    const head = world.fixture.journal.headSequence();
+    expect(refusalOf(() => world.service.start(command(), "local-window"))).toBe(
+      "provider-unavailable",
+    );
+    expect(world.fixture.journal.headSequence()).toBe(head);
+    expect(world.harness.latestCompaction(subject)).toBeUndefined();
     world.close();
   });
 
@@ -404,13 +480,8 @@ describe("compacting a session on request", () => {
     expect(world.fixture.journal.headSequence()).toBe(head);
     expect(world.provider.sends).toBe(0);
     expect(world.harness.latestCompaction(target)).toBeUndefined();
-    if (
-      scenario.target === undefined &&
-      scenario.reason !== "no-session" &&
-      scenario.reason !== "spend-ceiling-reached"
-    ) {
-      // The admission check and the inspector's offer are the same decision;
-      // a spend reservation only exceeds the ceiling once its bound is known.
+    if (scenario.target === undefined && scenario.reason !== "no-session") {
+      // The admission check and the inspector's offer are the same decision.
       expect(world.service.inspect(target, undefined, principal).compaction).toEqual({
         status: "refused",
         reason: scenario.reason,
@@ -428,7 +499,7 @@ describe("compacting a session on request", () => {
     world.close();
   });
 
-  it("returns the capacity a refused spend reservation held", () => {
+  it("refuses a compaction the ceiling cannot pay for before reserving provider capacity", () => {
     const world = createWorld();
     planSession(world);
     world.spend.execute("local-window", {
@@ -438,11 +509,13 @@ describe("compacting a session on request", () => {
       policy: { tokenBudget: 100 },
       window: { kind: "lifetime" },
     });
-    refusalOf(() => world.service.start(command(), "local-window"));
-    expect(world.capacity.snapshot(providerInstanceId).allocated).toEqual({
-      requests: 0,
-      tokens: 0,
-      concurrency: 0,
+
+    expect(refusalOf(() => world.service.start(command(), "local-window"))).toBe(
+      "spend-ceiling-reached",
+    );
+    expect(world.capacity.snapshot(providerInstanceId)).toEqual({
+      allocated: { requests: 0, tokens: 0, concurrency: 0 },
+      queue: [],
     });
     world.close();
   });
@@ -486,6 +559,7 @@ interface WorldState {
   turnRunning: boolean;
   modeEnabled: boolean;
   providerAvailable: boolean;
+  driverThrows: boolean;
   ownership: "host" | "provider";
   conversation: ReadonlyArray<SessionConversationMessage>;
 }
@@ -500,6 +574,7 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
     turnRunning: false,
     modeEnabled: true,
     providerAvailable: true,
+    driverThrows: false,
     ownership: "host",
     conversation,
   };
@@ -528,12 +603,13 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
       },
     },
     modeEnabled: () => state.modeEnabled,
-    availableDriver: () =>
-      !state.providerAvailable
-        ? undefined
-        : state.ownership === "provider"
-          ? { ...provider.driver, conversationOwnership: "provider" }
-          : provider.driver,
+    availableDriver: () => {
+      if (state.driverThrows) throw new Error("Provider driver is not effective.");
+      if (!state.providerAvailable) return undefined;
+      return state.ownership === "provider"
+        ? { ...provider.driver, conversationOwnership: "provider" }
+        : provider.driver;
+    },
     capacity,
     spendCeiling: spend,
     uuid: fixture.uuid,
@@ -589,6 +665,17 @@ function planSession(world: World): void {
 
 function command(target: ContextSubjectRef = subject) {
   return { kind: "compact-session", subject: target, compactionId } as const;
+}
+
+function reportedCompactionUsage(
+  connection: ReturnType<typeof createFixture>["connection"],
+): ReadonlyArray<{ readonly input_tokens: number; readonly output_tokens: number }> {
+  return connection
+    .prepare(
+      `SELECT input_tokens, output_tokens FROM usage_record_projection
+       WHERE request_shape = 'context-compaction' ORDER BY last_sequence ASC`,
+    )
+    .all() as ReadonlyArray<{ readonly input_tokens: number; readonly output_tokens: number }>;
 }
 
 function refusalOf(start: () => unknown): ContextCompactionRefusalReason | undefined {

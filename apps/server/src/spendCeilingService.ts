@@ -127,6 +127,12 @@ export class SpendCeilingService {
     readonly threadId?: string;
     readonly threadType?: SpendCeilingThreadType;
     readonly projectId?: string;
+    /**
+     * The spend this caller would reserve. Absent, the preview only asks
+     * whether a single token would pass, which a compaction must not use: a
+     * ceiling that can cover one token and not the summary would look open.
+     */
+    readonly turnUpperBoundTokens?: number;
   }): SpendCeilingSnapshot | { readonly kind: "unauthorized" } {
     if (!authorizeSpendCeilingRead(input.principalKind)) return { kind: "unauthorized" };
     const threadScope =
@@ -162,7 +168,7 @@ export class SpendCeilingService {
     const preview = evaluateSpendCeilingAdmission({
       ...(threadFacts === undefined ? {} : { thread: threadFacts }),
       ...(projectFacts === undefined ? {} : { project: projectFacts }),
-      turnUpperBoundTokens: 1,
+      turnUpperBoundTokens: input.turnUpperBoundTokens ?? 1,
     });
     return {
       ...(thread === undefined ? {} : { thread }),

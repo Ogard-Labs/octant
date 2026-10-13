@@ -8260,7 +8260,11 @@ export function startOctantServer(
         ) {
           return undefined;
         }
-        return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+        try {
+          return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+        } catch {
+          return undefined;
+        }
       },
       capacity: capacityScheduler,
       spendCeiling: spendCeilingService,

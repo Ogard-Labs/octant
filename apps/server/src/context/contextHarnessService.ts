@@ -226,8 +226,12 @@ export interface CompactSessionInput {
   ) => Promise<CompactionSummaryOutcome>;
   /** What the provider reported spending on the summary request, once it ends. */
   readonly reportedUsage: () => ReportedCompactionUsage | undefined;
-  /** Read again once the summary returns: the thread may have gone meanwhile. */
-  readonly subjectAvailability: () => "available" | "mode-disabled" | "deleted";
+  /**
+   * Read again once the summary returns. The thread may have gone, its mode
+   * may have been disabled, or it may have moved to another provider or model,
+   * which is journaled on the thread rather than on this ledger.
+   */
+  readonly subjectAvailability: () => "available" | "mode-disabled" | "deleted" | "context-changed";
 }
 
 export type CompactSessionResult =
@@ -854,10 +858,14 @@ export class ContextHarnessService {
       materials: selected.materials,
     });
     const usage = input.reportedUsage();
+    const availability = input.subjectAvailability();
 
     // A purge erases the request with the thread; nothing may bring it back.
+    // The summary's own spend is host accounting and stays, or a deleted
+    // thread would understate what the provider was asked to do.
     const latest = this.compaction(input.subject, input.compactionId);
-    if (latest === undefined || input.subjectAvailability() === "deleted") {
+    if (latest === undefined || availability === "deleted") {
+      this.#recordCompactionUsage(input.subject, current, usage, selected.materialTokens);
       return { kind: "discarded" };
     }
     if (latest.status !== "running") return { kind: "settled", record: latest };
@@ -867,8 +875,9 @@ export class ContextHarnessService {
         basePlan: current,
         materialTokens: selected.materialTokens,
       });
+    if (availability === "context-changed") return fail("context-changed");
     if (outcome.kind === "failed") return fail(outcome.reason);
-    if (input.subjectAvailability() === "mode-disabled") return fail("subject-unavailable");
+    if (availability === "mode-disabled") return fail("subject-unavailable");
     if (this.#aggregateVersion(input.subject.aggregateId) !== plannedVersion) {
       return fail("context-changed");
     }
@@ -1024,6 +1033,29 @@ export class ContextHarnessService {
       throw new ContextHarnessError("unavailable", "Compaction was not recorded.");
     }
     return { kind: "settled", record };
+  }
+
+  /**
+   * Journals the summary request's reported usage without a compaction
+   * outcome. A deleted thread keeps no completed or failed event, but the
+   * tokens the provider reported were still spent.
+   */
+  #recordCompactionUsage(
+    subject: ContextSubjectRef,
+    basePlan: ContextInspectorSnapshot,
+    usage: ReportedCompactionUsage | undefined,
+    materialTokens: number,
+  ): void {
+    if (usage === undefined) return;
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "context-ledger", aggregateId: subject.aggregateId },
+      expectedVersion: this.#aggregateVersion(subject.aggregateId),
+      events: [
+        this.#pending("context.usage-reconciled@1", {
+          reconciliation: this.#compactionUsage(basePlan, usage, materialTokens),
+        }),
+      ],
+    });
   }
 
   /**

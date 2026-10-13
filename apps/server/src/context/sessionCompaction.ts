@@ -142,6 +142,26 @@ export class SessionCompactionService {
     const safeInputBudget = planned.next.plan.safeInputBudget;
     const { capacity } = this.#options;
 
+    // Spend is decided before any provider slot is taken. A ceiling that can
+    // cover one token and not this summary must refuse with nothing reserved.
+    const spendReservationId = decodeSpendCeilingReservationId(this.#options.uuid());
+    const spend = this.#options.spendCeiling?.admit({
+      reservationId: spendReservationId,
+      threadId: String(subject.aggregateId),
+      threadType: subject.aggregateType === "chat-thread" ? "chat-thread" : "work-thread",
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      turnUpperBoundTokens: safeInputBudget,
+      countsAsTurn: false,
+    });
+    if (spend?.status === "refused") {
+      throw new ContextCompactionRefused("spend-ceiling-reached");
+    }
+    const releaseSpend = () => {
+      if (spend?.status === "admitted") {
+        this.#options.spendCeiling?.settle({ reservationId: spendReservationId });
+      }
+    };
+
     const capacityReservationId = decodeCapacityReservationId(this.#options.uuid());
     let submission: ReturnType<ProviderCapacityScheduler["submit"]>;
     try {
@@ -166,6 +186,7 @@ export class SessionCompactionService {
         origin: "subagent",
       });
     } catch (error) {
+      releaseSpend();
       if (error instanceof ProviderCapacitySchedulerRejected) {
         throw new ContextCompactionRefused("provider-unavailable");
       }
@@ -173,29 +194,15 @@ export class SessionCompactionService {
     }
     if (submission.status !== "dispatched") {
       capacity.recordTerminal({ reservationId: capacityReservationId, outcome: "cancelled" });
+      releaseSpend();
       throw new ContextCompactionRefused("provider-unavailable");
     }
-    const spendReservationId = decodeSpendCeilingReservationId(this.#options.uuid());
-    const spend = this.#options.spendCeiling?.admit({
-      reservationId: spendReservationId,
-      threadId: String(subject.aggregateId),
-      threadType: subject.aggregateType === "chat-thread" ? "chat-thread" : "work-thread",
-      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
-      turnUpperBoundTokens: safeInputBudget,
-      countsAsTurn: false,
-    });
     // Before the request is journaled nothing has reached the provider, so
     // both reservations return whole instead of ending as unmeasured work.
     const releaseUnstarted = () => {
       capacity.releaseUnstarted(capacityReservationId);
-      if (spend?.status === "admitted") {
-        this.#options.spendCeiling?.settle({ reservationId: spendReservationId });
-      }
+      releaseSpend();
     };
-    if (spend?.status === "refused") {
-      releaseUnstarted();
-      throw new ContextCompactionRefused("spend-ceiling-reached");
-    }
 
     let requested: ReturnType<ContextHarnessService["requestCompaction"]>;
     try {
@@ -295,12 +302,20 @@ export class SessionCompactionService {
           }
         },
         reportedUsage: () => usage,
-        subjectAvailability: () =>
-          threads.read(threadId) === undefined
-            ? "deleted"
-            : this.#options.modeEnabled(thread.mode)
-              ? "available"
-              : "mode-disabled",
+        subjectAvailability: () => {
+          const current = threads.read(threadId);
+          if (current === undefined) return "deleted";
+          // A provider or model change is journaled on the thread, not on the
+          // context ledger, so the ledger version alone would still commit a
+          // summary written for the session the thread has left.
+          if (
+            String(current.providerInstanceId) !== String(thread.providerInstanceId) ||
+            String(current.modelId) !== String(thread.modelId)
+          ) {
+            return "context-changed";
+          }
+          return this.#options.modeEnabled(current.mode) ? "available" : "mode-disabled";
+        },
       });
     } catch {
       // The request is journaled, so it must not be left running: a failure
@@ -325,8 +340,16 @@ export class SessionCompactionService {
     const threads =
       kind === "chat-thread" || kind === "work-thread" ? this.#options.threads[kind] : undefined;
     const thread = threads?.read(threadId);
-    const driver =
-      thread === undefined ? undefined : this.#options.availableDriver(thread.providerInstanceId);
+    // A driver that cannot be constructed is unavailable. Letting the throw
+    // out would fail the whole inspection, not only compaction.
+    let driver: ProviderDriver | undefined;
+    if (thread !== undefined) {
+      try {
+        driver = this.#options.availableDriver(thread.providerInstanceId);
+      } catch {
+        driver = undefined;
+      }
+    }
     // Code threads are planned by Octant Harness or a runtime, and neither
     // offers a compaction request through its connection yet.
     const owner =
@@ -340,6 +363,10 @@ export class SessionCompactionService {
             conversation: threads.conversation(threadId),
           })
         : undefined;
+    const compactionBound =
+      preview?.kind === "summarize"
+        ? harness.inspect(subject).next.plan.safeInputBudget
+        : undefined;
     const spend =
       thread === undefined
         ? undefined
@@ -348,6 +375,7 @@ export class SessionCompactionService {
             threadId,
             threadType: kind === "chat-thread" ? "chat-thread" : "work-thread",
             ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+            ...(compactionBound === undefined ? {} : { turnUpperBoundTokens: compactionBound }),
           });
     const availability = decideSessionCompaction({
       principal,

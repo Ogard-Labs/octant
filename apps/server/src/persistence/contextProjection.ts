@@ -727,11 +727,22 @@ export function readContextSubjectProjection(
       : [];
   });
   const summaries = relevantSummaryRows.map(({ summary }) => summary);
+  // The compaction's own usage is excluded above, and its completed event has
+  // no projection row. A window that already accepted the live snapshot's
+  // sequence — the journal head — would treat a lower restored sequence as a
+  // broken response, so the head is part of the sequence.
+  const journalHead = connection
+    .prepare(
+      `SELECT coalesce(max(global_sequence), 0) AS last_sequence FROM event_journal
+       WHERE aggregate_type = 'context-ledger' AND aggregate_id = ?`,
+    )
+    .get(subject.aggregateId) as { readonly last_sequence: number } | undefined;
   const sequence = Math.max(
     manifestRow.last_sequence,
     planRow.last_sequence,
     usageRow?.last_sequence ?? 0,
     capacityRow?.last_sequence ?? 0,
+    journalHead?.last_sequence ?? 0,
     ...relevantSummaryRows.map(({ row }) => row.last_sequence),
   );
   return {
