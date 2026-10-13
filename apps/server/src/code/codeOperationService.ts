@@ -27,6 +27,7 @@ import {
   type CodeOperationId,
   type CodeOperationResult,
   type CodeTerminalId,
+  type TerminalBrowserGrantOutcome,
   type CodeRepositoryTestDefinition,
   type CodeRepositoryTestRun,
   type CodeRepositoryTestStatus,
@@ -64,6 +65,7 @@ import {
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { CodeApprovalValidationPort } from "./codeOperationApprovalStore";
 import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoveryService";
@@ -757,6 +759,15 @@ export interface CodeOperationServiceOptions {
   readonly isProviderModelAllowed?: (thread: CodeThread) => boolean;
   readonly approvals?: CodeApprovalValidationPort;
   readonly terminals: CodeOperationTerminalPort;
+  /**
+   * Lets the person start a thread terminal with its Browser grant on. Absent
+   * on a host that lends no Browser: a start that asks for the grant is then
+   * refused and starts no terminal.
+   */
+  readonly terminalBrowserGrants?: Pick<
+    TerminalBrowserGrantService,
+    "open" | "abandon" | "switchOff" | "terminalClosed"
+  >;
   readonly repositoryTests: CodeOperationRepositoryTestPort;
   readonly scaffolds?: CodeOperationScaffoldPort;
   readonly git: CodeOperationGitPort;
@@ -1126,6 +1137,7 @@ export class CodeOperationService {
                       root,
                       starting.attachments,
                       options.admissionCurrent,
+                      initiator,
                     );
             } catch (error) {
               const category =
@@ -1735,6 +1747,7 @@ export class CodeOperationService {
     /** The images the caller resolved for a starting provider turn. */
     attachments: ReadonlyArray<CodeAttachmentReference>,
     admissionCurrent?: () => boolean,
+    initiator: CodeOperationInitiator = "agent",
   ): Promise<CodeOperationResult> {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
     switch (command.kind) {
@@ -1773,6 +1786,31 @@ export class CodeOperationService {
             );
           this.#deactivateTerminalOutput(command.terminalId);
         }
+        // A grant is asked for by the person's own window and for nobody else.
+        // A refusal starts no terminal: a shell that silently lacks what was
+        // asked for would read as one that has it.
+        let browserGrant: Awaited<ReturnType<TerminalBrowserGrantService["open"]>> | undefined;
+        if (command.browserGrant === "on") {
+          browserGrant =
+            this.#options.terminalBrowserGrants === undefined
+              ? {
+                  kind: "refused",
+                  outcome: { status: "refused", reason: "browser-unavailable" },
+                }
+              : await this.#options.terminalBrowserGrants.open({
+                  caller: initiator === "user" ? "local-window" : "remote-device",
+                  windowId,
+                  threadId: thread.id,
+                  terminalId: command.terminalId,
+                });
+          if (browserGrant.kind === "refused") {
+            return this.#terminalUnavailable(
+              command.operationId,
+              command.terminalId,
+              browserGrant.outcome,
+            );
+          }
+        }
         const owner: TerminalOwner = {
           windowId: String(windowId),
           threadId: thread.id,
@@ -1787,7 +1825,10 @@ export class CodeOperationService {
           stateScope: String(checkout.repositoryId),
           columns: command.columns,
           rows: command.rows,
-          credentialReferences,
+          credentialReferences:
+            browserGrant?.kind === "granted"
+              ? [...credentialReferences, ...browserGrant.credentialReferences]
+              : credentialReferences,
           executionPolicy: thread.executionPolicy,
         });
         owner.starting = starting;
@@ -1797,11 +1838,37 @@ export class CodeOperationService {
           snapshot = await starting;
         } catch (error) {
           this.#terminalOwners.delete(command.terminalId);
+          this.#options.terminalBrowserGrants?.abandon(command.terminalId);
           throw error;
         }
         delete owner.starting;
         owner.outputBaseline = snapshot.transcript.characters;
-        return this.#terminal(command.operationId, snapshot);
+        return this.#terminal(
+          command.operationId,
+          snapshot,
+          true,
+          browserGrant?.kind === "granted" ? browserGrant.outcome : undefined,
+        );
+      }
+      case "revoke-terminal-browser-grant": {
+        const grants = this.#options.terminalBrowserGrants;
+        const outcome =
+          grants === undefined
+            ? ({ status: "refused", reason: "no-live-grant" } as const)
+            : await grants.switchOff({
+                windowId,
+                threadId: thread.id,
+                terminalId: command.terminalId,
+              });
+        let snapshot: CodeOperationTerminalSnapshot | undefined;
+        try {
+          snapshot = this.#options.terminals.attach(command.terminalId);
+        } catch {
+          snapshot = undefined;
+        }
+        return snapshot === undefined
+          ? this.#terminalUnavailable(command.operationId, command.terminalId, outcome)
+          : this.#terminal(command.operationId, snapshot, false, outcome);
       }
       case "attach-terminal": {
         const owner = await this.#resolveTerminalOwner(command, windowId, thread, checkout);
@@ -2165,6 +2232,7 @@ export class CodeOperationService {
     operationId: CodeOperationCommand["operationId"],
     snapshot: CodeOperationTerminalSnapshot,
     includeTranscript = true,
+    browserGrant?: TerminalBrowserGrantOutcome,
   ): CodeOperationResult {
     const transcript = includeTranscript ? snapshot.transcript.chunks.join("") : "";
     const base = {
@@ -2173,6 +2241,7 @@ export class CodeOperationService {
       terminalId: snapshot.terminalId,
       state: snapshot.status,
       ...(transcript.length === 0 ? {} : { transcript: this.#options.evidence.put(transcript) }),
+      ...(browserGrant === undefined ? {} : { browserGrant }),
     } as const;
     return snapshot.status === "exited"
       ? decodeCodeOperationResult({ ...base, state: "exited", exitCode: snapshot.exitCode ?? null })
@@ -2334,6 +2403,9 @@ export class CodeOperationService {
     const owner = this.#terminalOwners.get(terminalId);
     owner?.removeOutputListener?.();
     this.#terminalOwners.delete(terminalId);
+    // Every way a shell stops being the one this window follows passes here, so
+    // a Browser grant minted for that session ends with it.
+    this.#options.terminalBrowserGrants?.terminalClosed(terminalId);
   }
 
   async #terminalInput(
@@ -3117,6 +3189,21 @@ export class CodeOperationService {
     });
   }
 
+  /** A terminal that is not running, with what the host decided about its Browser grant. */
+  #terminalUnavailable(
+    operationId: CodeOperationCommand["operationId"],
+    terminalId: CodeTerminalId,
+    browserGrant: TerminalBrowserGrantOutcome,
+  ): CodeOperationResult {
+    return decodeCodeOperationResult({
+      kind: "terminal-state",
+      operationId,
+      terminalId,
+      state: "unavailable",
+      browserGrant,
+    });
+  }
+
   #failed(
     operationId: CodeOperationCommand["operationId"],
     category:
@@ -3441,6 +3528,10 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
     case "resize-terminal":
     case "stop-terminal":
       return "terminal";
+    // Switching a grant off only narrows what a shell can reach, so it is a
+    // read under every posture and for every caller.
+    case "revoke-terminal-browser-grant":
+      return "read";
     case "run-repository-test":
     case "cancel-repository-test":
       return "test";

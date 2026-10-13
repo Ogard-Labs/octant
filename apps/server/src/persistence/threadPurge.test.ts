@@ -339,8 +339,31 @@ function seedThreadTraces(harness: Harness, thread: SeededThread): void {
   seedCheckpoint(harness, thread);
   seedFollowUp(harness, thread);
   seedHarnessSession(harness, thread);
+  seedTerminalBrowserGrant(harness, thread);
   seedWorktree(harness.directory, thread);
   seedUsage(harness.connection, thread);
+}
+
+function seedTerminalBrowserGrant(harness: Harness, thread: SeededThread): void {
+  if (thread.mode !== "code") return;
+  // A grant still on record and one that ended: both name the thread, and
+  // neither may outlive it.
+  for (const [kind, event] of [
+    ["issued", { kind: "terminal-browser-grant-issued", issuedAt: now }],
+    [
+      "revoked",
+      { kind: "terminal-browser-grant-revoked", reason: "thread-archived", revokedAt: now },
+    ],
+  ] as const) {
+    const grantId = uuidFor(thread.mode, `terminal-browser-grant-${kind}`);
+    insertEvent(
+      harness.connection,
+      "terminal-browser-grant",
+      grantId,
+      { ...event, grantId, threadId: thread.id, terminalId: uuidFor(thread.mode, "terminal") },
+      `code.terminal-browser-grant-${kind}@1`,
+    );
+  }
 }
 
 function seedChatProjection(harness: Harness, threadId: string, marker: string): void {
