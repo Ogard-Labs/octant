@@ -28,6 +28,29 @@ const PORTABLE_IMAGE_PATH_VARIABLE = "APPIMAGE";
  */
 const RUNTIME_VARIABLES = ["APPIMAGE", "APPDIR", "ARGV0", "OWD"] as const;
 
+/**
+ * Names the process a relaunched image replaces, so it starts after that
+ * process has stopped.
+ *
+ * Without it the new image asks for the single-instance lock while the old
+ * process is still stopping its host, loses it, and exits: measured as a
+ * relaunched process that lives about two seconds while the old one takes
+ * about five and a half to finish, leaving no Octant running. Waiting here,
+ * rather than releasing the lock early, keeps two hosts from ever sharing one
+ * data directory.
+ */
+export const REPLACED_PROCESS_VARIABLE = "OCTANT_REPLACED_PROCESS_ID";
+
+/**
+ * How long a relaunched image waits for the process it replaces. The measured
+ * shutdown is about five and a half seconds; this is an order of magnitude
+ * beyond it so a slow disk or a busy host still hands over, and short enough
+ * that a process that never exits does not hide the app forever. Past it the
+ * normal lock request runs and fails closed as it always has.
+ */
+export const REPLACED_PROCESS_WAIT_BOUND_MS = 60_000;
+export const REPLACED_PROCESS_POLL_MS = 100;
+
 /** Type-2 image magic at offset 8: `AI` plus the format version. */
 const IMAGE_MAGIC_OFFSET = 8;
 const IMAGE_MAGIC = [0x41, 0x49, 0x02] as const;
@@ -297,10 +320,13 @@ export async function relaunchPortableImage(
   options: {
     readonly spawnImpl?: PortableImageSpawn;
     readonly env?: Readonly<Record<string, string | undefined>>;
+    /** The process the new image replaces; this one unless a test says otherwise. */
+    readonly replacedProcessId?: number;
   } = {},
 ): Promise<void> {
   const spawnImpl = options.spawnImpl ?? defaultSpawn;
   const env = relaunchEnvironment(options.env ?? process.env);
+  env[REPLACED_PROCESS_VARIABLE] = String(options.replacedProcessId ?? process.pid);
   await new Promise<void>((resolvePromise, reject) => {
     let settled = false;
     const child = spawnImpl(path, [], { detached: true, stdio: "ignore", env });
@@ -349,6 +375,71 @@ export function createPortableImagePort(options: {
   };
 }
 
+/**
+ * Read the process this launch replaces, and remove the variable.
+ *
+ * Removed whether or not it parsed: the host and every other child inherit the
+ * environment, and one of them acting on a stale process id would wait for
+ * nothing. Only a positive whole number counts; anything else is treated as
+ * not set, so an ordinary launch is never delayed by a malformed value.
+ */
+export function takeReplacedProcessId(env: Record<string, string | undefined>): number | undefined {
+  const raw = env[REPLACED_PROCESS_VARIABLE]?.trim() ?? "";
+  delete env[REPLACED_PROCESS_VARIABLE];
+  if (!/^[1-9][0-9]*$/.test(raw)) return undefined;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : undefined;
+}
+
+/**
+ * Whether a process still exists. A process this user may not signal exists, so
+ * only "no such process" counts as gone.
+ */
+export function defaultProcessIsAlive(
+  kill: (pid: number, signal: 0) => unknown = process.kill.bind(process),
+): (pid: number) => boolean {
+  return (pid) => {
+    try {
+      kill(pid, 0);
+      return true;
+    } catch (error) {
+      return !(
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ESRCH"
+      );
+    }
+  };
+}
+
+export type ReplacedProcessWait =
+  | { readonly kind: "exited"; readonly waitedMs: number }
+  | { readonly kind: "timed-out"; readonly waitedMs: number };
+
+/**
+ * Wait until the process this launch replaces has exited, or the bound passes.
+ *
+ * Polls rather than retrying the lock: a lock request from here would raise
+ * `second-instance` on the instance that is still shutting down.
+ */
+export async function waitForReplacedProcessExit(input: {
+  readonly processId: number;
+  readonly boundMs: number;
+  readonly pollMs: number;
+  readonly now: () => number;
+  readonly isAlive: (processId: number) => boolean;
+  readonly sleep: (ms: number) => Promise<void>;
+}): Promise<ReplacedProcessWait> {
+  const started = input.now();
+  for (;;) {
+    const waitedMs = input.now() - started;
+    if (!input.isAlive(input.processId)) return { kind: "exited", waitedMs };
+    if (waitedMs >= input.boundMs) return { kind: "timed-out", waitedMs };
+    await input.sleep(Math.min(input.pollMs, input.boundMs - waitedMs));
+  }
+}
+
 function defaultSpawn(
   path: string,
   args: readonly string[],
@@ -376,6 +467,8 @@ function relaunchEnvironment(
   for (const [key, value] of Object.entries(source)) {
     if (value === undefined) continue;
     if (RUNTIME_VARIABLES.some((name) => name === key)) continue;
+    // An answer from an earlier relaunch is about a process that is long gone.
+    if (key === REPLACED_PROCESS_VARIABLE) continue;
     env[key] = value;
   }
   return env;

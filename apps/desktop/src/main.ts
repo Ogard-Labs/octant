@@ -69,7 +69,14 @@ import {
 import { type AppVersion, isAppReleaseRing } from "@octant/contracts/app-updates";
 import { decodeCodeOperationApprovalRequest } from "@octant/contracts/code-operations";
 import { createAppUpdateService } from "./appUpdateService";
-import { createPortableImagePort } from "./portableImageUpdate";
+import {
+  createPortableImagePort,
+  defaultProcessIsAlive,
+  REPLACED_PROCESS_POLL_MS,
+  REPLACED_PROCESS_WAIT_BOUND_MS,
+  takeReplacedProcessId,
+  waitForReplacedProcessExit,
+} from "./portableImageUpdate";
 import { buildApplicationMenuTemplate } from "./applicationMenu";
 import { resolveUpdateFeedBaseUrl } from "./appUpdateFeed";
 import {
@@ -3902,9 +3909,12 @@ function acceptCodeDeepLink(value: string): void {
   }
 }
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
-if (!hasSingleInstanceLock) app.quit();
-else {
+function startDesktopInstance(): void {
+  const hasSingleInstanceLock = app.requestSingleInstanceLock();
+  if (!hasSingleInstanceLock) {
+    app.quit();
+    return;
+  }
   app.setAsDefaultProtocolClient("octant");
   app.on("open-url", (event, url) => {
     event.preventDefault();
@@ -3925,6 +3935,24 @@ else {
       return requestActiveWindow();
     })
     .catch(handleFatalStartup);
+}
+
+// A launch started by a self-update waits for the instance it replaces to stop
+// before asking for the lock. It does not release the lock early or retry it:
+// the first would let two hosts share one data directory, the second would
+// raise `second-instance` on an instance that is shutting down. An ordinary
+// launch takes the synchronous path it always has.
+const replacedProcessId = takeReplacedProcessId(process.env);
+if (replacedProcessId === undefined) startDesktopInstance();
+else {
+  void waitForReplacedProcessExit({
+    processId: replacedProcessId,
+    boundMs: REPLACED_PROCESS_WAIT_BOUND_MS,
+    pollMs: REPLACED_PROCESS_POLL_MS,
+    now: () => Date.now(),
+    isAlive: defaultProcessIsAlive(),
+    sleep: (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)),
+  }).then(startDesktopInstance, handleFatalStartup);
 }
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {

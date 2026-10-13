@@ -1551,3 +1551,47 @@ describe("native menu authority", () => {
     expect(popup).toHaveBeenCalledWith(owner, { items: [] });
   });
 });
+
+describe("start-up after a self-update", () => {
+  async function startWith(replacedProcessId: string | undefined) {
+    vi.resetModules();
+    const { app } = await import("electron");
+    vi.mocked(app.requestSingleInstanceLock).mockClear();
+    if (replacedProcessId === undefined) delete process.env.OCTANT_REPLACED_PROCESS_ID;
+    else process.env.OCTANT_REPLACED_PROCESS_ID = replacedProcessId;
+    await import("./main");
+    return app;
+  }
+
+  it("asks for the single-instance lock at once on an ordinary launch", async () => {
+    const app = await startWith(undefined);
+
+    expect(app.requestSingleInstanceLock).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for the lock only after the instance it replaces has exited, and passes nothing on", async () => {
+    vi.useFakeTimers();
+    let replacedIsRunning = true;
+    const kill = vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
+      if (pid === 424242 && !replacedIsRunning) {
+        throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+      }
+      return true;
+    }) as typeof process.kill);
+    try {
+      const app = await startWith("424242");
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(app.requestSingleInstanceLock).not.toHaveBeenCalled();
+      expect(process.env.OCTANT_REPLACED_PROCESS_ID).toBeUndefined();
+
+      replacedIsRunning = false;
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(app.requestSingleInstanceLock).toHaveBeenCalledTimes(1);
+    } finally {
+      kill.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+});

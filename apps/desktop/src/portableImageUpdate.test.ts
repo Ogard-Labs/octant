@@ -5,10 +5,14 @@ import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createNodePortableImageFiles,
+  defaultProcessIsAlive,
   createPortableImagePort,
   isPortableImageBytes,
   readPortableImageLocation,
+  REPLACED_PROCESS_VARIABLE,
   relaunchPortableImage,
+  takeReplacedProcessId,
+  waitForReplacedProcessExit,
   replacePortableImage,
   type PortableImageChild,
   type PortableImageFiles,
@@ -352,6 +356,28 @@ describe("relaunching a portable image", () => {
     expect(seen?.detached).toBe(true);
   });
 
+  it("tells the new image which process it replaces and does not pass on an older answer", async () => {
+    let seen: PortableImageSpawnOptions | undefined;
+    const child: PortableImageChild = {
+      once: (event, listener) => {
+        if (event === "spawn") listener();
+      },
+      unref: () => undefined,
+    };
+
+    await relaunchPortableImage("/opt/Octant.AppImage", {
+      env: { [REPLACED_PROCESS_VARIABLE]: "111", PATH: "/usr/bin" },
+      replacedProcessId: 4242,
+      spawnImpl: (_path, _args, options) => {
+        seen = options;
+        return child;
+      },
+    });
+
+    expect(seen?.env[REPLACED_PROCESS_VARIABLE]).toBe("4242");
+    expect(seen?.env.PATH).toBe("/usr/bin");
+  });
+
   it("quits only after the replaced image has been accepted", async () => {
     const { path } = await imageDir();
     const next = imageBytes("replacement");
@@ -386,5 +412,93 @@ describe("image bytes", () => {
     expect(isPortableImageBytes(imageBytes("ok"))).toBe(true);
     expect(isPortableImageBytes(Buffer.from("short"))).toBe(false);
     expect(isPortableImageBytes(Buffer.alloc(16))).toBe(false);
+  });
+});
+
+describe("starting after the instance being replaced", () => {
+  it("reads the replaced process once and leaves nothing for children to inherit", () => {
+    const env: Record<string, string | undefined> = { [REPLACED_PROCESS_VARIABLE]: " 4242 " };
+
+    expect(takeReplacedProcessId(env)).toBe(4242);
+    expect(env[REPLACED_PROCESS_VARIABLE]).toBeUndefined();
+    expect(takeReplacedProcessId(env)).toBeUndefined();
+  });
+
+  it("ignores a value that is not a positive whole number, and still removes it", () => {
+    for (const value of ["", "0", "-5", "12.5", "1e3", "abc", "12abc", "99999999999999999999"]) {
+      const env: Record<string, string | undefined> = { [REPLACED_PROCESS_VARIABLE]: value };
+      expect(takeReplacedProcessId(env)).toBeUndefined();
+      expect(env[REPLACED_PROCESS_VARIABLE]).toBeUndefined();
+    }
+  });
+
+  it("returns as soon as the replaced process has exited", async () => {
+    let now = 0;
+    let alive = true;
+    const polls: number[] = [];
+    const result = await waitForReplacedProcessExit({
+      processId: 4242,
+      boundMs: 60_000,
+      pollMs: 100,
+      now: () => now,
+      isAlive: (pid) => {
+        polls.push(pid);
+        return alive;
+      },
+      sleep: async (ms) => {
+        now += ms;
+        if (now >= 500) alive = false;
+      },
+    });
+
+    expect(result).toEqual({ kind: "exited", waitedMs: 500 });
+    expect(polls.length).toBe(6);
+    expect(new Set(polls)).toEqual(new Set([4242]));
+  });
+
+  it("does not wait at all for a process that is already gone", async () => {
+    let slept = 0;
+    const result = await waitForReplacedProcessExit({
+      processId: 4242,
+      boundMs: 60_000,
+      pollMs: 100,
+      now: () => 0,
+      isAlive: () => false,
+      sleep: async () => {
+        slept += 1;
+      },
+    });
+
+    expect(result).toEqual({ kind: "exited", waitedMs: 0 });
+    expect(slept).toBe(0);
+  });
+
+  it("gives up at the bound so the normal lock request decides", async () => {
+    let now = 0;
+    const result = await waitForReplacedProcessExit({
+      processId: 4242,
+      boundMs: 1_000,
+      pollMs: 100,
+      now: () => now,
+      isAlive: () => true,
+      sleep: async (ms) => {
+        now += ms;
+      },
+    });
+
+    expect(result).toEqual({ kind: "timed-out", waitedMs: 1_000 });
+  });
+
+  it("treats a process it may not signal as still running", async () => {
+    const alive = defaultProcessIsAlive((): never => {
+      throw Object.assign(new Error("not permitted"), { code: "EPERM" });
+    });
+    const gone = defaultProcessIsAlive((): never => {
+      throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+    });
+
+    expect(alive(1)).toBe(true);
+    expect(gone(1)).toBe(false);
+    expect(defaultProcessIsAlive(() => true)(1)).toBe(true);
   });
 });
