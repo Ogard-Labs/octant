@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isRoutineHostScope, ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { BrowserToolApprovalService } from "./browserToolApprovalService";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as never;
@@ -44,6 +45,59 @@ describe("BrowserToolApprovalService", () => {
     ).toBe(true);
     await expect(pending).resolves.toBe("approved");
     expect(service.list(windowId)).toEqual([]);
+  });
+
+  it("a browser approval from a routine's Work turn reaches an open local window", async () => {
+    const otherProjectWindow = "60000000-0000-4000-8000-000000000002" as never;
+    const remembered: Array<unknown> = [];
+    const service = new BrowserToolApprovalService({
+      uuid: () => "40000000-0000-4000-8000-000000000002",
+      now: () => Date.parse("2026-09-09T10:00:00.000Z"),
+      // The routine's thread lives in the Project the open window is bound to;
+      // the host scope runs the thread; another Project's window cannot see it.
+      authorityIsCurrent: (_threadId, _authority, scope) =>
+        String(scope) === String(windowId) || isRoutineHostScope(scope),
+      rememberOrigin: (origin, scope) => remembered.push([origin, scope]),
+      isHostScope: isRoutineHostScope,
+    });
+    const pending = service.request({
+      windowId: ROUTINE_HOST_SCOPE_ID,
+      threadId: "50000000-0000-4000-8000-000000000002",
+      authority,
+      origin: "https://example.com",
+    });
+
+    expect(service.list(windowId)).toEqual([
+      expect.objectContaining({ approvalId: "40000000-0000-4000-8000-000000000002" }),
+    ]);
+    expect(service.list(otherProjectWindow)).toEqual([]);
+    const decision = {
+      approvalId: "40000000-0000-4000-8000-000000000002" as never,
+      decision: "approved" as const,
+      remember: true,
+    };
+    expect(service.decide(otherProjectWindow, decision)).toBe(false);
+    expect(service.decide(windowId, decision)).toBe(true);
+    await expect(pending).resolves.toBe("approved");
+    expect(remembered).toEqual([["https://example.com", windowId]]);
+  });
+
+  it("keeps a window's own approval from every other window, the host scope included", () => {
+    const service = new BrowserToolApprovalService({
+      uuid: () => "40000000-0000-4000-8000-000000000003",
+      now: () => Date.parse("2026-09-09T10:00:00.000Z"),
+      authorityIsCurrent: () => true,
+      isHostScope: isRoutineHostScope,
+    });
+    void service.request({
+      windowId,
+      threadId: "50000000-0000-4000-8000-000000000001",
+      authority,
+      origin: "https://example.com",
+    });
+    expect(service.list(ROUTINE_HOST_SCOPE_ID)).toEqual([]);
+    expect(service.list("60000000-0000-4000-8000-000000000002" as never)).toEqual([]);
+    service.close();
   });
 
   it("cancels pending approvals on abort and window revocation", async () => {

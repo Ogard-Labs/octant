@@ -39,3 +39,46 @@ export function combineAppManagedToolSets(
     },
   };
 }
+
+/**
+ * Answer `operation: "help"` for an offered tool family from its own usage
+ * text. Decision 0067 keeps the always-visible tool prefix small and loads
+ * capability detail lazily on use; 0093 allows that detail through a
+ * read-only operation on a tool that is already offered. Help is static text,
+ * so it never reaches the family's executor and every other action passes the
+ * same authority path it did before. A family the set does not offer gets no
+ * help: its call falls through and is refused as before.
+ */
+export function withToolFamilyHelp(
+  set: AppManagedToolSet,
+  help: Readonly<Record<string, string>>,
+): AppManagedToolSet {
+  return {
+    ...set,
+    execute: async (input) => {
+      const usage = help[input.name];
+      if (
+        usage !== undefined &&
+        set.definitions.some((definition) => definition.name === input.name) &&
+        requestsHelp(input.inputJson)
+      ) {
+        return { result: { tool: input.name, help: usage }, isError: false };
+      }
+      return set.execute(input);
+    },
+  };
+}
+
+function requestsHelp(inputJson: string): boolean {
+  try {
+    const input: unknown = JSON.parse(inputJson);
+    return (
+      typeof input === "object" &&
+      input !== null &&
+      "operation" in input &&
+      input.operation === "help"
+    );
+  } catch {
+    return false;
+  }
+}

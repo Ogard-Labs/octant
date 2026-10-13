@@ -42,18 +42,22 @@ the resolved rule. Routine implementation choices need no new design approval.
 - Planning and implementation progress live in Linear. Keep tracker identifiers
   and state out of code, comments, test titles, and design specifications.
 
-| Change area                                                      | Current source                                                                                                                                                                        |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Finding or changing a design rule                                | [Design index and maintenance](docs/design/README.md)                                                                                                                                 |
-| Navigation, Projects, panes, content tabs, dock, workspace tools | [Workspace](docs/design/workspace.md)                                                                                                                                                 |
-| Visual language, typography, Settings, controls, accessibility   | [Design system](DESIGN.md)                                                                                                                                                            |
-| Process topology, Apple/device transport, host lifecycle         | [Architecture: process topology](docs/architecture.md#process-topology) and [device transport](docs/architecture.md#device-transport-and-evidence)                                    |
-| Modes, Projects, checkout binding, thread authority              | [Architecture: modes](docs/architecture.md#modes-chat-work-and-code)                                                                                                                  |
-| Journal, projections, replay, retention, export                  | [Architecture: persistence](docs/architecture.md#persistence)                                                                                                                         |
-| Providers, harness, context, capacity                            | [Architecture: providers](docs/architecture.md#providers) and [context accounting](docs/architecture.md#context-and-usage-accounting)                                                 |
-| Plugins, skills, activation, contribution boundaries             | [Architecture: extensions and skills](docs/architecture.md#extensions-and-skills), including [extraction boundaries](docs/architecture.md#plugin-boundaries-and-remaining-extraction) |
-| Sandbox, approvals, remote access, credentials                   | [Architecture: security and authority](docs/architecture.md#security-and-authority)                                                                                                   |
-| Packaging, updates, platform scope                               | [Current Release Boundary](#current-release-boundary) and [architecture](docs/architecture.md#current-release-boundary)                                                               |
+| Change area                                                      | Current source                                                                                                                                                                                                      |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Finding or changing a design rule                                | [Design index and maintenance](docs/design/README.md)                                                                                                                                                               |
+| Navigation, Projects, panes, content tabs, dock, workspace tools | [Workspace](docs/design/workspace.md)                                                                                                                                                                               |
+| Visual language, typography, Settings, controls, accessibility   | [Design system](DESIGN.md)                                                                                                                                                                                          |
+| Start-screen tiles, tabs, and cards                              | [Workspace rules](docs/design/workspace.md#start-screen-cards) and [Start screen](docs/design/start-screen.md)                                                                                                      |
+| Canvas charts, tables, mockups, and designs                      | [Canvas visuals](docs/design/canvas-visuals.md)                                                                                                                                                                     |
+| Provider catalog and model endpoint Settings                     | [Providers and model endpoints](docs/design/model-endpoints.md)                                                                                                                                                     |
+| Process topology, Apple/device transport, host lifecycle         | [Architecture: process topology](docs/architecture.md#process-topology) and [device transport](docs/architecture.md#device-transport-and-evidence); detail in [Device workbench](docs/design/device-workbench.md)   |
+| Canvas tool, blocks, preview, designs                            | [Canvas](docs/design/canvas.md) and [Architecture: Canvas documents, designs, and prototypes](docs/architecture.md#canvas-documents-designs-and-prototypes)                                                         |
+| Modes, Projects, checkout binding, thread authority              | [Architecture: modes](docs/architecture.md#modes-chat-work-and-code)                                                                                                                                                |
+| Journal, projections, replay, retention, export, artifact sync   | [Architecture: persistence](docs/architecture.md#persistence); replica detail in [Artifact replica sync](docs/design/artifact-replica-sync.md)                                                                      |
+| Providers, harness, context, capacity                            | [Architecture: providers](docs/architecture.md#providers) and [context accounting](docs/architecture.md#context-and-usage-accounting); runtime wire detail in [Provider runtimes](docs/design/provider-runtimes.md) |
+| Plugins, skills, activation, contribution boundaries             | [Architecture: extensions and skills](docs/architecture.md#extensions-and-skills), including [extraction boundaries](docs/architecture.md#plugin-boundaries-and-remaining-extraction)                               |
+| Sandbox, approvals, remote access, credentials                   | [Architecture: security and authority](docs/architecture.md#security-and-authority)                                                                                                                                 |
+| Packaging, updates, platform scope                               | [Current Release Boundary](#current-release-boundary) and [architecture](docs/architecture.md#current-release-boundary)                                                                                             |
 
 Edit the owning specification in place when approved behavior changes. Do not add
 ADRs: the decision archive is closed. When a consequential tradeoff needs its
@@ -170,6 +174,9 @@ test count.
 `oxfmt` owns formatting and `oxlint` owns lint; never hand-format or reformat
 code a change does not otherwise touch. The rules below are semantics the
 formatter cannot express.
+
+`bun run style:check` refuses new `any`, non-null `!`, `as unknown as`, and
+tracker ids in shipped code against `scripts/code-style-baseline.json`.
 
 - TypeScript runs with `strict`, `exactOptionalPropertyTypes`, and
   `noUncheckedIndexedAccess`. Satisfy them by modelling the value honestly, not
@@ -372,7 +379,8 @@ The first release is the Apple Silicon technical preview with the
 provider-neutral plugin/skill marketplace. It is
 signed with a Developer ID, notarized, and updates itself — those three are one
 deliverable, because an updater on an unsigned app is an unauthenticated
-code-delivery channel and macOS refuses the replacement anyway. Cross-platform
+code-delivery channel and macOS refuses the replacement anyway. A local package
+built without maintainer signing credentials is unsigned. Cross-platform
 desktop (macOS, Linux, Windows) remains authorized: Linux desktop shell next, Windows Work/Code only after an
 explicitly approved Windows confinement design is documented. Do not add native mobile store distribution, hosted
 relay, connector/OAuth marketplace, or full LSP/extension host unless an explicit
@@ -380,5 +388,6 @@ request authorizes that scope and the current specification documents its
 authority and release boundaries. The person's confirmed pull-request merge from
 a local window and host-local routines (Automation Center) are in scope under the
 [architecture's rules](docs/architecture.md#modes-chat-work-and-code); other
-pull-request mutation, agent-initiated merge, and cloud scheduling are not.
+pull-request mutation, agent-initiated merge, cloud scheduling, and a hosted
+wake service are not.
 Existing scoped exceptions remain documented in the architecture.

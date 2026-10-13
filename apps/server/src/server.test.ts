@@ -1,3 +1,4 @@
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -370,6 +371,7 @@ describe("startOctantServer", () => {
         remove: async () => undefined,
       },
       isProjectConfinedPath: () => false,
+      claudeInstances: [instance],
       runtimeRegistry: new ProviderRuntimeRegistry(),
       permissionPersistence: () => "current-session",
     });
@@ -378,6 +380,43 @@ describe("startOctantServer", () => {
       Effect.runPromise(Effect.scoped(driver.probe({ instanceId: instance.id }))),
     ).rejects.toThrow(/Claude process selected/);
     expect(probeVersion).toHaveBeenCalledOnce();
+  });
+
+  it("refuses to construct a Claude driver without the account snapshot", () => {
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000402",
+      displayName: "Claude local",
+      driverKind: "claude",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/missing/claude",
+        authentication: "subscription",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-16T10:00:00.000Z",
+      updatedAt: "2026-07-16T10:00:00.000Z",
+    });
+
+    expect(() =>
+      makeConfiguredProviderDriver(instance, {
+        openCodeProcess: { start: () => Effect.die("must not start OpenCode") },
+        codexProcess: { start: () => Effect.die("must not start Codex") },
+        claudeProcess: {
+          probeVersion: () => Effect.die("must not probe"),
+        } as unknown as ClaudeProcessPort,
+        claudeSdk: {} as ClaudeAgentSdkPort,
+        claudeResumeIdentityPort: {
+          lookup: async () => undefined,
+          put: async () => undefined,
+          remove: async () => undefined,
+        },
+        isProjectConfinedPath: () => false,
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        permissionPersistence: () => "current-session",
+      }),
+    ).toThrow(/invalid/i);
   });
 
   it.each([
@@ -723,7 +762,7 @@ describe("startOctantServer", () => {
     expect(MAX_JSON_REQUEST_BODY_SIZE).toBe(1_048_576);
   });
 
-  it("lets a fresh local-session browser reach Navigator after workspace registration, and refuses a denied principal", async () => {
+  it("lets a freshly launched browser reach Navigator after workspace registration, and refuses a denied principal", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-navigator-local-session-"));
     directories.push(directory);
     const desktopSecret = `${"B".repeat(42)}A`;
@@ -750,23 +789,42 @@ describe("startOctantServer", () => {
           const fetchRoute = (request: Request) =>
             Effect.promise(() => Promise.resolve(routeHandler?.(request)).then(assertResponse));
 
-          const session = yield* fetchRoute(
-            new Request(new URL("/api/shell/local-session", server.url), {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                origin: rendererOrigin,
-              },
-              body: "{}",
-            }),
-          );
-          expect(session.status).toBe(200);
-          const authority = (yield* Effect.promise(() => session.json())) as {
-            readonly windowId: string;
-            readonly capability: string;
-            readonly authentication: string;
-          };
-          expect(authority.authentication).toBe("local-session");
+          // A browser session starts from a one-time launch token the launcher
+          // mints with the bridge secret for this renderer's origin.
+          const launchBrowserSession = () =>
+            Effect.gen(function* () {
+              const minted = {
+                windowId: randomUUID(),
+                capability: randomBytes(32).toString("base64url"),
+              };
+              const created = yield* fetchRoute(
+                new Request(new URL("/api/desktop/launch-sessions", server.url), {
+                  method: "POST",
+                  headers: {
+                    "content-type": "application/json",
+                    "x-octant-desktop-secret": desktopSecret,
+                  },
+                  body: JSON.stringify({ ...minted, origin: rendererOrigin }),
+                }),
+              );
+              expect(created.status).toBe(201);
+              const receipt = (yield* Effect.promise(() => created.json())) as {
+                readonly launchToken: string;
+              };
+              const exchanged = yield* fetchRoute(
+                new Request(new URL("/api/shell/launch-session", server.url), {
+                  method: "POST",
+                  headers: { "content-type": "application/json", origin: rendererOrigin },
+                  body: JSON.stringify({ launchToken: receipt.launchToken }),
+                }),
+              );
+              expect(exchanged.status).toBe(200);
+              return (yield* Effect.promise(() => exchanged.json())) as {
+                readonly windowId: string;
+                readonly capability: string;
+              };
+            });
+          const authority = yield* launchBrowserSession();
           const capabilityHeaders = {
             origin: rendererOrigin,
             "x-octant-window-capability": authority.capability,
@@ -818,20 +876,7 @@ describe("startOctantServer", () => {
             status: "unconfigured",
           });
 
-          const deniedSession = yield* fetchRoute(
-            new Request(new URL("/api/shell/local-session", server.url), {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                origin: rendererOrigin,
-              },
-              body: "{}",
-            }),
-          );
-          expect(deniedSession.status).toBe(200);
-          const denied = (yield* Effect.promise(() => deniedSession.json())) as {
-            readonly capability: string;
-          };
+          const denied = yield* launchBrowserSession();
           const deniedSnapshot = yield* fetchRoute(
             new Request(new URL("/api/navigator-assistant/snapshot", server.url), {
               headers: {
@@ -2449,6 +2494,74 @@ describe("startOctantServer", () => {
               aggregateType: "project",
               aggregateId: "00000000-0000-4000-8000-000000000471",
             },
+          });
+        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+      ),
+    );
+  });
+
+  it("registers the local-only route that clears a thread's outside-content mark", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-"));
+    directories.push(directory);
+    let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
+    const capability = "A".repeat(43);
+    const threadId = "00000000-0000-4000-8000-000000000481";
+    const post = (body: unknown, windowCapability: string) =>
+      Promise.resolve(
+        routeHandler?.(
+          new Request("http://127.0.0.1:13773/api/thread-external-content", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "x-octant-window-capability": windowCapability,
+            },
+            body: JSON.stringify(body),
+          }),
+        ),
+      ).then(assertResponse);
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            desktopBridgeSecret: "desktop-secret",
+            serve: (options) => {
+              routeHandler = options.fetch;
+              return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
+            },
+          });
+          yield* Effect.promise(() =>
+            Promise.resolve(
+              routeHandler?.(
+                new Request("http://127.0.0.1:13773/api/desktop/window-authorities", {
+                  method: "POST",
+                  headers: { "x-octant-desktop-secret": "desktop-secret" },
+                  body: JSON.stringify({
+                    windowId: "00000000-0000-4000-8000-000000000480",
+                    capability,
+                  }),
+                }),
+              ),
+            ),
+          );
+          const clear = { kind: "clear", mode: "chat", threadId, expectedVersion: 0 };
+
+          const unauthenticated = yield* Effect.promise(() => post(clear, "B".repeat(43)));
+          expect(unauthenticated.status).toBe(401);
+
+          // The thread's own mode is asked through the composed message queue
+          // read: no such thread exists, so there is nothing to show or clear.
+          const read = yield* Effect.promise(() =>
+            post({ kind: "read", mode: "chat", threadId }, capability),
+          );
+          expect(read.status).toBe(404);
+          const cleared = yield* Effect.promise(() => post(clear, capability));
+          expect(cleared.status).toBe(200);
+          expect(yield* Effect.promise(() => cleared.json())).toEqual({
+            kind: "refused",
+            reason: "thread-unavailable",
           });
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       ),

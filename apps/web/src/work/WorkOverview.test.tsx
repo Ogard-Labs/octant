@@ -8,6 +8,11 @@ import {
   type ProviderObservedState,
 } from "@octant/contracts";
 import { buildModelPickerGroups } from "@octant/domain";
+import {
+  createNewTaskDrafts,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+} from "../composer/useNewTaskPrompt";
 import { WorkOverview, type WorkOverviewModel, type OverviewSectionStatus } from "./WorkOverview";
 
 describe("WorkOverview", () => {
@@ -327,6 +332,130 @@ describe("WorkOverview", () => {
     ).toBeVisible();
   });
 
+  it("keeps the quick-start draft and attachments after the overview remounts", async () => {
+    const user = userEvent.setup();
+    const drafts = createNewTaskDrafts();
+    function view() {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="work-overview:test">
+            <WorkOverview model={emptyModel()} onCreateThread={vi.fn(async () => true)} />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    const rendered = render(view());
+    await user.type(screen.getByRole("textbox", { name: "Start a new task" }), "Keep this draft");
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File([new Uint8Array([1])], "brief.png", { type: "image/png" }),
+    );
+    expect(screen.getByText("brief.png")).toBeVisible();
+    rendered.unmount();
+    render(view());
+
+    expect(screen.getByRole("textbox", { name: "Start a new task" })).toHaveValue(
+      "Keep this draft",
+    );
+    expect(screen.getByText("brief.png")).toBeVisible();
+  });
+
+  it("does not restore a submitted quick-start draft after create opens the thread", async () => {
+    const drafts = createNewTaskDrafts();
+    let rendered: ReturnType<typeof render>;
+    function view() {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="work-overview:test">
+            <WorkOverview
+              model={emptyModel()}
+              onCreateThread={async () => {
+                rendered.unmount();
+                return true;
+              }}
+            />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    rendered = render(view());
+    fireEvent.change(screen.getByRole("textbox", { name: "Start a new task" }), {
+      target: { value: "Open the quarterly notes" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start task" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "Start a new task" })).toBeNull();
+    });
+    render(view());
+
+    expect(screen.getByRole("textbox", { name: "Start a new task" })).toHaveValue("");
+  });
+
+  it("does not restore a refused quick-start draft over a newer prompt in the same Project", async () => {
+    const drafts = createNewTaskDrafts();
+    let finishCreate: (created: boolean) => void = () => {};
+    const pending = new Promise<boolean>((resolve) => {
+      finishCreate = resolve;
+    });
+    render(
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="work-overview:shared">
+          <WorkOverview model={emptyModel()} onCreateThread={async () => pending} />
+          <WorkOverview model={emptyModel()} onCreateThread={vi.fn(async () => true)} />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>,
+    );
+
+    const inputs = screen.getAllByPlaceholderText("Describe the next task…");
+    const starts = screen.getAllByRole("button", { name: "Start task" });
+    fireEvent.change(inputs[0]!, { target: { value: "First submission" } });
+    fireEvent.click(starts[0]!);
+    await waitFor(() => expect(inputs[0]).toHaveValue(""));
+    fireEvent.change(inputs[1]!, { target: { value: "Newer prompt" } });
+    finishCreate(false);
+    await waitFor(() => expect(inputs[1]).toHaveValue("Newer prompt"));
+    expect(inputs[0]).toHaveValue("Newer prompt");
+  });
+
+  it("does not restore refused attachments over newer files in the same Project", async () => {
+    const user = userEvent.setup();
+    const drafts = createNewTaskDrafts();
+    let finishCreate: (created: boolean) => void = () => {};
+    const pending = new Promise<boolean>((resolve) => {
+      finishCreate = resolve;
+    });
+    render(
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="work-overview:shared">
+          <WorkOverview model={emptyModel()} onCreateThread={async () => pending} />
+          <WorkOverview model={emptyModel()} onCreateThread={vi.fn(async () => true)} />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>,
+    );
+
+    const inputs = screen.getAllByPlaceholderText("Describe the next task…");
+    const starts = screen.getAllByRole("button", { name: "Start task" });
+    const choosers = screen.getAllByLabelText("Choose attachment file");
+    fireEvent.change(inputs[0]!, { target: { value: "First submission" } });
+    await user.upload(
+      choosers[0]!,
+      new File([new Uint8Array([1])], "first.png", { type: "image/png" }),
+    );
+    fireEvent.click(starts[0]!);
+    await waitFor(() => expect(screen.queryByText("first.png")).toBeNull());
+    fireEvent.change(inputs[1]!, { target: { value: "Newer prompt" } });
+    await user.upload(
+      choosers[1]!,
+      new File([new Uint8Array([2])], "newer.png", { type: "image/png" }),
+    );
+    finishCreate(false);
+    await waitFor(() => expect(screen.getAllByText("newer.png").length).toBeGreaterThan(0));
+    expect(screen.queryByText("first.png")).toBeNull();
+    expect(inputs[0]).toHaveValue("Newer prompt");
+  });
+
   it("keeps provider setup reachable when no Work provider is ready", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();
@@ -342,8 +471,7 @@ describe("WorkOverview", () => {
     );
 
     const composer = screen.getByRole("region", { name: "Work quick start" });
-    const providerSetup = within(composer).getByRole("button", { name: "Provider and model" });
-    expect(providerSetup).toHaveTextContent("No provider ready");
+    const providerSetup = within(composer).getByRole("button", { name: "Set up a provider" });
     expect(providerSetup).toBeEnabled();
 
     await user.click(providerSetup);

@@ -1,3 +1,4 @@
+import { decodeHostId, LOCAL_HOST_ID } from "@octant/contracts/host";
 import { decodeProviderInstanceId, decodeProviderModelId } from "@octant/contracts/providers";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -6,6 +7,28 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { WorkComposerAdapter } from "./WorkComposerAdapter";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { PickerGroup } from "@octant/domain";
+import { browserUseSelection } from "@octant/plugin-host/browser-use";
+import { computerUseSelection } from "@octant/plugin-host/computer-use";
+import {
+  createNewTaskDrafts,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+} from "../../composer/useNewTaskPrompt";
+
+const twoHosts = [
+  {
+    hostId: LOCAL_HOST_ID,
+    displayName: "This Mac",
+    health: "healthy" as const,
+    capabilities: ["chat", "work", "code"],
+  },
+  {
+    hostId: decodeHostId("11111111-1111-4111-8111-111111111111"),
+    displayName: "Studio",
+    health: "healthy" as const,
+    capabilities: ["chat", "work", "code"],
+  },
+];
 
 const baseProps = {
   providerGroups: [],
@@ -15,6 +38,16 @@ const baseProps = {
 };
 
 describe("WorkComposerAdapter", () => {
+  it("shows Set up a provider on the Work start composer until a provider is ready", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    render(<WorkComposerAdapter {...baseProps} onOpenSettings={onOpenSettings} />);
+    const setup = screen.getByRole("button", { name: "Set up a provider" });
+    expect(setup).toBeEnabled();
+    await user.click(setup);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
   it("submits the selected reasoning level with the first Work message", async () => {
     const user = userEvent.setup();
     const onCreateThread = vi.fn();
@@ -111,7 +144,7 @@ describe("WorkComposerAdapter", () => {
   });
 
   it("carries host and Project context on the row inside the composer, above the prompt", () => {
-    const { container } = render(<WorkComposerAdapter {...baseProps} />);
+    const { container } = render(<WorkComposerAdapter {...baseProps} hosts={twoHosts} />);
     const frame = container.querySelector(".composer");
     const tray = container.querySelector(".composer-tray");
     const row = container.querySelector(".composer-row");
@@ -342,6 +375,169 @@ describe("WorkComposerAdapter interactions", () => {
       screen.queryByRole("listbox", { name: "Files you can mention" }),
     ).not.toBeInTheDocument();
     void onQueryChange;
+  });
+
+  it("keeps mentioned threads and extension selections after Settings remounts the draft", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const drafts = createNewTaskDrafts();
+    const threadId = "00000000-0000-4000-8000-000000000101";
+    drafts.write("work:pane", "#[Prior task] continue from there");
+    drafts.writeMentionChips("work:pane", [
+      {
+        threadId,
+        title: "Prior task",
+        mode: "work",
+        placementLabel: "Recents",
+      },
+    ]);
+    drafts.writeExtensionReceipts("work:pane", [
+      {
+        reference: "@Browser",
+        label: "Browser",
+        selection: browserUseSelection("00000000-0000-4000-8000-000000000201"),
+        status: { kind: "selected" },
+      },
+    ]);
+    const view = (
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="work:pane">
+          <WorkComposerAdapter
+            {...baseProps}
+            projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+            onCreateThread={onCreateThread}
+          />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>
+    );
+    const rendered = render(view);
+    expect(screen.getByLabelText("Mentioned threads")).toHaveTextContent("Prior task");
+    expect(screen.getByLabelText("Selected extensions")).toHaveTextContent("Browser");
+
+    rendered.unmount();
+    render(view);
+
+    expect(await screen.findByLabelText("Mentioned threads")).toHaveTextContent("Prior task");
+    expect(screen.getByLabelText("Selected extensions")).toHaveTextContent("Browser");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalled());
+    expect(onCreateThread.mock.calls[0]?.[2]).toEqual([threadId]);
+    expect(onCreateThread.mock.calls[0]?.[4]).toEqual([
+      expect.objectContaining({ kind: "plugin" }),
+    ]);
+  });
+
+  it("keeps a selected Browser receipt after Settings remounts while tools are blocked", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    const drafts = createNewTaskDrafts();
+    drafts.write("work:pane", "open the site");
+    drafts.writeExtensionReceipts("work:pane", [
+      {
+        reference: "@Browser",
+        label: "Browser",
+        selection: browserUseSelection("00000000-0000-4000-8000-000000000201"),
+        status: { kind: "selected" },
+      },
+    ]);
+    const wrap = (selection?: {
+      readonly selectedProviderInstanceId: ReturnType<typeof decodeProviderInstanceId>;
+      readonly selectedModelId: ReturnType<typeof decodeProviderModelId>;
+    }) => (
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="work:pane">
+          <WorkComposerAdapter
+            {...baseProps}
+            projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+            onCreateThread={onCreateThread}
+            {...selection}
+          />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>
+    );
+    // A selected provider that is not in the groups reports no Octant tools,
+    // so the chip is a blocked projection. Persisting that projection would
+    // drop the selection before Settings remounts the draft.
+    const blocked = render(
+      wrap({
+        selectedProviderInstanceId: decodeProviderInstanceId(
+          "80000000-0000-4000-8000-0000000000b1",
+        ),
+        selectedModelId: decodeProviderModelId("missing-model"),
+      }),
+    );
+    await waitFor(() => {
+      expect(drafts.readExtensionReceipts("work:pane")[0]?.selection).toBeDefined();
+    });
+    blocked.unmount();
+    render(wrap());
+    expect(await screen.findByLabelText("Selected extensions")).toHaveTextContent("Browser");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await waitFor(() => expect(onCreateThread).toHaveBeenCalled());
+    expect(onCreateThread.mock.calls[0]?.[4]).toEqual([
+      expect.objectContaining({ kind: "plugin" }),
+    ]);
+  });
+
+  it("keeps a direct Computer selection after Settings remounts while tools are blocked", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window, "octantHost");
+    Object.defineProperty(window, "octantHost", {
+      configurable: true,
+      value: { getComputerUseStatus: async () => ({ supported: true }) },
+    });
+    try {
+      const user = userEvent.setup();
+      const onCreateThread = vi.fn();
+      const drafts = createNewTaskDrafts();
+      drafts.write("work:pane", "use the host");
+      drafts.writeComputerSelection(
+        "work:pane",
+        computerUseSelection("00000000-0000-4000-8000-000000000301"),
+      );
+      const wrap = (selection?: {
+        readonly selectedProviderInstanceId: ReturnType<typeof decodeProviderInstanceId>;
+        readonly selectedModelId: ReturnType<typeof decodeProviderModelId>;
+      }) => (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="work:pane">
+            <WorkComposerAdapter
+              {...baseProps}
+              projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+              onCreateThread={onCreateThread}
+              {...selection}
+            />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+      const blocked = render(
+        wrap({
+          selectedProviderInstanceId: decodeProviderInstanceId(
+            "80000000-0000-4000-8000-0000000000b1",
+          ),
+          selectedModelId: decodeProviderModelId("missing-model"),
+        }),
+      );
+      expect(screen.queryByRole("button", { name: "Remove Computer" })).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(drafts.readComputerSelection("work:pane")).toEqual(
+          expect.objectContaining({ kind: "plugin" }),
+        );
+      });
+      blocked.unmount();
+      expect(drafts.readComputerSelection("work:pane")).toEqual(
+        expect.objectContaining({ kind: "plugin" }),
+      );
+      render(wrap());
+      expect(await screen.findByRole("button", { name: "Remove Computer" })).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Create thread" }));
+      await waitFor(() => expect(onCreateThread).toHaveBeenCalled());
+      expect(onCreateThread.mock.calls[0]?.[3]).toEqual(
+        expect.objectContaining({ kind: "plugin" }),
+      );
+    } finally {
+      if (descriptor === undefined) Reflect.deleteProperty(window, "octantHost");
+      else Object.defineProperty(window, "octantHost", descriptor);
+    }
   });
 });
 

@@ -33,11 +33,12 @@ describe("ModeSwitcher", () => {
     expect(group).toHaveClass("modeswitch", "window-no-drag");
     expect(group).toHaveAttribute("data-oct-modeswitch", "icons");
     // Chat and Work are one visible mode: enabling only Chat still offers Work.
-    expect(buttons.map((button) => button.textContent)).toEqual(["Work", "Code"]);
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(["Work", "Code"]);
     expect(screen.queryByRole("button", { name: "Chat" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText("Octant")).toHaveClass("mode-switcher__brand");
+    expect(screen.queryByText("Octant")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Work" })).not.toHaveAttribute("aria-current");
+    expect(cssRule('.mode[aria-current="page"]')).toContain("box-shadow:");
     const iconFrames = group.querySelectorAll(".mode__icon-frame");
     expect(iconFrames).toHaveLength(2);
     for (const frame of iconFrames) {
@@ -103,12 +104,12 @@ describe("ModeSwitcher", () => {
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
-  it("omits unavailable modes from the dropdown", async () => {
+  it("keeps a stored dropdown when Work and Code are both on", async () => {
     const user = userEvent.setup();
     render(
       <ModeSwitcher
         activeMode="code"
-        modes={["code"]}
+        modes={["code", "work"]}
         onSelectMode={vi.fn()}
         presentation="dropdown"
       />,
@@ -118,8 +119,37 @@ describe("ModeSwitcher", () => {
     trigger.focus();
     await user.keyboard("{Enter}");
     expect(screen.queryByRole("menuitemradio", { name: "Chat" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitemradio", { name: "Work" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: "Work" })).toBeVisible();
     expect(screen.getByRole("menuitemradio", { name: "Code" })).toBeVisible();
+  });
+
+  it("names each icon button and shows the mode on hover", async () => {
+    const user = userEvent.setup();
+    render(
+      <ModeSwitcher
+        activeMode="code"
+        modes={["code", "work"]}
+        onSelectMode={vi.fn()}
+        presentation="buttons"
+      />,
+    );
+    await user.hover(screen.getByRole("button", { name: "Work" }));
+    expect(await screen.findByRole("tooltip", { name: "Work" })).toBeVisible();
+  });
+
+  it("shows a single label and no control when only one mode is enabled", () => {
+    render(
+      <ModeSwitcher
+        activeMode="code"
+        modes={["code"]}
+        onSelectMode={vi.fn()}
+        presentation="buttons"
+      />,
+    );
+    expect(screen.queryByRole("group", { name: "Workspace mode" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Code" })).not.toBeInTheDocument();
+    expect(screen.getByText("Code")).toBeVisible();
+    expect(screen.getByText("Octant")).toBeVisible();
   });
 
   it("places optional chrome actions beside the mode switcher", () => {

@@ -1,6 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { useRef } from "react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { StrictMode, useRef } from "react";
 import { describe, expect, it } from "vitest";
+import {
+  createNewTaskDrafts,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+} from "../../composer/useNewTaskPrompt";
 import { useWorkComposerImages } from "./useWorkComposerImages";
 
 function Harness() {
@@ -35,6 +40,11 @@ function Harness() {
       >
         attach later
       </button>
+      {images.staged.map((image) => (
+        <button key={image.id} onClick={() => images.remove(image.id)} type="button">
+          {`remove ${image.displayName}`}
+        </button>
+      ))}
       <output aria-label="images">
         {images.staged.map((image) => image.displayName).join(",")}
       </output>
@@ -61,5 +71,92 @@ describe("useWorkComposerImages", () => {
     fireEvent.click(screen.getByRole("button", { name: "restore" }));
 
     expect(screen.getByLabelText("images")).toHaveTextContent("captured.png");
+  });
+
+  it("keeps staged images when the composer remounts under the same draft scope", () => {
+    const drafts = createNewTaskDrafts();
+    function view() {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="work-overview:test">
+            <Harness />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    const rendered = render(view());
+    fireEvent.click(screen.getByRole("button", { name: "attach" }));
+    expect(screen.getByLabelText("images")).toHaveTextContent("captured.png");
+    rendered.unmount();
+    render(view());
+
+    expect(screen.getByLabelText("images")).toHaveTextContent("captured.png");
+  });
+
+  it("removes a remounted attachment on the first click under StrictMode", () => {
+    const drafts = createNewTaskDrafts();
+    drafts.writeImages("work-overview:test", [
+      new File([new Uint8Array([1])], "captured.png", { type: "image/png" }),
+    ]);
+
+    render(
+      <StrictMode>
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="work-overview:test">
+            <Harness />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      </StrictMode>,
+    );
+
+    expect(screen.getByLabelText("images")).toHaveTextContent("captured.png");
+    fireEvent.click(screen.getByRole("button", { name: "remove captured.png" }));
+    expect(screen.getByLabelText("images")).toHaveTextContent("");
+  });
+
+  it("shows an attachment added on another pane that shares the draft scope", () => {
+    const drafts = createNewTaskDrafts();
+    render(
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="work-overview:shared">
+          <div>
+            <section aria-label="pane a">
+              <Harness />
+            </section>
+            <section aria-label="pane b">
+              <Harness />
+            </section>
+          </div>
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>,
+    );
+
+    const paneA = screen.getByRole("region", { name: "pane a" });
+    const paneB = screen.getByRole("region", { name: "pane b" });
+    fireEvent.click(within(paneA).getByRole("button", { name: "attach" }));
+    expect(within(paneA).getByLabelText("images")).toHaveTextContent("captured.png");
+    expect(within(paneB).getByLabelText("images")).toHaveTextContent("captured.png");
+  });
+
+  it("does not keep attachments after the draft scope changes", () => {
+    const drafts = createNewTaskDrafts();
+    drafts.writeImages("work-overview:a", [
+      new File([new Uint8Array([1])], "alpha.png", { type: "image/png" }),
+    ]);
+    function view(scope: string) {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value={scope}>
+            <Harness />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    const rendered = render(view("work-overview:a"));
+    expect(screen.getByLabelText("images")).toHaveTextContent("alpha.png");
+    rendered.rerender(view("work-overview:b"));
+    expect(screen.getByLabelText("images")).toHaveTextContent("");
   });
 });

@@ -18,6 +18,7 @@ import {
 import type { NavigatorAssistantClient } from "@octant/client-runtime/navigator-assistant-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
+import type { ShellClient } from "@octant/client-runtime/shell-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
@@ -26,11 +27,12 @@ import type { ContextClient } from "@octant/client-runtime/context-client";
 import { applyWorkspaceOperation } from "@octant/domain/shell-policy";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { decodeChatCommandResult, type ChatThread } from "@octant/contracts/chat";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import type { OctantHostBridge } from "./shell/hostBridge";
 import { App } from "./App";
+import { composerThreadDrafts } from "./composer/composerThreadDraftStore";
 import {
   threadUtilityDockKey,
   writeUtilityDockPresentation,
@@ -87,8 +89,19 @@ vi.mock("./automation/automationCenterGate", () => ({
   },
 }));
 
+// Settings is a lazy chunk. The first test in the file to open it otherwise
+// waits on a cold import of the whole Settings module graph behind the
+// "Opening Settings" fallback, and under CI load that took longer than
+// findBy's 1 s default, so whichever Settings test ran first failed on its
+// first Settings query. Loading the chunk once here keeps that cost out of
+// every test's assertions; the lazy boundary still renders through Suspense.
+beforeAll(async () => {
+  await import("./shell/SettingsView");
+});
+
 afterEach(() => {
   automationGate.enabled = false;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   try {
     window.sessionStorage.clear();
@@ -520,23 +533,47 @@ describe("App", () => {
     );
   });
 
-  it("opens the canonical Machine directly in a browser without a launch token", async () => {
-    const browserCapability = `${"C".repeat(42)}A`;
+  it("asks for a launch from the desktop app or `octant web` when the address is typed, and asks the host nothing", async () => {
     const originalHref = window.location.href;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      throw new Error(`unexpected fetch ${typeof input === "string" ? input : input.toString()}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      window.sessionStorage.clear();
+      window.history.replaceState(null, "", `${window.location.origin}/`);
+      render(
+        <App
+          chatClient={chats()}
+          codeClient={codes()}
+          projectClient={projects()}
+          providerClient={providers()}
+          shellClient={client(codeShellBootstrap())}
+        />,
+      );
+      expect(
+        await screen.findByText("Open Octant from the desktop app or run `octant web`"),
+      ).toBeVisible();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      window.history.replaceState(null, "", originalHref);
+    }
+  });
+
+  it("opens a browser session from a one-time launch link and removes the token from the address bar", async () => {
+    const browserCapability = `${"C".repeat(42)}A`;
+    const launchToken = `${"T".repeat(42)}A`;
+    const originalHref = window.location.href;
+    let addressAtExchange: string | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.endsWith("/api/shell/local-session")) {
-        return new Response(
-          JSON.stringify({
-            windowId,
-            capability: browserCapability,
-            authentication: "local-session",
-          }),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          },
-        );
+      if (url.endsWith("/api/shell/launch-session")) {
+        addressAtExchange = window.location.href;
+        return new Response(JSON.stringify({ windowId, capability: browserCapability }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
       }
       const canvasResponse = canvasFetchPassthrough(url);
       if (canvasResponse !== undefined) {
@@ -546,11 +583,16 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     try {
-      const codeApi = codes();
+      window.sessionStorage.clear();
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.origin}/#launchToken=${launchToken}`,
+      );
       render(
         <App
           chatClient={chats()}
-          codeClient={codeApi}
+          codeClient={codes()}
           projectClient={projects()}
           providerClient={providers()}
           shellClient={client(codeShellBootstrap())}
@@ -562,9 +604,14 @@ describe("App", () => {
         }),
       ).toBeVisible();
       expect(fetchMock).toHaveBeenCalledWith(
-        new URL("/api/shell/local-session", window.location.origin),
-        expect.objectContaining({ method: "POST" }),
+        new URL("/api/shell/launch-session", window.location.origin),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ launchToken }),
+        }),
       );
+      expect(addressAtExchange).not.toContain(launchToken);
+      expect(window.location.href).not.toContain(launchToken);
     } finally {
       vi.unstubAllGlobals();
       window.history.replaceState(null, "", originalHref);
@@ -717,7 +764,12 @@ describe("App", () => {
   });
 
   it("hands off a sidebar thread without inserting operation text into the Project list", async () => {
-    const user = userEvent.setup();
+    // Fake timers from the start, so any timer the toast schedules is fake and
+    // the 8.2 s wait below elapses instantly. A real 8.2 s sleep outlived the
+    // default 5 s test timeout and left its act() scope open, which stopped the
+    // following tests in this file from rendering at all.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const handOff = deferred<Response>();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -753,7 +805,7 @@ describe("App", () => {
     );
     expect(progress.closest(".toast")).not.toBeNull();
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 8200));
+      await vi.advanceTimersByTimeAsync(8200);
     });
     expect(progress).toBeVisible();
     expect(within(projectsNavigation).queryByText(/Writing the hand-off document/)).toBeNull();
@@ -963,7 +1015,32 @@ describe("App", () => {
     );
     expect(sendCallOrder).toBeDefined();
     expect(openCallOrder).toBeDefined();
-    expect(sendCallOrder!).toBeLessThan(openCallOrder!);
+    expect(openCallOrder!).toBeLessThan(sendCallOrder!);
+  });
+
+  it("does not restore the Chat welcome prompt after a thread is created", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "New chat");
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Exact created chat" }),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "New chat" }));
+    expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue("");
   });
 
   it.each(["accepted", "refused"] as const)(
@@ -1192,6 +1269,152 @@ describe("App", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The first message could not be sent. Retry from the open thread.",
     );
+    expect(await screen.findByRole("textbox", { name: "Message" })).toHaveValue(
+      "Prepare launch brief",
+    );
+  });
+
+  it("keeps the created Project Chat thread unsent when opening it is refused", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const chatProject = {
+      id: projectId,
+      type: "chat",
+      name: "Launch planning",
+      lifecycle: "active",
+      pinned: true,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-07-20T08:00:00.000Z",
+      updatedAt: "2026-07-20T08:00:00.000Z",
+    } as never;
+    const projectApi = projects({
+      active: [chatProject],
+      archived: [],
+      availability: [],
+      memory: [],
+    });
+    projectApi.memory = vi.fn(async () => ({ projectId, active: [], history: [] }) as never);
+    const initial = chatShellBootstrap();
+    const layout = initial.workspace.layouts.chat;
+    if (layout.kind !== "pane") throw new Error("Expected the default Chat pane.");
+    const shellApi = client({
+      ...initial,
+      workspace: applyWorkspaceOperation(initial.workspace, {
+        kind: "open-surface",
+        mode: "chat",
+        paneId: layout.paneId,
+        surface: {
+          kind: "project",
+          id: "00000000-0000-4000-8000-000000000891" as never,
+          projectId,
+          mode: "chat",
+          title: "Launch planning",
+        },
+      }),
+    });
+    const shellExecute = vi.mocked(shellApi.execute);
+    const baseShell = shellExecute.getMockImplementation();
+    if (baseShell === undefined) throw new Error("Expected a shell fixture");
+    const continueShell = baseShell as ShellClient["execute"];
+    shellExecute.mockImplementation(async (command) => {
+      if (
+        command.kind === "apply-workspace-operation" &&
+        command.operation.kind === "open-surface" &&
+        command.operation.surface.kind === "chat-thread"
+      ) {
+        throw {
+          category: "invalid",
+          message: "Workspace changed. Try again.",
+        };
+      }
+      return await continueShell(command);
+    });
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={shellApi}
+      />,
+    );
+
+    const quickStart = await screen.findByRole("region", { name: "Chat quick start" });
+    await user.type(
+      within(quickStart).getByRole("textbox", { name: "Start a new Chat thread" }),
+      "Prepare launch brief",
+    );
+    await user.click(within(quickStart).getByRole("button", { name: "Start thread" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The chat was created, but it could not be opened. Open it from the sidebar to continue.",
+    );
+    expect(screen.queryByRole("region", { name: "Workspace pane: Exact created chat" })).toBeNull();
+    expect(chatApi.execute).toHaveBeenCalledWith({
+      kind: "create-chat-thread",
+      projectId,
+      title: "Prepare launch brief",
+    });
+    expect(chatApi.execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "send-chat-turn" }),
+    );
+    expect(composerThreadDrafts.read("chat", createdChatThreadId)?.text).toBe(
+      "Prepare launch brief",
+    );
+  });
+
+  it("clears the Chat welcome composer after create succeeds but opening is refused", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const shellApi = client(chatShellBootstrap());
+    const shellExecute = vi.mocked(shellApi.execute);
+    const baseShell = shellExecute.getMockImplementation();
+    if (baseShell === undefined) throw new Error("Expected a shell fixture");
+    const continueShell = baseShell as ShellClient["execute"];
+    shellExecute.mockImplementation(async (command) => {
+      if (
+        command.kind === "apply-workspace-operation" &&
+        command.operation.kind === "open-surface" &&
+        command.operation.surface.kind === "chat-thread"
+      ) {
+        throw {
+          category: "invalid",
+          message: "Workspace changed. Try again.",
+        };
+      }
+      return await continueShell(command);
+    });
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={shellApi}
+      />,
+    );
+
+    const welcome = await screen.findByRole("region", { name: "Chat welcome" });
+    await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "Keep going");
+    await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
+
+    const remainingWelcome = await screen.findByRole("region", { name: "Chat welcome" });
+    expect(await within(remainingWelcome).findByRole("alert")).toHaveTextContent(
+      "The chat was created, but it could not be opened. Open it from the sidebar to continue.",
+    );
+    expect(within(remainingWelcome).getByRole("textbox", { name: "First message" })).toHaveValue(
+      "",
+    );
+    expect(within(remainingWelcome).getByRole("button", { name: "Start chat" })).toBeDisabled();
+    expect(chatApi.execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "send-chat-turn" }),
+    );
+    expect(composerThreadDrafts.read("chat", createdChatThreadId)?.text).toBe("Keep going");
   });
 
   it("applies the selected Chat provider and model before starting the first turn", async () => {
@@ -1783,6 +2006,91 @@ describe("App", () => {
     );
   });
 
+  it("opens the created Work thread when the first turn cannot start", async () => {
+    const user = userEvent.setup();
+    const shellApi = client(workShellBootstrap());
+    const createdWorkThread = decodeWorkThread({
+      id: workThreadId,
+      projectId: workProjectId,
+      title: "Draft brief",
+      lifecycle: "active",
+      providerInstanceId: "90000000-0000-4000-8000-000000000001" as never,
+      modelId: "gpt-5" as never,
+      bindingRevisionId: "30000000-0000-4000-8000-000000000001" as never,
+      workingDirectory: "." as never,
+      version: 1,
+      createdAt: "2026-07-26T09:30:00.000Z" as never,
+      updatedAt: "2026-07-26T09:30:00.000Z" as never,
+    });
+    const workThreadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [createdWorkThread] })),
+      execute: vi.fn(async () => ({
+        kind: "thread-created" as const,
+        thread: createdWorkThread,
+      })),
+    };
+    const workTurnClient = {
+      startFirstTurn: vi.fn(async () => {
+        throw new Error("The first turn could not start.");
+      }),
+      lookupFirstTurn: vi.fn(),
+      cancelFirstTurn: vi.fn(),
+      transcript: vi.fn(async () => ({ threadId: workThreadId, turns: [] })),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/work/overview")) {
+          return new Response(
+            JSON.stringify({
+              projectId: workProjectId,
+              filesAndArtifacts: [],
+              workflowsAndThreads: [],
+              approvals: [],
+              versions: [],
+              validation: [],
+              exports: [],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        const canvasResponse = canvasFetchPassthrough(url);
+        if (canvasResponse !== undefined) {
+          return canvasResponse;
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      }),
+    );
+
+    render(
+      <App
+        contextClient={contextClient()}
+        workThreadClient={workThreadClient as never}
+        workTurnClient={workTurnClient as never}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={workProjects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={shellApi}
+      />,
+    );
+
+    await user.type(
+      await screen.findByRole("textbox", { name: "Start a new task" }),
+      "Draft brief",
+    );
+    await user.click(screen.getByRole("button", { name: "Start task" }));
+
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Draft brief" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "Start a new task" })).toBeNull();
+    expect(await screen.findByRole("textbox", { name: "Work prompt" })).toHaveValue("Draft brief");
+  });
+
   it("preserves the Work overview draft when authoritative create fails", async () => {
     const user = userEvent.setup();
     const shellApi = client(workShellBootstrap());
@@ -2041,6 +2349,9 @@ describe("App", () => {
     const contextApi: ContextClient = {
       inspect,
       execute: vi.fn(),
+      externalContentAvailable: false,
+      readExternalContent: vi.fn(),
+      clearExternalContent: vi.fn(),
     };
 
     render(
@@ -2134,6 +2445,9 @@ describe("App", () => {
         };
       }),
       execute: vi.fn(),
+      externalContentAvailable: false,
+      readExternalContent: vi.fn(),
+      clearExternalContent: vi.fn(),
     };
 
     render(
@@ -2186,7 +2500,7 @@ describe("App", () => {
         shellClient={shellApi}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Workspace mode" })).toBeVisible();
     const separator = screen.getByRole("separator", { name: "Resize navigation sidebar" });
     Object.assign(separator, {
       hasPointerCapture: vi.fn(() => true),
@@ -2344,7 +2658,7 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Workspace mode" })).toBeVisible();
     expect(screen.queryByRole("separator", { name: "Resize navigation sidebar" })).toBeNull();
     expect(document.querySelector(".shell")).toHaveStyle({ "--octant-sidebar-width": "320px" });
   });
@@ -3558,12 +3872,18 @@ describe("App", () => {
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep my unsent draft",
     );
-    await user.click(screen.getByRole("button", { name: "Workspace mode, Code" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Work" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Workspace mode" })).getByRole("button", {
+        name: "Work",
+      }),
+    );
     expect(screen.queryByDisplayValue("Keep my unsent draft")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "New chat" }));
-    await user.click(screen.getByRole("button", { name: "Workspace mode, Work" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Code" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Workspace mode" })).getByRole("button", {
+        name: "Code",
+      }),
+    );
     expect(await screen.findByRole("textbox", { name: "First message" })).toHaveValue(
       "Keep my unsent draft",
     );
@@ -3739,7 +4059,7 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Workspace mode" })).toBeVisible();
     await openSidebarProject(user, "Octant");
     expect(screen.queryByRole("button", { name: /Right sidebar/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Open Code environment" })).toBeNull();
@@ -4301,7 +4621,7 @@ describe("App", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading Octant workspace");
-    expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Workspace mode" })).toBeVisible();
     expect(document.querySelector(".shell")).toHaveStyle({
       "--octant-sidebar-width": "280px",
     });
@@ -4325,7 +4645,7 @@ describe("App", () => {
       within(sidebar).getByRole("button", { name: "Hide sidebar" }),
     );
     expect(sidebar.querySelector(".sidebar__content")).toHaveClass("window-no-drag");
-    expect(within(sidebar).getByRole("button", { name: "Workspace mode, Code" })).toHaveClass(
+    expect(within(sidebar).getByRole("group", { name: "Workspace mode" })).toHaveClass(
       "window-no-drag",
     );
     expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass("window-no-drag");
@@ -4376,12 +4696,18 @@ describe("App", () => {
     }
     // A mode switch is a navigation away from the Projects page, so the page
     // must not keep sitting over the workspace it belongs to.
-    await user.click(screen.getByRole("button", { name: "Workspace mode, Code" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Work" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Workspace mode" })).getByRole("button", {
+        name: "Work",
+      }),
+    );
     expect(screen.queryByRole("searchbox", { name: "Search Projects" })).toBeNull();
     expect(document.querySelector(".projects-page-layer")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Workspace mode, Work" }));
-    await user.click(await screen.findByRole("menuitemradio", { name: "Code" }));
+    await user.click(
+      within(screen.getByRole("group", { name: "Workspace mode" })).getByRole("button", {
+        name: "Code",
+      }),
+    );
     await act(async () => {
       codeBootstrap.resolve(readyCodeBootstrap);
       codeThread.resolve(readyCodeThread);

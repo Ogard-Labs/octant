@@ -16,6 +16,7 @@ const MAX_RECORDS_PER_SOURCE = 250_000;
 const MAX_TOTAL_RECORDS = 1_000_000;
 const MAX_GROUPS = 256;
 const MAX_DAYS = 512;
+const MAX_COVERAGE_SOURCES = 32;
 
 interface TotalsAccumulator {
   inputTokens: number;
@@ -84,8 +85,10 @@ export async function readLocalUsageHistoryDashboard(input: {
   readonly signal?: AbortSignal;
 }): Promise<LocalUsageHistoryResponse> {
   decodeLocalUsageHistoryRequest(input.request);
+  const omittedSourceCount = Math.max(0, input.sources.length - MAX_COVERAGE_SOURCES);
+  const sources = input.sources.slice(0, MAX_COVERAGE_SOURCES);
   const results = await Promise.all(
-    input.sources.map((source) =>
+    sources.map((source) =>
       Effect.runPromise(
         source.read(input.request, input.signal),
         input.signal === undefined ? {} : { signal: input.signal },
@@ -155,6 +158,9 @@ export async function readLocalUsageHistoryDashboard(input: {
   }
   const aggregateTotals = tokenTotals(totals);
   const truncationDetails = [
+    ...(omittedSourceCount > 0
+      ? ["The bounded local history response reached its source coverage limit."]
+      : []),
     ...(sourceRecordLimitReached ? ["A provider source reached its per-source record bound."] : []),
     ...(truncatedByRecordLimit
       ? ["The bounded local history response reached its total record limit."]

@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { decodeProviderInstance } from "@octant/contracts";
 import { decodeChatThreadView } from "@octant/contracts/chat";
 import { decodeThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
+import type { PickerGroup } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import { ChatTranscript } from "./ChatTranscript";
 
@@ -1281,6 +1283,60 @@ describe("ChatTranscript", () => {
     ).toBeVisible();
   });
 
+  it("omits Fork and Restore from here when the thread's or carried reply's provider keeps its own session", async () => {
+    const threadProvider = "10000000-0000-4000-8000-000000000001";
+    const replyProvider = "10000000-0000-4000-8000-000000000002";
+    const branchActions = async (groups: ReadonlyArray<PickerGroup>) => {
+      const { unmount } = render(
+        <ChatTranscript
+          checkpoints={{
+            byTurnId: new Map([[ids.turn, markedCheckpoint()]]),
+            busy: false,
+            onForget: vi.fn(),
+            onMark: vi.fn(),
+            onRestore: vi.fn(),
+          }}
+          onBranchTurn={vi.fn()}
+          providerGroups={groups}
+          view={viewFixture()}
+        />,
+      );
+      const fork = screen.queryByRole("button", { name: "Fork from here" }) !== null;
+      await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+      await screen.findByRole("menuitemradio", { name: "Forget" });
+      const offered = {
+        fork,
+        branch: screen.queryByRole("menuitemradio", { name: "Branch from here" }) !== null,
+        restore: screen.queryByRole("menuitemradio", { name: "Restore from here" }) !== null,
+      };
+      unmount();
+      return offered;
+    };
+
+    // Octant replays a host-owned conversation from its journal, so the
+    // branch's next turn can continue.
+    expect(
+      await branchActions([
+        providerGroup(threadProvider, "replayed"),
+        providerGroup(replyProvider, "replayed"),
+      ]),
+    ).toEqual({ fork: true, branch: true, restore: true });
+    // The host refuses a branch when the thread's provider keeps its own session.
+    expect(
+      await branchActions([
+        providerGroup(threadProvider, "native"),
+        providerGroup(replyProvider, "replayed"),
+      ]),
+    ).toEqual({ fork: false, branch: false, restore: false });
+    // ...and when the reply the branch would carry came from such a provider.
+    expect(
+      await branchActions([
+        providerGroup(threadProvider, "replayed"),
+        providerGroup(replyProvider, "native"),
+      ]),
+    ).toEqual({ fork: false, branch: false, restore: false });
+  });
+
   it("keeps revising and branching unavailable while a response is running", async () => {
     render(
       <ChatTranscript busy onBranchTurn={vi.fn()} onEditTurn={vi.fn()} view={viewFixture()} />,
@@ -1487,6 +1543,41 @@ describe("ChatTranscript", () => {
 async function chooseTurnAction(name: string) {
   await userEvent.click(screen.getByRole("button", { name: "More actions" }));
   await userEvent.click(await screen.findByRole("menuitemradio", { name }));
+}
+
+function providerGroup(id: string, conversation: "native" | "replayed"): PickerGroup {
+  return {
+    instance: decodeProviderInstance({
+      id,
+      displayName: conversation === "native" ? "Codex" : "Endpoint",
+      ...(conversation === "native"
+        ? {
+            driverKind: "codex",
+            configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex" },
+          }
+        : {
+            driverKind: "openai-compatible",
+            configuration: {
+              kind: "openai-compatible-http",
+              baseUrl: "http://127.0.0.1:11434/v1",
+              authentication: "none",
+              protocol: "responses",
+              manualModelIds: [],
+            },
+          }),
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    runtime: conversation === "native" ? "provider" : "octant-harness",
+    readiness: "ready",
+    driverLabel: conversation === "native" ? "Codex CLI" : "OpenAI-compatible",
+    endpointHost: undefined,
+    executionHost: "This computer",
+    sections: [],
+  };
 }
 
 function markedCheckpoint() {

@@ -507,6 +507,25 @@ describe("SettingsView", () => {
     await waitFor(() => expect(discoveryController.scan).toHaveBeenCalledTimes(1));
   });
 
+  it("opens the Provider catalog and a driver's setup without scanning the host", async () => {
+    const providerController = providerControllerFixture();
+    const discoveryController = discoveryControllerFixture();
+    renderSettings({
+      providerController,
+      discoveryController,
+      initialDeepLink: { section: "provider-catalog" },
+    });
+
+    fireEvent.click(await screen.findByRole("link", { name: /^Codex CLI, / }));
+    expect(screen.getByRole("heading", { level: 1, name: "Codex CLI" })).toBeDefined();
+    expect(
+      within(screen.getByRole("navigation", { name: "Settings breadcrumb" })).getByText(
+        "Codex CLI",
+      ),
+    ).toBeDefined();
+    expect(discoveryController.scan).not.toHaveBeenCalled();
+  });
+
   it("checks every enabled installed provider when discovery is checked again", async () => {
     const user = userEvent.setup();
     const enabledId = "70000000-0000-4000-8000-000000000091" as never;
@@ -1504,6 +1523,55 @@ describe("SettingsView", () => {
     expect(screen.getByRole("button", { name: "Stop host" })).toBeEnabled();
   });
 
+  it("lists remembered tool approvals beside remembered websites, with the Project's name", async () => {
+    const projectId = "44000000-0000-4000-8000-0000000000a1";
+    const extensionClient = {
+      toolGrantsAvailable: true,
+      snapshot: vi.fn(async () => ({ packages: [] })),
+      listToolGrants: vi.fn(async () => [
+        {
+          grantId: `sha256:${"1".repeat(64)}`,
+          projectId,
+          extensionId: "44000000-0000-4000-8000-000000000011",
+          packageId: "44000000-0000-4000-8000-000000000012",
+          componentId: "files-server",
+          mcpToolName: "read_file",
+          version: "1.0.0",
+          digest: `sha256:${"a".repeat(64)}`,
+          definitionDigest: `sha256:${"c".repeat(64)}`,
+          grantedAt: "2026-10-12T10:00:00.000Z",
+        },
+      ]),
+      revokeToolGrant: vi.fn(async () => true),
+    };
+    renderSettings({
+      extensionClient: extensionClient as never,
+      projectNames: new Map([[projectId, "Octant"]]),
+    });
+    navigateTo("Data & privacy");
+
+    expect(screen.getByRole("heading", { name: "Remembered websites" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Remembered tool approvals" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: "Octant" })).toHaveTextContent("read_file");
+  });
+
+  it("leaves remembered tool approvals out for a client that is not a local window", () => {
+    const extensionClient = {
+      toolGrantsAvailable: false,
+      snapshot: vi.fn(async () => ({ packages: [] })),
+      listToolGrants: vi.fn(),
+      revokeToolGrant: vi.fn(),
+    };
+    renderSettings({ extensionClient: extensionClient as never });
+    navigateTo("Data & privacy");
+
+    expect(screen.getByRole("heading", { name: "Remembered websites" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Remembered tool approvals" }),
+    ).not.toBeInTheDocument();
+    expect(extensionClient.listToolGrants).not.toHaveBeenCalled();
+  });
+
   it("explains that host controls stay on the host when no client is available", () => {
     renderSettings();
     navigateTo("Host");
@@ -1682,12 +1750,12 @@ describe("SettingsView", () => {
       "settings-view__range",
     );
     const modeSwitcher = screen.getByRole("group", { name: "Mode switcher" });
-    expect(within(modeSwitcher).getByRole("button", { name: "Dropdown" })).toHaveAttribute(
+    expect(within(modeSwitcher).getByRole("button", { name: "Buttons" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    fireEvent.click(within(modeSwitcher).getByRole("button", { name: "Buttons" }));
-    expect(onSettingsChange).toHaveBeenCalledWith({ modeSwitcherPresentation: "buttons" });
+    fireEvent.click(within(modeSwitcher).getByRole("button", { name: "Dropdown" }));
+    expect(onSettingsChange).toHaveBeenCalledWith({ modeSwitcherPresentation: "dropdown" });
     fireEvent.click(screen.getByRole("button", { name: "Host" }));
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveClass(
       "settings-view__action",

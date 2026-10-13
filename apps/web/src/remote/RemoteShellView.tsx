@@ -11,7 +11,7 @@ import {
 import { OctantBadge } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
-import { HostSelector } from "../shell/HostSelector";
+import { HostStatus } from "../shell/HostSelector";
 import { ModeSwitcher } from "../shell/ModeSwitcher";
 import { SyncStatusReadOnly } from "../settings/SyncMembershipSections";
 import { ShellState } from "../shell/ShellState";
@@ -113,7 +113,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
       <ConnectionStatusLine status={connectionStatus} />
       <header className="remote-shell__header">
         <h1 className="remote-shell__title">Octant</h1>
-        <HostSelector hosts={hosts} />
+        <HostStatus hosts={hosts} />
         <ModeSwitcher
           separateChat
           activeMode={activeMode}

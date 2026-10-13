@@ -23,6 +23,8 @@ export interface ThreadMentionsOptions {
   readonly requestId?: () => ThreadMentionRequestId;
   /** Enables the explicit Chat-to-Chat dialogue capability for this composer. */
   readonly dialogueEnabled?: boolean;
+  /** Chips restored with a persisted new-task draft after Settings unmounts. */
+  readonly initialChips?: ReadonlyArray<ChatComposerThreadMentionChip>;
 }
 
 export interface ThreadMentionsController {
@@ -90,7 +92,9 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
   const newRequestId = useCallback(() => requestIdRef.current(), []);
   const [query, setQuery] = useState<string | undefined>(undefined);
   const [candidates, setCandidates] = useState<ReadonlyArray<ThreadMentionCandidate>>([]);
-  const [chips, setChips] = useState<ReadonlyArray<ChatComposerThreadMentionChip>>([]);
+  const [chips, setChips] = useState<ReadonlyArray<ChatComposerThreadMentionChip>>(
+    () => options.initialChips ?? [],
+  );
   const [busy, setBusy] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | undefined>(undefined);
   const mounted = useRef(true);

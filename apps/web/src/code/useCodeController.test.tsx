@@ -462,6 +462,36 @@ describe("useCodeController", () => {
     expect(sent.some((entry) => entry.kind === "create-code-thread")).toBe(false);
   });
 
+  it("asks the host to merge a fork back through the chosen reply and returns its answer", async () => {
+    const execute = vi.fn(async (command: CodeCommand) =>
+      command.kind === "merge-code-fork-context"
+        ? ({
+            kind: "fork-context-merge",
+            threadId: command.threadId,
+            outcome: { status: "refused", reason: "already-merged" },
+          } as never)
+        : ({ kind: "unhandled" } as never),
+    );
+    const client = fakeClient({ execute });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await result.current.mergeForkContext({
+        threadId: ids.thread,
+        throughOperationId: "70000000-0000-4000-8000-000000000001",
+      });
+    });
+
+    expect(execute.mock.calls.map(([command]) => command)).toContainEqual({
+      kind: "merge-code-fork-context",
+      threadId: ids.thread,
+      throughOperationId: "70000000-0000-4000-8000-000000000001",
+    });
+    expect(outcome).toEqual({ status: "refused", reason: "already-merged" });
+  });
+
   it("bootstraps authoritative navigation and activates a thread through codeClient only", async () => {
     const client = fakeClient();
     const { result, unmount } = renderHook(() =>
@@ -3668,6 +3698,7 @@ function bootstrap(version = 1, activitySequence = 0): CodeBootstrap {
       defaultPermissionPersistence: "current-session",
       requireGitRepository: true,
       allowDefaultFolderThreads: false,
+      defaultDiffLayout: "unified",
       updatedAt: now as never,
       version: 1 as never,
     },

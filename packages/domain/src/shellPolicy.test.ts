@@ -158,7 +158,7 @@ describe("shell settings policy", () => {
       lastContextSurface: null,
       sidebarMaterial: "system",
       workspaceMaterial: "opaque",
-      modeSwitcherPresentation: "dropdown",
+      modeSwitcherPresentation: "buttons",
       projectViewSwitcherPresentation: "dropdown",
       transcriptTextSize: "small",
       transcriptWidth: "narrow",
@@ -210,7 +210,8 @@ describe("shell settings policy", () => {
       voice: {},
       // Image generation starts with no custom OpenAI-compatible sources.
       imageGeneration: { customSources: [] },
-      computerUse: { enabled: true, automaticUpdates: true },
+      // The Computer-use driver waits for a person before fetching an upstream release.
+      computerUse: { enabled: true, automaticUpdates: false },
       // The host has not been told who is using it, so the profile carries no
       // name and no address — only the accent the initials avatar falls back to.
       userProfile: { accent: "indigo", avatar: { kind: "initials" } },

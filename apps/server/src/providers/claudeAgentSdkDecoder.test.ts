@@ -109,3 +109,136 @@ describe("Managed tool progress", () => {
     ).toThrow();
   });
 });
+
+describe("Runtime compaction", () => {
+  const active = { kind: "active", sessionId: "session-1" } as const;
+  const refusal = (message: unknown): string | undefined => {
+    try {
+      decodeMessage(message, openInput, active);
+      return undefined;
+    } catch (error) {
+      return (error as { readonly failure?: { readonly message?: string } }).failure?.message;
+    }
+  };
+  // Shaped as `SDKCompactBoundaryMessage` in @anthropic-ai/claude-agent-sdk 0.3.211.
+  const boundary = {
+    type: "system",
+    subtype: "compact_boundary",
+    compact_metadata: {
+      trigger: "auto",
+      pre_tokens: 167_412,
+      post_tokens: 18_204,
+      duration_ms: 41_200,
+      preserved_segment: { head_uuid: "u-head", anchor_uuid: "u-anchor", tail_uuid: "u-tail" },
+      preserved_messages: { anchor_uuid: "u-anchor", uuids: ["u-head", "u-tail"] },
+    },
+    uuid: "u-boundary",
+    session_id: "session-1",
+  };
+
+  it("reads Claude compacting its own session mid-turn as a notice, not an unsupported message", () => {
+    expect(decodeMessage(boundary, openInput, active)).toEqual({
+      kind: "compaction",
+      sessionId: "session-1",
+      postTokens: 18_204,
+    });
+  });
+
+  it("accepts the fields the runtime adds beyond its published type", () => {
+    // Claude Code 0.3.211's runtime also sends `logical_parent_uuid` and
+    // summary bookkeeping that the published type leaves out.
+    expect(
+      decodeMessage(
+        {
+          ...boundary,
+          logical_parent_uuid: "u-parent",
+          compact_metadata: {
+            trigger: "manual",
+            pre_tokens: 90_000,
+            user_context: "",
+            messages_summarized: 40,
+          },
+        },
+        openInput,
+        active,
+      ),
+    ).toEqual({ kind: "compaction", sessionId: "session-1" });
+  });
+
+  it.each([
+    ["an unknown trigger", { ...boundary.compact_metadata, trigger: "scheduled" }],
+    ["no token count", { trigger: "auto" }],
+    ["a negative token count", { trigger: "auto", pre_tokens: -1 }],
+  ])("refuses a compaction notice with %s", (_, compact_metadata) => {
+    expect(refusal({ ...boundary, compact_metadata })).toBe(
+      "Claude returned an unsupported runtime message.",
+    );
+  });
+
+  it("refuses a compaction notice for another session", () => {
+    expect(refusal({ ...boundary, session_id: "session-2" })).toBe(
+      "Claude returned an unsupported runtime message.",
+    );
+  });
+
+  it("refuses a system message it does not know without quoting its subtype", () => {
+    expect(
+      refusal({
+        type: "system",
+        subtype: "conversation_reset",
+        uuid: "u-1",
+        session_id: "session-1",
+      }),
+    ).toBe("Claude returned an unsupported system message.");
+    expect(
+      refusal({
+        type: "system",
+        subtype: "Not An Identifier!",
+        uuid: "u-1",
+        session_id: "session-1",
+      }),
+    ).toBe("Claude returned an unsupported system message.");
+  });
+});
+
+describe("Interruption", () => {
+  const active = { kind: "active", sessionId: "session-1" } as const;
+  // What Claude Code 2.1.296 sends once a turn is interrupted, just before the
+  // result that ends it: the first text while output was streaming, the second
+  // while a tool was waiting.
+  const marker = (text: string) => ({
+    type: "user",
+    message: { role: "user", content: [{ type: "text", text }] },
+    parent_tool_use_id: null,
+    session_id: "session-1",
+    uuid: "u-marker",
+    timestamp: "2026-10-12T10:52:30.164Z",
+  });
+
+  it.each(["[Request interrupted by user]", "[Request interrupted by user for tool use]"])(
+    "drops the runtime's note %s, so the result can end the turn as interrupted",
+    (text) => {
+      expect(decodeMessage(marker(text), openInput, active)).toEqual({ kind: "ignored" });
+    },
+  );
+
+  it("refuses any other text the runtime sends as a user message's blocks", () => {
+    expect(() => decodeMessage(marker("Run the deploy."), openInput, active)).toThrow();
+    expect(() =>
+      decodeMessage(
+        {
+          ...marker("[Request interrupted by user]"),
+          message: {
+            role: "user",
+            content: [
+              { type: "text", text: "[Request interrupted by user]" },
+              { type: "text", text: "Run the deploy." },
+            ],
+          },
+        },
+        openInput,
+        active,
+      ),
+    ).toThrow();
+  });
+});

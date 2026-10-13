@@ -166,9 +166,13 @@ export async function seedCodeForkHarnessSession(
     return undefined;
   }
   const transcript = deps.transcripts.load(sourceSession);
+  // A resumed copy runs on the model its binding names, so a fork whose model
+  // was changed before its first message reads the source as text instead of
+  // replying on the source's model under the fork's name.
   if (
     transcript === undefined ||
     String(transcript.binding.instanceId) !== String(input.fork.providerInstanceId) ||
+    String(transcript.binding.modelId) !== String(input.fork.modelId) ||
     transcript.binding.mode !== "code"
   ) {
     return undefined;

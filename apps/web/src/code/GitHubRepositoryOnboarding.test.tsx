@@ -397,7 +397,7 @@ describe("GitHubRepositoryOnboardingFlow", () => {
     );
     expect(githubStyles).toContain("overflow-wrap: anywhere");
     expect(githubStyles).toMatch(
-      /@media \(prefers-contrast: more\)[\s\S]*?\.github-picker__option/,
+      /\[data-octant-increased-contrast="true"\] \.github-picker__option/,
     );
     expect(githubStyles).not.toContain("animation");
   });

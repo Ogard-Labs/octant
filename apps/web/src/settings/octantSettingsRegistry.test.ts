@@ -16,6 +16,7 @@ describe("octantSettingsRegistry", () => {
       "work",
       "code",
       "providers",
+      "provider-catalog",
       "harness",
       "navigator-assistant",
       "voice",
@@ -61,6 +62,7 @@ describe("octantSettingsRegistry", () => {
       "data-map",
       "thread-retention",
       "browser-site-approvals",
+      "tool-approvals",
     ]);
     expect(data?.keywords).toMatch(/backup/);
     expect(data?.keywords).toMatch(/retention/);
@@ -145,6 +147,7 @@ describe("octantSettingsRegistry", () => {
     const code = octantSettingsRegistry.sections.find((section) => section.id === "code");
     expect(code?.settings.map((setting) => setting.id)).toEqual([
       "code-default-folder-threads",
+      "code-default-diff-layout",
       "project-view-switcher",
     ]);
     const chat = octantSettingsRegistry.sections.find((section) => section.id === "chat");

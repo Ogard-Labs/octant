@@ -16,6 +16,7 @@ import { noticeTouches, useCodeFileChangeWatch } from "./useCodeFileChangeWatch"
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -46,6 +47,7 @@ export default function CodeWorkspaceTab(props: {
   readonly canvasClient?: CanvasClient;
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
+  readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
@@ -164,6 +166,9 @@ export default function CodeWorkspaceTab(props: {
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}
+        {...(props.browserAutomationClient === undefined
+          ? {}
+          : { browserAutomationClient: props.browserAutomationClient })}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}

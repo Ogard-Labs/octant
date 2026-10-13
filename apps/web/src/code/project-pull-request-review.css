@@ -24,7 +24,7 @@
 .code-pr-review__freshness {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--oct-space-1);
 }
 
 .code-pr-review__eyebrow {

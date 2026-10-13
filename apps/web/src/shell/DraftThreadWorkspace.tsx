@@ -1,5 +1,10 @@
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
-import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
+import {
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+  useNewTaskPrompt,
+  type NewTaskCreateFromSelection,
+} from "../composer/useNewTaskPrompt";
 import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
@@ -50,13 +55,23 @@ import {
 } from "../linear/CreateFromLinearIssuePicker";
 import {
   draftThreadModePresentation,
+  pickerGroupCarriesAppManagedTools,
   resolveCodeNewThreadWorkspace,
   type CreateHostViewScope,
   type DraftIntentCard,
   type PickerGroup,
 } from "@octant/domain";
 import { FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { joinDefaultFolderDisplayPath } from "../settings/defaultFolderDisplay";
 import { CodeHome, type CodeHomeProps } from "../code/CodeHome";
 import {
@@ -169,6 +184,8 @@ export interface DraftThreadWorkspaceProps {
   ) => void;
   readonly onAttachFolder?: () => void;
   readonly onOpenCodeSettings?: () => void;
+  /** Opens Providers & Models from the start composer while none is ready. */
+  readonly onOpenSettings?: () => void;
   /**
    * Reports the Project the composer now targets. The draft is unmounted
    * while Settings covers the workspace, so the shell keeps this choice and
@@ -311,18 +328,20 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     }
   };
   useEffect(() => setLocalProjectId(props.projectId), [props.projectId]);
-  type CreateFromSelection =
-    | {
-        readonly kind: "github";
-        readonly request: GithubIssueContextRequest;
-        readonly label: string;
-      }
-    | {
-        readonly kind: "linear";
-        readonly request: LinearIssueContextRequest;
-        readonly label: string;
-      };
-  const [createFromSelection, setCreateFromSelection] = useState<CreateFromSelection>();
+  const drafts = useContext(NewTaskDraftsContext);
+  const draftScope = useContext(NewTaskDraftScopeContext);
+  const [createFromSelection, setCreateFromSelectionState] = useState<
+    NewTaskCreateFromSelection | undefined
+  >(() => (draftScope === undefined ? undefined : drafts?.readCreateFrom(draftScope)));
+  useLayoutEffect(() => {
+    setCreateFromSelectionState(
+      draftScope === undefined ? undefined : drafts?.readCreateFrom(draftScope),
+    );
+  }, [drafts, draftScope]);
+  const setCreateFromSelection = (selection: NewTaskCreateFromSelection | undefined) => {
+    setCreateFromSelectionState(selection);
+    if (draftScope !== undefined) drafts?.writeCreateFrom(draftScope, selection);
+  };
   const [promptRequest, setPromptRequest] = useState<{
     readonly text: string;
     readonly revision: number;
@@ -812,6 +831,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { selectedModelId: props.selectedModelId })}
           onSelectProvider={props.onSelectProvider}
+          {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
           {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
           {...(props.windowCapability === undefined
             ? {}
@@ -888,6 +908,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { selectedModelId: props.selectedModelId })}
           onSelectProvider={props.onSelectProvider}
+          {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
           {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
           {...(props.windowCapability === undefined
             ? {}
@@ -984,12 +1005,36 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
   const presentation = draftThreadModePresentation(props.mode);
   const [prompt, setPrompt] = useNewTaskPrompt();
+  const storedComputerSelection =
+    draftScope === undefined ? undefined : drafts?.readComputerSelection(draftScope);
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "chat-draft",
+    providerCarriesTools: pickerGroupCarriesAppManagedTools(
+      props.providerGroups,
+      props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+        ? undefined
+        : {
+            providerInstanceId: props.selectedProviderInstanceId,
+            modelId: props.selectedModelId,
+          },
+    ),
+    ...(storedComputerSelection === undefined ? {} : { initialSelection: storedComputerSelection }),
   });
+  const structuredDraftScope = useRef(draftScope);
+  useLayoutEffect(() => {
+    if (drafts === undefined || draftScope === undefined) return;
+    if (structuredDraftScope.current === draftScope) return;
+    structuredDraftScope.current = draftScope;
+    computer.restore(drafts.readComputerSelection(draftScope));
+  }, [computer, drafts, draftScope]);
+  useEffect(() => {
+    if (draftScope === undefined || drafts === undefined) return;
+    if (structuredDraftScope.current !== draftScope) return;
+    drafts.writeComputerSelection(draftScope, computer.stagedSelection);
+  }, [computer.stagedSelection, drafts, draftScope]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // A Chat draft is a first-message composer like Work's and Code's, so it
   // offers the same host command list rather than only the @Computer mention.
@@ -1167,6 +1212,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                     <span className="composer-gap" aria-hidden="true" />
                     <ComposerModelPicker
                       ariaLabel="Provider and model"
+                      disabled={props.creating === true}
                       menuSide="bottom"
                       groups={props.providerGroups}
                       modelOptionValues={modelOptionValues}
@@ -1180,6 +1226,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                         });
                       }}
                       onSelect={props.onSelectProvider}
+                      {...(props.onOpenSettings === undefined
+                        ? {}
+                        : { onOpenSettings: props.onOpenSettings })}
                       {...(props.selectedModelId === undefined
                         ? {}
                         : { selectedModelId: props.selectedModelId })}

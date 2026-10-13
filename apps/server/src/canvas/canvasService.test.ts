@@ -583,7 +583,7 @@ describe("CanvasService", () => {
     expect(result).toMatchObject({ kind: "denied", denialCode: "invalid-template" });
   });
 
-  it("draws a small agent-written Canvas inside its thread and shows a card once it outgrows the thread", async () => {
+  it("draws an agent-written reading document inside its thread and shows a card once it gains a board", async () => {
     const { service } = createService();
     const tools = createCanvasAgentTools({
       windowId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
@@ -672,6 +672,23 @@ describe("CanvasService", () => {
       kind: "ready",
       version: { definition: { presentation: "sidebar" } },
     });
+
+    // A long reading document is drawn in the thread rather than cut to a teaser's block count.
+    const article = await tools.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Research brief",
+        presentation: "inline",
+        blocks: Array.from({ length: 40 }, (_unused, index) => ({
+          ...heading,
+          blockId: `section-${String(index)}`,
+        })),
+      }),
+    });
+    expect(article.isError).toBeUndefined();
+    expect(article.result).toMatchObject({ presentation: "inline" });
+    expect(article.result).not.toHaveProperty("presentationNote");
   });
 
   it("keeps an agent-written design that follows the frame rules and tells the agent why one does not", async () => {
@@ -716,8 +733,33 @@ describe("CanvasService", () => {
     expect(kept.isError).toBeUndefined();
     expect(kept.result).toMatchObject({
       presentation: "sidebar",
-      presentationNote: expect.stringContaining("design"),
+      presentationNote: expect.stringContaining("phone design"),
     });
+
+    // An article or spec written as a document-size design reads in the thread.
+    const article = await tools.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "create",
+        title: "Search ranking spec",
+        presentation: "inline",
+        blocks: [
+          {
+            blockId: "spec",
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "design",
+            title: "Search ranking spec",
+            size: "document",
+            frames: [
+              { frameId: "spec", title: "Spec", html: "<article><h1>Ranking</h1></article>" },
+            ],
+          },
+        ],
+      }),
+    });
+    expect(article.isError).toBeUndefined();
+    expect(article.result).toMatchObject({ presentation: "inline" });
+    expect(article.result).not.toHaveProperty("presentationNote");
 
     const refused = await tools.execute({
       name: CANVAS_TOOL_NAME,

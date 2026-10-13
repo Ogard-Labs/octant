@@ -2,7 +2,7 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeOperationResult } from "@octant/contracts/code-operations";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { CodeDiffPane, type CodeDiffProjection } from "./CodeDiffPane";
 
@@ -28,6 +28,10 @@ async function chooseSideBySide() {
 }
 
 describe("CodeDiffPane", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+  });
+
   it("stacks every changed file with its numbered lines by default", async () => {
     render(
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
@@ -340,6 +344,114 @@ describe("CodeDiffPane", () => {
     expect(await screen.findByRole("button", { name: "Discard changes" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "README.mdadded+1−0" }));
     expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
+  });
+
+  it("uses the Settings default until a thread stores its own layout", async () => {
+    render(
+      <CodeDiffPane
+        client={client()}
+        defaultLayout="side-by-side"
+        diff={available()}
+        loadRuntime={runtime().loadRuntime}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Side by side" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("navigation", { name: "Changed files" })).toBeVisible();
+  });
+
+  it("follows a later Settings default while the thread has no stored layout", async () => {
+    const { rerender } = render(
+      <CodeDiffPane
+        client={client()}
+        defaultLayout="unified"
+        diff={available()}
+        loadRuntime={runtime().loadRuntime}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Unified" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    rerender(
+      <CodeDiffPane
+        client={client()}
+        defaultLayout="side-by-side"
+        diff={available()}
+        loadRuntime={runtime().loadRuntime}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Side by side" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("keeps a chosen layout when storage refuses the write and the Settings default later changes", async () => {
+    const user = userEvent.setup();
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("quota");
+    });
+    const { rerender } = render(
+      <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Side by side" }));
+    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    rerender(
+      <CodeDiffPane
+        client={client()}
+        defaultLayout="unified"
+        diff={available()}
+        loadRuntime={runtime().loadRuntime}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    setItem.mockRestore();
+  });
+
+  it("remembers one thread's layout without rewriting another", async () => {
+    const user = userEvent.setup();
+    const first = render(
+      <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Side by side" }));
+    expect(screen.getByRole("button", { name: "Side by side" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    first.unmount();
+
+    const otherThread = {
+      ...available(),
+      threadId: "20000000-0000-4000-8000-000000000006" as never,
+    };
+    const other = render(
+      <CodeDiffPane client={client()} diff={otherThread} loadRuntime={runtime().loadRuntime} />,
+    );
+    expect(await screen.findByRole("button", { name: "Unified" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
+    other.unmount();
+
+    render(
+      <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
+    );
+    expect(await screen.findByRole("button", { name: "Side by side" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });
 

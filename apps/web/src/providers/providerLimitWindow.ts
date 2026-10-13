@@ -32,6 +32,22 @@ export function providerLimitWindowLabel(window: string): string {
   return providerLimitWindowName(window).label;
 }
 
+const UNIT_SUFFIX: Readonly<Record<string, string>> = { minute: "m", hour: "h", day: "d" };
+
+/**
+ * The short name a narrow bar can carry: "5h", "Week". A seven-day window is
+ * the provider's weekly limit, so it reads as "Week". A window whose length
+ * is not a plain duration keeps its full label.
+ */
+export function providerLimitWindowShortLabel(window: string): string {
+  const { label } = providerLimitWindowName(window);
+  const duration = /^(\d+)-(minute|hour|day) limit$/.exec(label);
+  if (duration === null) return label;
+  const [, amount = "", unit = ""] = duration;
+  if (unit === "day" && amount === "7") return "Week";
+  return `${amount}${UNIT_SUFFIX[unit] ?? ""}`;
+}
+
 /**
  * Slot windows are named by slot and length (`primary_5h`, `secondary_7d`).
  * The length is what a reader recognizes, so it becomes the label; the slot

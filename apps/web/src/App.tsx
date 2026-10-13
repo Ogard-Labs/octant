@@ -1,10 +1,14 @@
-import { useMenuBarTasks } from "./shell/useMenuBarTasks";
+import { useMenuBarThread } from "./shell/useMenuBarThread";
 import {
   MODEL_CHOICE_CHANGED,
   readLastModelChoice,
   rememberModelChoice,
 } from "./providers/modelChoiceMemory";
-import { createNewTaskDrafts, NewTaskDraftsContext } from "./composer/useNewTaskPrompt";
+import {
+  createNewTaskDrafts,
+  discardNewTaskDraftForPane,
+  NewTaskDraftsContext,
+} from "./composer/useNewTaskPrompt";
 import { StreamRepliesContext } from "./transcript/AssistantMessageBody";
 import { ComputerUseEnabledContext } from "./computerUse/ComputerUseMention";
 import { UsageNamesProvider } from "./usage/UsageName";
@@ -548,7 +552,7 @@ export function App(props: AppProps) {
     ...(injectedCapability === undefined && launch !== undefined
       ? { serverUrl: launch.serverUrl }
       : {}),
-    onExchanged: clearLaunchTokenFragment,
+    onLaunchTokenRead: clearLaunchTokenFragment,
   });
 
   // A launch address the capability must not travel to is explained here,
@@ -605,6 +609,21 @@ export function App(props: AppProps) {
             message="Establishing the authenticated Octant browser session."
             state="loading"
             title="Opening Octant"
+          />
+        </main>
+      );
+    }
+    if (launchSession.launchRequired === true) {
+      // A browser session opens only from a one-time link the desktop app or
+      // `octant web` mints with a secret readable by the host's OS user, so a
+      // typed address, an expired tab, or a restarted host lands here.
+      return (
+        <main className="shell-boundary">
+          <ShellState
+            eyebrow="Browser session"
+            message="Octant opens a browser session only from the one-time link that the desktop app or `octant web` creates; typing the address is not enough."
+            state="warning"
+            title="Open Octant from the desktop app or run `octant web`"
           />
         </main>
       );
@@ -907,20 +926,28 @@ function LaunchedShell(
   }
   const [draftCreating, setDraftCreating] = useState(false);
   const [draftError, setDraftError] = useState<string>();
-  const [draftResetRevision, setDraftResetRevision] = useState(0);
+  const [draftResetRevisions, setDraftResetRevisions] = useState<Readonly<Record<string, number>>>(
+    {},
+  );
   const newTaskDrafts = useMemo(
     () => createNewTaskDrafts(),
     [props.launch.serverUrl, props.launch.windowId],
   );
-  function resetNewTaskDraft(mode: OctantMode): void {
-    const paneId = controller.workspace?.activePaneIds[mode];
-    if (paneId !== undefined) newTaskDrafts.write(`${mode}:${String(paneId)}`, "");
+  function resetNewTaskDraft(mode: OctantMode, paneId?: PaneId): void {
+    const target = paneId ?? controller.workspace?.activePaneIds[mode];
+    if (target !== undefined) {
+      const paneKey = String(target);
+      discardNewTaskDraftForPane(newTaskDrafts, mode, paneKey);
+      setDraftResetRevisions((current) => ({
+        ...current,
+        [paneKey]: (current[paneKey] ?? 0) + 1,
+      }));
+    }
     if (mode === "code") {
       setDraftExecutionPolicy(undefined);
       setDraftPermissionPersistence(undefined);
       setPendingDraftBranch(undefined);
     }
-    setDraftResetRevision((revision) => revision + 1);
   }
   // The Project an unbound draft composer targets, per mode. The draft lives
   // in local state and unmounts while Settings covers the workspace; this is
@@ -2737,7 +2764,7 @@ function LaunchedShell(
   // so a clean store is the only thing that can produce it.
   // The readiness line and the notice under it read the same discovery record,
   // so first run cannot say "nothing is configured" above a scan it is still
-  // running (`BOOT-02`).
+  // running.
   const firstRunDiscovery = useMemo<FirstRunDiscoveryInput>(
     () => ({
       scanning: discoveryController.scanning,
@@ -3116,6 +3143,38 @@ function LaunchedShell(
   // The prompt of a confirmed follow-up waits in the composer of the thread
   // it belongs to; sending it is the person's move. A started side task has
   // already sent its prompt and passes none.
+  function seedOpenedComposerDraft(
+    mode: "chat" | "work" | "code",
+    threadId: string,
+    text: string,
+    stagedDropped = false,
+  ): void {
+    if (text.length === 0) return;
+    composerThreadDrafts.write(mode, threadId, {
+      text,
+      caretIndex: text.length,
+      stagedDropped,
+    });
+  }
+
+  async function openCreatedChatThread(
+    threadId: ChatThreadId,
+    title: string,
+    prompt: string,
+    projectId?: ProjectId,
+  ): Promise<boolean> {
+    const opened =
+      projectId === undefined
+        ? await controller.openChatThread(threadId, title)
+        : await controller.openChatThread(threadId, title, projectId);
+    if (opened) return true;
+    chatController.reportError(
+      "The chat was created, but it could not be opened. Open it from the sidebar to continue.",
+    );
+    seedOpenedComposerDraft("chat", String(threadId), prompt);
+    return false;
+  }
+
   const openCreatedFollowUp = ({
     mode,
     created,
@@ -3126,12 +3185,7 @@ function LaunchedShell(
     readonly prompt: string;
   }) => {
     const seed = (threadMode: "chat" | "work" | "code", threadId: string) =>
-      prompt.length > 0 &&
-      composerThreadDrafts.write(threadMode, threadId, {
-        text: prompt,
-        caretIndex: prompt.length,
-        stagedDropped: false,
-      });
+      seedOpenedComposerDraft(threadMode, threadId, prompt);
     if (created.kind === "same-thread") {
       seed(mode, created.threadId);
       return;
@@ -3895,6 +3949,12 @@ function LaunchedShell(
     () => (activeMode === "code" ? (["code"] as const) : (["chat", "work"] as const)),
     [activeMode],
   );
+  // Every Project, archived ones too: a grant outlives the Project's listing.
+  const projectNamesById = useMemo(
+    () =>
+      new Map(projectController.allProjects.map((project) => [String(project.id), project.name])),
+    [projectController.allProjects],
+  );
   const workingNowProjectNames = useMemo(
     () => new Map(projectController.projects.map((project) => [String(project.id), project.name])),
     [projectController.projects],
@@ -3956,12 +4016,11 @@ function LaunchedShell(
           onSwitch: switchWorkKind,
         };
 
-  useMenuBarTasks({
+  useMenuBarThread({
     bridge: props.hostBridge,
     ready: controller.status === "ready",
-    chat: navigationModel.markedChatNavigation,
-    work: navigationModel.workProjectThreads,
-    code: navigationModel.codeProjectThreads,
+    open:
+      watchedThreadId === undefined ? undefined : { mode: activeMode, threadId: watchedThreadId },
     onSelect: (target) => {
       if (controller.status !== "ready") return;
       if (target.mode === "chat") selectChatThread(target.threadId);
@@ -5188,12 +5247,13 @@ function LaunchedShell(
   function createChat(
     prompt?: string,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
+    paneId?: PaneId,
   ) {
     if (prompt === undefined || prompt.trim() === "") {
       closeWorkspaceReaders();
       setDraftError(undefined);
       setDraftPendingMessage(undefined);
-      resetNewTaskDraft("chat");
+      resetNewTaskDraft("chat", paneId);
       setDraftProjectSelection(({ chat: _previous, ...rest }) => rest);
       void controller.openDraftThread("chat");
       return;
@@ -5212,6 +5272,7 @@ function LaunchedShell(
       undefined,
       undefined,
       modelOptionValues,
+      paneId,
     );
   }
 
@@ -5286,7 +5347,10 @@ function LaunchedShell(
     // work modes dismisses it.
     if (mode === "chat") setAutomationCenterOpen(false);
     if (mode === "chat") return;
-    const hasProject = projectController.projects.some(
+    // `projects` is the mode currently on screen. Switching Work → Code must
+    // see Code Projects that already exist, or Switch to Code also opens an
+    // unscoped draft over the Code workspace.
+    const hasProject = projectController.allProjects.some(
       (project) => project.type === mode && project.lifecycle === "active",
     );
     if (!hasProject) {
@@ -5386,8 +5450,9 @@ function LaunchedShell(
     const providerInstanceId = workProviderChoice?.instanceId;
     const modelId = workProviderChoice?.modelId;
     if (providerInstanceId === undefined || modelId === undefined) return false;
+    let created;
     try {
-      const created = await workThreadClient.execute({
+      created = await workThreadClient.execute({
         kind: "create-work-thread",
         threadId: decodeWorkThreadId(globalThis.crypto.randomUUID()),
         projectId: project.id,
@@ -5399,9 +5464,16 @@ function LaunchedShell(
         bindingRevisionId,
         workingDirectory: decodeThreadWorkingDirectory("."),
       });
-      if (!("kind" in created) || created.kind !== "thread-created") return false;
-      // A successful create is durable even if the first turn fails. Open the
-      // exact thread before starting the turn so the user can see recovery UI.
+    } catch {
+      return false;
+    }
+    if (!("kind" in created) || created.kind !== "thread-created") return false;
+    // A successful create is durable even if the first turn fails. Open the
+    // exact thread before starting the turn so the user can see recovery UI.
+    // Return true so the overview does not restore a prompt that already
+    // created a thread.
+    let firstTurnFailed = false;
+    try {
       await controller.openWorkThread(
         created.thread.id,
         created.thread.title,
@@ -5430,11 +5502,14 @@ function LaunchedShell(
           ? {}
           : { threadMentionIds }),
       });
-      if (started.kind !== "accepted") return false;
-      return true;
+      firstTurnFailed = started.kind !== "accepted";
     } catch {
-      return false;
+      firstTurnFailed = true;
     }
+    if (firstTurnFailed) {
+      seedOpenedComposerDraft("work", String(created.thread.id), prompt, (images ?? []).length > 0);
+    }
+    return true;
   }
 
   async function stageWorkImages(
@@ -5485,35 +5560,50 @@ function LaunchedShell(
     // A successful create is durable even if provider selection or the first
     // turn fails. Open its exact thread before either follow-up command so the
     // user can see the failure and retry instead of creating a duplicate.
-    if (!(await controller.openChatThread(thread.id, thread.title, project.id))) return false;
-    if (
-      selection !== undefined &&
-      (thread.providerInstanceId !== selection.providerInstanceId ||
-        thread.modelId !== selection.modelId ||
-        modelOptionValues !== undefined)
-    ) {
-      const changed = await chatController.execute({
-        kind: "change-chat-provider",
+    if (!(await openCreatedChatThread(thread.id, thread.title, prompt, project.id))) {
+      return true;
+    }
+    try {
+      if (
+        selection !== undefined &&
+        (thread.providerInstanceId !== selection.providerInstanceId ||
+          thread.modelId !== selection.modelId ||
+          modelOptionValues !== undefined)
+      ) {
+        const changed = await chatController.execute({
+          kind: "change-chat-provider",
+          threadId: thread.id,
+          expectedVersion: thread.version,
+          providerInstanceId: selection.providerInstanceId,
+          modelId: selection.modelId,
+          ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
+        });
+        if (changed?.kind !== "thread-updated") {
+          chatController.reportError(
+            "The selected Chat provider and model could not be applied. Retry from the open thread.",
+          );
+          seedOpenedComposerDraft("chat", String(thread.id), prompt);
+          return true;
+        }
+        thread = changed.thread;
+      }
+      const sent = await chatController.execute({
+        kind: "send-chat-turn",
         threadId: thread.id,
         expectedVersion: thread.version,
-        providerInstanceId: selection.providerInstanceId,
-        modelId: selection.modelId,
-        ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
+        prompt,
       });
-      if (changed?.kind !== "thread-updated") return false;
-      thread = changed.thread;
-    }
-    const sent = await chatController.execute({
-      kind: "send-chat-turn",
-      threadId: thread.id,
-      expectedVersion: thread.version,
-      prompt,
-    });
-    if (sent === undefined) {
+      if (sent === undefined) {
+        chatController.reportError(
+          "The first message could not be sent. Retry from the open thread.",
+        );
+        seedOpenedComposerDraft("chat", String(thread.id), prompt);
+      }
+    } catch {
       chatController.reportError(
         "The first message could not be sent. Retry from the open thread.",
       );
-      return false;
+      seedOpenedComposerDraft("chat", String(thread.id), prompt);
     }
     return true;
   }
@@ -5768,7 +5858,13 @@ function LaunchedShell(
     executionPolicy?: import("@octant/contracts/providers").ProviderExecutionPolicy,
     permissionPersistence?: import("@octant/contracts/providers").PermissionPersistence,
     modelOptionValues?: import("@octant/contracts/providers").ProviderModelOptionValues,
+    initiatingPaneId?: PaneId,
   ): Promise<boolean | void> {
+    const paneToReset =
+      initiatingPaneId ??
+      (mode === "chat" || mode === "work" || mode === "code"
+        ? controller.workspace?.activePaneIds[mode]
+        : undefined);
     setDraftCreating(true);
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
@@ -5798,6 +5894,10 @@ function LaunchedShell(
           setDraftError(chatController.errorMessage ?? "The chat thread could not be created.");
           return;
         }
+        // Clear the pane that submitted this create. Welcome panes cannot
+        // become active, and another Chat pane can be current by the time
+        // create finishes, so the caller passes the submitting pane.
+        resetNewTaskDraft("chat", paneToReset);
         let thread = result.thread;
         if (
           draftSelection !== undefined &&
@@ -5814,18 +5914,23 @@ function LaunchedShell(
             ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
           });
           if (changed?.kind !== "thread-updated") {
-            setDraftError(
-              chatController.lastExecuteError.current ??
-                "The selected Chat provider and model could not be applied.",
-            );
-            return;
+            if (await openCreatedChatThread(thread.id, thread.title, prompt)) {
+              chatController.reportError(
+                "The selected Chat provider and model could not be applied. Retry from the open thread.",
+              );
+              seedOpenedComposerDraft("chat", String(thread.id), prompt);
+            }
+            return true;
           }
           thread = changed.thread;
         }
+        if (!(await openCreatedChatThread(thread.id, thread.title, prompt))) {
+          return true;
+        }
         const draftExtensionSelections =
           extensionSelections ?? (computerUseSelection === undefined ? [] : [computerUseSelection]);
-        const sendOutcome = chatController
-          .execute({
+        try {
+          const sent = await chatController.execute({
             kind: "send-chat-turn",
             ...(draftExtensionSelections.length === 0
               ? {}
@@ -5833,21 +5938,18 @@ function LaunchedShell(
             threadId: thread.id,
             expectedVersion: thread.version,
             prompt,
-          })
-          .then(
-            (sent) => ({ sent }),
-            (error: unknown) => ({ error }),
-          );
-        await controller.openChatThread(thread.id, thread.title);
-        const outcome = await sendOutcome;
-        if ("error" in outcome) {
-          throw outcome.error;
-        }
-        if (outcome.sent === undefined) {
-          setDraftError(
-            chatController.lastExecuteError.current ??
+          });
+          if (sent === undefined) {
+            chatController.reportError(
               "The first message could not be sent. Retry from the open thread.",
+            );
+            seedOpenedComposerDraft("chat", String(thread.id), prompt);
+          }
+        } catch {
+          chatController.reportError(
+            "The first message could not be sent. Retry from the open thread.",
           );
+          seedOpenedComposerDraft("chat", String(thread.id), prompt);
         }
       } else if (mode === "code") {
         const destinationHostId = refuseUnlessCreatableDestination({
@@ -6050,36 +6152,45 @@ function LaunchedShell(
           created.thread.projectId,
         );
         await workNavigation.refresh();
-        const attachmentIds = await stageWorkImages(created.thread.id, images ?? []);
-        const started = await workTurnClient.startFirstTurn({
-          kind: "start-work-thread-turn",
-          ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
-          ...(extensionSelections === undefined || extensionSelections.length === 0
-            ? {}
-            : { extensionSelections }),
-          requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
-          threadId: created.thread.id,
-          turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
-          prompt,
-          authority: {
-            hostId: destinationHostId,
-            projectId: project.id,
-            bindingRevisionId,
-            workingDirectory: created.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
-            confinementPosture: "project-root-confined",
-            providerInstanceId,
-            modelId,
-          },
-          ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
-          ...(threadMentionIds === undefined || threadMentionIds.length === 0
-            ? {}
-            : { threadMentionIds }),
-        });
-        if (started.kind !== "accepted") {
-          setDraftError(
-            "The thread was created, but its first provider turn could not be started.",
+        let firstTurnFailed = false;
+        try {
+          const attachmentIds = await stageWorkImages(created.thread.id, images ?? []);
+          const started = await workTurnClient.startFirstTurn({
+            kind: "start-work-thread-turn",
+            ...(computerUseSelection === undefined ? {} : { computerUseSelection }),
+            ...(extensionSelections === undefined || extensionSelections.length === 0
+              ? {}
+              : { extensionSelections }),
+            requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
+            threadId: created.thread.id,
+            turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
+            prompt,
+            authority: {
+              hostId: destinationHostId,
+              projectId: project.id,
+              bindingRevisionId,
+              workingDirectory:
+                created.thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+              confinementPosture: "project-root-confined",
+              providerInstanceId,
+              modelId,
+            },
+            ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+            ...(threadMentionIds === undefined || threadMentionIds.length === 0
+              ? {}
+              : { threadMentionIds }),
+          });
+          firstTurnFailed = started.kind !== "accepted";
+        } catch {
+          firstTurnFailed = true;
+        }
+        if (firstTurnFailed) {
+          seedOpenedComposerDraft(
+            "work",
+            String(created.thread.id),
+            prompt,
+            (images ?? []).length > 0,
           );
-          return false;
         }
       }
       return true;
@@ -6333,6 +6444,7 @@ function LaunchedShell(
       codeController={codeController}
       discoveryController={discoveryController}
       extensionClient={extensionClient}
+      projectNames={projectNamesById}
       {...(props.hostBridge?.selectLocalPluginFolder === undefined
         ? {}
         : {
@@ -6937,6 +7049,19 @@ function LaunchedShell(
                           onRetryThreads: () => projectThreadsAccess.onRetry?.(),
                         })}
                     projects={workSide ? workSideProjects : projectController.projects}
+                    {...(workSide &&
+                    workSideProjects.length === 0 &&
+                    projectController.allProjects.some(
+                      (project) => project.type === "code" && project.lifecycle === "active",
+                    )
+                      ? {
+                          otherModeProjectsHint: {
+                            message: "Your Projects are in Code.",
+                            actionLabel: "Switch to Code",
+                            onSwitch: () => handleSelectMode("code"),
+                          },
+                        }
+                      : {})}
                   />
                 )}
               </>
@@ -7241,6 +7366,7 @@ function LaunchedShell(
                       <ComposerContextMeterShortcut />
                       <ThreadStatsDetailDialog />
                       <WorkspaceView
+                        {...(contextClient === undefined ? {} : { contextClient })}
                         {...(welcomeBackdrop === undefined ? {} : { welcomeBackdrop })}
                         followUpSuggestions={{
                           client: followUpSuggestionClient,
@@ -7248,7 +7374,7 @@ function LaunchedShell(
                           onCreated: openCreatedFollowUp,
                         }}
                         greetingName={controller.settings?.userProfile.displayName}
-                        draftResetRevision={draftResetRevision}
+                        draftResetRevisions={draftResetRevisions}
                         draftProjectSelection={draftProjectSelection}
                         onDraftSelectProject={(mode, projectId) => {
                           // Choosing a folder in the composer is the authority
@@ -7501,6 +7627,9 @@ function LaunchedShell(
                         projects={projectController.allProjects}
                         providerController={providerController}
                         workspace={controller.workspace}
+                        {...(controller.workspaceVersion === undefined
+                          ? {}
+                          : { workspaceVersion: controller.workspaceVersion })}
                         mode={controller.workspace.activeMode}
                         {...(controller.crossContextOffer === undefined
                           ? {}

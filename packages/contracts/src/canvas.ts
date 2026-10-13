@@ -20,6 +20,7 @@ import { WorkThreadId } from "./workThreads";
 import { HostId } from "./host";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
+import { ImageArtifactId } from "./imageGeneration";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -32,7 +33,11 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // entity-relationship, swimlane, and mind map diagram kinds, version 9 the
 // design block, version 10 the comparison matrix, version 11 the math
 // block, version 12 the mockup catalog, version 13 the stable table row
-// id, and version 14 the funnel, radar, and sankey chart types, which the
+// id, version 14 the funnel, radar, and sankey chart types, version 15 the
+// dashboard layout block, version 16 the design document size and workspace
+// theme, version 17 a design's declared image assets, version 18 a design
+// that runs script, and version 19 the tabs and columns layout groups, diagram
+// styles, and the plan's Gantt view, which the
 // definition filters below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
@@ -94,6 +99,20 @@ export const CANVAS_MAX_HEATMAP_DAYS = 3 * 366;
 export const CANVAS_MAX_HEATMAP_NOTE_LENGTH = 120;
 export const CANVAS_MAX_DESIGN_FRAMES = 24;
 export const CANVAS_MAX_DESIGN_MARKUP_LENGTH = 32_768;
+// A design shows a few real pictures: a screenshot in a phone frame, a hero
+// image, a team photo. The host reads and inlines every declared image each
+// time the design is drawn, so the count and bytes are bounded per design.
+// The design budget keeps one design's resolved images, base64-encoded in a
+// JSON response, inside the 8 MiB a paired remote client's gateway forwards.
+export const CANVAS_MAX_DESIGN_ASSETS = 12;
+export const CANVAS_DESIGN_ASSET_MAX_BYTES = 3 * 1024 * 1024;
+export const CANVAS_DESIGN_ASSETS_MAX_BYTES = 5 * 1024 * 1024;
+/**
+ * How frame markup and styles name a declared asset, in `src`, `srcset`, a CSS
+ * `url()`, or an `image-set()` candidate: `octant-asset:hero`. The renderer
+ * replaces each reference with the resolved image before the page is drawn.
+ */
+export const CANVAS_DESIGN_ASSET_SCHEME = "octant-asset:";
 // A ranked list is read, not scrolled: the cap is what keeps a "hottest files"
 // list from becoming the whole repository. The renderer shows a shorter top N
 // and offers Show all up to this bound.
@@ -147,6 +166,21 @@ export const CANVAS_MAX_SANKEY_LINKS = 256;
 // A funnel stage, a radar axis, and a sankey node are drawn as labels beside
 // their marks, so they are names rather than sentences.
 export const CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH = 80;
+// A dashboard is a glance, not a second document: at most 24 cells on a grid
+// of at most four columns, so a wide window shows six rows of tiles and a
+// phone a single column it can still scroll through.
+export const CANVAS_MAX_DASHBOARD_CELLS = 24;
+export const CANVAS_MAX_DASHBOARD_COLUMNS = 4;
+export const CANVAS_DEFAULT_DASHBOARD_COLUMNS = 4;
+// A tab strip is read at a glance: past a dozen labels it wraps or scrolls,
+// and the document wants headings instead. A label names the pane, so it is a
+// word or two rather than a sentence.
+export const CANVAS_MAX_TABS_PANES = 12;
+export const CANVAS_MAX_TABS_LABEL_LENGTH = 80;
+// Two to four tracks side by side: one is not columns, and past four a track
+// is narrower than a metric tile even on a wide display.
+export const CANVAS_MIN_COLUMN_TRACKS = 2;
+export const CANVAS_MAX_COLUMN_TRACKS = 4;
 
 // The schema version that introduced each version-gated block kind or hint. A
 // document carrying one below the version that introduced it is a declared
@@ -170,6 +204,21 @@ export const CANVAS_TABLE_ROW_ID_SCHEMA_VERSION = 13;
 // The funnel, radar, and sankey chart types shipped as one slice and share a
 // floor, as the three diagram kinds do.
 export const CANVAS_FLOW_CHARTS_SCHEMA_VERSION = 14;
+// The dashboard layout block: a titled grid that places metric, progress,
+// status, chart, and table blocks by id.
+export const CANVAS_DASHBOARD_SCHEMA_VERSION = 15;
+// A design drawn as a document that grows to its content, and a design drawn
+// in the workspace theme.
+export const CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION = 16;
+// A design that declares the images its frames show.
+export const CANVAS_DESIGN_ASSET_SCHEMA_VERSION = 17;
+// A design that runs its own script, drawn in a frame the host serves.
+export const CANVAS_DESIGN_RUNNING_SCHEMA_VERSION = 18;
+// The tabs and columns layout groups, which name other blocks of the document.
+export const CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION = 19;
+// Diagram styling (closed node roles, edge styles and tones, group tones) and
+// the plan's Gantt view shipped with the layout groups and share their floor.
+export const CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION = CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
 
@@ -430,6 +479,9 @@ export const CanvasBlockKind = Schema.Literal(
   "bar-list",
   "comparison-matrix",
   "math",
+  "dashboard",
+  "tabs",
+  "columns",
 );
 export type CanvasBlockKind = typeof CanvasBlockKind.Type;
 
@@ -1301,6 +1353,36 @@ export type CanvasTimelineBlock = typeof CanvasTimelineBlock.Type;
 // a diagram may declare whether its layout is authoritative (manual) or
 // generated (auto). Layout revisions mint a new immutable Canvas version with
 // the authoring actor recorded in provenance.
+/**
+ * The node roles the layout draws as shapes: a process is a box, a decision a
+ * diamond, a terminator a pill, and a node without a role the plain rounded
+ * box. Before version 19 a role was free text no renderer read; a block that
+ * declares version 19 or newer may only use these, and the domain policy
+ * refuses anything else there. An older block keeps whatever it wrote and
+ * draws every node as the plain box, even a role that names a shape.
+ */
+export const CANVAS_DIAGRAM_NODE_ROLES = ["process", "decision", "terminator"] as const;
+export const CanvasDiagramNodeRole = Schema.Literal(...CANVAS_DIAGRAM_NODE_ROLES);
+export type CanvasDiagramNodeRole = typeof CanvasDiagramNodeRole.Type;
+
+/** Whether a line ends in an arrowhead, or is dashed to read as optional or async. */
+export const CanvasDiagramEdgeStyle = Schema.Literal("line", "arrow", "dashed");
+export type CanvasDiagramEdgeStyle = typeof CanvasDiagramEdgeStyle.Type;
+
+/**
+ * A diagram tone is a theme role, never a colour: neutral, the accent, and the
+ * success, warning, and danger roles. A tone is emphasis beside the label and
+ * the line style, never the only thing that carries a distinction.
+ */
+export const CanvasDiagramTone = Schema.Literal(
+  "neutral",
+  "accent",
+  "success",
+  "warning",
+  "danger",
+);
+export type CanvasDiagramTone = typeof CanvasDiagramTone.Type;
+
 export const CanvasDiagramNode = Schema.Struct({
   nodeId: CanvasNodeId,
   label: CanvasLabel,
@@ -1319,6 +1401,8 @@ export const CanvasDiagramEdge = Schema.Struct({
   source: CanvasNodeId,
   target: CanvasNodeId,
   label: Schema.optional(CanvasLabel),
+  style: Schema.optional(CanvasDiagramEdgeStyle),
+  tone: Schema.optional(CanvasDiagramTone),
 }).annotations(strict);
 export type CanvasDiagramEdge = typeof CanvasDiagramEdge.Type;
 
@@ -1334,8 +1418,33 @@ export const CanvasDiagramGroup = Schema.Struct({
   groupId: boundedToken("CanvasGroupId"),
   label: CanvasLabel,
   nodeIds: Schema.Array(CanvasNodeId).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
+  /** A region's tone, so a zone map reads as areas rather than outlines. */
+  tone: Schema.optional(CanvasDiagramTone),
 }).annotations(strict);
 export type CanvasDiagramGroup = typeof CanvasDiagramGroup.Type;
+
+/** Whether a block uses a diagram field introduced at the diagram-styles version. */
+export function canvasDiagramUsesStyles(block: {
+  readonly kind?: unknown;
+  readonly edges?: unknown;
+  readonly groups?: unknown;
+}): boolean {
+  if (block.kind !== "diagram") return false;
+  const carries = (items: unknown, fields: ReadonlyArray<string>): boolean =>
+    Array.isArray(items) &&
+    items.some(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        fields.some((field) => (item as Record<string, unknown>)[field] !== undefined),
+    );
+  return carries(block.edges, ["style", "tone"]) || carries(block.groups, ["tone"]);
+}
+
+/** Whether a role is one the layout draws as a shape. */
+export function isCanvasDiagramNodeRole(role: unknown): role is CanvasDiagramNodeRole {
+  return CANVAS_DIAGRAM_NODE_ROLES.some((known) => known === role);
+}
 
 /** Which way the diagram reads. Layout follows it; it is never inferred. */
 export const CanvasDiagramFlow = Schema.Literal("down", "right");
@@ -1656,7 +1765,7 @@ export type CanvasSummaryBlock = typeof CanvasSummaryBlock.Type;
 export const CanvasPlanTaskStatus = Schema.Literal("todo", "doing", "blocked", "done");
 export type CanvasPlanTaskStatus = typeof CanvasPlanTaskStatus.Type;
 
-export const CanvasPlanView = Schema.Literal("checklist", "kanban", "timeline");
+export const CanvasPlanView = Schema.Literal("checklist", "kanban", "timeline", "gantt");
 export type CanvasPlanView = typeof CanvasPlanView.Type;
 
 export const CanvasPlanOwner = Schema.Struct({
@@ -1889,15 +1998,65 @@ export const CanvasMockupBlock = Schema.Struct({
 export type CanvasMockupBlock = typeof CanvasMockupBlock.Type;
 
 /**
- * The viewport a design frame is drawn at, in CSS pixels: a phone, a tablet,
- * a desktop window or web page, or a 16:9 slide.
+ * What a design frame is drawn as: a phone, a tablet, a desktop window or web
+ * page, or a 16:9 slide, each at a fixed viewport, or a `document` as wide as
+ * the Canvas column and as tall as its content, such as an article or a spec.
  */
-export const CanvasDesignSize = Schema.Literal("phone", "tablet", "desktop", "slide");
+export const CanvasDesignSize = Schema.Literal("phone", "tablet", "desktop", "slide", "document");
 export type CanvasDesignSize = typeof CanvasDesignSize.Type;
+/** The sizes drawn at a fixed viewport and scaled to fit. */
+export type CanvasDesignDeviceSize = Exclude<CanvasDesignSize, "document">;
 
-/** The CSS viewport each size is drawn at. Authors lay frames out against it. */
+/**
+ * Whether a design frame is drawn in Octant's theme (`workspace`: its colour
+ * tokens, light or dark as the workspace is, its fonts, and the frame kit's
+ * classes) or as the author's page alone (`none`). A document defaults to
+ * `workspace`; a device size defaults to `none`, so a product screen keeps its
+ * own brand.
+ */
+export const CanvasDesignTheme = Schema.Literal("workspace", "none");
+export type CanvasDesignTheme = typeof CanvasDesignTheme.Type;
+
+/**
+ * Whether a design uses anything version 13 introduced: the document size or
+ * a declared theme. Reads loose fields so the domain's declared-version check
+ * can ask the same question of a document that did not decode.
+ */
+export function canvasDesignUsesDocumentFields(block: {
+  readonly kind?: unknown;
+  readonly size?: unknown;
+  readonly theme?: unknown;
+}): boolean {
+  return block.kind === "design" && (block.size === "document" || block.theme !== undefined);
+}
+
+/**
+ * Whether a design declares image assets, which version 17 introduced. Reads
+ * loose fields so the domain's declared-version check can ask the same
+ * question of a document that did not decode.
+ */
+export function canvasDesignUsesAssets(block: {
+  readonly kind?: unknown;
+  readonly assets?: unknown;
+}): boolean {
+  return block.kind === "design" && block.assets !== undefined;
+}
+
+/**
+ * Whether a design declares that it runs script, which version 18 introduced.
+ * Reads loose fields so the domain's declared-version check can ask the same
+ * question of a document that did not decode.
+ */
+export function canvasDesignRunsScript(block: {
+  readonly kind?: unknown;
+  readonly runsScript?: unknown;
+}): boolean {
+  return block.kind === "design" && block.runsScript !== undefined;
+}
+
+/** The CSS viewport each device size is drawn at. Authors lay frames out against it. */
 export const CANVAS_DESIGN_VIEWPORT: Readonly<
-  Record<CanvasDesignSize, { readonly width: number; readonly height: number }>
+  Record<CanvasDesignDeviceSize, { readonly width: number; readonly height: number }>
 > = {
   phone: { width: 390, height: 844 },
   tablet: { width: 820, height: 1180 },
@@ -1905,8 +2064,8 @@ export const CANVAS_DESIGN_VIEWPORT: Readonly<
   slide: { width: 1920, height: 1080 },
 };
 
-const CanvasDesignFrameId = boundedToken("CanvasDesignFrameId");
-const CanvasDesignMarkup = boundedText(CANVAS_MAX_DESIGN_MARKUP_LENGTH);
+export const CanvasDesignFrameId = boundedToken("CanvasDesignFrameId");
+export const CanvasDesignMarkup = boundedText(CANVAS_MAX_DESIGN_MARKUP_LENGTH);
 
 /**
  * One screen or slide. `html` is the body of a static page and `frameId` is
@@ -1922,21 +2081,203 @@ export const CanvasDesignFrame = Schema.Struct({
 export type CanvasDesignFrame = typeof CanvasDesignFrame.Type;
 
 /**
+ * The name markup gives a declared asset after the scheme: `octant-asset:hero`.
+ * Letters, digits, dots, dashes, and underscores, so a reference ends at the
+ * quote, parenthesis, or space around it wherever it is written.
+ */
+export const CanvasDesignAssetId = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
+  Schema.brand("CanvasDesignAssetId"),
+);
+export type CanvasDesignAssetId = typeof CanvasDesignAssetId.Type;
+
+/**
+ * Where a declared image comes from. A `generated-image` is a completed image
+ * an image job made in a thread of the Canvas's own Project, named by its
+ * attachment id. A `project-file` is a path relative to the folder a Work
+ * thread is bound to or the checkout a Code thread is bound to; a Chat
+ * Project has no folder, so it never resolves one. The definition holds only
+ * the reference: the host resolves it under the thread's authority each time
+ * the design is drawn, and the bytes are never journaled.
+ */
+export const CanvasDesignAssetSource = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("generated-image"),
+    imageId: ImageArtifactId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-file"),
+    path: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
+  }).annotations(strict),
+);
+export type CanvasDesignAssetSource = typeof CanvasDesignAssetSource.Type;
+
+export const CanvasDesignAsset = Schema.Struct({
+  assetId: CanvasDesignAssetId,
+  source: CanvasDesignAssetSource,
+  /** What the image shows, for the author's own reference and the warnings. */
+  description: Schema.optional(CanvasMockupText),
+}).annotations(strict);
+export type CanvasDesignAsset = typeof CanvasDesignAsset.Type;
+
+/**
  * Screens of an app or site, or the slides of a deck, written as HTML and CSS.
- * `styles` is one stylesheet every frame shares.
+ * `styles` is one stylesheet every frame shares. `assets` declares the images
+ * the frames and styles may name with `octant-asset:<assetId>`. `runsScript`
+ * makes the design a running prototype: its inline script and event handlers
+ * run in a frame the host serves with its own policy, which still loads
+ * nothing from the network. A design without it runs nothing.
  */
 export const CanvasDesignBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("design"),
   title: CanvasMockupText,
   size: CanvasDesignSize,
+  theme: Schema.optional(CanvasDesignTheme),
+  runsScript: Schema.optional(Schema.Literal(true)),
   styles: Schema.optional(CanvasDesignMarkup),
+  assets: Schema.optional(
+    Schema.Array(CanvasDesignAsset).pipe(Schema.maxItems(CANVAS_MAX_DESIGN_ASSETS)),
+  ),
   frames: Schema.Array(CanvasDesignFrame).pipe(
     Schema.minItems(1),
     Schema.maxItems(CANVAS_MAX_DESIGN_FRAMES),
   ),
 }).annotations(strict);
 export type CanvasDesignBlock = typeof CanvasDesignBlock.Type;
+
+/** Whether a plan names the Gantt view, which arrived at the diagram-styles version. */
+export function canvasPlanUsesGantt(block: {
+  readonly kind?: unknown;
+  readonly view?: unknown;
+}): boolean {
+  return block.kind === "plan" && block.view === "gantt";
+}
+
+/** The image types a design asset may resolve to, read from the bytes. */
+export const CanvasDesignAssetMediaType = Schema.Literal(
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+);
+export type CanvasDesignAssetMediaType = typeof CanvasDesignAssetMediaType.Type;
+
+/**
+ * Why a declared asset is drawn as a placeholder. `missing`: nothing by that
+ * reference exists, or it was deleted. `refused`: it exists but lies outside
+ * this Canvas's authority, such as another Project's image, a path that
+ * leaves the folder, or a file asked for in Chat. `too-large`: past the
+ * per-image budget. `design-budget`: the design's earlier images already
+ * spent its budget. `not-an-image`: the bytes are not a PNG, JPEG, GIF, or
+ * WebP.
+ */
+export const CanvasDesignAssetUnavailableReason = Schema.Literal(
+  "missing",
+  "refused",
+  "too-large",
+  "design-budget",
+  "not-an-image",
+);
+export type CanvasDesignAssetUnavailableReason = typeof CanvasDesignAssetUnavailableReason.Type;
+
+export const CanvasDesignAssetResolution = Schema.Union(
+  Schema.Struct({
+    assetId: CanvasDesignAssetId,
+    status: Schema.Literal("resolved"),
+    mediaType: CanvasDesignAssetMediaType,
+    // Base64 of at most the per-image budget.
+    data: Schema.String.pipe(
+      Schema.maxLength(Math.ceil(CANVAS_DESIGN_ASSET_MAX_BYTES / 3) * 4),
+      Schema.pattern(/^[A-Za-z0-9+/]*={0,2}$/),
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    assetId: CanvasDesignAssetId,
+    status: Schema.Literal("unavailable"),
+    reason: CanvasDesignAssetUnavailableReason,
+  }).annotations(strict),
+);
+export type CanvasDesignAssetResolution = typeof CanvasDesignAssetResolution.Type;
+
+/**
+ * One design's declared images as the host resolved them for this reader,
+ * now. Never stored: a reader asks again each time it draws the design.
+ */
+export const CanvasDesignAssetsOutcome = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("ready"),
+    canvasId: CanvasId,
+    versionId: CanvasVersionId,
+    blockId: CanvasBlockId,
+    assets: Schema.Array(CanvasDesignAssetResolution).pipe(
+      Schema.maxItems(CANVAS_MAX_DESIGN_ASSETS),
+    ),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("unavailable"),
+    canvasId: CanvasId,
+    reason: boundedNonEmptyText(512),
+  }).annotations(strict),
+);
+export type CanvasDesignAssetsOutcome = typeof CanvasDesignAssetsOutcome.Type;
+
+/**
+ * Where the host serves a running design's page. A reader never names a
+ * design here: the only query is a ticket the host issued for one Canvas
+ * version, design, and start frame.
+ */
+export const CANVAS_DESIGN_PAGE_PATH = "/api/canvas/design-page";
+/**
+ * How long a running design's ticket lasts. The reader loads the page as soon
+ * as it holds the ticket, so a few seconds is enough, and a ticket copied out
+ * of a frame's address is useless almost at once.
+ */
+export const CANVAS_DESIGN_RUN_TICKET_TTL_MS = 10_000;
+/**
+ * The bridge a running page talks to its host through. The host writes the
+ * bridge script first in the page; it posts the page's height, its script
+ * errors, and a heartbeat every interval, and nothing else. Agent script can
+ * post the same messages, so the host treats each one as a claim to bound,
+ * never as a command.
+ */
+export const CANVAS_DESIGN_BRIDGE_CHANNEL = "octant-design-frame@1";
+export const CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS = 1_000;
+export const CANVAS_DESIGN_BRIDGE_MAX_ERROR_LENGTH = 280;
+
+export const CanvasDesignRunRequest = Schema.Struct({
+  canvasId: CanvasId,
+  versionId: CanvasVersionId,
+  blockId: CanvasBlockId,
+  /** The frame the page opens on; the design's first frame when omitted. */
+  frameId: Schema.optional(CanvasDesignFrameId),
+}).annotations(strict);
+export type CanvasDesignRunRequest = typeof CanvasDesignRunRequest.Type;
+
+/**
+ * A running design's page, offered to one reader once. `page` is a path on
+ * the host holding a single-use ticket; the reader loads it in a frame
+ * sandboxed to `allow-scripts` alone, so the page's origin is opaque.
+ */
+export const CanvasDesignRunOutcome = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("ready"),
+    canvasId: CanvasId,
+    versionId: CanvasVersionId,
+    blockId: CanvasBlockId,
+    page: Schema.String.pipe(
+      Schema.pattern(/^\/api\/canvas\/design-page\?ticket=[A-Za-z0-9_-]{43}$/),
+    ),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("unauthorized"), canvasId: CanvasId }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("unavailable"),
+    canvasId: CanvasId,
+    reason: boundedNonEmptyText(512),
+  }).annotations(strict),
+);
+export type CanvasDesignRunOutcome = typeof CanvasDesignRunOutcome.Type;
 
 export const CanvasPlanBlock = Schema.Struct({
   ...CanvasBlockFields,
@@ -1994,6 +2335,109 @@ export const CanvasImageBlock = Schema.Struct({
 }).annotations(strict);
 export type CanvasImageBlock = typeof CanvasImageBlock.Type;
 
+/**
+ * The block kinds a dashboard may place. A dashboard is never among them, so
+ * a grid never holds a grid; neither does prose, a diagram, or an action,
+ * which read as a document rather than at a glance.
+ */
+export const CANVAS_DASHBOARD_CELL_KINDS = [
+  "metric",
+  "progress",
+  "status",
+  "chart",
+  "table",
+] as const;
+export type CanvasDashboardCellKind = (typeof CANVAS_DASHBOARD_CELL_KINDS)[number];
+
+/**
+ * One place on the grid. It names a block elsewhere in the same document
+ * rather than holding a copy, so the block keeps its own id, its comments,
+ * and its one definition; `span` is how many columns it takes on a wide grid.
+ */
+export const CanvasDashboardCell = Schema.Struct({
+  blockId: CanvasBlockId,
+  span: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
+}).annotations(strict);
+export type CanvasDashboardCell = typeof CanvasDashboardCell.Type;
+
+/**
+ * A KPI dashboard: a titled grid of the document's metric, progress, status,
+ * chart, and table blocks. The grid is drawn where the dashboard sits, its
+ * cells in the order listed, and each placed block is drawn there instead of
+ * at its own position. A layout block rather than a document-level field, so
+ * it is version-gated, revised, commented on, and described like every other
+ * kind, and a Canvas can hold a dashboard beside ordinary prose.
+ */
+export const CanvasDashboardBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("dashboard"),
+  /** Names the region a screen reader lands on. */
+  title: CanvasLabel,
+  /** Columns on a wide grid; absent means four. Narrow widths draw one. */
+  columns: Schema.optional(Schema.Int.pipe(Schema.between(1, CANVAS_MAX_DASHBOARD_COLUMNS))),
+  cells: Schema.NonEmptyArray(CanvasDashboardCell).pipe(
+    Schema.maxItems(CANVAS_MAX_DASHBOARD_CELLS),
+  ),
+}).annotations(strict);
+export type CanvasDashboardBlock = typeof CanvasDashboardBlock.Type;
+
+/**
+ * Layout groups: tabs and columns arrange blocks the document already holds.
+ *
+ * A group names its children by block id rather than nesting them, so every
+ * child keeps the identity a comment anchors to and a revision edits, and the
+ * version envelope stays inside the depth budget. Groups are one level deep:
+ * the domain policy refuses a child that is itself a group, a child named
+ * twice, and a name that holds no block. Which tab is selected is the
+ * reader's view state; it is never part of the document.
+ */
+export const CanvasTabsPane = Schema.Struct({
+  label: boundedNonEmptyText(CANVAS_MAX_TABS_LABEL_LENGTH),
+  blockIds: Schema.NonEmptyArray(CanvasBlockId).pipe(Schema.maxItems(CANVAS_MAX_BLOCKS)),
+}).annotations(strict);
+export type CanvasTabsPane = typeof CanvasTabsPane.Type;
+
+export const CanvasTabsBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("tabs"),
+  panes: Schema.Array(CanvasTabsPane).pipe(
+    Schema.minItems(2),
+    Schema.maxItems(CANVAS_MAX_TABS_PANES),
+  ),
+}).annotations(strict);
+export type CanvasTabsBlock = typeof CanvasTabsBlock.Type;
+
+export const CanvasColumnTrack = Schema.Struct({
+  blockIds: Schema.NonEmptyArray(CanvasBlockId).pipe(Schema.maxItems(CANVAS_MAX_BLOCKS)),
+}).annotations(strict);
+export type CanvasColumnTrack = typeof CanvasColumnTrack.Type;
+
+export const CanvasColumnsBlock = Schema.Struct({
+  ...CanvasBlockFields,
+  kind: Schema.Literal("columns"),
+  tracks: Schema.Array(CanvasColumnTrack).pipe(
+    Schema.minItems(CANVAS_MIN_COLUMN_TRACKS),
+    Schema.maxItems(CANVAS_MAX_COLUMN_TRACKS),
+  ),
+}).annotations(strict);
+export type CanvasColumnsBlock = typeof CanvasColumnsBlock.Type;
+
+export type CanvasLayoutGroupBlock = CanvasTabsBlock | CanvasColumnsBlock;
+
+/** Whether a block is a layout group, which may name children but never be one. */
+export function isCanvasLayoutGroup(block: { readonly kind?: unknown }): boolean {
+  return block.kind === "tabs" || block.kind === "columns";
+}
+
+/** The child block ids a layout group names, in reading order. */
+export function canvasLayoutGroupChildIds(
+  block: CanvasLayoutGroupBlock,
+): ReadonlyArray<CanvasBlockId> {
+  return block.kind === "tabs"
+    ? block.panes.flatMap((pane) => pane.blockIds)
+    : block.tracks.flatMap((track) => track.blockIds);
+}
+
 export const CanvasBlock = Schema.Union(
   CanvasHeadingBlock,
   CanvasRichTextBlock,
@@ -2038,10 +2482,13 @@ export const CanvasBlock = Schema.Union(
   CanvasComparisonMatrixBlock,
   CanvasMathDisplayBlock,
   CanvasMathInlineBlock,
+  CanvasDashboardBlock,
   // Typed actions (Canvas D). The block is a declarative reference to an
   // allowlisted command; the server reauthorizes every action before any side
   // effect, so union membership never makes a definition executable.
   CanvasActionBlock,
+  CanvasTabsBlock,
+  CanvasColumnsBlock,
 );
 export type CanvasBlock = typeof CanvasBlock.Type;
 
@@ -2073,9 +2520,14 @@ export const CanvasDefinition = Schema.Struct({
     // from version 6, a bar list and the metric trend fields from version 7, a
     // design from version 9, a comparison matrix from version 10, math from
     // version 11, the mockup catalog from version 12, table row ids from
-    // version 13, and the funnel, radar, and sankey charts from version 14. A rolled-back runtime that never learned a kind or hint must see a document
-    // carrying it as a declared future version, not as a document that failed
-    // to decode. Each keeps its own floor so an earlier document stays valid.
+    // version 13, the funnel, radar, and sankey charts from version 14, the
+    // dashboard from version 15, a design document or theme from version 16,
+    // design assets from version 17, a design that runs script from version
+    // 18, and the tabs and columns layout groups, diagram styles, and the
+    // Gantt view from version 19. A rolled-back runtime that never learned a
+    // kind or hint must see a document carrying it as a declared future
+    // version, not as a document that failed to decode. Each keeps its own
+    // floor so an earlier document stays valid.
     Schema.filter(
       (definition) =>
         definition.schemaVersion >= CANVAS_MOCKUP_SCHEMA_VERSION ||
@@ -2197,6 +2649,62 @@ export const CanvasDefinition = Schema.Struct({
           `Funnel, radar, and sankey charts require Canvas schema version ${String(CANVAS_FLOW_CHARTS_SCHEMA_VERSION)}.`,
       },
     ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DASHBOARD_SCHEMA_VERSION ||
+        !definition.blocks.some((block) => block.kind === "dashboard"),
+      {
+        message: () =>
+          `Dashboard blocks require Canvas schema version ${String(CANVAS_DASHBOARD_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasDesignUsesDocumentFields),
+      {
+        message: () =>
+          `A design document size or theme requires Canvas schema version ${String(CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DESIGN_ASSET_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasDesignUsesAssets),
+      {
+        message: () =>
+          `Design assets require Canvas schema version ${String(CANVAS_DESIGN_ASSET_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DESIGN_RUNNING_SCHEMA_VERSION ||
+        !definition.blocks.some(canvasDesignRunsScript),
+      {
+        message: () =>
+          `A design that runs script requires Canvas schema version ${String(CANVAS_DESIGN_RUNNING_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION ||
+        !definition.blocks.some(isCanvasLayoutGroup),
+      {
+        message: () =>
+          `Tabs and columns require Canvas schema version ${String(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION)}.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION ||
+        !definition.blocks.some(
+          (block) => canvasDiagramUsesStyles(block) || canvasPlanUsesGantt(block),
+        ),
+      {
+        message: () =>
+          `Diagram edge styles and tones, group tones, and the plan's Gantt view require Canvas schema version ${String(CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION)}.`,
+      },
+    ),
   );
 export type CanvasDefinition = typeof CanvasDefinition.Type;
 
@@ -2231,6 +2739,9 @@ export const decodeCanvasPresentation = Schema.decodeUnknownSync(CanvasPresentat
 export const decodeCanvasDiagramLayoutKind = Schema.decodeUnknownSync(CanvasDiagramLayoutKind);
 export const decodeCanvasPlanTaskId = Schema.decodeUnknownSync(CanvasPlanTaskId);
 export const decodeCanvasNodeId = Schema.decodeUnknownSync(CanvasNodeId);
+export const decodeCanvasDesignAssetsOutcome = Schema.decodeUnknownSync(CanvasDesignAssetsOutcome);
+export const decodeCanvasDesignRunRequest = Schema.decodeUnknownSync(CanvasDesignRunRequest);
+export const decodeCanvasDesignRunOutcome = Schema.decodeUnknownSync(CanvasDesignRunOutcome);
 
 // ── Journaled lifecycle events ──────────────────────────────────────────────
 //

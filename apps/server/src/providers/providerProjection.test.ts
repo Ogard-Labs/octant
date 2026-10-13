@@ -21,6 +21,7 @@ import {
   readProviderCatalogs,
   readProviderInstance,
   readProviderInstances,
+  readRemovedProviderInstanceIds,
   PROVIDER_DEFAULTS_AGGREGATE_ID,
 } from "./providerProjection";
 
@@ -461,6 +462,32 @@ describe("ProviderProjection", () => {
     );
 
     expect(readProviderInstance(connection, instance().id)).toBeUndefined();
+    connection.close();
+  });
+
+  it("keeps the id of a removed instance and never lists one the registry still holds", () => {
+    const connection = openConnection();
+    const { runtime } = providerProjection();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => now,
+    });
+    journal.append({
+      aggregate: { aggregateType: "provider-instance", aggregateId: ids.instance },
+      expectedVersion: 0,
+      events: [pending("provider.instance-created@1", { instance: instance() })],
+    });
+    expect(readRemovedProviderInstanceIds(connection)).toEqual([]);
+
+    journal.append({
+      aggregate: { aggregateType: "provider-instance", aggregateId: ids.instance },
+      expectedVersion: 1,
+      events: [pending("provider.instance-removed@1", { instanceId: ids.instance, version: 2 })],
+    });
+
+    expect(readRemovedProviderInstanceIds(connection)).toEqual([ids.instance]);
     connection.close();
   });
 

@@ -5,6 +5,7 @@ export {
   type ProviderCreateProviderType,
 } from "./configuration/ProviderCreateForm";
 export { ClaudeConfigurationForm } from "./configuration/ClaudeConfigurationForm";
+export { CodexConfigurationForm } from "./configuration/CodexConfigurationForm";
 export { DevinConfigurationForm } from "./configuration/DevinConfigurationForm";
 export { OhMyPiConfigurationForm, PiConfigurationForm } from "./configuration/PiConfigurationForms";
 export {

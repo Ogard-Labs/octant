@@ -54,6 +54,133 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     expect(screen.queryByText("Archive")).toBeNull();
   });
 
+  it("tells Work when the only Projects are Code Projects", async () => {
+    const user = userEvent.setup();
+    const onSwitch = vi.fn();
+    render(
+      <ProjectSidebarSection
+        addProjectLabel="folder"
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onAddProject={vi.fn()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        otherModeProjectsHint={{
+          actionLabel: "Switch to Code",
+          message: "Your Projects are in Code.",
+          onSwitch,
+        }}
+        projects={[]}
+      />,
+    );
+
+    expect(screen.getByText(/Your Projects are in Code\./)).toBeVisible();
+    expect(screen.queryByText(/No Projects yet\./)).toBeNull();
+    expect(screen.getByRole("button", { name: "Add folder" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Switch to Code" }));
+    expect(onSwitch).toHaveBeenCalledOnce();
+  });
+
+  it("still tells Work the Projects are in Code when the saved view groups by something else", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.work.project-view-preferences.v1",
+      JSON.stringify({ filters: { grouping: "none" } }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        addProjectLabel="folder"
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onAddProject={vi.fn()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        otherModeProjectsHint={{
+          actionLabel: "Switch to Code",
+          message: "Your Projects are in Code.",
+          onSwitch: vi.fn(),
+        }}
+        projectViewsEnabled
+        projectViewsMode="work"
+        projects={[]}
+      />,
+    );
+
+    expect(screen.getByText(/Your Projects are in Code\./)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Switch to Code" })).toBeVisible();
+  });
+
+  it("does not say No Projects yet when a saved view hides every Project in the mode", () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.work.project-views.v1",
+      JSON.stringify({
+        activeViewId: "view-empty",
+        views: [
+          {
+            id: "view-empty",
+            name: "Empty",
+            projectIds: ["00000000-0000-4000-8000-000000000000"],
+            filters: { grouping: "none" },
+          },
+        ],
+      }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        addProjectLabel="folder"
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onAddProject={vi.fn()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        otherModeProjectsHint={{
+          actionLabel: "Switch to Code",
+          message: "Your Projects are in Code.",
+          onSwitch: vi.fn(),
+        }}
+        projectViewsEnabled
+        projectViewsMode="work"
+        projects={[chatProjectA]}
+      />,
+    );
+
+    expect(screen.queryByText(/No Projects yet\./)).toBeNull();
+    expect(screen.queryByText(/Your Projects are in Code\./)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Switch to Code" })).toBeNull();
+  });
+
+  it("keeps the empty Projects line when no mode has Projects", () => {
+    render(
+      <ProjectSidebarSection
+        addProjectLabel="folder"
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onAddProject={vi.fn()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projects={[]}
+      />,
+    );
+
+    expect(screen.getByText(/No Projects yet\./)).toBeVisible();
+    expect(screen.queryByText(/Your Projects are in Code\./)).toBeNull();
+  });
+
   it("keeps an empty section's header quiet when it has no add control to show", () => {
     render(
       <ProjectSidebarSection

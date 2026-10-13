@@ -7,6 +7,11 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { Activity } from "lucide-react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import {
+  createNewTaskDrafts,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+} from "../composer/useNewTaskPrompt";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
 import { OctantCommandProvider } from "../palette/CommandRegistry";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
@@ -745,28 +750,8 @@ describe("DraftThreadWorkspace", () => {
     expect(screen.getByRole("button", { name: "Access policy" })).toHaveTextContent("Plan");
   });
 
-  it("shows the authoritative Environment health in the context strip", () => {
-    render(
-      <DraftThreadWorkspace
-        {...baseProps}
-        hosts={[
-          {
-            hostId: LOCAL_HOST_ID,
-            displayName: "This Mac",
-            health: "healthy",
-            capabilities: ["chat", "work", "code"],
-          },
-        ]}
-      />,
-    );
-    expect(screen.getByRole("status", { name: "Environment: This Mac · Connected" })).toBeVisible();
-    expect(
-      screen.getByRole("status", { name: "Environment: This Mac · Connected" }).firstChild,
-    ).toHaveClass("host-selector__environment-icon");
-  });
-
-  it.each(["code", "work"] as const)(
-    "passes authoritative host health into the %s composer",
+  it.each(["chat", "code", "work"] as const)(
+    "offers no Environment in the %s composer while only one host is known",
     (mode) => {
       render(
         <DraftThreadWorkspace
@@ -783,9 +768,8 @@ describe("DraftThreadWorkspace", () => {
         />,
       );
 
-      expect(
-        screen.getByRole("status", { name: "Environment: This Mac · Connected" }),
-      ).toBeVisible();
+      expect(screen.queryByTestId("host-selector")).not.toBeInTheDocument();
+      expect(screen.queryByRole("combobox", { name: "Environment" })).not.toBeInTheDocument();
     },
   );
 
@@ -850,6 +834,9 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
     expect(screen.getByRole("status", { name: "Environment: This Mac · Connected" })).toBeVisible();
+    expect(
+      screen.getByRole("status", { name: "Environment: This Mac · Connected" }).firstChild,
+    ).toHaveClass("host-selector__environment-icon");
     expect(screen.queryByRole("combobox", { name: "Environment" })).not.toBeInTheDocument();
   });
 
@@ -944,6 +931,11 @@ describe("DraftThreadWorkspace", () => {
   it("disables the textarea while creating", () => {
     render(<DraftThreadWorkspace {...baseProps} creating />);
     expect(screen.getByRole("textbox", { name: "First message" })).toBeDisabled();
+  });
+
+  it("keeps Set up a provider locked while a Chat draft is creating", () => {
+    render(<DraftThreadWorkspace {...baseProps} creating onOpenSettings={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeDisabled();
   });
 
   it.each([
@@ -1289,7 +1281,7 @@ describe("DraftThreadWorkspace", () => {
     };
   }
 
-  it("keeps Host and Project on the tray and offers GitHub inside the Project menu", async () => {
+  it("keeps Project on the tray and offers GitHub inside the Project menu", async () => {
     const user = userEvent.setup();
     render(
       <DraftThreadWorkspace
@@ -1302,7 +1294,7 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("status", { name: /Environment: This computer/ })).toBeVisible();
+    expect(screen.queryByTestId("host-selector")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "GitHub repository" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     expect(screen.getByRole("option", { name: "New Project from folder…" })).toBeVisible();
@@ -1495,6 +1487,47 @@ describe("DraftThreadWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Create thread" }));
     expect(onCreateThread).toHaveBeenCalledWith(
       "Start from Linear",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { id: "11111111-1111-4111-8111-111111111111" },
+    );
+  });
+
+  it("keeps a Create from selection after Settings remounts the draft", async () => {
+    const user = userEvent.setup();
+    const drafts = createNewTaskDrafts();
+    const onCreateThread = vi.fn();
+    const view = (
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="chat:pane">
+          <DraftThreadWorkspace
+            {...baseProps}
+            linearClient={makeLinearClient()}
+            linearPluginEnabled={true}
+            onCreateThread={onCreateThread}
+          />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>
+    );
+    const rendered = render(view);
+    await user.click(await screen.findByRole("button", { name: "Create from…" }));
+    await user.click(await screen.findByRole("tab", { name: "Linear" }));
+    await user.click(
+      await screen.findByRole("button", { name: /ENG-12 Browse issues in the workspace/ }),
+    );
+    expect(screen.getByText("ENG-12")).toBeVisible();
+
+    rendered.unmount();
+    render(view);
+
+    expect(await screen.findByText("ENG-12")).toBeVisible();
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Keep the issue");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(onCreateThread).toHaveBeenCalledWith(
+      "Keep the issue",
       undefined,
       undefined,
       undefined,

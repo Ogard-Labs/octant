@@ -308,6 +308,44 @@ describe("local usage history aggregation", () => {
     expect(response.coverage[0]?.detail).toContain("safe integer");
   });
 
+  it("caps coverage sources at the contract bound instead of failing the dashboard decode", async () => {
+    const sources = Array.from({ length: 33 }, (_, index) => ({
+      sourceKind: `claude-${index}`,
+      read: () =>
+        Effect.succeed({
+          records: [
+            {
+              ...records[2]!,
+              sourceKind: `claude-${index}`,
+              sourceInstallationId: `install-${index}`,
+              sourceEventId: `event-${index}`,
+            },
+          ],
+          coverage: {
+            sourceKind: `claude-${index}`,
+            sourceInstallationId: `install-${index}`,
+            status: "ready",
+            scannedFileCount: 1,
+            acceptedRecordCount: 1,
+            omittedRecordCount: 0,
+            truncated: false,
+            hasMore: false,
+            detail: "synthetic",
+          },
+        } as never),
+    }));
+    const response = await readLocalUsageHistoryDashboard({
+      sources,
+      request,
+      queryAt: "2026-09-11T00:00:00.000Z",
+    });
+    expect(response.coverage).toHaveLength(32);
+    expect(response.coverage.every((entry) => entry.truncated)).toBe(true);
+    expect(response.coverage[0]?.status).toBe("partial");
+    expect(response.coverage[0]?.detail).toContain("source coverage");
+    expect(response.totals.requestCount).toBe(32);
+  });
+
   it("omits partial optional component sums while exposing measured coverage", async () => {
     const response = await readLocalUsageHistoryDashboard({
       sources: [source(records)],

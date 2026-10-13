@@ -56,6 +56,7 @@ import {
 } from "react";
 import {
   applyComposerCaret,
+  COMPOSER_STAGED_DROPPED_NOTE,
   type ComposerThreadDraftStore,
 } from "../composer/composerThreadDraftStore";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
@@ -71,11 +72,12 @@ import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { ImageGenerationProfileView } from "@octant/contracts";
-import { decodeImageGenerationScopeId } from "@octant/contracts";
+import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import {
   unattachedCapabilityMentionCopy,
   unattachedCapabilityMentions,
 } from "@octant/plugin-host/capability-mentions";
+import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -455,10 +457,17 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ...(props.draftStore === undefined ? {} : { store: props.draftStore }),
   });
   const prompt = composerDraft.text;
+  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
+    props.providerGroups ?? [],
+    thread === undefined
+      ? undefined
+      : { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId },
+  );
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
     scopeKey: String(props.threadId),
+    providerCarriesTools: runtimeCarriesTools,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
     onSelectionEdited: () => composerDraft.setDraft(composerDraft.text),
   });
@@ -469,6 +478,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "work",
+    providerCarriesTools: runtimeCarriesTools,
     projectId: thread?.projectId ?? projectId ?? null,
     threadId: thread?.id ?? props.threadId,
     ...(providerFamily === undefined ? {} : { providerFamily }),
@@ -478,14 +488,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     draft: composerDraft.text,
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
     scopeKey: String(props.threadId),
-    available:
-      props.browserAvailable === true &&
-      pickerGroupCarriesAppManagedTools(
-        props.providerGroups ?? [],
-        thread === undefined
-          ? undefined
-          : { providerInstanceId: thread.providerInstanceId, modelId: thread.modelId },
-      ),
+    available: props.browserAvailable === true && runtimeCarriesTools,
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({
@@ -1686,32 +1689,42 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         restoreKey={`work:${String(props.threadId)}`}
         role="log"
         trail={
-          props.imageGenerationClient === undefined ||
-          props.imageGenerationProfiles === undefined ? null : (
+          (props.imageGenerationClient === undefined ||
+            props.imageGenerationProfiles === undefined) &&
+          props.browserAutomationClient === undefined ? null : (
             <div className="work-thread-workspace__transcript-trail">
-              <GeneratedImageList
-                canSaveToProject
-                client={props.imageGenerationClient}
-                onAttach={(file) => images.attach([file])}
-                onSaveToProject={(job, artifact) => {
-                  void props.imageGenerationClient
-                    ?.save({
-                      jobId: job.id,
-                      attachmentId: artifact.attachmentId,
-                      relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
-                    })
-                    .then((result) => {
-                      if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
-                      else setStatus(result.reason);
-                    })
-                    .catch(() => {
-                      setStatus("The image could not be saved.");
-                    });
-                }}
-                profiles={props.imageGenerationProfiles}
-                scopeId={decodeImageGenerationScopeId(String(props.threadId))}
-                threadKind="work-thread"
-              />
+              {props.imageGenerationClient === undefined ||
+              props.imageGenerationProfiles === undefined ? null : (
+                <GeneratedImageList
+                  canSaveToProject
+                  client={props.imageGenerationClient}
+                  onAttach={(file) => images.attach([file])}
+                  onSaveToProject={(job, artifact) => {
+                    void props.imageGenerationClient
+                      ?.save({
+                        jobId: job.id,
+                        attachmentId: artifact.attachmentId,
+                        relativePath: `generated/${String(artifact.attachmentId).slice(0, 8)}.png`,
+                      })
+                      .then((result) => {
+                        if (result.status === "saved") setStatus(`Saved ${result.relativePath}.`);
+                        else setStatus(result.reason);
+                      })
+                      .catch(() => {
+                        setStatus("The image could not be saved.");
+                      });
+                  }}
+                  profiles={props.imageGenerationProfiles}
+                  scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+                  threadKind="work-thread"
+                />
+              )}
+              {props.browserAutomationClient === undefined ? null : (
+                <BrowserCaptureList
+                  client={props.browserAutomationClient}
+                  threadId={decodeBrowserThreadId(String(props.threadId))}
+                />
+              )}
             </div>
           )
         }
@@ -1776,6 +1789,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       )}
       <ThreadComposer
         queue={<ThreadMessageQueue queue={messageQueue} showUnavailable={queueFollowUp} />}
+        threadBusy={turnRunning || (messageQueue.snapshot?.items.length ?? 0) > 0}
         presentation="follow-up"
         {...(threadDropKey === undefined ? {} : { threadDropKey })}
         context={
@@ -1829,6 +1843,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             />
             <TrackerReferenceComposerHints draft={prompt} />
             <WorkImageAttachmentChips images={images} />
+            {composerDraft.stagedDropped === true ? (
+              <p className="work-thread-workspace__hint" role="status">
+                {COMPOSER_STAGED_DROPPED_NOTE}
+              </p>
+            ) : null}
             {composerDraft.persistError === undefined ? null : (
               <p className="work-thread-workspace__hint" role="status">
                 {composerDraft.persistError}

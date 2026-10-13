@@ -1,3 +1,8 @@
+import {
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+  useNewTaskPrompt,
+} from "../composer/useNewTaskPrompt";
 import { useDraftModelOptions } from "../providers/useDraftModelOptions";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import type {
@@ -9,7 +14,7 @@ import type {
 import type { WorkProjectStatus, WorkStatusDatedItem } from "@octant/contracts/work-project-status";
 import type { CreateHostViewScope, PickerGroup, ModelPickerSelection } from "@octant/domain";
 import { CalendarClock, FolderOpen, ShieldCheck } from "lucide-react";
-import { useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
+import { useContext, useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
 import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
@@ -79,6 +84,7 @@ export interface WorkOverviewProps {
   ) => boolean | Promise<boolean>;
   readonly onOpenThread?: (threadId: string) => void;
   readonly onOpenSettings?: () => void;
+  readonly providersReady?: boolean;
   readonly projectName?: string;
   readonly projectId?: ProjectId;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
@@ -104,7 +110,9 @@ export function WorkOverview(props: WorkOverviewProps) {
       section.models.some((model) => model.unavailableReason === undefined),
     ),
   );
-  const [draft, setDraft] = useState("");
+  const drafts = useContext(NewTaskDraftsContext);
+  const draftScope = useContext(NewTaskDraftScopeContext);
+  const [draft, setDraft] = useNewTaskPrompt();
   const { modelKey, modelOptionValues, setModelChoice } = useDraftModelOptions(
     props.providerGroups ?? [],
     props.selectedProviderInstanceId,
@@ -129,8 +137,10 @@ export function WorkOverview(props: WorkOverviewProps) {
     const normalized = draft.trim();
     if (!createAvailable || submitting || normalized === "") return;
     setSubmitting(true);
+    const staged = images.filesForSend();
+    setDraft("");
+    images.clearAfterAccepted();
     try {
-      const staged = images.filesForSend();
       const created =
         Object.keys(modelOptionValues).length > 0
           ? await props.onCreateThread(
@@ -141,9 +151,15 @@ export function WorkOverview(props: WorkOverviewProps) {
           : staged.length === 0
             ? await props.onCreateThread(normalized)
             : await props.onCreateThread(normalized, staged);
-      if (created) {
-        images.clearAfterAccepted();
-        setDraft("");
+      if (!created) {
+        const currentText =
+          drafts === undefined || draftScope === undefined ? "" : drafts.read(draftScope);
+        const currentFiles =
+          drafts === undefined || draftScope === undefined ? [] : drafts.readImages(draftScope);
+        if (currentText.trim() === "" && currentFiles.length === 0) {
+          setDraft(normalized);
+          if (staged.length > 0) images.restore(staged);
+        }
       }
     } finally {
       setSubmitting(false);
@@ -217,6 +233,9 @@ export function WorkOverview(props: WorkOverviewProps) {
               {...(props.onOpenSettings === undefined
                 ? {}
                 : { onOpenSettings: props.onOpenSettings })}
+              {...(props.providersReady === undefined
+                ? {}
+                : { providersReady: props.providersReady })}
               modelOptionValues={modelOptionValues}
               onModelOptionChange={(id, value) => {
                 const rest = Object.fromEntries(

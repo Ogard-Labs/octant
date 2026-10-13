@@ -243,6 +243,46 @@ describe("createBrowserAppManagedTools", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("answers help only where Browser is offered and keeps refusing effects Plan denies", async () => {
+    const create = vi.fn(async () => snapshot());
+    const make = (toolConstraints: ReadonlyArray<string> = []) =>
+      createBrowserAppManagedTools({
+        windowId,
+        threadId,
+        mode: "work",
+        modelId,
+        resolveModelId: () => modelId,
+        modelBindings: new Map(),
+        executionPolicy: "plan",
+        toolConstraints,
+        resolveAuthority: () => authority,
+        browser: {
+          inspectThread: () => snapshot(),
+          create,
+          act: vi.fn(async () => snapshot()),
+          releaseThread: vi.fn(async () => snapshot()),
+        },
+        uuid: crypto.randomUUID,
+      });
+    const help = await make().execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "help" }),
+    });
+    expect(help.isError).toBe(false);
+    expect((help.result as { help: string }).help).toContain("observationRevision");
+    const planned = await make().execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "navigate", url: "https://example.com" }),
+    });
+    expect(planned.result).toEqual({ error: "plan-mode-read-only" });
+    const denied = await make(["web-search"]).execute({
+      name: "octant_browser",
+      inputJson: JSON.stringify({ operation: "help" }),
+    });
+    expect(denied).toEqual({ result: { error: "tool-unavailable" }, isError: true });
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("cancels a queued browser approval when the selected model changes", async () => {
     let currentModel = modelId;
     let resolveApproval: ((decision: "approved") => void) | undefined;
@@ -455,7 +495,10 @@ describe("browser diagnostics reach the provider-facing result", () => {
     };
   }
 
-  function toolsFor(observation: unknown) {
+  function toolsFor(
+    observation: unknown,
+    act?: Parameters<typeof createBrowserAppManagedTools>[0]["browser"]["act"],
+  ) {
     const running = snapshot({
       status: "running",
       context: activeContext(),
@@ -473,7 +516,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
       browser: {
         inspectThread: () => running,
         create: vi.fn(async () => running),
-        act: vi.fn(async () => running),
+        act: act ?? vi.fn(async () => running),
         releaseThread: vi.fn(async () => running),
       },
       approvals: { request: vi.fn(async () => "approved" as const) } as never,
@@ -512,6 +555,36 @@ describe("browser diagnostics reach the provider-facing result", () => {
       isError: false,
     });
     expect(JSON.stringify(result.result)).not.toContain("aGVsbG8=");
+  });
+
+  it("names the agent as the one asking for the screenshot the host may keep", async () => {
+    const act = vi.fn(async () =>
+      snapshot({
+        status: "running",
+        context: activeContext(),
+        observation: { revision: 12, screenshotDataUrl: "data:image/png;base64,aGVsbG8=" } as never,
+      }),
+    );
+    const tools = toolsFor({ revision: 11 }, act);
+    await tools.execute({ name: "octant_browser", inputJson: '{"operation":"screenshot"}' });
+    expect(act).toHaveBeenCalledWith(expect.objectContaining({ capturedBy: "agent" }));
+  });
+
+  it("returns the screenshot and says when the thread did not keep a capture of it", async () => {
+    const tools = toolsFor({
+      revision: 12,
+      screenshotDataUrl: "data:image/png;base64,aGVsbG8=",
+      capture: { status: "not-kept", reason: "unavailable" },
+    });
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: '{"operation":"screenshot"}',
+    });
+    expect(result).toMatchObject({
+      images: [{ mimeType: "image/png", data: "aGVsbG8=" }],
+      isError: false,
+      result: { page: { captureNotKept: "unavailable" } },
+    });
   });
 
   it("passes what the page logged and failed to load through to the result", async () => {
@@ -559,6 +632,7 @@ describe("browser diagnostics reach the provider-facing result", () => {
       screenshot: {},
       diagnostics: {},
       stop: {},
+      help: {},
     };
 
     const tools = toolsFor({ revision: 1 });

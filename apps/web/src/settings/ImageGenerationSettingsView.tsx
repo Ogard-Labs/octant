@@ -209,6 +209,7 @@ function ImageProviderSettings(props: { readonly controller: ProviderController 
         onChangeBflImageConfiguration={controller.changeBflImageConfiguration}
         onChangeBinary={controller.changeBinary}
         onChangeClaudeConfiguration={controller.changeClaudeConfiguration}
+        onChangeCodexConfiguration={controller.changeCodexConfiguration}
         onChangeClineConfiguration={controller.changeClineConfiguration}
         onChangeCopilotConfiguration={controller.changeCopilotConfiguration}
         onChangeDevinConfiguration={controller.changeDevinConfiguration}

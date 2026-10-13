@@ -2,6 +2,11 @@ import { ProjectClientFailure } from "@octant/client-runtime/project-client";
 import { ChatClientFailure } from "@octant/client-runtime/chat-client";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import {
+  createNewTaskDrafts,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+} from "../composer/useNewTaskPrompt";
 import { ChatProjectOverview, type ChatProjectOverviewModel } from "./ChatProjectOverview";
 
 const model: ChatProjectOverviewModel = {
@@ -683,6 +688,103 @@ describe("ChatProjectOverview", () => {
         "Refreshed Project decision",
       ),
     ).toBeVisible();
+  });
+
+  it("keeps the quick-start draft after the overview remounts", async () => {
+    const drafts = createNewTaskDrafts();
+    function view() {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="chat-overview:test">
+            <ChatProjectOverview model={model} onCreateThread={vi.fn()} />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    const rendered = render(view());
+    fireEvent.change(screen.getByRole("textbox", { name: "Start a new Chat thread" }), {
+      target: { value: "Keep this draft" },
+    });
+    rendered.unmount();
+    render(view());
+
+    expect(screen.getByRole("textbox", { name: "Start a new Chat thread" })).toHaveValue(
+      "Keep this draft",
+    );
+  });
+
+  it("does not restore a submitted quick-start draft after create opens the thread", async () => {
+    const drafts = createNewTaskDrafts();
+    let rendered: ReturnType<typeof render>;
+    function view() {
+      return (
+        <NewTaskDraftsContext.Provider value={drafts}>
+          <NewTaskDraftScopeContext.Provider value="chat-overview:test">
+            <ChatProjectOverview
+              model={model}
+              onCreateThread={async () => {
+                rendered.unmount();
+                return true;
+              }}
+            />
+          </NewTaskDraftScopeContext.Provider>
+        </NewTaskDraftsContext.Provider>
+      );
+    }
+
+    rendered = render(view());
+    fireEvent.change(screen.getByRole("textbox", { name: "Start a new Chat thread" }), {
+      target: { value: "Open a launch thread" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start thread" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox", { name: "Start a new Chat thread" })).toBeNull();
+    });
+    render(view());
+
+    expect(screen.getByRole("textbox", { name: "Start a new Chat thread" })).toHaveValue("");
+  });
+
+  it("does not restore a refused quick-start draft over a newer prompt in the same Project", async () => {
+    const drafts = createNewTaskDrafts();
+    let finishCreate: (created: boolean) => void = () => {};
+    const pending = new Promise<boolean>((resolve) => {
+      finishCreate = resolve;
+    });
+    render(
+      <NewTaskDraftsContext.Provider value={drafts}>
+        <NewTaskDraftScopeContext.Provider value="chat-overview:shared">
+          <ChatProjectOverview model={model} onCreateThread={async () => pending} />
+          <ChatProjectOverview model={model} onCreateThread={vi.fn(async () => true)} />
+        </NewTaskDraftScopeContext.Provider>
+      </NewTaskDraftsContext.Provider>,
+    );
+
+    const inputs = screen.getAllByRole("textbox", { name: "Start a new Chat thread" });
+    const starts = screen.getAllByRole("button", { name: "Start thread" });
+    fireEvent.change(inputs[0]!, { target: { value: "First submission" } });
+    fireEvent.click(starts[0]!);
+    await waitFor(() => expect(inputs[0]).toHaveValue(""));
+    fireEvent.change(inputs[1]!, { target: { value: "Newer prompt" } });
+    finishCreate(false);
+    await waitFor(() => expect(inputs[1]).toHaveValue("Newer prompt"));
+    expect(inputs[0]).toHaveValue("Newer prompt");
+  });
+
+  it("opens Providers from Set up a provider on the Project composer", () => {
+    const onOpenSettings = vi.fn();
+    render(
+      <ChatProjectOverview
+        model={model}
+        onCreateThread={vi.fn()}
+        onOpenSettings={onOpenSettings}
+        providerGroups={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Set up a provider" }));
+    expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 
   it("generates a distinct quick-start label target per visible Overview", () => {

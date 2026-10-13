@@ -9,7 +9,7 @@ import {
   rmSync,
   statSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, sep } from "node:path";
 
 import type {
@@ -20,16 +20,22 @@ import type {
 import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
 import { Effect } from "effect";
 
-import { prepareConfinedVersionProbe } from "../process/confinedVersionProbe";
 import {
-  makeSeatbeltConfinementLive,
-  SeatbeltConfinementError,
-  type SeatbeltConfinementPort,
+  prepareConfinedVersionProbe,
+  type ConfinedVersionProbeLaunch,
+} from "../process/confinedVersionProbe";
+import {
+  makeProcessConfinementLive,
+  ProcessConfinementError,
+  seatbeltAllowLiteralReadRule,
+  seatbeltExecRule,
+  type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import {
   materializeOsNetworkEgress,
   resolveProviderRuntimeEgressPolicy,
 } from "../process/threadEgressPolicy";
+import { canonicalClaudeAccountDirectory } from "./claudeAccountIsolation";
 import { REQUIRED_GUARDS, sanitizeClaudeEnvironment } from "./claudeEnvironment";
 import type { ProviderProcessStartedListener } from "./providerRuntimeRegistry";
 
@@ -63,9 +69,15 @@ export const CONFINED_CLAUDE_EXECUTION_POLICIES: ReadonlySet<ProviderExecutionPo
 
 export interface ClaudeProcessPort {
   readonly probeVersion: (binaryPath: string) => Effect.Effect<string, ProviderFailure>;
+  /**
+   * Whether the account is signed in. With a confinement, the check runs inside
+   * the sandbox that launch will use: a sign-in the sandbox cannot read is no
+   * sign-in for that launch, and an unconfined check cannot tell.
+   */
   readonly probeSubscription: (
     binaryPath: string,
     environment: NodeJS.ProcessEnv,
+    confinement?: ClaudeRuntimeConfinement,
   ) => Effect.Effect<"authenticated" | "unauthenticated", ProviderFailure>;
   /** Binds one thread's confinement to the callback the Agent SDK will invoke. */
   readonly spawn: (confinement: ClaudeRuntimeConfinement) => SpawnClaudeCodeProcess;
@@ -73,7 +85,7 @@ export interface ClaudeProcessPort {
 
 export interface ClaudeProcessOptions {
   readonly inheritedEnvironment?: NodeJS.ProcessEnv;
-  readonly confinement?: SeatbeltConfinementPort;
+  readonly confinement?: ProcessConfinementPort;
   readonly onDiagnostic?: (message: string) => void;
   readonly probeOutputBytes?: number;
   readonly probeTimeoutMs?: number;
@@ -93,7 +105,7 @@ type ProbeKind = "authentication" | "version";
 
 interface ResolvedClaudeProcessOptions {
   readonly inheritedEnvironment: NodeJS.ProcessEnv;
-  readonly confinement: SeatbeltConfinementPort;
+  readonly confinement: ProcessConfinementPort;
   readonly onDiagnostic: ((message: string) => void) | undefined;
   readonly probeOutputBytes: number;
   readonly probeTimeoutMs: number;
@@ -233,6 +245,7 @@ function runProbe(
   environment: NodeJS.ProcessEnv,
   kind: "authentication",
   options: ResolvedClaudeProcessOptions,
+  confinement?: ClaudeRuntimeConfinement,
 ): Effect.Effect<"authenticated" | "unauthenticated", ProviderFailure>;
 function runProbe(
   binaryPath: string,
@@ -247,13 +260,16 @@ function runProbe(
   environment: NodeJS.ProcessEnv,
   kind: ProbeKind,
   options: ResolvedClaudeProcessOptions,
+  confinement?: ClaudeRuntimeConfinement,
 ): Effect.Effect<string, ProviderFailure> {
   const invalid = validateBinaryPath(binaryPath);
   if (invalid !== undefined) return Effect.fail(invalid);
 
-  // Only the version read is confined. The authentication probe reaches the
+  // The version read is always confined. The authentication probe reaches the
   // provider's own control plane out of the user's credential home, which is a
-  // readiness check under 0122 rather than a local string read.
+  // readiness check under 0122 rather than a local string read, so on its own
+  // it runs unconfined. A caller about to start a confined launch passes that
+  // launch's confinement, and the probe then runs inside it.
   // Preparing inside the suspend keeps one scratch directory per run: an
   // Effect a caller holds and never runs leaves nothing behind, and one it runs
   // twice does not hand the second run a directory the first already released.
@@ -271,7 +287,43 @@ function runProbe(
           })
         : undefined;
     if (probe?.status === "refused") return Effect.fail(failure(probe.reason, probe.message));
-    const launch = probe?.status === "prepared" ? probe.launch : undefined;
+    let launch: ConfinedVersionProbeLaunch | undefined =
+      probe?.status === "prepared" ? probe.launch : undefined;
+    if (
+      kind === "authentication" &&
+      confinement !== undefined &&
+      CONFINED_CLAUDE_EXECUTION_POLICIES.has(confinement.executionPolicy)
+    ) {
+      try {
+        const confined = confineClaudeLaunch(
+          {
+            command: binaryPath,
+            args: [...args],
+            cwd: confinement.projectRoot,
+            env: environment,
+            signal: new AbortController().signal,
+          },
+          confinement,
+          options,
+        );
+        launch = {
+          command: confined.spawnOptions.command,
+          args: confined.spawnOptions.args,
+          workingDirectory: confinement.projectRoot,
+          environment: confined.spawnOptions.env,
+          release: confined.release,
+        };
+      } catch (error) {
+        return Effect.fail(
+          failure(
+            "invalid-configuration",
+            error instanceof ProcessConfinementError
+              ? error.message
+              : "Claude sign-in check could not be confined.",
+          ),
+        );
+      }
+    }
 
     return Effect.async<string, ProviderFailure>((resume) => {
       const child = spawn(
@@ -418,20 +470,22 @@ function planStateDirectories(
   boundRoot: string,
   stateDirectories: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
-  const canonicalDirectories = stateDirectories.map((path) => {
-    try {
-      return realpathSync(path);
-    } catch {
-      // A provider may create its state directory during launch; preserve the
-      // configured path when it does not exist yet.
-      return path;
-    }
-  });
+  // A provider may create its state directory during launch. Resolve through
+  // the nearest existing ancestor, so a not-yet-created leaf under a symlinked
+  // prefix (`/tmp` is `/private/tmp` on macOS) cannot dodge the overlap check.
+  const canonicalDirectories = stateDirectories.map(
+    (path) => canonicalClaudeAccountDirectory(path).path,
+  );
   for (const path of canonicalDirectories) {
-    if (path === boundRoot) {
-      throw new SeatbeltConfinementError(
+    // 0145: the checkout must not be the leaf, sit inside it, or be an ancestor.
+    if (
+      path === boundRoot ||
+      path.startsWith(`${boundRoot}${sep}`) ||
+      boundRoot.startsWith(`${path}${sep}`)
+    ) {
+      throw new ProcessConfinementError(
         "invalid-configuration",
-        "Claude Plan confinement cannot use a project root that is also a runtime state directory.",
+        "Claude Plan confinement cannot grant a runtime state directory that overlaps the checkout.",
       );
     }
   }
@@ -445,6 +499,22 @@ function claudeRuntimeStateDirectories(environment: SpawnOptions["env"]): Readon
   return [configuration, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR].filter(
     (path): path is string => path !== undefined && isAbsolute(path),
   );
+}
+
+/**
+ * The one Keychain file a confined subscription launch may read on macOS.
+ *
+ * Exported so the driver can refuse a file tool that names its folder: the
+ * sandbox opens this file to the runtime's own sign-in read, not to the model.
+ */
+export function claudeLoginKeychainPath(): string {
+  let home = homedir();
+  try {
+    home = realpathSync(home);
+  } catch {
+    // A home that cannot be resolved names no file the profile could open.
+  }
+  return join(home, "Library", "Keychains", "login.keychain-db");
 }
 
 /**
@@ -466,7 +536,7 @@ function confineClaudeLaunch(
     return { spawnOptions, release: () => undefined };
   }
   if (!isAbsolute(confinement.projectRoot) || !existsSync(confinement.projectRoot)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Claude runtime confinement requires an existing absolute project root.",
     );
@@ -481,7 +551,7 @@ function confineClaudeLaunch(
   try {
     temporaryRoot = realpathSync(spawnOptions.env.TMPDIR ?? tmpdir());
   } catch {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Claude runtime confinement could not create a private temporary directory.",
     );
@@ -491,7 +561,7 @@ function confineClaudeLaunch(
   // folder the caller named outranks the bound root's denial. Refuse it before
   // anything is created there.
   if (temporaryRoot === boundRoot || temporaryRoot.startsWith(`${boundRoot}${sep}`)) {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Claude runtime confinement requires a temporary directory outside the checkout.",
     );
@@ -500,7 +570,7 @@ function confineClaudeLaunch(
   try {
     temporaryDirectory = realpathSync(mkdtempSync(join(temporaryRoot, "octant-claude-plan-")));
   } catch {
-    throw new SeatbeltConfinementError(
+    throw new ProcessConfinementError(
       "invalid-configuration",
       "Claude runtime confinement could not create a private temporary directory.",
     );
@@ -513,11 +583,29 @@ function confineClaudeLaunch(
       // open is left to it.
     }
   };
-  const stateDirectories = planStateDirectories(
-    boundRoot,
-    claudeRuntimeStateDirectories(spawnOptions.env),
-  );
   try {
+    const stateDirectories = planStateDirectories(
+      boundRoot,
+      claudeRuntimeStateDirectories(spawnOptions.env),
+    );
+    // A subscription launch on macOS reads its own sign-in by running
+    // `/usr/bin/security` against the login keychain. Measured on macOS 27.0.1
+    // with Claude Code 2.1.296: with exec of that binary and the two
+    // security-server lookups alone the runtime is signed out (`security`
+    // exits 44, item not found), and it signs in once the profile also allows
+    // process-fork and read of the one file `login.keychain-db`. No shell, no
+    // Keychain write and no other file in that folder is needed, so none is
+    // granted: `/bin/sh` stays refused, which keeps hooks and the Bash tool
+    // out. The cost is that the runtime may fork, may run `security`, which
+    // returns any Keychain item that trusts that tool, and may read the
+    // encrypted login keychain file. The driver refuses a file tool that names
+    // that folder, so the grant serves the sign-in read and not the model. A
+    // launch that carries an API key reads nothing from the store and gets
+    // none of this. Linux keeps the login in a file inside the account
+    // directory, which the launch already holds, and Seatbelt rules do not
+    // apply there.
+    const readsSignInFromKeychain =
+      process.platform === "darwin" && spawnOptions.env.ANTHROPIC_API_KEY === undefined;
     const launch = options.confinement.prepare({
       executable: spawnOptions.command,
       args: spawnOptions.args,
@@ -537,22 +625,23 @@ function confineClaudeLaunch(
       ),
       // Plan is read-only at the sandbox, not only in the provider's permission
       // layer (0009): the checkout reads and never writes, and the runtime execs
-      // nothing at all. Measured on macOS 27, a session hook under this profile
-      // is refused with `EPERM: operation not permitted, posix_spawn '/bin/sh'`.
+      // nothing but itself and, for a Keychain sign-in, `/usr/bin/security`.
+      // Measured on macOS 27, a session hook under this profile is refused with
+      // `EPERM: operation not permitted, posix_spawn '/bin/sh'`.
       writeBoundRoot: false,
       allowProcessExec: false,
-      allowProcessFork: false,
+      allowProcessFork: readsSignInFromKeychain,
       allowFileReadStar: true,
-      // The store's files stay denied either way; only the lookup opens (0145),
-      // and the lookup alone does not sign the runtime in, because it reads its
-      // sign-in by running `/usr/bin/security`, which this profile never runs.
-      // A launch that carries its credential, an API key or the connected
-      // helper token, resolves nothing from the store, and the same binary may
-      // be trusted for a stored subscription item it has no use for, so the
-      // lookup stays closed there.
-      allowProviderCredentialLookup:
-        spawnOptions.env.ANTHROPIC_API_KEY === undefined &&
-        spawnOptions.env.CLAUDE_CODE_OAUTH_TOKEN === undefined,
+      ...(readsSignInFromKeychain
+        ? {
+            extraRules: [
+              seatbeltExecRule("/usr/bin/security"),
+              '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+              '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+              seatbeltAllowLiteralReadRule(claudeLoginKeychainPath()),
+            ],
+          }
+        : {}),
     });
     return {
       spawnOptions: {
@@ -713,8 +802,8 @@ function spawnOwnedClaudeProcess(
 
 export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): ClaudeProcessPort {
   const resolved: ResolvedClaudeProcessOptions = {
-    inheritedEnvironment: options.inheritedEnvironment ?? process.env,
-    confinement: options.confinement ?? makeSeatbeltConfinementLive(),
+    inheritedEnvironment: { ...(options.inheritedEnvironment ?? process.env) },
+    confinement: options.confinement ?? makeProcessConfinementLive(),
     onDiagnostic: options.onDiagnostic,
     probeOutputBytes: options.probeOutputBytes ?? DEFAULT_PROBE_OUTPUT_BYTES,
     probeTimeoutMs: options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS,
@@ -732,8 +821,15 @@ export function makeClaudeProcessLive(options: ClaudeProcessOptions = {}): Claud
         "version",
         resolved,
       ),
-    probeSubscription: (binaryPath, environment) =>
-      runProbe(binaryPath, ["auth", "status", "--json"], environment, "authentication", resolved),
+    probeSubscription: (binaryPath, environment, confinement) =>
+      runProbe(
+        binaryPath,
+        ["auth", "status", "--json"],
+        environment,
+        "authentication",
+        resolved,
+        confinement,
+      ),
     spawn: (confinement) => (spawnOptions) => {
       const confined = confineClaudeLaunch(spawnOptions, confinement, resolved);
       try {

@@ -23,7 +23,11 @@ selected, and whether that mode has a model it can actually use. When all
 three hold, **Start a task** opens the new-task composer in that Project. A
 missing prerequisite opens its exact setup surface — provider settings,
 Project create, or the Model step — and returns to the same draft when that
-surface closes. Skip does not mark the host ready or start a thread.
+surface closes. Skip does not mark the host ready or start a thread. After Skip, or in a
+later session with no ready provider, the New task composer in Work and Code
+shows **Set up a provider**. It opens Providers & Models and returns to the
+same draft when that surface closes. The action leaves once any instance is
+ready.
 
 ## Configure a provider
 
@@ -62,6 +66,12 @@ Credentials are stored in the host secret store (macOS Keychain, or Linux
 Secret Service on a headless host) and resolved through the authenticated
 host broker. They are never written to the event journal or returned to the
 renderer.
+
+A model endpoint's key is kept only for the endpoint URL you entered it for.
+If you change the URL later, Octant deletes the saved key, and you enter the
+key again with the new URL. The address field says so as soon as it differs
+from the saved one, and after you save, the endpoint reads Needs key until you
+add it.
 
 Closing Settings returns to first run with the answers you already gave.
 

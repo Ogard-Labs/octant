@@ -549,7 +549,7 @@
 
 .context-inspector button {
   min-height: 28px;
-  padding: 3px 8px;
+  padding: var(--oct-space-1) var(--oct-space-2);
   color: var(--octant-text-secondary);
   border: 1px solid var(--octant-border);
   border-radius: var(--oct-radius-sm);
@@ -603,7 +603,7 @@
 .context-inspector__facts,
 .context-entry-card__facts {
   display: grid;
-  gap: 5px;
+  gap: var(--oct-space-1);
   margin: 8px 0 0;
 }
 
@@ -651,7 +651,7 @@
 
 .context-entry-card__actions {
   justify-content: flex-start;
-  margin-top: 9px;
+  margin-top: var(--oct-space-2);
 }
 
 @media (max-width: 720px) {
@@ -677,12 +677,10 @@
   }
 }
 
-@media (prefers-contrast: more) {
-  .composer-context-meter__track {
-    stroke: var(--octant-text-primary);
-  }
+html[data-octant-increased-contrast="true"] .composer-context-meter__track {
+  stroke: var(--octant-text-primary);
+}
 
-  .context-health-warning {
-    border-color: var(--octant-border-strong);
-  }
+html[data-octant-increased-contrast="true"] .context-health-warning {
+  border-color: var(--octant-border-strong);
 }

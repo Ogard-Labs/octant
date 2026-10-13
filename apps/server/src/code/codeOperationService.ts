@@ -32,7 +32,6 @@ import {
   type CodeRepositoryTestStatus,
   type CodeReviewFinding,
   type CodeThread,
-  type CodeThreadForkOrigin,
   type CodeThreadId,
   type AgentRun,
   type AgentRunId,
@@ -623,12 +622,6 @@ export interface CodeOperationTurnPort {
      */
     readonly context?: ReadonlyArray<ProviderContextBlock>;
     /**
-     * A fork's first turn: the source's conversation as text. Carried only
-     * when the provider's own session could not start from the source's, so
-     * a fork never reads its history twice.
-     */
-    readonly forkHandoff?: ProviderContextBlock;
-    /**
      * Which of the context blocks are Octant's instructions and skills, so the
      * window of a runtime that reports no categories can count them.
      */
@@ -639,6 +632,13 @@ export interface CodeOperationTurnPort {
     readonly extensionTools?: AppManagedToolSet;
     /** The host rechecks this after runtime preparation, before launching. */
     readonly admissionCurrent?: () => boolean;
+    /**
+     * Told once a provider has accepted this turn's prompt and context. A
+     * start that returns `running` has only taken the turn on: the context is
+     * still in memory, and a host that stops before the send has delivered
+     * nothing.
+     */
+    readonly onContextDelivered?: () => void;
     /** Consume feedback synchronously only after the runtime's final admission check. */
     readonly takeProductFeedback?: () => {
       readonly context?: string;
@@ -832,24 +832,16 @@ export interface CodeOperationServiceOptions {
   readonly peekIssueContextFramed?: (threadId: string) => FramedExternalContent | undefined;
   readonly consumeIssueContextFramed?: (threadId: string) => void;
   /**
-   * Reads the conversation a forked thread inherits, for its first turn only.
-   *
-   * A fork's own transcript starts empty, so without this its provider would be
-   * answering from nothing while the user believes it continues a conversation.
-   * The host reads the source thread itself and bounds what it hands over; a
-   * source it cannot read contributes nothing rather than a claimed history.
+   * The agent messages waiting for a thread, as the host admits them into the
+   * turn about to start: rechecked against the sender and the recipient as
+   * they stand now, recorded as external content on the thread, and framed as
+   * data. Reading them delivers nothing by itself.
    */
-  readonly resolveForkHandoff?: (input: {
-    readonly threadId: CodeThreadId;
-    readonly origin: CodeThreadForkOrigin;
-    readonly windowId: WindowId;
-    /**
-     * The turn asking for the handoff. Its own start event is already in the
-     * journal by the time this runs, so the resolver has to know which turn to
-     * discount before it can tell whether any earlier one exists.
-     */
-    readonly operationId: CodeOperationId;
-  }) => Promise<string | undefined>;
+  readonly carryAgentMessages?: (
+    threadId: string,
+  ) => Promise<ReadonlyArray<{ readonly messageId: string; readonly text: string }>>;
+  /** Records that a provider has accepted the turn carrying those messages. */
+  readonly confirmAgentMessagesDelivered?: (messageIds: ReadonlyArray<string>) => Promise<void>;
   /**
    * Loads skills named by the thread's snapshotted profile allowlist. Absent
    * on a host that cannot resolve skills, where a profile still injects its
@@ -2827,7 +2819,6 @@ export class CodeOperationService {
     const issueContext =
       this.#options.peekIssueContextFramed?.(String(thread.id)) ??
       this.#options.takeIssueContextFramed?.(String(thread.id));
-    const [forkHandoff] = await this.#resolveForkHandoff(thread, windowId, command.operationId);
     const sentContext: CodeTurnSentContext = {
       instructions: profileContext.sent.instructions,
       skills: [...skillContext, ...profileContext.sent.skills],
@@ -2870,6 +2861,14 @@ export class CodeOperationService {
         "refused",
       );
     }
+    // Read last, after every refusal above: carrying a message marks this
+    // thread as having ingested external content, and a turn that was never
+    // going to start should not do that. A failed read costs the turn its
+    // messages, not the person their turn; the messages wait for the next one.
+    const agentMessages = await (
+      this.#options.carryAgentMessages?.(String(thread.id)) ?? Promise.resolve([])
+    ).catch(() => []);
+    for (const message of agentMessages) context.push({ kind: "user-message", text: message.text });
     const takeProductFeedback = this.#options.takeProductFeedbackForTurn;
     const turn = await this.#options.turns.start({
       windowId,
@@ -2881,10 +2880,23 @@ export class CodeOperationService {
       ...(sentContext.instructions.length === 0 && sentContext.skills.length === 0
         ? {}
         : { sentContext }),
-      ...(forkHandoff === undefined ? {} : { forkHandoff }),
       ...(attachments.length === 0 ? {} : { attachments }),
       ...(extensionTools === undefined ? {} : { extensionTools }),
       ...(admissionCurrent === undefined ? {} : { admissionCurrent }),
+      // A message is delivered when a provider has it, not when the turn was
+      // taken on: the runtime launches after this call returns, and a host
+      // that stopped in between would have journaled a delivery, dropped the
+      // body, and sent nothing. Until the send, the message stays waiting and
+      // the next turn, or this one recovered after a restart, carries it.
+      ...(agentMessages.length === 0
+        ? {}
+        : {
+            onContextDelivered: () => {
+              void this.#options
+                .confirmAgentMessagesDelivered?.(agentMessages.map((message) => message.messageId))
+                .catch(() => undefined);
+            },
+          }),
       ...(takeProductFeedback === undefined
         ? {}
         : {
@@ -2992,25 +3004,6 @@ export class CodeOperationService {
       skills,
       uuid: randomUUID,
     });
-  }
-
-  async #resolveForkHandoff(
-    thread: CodeThread,
-    windowId: WindowId,
-    operationId: CodeOperationId,
-  ): Promise<ReadonlyArray<ProviderContextBlock>> {
-    const origin = thread.forkedFrom;
-    const resolve = this.#options.resolveForkHandoff;
-    if (origin === undefined || resolve === undefined) return [];
-    let text: string | undefined;
-    try {
-      text = await resolve({ threadId: thread.id, origin, windowId, operationId });
-    } catch {
-      return [];
-    }
-    return text === undefined || text.trim().length === 0
-      ? []
-      : [{ kind: "user-message", text } as const];
   }
 
   /**
@@ -3405,6 +3398,10 @@ function evidenceReferences(event: CodeOperationEvent): readonly CodeEvidenceRef
     case "provider-content":
     case "terminal-output":
     case "diff":
+      return [event.content];
+    case "context-handoff-attached":
+      return event.reason === "fork-native-session" ? [] : [event.content];
+    case "fork-context-merged":
       return [event.content];
     case "operation-result":
       return resultEvidenceReferences(event.result);

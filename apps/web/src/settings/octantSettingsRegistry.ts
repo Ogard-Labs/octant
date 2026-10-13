@@ -228,7 +228,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           id: settingId("mode-switcher"),
           label: "Mode switcher",
           scope: "app",
-          keywords: "mode switcher compact buttons dropdown sidebar navigation",
+          keywords: "mode switcher compact buttons icons dropdown sidebar navigation",
         },
         {
           id: settingId("thread-provider-icons"),
@@ -359,13 +359,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Code",
       scope: "app",
       keywords:
-        "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads open in applications vscode cursor zed finder terminal ghostty xcode detected installed",
+        "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads open in applications vscode cursor zed finder terminal ghostty xcode detected installed diff layout unified side by side review",
       settings: [
         {
           id: settingId("code-default-folder-threads"),
           label: "Threads without a Project",
           scope: "mode",
           keywords: "default folder projectless no project git repository",
+        },
+        {
+          id: settingId("code-default-diff-layout"),
+          label: "Default diff layout",
+          scope: "mode",
+          keywords: "diff layout unified side by side review checkout",
         },
         {
           id: settingId("project-view-switcher"),
@@ -389,6 +395,14 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "opencode update version managed cli installed available",
         },
       ],
+    },
+    {
+      id: "provider-catalog",
+      label: "Provider catalog",
+      scope: "host",
+      keywords:
+        "provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
+      settings: [],
     },
     {
       id: "harness",
@@ -623,6 +637,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "remembered websites browser origin site approval allow always forget revoke open page permission",
+        },
+        {
+          id: settingId("tool-approvals"),
+          label: "Remembered tool approvals",
+          scope: "host",
+          keywords:
+            "remembered tool approvals mcp plugin extension server project allow always revoke ask again permission",
         },
       ],
     },

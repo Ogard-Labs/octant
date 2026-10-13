@@ -13,13 +13,13 @@ import {
   type OwnedProcessReceiptHandle,
 } from "../process/nodeOwnedProcessReceipt";
 import {
-  makeSeatbeltConfinementLive,
-  SeatbeltConfinementError,
+  makeProcessConfinementLive,
+  ProcessConfinementError,
   seatbeltAllowLiteralMetadataRule,
   seatbeltAllowLiteralReadRule,
   seatbeltAllowMachLookupRule,
   seatbeltAllowRegexReadWriteRule,
-  type SeatbeltConfinementPort,
+  type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
 import type { OsNetworkEgress } from "../process/threadEgressPolicy";
 
@@ -69,7 +69,7 @@ interface RepositoryTestProcessPortOptions {
   readonly receiptDirectory?: string;
   readonly processIdentity?: (pid: number) => Promise<string | undefined>;
   readonly processGroupExists?: (pid: number) => boolean;
-  readonly confinement?: SeatbeltConfinementPort;
+  readonly confinement?: ProcessConfinementPort;
   readonly sandboxPath?: string;
   readonly temporaryDirectory?: string;
   readonly networkEgress?: OsNetworkEgress;
@@ -221,7 +221,7 @@ export class RepositoryTestProcessPort {
   readonly #receiptDirectory: string | undefined;
   readonly #processIdentity: ((pid: number) => Promise<string | undefined>) | undefined;
   readonly #processGroupExists: (pid: number) => boolean;
-  readonly #confinement: SeatbeltConfinementPort;
+  readonly #confinement: ProcessConfinementPort;
   readonly #temporaryDirectory: string;
   readonly #networkEgress: OsNetworkEgress;
   readonly #literalReadPaths: ReadonlyArray<string>;
@@ -250,7 +250,7 @@ export class RepositoryTestProcessPort {
     this.#harnessShellScriptDirectory = options.harnessShellScriptDirectory;
     this.#confinement =
       options.confinement ??
-      makeSeatbeltConfinementLive({
+      makeProcessConfinementLive({
         platform: this.#platform,
         ...(options.sandboxPath === undefined ? {} : { sandboxPath: options.sandboxPath }),
         ...(options.seatbeltHomeDirectory === undefined
@@ -391,7 +391,7 @@ export class RepositoryTestProcessPort {
           : {}),
       });
     } catch (error) {
-      if (error instanceof SeatbeltConfinementError) return unavailable(false);
+      if (error instanceof ProcessConfinementError) return unavailable(false);
       return unavailable(false);
     }
 

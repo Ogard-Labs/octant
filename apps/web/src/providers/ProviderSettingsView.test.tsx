@@ -570,6 +570,86 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("private-value");
   });
 
+  it("creates a Claude account with a name and accent and no free-text directory field", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    await user.type(within(create).getByLabelText("Provider name"), "Work Claude");
+    await user.type(within(create).getByLabelText("Claude binary"), "/opt/homebrew/bin/claude");
+    const directory = within(create).getByLabelText("Account directory");
+    expect(directory).toHaveAttribute("readonly");
+    expect(directory).toHaveValue("~/.claude-accounts/<assigned on create>");
+    expect(within(create).queryByLabelText("Claude config directory")).toBeNull();
+    await user.click(within(create).getByRole("radio", { name: "Teal" }));
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
+    await user.click(within(create).getByRole("button", { name: "Add Claude" }));
+    expect(props.onCreateClaude).toHaveBeenLastCalledWith(
+      "Work Claude",
+      {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+        accent: "teal",
+      },
+      expect.objectContaining({ value: "" }),
+    );
+  });
+
+  it("clears the Claude create fields after a successful add so the next account starts blank", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    await user.type(within(create).getByLabelText("Provider name"), "Work Claude");
+    await user.type(within(create).getByLabelText("Claude binary"), "/opt/homebrew/bin/claude");
+    await user.click(within(create).getByRole("radio", { name: "Teal" }));
+    await user.click(within(create).getByRole("button", { name: "Add Claude" }));
+    await waitFor(() => {
+      expect(within(create).getByLabelText("Claude binary")).toHaveValue("");
+    });
+    expect(within(create).getByLabelText("Account directory")).toHaveValue(
+      "~/.claude-accounts/<assigned on create>",
+    );
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
+  });
+
+  it("shows a read-only account directory and no free-text directory when adding another Claude account", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    const directory = within(create).getByLabelText("Account directory");
+    expect(directory).toHaveAttribute("readonly");
+    expect(directory).toHaveValue("~/.claude-accounts/<assigned on create>");
+    expect(within(create).queryByLabelText("Claude config directory")).toBeNull();
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
+    await user.type(within(create).getByLabelText("Claude binary"), "/usr/local/bin/claude");
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
+  });
+
+  it("hides the Claude sign-in command until the binary path is absolute", async () => {
+    const user = userEvent.setup();
+    renderExpanded(<ProviderSettingsView {...fixture()} />);
+
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Claude Agent SDK");
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
+    await user.type(within(create).getByLabelText("Claude binary"), "claude");
+    expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
+    await user.clear(within(create).getByLabelText("Claude binary"));
+    await user.type(within(create).getByLabelText("Claude binary"), "/opt/homebrew/bin/claude");
+    expect(within(create).getByLabelText("Account sign-in command")).toHaveValue(
+      "'/opt/homebrew/bin/claude' auth login",
+    );
+  });
+
   it("creates Mistral Vibe with API-key authentication only", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: vibeProvider() });
@@ -721,10 +801,11 @@ describe("ProviderSettingsView", () => {
     "clears the real controller-backed Claude key input after host storage %s",
     async (outcome) => {
       const user = userEvent.setup();
-      const setProviderCredential = vi.fn(async () => {
+      const addProviderApiKey = vi.fn(async () => {
         if (outcome === "failure") throw new Error("private-value raw Keychain diagnostic");
+        return { id: "7d444840-9dc0-11d1-b245-5ffdce74fad2", label: "Key 1", active: true };
       });
-      const host = controllerHost(setProviderCredential);
+      const host = controllerHost(addProviderApiKey);
       const client = controllerClient();
       render(<ControllerBackedProviderSettings client={client} host={host} />);
       await user.click(await screen.findByRole("button", { name: "Add provider manually" }));
@@ -748,7 +829,7 @@ describe("ProviderSettingsView", () => {
       await user.click(within(create).getByRole("button", { name: "Add Claude" }));
 
       await waitFor(() => expect(apiKey).toHaveValue(""));
-      expect(setProviderCredential).toHaveBeenCalledWith(expect.any(String), "private-value");
+      expect(addProviderApiKey).toHaveBeenCalledWith(expect.any(String), "private-value");
       expect(document.body.textContent).not.toContain("private-value");
       if (outcome === "failure") {
         expect(screen.getByRole("alert")).toHaveTextContent(
@@ -771,11 +852,12 @@ describe("ProviderSettingsView", () => {
     const card = screen.getByRole("article", { name: "Codex local" });
     expect(within(card).getByText("Codex CLI")).toBeVisible();
     expect(within(card).getByText(/codex login/i)).toBeVisible();
+    expect(within(card).getByLabelText("Account directory")).toHaveValue("~/.codex");
     expect(within(card).getByText(/Remember for this Project/)).toHaveTextContent(/one-shot/i);
     expect(within(card).getByText(/Remember for this Project/)).toHaveTextContent(
       /Current session only/i,
     );
-    expect(card.textContent).not.toMatch(/account identity|CODEX_HOME|config\.toml|access token/i);
+    expect(card.textContent).not.toMatch(/account identity|config\.toml|access token/i);
   });
 
   it("renders Kimi Code identity, provider-native login guidance, and no credential surface", () => {
@@ -1113,6 +1195,11 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByLabelText("Claude authentication for Claude local")).toHaveTextContent(
       "Claude subscription",
     );
+    expect(within(card).getByLabelText("Account directory")).toHaveAttribute("readonly");
+    expect(within(card).getByLabelText("Account directory")).toHaveValue("~/.claude");
+    expect(within(card).getByLabelText("Account sign-in command")).toHaveValue(
+      "'/opt/homebrew/bin/claude' auth login",
+    );
     expect(
       within(card).queryByLabelText("Anthropic API key for Claude local"),
     ).not.toBeInTheDocument();
@@ -1134,6 +1221,95 @@ describe("ProviderSettingsView", () => {
     expect(within(card).getByText(/replace.*Anthropic API key/i)).toHaveTextContent(/write-only/i);
     expect(within(card).getByText(/replace.*Anthropic API key/i)).toHaveTextContent(/Keychain/i);
     expect(card.textContent).not.toMatch(/official Claude Code|Claude subscription login/i);
+  });
+
+  it("updates the Claude sign-in command while the binary path is being edited", async () => {
+    const user = userEvent.setup();
+    const props = fixture({
+      instance: decodeProviderInstance({
+        ...claudeProvider(),
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: "/Users/example/.claude-accounts/work",
+        },
+      }),
+    });
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "Claude work" });
+    const binary = within(card).getByLabelText("Claude binary for Claude work");
+    await user.clear(binary);
+    await user.type(binary, "/usr/local/bin/claude");
+    expect(within(card).getByLabelText("Account sign-in command")).toHaveValue(
+      "CLAUDE_CONFIG_DIR='/Users/example/.claude-accounts/work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/example/.claude-accounts/work' '/usr/local/bin/claude' auth login",
+    );
+  });
+
+  it("shows a leftover custom directory as read-only and never offers a free-text directory field", async () => {
+    const props = fixture({
+      instance: decodeProviderInstance({
+        ...claudeProvider(),
+        displayName: "Claude work",
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          configDirectory: "/Users/example/.claude-accounts/work",
+          accent: "teal",
+        },
+      }),
+    });
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "Claude work" });
+    const directory = within(card).getByLabelText("Account directory");
+    expect(directory).toHaveAttribute("readonly");
+    expect(directory).toHaveValue("/Users/example/.claude-accounts/work");
+    expect(within(card).queryByLabelText("Claude config directory")).toBeNull();
+    expect(within(card).getByLabelText("Account sign-in command")).toHaveValue(
+      "CLAUDE_CONFIG_DIR='/Users/example/.claude-accounts/work' CLAUDE_SECURESTORAGE_CONFIG_DIR='/Users/example/.claude-accounts/work' '/opt/homebrew/bin/claude' auth login",
+    );
+    expect(within(card).queryByRole("button", { name: /Connect Claude for helpers/ })).toBeNull();
+    expect(
+      within(card).getByRole("button", { name: "Use Octant's assigned directory" }),
+    ).toBeVisible();
+  });
+
+  it("shows a read-only default account directory and the unmodified sign-in command", async () => {
+    const props = fixture({ instance: claudeProvider() });
+    renderExpanded(<ProviderSettingsView {...props} />);
+    const card = screen.getByRole("article", { name: "Claude local" });
+    const directory = within(card).getByLabelText("Account directory");
+    expect(directory).toHaveAttribute("readonly");
+    expect(directory).toHaveValue("~/.claude");
+    expect(within(card).queryByLabelText("Claude config directory")).toBeNull();
+    expect(within(card).getByLabelText("Account sign-in command")).toHaveValue(
+      "'/opt/homebrew/bin/claude' auth login",
+    );
+    expect(within(card).queryByRole("button", { name: /Connect Claude for helpers/ })).toBeNull();
+  });
+
+  it("offers no sign-in command for an extra account that has no stored directory", () => {
+    const owner = claudeProvider();
+    const extra = decodeProviderInstance({
+      ...owner,
+      id: "80000000-0000-4000-8000-0000000000aa",
+      displayName: "Claude work",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    });
+    renderExpanded(
+      <ProviderSettingsView {...fixture({ instance: owner })} instances={[owner, extra]} />,
+    );
+    const card = screen.getByRole("article", { name: "Claude work" });
+    // Claude keys a login on the exact directory string, so a path Octant only
+    // displays must never be offered as a command to run.
+    expect(within(card).getByLabelText("Account directory")).toHaveValue(
+      `~/.claude-accounts/${extra.id}`,
+    );
+    expect(within(card).queryByLabelText("Account sign-in command")).toBeNull();
+    expect(within(card).queryByLabelText("Account status command")).toBeNull();
   });
 
   it("edits Claude authentication with a write-only key and constrains remote key management", async () => {
@@ -1234,6 +1410,72 @@ describe("ProviderSettingsView", () => {
     expect(within(diagnostics).getByText("API key (bearer)")).toBeInTheDocument();
     expect(within(page).queryByLabelText(/Binary path/)).not.toBeInTheDocument();
   });
+
+  it.each([
+    ["OpenAI-compatible", httpProvider(), /^API base URL for /],
+    ["Anthropic-compatible", anthropicProvider(), /^API base URL for /],
+    ["Azure AI Foundry", foundryProvider(), /^Foundry OpenAI v1 base URL for /],
+  ] as const)(
+    "says a new address removes the stored key of an %s endpoint, then shows it needs the key",
+    async (_label, instance, addressName) => {
+      const user = userEvent.setup();
+      const props = fixture({ instance });
+      const { rerender } = renderExpanded(<ModelEndpointSettingsView {...props} />);
+      const page = screen.getByRole("region", { name: instance.displayName });
+      const address = within(page).getByRole("textbox", { name: addressName });
+      const note = /removes this endpoint's stored API key/;
+
+      // Only a changed address says so; the saved one reads as before.
+      expect(within(page).queryByText(note)).toBeNull();
+      await user.type(address, "x");
+      expect(within(page).getByText(note)).toBeVisible();
+      expect(address).toHaveAccessibleDescription(note);
+      await user.type(address, "{Backspace}");
+      expect(within(page).queryByText(note)).toBeNull();
+
+      // The trailing slash is spelling only: the host keeps the key for it.
+      await user.type(address, "{Backspace}");
+      expect(within(page).queryByText(note)).toBeNull();
+      await user.type(address, "/");
+
+      await user.clear(address);
+      await user.type(address, "http://127.0.0.1:9/v1/");
+      expect(within(page).getByText(note)).toBeVisible();
+      const save = within(page).getAllByRole("button", { name: /^Save .* settings for / })[0]!;
+      await user.click(save);
+      const change = (
+        instance.driverKind === "anthropic-compatible"
+          ? props.onChangeAnthropicCompatibleConfiguration
+          : instance.driverKind === "azure-foundry"
+            ? props.onChangeAzureFoundryConfiguration
+            : props.onChangeOpenAiCompatibleConfiguration
+      ) as ReturnType<typeof vi.fn>;
+      await waitFor(() => expect(change).toHaveBeenCalledOnce());
+
+      // The host saved the address and deleted the key with it; nothing has
+      // been checked since, so the row says what is needed rather than "Not checked yet".
+      vi.mocked(props.onProviderCredentialStatus).mockResolvedValue("missing");
+      const saved = [
+        {
+          ...instance,
+          configuration: { ...instance.configuration, baseUrl: "http://127.0.0.1:9/v1/" },
+          version: 2 as never,
+        } as ProviderInstance,
+      ];
+      rerender(<ModelEndpointSettingsView {...props} busy instances={saved} />);
+      rerender(<ModelEndpointSettingsView {...props} instances={saved} />);
+      await user.click(screen.getByRole("button", { name: "Back to Octant Harness" }));
+      expect(
+        await screen.findByRole("link", {
+          name: new RegExp(`^${instance.displayName}, needs key`),
+        }),
+      ).toBeVisible();
+      expect(screen.getByText("No API key is saved for it.")).toBeVisible();
+      expect(
+        screen.getByRole("button", { name: `Add key for ${instance.displayName}` }),
+      ).toBeVisible();
+    },
+  );
 
   it("offers an optional context window per model under Model endpoints that shows what Octant found", async () => {
     const user = userEvent.setup();
@@ -3451,6 +3693,7 @@ function ControllerBackedProviderSettings(props: {
       onHiddenModelsChange={controller.updateHiddenModels}
       onChangeBinary={controller.changeBinary}
       onChangeClaudeConfiguration={controller.changeClaudeConfiguration}
+      onChangeCodexConfiguration={controller.changeCodexConfiguration}
       onChangeDevinConfiguration={controller.changeDevinConfiguration}
       onChangeKiloConfiguration={controller.changeKiloConfiguration}
       onChangePiConfiguration={controller.changePiConfiguration}
@@ -3541,7 +3784,7 @@ function controllerClient(): ProviderClient {
 }
 
 function controllerHost(
-  setProviderCredential: OctantHostBridge["setProviderCredential"],
+  addProviderApiKey: OctantHostBridge["addProviderApiKey"],
 ): OctantHostBridge {
   return {
     clearProviderCredential: vi.fn(async () => undefined),
@@ -3552,9 +3795,16 @@ function controllerHost(
     providerCredentialStatus: vi.fn(async () => "missing" as const),
     resetBounds: vi.fn(),
     selectProjectRoot: vi.fn(async () => ({ kind: "cancelled" as const })),
-    setProviderCredential,
+    addProviderApiKey,
+    setProviderCredential: vi.fn(),
     setSidebarMaterialPreference: vi.fn(),
     subscribeResolvedMaterial: vi.fn(() => vi.fn()),
+    listProviderApiKeys: vi.fn(async () => []),
+    renameProviderApiKey: vi.fn(),
+    replaceProviderApiKey: vi.fn(),
+    removeProviderApiKey: vi.fn(),
+    setActiveProviderApiKey: vi.fn(),
+    moveProviderApiKey: vi.fn(),
   };
 }
 
@@ -3653,6 +3903,7 @@ function fixture(
       credential.clear();
       return true;
     }),
+    onChangeCodexConfiguration: vi.fn(async () => true),
     onChangeDevinConfiguration: vi.fn(async () => true),
     onChangeKiloConfiguration: vi.fn(async () => true),
     onChangePiConfiguration: vi.fn(async () => true),

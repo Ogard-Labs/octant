@@ -10,7 +10,7 @@ import {
   prepareGitSeatbeltLaunch,
   type GitSeatbeltPortOptions,
 } from "../process/gitSeatbeltLaunch";
-import { SeatbeltConfinementError, type SeatbeltConfinementPort } from "../process/seatbeltProfile";
+import { ProcessConfinementError, type ProcessConfinementPort } from "../process/seatbeltProfile";
 import type { GitStatusEntry } from "./gitObservationPort";
 
 interface CommandResult {
@@ -918,7 +918,7 @@ export class GitMutationPort {
       if (controller.signal.aborted) throw new Error("Git mutation aborted.");
       return await run(controller.signal);
     } catch (error) {
-      if (error instanceof SeatbeltConfinementError) {
+      if (error instanceof ProcessConfinementError) {
         return { exitCode: 1, stdout: "", stderr: "" };
       }
       throw error;
@@ -1023,7 +1023,7 @@ export class GitMutationPort {
   }
 }
 
-function planGitMutationConfinement(confinement: SeatbeltConfinementPort): SeatbeltConfinementPort {
+function planGitMutationConfinement(confinement: ProcessConfinementPort): ProcessConfinementPort {
   return {
     prepare: (input) =>
       confinement.prepare({

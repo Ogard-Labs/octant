@@ -45,6 +45,14 @@ integration or uncertain dependency impact needs full local `bun run verify`.
 Always run `git diff --check`. Existing tests may supply the required coverage;
 adding tests is justified by an uncovered behavior or concrete risk.
 
+A web UI test that passes locally but fails now and then in CI usually reads
+state that an async render has not produced yet. To make such reads fail far
+more often, run the web DOM tests from `apps/web` with
+`OCTANT_TEST_ASYNC_STRESS=1 bun run test [file]`. It removes the short wait
+after each user-event action; `waitFor` and `findBy*` are unaffected and are
+the fix. The stress mode is a local diagnostic, not a CI gate: a pass does not
+prove a test is race-free.
+
 Run real-provider smokes when the issue's outcome or affected provider boundary
 requires them and credentials are available. If a required smoke is unavailable,
 record the exact blocker; synthetic checks do not replace that acceptance.

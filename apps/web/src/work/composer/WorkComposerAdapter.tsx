@@ -1,5 +1,11 @@
 import { useDraftModelOptions } from "../../providers/useDraftModelOptions";
-import { useNewTaskPrompt } from "../../composer/useNewTaskPrompt";
+import {
+  mentionChipsFromDraft,
+  mentionChipsToDraft,
+  NewTaskDraftsContext,
+  NewTaskDraftScopeContext,
+  useNewTaskPrompt,
+} from "../../composer/useNewTaskPrompt";
 import {
   ApplicationMentionTypeahead,
   BrowserUseMention,
@@ -36,7 +42,9 @@ import {
 import { FolderOpen, AlertTriangle } from "lucide-react";
 import {
   useCallback,
+  useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ClipboardEvent,
@@ -89,6 +97,8 @@ export interface WorkComposerAdapterProps {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => void;
+  /** Opens Providers & Models from the start composer while none is ready. */
+  readonly onOpenSettings?: () => void;
   readonly onCreateThread: (
     prompt: string,
     images?: ReadonlyArray<File>,
@@ -122,6 +132,17 @@ export interface WorkComposerAdapterProps {
 
 export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const [prompt, setPrompt] = useNewTaskPrompt();
+  const drafts = useContext(NewTaskDraftsContext);
+  const draftScope = useContext(NewTaskDraftScopeContext);
+  const storedMentionChips = mentionChipsFromDraft(
+    draftScope === undefined || drafts === undefined ? [] : drafts.readMentionChips(draftScope),
+  );
+  const storedExtensionReceipts =
+    draftScope === undefined || drafts === undefined
+      ? []
+      : drafts.readExtensionReceipts(draftScope);
+  const storedComputerSelection =
+    draftScope === undefined ? undefined : drafts?.readComputerSelection(draftScope);
   const {
     modelKey,
     modelOptionValues,
@@ -132,11 +153,22 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     props.selectedModelId,
   );
 
+  const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
+    props.providerGroups,
+    props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
+      ? undefined
+      : {
+          providerInstanceId: props.selectedProviderInstanceId,
+          modelId: props.selectedModelId,
+        },
+  );
   const computer = useComputerUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "work-draft",
+    providerCarriesTools: runtimeCarriesTools,
+    ...(storedComputerSelection === undefined ? {} : { initialSelection: storedComputerSelection }),
   });
   const selectedFamily = providerFamilyForThread(
     props.providerGroups,
@@ -145,25 +177,17 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const extensionDraft = useExtensionDraftSelections({
     ...(props.extensionClient === undefined ? {} : { client: props.extensionClient }),
     mode: "work",
+    providerCarriesTools: runtimeCarriesTools,
     projectId: props.projectId ?? null,
     ...(selectedFamily === undefined ? {} : { providerFamily: selectedFamily }),
+    ...(storedExtensionReceipts.length === 0 ? {} : { initialReceipts: storedExtensionReceipts }),
   });
   const browser = useBrowserUseMention({
     textarea: () => textareaRef.current,
     draft: prompt,
     onDraftChange: setPrompt,
     scopeKey: "work-draft",
-    available:
-      props.browserAvailable === true &&
-      pickerGroupCarriesAppManagedTools(
-        props.providerGroups,
-        props.selectedProviderInstanceId === undefined || props.selectedModelId === undefined
-          ? undefined
-          : {
-              providerInstanceId: props.selectedProviderInstanceId,
-              modelId: props.selectedModelId,
-            },
-      ),
+    available: props.browserAvailable === true && runtimeCarriesTools,
     onChoose: () => void extensionDraft.resolveReference("@browser"),
   });
   const slash = useComposerSlashCommands({
@@ -193,7 +217,30 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     draft: prompt,
+    ...(storedMentionChips.length === 0 ? {} : { initialChips: storedMentionChips }),
   });
+  const structuredDraftScope = useRef(draftScope);
+  useLayoutEffect(() => {
+    if (drafts === undefined || draftScope === undefined) return;
+    if (structuredDraftScope.current === draftScope) return;
+    structuredDraftScope.current = draftScope;
+    threadMentions.restore(mentionChipsFromDraft(drafts.readMentionChips(draftScope)));
+    extensionDraft.restore(drafts.readExtensionReceipts(draftScope));
+    computer.restore(drafts.readComputerSelection(draftScope));
+  }, [computer, drafts, draftScope, extensionDraft, threadMentions]);
+  useEffect(() => {
+    if (draftScope === undefined || drafts === undefined) return;
+    if (structuredDraftScope.current !== draftScope) return;
+    drafts.writeMentionChips(draftScope, mentionChipsToDraft(threadMentions.chips));
+    drafts.writeExtensionReceipts(draftScope, extensionDraft.stagedReceipts);
+    drafts.writeComputerSelection(draftScope, computer.stagedSelection);
+  }, [
+    computer.stagedSelection,
+    drafts,
+    draftScope,
+    extensionDraft.stagedReceipts,
+    threadMentions.chips,
+  ]);
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
     draft: prompt,
@@ -534,6 +581,9 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                         setOptionState({ key: modelKey, values });
                       }}
                       onSelect={props.onSelectProvider}
+                      {...(props.onOpenSettings === undefined
+                        ? {}
+                        : { onOpenSettings: props.onOpenSettings })}
                       {...(props.selectedModelId === undefined
                         ? {}
                         : { selectedModelId: props.selectedModelId })}

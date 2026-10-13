@@ -263,6 +263,56 @@ describe("ComposerModelPicker", () => {
     expect(screen.queryByRole("option", { name: "Model One" })).not.toBeInTheDocument();
   });
 
+  it("names a hidden bound model when no selectable models remain", () => {
+    const source = groups();
+    const first = source[0];
+    const current = first?.sections[0]?.models[0];
+    if (first === undefined || current === undefined) throw new Error("Expected model fixture");
+    render(
+      <ComposerModelPicker
+        groups={[{ ...first, sections: [], hiddenCurrent: current }]}
+        onOpenSettings={vi.fn()}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Set up a provider" })).not.toBeInTheDocument();
+    expect(screen.queryByText("No provider ready")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Provider and model" })).toHaveTextContent(
+      "Model One",
+    );
+  });
+
+  it("names an unavailable bound model when no selectable models remain", () => {
+    const source = groups();
+    const first = source[0];
+    const current = first?.sections[0]?.models[0];
+    if (first === undefined || current === undefined) throw new Error("Expected model fixture");
+    render(
+      <ComposerModelPicker
+        groups={[
+          {
+            ...first,
+            readiness: "unavailable",
+            sections: [],
+            unavailableCurrent: current,
+          },
+        ]}
+        onOpenSettings={vi.fn()}
+        onSelect={vi.fn()}
+        selectedModelId={modelOne}
+        selectedProviderInstanceId={providerA}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Set up a provider" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Provider and model" })).toHaveTextContent(
+      "Model One",
+    );
+  });
+
   it("opens a nested provider → model menu from the compact trigger", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
@@ -410,6 +460,45 @@ describe("ComposerModelPicker", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it("marks a Claude account rail with its accent color", async () => {
+    const user = userEvent.setup();
+    const instances = [
+      instance("opencode", providerA, "Local agent"),
+      decodeProviderInstance({
+        ...instance("claude", providerB, "Work Claude"),
+        configuration: {
+          kind: "claude-agent-sdk",
+          binaryPath: "/opt/homebrew/bin/claude",
+          authentication: "subscription",
+          accent: "teal",
+        },
+      }),
+    ];
+    const observedByInstance = new Map([
+      [
+        providerA,
+        observation(providerA, [model(modelOne, "Model One"), model(modelTwo, "Model Two")]),
+      ],
+      [providerB, observation(providerB, [model(modelThree, "Model Three")])],
+    ]);
+    render(
+      <ComposerModelPicker
+        groups={buildModelPickerGroups({
+          instances,
+          observedByInstance,
+          mode: "chat",
+        })}
+        onSelect={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const rail = await screen.findByRole("option", { name: "Work Claude" });
+    expect(rail.querySelector("[data-accent='teal']")).not.toBeNull();
+    expect(
+      screen.getByRole("option", { name: "Local agent" }).querySelector("[data-accent]"),
+    ).toBeNull();
+  });
+
   it("shows readiness labels on providers that are not fully ready", async () => {
     const user = userEvent.setup();
     render(<ComposerModelPicker groups={groups({ degraded: true })} onSelect={vi.fn()} />);
@@ -429,15 +518,82 @@ describe("ComposerModelPicker", () => {
     );
   });
 
-  it("offers Settings when no providers are ready", async () => {
+  it("offers Set up a provider when retained groups list no models", async () => {
+    const user = userEvent.setup();
+    const onOpenSettings = vi.fn();
+    const unready = groups().map((group) => ({
+      ...group,
+      sections: [],
+      readiness: "unavailable" as const,
+    }));
+    render(
+      <ComposerModelPicker groups={unready} onOpenSettings={onOpenSettings} onSelect={vi.fn()} />,
+    );
+
+    const setup = screen.getByRole("button", { name: "Set up a provider" });
+    expect(setup).toBeEnabled();
+    await user.click(setup);
+    expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
+  it("does not offer Set up a provider when a ready instance lists no models", () => {
+    const readyHidden = groups().map((group) => ({ ...group, sections: [] }));
+    render(
+      <ComposerModelPicker groups={readyHidden} onOpenSettings={vi.fn()} onSelect={vi.fn()} />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Set up a provider" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
+  });
+
+  it("offers Set up a provider when no providers are ready", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();
     render(<ComposerModelPicker groups={[]} onOpenSettings={onOpenSettings} onSelect={vi.fn()} />);
 
-    const trigger = screen.getByRole("button", { name: "Provider and model" });
-    expect(trigger).toHaveTextContent("No provider ready");
-    await user.click(trigger);
+    const setup = screen.getByRole("button", { name: "Set up a provider" });
+    expect(setup).toBeEnabled();
+    await user.click(setup);
     expect(onOpenSettings).toHaveBeenCalled();
+    expect(screen.queryByText("No provider ready")).not.toBeInTheDocument();
+  });
+
+  it("keeps Set up a provider locked while the composer is busy", () => {
+    render(
+      <ComposerModelPicker disabled groups={[]} onOpenSettings={vi.fn()} onSelect={vi.fn()} />,
+    );
+
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeDisabled();
+  });
+
+  it("keeps Set up a provider locked while a model selection is still pending", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn(() => new Promise<void>(() => {}));
+    const view = render(
+      <ComposerModelPicker groups={groups()} onOpenSettings={vi.fn()} onSelect={onSelect} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(await screen.findByRole("option", { name: "Model Two" }));
+    expect(onSelect).toHaveBeenCalledOnce();
+
+    view.rerender(<ComposerModelPicker groups={[]} onOpenSettings={vi.fn()} onSelect={onSelect} />);
+
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeDisabled();
+  });
+
+  it("does not offer Set up a provider when ready providers were filtered out", () => {
+    render(
+      <ComposerModelPicker
+        groups={[]}
+        onOpenSettings={vi.fn()}
+        onSelect={vi.fn()}
+        providersReady
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Set up a provider" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
   });
 
   it("keeps the provider control visible but disabled when configuration cannot be opened", () => {
