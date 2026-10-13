@@ -25,6 +25,7 @@ export class MachineChangeFeed {
   readonly #frames: MachineChangeFrame[] = [];
   readonly #subscribers = new Set<Subscriber>();
   readonly #maxFrames: number;
+  readonly #childRequestIds = new Set<string>();
   #nextSequence = 1;
   #closed = false;
 
@@ -53,8 +54,47 @@ export class MachineChangeFeed {
     const topics = new Set<MachineChangeTopic>();
     for (const event of input.events) {
       for (const topic of topicsForEvent(event)) topics.add(topic);
+      if (this.#childRequestChanged(event)) {
+        topics.add("work-navigation");
+        topics.add("code-navigation");
+      }
     }
     this.publish([...topics]);
+  }
+
+  /**
+   * Whether this event asks or settles a request a subagent made. Only those
+   * reach the navigation reads: a lead's own approval or question is answered
+   * where it is asked and is not a Needs you row. An ask names its subagent in
+   * `source`; a settle names only the request, so the ask's id is remembered
+   * until its settle, which every ask reaches (answered, expired, or cancelled).
+   */
+  #childRequestChanged(event: {
+    readonly aggregateType: string;
+    readonly eventName?: string;
+    readonly payload?: unknown;
+  }): boolean {
+    if (event.aggregateType !== NATIVE_HARNESS_SESSION_AGGREGATE_TYPE) return false;
+    const payload = event.payload as
+      | {
+          readonly id?: unknown;
+          readonly source?: unknown;
+          readonly approvalId?: unknown;
+          readonly questionId?: unknown;
+        }
+      | null
+      | undefined;
+    if (payload === undefined || payload === null) return false;
+    const names = NATIVE_HARNESS_SESSION_EVENT_NAMES;
+    if (event.eventName === names.approvalAsked || event.eventName === names.questionAsked) {
+      if (payload.source === undefined) return false;
+      this.#childRequestIds.add(String(payload.id));
+      return true;
+    }
+    if (event.eventName === names.approvalSettled || event.eventName === names.questionSettled) {
+      return this.#childRequestIds.delete(String(payload.approvalId ?? payload.questionId));
+    }
+    return false;
   }
 
   publish(topics: ReadonlyArray<MachineChangeTopic>): void {
@@ -156,13 +196,6 @@ function topicsForEvent(event: {
   readonly payload?: unknown;
 }): ReadonlyArray<MachineChangeTopic> {
   const { aggregateType } = event;
-  if (aggregateType === NATIVE_HARNESS_SESSION_AGGREGATE_TYPE) {
-    // A subagent's approval or question is read from this session by the
-    // pending-request read, which follows the Work and Code navigation topics.
-    return event.eventName !== undefined && HARNESS_SESSION_REQUEST_EVENT_NAMES.has(event.eventName)
-      ? ["work-navigation", "code-navigation"]
-      : [];
-  }
   if (aggregateType === "project") {
     return ["projects", "chat-navigation", "work-navigation", "code-navigation"];
   }
@@ -176,13 +209,6 @@ function topicsForEvent(event: {
   if (aggregateType.startsWith("extension-")) return ["extensions"];
   return [];
 }
-
-const HARNESS_SESSION_REQUEST_EVENT_NAMES: ReadonlySet<string> = new Set([
-  NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalAsked,
-  NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalSettled,
-  NATIVE_HARNESS_SESSION_EVENT_NAMES.questionAsked,
-  NATIVE_HARNESS_SESSION_EVENT_NAMES.questionSettled,
-]);
 
 const CODE_NAVIGATION_EVENT_KINDS = new Set([
   "conversation-turn-started",
