@@ -3584,7 +3584,12 @@ prompt, schema, tool, route, model, or capability.
   - Disabling the plugin or component, archiving the Project, or switching a
     mode off leaves grants stored and unused. Uninstall, withdrawn source
     trust, and rollback revoke them (`extension.tool-grant-revoked@1`), so
-    installing or trusting the package again restores nothing. A person
+    installing or trusting the package again restores nothing. The
+    revocation is a second append after the lifecycle commit, so a grant also
+    stops standing when its extension's latest uninstall, rollback, or trust
+    withdrawal is later in the journal than the grant, whether or not the
+    host stopped before appending the revocation; Settings does not list it
+    and a call asks again. A person
     revokes one through the local-only `/api/extensions/tool-grants`, which
     lists and revokes and has no request that adds a grant. Settings › Data &
     privacy lists them by Project with Revoke, and the prompt offers "always

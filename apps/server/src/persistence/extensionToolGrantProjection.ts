@@ -24,6 +24,8 @@ export interface ExtensionToolGrantSubject {
 
 export interface ProjectedExtensionToolGrant extends ExtensionToolGrant {
   readonly revocationReason: ExtensionToolGrantRevocationReason | undefined;
+  /** The journal sequence of the event that last moved this row. */
+  readonly lastSequence: number;
 }
 
 interface GrantRow {
@@ -38,6 +40,7 @@ interface GrantRow {
   readonly definition_digest: string;
   readonly revocation_reason: ExtensionToolGrantRevocationReason | null;
   readonly granted_at: string;
+  readonly last_sequence: number;
 }
 
 /**
@@ -139,7 +142,7 @@ export class ExtensionToolGrantProjection implements Projection {
 
 const GRANT_COLUMNS = `grant_id, project_id, extension_id, package_id, component_id,
   mcp_tool_name, package_version, package_digest, definition_digest, revocation_reason,
-  granted_at`;
+  granted_at, last_sequence`;
 
 /** The stored grant for a tool, revoked or not, or `undefined` when none was ever recorded. */
 export function readExtensionToolGrant(
@@ -191,5 +194,6 @@ function projectGrant(row: GrantRow): ProjectedExtensionToolGrant {
       grantedAt: row.granted_at,
     }),
     revocationReason: row.revocation_reason ?? undefined,
+    lastSequence: row.last_sequence,
   };
 }

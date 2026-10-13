@@ -1,6 +1,7 @@
 import {
   decodeExtensionLifecycleEvent,
   type ExtensionLifecycleEvent,
+  type ExtensionToolGrantRevocationReason,
 } from "@octant/contracts/extension-events";
 import {
   decodeExtensionPackageManifest,
@@ -65,6 +66,16 @@ export interface ProjectedExtensionRecord {
   readonly waiting: boolean;
   readonly diagnostics: ReadonlyArray<ExtensionDiagnostic>;
   readonly tombstoned: boolean;
+  /**
+   * The latest lifecycle commit that ends the remembered tool approvals given
+   * before it: an uninstall, a rollback, or withdrawn source trust. A grant
+   * journaled at or before `sequence` no longer stands, whether or not its
+   * revocation was ever appended.
+   */
+  readonly grantsEnded?: {
+    readonly sequence: number;
+    readonly reason: Exclude<ExtensionToolGrantRevocationReason, "person">;
+  };
   readonly aggregateVersion: number;
   readonly lastSequence: number;
 }
@@ -222,6 +233,7 @@ function applyLifecycle(
     case "rollback-selected":
       return {
         ...withoutPending(next),
+        grantsEnded: { sequence: lastSequence, reason: "rolled-back" },
         lifecycleState: "installed",
         current: payload.manifest,
         versions: selectVersion(next.versions, payload.manifest),
@@ -245,7 +257,13 @@ function applyLifecycle(
         diagnostics: appendDiagnostic(next.diagnostics, payload.reason),
       };
     case "source-trust-changed":
-      return { ...next, trusted: payload.trusted };
+      return {
+        ...next,
+        trusted: payload.trusted,
+        ...(payload.trusted
+          ? {}
+          : { grantsEnded: { sequence: lastSequence, reason: "trust-revoked" as const } }),
+      };
     case "plugin-desired-state-changed":
       return { ...next, pluginDesired: payload.desired };
     case "component-desired-state-changed":
@@ -284,6 +302,7 @@ function applyLifecycle(
       return {
         ...next,
         lifecycleState: "uninstalled",
+        grantsEnded: { sequence: lastSequence, reason: "plugin-uninstalled" },
         trusted: false,
         pluginDesired: false,
         componentDesired: {},
