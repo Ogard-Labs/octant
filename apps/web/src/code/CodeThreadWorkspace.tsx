@@ -78,8 +78,8 @@ import { useThreadMentions } from "../chat/useThreadMentions";
 import { useComposerThreadDropRegistration } from "../chat/composerThreadDrop";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTurnChangedFilesCard } from "./CodeTurnChangedFilesCard";
-import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { HarnessRetryStatus } from "../transcript/HarnessRetryStatus";
+import { TurnActivityRows } from "../transcript/TurnActivityRows";
 import { liveTaskProgress } from "./transcriptActivity";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { modelDisplayName, providerModelLabel } from "../providers/providerModelLabel";
@@ -1524,7 +1524,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                         )}
                         {gallery}
                         {activity === undefined ? null : (
-                          <CodeTranscriptRow
+                          <TurnActivityRows
                             activity={activity}
                             running={message.status === "incomplete"}
                             settled={

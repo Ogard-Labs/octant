@@ -8,11 +8,9 @@ import {
   EMPTY_TURN_ACTIVITY,
   activeRowCount,
   alwaysVisibleActivityRows,
-  appendReasoning,
-  applyActivityEvent,
-  liveTaskProgress,
   settledTurnActivitySummary,
-} from "./transcriptActivity";
+} from "../transcript/turnActivity";
+import { appendReasoning, applyActivityEvent, liveTaskProgress } from "./transcriptActivity";
 
 function tool(state: "started" | "running" | "completed" | "failed"): CodeOperationEvent {
   return {

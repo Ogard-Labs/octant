@@ -25,12 +25,8 @@ import {
   type ProviderContextBreakdown,
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
-import {
-  appendReasoning,
-  applyActivityEvent,
-  EMPTY_TURN_ACTIVITY,
-  type CodeTurnActivity,
-} from "./transcriptActivity";
+import { appendReasoning, applyActivityEvent } from "./transcriptActivity";
+import { EMPTY_TURN_ACTIVITY, type TurnActivity } from "../transcript/turnActivity";
 import { samePollingData } from "../polling/samePollingData";
 import { createReadCursorStore, type ReadCursorStore } from "../threads/readCursorStore";
 
@@ -465,7 +461,7 @@ async function readForkConversation(
   visited: ReadonlySet<string> = new Set(),
 ): Promise<{
   readonly messages: ReadonlyArray<CodeConversationMessage>;
-  readonly activity: ReadonlyMap<string, CodeTurnActivity>;
+  readonly activity: ReadonlyMap<string, TurnActivity>;
 }> {
   const sourceId = String(origin.threadId);
   if (visited.has(sourceId) || visited.size >= 32)
@@ -473,7 +469,7 @@ async function readForkConversation(
   const source = await client.thread(origin.threadId, signal);
   const inherited =
     source.thread.forkedFrom === undefined
-      ? { messages: [], activity: new Map<string, CodeTurnActivity>() }
+      ? { messages: [], activity: new Map<string, TurnActivity>() }
       : await readForkConversation(
           client,
           source.thread.forkedFrom,
@@ -516,10 +512,10 @@ async function projectConversationTurns(
   signal: AbortSignal,
 ): Promise<{
   readonly messages: ReadonlyArray<CodeConversationMessage>;
-  readonly activity: ReadonlyMap<string, CodeTurnActivity>;
+  readonly activity: ReadonlyMap<string, TurnActivity>;
 }> {
   const messages: CodeConversationMessage[] = [];
-  const activity = new Map<string, CodeTurnActivity>();
+  const activity = new Map<string, TurnActivity>();
   for (const turn of turns) {
     if (signal.aborted) throw new DOMException("The request was aborted.", "AbortError");
     const prompt = await readConversationText(
