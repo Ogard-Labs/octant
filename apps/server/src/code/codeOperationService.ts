@@ -910,6 +910,12 @@ export class CodeOperationService {
         ? decodeCodeOperationResult({ ...result, delivery: command.delivery })
         : result;
     const initiator = options.initiator ?? "agent";
+    // Switching a grant off only narrows authority, so losing the checkout
+    // cannot stand in its way: it needs the thread and a window that can open
+    // it, and nothing about the folder.
+    if (command.kind === "revoke-terminal-browser-grant") {
+      return this.#switchOffTerminalBrowserGrant(windowId, command);
+    }
     const scope = await this.#scope(windowId, command);
     if ("failure" in scope) return this.#failed(command.operationId, scope.failure, scope.message);
     if (command.kind === "start-provider-turn" && command.delivery !== undefined) {
@@ -1628,6 +1634,63 @@ export class CodeOperationService {
     return replay;
   }
 
+  async #switchOffTerminalBrowserGrant(
+    windowId: WindowId,
+    command: Extract<CodeOperationCommand, { readonly kind: "revoke-terminal-browser-grant" }>,
+  ): Promise<CodeOperationResult> {
+    const stored = this.#options.authority.readThread(command.threadId);
+    const thread =
+      stored === undefined
+        ? undefined
+        : (this.#options.authority.effectiveThread?.(windowId, stored) ?? stored);
+    if (
+      thread === undefined ||
+      thread.id !== command.threadId ||
+      thread.checkoutId !== command.checkoutId
+    ) {
+      return this.#failed(command.operationId, "invalid", "Code thread or checkout is invalid.");
+    }
+    if (!(await this.#options.authority.canAccessProject(windowId, thread.projectId))) {
+      return this.#failed(command.operationId, "unauthorized", "Code thread is unauthorized.");
+    }
+    const replay = this.#replay(command.threadId, command.operationId, 0, 256);
+    const recorded = replay.frames.find(
+      (
+        frame,
+      ): frame is CodeOperationEventFrame & {
+        readonly event: { readonly kind: "operation-result"; readonly result: CodeOperationResult };
+      } => frame.event.kind === "operation-result",
+    );
+    if (recorded !== undefined) return recorded.event.result;
+
+    const grants = this.#options.terminalBrowserGrants;
+    const outcome =
+      grants === undefined
+        ? ({ status: "refused", reason: "no-live-grant" } as const)
+        : await grants.switchOff({
+            windowId,
+            threadId: thread.id,
+            terminalId: command.terminalId,
+          });
+    let snapshot: CodeOperationTerminalSnapshot | undefined;
+    try {
+      snapshot = this.#options.terminals.attach(command.terminalId);
+    } catch {
+      snapshot = undefined;
+    }
+    const result =
+      snapshot === undefined
+        ? this.#terminalUnavailable(command.operationId, command.terminalId, outcome)
+        : this.#terminal(command.operationId, snapshot, false, outcome);
+    this.#options.events.append({
+      threadId: command.threadId,
+      operationId: command.operationId,
+      expectedCursor: replay.nextCursor,
+      event: { kind: "operation-result", result },
+    });
+    return result;
+  }
+
   async #scope(
     windowId: WindowId,
     command: Pick<CodeOperationCommand, "threadId" | "checkoutId">,
@@ -1843,33 +1906,20 @@ export class CodeOperationService {
         }
         delete owner.starting;
         owner.outputBaseline = snapshot.transcript.characters;
-        return this.#terminal(
-          command.operationId,
-          snapshot,
-          true,
-          browserGrant?.kind === "granted" ? browserGrant.outcome : undefined,
-        );
+        // A shell that already exited when the launch returned never ran with
+        // its grant, and nothing observes it any more. The grant ends here and
+        // the caller is told so, never that it was granted.
+        const grantOutcome =
+          browserGrant?.kind !== "granted"
+            ? undefined
+            : snapshot.status === "running"
+              ? browserGrant.outcome
+              : this.#options.terminalBrowserGrants?.abandon(command.terminalId);
+        return this.#terminal(command.operationId, snapshot, true, grantOutcome);
       }
-      case "revoke-terminal-browser-grant": {
-        const grants = this.#options.terminalBrowserGrants;
-        const outcome =
-          grants === undefined
-            ? ({ status: "refused", reason: "no-live-grant" } as const)
-            : await grants.switchOff({
-                windowId,
-                threadId: thread.id,
-                terminalId: command.terminalId,
-              });
-        let snapshot: CodeOperationTerminalSnapshot | undefined;
-        try {
-          snapshot = this.#options.terminals.attach(command.terminalId);
-        } catch {
-          snapshot = undefined;
-        }
-        return snapshot === undefined
-          ? this.#terminalUnavailable(command.operationId, command.terminalId, outcome)
-          : this.#terminal(command.operationId, snapshot, false, outcome);
-      }
+      case "revoke-terminal-browser-grant":
+        // Settled before any checkout is resolved; see `execute`.
+        return this.#switchOffTerminalBrowserGrant(windowId, command);
       case "attach-terminal": {
         const owner = await this.#resolveTerminalOwner(command, windowId, thread, checkout);
         if (owner === "unauthorized")
