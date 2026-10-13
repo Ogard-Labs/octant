@@ -660,7 +660,9 @@ that expires in 10 seconds and authorizes that one page. The ticket is held in
 memory only and is forgotten when redeemed, so a replayed or expired one is
 refused; the window credential never enters the address. `GET
 /api/canvas/design-page?ticket=` redeems it only for a frame load
-(`Sec-Fetch-Dest: iframe` when the browser sends it) and serves the page with
+(`Sec-Fetch-Dest: iframe` when the browser sends it; the desktop's main process
+asks for the page without a fetch destination, and only for a ticket the
+renderer named) and serves the page with
 `Content-Security-Policy: sandbox allow-scripts; default-src 'none';
 script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:;
 font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none';
@@ -679,30 +681,78 @@ design-page path, which the packaged `file://` and Vite renderers reach on the
 loopback host. The host writes a bridge script first in the page; it posts the
 page's height, uncaught errors cut to 280 characters, and a heartbeat every
 second on the `octant-design-frame@1` channel and grants nothing. The
-renderer draws the page in a frame sandboxed to `allow-scripts` alone and
-reads only typed, bounded messages whose `source` is that frame's window and
-whose origin is opaque, clamps height to 48–12,000px, and shows errors as text.
-A frame with no heartbeat for 5 seconds (10 for the first) while the window is
-visible is removed and shown as stopped with **Run again**, as is a frame
-that posts more than 250 messages in a second, which would starve the
-renderer that holds **Stop**, and a frame whose `load` fires a second time,
-which is a page it navigated to. Host
-chrome holds a running label and **Stop**. In the thread a prototype starts
-only on **Run**; the sidebar runs it on open, and the frame is out of the tab
-order until the person pressed Run. On desktop the main process cancels every
-navigation of a running frame except its first load of a ticketed page
-(`will-frame-navigate`, keyed by frame tree node and by an address on the
-host, so a `history` rewrite does not hide it), sets the renderer's WebRTC
-policy to `disable_non_proxied_udp`, reads Command-Escape (Control-Escape
-elsewhere) through `before-input-event` before a running frame sees it and
-moves focus to that frame's Stop, stopping a page that takes focus straight
-back, and enables `IsolateSandboxedIframes` with per-document grouping:
-Electron 43 already runs sandboxed frames out of process, but grouped one
-site's frames into one process, so a page spinning in a loop held the next
-prototype. In a browser the Run control says the prototype is not
-network-contained, because a self-navigated page can reach the network before
-the parent removes it, under the
+renderer reads only typed, bounded messages (below), clamps height to
+48–12,000px, and shows errors as text. A page with no heartbeat for 5 seconds
+(10 for the first) while the window is visible is removed and shown as stopped
+with **Run again**, as is a page that posts more than 250 messages in a second,
+which would starve the renderer that holds **Stop**, and a page that loads a
+second time, which is a page it navigated to. Host chrome holds a running label
+and **Stop**. In the thread a prototype starts only on **Run**; the sidebar
+runs it on open, and the page is out of the tab order until the person pressed
+Run.
+
+In a browser the page is drawn in a frame sandboxed to `allow-scripts` alone,
+and the renderer accepts only messages whose `source` is that frame's window
+and whose origin is opaque. A browser cannot cancel a self-navigation, so the
+Run control says the prototype is not network-contained, and says that its
+script can still connect to another computer, under the
 [Canvas HTML frames threat model](../security/canvas-html-frames-threat-model.md).
+
+On desktop a running prototype is never drawn in a frame. A page policy does
+not cover WebRTC, and the renderer's WebRTC policy stops only UDP: on Electron
+43.1.0 a peer connection naming a TURN server over TCP still reached a local
+listener from a sandboxed frame. So the prototype is a `<webview>` whose guest
+lives in a session of its own with no route out, the same boundary the preview
+browser has:
+
+- **Preparing.** A run is two separate facts: whether it is contained (what the
+  person is told) and where it is drawn (the desktop's own surface, or a frame).
+  Whatever builds the run, a prototype drawn on the surface is not asked for a
+  ticket until the renderer has asked the main process to prepare the surface;
+  a shared snapshot's prototype takes the same path as a live one. The agent's
+  preview browser is contained and draws a frame, because it is an ordinary
+  browser with no such surface. The main process points the surface's session
+  at a SOCKS address that is never a proxy, with `<-loopback>` so loopback is
+  not exempt, reads back that a public and a loopback address both resolve to
+  it and neither to `DIRECT`, and refuses every permission, device, screen
+  capture, and download. When it cannot, the prototype reports why and does not
+  run; it is never drawn in a frame instead, and the app window cancels any
+  frame navigation to the design page.
+- **What may attach.** The renderer names only the host's ticketed address. The
+  main process (`will-attach-webview`) cancels an element naming anything else,
+  or arriving before the surface is ready, and replaces the element's partition,
+  preload, and preferences with the surface's own: an in-memory partition shared
+  with no cookies, storage, or permissions of the app's, sandboxed and
+  context-isolated, no Node. The renderer never passes a session name, URL of
+  its choosing, or preference.
+- **The page.** The page is served to the guest under an `octant-prototype:`
+  scheme the surface's session answers from the main process, which asks the
+  host for the ticketed design page itself and keeps its content type and
+  policy. Nothing else is served, so the guest needs no route to the host's
+  loopback address and the host API is unreachable from it.
+- **The bridge.** The guest's preload forwards the page's bridge messages, cut
+  to type, height, and message text, as `ipc-message` events of the element. The
+  renderer applies the same channel, type, bounds, heartbeat, and flood checks,
+  and also stops a prototype whose surface goes away. There is no window or
+  origin to check because the page has no parent frame to post to.
+- **What the guest may do.** The main process refuses new windows, every
+  navigation and redirect after the first load, non-proxied UDP, and every
+  permission. It reads Command-Escape (Control-Escape elsewhere) through the
+  guest's `before-input-event` before the page sees it, and the renderer moves
+  focus to the surface's Stop, stopping a page that takes focus straight back.
+  A guest is its own process, and the surface is drawn with the same size,
+  scale, and placement as a frame, so expanded and in-thread placements,
+  sizing to content, and redraw without restart are unchanged.
+
+The app window still gives each sandboxed document its own process
+(`IsolateSandboxedIframes`, per-document grouping), because Electron 43 grouped
+one site's sandboxed frames into one process, so a page spinning in a loop held
+the next frame.
+
+What stays open on desktop is a host-name lookup the page asks the app's
+resolver for (a `dns-prefetch` link): Electron has no per-session resolver rule,
+so the notice under a running prototype says that it can still make Octant look
+up host names, and that this can carry a little of what it holds.
 
 ## Verification
 
