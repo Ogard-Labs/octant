@@ -713,8 +713,9 @@ conversation transfer every fork can fall back to.
 
 A fork or Restore from here copies its source's conversation, and a harness
 fork its tool results too, so a thread made from a source marked with
-outside content starts marked. Every Code creation with a `forkedFrom` origin
-appends `thread.external-content-ingested@1` on the new thread
+outside content starts marked. A Code creation with a `forkedFrom` origin
+whose source is marked appends `thread.external-content-ingested@1` on the new
+thread
 (`external-content`, label `code-fork`, content reference
 `code-fork-<source thread>-<fork turn>`) before it journals the thread, so no
 moment exists at which the thread is created and unmarked; a mark that cannot
