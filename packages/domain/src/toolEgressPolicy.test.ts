@@ -183,6 +183,9 @@ describe("decideToolEgress host matching", () => {
       "-bad.npmjs.org",
       "under_score.npmjs.org",
       `${"a".repeat(64)}.npmjs.org`,
+      "registry.npmjs.org:443",
+      "[::1]:443",
+      "[registry.npmjs.org]",
     ]) {
       expect([host, decide([threadRule()], { destination: { host, port: 443 } })]).toEqual([
         host,

@@ -88,11 +88,14 @@ const DOTTED_IPV4 = /^\d+\.\d+\.\d+\.\d+$/;
  * The name a destination is compared under: lowercase IDNA ASCII with no
  * trailing dot. An IPv4 literal in any spelling the URL host parser accepts
  * (`2130706433`, `0x7f.1`) and any IPv6 literal refuse as `ip-literal`; a
- * single-label name, `localhost` and names under it, and anything that is not
- * a DNS name refuse as `invalid-name`.
+ * single-label name, `localhost` and names under it, a name carrying a port
+ * (`example.com:443`), and anything else that is not a DNS name refuse as
+ * `invalid-name`.
  */
 export function canonicalToolEgressHost(raw: string): ToolEgressHostName {
-  if (raw.includes(":") || raw.startsWith("[")) return { kind: "refused", reason: "ip-literal" };
+  if (raw.includes(":") || raw.startsWith("[")) {
+    return { kind: "refused", reason: isIpv6Literal(raw) ? "ip-literal" : "invalid-name" };
+  }
   if (raw.length === 0 || NON_HOST_CHARACTER.test(raw)) {
     return { kind: "refused", reason: "invalid-name" };
   }
@@ -110,6 +113,20 @@ export function canonicalToolEgressHost(raw: string): ToolEgressHostName {
     return { kind: "refused", reason: "invalid-name" };
   }
   return { kind: "name", host };
+}
+
+/** `::1` or `[::1]`: a colon alone does not make an address (`example.com:443` is a name with a port). */
+function isIpv6Literal(raw: string): boolean {
+  const address = raw.startsWith("[") && raw.endsWith("]") ? raw.slice(1, -1) : raw;
+  if (address.includes("[") || address.includes("]") || NON_HOST_CHARACTER.test(address)) {
+    return false;
+  }
+  try {
+    new URL(`http://[${address}]/`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

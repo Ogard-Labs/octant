@@ -3361,13 +3361,14 @@ confirmed call. A child's proposals surface on its parent's thread with the
 child named, and granting them grants the parent. With learn mode off, the
 refusal reaches the command's output and nothing is proposed.
 
-**Audit journal.** On the thread aggregate unless noted; payloads carry host,
+**Audit journal.** On the thread's own `thread-egress` aggregate unless noted,
+not on the thread aggregate; payloads carry host,
 port, scope, `expiresAt`, rule and launch identity, the server-resolved
 principal, and the thread's taint at the time, never a token, URL path, header,
 or body:
 
 - `thread.egress-rule-granted@1`, `thread.egress-rule-revoked@1`, and on the
-  Project aggregate `project.egress-rule-granted@1` and
+  Project's `project-egress` aggregate `project.egress-rule-granted@1` and
   `project.egress-rule-revoked@1`. A grant is journal-first: a rule whose event
   cannot be appended is not in force.
 - `thread.egress-proposal-raised@1` and `thread.egress-proposal-declined@1`.
