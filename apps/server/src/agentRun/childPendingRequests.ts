@@ -152,7 +152,9 @@ export async function listChildPendingRequests(
     if (!mayOpen) continue;
     const text = modeText(run.routingReceipt.mode, wait.kind, item.text);
     const task = cut(
-      run.routingReceipt.mode === "work" ? sanitizeRequestText(run.task, "Subagent task") : run.task,
+      run.routingReceipt.mode === "work"
+        ? sanitizeRequestText(run.task, "Subagent task")
+        : run.task,
       MAX_CHILD_PENDING_REQUEST_TASK_LENGTH,
     );
     if (text === undefined || task === undefined) continue;
