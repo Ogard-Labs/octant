@@ -116,6 +116,32 @@ setTimeout(() => attempt("self-navigation", () => { location = ${inScript(`${bea
   return block;
 }
 
+/** A benign phone-sized page that reports which element takes each click, and where. */
+function pointerBlock(): CanvasDesignBlock {
+  const script = `
+const report = (message) => { try { parent.postMessage({ channel: "octant-design-frame@1", type: "error", message }, "*"); } catch (_) {} };
+for (const type of ["mousedown", "click"]) {
+  addEventListener(type, (event) => report(type + ":" + (event.target.id || event.target.tagName) + "@" + Math.round(event.clientX) + "," + Math.round(event.clientY)), true);
+}`;
+  const block = decodeCanvasBlock({
+    blockId: "pointer",
+    schemaVersion: 18,
+    kind: "design",
+    title: "Pointer",
+    size: "phone",
+    runsScript: true,
+    frames: [
+      {
+        frameId: "start",
+        title: "Start",
+        html: `<div id="decoy" style="position:absolute;left:0;top:0;width:100px;height:100px;background:#c33"></div><div id="target" style="position:absolute;left:200px;top:600px;width:120px;height:120px;background:#33c"></div><script>${script}</script>`,
+      },
+    ],
+  });
+  if (block.kind !== "design") throw new Error("The fixture is not a design.");
+  return block;
+}
+
 interface Hits {
   udp: number;
   tcp: number;
@@ -173,12 +199,15 @@ async function startListeners(): Promise<Listeners> {
       const url = new URL(request.url);
       hits.host.push(`${request.method} ${url.pathname}`);
       if (url.pathname === "/issue") {
-        const block = hostileBlock({
-          udp: udpPort,
-          tcp: tcpPort,
-          beacon: beaconUrl,
-          host: hostUrl(),
-        });
+        const block =
+          url.searchParams.get("block") === "pointer"
+            ? pointerBlock()
+            : hostileBlock({
+                udp: udpPort,
+                tcp: tcpPort,
+                beacon: beaconUrl,
+                host: hostUrl(),
+              });
         const ticket = tickets.issue({
           canvasId: decodeCanvasId("22222222-2222-4222-8222-222222222222"),
           versionId: decodeCanvasVersionId("33333333-3333-4333-8333-333333333333"),
@@ -246,6 +275,14 @@ interface ProbeResult {
   readonly sessions?: ReadonlyArray<{ readonly shared: boolean; readonly url: string }>;
   readonly refusals?: Record<string, unknown>;
   readonly focusEscapes?: number;
+  readonly pointer?: {
+    readonly scale: number;
+    readonly target: ReadonlyArray<string>;
+    readonly decoy: ReadonlyArray<string>;
+    readonly pastRightEdge: ReadonlyArray<string>;
+    readonly pastBottomEdge: ReadonlyArray<string>;
+    readonly whereUnscaledTargetWouldBe: ReadonlyArray<string>;
+  };
   readonly bridge?: {
     readonly heartbeats: number;
     readonly sizes: ReadonlyArray<number | undefined>;
@@ -334,6 +371,7 @@ interface Row {
 }
 
 const rows: Array<Row> = [];
+let pointerRun: ProbeResult | undefined;
 const failures: Array<string> = [];
 const listeners = await startListeners();
 try {
@@ -366,6 +404,13 @@ try {
       result,
     });
   }
+  pointerRun = await runElectron({
+    binary,
+    main: join(work, "probe-main.mjs"),
+    preload: join(work, "canvasPrototypePreload.cjs"),
+    mode: "contained-pointer",
+    listeners,
+  });
 } finally {
   listeners.stop();
   await rm(work, { recursive: true, force: true });
@@ -417,11 +462,44 @@ for (const row of [contained, stripped]) {
   }
 }
 
+// A click through the scaled surface lands on the element drawn under the
+// pointer, in the page's own pixels, and a click outside the clipped box
+// reaches nothing.
+const landed = (events: ReadonlyArray<string> | undefined, id: string, x: number, y: number) => {
+  const click = events?.find((entry) => entry.startsWith("click:"));
+  const match = /^click:([^@]+)@(-?\d+),(-?\d+)$/.exec(click ?? "");
+  return (
+    match !== null &&
+    match[1] === id &&
+    Math.abs(Number(match[2]) - x) <= 2 &&
+    Math.abs(Number(match[3]) - y) <= 2 &&
+    events?.every((entry) => entry.includes(`:${id}@`)) === true
+  );
+};
+const pointer = pointerRun?.pointer;
+if (pointer === undefined) failures.push("the scaled-pointer run reported nothing");
+else {
+  if (!landed(pointer.target, "target", 260, 660)) {
+    failures.push(`a click on the scaled target landed as ${pointer.target.join(" ")}`);
+  }
+  if (!landed(pointer.decoy, "decoy", 50, 50)) {
+    failures.push(`a click on the scaled decoy landed as ${pointer.decoy.join(" ")}`);
+  }
+  for (const [name, events] of [
+    ["past the right edge", pointer.pastRightEdge],
+    ["past the bottom edge", pointer.pastBottomEdge],
+    ["where the unscaled target would be", pointer.whereUnscaledTargetWouldBe],
+  ] as const) {
+    if (events.length !== 0) failures.push(`a click ${name} reached the page: ${events.join(" ")}`);
+  }
+}
+
 console.log(
   JSON.stringify(
     {
       status: failures.length === 0 ? "passed" : "failed",
       failures,
+      scaledPointer: pointerRun?.pointer,
       runs: rows.map((row) => ({
         run: row.run,
         udpDatagrams: row.udp,
