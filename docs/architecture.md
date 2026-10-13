@@ -60,11 +60,11 @@ The design rests on a small set of invariants that every package obeys:
 - **Capabilities are honest and fail closed.** Every provider reports what it
   supports in every mode; an unsupported capability is disabled or refused,
   never silently emulated. A first-class provider may offer a capability in
-  full; every other provider gets a documented degraded form, listed in a
+  full; every other provider gets a documented degraded form, listed in the
   "degraded on" matrix, or reports the capability unsupported. Not built yet:
   the matrix is not written, and which providers are first-class is not yet
-  named. The app-managed tools below stay
-  provider-neutral, and a seam is never widened for one vendor.
+  named. The app-managed tools below stay provider-neutral, and a seam is never
+  widened for one vendor.
 - **Install ≠ trust ≠ enable.** Extensions contribute nothing until each of
   those steps has been taken explicitly, and even then only within the mode,
   Project, thread, and provider policy that applies.
@@ -685,7 +685,9 @@ disabled, Octant reads nothing from the folder for this purpose, adds no
 instruction, and writes nothing there; turning the setting off leaves an
 existing file untouched. Octant never writes an agent brief (`AGENTS.md`,
 `CLAUDE.md`, or similar) into a user folder, and a Work turn does not read an
-existing one. This narrows the always-on
+existing one. Not built yet for Codex: a Codex Work turn starts at the Project
+root, and Codex still loads an `AGENTS.md` it finds there; Claude Work turns
+load no project settings or instruction files. This narrows the always-on
 behavior first recorded in
 [decisions/0119-a-work-project-keeps-its-status-in-its-folder.md](decisions/0119-a-work-project-keeps-its-status-in-its-folder.md).
 
@@ -3558,13 +3560,11 @@ prompt, schema, tool, route, model, or capability.
 - Skills are discovered only from valid `.agents/skills/` packages between the
   working directory and the Project or repository root, plus the user-global
   `~/.agents/skills/`.
-  Not built yet: discovery also reads a closed, explicit allow-list of extra
-  skill roots, each walked and validated exactly like `.agents/skills/` and
-  entering the same ladder (indexed disabled, then reviewed, then enabled; a
+  Not built yet: discovery also reads an allow-listed set of extra skill roots
+  (for example `.claude/skills`), each entering the same activation ladder as
+  `.agents/skills/` (indexed disabled, then reviewed, then enabled; a
   discovered skill is never trusted or active because of where it was found).
-  The one decided entry is `.claude/skills`. Octant scans no other directory,
-  and a further entry needs its own decision. Until this is built, only
-  `.agents/skills/` is read.
+  Until this is built, only `.agents/skills/` is read.
 - Marketplace network is on user action: curated catalog search is in-memory;
   inspect/install fetches the pinned GitHub tree; standalone skill search
   queries skills.sh and npm with the typed text; Agent Plugins search queries

@@ -4406,9 +4406,6 @@ input.switch:checked::after {
   overflow-wrap: anywhere;
   text-align: center;
 }
-.composer:focus-within {
-  box-shadow: var(--octant-shadow-md);
-}
 .composer-chips {
   display: flex;
   flex-wrap: wrap;
@@ -4588,8 +4585,7 @@ input.switch:checked::after {
 
 /* Existing conversations keep the message surface distinct from its binding.
    Feedback appears only when there is something to act on. */
-.composer.composer--follow-up,
-.composer.composer--follow-up:focus-within {
+.composer.composer--follow-up {
   background: var(--octant-tray);
   border-radius: var(--oct-radius-md);
   box-shadow: none;
@@ -4599,9 +4595,6 @@ input.switch:checked::after {
   background: var(--octant-card);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
-}
-.thread-composer__surface:focus-within {
-  border-color: var(--octant-border-strong);
 }
 .thread-composer__surface > label {
   display: block;

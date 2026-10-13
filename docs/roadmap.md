@@ -180,6 +180,7 @@ Intentionally out of scope; changing this requires an approved design change.
   them; explicit provider-owned update actions remain user-triggered.
 - **Core capabilities that depend on an optional extension** — browser/computer
   use, tests, Apple validation, approvals, memory, and subagents stay
-  app-managed and provider-neutral. A capability may be complete on first-class
-  providers and degraded on the rest, as the architecture's "degraded on"
-  matrix records.
+  app-managed and provider-neutral. Beyond them, a first-class provider may
+  offer a capability in full while every other provider gets a documented
+  degraded form or reports the capability unsupported
+  ([architecture](architecture.md#overview-and-principles)).
