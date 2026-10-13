@@ -27,6 +27,7 @@ import {
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { verifyDatabase } from "../persistence/recovery";
 import { openSqlite } from "../persistence/sqlitePort";
 import { erasePurgedThread } from "../persistence/threadPurge";
 import { SpendCeilingService } from "../spendCeilingService";
@@ -268,11 +269,22 @@ describe("compacting a session on request", () => {
       mode: "chat",
       threadId: threadId as never,
     });
+    // The ledger's surviving plan and summary events stay contiguous, so the
+    // store still verifies and the next append expects a version that exists.
+    expect(
+      verifyDatabase({
+        connection: world.fixture.connection,
+        journal: world.fixture.journal,
+        projections: world.fixture.projections,
+      }).issues.filter((issue) => issue.kind.startsWith("aggregate-")),
+    ).toEqual([]);
     world.fixture.connection.close();
 
     const restarted = createFixture(world.path);
     expect(restarted.harness.latestCompaction(subject)).toBeUndefined();
     expect(restarted.harness.summaryContent(summaryId)).toBeUndefined();
+    planSession({ ...world, harness: restarted.harness });
+    expect(restarted.harness.inspect(subject).latestCompaction).toBeUndefined();
     restarted.connection.close();
   });
 
@@ -466,7 +478,7 @@ function createFixture(existingPath?: string) {
     uuid,
     clock: () => now,
   });
-  return { path, connection, journal, harness, uuid };
+  return { path, connection, journal, projections: runtime.projections, harness, uuid };
 }
 
 interface WorldState {

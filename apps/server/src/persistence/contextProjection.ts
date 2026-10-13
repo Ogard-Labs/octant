@@ -541,6 +541,28 @@ export function purgeContextCompactions(
   connection
     .prepare(`DELETE FROM event_journal WHERE global_sequence IN (${owned})`)
     .run(subject.aggregateId, ...names);
+  // The plans and summaries a compaction committed sit between its events and
+  // survive them. The store verifier treats a per-aggregate version gap as
+  // corruption, so survivors are renumbered contiguously as journal compaction
+  // does: ascending, each new version at most the old one, so the unique
+  // version constraint never sees a transient collision. The caller reconciles
+  // the aggregate head afterwards.
+  const survivors = connection
+    .prepare(
+      `SELECT global_sequence, aggregate_version FROM event_journal
+       WHERE aggregate_type = 'context-ledger' AND aggregate_id = ?
+       ORDER BY global_sequence ASC`,
+    )
+    .all(subject.aggregateId) as ReadonlyArray<{
+    readonly global_sequence: number;
+    readonly aggregate_version: number;
+  }>;
+  const renumber = connection.prepare(
+    "UPDATE event_journal SET aggregate_version = ? WHERE global_sequence = ?",
+  );
+  survivors.forEach((event, index) => {
+    if (event.aggregate_version !== index + 1) renumber.run(index + 1, event.global_sequence);
+  });
 }
 
 export function readContextUsage(
