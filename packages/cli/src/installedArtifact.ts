@@ -37,6 +37,10 @@ export function resolveInstalledArtifactRoot(
  * server verifies the artifact named by `OCTANT_ARTIFACT_ROOT` before it opens
  * anything, serves the artifact's web assets, and reports the version stamped
  * on that artifact.
+ *
+ * `OCTANT_ARTIFACT_VERSION` is always set. The launcher merges this environment
+ * after the parent process, so omitting the key would keep a version inherited
+ * from the parent. An empty value is treated as unset.
  */
 export function installedArtifactServerStartCommand(
   artifactRoot: string,
@@ -48,7 +52,7 @@ export function installedArtifactServerStartCommand(
     args: [join(artifactRoot, "lib", "server", "main.mjs")],
     env: {
       OCTANT_ARTIFACT_ROOT: artifactRoot,
-      ...(artifactVersion === undefined ? {} : { OCTANT_ARTIFACT_VERSION: artifactVersion }),
+      OCTANT_ARTIFACT_VERSION: artifactVersion ?? "",
       OCTANT_WEB_DIST_PATH: join(artifactRoot, "share", "web"),
     },
   };

@@ -136,9 +136,11 @@ dependencies both bundles leave external, built on the target platform itself.
 An installed CLI starts that server under its own Bun runtime with
 `OCTANT_ARTIFACT_ROOT` and `OCTANT_ARTIFACT_VERSION` set. The server verifies
 every listed file before it opens the store, and reports that version on
-`/health`, in a diagnostics export, and on the owner receipt. When the variable
-is unset, the host reports the package version a development script exports, or
-`0.0.0-dev` when that is absent. For Code,
+`/health`, in a diagnostics export, and on the owner receipt. When the stamped
+version is missing or unusable, the CLI still sets `OCTANT_ARTIFACT_VERSION`
+to empty so a value inherited from the parent process cannot replace it. The
+host treats an empty or over-long value as unset and reports the package
+version a development script exports, or `0.0.0-dev` when that is absent. For Code,
 verified remote requests carry their principal through an async request scope:
 the paired device may reach existing active Code Projects without a desktop
 workspace, while services retain thread, checkout, provider, and approval checks.
