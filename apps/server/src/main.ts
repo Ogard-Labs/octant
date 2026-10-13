@@ -16,6 +16,7 @@ import {
   probeHostPlatformCapabilities,
   readHostRuntimeProcessStart,
   resolveHostRuntimePaths,
+  resolveReportedHostVersion,
   ServicePolicyStore,
   startupFailureExitCode,
   writeHostInfoReceipt,
@@ -83,7 +84,7 @@ try {
   process.env.OCTANT_DATA_DIR = paths.dataDirectory;
   const instanceId = launchConfig.instanceId ?? randomUUID();
   const hostId = deriveHostRuntimeHostId(paths.dataDirectory);
-  const serverVersion = process.env.npm_package_version ?? "0.0.0-dev";
+  const serverVersion = resolveReportedHostVersion(process.env);
   const ownership = await acquireHostRuntimeOwner({
     paths,
     hostId,

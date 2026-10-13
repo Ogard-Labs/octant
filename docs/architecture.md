@@ -104,9 +104,10 @@ under the desktop bridge secret and gives the renderer only a single-use
 receipt bound to its window, so a renderer can act on a path only the person
 picked. It attaches to the canonical host at
 `http://127.0.0.1:13773`, or starts that independently runnable host when it is
-absent, then probes storage readiness before showing a window. It passes only
+absent, then probes storage readiness before showing a window. It passes
 native broker coordinates and the desktop bridge secret that native-only
-operations require. It also runs loopback-only
+operations require. A packaged launch also passes the app's version in
+`OCTANT_ARTIFACT_VERSION`; a development launch does not. It also runs loopback-only
 brokers the server talks back to: the credential broker (Keychain access by
 opaque reference), the browser runtime broker, and on macOS the Simulator
 device broker, behind which one native device helper per Simulator delivers
@@ -133,8 +134,13 @@ it carries the bundled CLI (`bin/octant`), the bundled server (`lib/server`), th
 web assets, and a top-level `node_modules` holding the third-party and native
 dependencies both bundles leave external, built on the target platform itself.
 An installed CLI starts that server under its own Bun runtime with
-`OCTANT_ARTIFACT_ROOT` set, so the server verifies every listed file before it
-opens the store. For Code,
+`OCTANT_ARTIFACT_ROOT` and `OCTANT_ARTIFACT_VERSION` set. The server verifies
+every listed file before it opens the store, and reports that version on
+`/health`, in a diagnostics export, and on the owner receipt. When the stamped
+version is missing or unusable, the CLI still sets `OCTANT_ARTIFACT_VERSION`
+to empty so a value inherited from the parent process cannot replace it. The
+host treats an empty or over-long value as unset and reports the package
+version a development script exports, or `0.0.0-dev` when that is absent. For Code,
 verified remote requests carry their principal through an async request scope:
 the paired device may reach existing active Code Projects without a desktop
 workspace, while services retain thread, checkout, provider, and approval checks.
