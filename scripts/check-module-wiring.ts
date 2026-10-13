@@ -92,6 +92,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
+  [
+    "packages/domain/src/toolEgressPolicy.ts",
+    "The harness tool egress decision lands before the host proxy that calls it, as the delivery phases in docs/architecture.md § Harness tool egress rules order them. Remove once the proxy imports decideToolEgress.",
+  ],
 ]);
 
 /** Route modules exempt from Rule A, with the reason they are not registered. */

@@ -114,6 +114,7 @@ export * from "./imageSourcePolicy";
 export * from "./themePolicy";
 export * from "./toolActionPolicy";
 export * from "./toolCallPolicy";
+export * from "./toolEgressPolicy";
 export * from "./untrustedContentPolicy";
 export * from "./artifactLibraryPolicy";
 export * from "./artifactMirrorPolicy";
