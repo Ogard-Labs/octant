@@ -8241,9 +8241,13 @@ export function startOctantServer(
             ) {
               return undefined;
             }
-            // The policy a Work turn on this thread is admitted under.
+            // The policy a Work turn on this thread is admitted under. A thread
+            // whose Project cannot be read has no policy to check, so it has no
+            // session to compact: an unreadable Project never reads as "no
+            // policy, allowed".
             const project = persistence.readProject(thread.projectId);
-            const providerPolicy = project?.type === "work" ? project.providerPolicy : undefined;
+            if (project === undefined || project.type !== "work") return undefined;
+            const providerPolicy = project.providerPolicy;
             return {
               mode: "work",
               projectId: String(thread.projectId),
