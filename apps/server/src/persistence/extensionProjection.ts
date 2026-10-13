@@ -69,7 +69,7 @@ export interface ProjectedExtensionRecord {
   /**
    * The latest lifecycle commit that ends the remembered tool approvals given
    * before it: an uninstall, a rollback, or withdrawn source trust. A grant
-   * journaled at or before `sequence` no longer stands, whether or not its
+   * journaled before `sequence` no longer stands, whether or not its
    * revocation was ever appended.
    */
   readonly grantsEnded?: {
