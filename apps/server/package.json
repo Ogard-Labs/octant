@@ -43,6 +43,7 @@
     "yaml": "catalog:"
   },
   "devDependencies": {
+    "@octant/cli": "workspace:*",
     "@octant/client-runtime": "workspace:*",
     "@types/better-sqlite3": "catalog:",
     "@types/bun": "catalog:",

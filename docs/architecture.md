@@ -292,15 +292,15 @@ Each mode offers only its admitted tools, so every runtime receives the same
 definitions without a separate global tool installation or prompt catalogue,
 through the transport its adapter verified:
 
-| Runtime                             | App-managed tool transport                                                                                            |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Claude Code                         | The Agent SDK's in-process MCP server `octant`, owned by the provider connection                                      |
-| Codex                               | App-server `thread/start.dynamicTools`                                                                                |
-| OpenCode                            | A connection-private loopback MCP endpoint, registered through OpenCode's own server API                              |
-| ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate |
-| Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                              |
-| Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                     |
-| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant; partly built ([detail](design/terminal-browser-grant.md))         |
+| Runtime                             | App-managed tool transport                                                                                                                  |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code                         | The Agent SDK's in-process MCP server `octant`, owned by the provider connection                                                            |
+| Codex                               | App-server `thread/start.dynamicTools`                                                                                                      |
+| OpenCode                            | A connection-private loopback MCP endpoint, registered through OpenCode's own server API                                                    |
+| ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate                       |
+| Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                                                    |
+| Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                                           |
+| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant, reached through `octant mcp`; partly built ([detail](design/terminal-browser-grant.md)) |
 
 No transport edits a person's provider MCP, hook, or global configuration;
 OpenCode's per-launch posture stays in its connection-private configuration.
@@ -4194,8 +4194,9 @@ mechanisms are:
   thread is completed, archived, or purged, its window loses authority, or the
   host stops; a revoked or unknown grant answers every call `unauthorized`. Issue
   and end are journaled without the token or address. Built: the grant, its
-  endpoint, its lifecycle, and its refusals. Not built: the `octant mcp` command,
-  the window switch and approval wording, and desktop packaging. Detail is in
+  endpoint, its lifecycle, its refusals, and the `octant mcp` command a CLI is
+  pointed at. Not built: the window switch and approval wording, the user guide,
+  and desktop packaging. Detail is in
   [Terminal Browser grant](design/terminal-browser-grant.md).
 - **Terminal shell configuration.** On macOS a thread or Project terminal is
   the person's login shell (`-l`), and its read roots add, read-only and only
