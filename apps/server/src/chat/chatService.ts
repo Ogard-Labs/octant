@@ -180,6 +180,8 @@ import {
   contextSourceKey,
   ContextHarnessError,
   ContextHarnessService,
+  reusableContextSummaryIds,
+  type SessionConversationMessage,
 } from "../context/contextHarnessService";
 import { makeContextSummaryGenerator } from "../context/contextSummaryGenerator";
 import { deriveCatalogEpoch, type CapabilityCatalogEntry } from "../context/capabilityCatalog";
@@ -352,57 +354,6 @@ const CHAT_TURN_REQUIRED_CAPABILITIES: ReadonlyArray<ChatProviderCapabilityName>
 
 function poolCandidateKey(candidate: MultiModelPoolCandidate): string {
   return `${candidate.hostId}:${candidate.providerInstanceId}:${candidate.modelId}`;
-}
-
-/** The `summary` source-key prefix {@link contextSourceKey} produces. */
-const SUMMARY_SOURCE_KEY_PREFIX = contextSourceKey({ kind: "summary", referenceId: "" });
-
-/**
- * The journaled summaries a turn may send, given the conversation it selected.
- *
- * A summary's material is the set of conversation sources it replaced — the
- * ones the projection's manifest still records as `summarized` against it — so
- * it may only stand in when every one of those sources is part of this turn's
- * history. A summary that replaced an earlier summary is in range only when
- * that earlier one is too, because it carries the same conversation forward.
- *
- * A summary that is only partly in range is not partly trusted: it is dropped
- * whole, and the material it covered is sent as the real turns instead (which
- * this turn compacts again if it does not fit). Reusing it would put back
- * exactly the superseded conversation an edit exists to exclude.
- */
-function reusableContextSummaryIds(
-  summarizedSourceKeys: ReadonlyMap<string, ContextSummaryId>,
-  historySourceKeys: ReadonlySet<string>,
-): ReadonlySet<string> {
-  const replacedBySummary = new Map<string, Array<string>>();
-  for (const [sourceKey, summaryId] of summarizedSourceKeys) {
-    const replaced = replacedBySummary.get(String(summaryId));
-    if (replaced === undefined) replacedBySummary.set(String(summaryId), [sourceKey]);
-    else replaced.push(sourceKey);
-  }
-  const reusable = new Set<string>();
-  const inRange = (summaryId: string, visiting: Set<string>): boolean => {
-    if (reusable.has(summaryId)) return true;
-    // A summary that (transitively) replaced itself records no history this
-    // turn can check, so it fails closed rather than looping.
-    if (visiting.has(summaryId)) return false;
-    visiting.add(summaryId);
-    const replaced = replacedBySummary.get(summaryId) ?? [];
-    const covered =
-      replaced.length > 0 &&
-      replaced.every(
-        (sourceKey) =>
-          historySourceKeys.has(sourceKey) ||
-          (sourceKey.startsWith(SUMMARY_SOURCE_KEY_PREFIX) &&
-            inRange(sourceKey.slice(SUMMARY_SOURCE_KEY_PREFIX.length), visiting)),
-      );
-    visiting.delete(summaryId);
-    if (covered) reusable.add(summaryId);
-    return covered;
-  };
-  for (const summaryId of replacedBySummary.keys()) inRange(summaryId, new Set());
-  return reusable;
 }
 
 /**
@@ -5600,6 +5551,51 @@ export class ChatService {
       threadId,
     );
     return { ...thread, version: aggregateVersion };
+  }
+
+  /**
+   * The conversation a requested compaction may summarize: the active turns'
+   * prompts and answers, sourced exactly as a turn's context entries source
+   * them so the stored plan can say which ones it already carries.
+   */
+  sessionCompactionConversation(threadId: ChatThreadId): ReadonlyArray<SessionConversationMessage> {
+    const view = this.#persistence.readChatThreadView(threadId);
+    if (view === undefined) return [];
+    const contentById = new Map(view.contents.map((content) => [content.contentId, content]));
+    return activeChatTurns(view.turns).flatMap((turn) => {
+      const exchangeKey = String(turn.id);
+      const user = contentById.get(turn.userMessageRef.contentId);
+      const messages: Array<SessionConversationMessage> =
+        user === undefined
+          ? []
+          : [
+              {
+                source: { kind: "message", referenceId: String(user.contentId) },
+                role: "user",
+                exchangeKey,
+                content: user.body,
+              },
+            ];
+      const attempt = chatTurnAnsweredAttempt(turn);
+      const answer =
+        attempt?.responseRefs
+          .map((reference) => contentById.get(reference.contentId)?.body ?? "")
+          .join("") ?? "";
+      if (attempt !== undefined && answer.trim().length > 0) {
+        messages.push({
+          source: { kind: "message", referenceId: `attempt:${attempt.id}` },
+          role: "assistant",
+          exchangeKey,
+          content: answer,
+        });
+      }
+      return messages;
+    });
+  }
+
+  /** The thread's scratch folder, where its provider sessions start. */
+  scratchRoot(threadId: ChatThreadId): Promise<string> {
+    return this.#scratchStore.acquire(threadId);
   }
 
   /** A queued or streaming attempt, or an execution this process still owns. */

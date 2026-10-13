@@ -51,6 +51,57 @@ describe("planWorkTurnContext", () => {
     ]);
   });
 
+  it("sends a compaction's summary in place of the messages it summarized", () => {
+    let n = 0;
+    const summaryId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" as never;
+    const planned = planWorkTurnContext({
+      threadId,
+      providerInstanceId: provider,
+      modelId: model,
+      uuid: () => `aaaaaaaa-aaaa-4aaa-8aaa-${String(++n).padStart(12, "0")}`,
+      createdAt: "2026-08-11T12:00:00.000Z",
+      contributions: [
+        {
+          text: "The brief asks for a revised launch plan.",
+          sourceKind: "summary",
+          referenceId: String(summaryId),
+          category: "conversation",
+          posture: "compressible",
+          block: {
+            kind: "conversation-summary",
+            text: "The brief asks for a revised launch plan.",
+          },
+        },
+        {
+          text: "Summarize the brief",
+          sourceKind: "message",
+          referenceId: "prior-user",
+          category: "conversation",
+          posture: "compressible",
+          block: { kind: "user-message", text: "Summarize the brief" },
+          summaryId,
+        },
+        {
+          text: "Revise that",
+          sourceKind: "message",
+          referenceId: "prompt",
+          category: "current-request",
+          posture: "required",
+          block: { kind: "user-message", text: "Revise that" },
+        },
+      ],
+    });
+    expect(planned.kind).toBe("ok");
+    if (planned.kind !== "ok") return;
+    expect(planned.context).toEqual([
+      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+      { kind: "conversation-summary", text: "The brief asks for a revised launch plan." },
+    ]);
+    expect(
+      planned.manifest.entries.find((entry) => entry.source.referenceId === "prior-user"),
+    ).toMatchObject({ state: "summarized", summaryId, includedSize: 0 });
+  });
+
   it("keeps private contribution text out of redacted context metadata", () => {
     let n = 0;
     const text = "Private customer detail: confidential fixture";

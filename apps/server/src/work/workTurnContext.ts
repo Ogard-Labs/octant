@@ -5,6 +5,7 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
   type ContextManifest,
+  type ContextSummaryId,
   type ProviderToolDefinition,
   type ProviderContextBlock,
   type ProviderInstanceId,
@@ -33,11 +34,17 @@ export type WorkTurnContextPlan =
 
 export interface WorkTurnContextContribution {
   readonly text: string;
-  readonly sourceKind: "message" | "file" | "instruction";
+  readonly sourceKind: "message" | "file" | "instruction" | "summary";
   readonly referenceId: string;
   readonly category: "conversation" | "current-request" | "workspace-context" | "octant-policy";
   readonly posture: "required" | "compressible";
   readonly block: ProviderContextBlock;
+  /**
+   * The journaled summary that already stands for this message. The entry
+   * stays in the manifest so the next turn still knows it is compacted, but it
+   * costs nothing and is not sent: the summary carries it.
+   */
+  readonly summaryId?: ContextSummaryId;
 }
 
 /**
@@ -69,8 +76,9 @@ export function planWorkTurnContext(input: {
     } as const,
     ...input.contributions,
   ];
-  const entries = contributions.map((contribution) => {
+  const entries = contributions.map((contribution: WorkTurnContextContribution) => {
     const tokens = Math.max(16, Math.ceil(contribution.text.length / 4));
+    const summarized = contribution.summaryId !== undefined;
     const entry = decodeContextEntry({
       id: input.uuid(),
       source: { kind: contribution.sourceKind, referenceId: contribution.referenceId },
@@ -90,14 +98,19 @@ export function planWorkTurnContext(input: {
       retention: "active",
       priority: contribution.posture === "required" ? 100 : 20,
       originalSize: tokens,
-      includedSize: tokens,
-      tokens: { kind: "known", tokens, accuracy: "conservative-heuristic" },
-      state: "included",
+      includedSize: summarized ? 0 : tokens,
+      tokens: {
+        kind: "known",
+        tokens: summarized ? 0 : tokens,
+        accuracy: "conservative-heuristic",
+      },
+      state: summarized ? "summarized" : "included",
       introducedAtTurn: 1,
       reuseCount: 0,
       preview: { redacted: true, label: `${contribution.category} hidden` },
+      ...(contribution.summaryId === undefined ? {} : { summaryId: contribution.summaryId }),
     });
-    blocksByEntryId.set(String(entry.id), contribution.block);
+    if (!summarized) blocksByEntryId.set(String(entry.id), contribution.block);
     return entry;
   });
   const manifest = decodeContextManifest({
@@ -124,7 +137,7 @@ export function includeWorkToolDefinitions(input: {
   const blocks = new Map<string, ProviderContextBlock>();
   let blockIndex = 0;
   for (const entry of input.plan.manifest.entries) {
-    if (entry.state === "omitted" || entry.category === "current-request") continue;
+    if (!sendsWorkBlock(entry)) continue;
     const block = input.plan.context[blockIndex++];
     if (block !== undefined) blocks.set(String(entry.id), block);
   }
@@ -159,6 +172,20 @@ export function includeWorkToolDefinitions(input: {
     }),
     blocks,
     input.safeInputBudget,
+  );
+}
+
+/**
+ * Whether a planned entry has a block in the plan's `context`, which lists
+ * blocks in manifest order without naming their entries. The current prompt
+ * is sent as the turn prompt, and a summarized message is carried by its
+ * summary, so neither has a block.
+ */
+export function sendsWorkBlock(entry: ContextManifest["entries"][number]): boolean {
+  return (
+    entry.state !== "omitted" &&
+    entry.state !== "summarized" &&
+    entry.category !== "current-request"
   );
 }
 

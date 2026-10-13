@@ -1,23 +1,33 @@
 import {
+  CONTEXT_COMPACTION_EVENT_NAMES,
+  CONTEXT_COMPACTION_REQUEST_SHAPE,
   CorrelationId,
   EventId,
   UtcTimestamp,
   decodeContextCommand,
-  decodeContextCommandResult,
+  decodeContextCompactionReceipt,
+  decodeContextCompactionRecord,
   decodeContextEntry,
   decodeContextInspectorSnapshot,
   decodeContextManifest,
   decodeContextPlan,
+  decodeContextSummary,
   decodeContextSummaryContent,
   decodeContextSummaryId,
   decodeUsageReconciliation,
   decodeUsageReconciliationId,
   type ContextCapabilityCounts,
   type ContextCommandResult,
+  type ContextCompactionExecutor,
+  type ContextCompactionFailureReason,
+  type ContextCompactionId,
+  type ContextCompactionRecord,
+  type ContextCompactionUsage,
   type ContextEntry,
   type ContextEntryId,
   type ContextInspectorSnapshot,
   type ContextReserveBreakdown,
+  type ContextSourceRef,
   type ContextSubjectRef,
   type ContextSummary,
   type ContextSummaryId,
@@ -27,11 +37,14 @@ import {
   type ProviderInstanceId,
   type ProviderModelId,
   type ProviderServiceLimits,
+  type UsageReconciliation,
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import {
   ContextCompactionRejected,
   reconcileContextVariance,
+  selectSessionCompaction,
+  type SessionCompactionItem,
 } from "@octant/domain/context-compaction";
 import {
   ContextPolicyRejected,
@@ -43,8 +56,12 @@ import {
 } from "@octant/domain/context-policy";
 import { ledgerUsageCost } from "@octant/domain/turn-metrics-display";
 import type { Journal } from "../persistence/journal";
+import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
+  listRunningContextCompactions,
+  readContextCompaction,
+  readContextCompactions,
   readContextSubjectProjection,
   readContextSummary,
   readContextSummaryContent,
@@ -74,6 +91,17 @@ import {
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
+
+interface PendingContextEvent {
+  readonly eventId: ReturnType<typeof decodeEventId>;
+  readonly eventName: string;
+  readonly eventVersion: 1;
+  readonly hostId: typeof LOCAL_HOST_ID;
+  readonly correlationId: ReturnType<typeof decodeCorrelationId>;
+  readonly actor: { readonly kind: "system"; readonly actorId: typeof OCTANT_LOCAL_ACTOR_ID };
+  readonly occurredAt: ReturnType<typeof decodeTimestamp>;
+  readonly payload: unknown;
+}
 
 interface ContextHarnessPersistence {
   readonly connection: SqliteConnection;
@@ -163,6 +191,53 @@ export type MaintainContextTurnResult =
   // so it is discarded and nothing is committed.
   | { readonly kind: "context-changed" }
   | Exclude<ContextMaintenanceResult, { readonly kind: "summary-created" }>;
+
+/** One message of a thread's conversation, as its own turn builder sources it. */
+export interface SessionConversationMessage {
+  /** The source the thread gives this message's context entry. */
+  readonly source: ContextSourceRef;
+  readonly role: "user" | "assistant";
+  /** The turn the message belongs to; a receipt names the last one summarized. */
+  readonly exchangeKey: string;
+  readonly content: string;
+}
+
+export type SessionCompactionPreview =
+  | { readonly kind: "no-session" }
+  | { readonly kind: "nothing-to-compact" }
+  | { readonly kind: "summarize"; readonly executor: ContextCompactionExecutor };
+
+export interface ReportedCompactionUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+}
+
+export type CompactionSummaryOutcome =
+  | { readonly kind: "generated"; readonly summary: GeneratedContextSummary }
+  | { readonly kind: "failed"; readonly reason: "summary-failed" | "timed-out" };
+
+export interface CompactSessionInput {
+  readonly subject: ContextSubjectRef;
+  readonly compactionId: ContextCompactionId;
+  readonly conversation: ReadonlyArray<SessionConversationMessage>;
+  readonly generateSummary: (
+    request: GenerateContextSummaryRequest,
+  ) => Promise<CompactionSummaryOutcome>;
+  /** What the provider reported spending on the summary request, once it ends. */
+  readonly reportedUsage: () => ReportedCompactionUsage | undefined;
+  /** Read again once the summary returns: the thread may have gone meanwhile. */
+  readonly subjectAvailability: () => "available" | "mode-disabled" | "deleted";
+}
+
+export type CompactSessionResult =
+  | {
+      readonly kind: "settled";
+      readonly record: ContextCompactionRecord;
+      readonly snapshot?: ContextInspectorSnapshot;
+    }
+  // The thread was deleted while the summary was written; its purge erases
+  // the request, so nothing is journaled for it.
+  | { readonly kind: "discarded" };
 
 export class ContextHarnessError extends Error {
   override readonly name = "ContextHarnessError";
@@ -310,12 +385,17 @@ export class ContextHarnessService {
     return snapshot;
   }
 
-  execute(input: unknown): ContextCommandResult {
+  execute(input: unknown): Exclude<ContextCommandResult, { readonly kind: "compaction-started" }> {
     this.#assertReady();
     let command;
     try {
       command = decodeContextCommand(input);
     } catch {
+      throw new ContextHarnessError("invalid", "Context command is invalid.");
+    }
+    // Compaction needs the thread's provider, capacity and spend authority,
+    // which only the session compaction runner holds.
+    if (command.kind === "compact-session") {
       throw new ContextHarnessError("invalid", "Context command is invalid.");
     }
     const key = subjectKey(command.subject);
@@ -369,10 +449,9 @@ export class ContextHarnessService {
       next: { manifest, plan },
     });
     this.#snapshots.set(key, snapshot);
-    return decodeContextCommandResult({
-      kind: command.kind === "update-context-overrides" ? "context-updated" : "context-rebuilt",
-      snapshot,
-    });
+    return command.kind === "update-context-overrides"
+      ? { kind: "context-updated", snapshot }
+      : { kind: "context-rebuilt", snapshot };
   }
 
   reconcileUsage(input: ReconcileContextUsageInput) {
@@ -600,7 +679,16 @@ export class ContextHarnessService {
     if (this.#aggregateVersion(input.subject.aggregateId) !== plannedVersion) {
       return { kind: "context-changed" };
     }
-    return this.#commitSummary(current, produced.summary, produced.content);
+    const snapshot = this.#commitSummary(current, produced.summary, produced.content, {
+      expectedVersion: plannedVersion,
+      events: () => [],
+    });
+    return {
+      kind: "summary-created",
+      summary: produced.summary,
+      content: produced.content,
+      snapshot,
+    };
   }
 
   /**
@@ -659,11 +747,449 @@ export class ContextHarnessService {
     return readContextSummaryContent(this.#persistence.connection, summaryId);
   }
 
+  /** The subject's most recent compaction, if it has had one. */
+  latestCompaction(subject: ContextSubjectRef): ContextCompactionRecord | undefined {
+    this.#assertReady();
+    return readContextCompactions(this.#persistence.connection, subject).at(-1);
+  }
+
+  compaction(
+    subject: ContextSubjectRef,
+    compactionId: ContextCompactionId,
+  ): ContextCompactionRecord | undefined {
+    this.#assertReady();
+    return readContextCompaction(this.#persistence.connection, subject, compactionId);
+  }
+
+  /**
+   * Whether a requested compaction of this subject would change anything now.
+   *
+   * There is no session to compact until a plan has been sent, and a thread
+   * that has since moved to another provider or model has no session the
+   * stored plan describes: summarizing it would write with a model the thread
+   * no longer uses.
+   */
+  previewSessionCompaction(input: {
+    readonly subject: ContextSubjectRef;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+    readonly conversation: ReadonlyArray<SessionConversationMessage>;
+  }): SessionCompactionPreview {
+    this.#assertReady();
+    const current = this.#restored(input.subject);
+    if (current === undefined || !describesSession(current, input)) return { kind: "no-session" };
+    const selected = this.#selectCompaction(current, input.conversation);
+    return selected.kind === "nothing-to-compact"
+      ? selected
+      : { kind: "summarize", executor: hostExecutor(current) };
+  }
+
+  /**
+   * Journals a requested compaction, or returns the one already journaled
+   * under this id so a repeated request never compacts twice.
+   */
+  requestCompaction(input: {
+    readonly subject: ContextSubjectRef;
+    readonly compactionId: ContextCompactionId;
+    readonly executor: ContextCompactionExecutor;
+  }): { readonly kind: "requested" | "existing"; readonly record: ContextCompactionRecord } {
+    this.#assertReady();
+    const existing = this.compaction(input.subject, input.compactionId);
+    if (existing !== undefined) return { kind: "existing", record: existing };
+    const requestedAt = decodeTimestamp(this.#clock());
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "context-ledger", aggregateId: input.subject.aggregateId },
+      expectedVersion: this.#aggregateVersion(input.subject.aggregateId),
+      events: [
+        this.#pending(CONTEXT_COMPACTION_EVENT_NAMES.requested, {
+          compactionId: input.compactionId,
+          subject: input.subject,
+          executor: input.executor,
+          requestedBy: "local-window",
+          requestedAt,
+        }),
+      ],
+    });
+    return {
+      kind: "requested",
+      record: decodeContextCompactionRecord({
+        status: "running",
+        compactionId: input.compactionId,
+        executor: input.executor,
+        requestedAt,
+      }),
+    };
+  }
+
+  /**
+   * Summarizes the conversation before the recent tail with the thread's own
+   * provider and model, and commits it as the subject's next plan.
+   *
+   * A requested compaction skips the reuse economics automatic maintenance
+   * applies, because the person asked, but the summary must still be smaller
+   * than what it replaces. The ledger version is read before the summary is
+   * requested and the commit expects it, so a pin, an exclusion or a turn
+   * planned in between fails the compaction rather than undoing that change.
+   */
+  async compactSession(input: CompactSessionInput): Promise<CompactSessionResult> {
+    this.#assertReady();
+    const requested = this.compaction(input.subject, input.compactionId);
+    if (requested === undefined) return { kind: "discarded" };
+    if (requested.status !== "running") return { kind: "settled", record: requested };
+    const current = this.#restored(input.subject);
+    if (current === undefined) {
+      return this.#failCompaction(input.subject, input.compactionId, "subject-unavailable");
+    }
+    const plannedVersion = this.#aggregateVersion(input.subject.aggregateId);
+    const selected = this.#selectCompaction(current, input.conversation);
+    if (selected.kind === "nothing-to-compact") {
+      // The conversation was compactable when the command was admitted.
+      return this.#failCompaction(input.subject, input.compactionId, "context-changed");
+    }
+    const manifest = current.next.manifest;
+    const outcome = await input.generateSummary({
+      providerInstanceId: manifest.providerInstanceId,
+      modelId: manifest.modelId,
+      materials: selected.materials,
+    });
+    const usage = input.reportedUsage();
+
+    // A purge erases the request with the thread; nothing may bring it back.
+    const latest = this.compaction(input.subject, input.compactionId);
+    if (latest === undefined || input.subjectAvailability() === "deleted") {
+      return { kind: "discarded" };
+    }
+    if (latest.status !== "running") return { kind: "settled", record: latest };
+    const fail = (reason: ContextCompactionFailureReason) =>
+      this.#failCompaction(input.subject, input.compactionId, reason, {
+        usage,
+        basePlan: current,
+        materialTokens: selected.materialTokens,
+      });
+    if (outcome.kind === "failed") return fail(outcome.reason);
+    if (input.subjectAvailability() === "mode-disabled") return fail("subject-unavailable");
+    if (this.#aggregateVersion(input.subject.aggregateId) !== plannedVersion) {
+      return fail("context-changed");
+    }
+    const summaryTokens = outcome.summary.summaryTokens;
+    if (summaryTokens.kind !== "known" || summaryTokens.tokens >= selected.materialTokens) {
+      return fail("summary-not-smaller");
+    }
+    const summary = decodeContextSummary({
+      id: this.#uuid(),
+      sourceEntryIds: selected.entryIds,
+      providerInstanceId: manifest.providerInstanceId,
+      modelId: manifest.modelId,
+      createdAt: decodeTimestamp(this.#clock()),
+      usageCount: 0,
+      summaryTokens,
+      originalTokens: {
+        kind: "known",
+        tokens: selected.materialTokens,
+        accuracy: "conservative-heuristic",
+      },
+      estimatedSavingsTokens: selected.materialTokens - summaryTokens.tokens,
+      replacedSummaryIds: selected.replacedSummaryIds,
+    });
+    const usageReconciliation =
+      usage === undefined
+        ? undefined
+        : this.#compactionUsage(current, usage, selected.materialTokens);
+    let snapshot: ContextInspectorSnapshot;
+    try {
+      snapshot = this.#commitSummary(current, summary, outcome.summary.content, {
+        expectedVersion: plannedVersion,
+        events: ({ plan, timestamp }) => {
+          const tokensBefore = current.next.plan.plannedInputTokens;
+          const tokensAfter = plan.plannedInputTokens;
+          const receipt = decodeContextCompactionReceipt({
+            compactionId: input.compactionId,
+            subject: input.subject,
+            executor: hostExecutor(current),
+            trigger: "requested",
+            // Both figures are the planner's own estimate of the same request
+            // before and after, so their difference is an estimate too.
+            tokensBefore: {
+              kind: "known",
+              tokens: tokensBefore,
+              accuracy: "conservative-heuristic",
+            },
+            tokensAfter: { kind: "known", tokens: tokensAfter, accuracy: "conservative-heuristic" },
+            tokensFreed: {
+              kind: "estimated",
+              tokens: Math.max(0, tokensBefore - tokensAfter),
+              accuracy: "conservative-heuristic",
+            },
+            summary: {
+              visibility: "stored",
+              summaryId: summary.id,
+              summaryTokens,
+              throughTurnId: selected.throughExchangeKey,
+            },
+            usage: compactionUsageOf(usageReconciliation),
+            completedAt: timestamp,
+          });
+          return [
+            ...(usageReconciliation === undefined
+              ? []
+              : [
+                  this.#pending("context.usage-reconciled@1", {
+                    reconciliation: usageReconciliation,
+                  }),
+                ]),
+            this.#pending(CONTEXT_COMPACTION_EVENT_NAMES.completed, { receipt }),
+          ];
+        },
+      });
+    } catch (error) {
+      if (error instanceof ConcurrencyConflict) return fail("context-changed");
+      throw error;
+    }
+    const completed = this.compaction(input.subject, input.compactionId);
+    if (completed === undefined) {
+      throw new ContextHarnessError("unavailable", "Compaction was not recorded.");
+    }
+    return { kind: "settled", record: completed, snapshot };
+  }
+
+  /** Records a requested compaction that ended without changing the session. */
+  failCompaction(
+    subject: ContextSubjectRef,
+    compactionId: ContextCompactionId,
+    reason: ContextCompactionFailureReason,
+  ): CompactSessionResult {
+    this.#assertReady();
+    return this.#failCompaction(subject, compactionId, reason);
+  }
+
+  /**
+   * Closes the compactions a previous host process journaled but never
+   * finished. The host summary was never committed, so its session is
+   * unchanged; a runtime may have compacted before the host went away.
+   */
+  closeInterruptedCompactions(): number {
+    this.#assertReady();
+    let closed = 0;
+    for (const running of listRunningContextCompactions(this.#persistence.connection)) {
+      const record = this.compaction(running.subject, running.compactionId);
+      if (record?.status !== "running") continue;
+      this.#failCompaction(
+        running.subject,
+        running.compactionId,
+        "interrupted",
+        undefined,
+        record.executor.kind === "runtime",
+      );
+      closed += 1;
+    }
+    return closed;
+  }
+
+  #failCompaction(
+    subject: ContextSubjectRef,
+    compactionId: ContextCompactionId,
+    reason: ContextCompactionFailureReason,
+    spent?: {
+      readonly usage: ReportedCompactionUsage | undefined;
+      readonly basePlan: ContextInspectorSnapshot;
+      readonly materialTokens: number;
+    },
+    sessionMayHaveChanged = false,
+  ): CompactSessionResult {
+    // A failed request still spent what the provider reported, and the
+    // ledger and spend ceilings count it.
+    const usageReconciliation =
+      spent?.usage === undefined
+        ? undefined
+        : this.#compactionUsage(spent.basePlan, spent.usage, spent.materialTokens);
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "context-ledger", aggregateId: subject.aggregateId },
+      expectedVersion: this.#aggregateVersion(subject.aggregateId),
+      events: [
+        ...(usageReconciliation === undefined
+          ? []
+          : [this.#pending("context.usage-reconciled@1", { reconciliation: usageReconciliation })]),
+        this.#pending(CONTEXT_COMPACTION_EVENT_NAMES.failed, {
+          compactionId,
+          subject,
+          reason,
+          sessionMayHaveChanged,
+          failedAt: decodeTimestamp(this.#clock()),
+        }),
+      ],
+    });
+    const record = this.compaction(subject, compactionId);
+    if (record === undefined) {
+      throw new ContextHarnessError("unavailable", "Compaction was not recorded.");
+    }
+    return { kind: "settled", record };
+  }
+
+  /**
+   * The compaction request's own usage. It is priced against the plan it
+   * compacted because the ledger keys usage to a plan, but it is a summary
+   * request, not a turn, so the subject's latest usage leaves it out.
+   */
+  #compactionUsage(
+    basePlan: ContextInspectorSnapshot,
+    usage: ReportedCompactionUsage,
+    materialTokens: number,
+  ) {
+    const modelId = basePlan.next.manifest.modelId;
+    const cost = ledgerUsageCost(String(modelId), {
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+    });
+    return decodeUsageReconciliation({
+      id: this.#uuid(),
+      planId: basePlan.next.plan.id,
+      providerInstanceId: basePlan.next.manifest.providerInstanceId,
+      modelId,
+      requestShape: CONTEXT_COMPACTION_REQUEST_SHAPE,
+      plannedInputTokens: materialTokens,
+      actualInputTokens: usage.inputTokens,
+      actualOutputTokens: usage.outputTokens,
+      ...(cost === undefined ? {} : { cost }),
+      varianceTokens: usage.inputTokens - materialTokens,
+      observedAt: decodeTimestamp(this.#clock()),
+    });
+  }
+
+  /**
+   * Picks what a requested compaction summarizes from the thread's own
+   * conversation, matched to the stored plan by source rather than entry id
+   * because a turn rebuilds its entries with fresh ids every time.
+   *
+   * The latest exchange is never in the stored plan — its prompt was that
+   * plan's current request and its reply came after — so it arrives without
+   * an entry, cannot be summarized, and anchors the tail.
+   */
+  #selectCompaction(
+    current: ContextInspectorSnapshot,
+    conversation: ReadonlyArray<SessionConversationMessage>,
+  ):
+    | { readonly kind: "nothing-to-compact" }
+    | {
+        readonly kind: "summarize";
+        readonly entryIds: ReadonlyArray<ContextEntryId>;
+        readonly materials: ReadonlyArray<ContextMaintenanceMaterial>;
+        readonly materialTokens: number;
+        readonly throughExchangeKey: string;
+        readonly replacedSummaryIds: ReadonlyArray<ContextSummaryId>;
+      } {
+    const manifest = current.next.manifest;
+    const pinned = new Set(manifest.overrides.pinnedEntryIds.map(String));
+    const excluded = new Set(manifest.overrides.excludedEntryIds.map(String));
+    const summarizable = (entry: ContextEntry) =>
+      entry.category === "conversation" &&
+      entry.eligibility.status === "eligible" &&
+      entry.state !== "summarized" &&
+      entry.tokens.kind === "known" &&
+      !pinned.has(String(entry.id)) &&
+      !excluded.has(String(entry.id));
+    const contentByEntryId = new Map<string, string>();
+    const items: Array<SessionCompactionItem> = [];
+    // An earlier summary stands for the oldest conversation, ahead of every
+    // message it did not replace.
+    for (const entry of manifest.entries) {
+      if (
+        entry.source.kind !== "summary" ||
+        entry.category !== "conversation" ||
+        entry.state === "summarized"
+      ) {
+        continue;
+      }
+      const content = readContextSummaryContent(
+        this.#persistence.connection,
+        decodeContextSummaryId(entry.source.referenceId),
+      );
+      const usable = content !== undefined && content.length > 0 && summarizable(entry);
+      if (usable) contentByEntryId.set(String(entry.id), `Earlier summary: ${content}`);
+      items.push({
+        ...(usable ? { entryId: entry.id } : {}),
+        kind: "summary",
+        exchangeKey: contextSourceKey(entry.source),
+        tokens: entry.tokens.kind === "known" ? entry.tokens.tokens : 0,
+        summarizable: usable,
+      });
+    }
+    const entryBySource = new Map(
+      manifest.entries
+        .filter((entry) => entry.category === "conversation" && entry.source.kind === "message")
+        .map((entry) => [contextSourceKey(entry.source), entry]),
+    );
+    for (const message of conversation) {
+      const entry = entryBySource.get(contextSourceKey(message.source));
+      if (entry?.state === "summarized") continue;
+      const usable = entry !== undefined && summarizable(entry);
+      if (usable) {
+        contentByEntryId.set(
+          String(entry.id),
+          `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`,
+        );
+      }
+      items.push({
+        ...(usable ? { entryId: entry.id } : {}),
+        kind: "message",
+        exchangeKey: message.exchangeKey,
+        tokens:
+          entry?.tokens.kind === "known"
+            ? entry.tokens.tokens
+            : Math.max(16, Math.ceil(message.content.length / 4)),
+        summarizable: usable,
+      });
+    }
+    const selection = selectSessionCompaction({
+      items,
+      safeInputBudget: current.next.plan.safeInputBudget,
+    });
+    if (selection.kind === "nothing-to-compact") return selection;
+    const selectedIds = new Set(selection.entryIds.map(String));
+    const sizeByEntryId = new Map(
+      items.flatMap((item) =>
+        item.entryId === undefined ? [] : [[String(item.entryId), item.tokens] as const],
+      ),
+    );
+    return {
+      kind: "summarize",
+      entryIds: selection.entryIds,
+      materials: selection.entryIds.map((entryId) => ({
+        entryId,
+        content: contentByEntryId.get(String(entryId)) ?? "",
+        sizeTokens: sizeByEntryId.get(String(entryId)) ?? 0,
+      })),
+      materialTokens: selection.materialTokens,
+      throughExchangeKey: selection.throughExchangeKey,
+      replacedSummaryIds: manifest.entries.flatMap((entry) =>
+        entry.source.kind === "summary" && selectedIds.has(String(entry.id))
+          ? [decodeContextSummaryId(entry.source.referenceId)]
+          : [],
+      ),
+    };
+  }
+
+  /** The subject's current snapshot, restored from its projection after a restart. */
+  #restored(subject: ContextSubjectRef): ContextInspectorSnapshot | undefined {
+    const cached = this.#snapshots.get(subjectKey(subject));
+    if (cached !== undefined) return cached;
+    const inspection = readContextSubjectProjection(this.#persistence.connection, subject)?.next
+      .plan.inspection;
+    return inspection === undefined ? undefined : this.restoreSubject({ subject, ...inspection });
+  }
+
   #commitSummary(
     current: ContextInspectorSnapshot,
     summary: ContextSummary,
     content: string,
-  ): MaintainContextTurnResult {
+    commit: {
+      readonly expectedVersion: number;
+      /** Events committed with the summary, given the plan it produced. */
+      readonly events: (next: {
+        readonly plan: ReturnType<typeof decodeContextPlan>;
+        readonly timestamp: ReturnType<typeof decodeTimestamp>;
+      }) => ReadonlyArray<PendingContextEvent>;
+    },
+  ): ContextInspectorSnapshot {
     const summarized = new Set(summary.sourceEntryIds.map((entryId) => String(entryId)));
     const timestamp = decodeTimestamp(this.#clock());
     const summarizedEntries = current.next.manifest.entries.map((entry) =>
@@ -726,11 +1252,12 @@ export class ContextHarnessService {
     const committed = this.#persistence.journal.append(
       {
         aggregate: { aggregateType: "context-ledger", aggregateId: current.subject.aggregateId },
-        expectedVersion: this.#aggregateVersion(current.subject.aggregateId),
+        expectedVersion: commit.expectedVersion,
         events: [
           this.#pending("context.manifest-created@1", { manifest }),
           this.#pending("context.summary-created@1", { summary }),
           this.#pending("context.plan-created@1", { plan }),
+          ...commit.events({ plan, timestamp }),
         ],
       },
       {
@@ -756,7 +1283,7 @@ export class ContextHarnessService {
       summaries: [...current.summaries, summary],
     });
     this.#snapshots.set(subjectKey(current.subject), snapshot);
-    return { kind: "summary-created", summary, content, snapshot };
+    return snapshot;
   }
 
   restoreSubject(input: RestoreContextSubjectInput): ContextInspectorSnapshot {
@@ -789,14 +1316,7 @@ export class ContextHarnessService {
 
   inspect(subject: ContextSubjectRef, afterSequence?: number): ContextInspectorSnapshot {
     this.#assertReady();
-    let snapshot = this.#snapshots.get(subjectKey(subject));
-    if (snapshot === undefined) {
-      const persisted = readContextSubjectProjection(this.#persistence.connection, subject);
-      const inspection = persisted?.next.plan.inspection;
-      if (inspection !== undefined) {
-        snapshot = this.restoreSubject({ subject, ...inspection });
-      }
-    }
+    const snapshot = this.#restored(subject);
     if (snapshot === undefined) {
       // Nothing has planned this subject's context yet — a thread before its
       // first turn has none. That is an empty answer, not a broken service, and
@@ -807,7 +1327,8 @@ export class ContextHarnessService {
     if (afterSequence !== undefined && snapshot.sequence < afterSequence) {
       throw new ContextHarnessError("stale", "Context projection has not reached that sequence.");
     }
-    return snapshot;
+    const latestCompaction = this.latestCompaction(subject);
+    return latestCompaction === undefined ? snapshot : { ...snapshot, latestCompaction };
   }
 
   #plan(
@@ -896,14 +1417,14 @@ export class ContextHarnessService {
     return row?.aggregate_version ?? 0;
   }
 
-  #pending(eventName: string, payload: unknown) {
+  #pending(eventName: string, payload: unknown): PendingContextEvent {
     return {
       eventId: decodeEventId(this.#uuid()),
       eventName,
       eventVersion: 1,
       hostId: LOCAL_HOST_ID,
       correlationId: decodeCorrelationId(this.#uuid()),
-      actor: { kind: "system" as const, actorId: OCTANT_LOCAL_ACTOR_ID },
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
       occurredAt: decodeTimestamp(this.#clock()),
       payload,
     };
@@ -920,6 +1441,88 @@ export class ContextHarnessService {
 /** Stable identity for the canonical thing a context entry stands for. */
 export function contextSourceKey(source: ContextEntry["source"]): string {
   return `${source.kind}\u0000${source.referenceId}`;
+}
+
+/** The `summary` source-key prefix {@link contextSourceKey} produces. */
+const SUMMARY_SOURCE_KEY_PREFIX = contextSourceKey({ kind: "summary", referenceId: "" });
+
+/**
+ * The journaled summaries a turn may send, given the conversation it selected.
+ *
+ * A summary's material is the set of conversation sources it replaced — the
+ * ones the projection's manifest still records as `summarized` against it — so
+ * it may only stand in when every one of those sources is part of this turn's
+ * history. A summary that replaced an earlier summary is in range only when
+ * that earlier one is too, because it carries the same conversation forward.
+ *
+ * A summary that is only partly in range is not partly trusted: it is dropped
+ * whole, and the material it covered is sent as the real turns instead (which
+ * this turn compacts again if it does not fit). Reusing it would put back
+ * exactly the superseded conversation an edit exists to exclude.
+ */
+export function reusableContextSummaryIds(
+  summarizedSourceKeys: ReadonlyMap<string, ContextSummaryId>,
+  historySourceKeys: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const replacedBySummary = new Map<string, Array<string>>();
+  for (const [sourceKey, summaryId] of summarizedSourceKeys) {
+    const replaced = replacedBySummary.get(String(summaryId));
+    if (replaced === undefined) replacedBySummary.set(String(summaryId), [sourceKey]);
+    else replaced.push(sourceKey);
+  }
+  const reusable = new Set<string>();
+  const inRange = (summaryId: string, visiting: Set<string>): boolean => {
+    if (reusable.has(summaryId)) return true;
+    // A summary that (transitively) replaced itself records no history this
+    // turn can check, so it fails closed rather than looping.
+    if (visiting.has(summaryId)) return false;
+    visiting.add(summaryId);
+    const replaced = replacedBySummary.get(summaryId) ?? [];
+    const covered =
+      replaced.length > 0 &&
+      replaced.every(
+        (sourceKey) =>
+          historySourceKeys.has(sourceKey) ||
+          (sourceKey.startsWith(SUMMARY_SOURCE_KEY_PREFIX) &&
+            inRange(sourceKey.slice(SUMMARY_SOURCE_KEY_PREFIX.length), visiting)),
+      );
+    visiting.delete(summaryId);
+    if (covered) reusable.add(summaryId);
+    return covered;
+  };
+  for (const summaryId of replacedBySummary.keys()) inRange(summaryId, new Set());
+  return reusable;
+}
+
+function hostExecutor(snapshot: ContextInspectorSnapshot): ContextCompactionExecutor {
+  return {
+    kind: "host",
+    providerInstanceId: snapshot.next.manifest.providerInstanceId,
+    modelId: snapshot.next.manifest.modelId,
+  };
+}
+
+function describesSession(
+  snapshot: ContextInspectorSnapshot,
+  thread: { readonly providerInstanceId: ProviderInstanceId; readonly modelId: ProviderModelId },
+): boolean {
+  return (
+    String(snapshot.next.manifest.providerInstanceId) === String(thread.providerInstanceId) &&
+    String(snapshot.next.manifest.modelId) === String(thread.modelId)
+  );
+}
+
+function compactionUsageOf(
+  reconciliation: UsageReconciliation | undefined,
+): ContextCompactionUsage {
+  return reconciliation === undefined
+    ? { kind: "unreported" }
+    : {
+        kind: "reported",
+        inputTokens: reconciliation.actualInputTokens,
+        outputTokens: reconciliation.actualOutputTokens,
+        ...(reconciliation.cost === undefined ? {} : { cost: reconciliation.cost }),
+      };
 }
 
 function subjectKey(subject: ContextSubjectRef): string {

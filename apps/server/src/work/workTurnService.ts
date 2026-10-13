@@ -3,7 +3,12 @@ import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
 } from "../agentRun/agentResultDeliveryBatch";
-import type { ContextHarnessService } from "../context/contextHarnessService";
+import {
+  contextSourceKey,
+  reusableContextSummaryIds,
+  type ContextHarnessService,
+  type SessionConversationMessage,
+} from "../context/contextHarnessService";
 import { observeWorkContext } from "./workContextInspection";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
@@ -15,6 +20,7 @@ import {
   UtcTimestamp,
   WORK_TURN_CAPABILITIES,
   decodeCancelWorkTurnCommand,
+  decodeContextSubjectRef,
   decodeWorkThreadTranscript,
   decodeWorkTurnCancelResult,
   decodeWorkTurnFailure,
@@ -1564,27 +1570,91 @@ export class WorkTurnService {
     return date;
   }
 
+  /**
+   * The thread's earlier turns as context. Conversation a compaction already
+   * summarized is carried by its summary and kept in the manifest as
+   * summarized, so the next compaction knows it is covered; the transcript
+   * keeps every original message either way.
+   */
   #priorTranscriptContributions(
     threadId: WorkThreadId,
   ): ReadonlyArray<WorkTurnContextContribution> {
-    const contributions: WorkTurnContextContribution[] = [];
-    for (const turn of this.#projection.listForThread(threadId)) {
-      for (const [index, entry] of turn.transcript.entries()) {
-        if (entry.text.trim() === "") continue;
-        contributions.push({
-          text: entry.text,
+    const messages = this.sessionCompactionConversation(threadId);
+    const compacted = this.#contextHarness?.compactedConversation(
+      decodeContextSubjectRef({ aggregateType: "work-thread", aggregateId: String(threadId) }),
+    );
+    const reusable =
+      compacted === undefined
+        ? new Set<string>()
+        : reusableContextSummaryIds(
+            compacted.summarizedSourceKeys,
+            new Set(messages.map((message) => contextSourceKey(message.source))),
+          );
+    const summaries = (compacted?.summaries ?? [])
+      .filter((summary) => reusable.has(String(summary.id)))
+      .map(
+        (summary): WorkTurnContextContribution => ({
+          text: summary.content,
+          sourceKind: "summary",
+          referenceId: String(summary.id),
+          category: "conversation",
+          posture: "compressible",
+          block: { kind: "conversation-summary", text: summary.content },
+        }),
+      );
+    return [
+      ...summaries,
+      ...messages.map((message): WorkTurnContextContribution => {
+        const summaryId = compacted?.summarizedSourceKeys.get(contextSourceKey(message.source));
+        return {
+          text: message.content,
           sourceKind: "message",
-          referenceId: `${String(turn.requestId)}:${entry.role}:${String(index)}`,
+          referenceId: message.source.referenceId,
           category: "conversation",
           posture: "compressible",
           block: {
-            kind: entry.role === "assistant" ? "assistant-message" : "user-message",
-            text: entry.text,
+            kind: message.role === "assistant" ? "assistant-message" : "user-message",
+            text: message.content,
           },
-        });
-      }
-    }
-    return contributions;
+          ...(summaryId !== undefined && reusable.has(String(summaryId)) ? { summaryId } : {}),
+        };
+      }),
+    ];
+  }
+
+  /** The conversation a requested compaction may summarize, sourced as turn context sources it. */
+  sessionCompactionConversation(threadId: WorkThreadId): ReadonlyArray<SessionConversationMessage> {
+    return this.#projection.listForThread(threadId).flatMap((turn) =>
+      turn.transcript.flatMap(
+        (entry, index): ReadonlyArray<SessionConversationMessage> =>
+          entry.text.trim() === ""
+            ? []
+            : [
+                {
+                  source: {
+                    kind: "message",
+                    referenceId: `${String(turn.requestId)}:${entry.role}:${String(index)}`,
+                  },
+                  role: entry.role,
+                  exchangeKey: String(turn.turnId),
+                  content: entry.text,
+                },
+              ],
+      ),
+    );
+  }
+
+  /** Whether a turn on this thread is accepted, running, or waiting on the person. */
+  isTurnActive(threadId: WorkThreadId): boolean {
+    return (
+      this.#runningAccess.has(String(threadId)) ||
+      this.#projection
+        .listForThread(threadId)
+        .some(
+          (turn) =>
+            turn.status === "accepted" || turn.status === "running" || turn.status === "waiting",
+        )
+    );
   }
 
   async #threadMentionContributions(

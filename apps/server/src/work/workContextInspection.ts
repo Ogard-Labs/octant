@@ -18,7 +18,11 @@ import type {
   ProviderServiceLimits,
 } from "@octant/contracts";
 import type { ContextHarnessService } from "../context/contextHarnessService";
-import { WORK_TURN_SAFE_INPUT_TOKENS, type WorkTurnContextPlan } from "./workTurnContext";
+import {
+  sendsWorkBlock,
+  WORK_TURN_SAFE_INPUT_TOKENS,
+  type WorkTurnContextPlan,
+} from "./workTurnContext";
 
 export function publishWorkContext(input: {
   readonly service: ContextHarnessService;
@@ -89,12 +93,7 @@ export function publishWorkContext(input: {
   );
   let index = 0;
   const context = manifest.entries.flatMap((entry) => {
-    if (
-      entry.state === "omitted" ||
-      entry.category === "current-request" ||
-      entry.category === "octant-tools"
-    )
-      return [];
+    if (!sendsWorkBlock(entry) || entry.category === "octant-tools") return [];
     const block = input.plan.context[index++];
     return block !== undefined && included.has(String(entry.id)) ? [block] : [];
   });
