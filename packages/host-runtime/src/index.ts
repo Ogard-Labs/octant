@@ -139,7 +139,7 @@ export {
   type HostLogReadResult,
 } from "./logs";
 export { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "./diagnostics";
-export { resolveReportedHostVersion } from "./reportedHostVersion";
+export { acceptedReportedHostVersion, resolveReportedHostVersion } from "./reportedHostVersion";
 export { writeBridgeSecretProjection } from "./bridgeSecret";
 export {
   clearHostRuntimeProjections,

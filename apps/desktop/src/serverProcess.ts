@@ -1,6 +1,7 @@
 import { createServer, type AddressInfo } from "node:net";
 import { StringDecoder } from "node:string_decoder";
 import {
+  acceptedReportedHostVersion,
   HostRuntimePathError,
   redactHostRuntimeText,
   type HostInfoReceipt,
@@ -78,21 +79,11 @@ export function resolvePackagedServerPath(
   return [...new Set([...entries, ...trustedMacOsExecutablePaths])].join(":");
 }
 
-// The owner receipt rejects a server version longer than 64 characters.
-const MAX_PACKAGED_APP_VERSION_LENGTH = 64;
-
 function packagedArtifactVersion(version: string | undefined): {
   readonly OCTANT_ARTIFACT_VERSION?: string;
 } {
-  const trimmed = version?.trim();
-  if (
-    trimmed === undefined ||
-    trimmed.length === 0 ||
-    trimmed.length > MAX_PACKAGED_APP_VERSION_LENGTH
-  ) {
-    return {};
-  }
-  return { OCTANT_ARTIFACT_VERSION: trimmed };
+  const accepted = acceptedReportedHostVersion(version);
+  return accepted === undefined ? {} : { OCTANT_ARTIFACT_VERSION: accepted };
 }
 
 export function serverSpawnSpec(options: ServerSpawnSpecOptions) {

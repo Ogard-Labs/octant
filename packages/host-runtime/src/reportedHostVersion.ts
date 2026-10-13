@@ -15,13 +15,18 @@ export function resolveReportedHostVersion(
   env: Readonly<Record<string, string | undefined>>,
 ): string {
   return (
-    acceptedHostVersion(env.OCTANT_ARTIFACT_VERSION) ??
-    acceptedHostVersion(env.npm_package_version) ??
+    acceptedReportedHostVersion(env.OCTANT_ARTIFACT_VERSION) ??
+    acceptedReportedHostVersion(env.npm_package_version) ??
     DEVELOPMENT_HOST_VERSION
   );
 }
 
-function acceptedHostVersion(value: string | undefined): string | undefined {
+/**
+ * The trimmed version, or `undefined` when it is blank or too long to store on
+ * the owner receipt. A launcher that hands a version to a host uses the same
+ * rule, so the host never discards a version its launcher accepted.
+ */
+export function acceptedReportedHostVersion(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   const trimmed = value.trim();
   if (trimmed.length === 0 || trimmed.length > MAX_REPORTED_HOST_VERSION_LENGTH) return undefined;

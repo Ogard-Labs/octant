@@ -1,10 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { HEADLESS_ARTIFACT_MANIFEST_FILENAME } from "@octant/host-runtime";
-
-// The owner receipt rejects a server version longer than 64 characters.
-const MAX_ARTIFACT_VERSION_LENGTH = 64;
+import {
+  acceptedReportedHostVersion,
+  HEADLESS_ARTIFACT_MANIFEST_FILENAME,
+} from "@octant/host-runtime";
 
 // In a headless artifact the CLI bundle is `bin/octant` and the server is
 // `lib/server/main.mjs` beside it, with no repository checkout around them.
@@ -65,10 +65,7 @@ function readInstalledArtifactVersion(artifactRoot: string): string | undefined 
     );
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
     const version = (parsed as { readonly artifactVersion?: unknown }).artifactVersion;
-    if (typeof version !== "string") return undefined;
-    const trimmed = version.trim();
-    if (trimmed.length === 0 || trimmed.length > MAX_ARTIFACT_VERSION_LENGTH) return undefined;
-    return trimmed;
+    return typeof version === "string" ? acceptedReportedHostVersion(version) : undefined;
   } catch {
     return undefined;
   }
