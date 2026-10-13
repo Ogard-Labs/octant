@@ -1440,7 +1440,9 @@ flowchart LR
   conversation evidence is read in bounded batches and page results paint as
   they arrive; live Code operation frames carry bounded display text beside
   their durable evidence references. Work uses a bounded delta feed over its
-  durable transcript. One post-commit Machine change feed invalidates mode
+  durable transcript. The Work transcript route answers with the newest 64
+  turns of a longer thread, oldest first; export and `#thread` mentions read the
+  whole thread on the host. One post-commit Machine change feed invalidates mode
   navigation and Project/extension projections instead of independent polling
   timers. A running turn's start time and latest step (a tool name and one
   redacted, truncated argument, or a wait on approval or an answer) ride on the
