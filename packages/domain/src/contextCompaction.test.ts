@@ -371,6 +371,7 @@ describe("context compaction policy", () => {
 });
 
 describe("session compaction on request", () => {
+  const noFraming = { fixedTokens: 0, perItemTokens: 0 };
   const message = (
     id: string,
     exchangeKey: string,
@@ -386,6 +387,7 @@ describe("session compaction on request", () => {
 
   it("summarizes the conversation before a tail that fits a quarter of the safe budget", () => {
     const selection = selectSessionCompaction({
+      summaryFraming: noFraming,
       safeInputBudget: 800,
       items: [
         message("u1", "turn-1", 100),
@@ -408,6 +410,7 @@ describe("session compaction on request", () => {
   it("always keeps the latest exchange, even one newer than the plan or larger than the tail", () => {
     expect(
       selectSessionCompaction({
+        summaryFraming: noFraming,
         safeInputBudget: 400,
         items: [
           message("u1", "turn-1", 50),
@@ -423,6 +426,7 @@ describe("session compaction on request", () => {
     });
     expect(
       selectSessionCompaction({
+        summaryFraming: noFraming,
         safeInputBudget: 400,
         items: [message("u1", "turn-1", 900), message("a1", "turn-1", 900)],
       }),
@@ -432,6 +436,7 @@ describe("session compaction on request", () => {
   it("never summarizes pinned, excluded, or summarized entries, and leaves what does not fit", () => {
     expect(
       selectSessionCompaction({
+        summaryFraming: noFraming,
         safeInputBudget: 400,
         items: [
           message("pinned", "turn-1", 50, false),
@@ -449,9 +454,34 @@ describe("session compaction on request", () => {
     });
   });
 
+  it("leaves out material whose excerpt framing would overflow the summary request", () => {
+    const items = [
+      message("u1", "turn-1", 150),
+      message("a1", "turn-1", 150),
+      message("u2", "turn-2", 20),
+    ];
+    expect(
+      selectSessionCompaction({ summaryFraming: noFraming, safeInputBudget: 300, items }),
+    ).toMatchObject({ entryIds: ["u1", "a1"], materialTokens: 300 });
+    // 40 for the instruction and 10 per excerpt: the second message no longer fits.
+    expect(
+      selectSessionCompaction({
+        summaryFraming: { fixedTokens: 40, perItemTokens: 10 },
+        safeInputBudget: 300,
+        items,
+      }),
+    ).toEqual({
+      kind: "summarize",
+      entryIds: ["u1"],
+      materialTokens: 150,
+      throughExchangeKey: "turn-1",
+    });
+  });
+
   it("does not re-summarize an earlier summary on its own", () => {
     expect(
       selectSessionCompaction({
+        summaryFraming: noFraming,
         safeInputBudget: 400,
         items: [
           {

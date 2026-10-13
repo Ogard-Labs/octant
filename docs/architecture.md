@@ -2340,8 +2340,9 @@ The host path picks what to summarize the same way for every planned thread:
 the conversation entries before a tail of the most recent exchanges that fit a
 quarter of the plan's safe input budget, always keeping the latest exchange.
 Pinned entries are never summarized and excluded entries stay excluded.
-Material that does not fit one safe summary request is summarized from the
-oldest end as far as it fits, and the rest stays as it was. A requested
+Material that does not fit one safe summary request — counting the request's
+instruction and each excerpt's header — is summarized from the oldest end as
+far as it fits, and the rest stays as it was. A requested
 compaction skips the reuse economics that automatic maintenance applies
 (`not-net-positive`), because the person asked, but still requires the summary
 to be smaller than what it replaces. The host path records the context ledger's
@@ -2447,6 +2448,10 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   `context.summary-created@1` and `context.plan-created@1` as `#commitSummary`
   does today; the summary text stays subject content, outside the journal, where
   a thread purge erases it.
+- A thread purge erases the thread's compaction events and keeps the rest of
+  its ledger as host accounting. The surviving ledger events are renumbered
+  contiguously, as journal compaction does, because the store verifier treats a
+  per-aggregate version gap as corruption.
 - Octant Harness appends a `compacted` event to `native-harness-transcript`
   that names the summary and the last turn it covers. Earlier messages stay in
   the aggregate; resume and replay build requests from the summary and the tail.

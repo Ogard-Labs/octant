@@ -38,6 +38,16 @@ const SUMMARY_INSTRUCTION = [
   "commentary, and do not invent detail that is not present.",
 ].join(" ");
 
+/**
+ * What {@link summaryPrompt} adds around the material, at the planner's
+ * four-characters-a-token estimate: the instruction, and per excerpt its
+ * header and the longest speaker label a requested compaction prefixes.
+ */
+export const SUMMARY_PROMPT_FRAMING = {
+  fixedTokens: Math.ceil(SUMMARY_INSTRUCTION.length / 4),
+  perItemTokens: Math.ceil(("\n\n--- excerpt 9999 ---\n".length + "Earlier summary: ".length) / 4),
+} as const;
+
 export class ContextSummaryGenerationFailed extends Error {
   override readonly name = "ContextSummaryGenerationFailed";
 

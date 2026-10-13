@@ -313,6 +313,13 @@ export interface SessionCompactionSelectionInput {
   /** The thread's conversation, oldest first. */
   readonly items: ReadonlyArray<SessionCompactionItem>;
   readonly safeInputBudget: number;
+  /**
+   * What the summary request adds around the material: its instruction, and a
+   * header and speaker label per excerpt. Selecting material up to the whole
+   * budget without it would overflow the request exactly when a long session
+   * most needs compacting.
+   */
+  readonly summaryFraming: { readonly fixedTokens: number; readonly perItemTokens: number };
 }
 
 export type SessionCompactionSelection =
@@ -328,7 +335,7 @@ export type SessionCompactionSelection =
  * Picks what a requested compaction summarizes: the conversation before a tail
  * of the most recent exchanges that fit a quarter of the safe input budget,
  * always keeping the latest exchange. Material that does not fit one safe
- * summary request is taken from the oldest end as far as it fits, and the rest
+ * summary request, framing included, is taken from the oldest end as far as it fits, and the rest
  * stays as it was. A selection that would only re-summarize an earlier summary
  * frees nothing, so it is nothing to compact.
  */
@@ -360,18 +367,31 @@ export function selectSessionCompaction(
     tailTokens = withPrevious;
     tailStart -= 1;
   }
+  const perItemTokens = checkedNonNegativeInteger(
+    input.summaryFraming.perItemTokens,
+    "Summary framing per item",
+  );
   const entryIds: Array<ContextEntryId> = [];
   let materialTokens = 0;
+  let requestTokens = checkedNonNegativeInteger(
+    input.summaryFraming.fixedTokens,
+    "Summary framing",
+  );
   let throughExchangeKey: string | undefined;
   const older = exchanges
     .slice(0, tailStart)
     .flatMap((exchange) => exchange.items.map((item) => ({ item, key: exchange.key })));
   for (const { item, key } of older) {
     if (!item.summarizable || item.entryId === undefined) continue;
-    const withItem = checkedAdd(materialTokens, item.tokens, "Summary material");
+    const withItem = checkedAdd(
+      requestTokens,
+      checkedAdd(item.tokens, perItemTokens, "Summary excerpt"),
+      "Summary request",
+    );
     if (withItem > safeInputBudget) break;
     entryIds.push(item.entryId);
-    materialTokens = withItem;
+    requestTokens = withItem;
+    materialTokens = checkedAdd(materialTokens, item.tokens, "Summary material");
     if (item.kind === "message") throughExchangeKey = key;
   }
   return throughExchangeKey === undefined

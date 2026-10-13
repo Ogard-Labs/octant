@@ -82,6 +82,7 @@ import type {
   GeneratedContextSummary,
 } from "./contextMaintenancePort";
 import type { ContextMaintenanceResult } from "./contextMaintenanceService";
+import { SUMMARY_PROMPT_FRAMING } from "./contextSummaryGenerator";
 import {
   makeContextMaintenanceService,
   CONTEXT_SUMMARY_EXPECTED_RETAINED_SHARE,
@@ -1142,6 +1143,7 @@ export class ContextHarnessService {
     const selection = selectSessionCompaction({
       items,
       safeInputBudget: current.next.plan.safeInputBudget,
+      summaryFraming: SUMMARY_PROMPT_FRAMING,
     });
     if (selection.kind === "nothing-to-compact") return selection;
     const selectedIds = new Set(selection.entryIds.map(String));
