@@ -4608,7 +4608,8 @@ there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
   atomically, and refuses a package or archive launch before any request. The
   relaunched image is told which process it replaces
   (`OCTANT_REPLACED_PROCESS_ID`, removed from its environment as it starts) and
-  waits, for at most a minute, until that process has exited before it asks for
+  waits, for at most a minute, until that process has exited (on Linux, exited but
+  not yet reaped counts) before it asks for
   the single-instance lock, so it never starts a host while the old one is
   still stopping; the old instance keeps its lock until it exits. A platform
   with no signed channel (`supportsSignedDesktopUpdateChannel`:

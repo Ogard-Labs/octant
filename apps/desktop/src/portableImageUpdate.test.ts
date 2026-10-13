@@ -489,16 +489,99 @@ describe("starting after the instance being replaced", () => {
     expect(result).toEqual({ kind: "timed-out", waitedMs: 1_000 });
   });
 
-  it("treats a process it may not signal as still running", async () => {
-    const alive = defaultProcessIsAlive((): never => {
-      throw Object.assign(new Error("not permitted"), { code: "EPERM" });
-    });
-    const gone = defaultProcessIsAlive((): never => {
+  describe("reading whether a process is still running", () => {
+    const signalSaysRunning = (): true => true;
+    const signalSaysGone = (): never => {
       throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+    };
+    const signalRefused = (): never => {
+      throw Object.assign(new Error("not permitted"), { code: "EPERM" });
+    };
+    const statOf = (state: string, command = "Octant"): string =>
+      `4242 (${command}) ${state} 1 4242 4242 0 -1 4194560 12345 0 0 0 10 5 0 0 20 0 25 0 99\n`;
+
+    it("treats a process it may not signal as still running, and only a missing one as gone", () => {
+      const options = { platform: "darwin" } as const;
+
+      expect(defaultProcessIsAlive({ ...options, kill: signalRefused })(1)).toBe(true);
+      expect(defaultProcessIsAlive({ ...options, kill: signalSaysGone })(1)).toBe(false);
+      expect(defaultProcessIsAlive({ ...options, kill: signalSaysRunning })(1)).toBe(true);
     });
 
-    expect(alive(1)).toBe(true);
-    expect(gone(1)).toBe(false);
-    expect(defaultProcessIsAlive(() => true)(1)).toBe(true);
+    it("counts a process that has exited but not been reaped as gone", () => {
+      for (const state of ["Z", "X"]) {
+        const isAlive = defaultProcessIsAlive({
+          platform: "linux",
+          kill: signalSaysRunning,
+          readProcessStat: () => statOf(state),
+        });
+
+        expect(isAlive(4242)).toBe(false);
+      }
+    });
+
+    it("counts a running, sleeping, waiting or stopped process as still running", () => {
+      for (const state of ["R", "S", "D", "T", "t", "I"]) {
+        const isAlive = defaultProcessIsAlive({
+          platform: "linux",
+          kill: signalSaysGone,
+          readProcessStat: () => statOf(state),
+        });
+
+        expect(isAlive(4242)).toBe(true);
+      }
+    });
+
+    it("reads the state after the last parenthesis so a command name cannot fake it", () => {
+      const isAlive = (command: string, state: string) =>
+        defaultProcessIsAlive({
+          platform: "linux",
+          kill: signalSaysRunning,
+          readProcessStat: () => statOf(state, command),
+        })(4242);
+
+      expect(isAlive("evil) Z (name", "S")).toBe(true);
+      expect(isAlive("a b) X (c", "R")).toBe(true);
+      expect(isAlive("evil) S (name", "Z")).toBe(false);
+    });
+
+    it("falls back to the signal answer when the stat file cannot be read or understood", () => {
+      const unreadable = (code: string) => (): never => {
+        throw Object.assign(new Error("unreadable"), { code });
+      };
+      for (const reader of [
+        unreadable("EACCES"),
+        unreadable("ENOENT"),
+        () => "",
+        () => "garbage",
+      ]) {
+        expect(
+          defaultProcessIsAlive({
+            platform: "linux",
+            kill: signalSaysRunning,
+            readProcessStat: reader,
+          })(1),
+        ).toBe(true);
+        expect(
+          defaultProcessIsAlive({
+            platform: "linux",
+            kill: signalSaysGone,
+            readProcessStat: reader,
+          })(1),
+        ).toBe(false);
+      }
+    });
+
+    it("does not read /proc where it is not the source of truth", () => {
+      const reader = (): string => statOf("Z");
+
+      expect(
+        defaultProcessIsAlive({
+          platform: "darwin",
+          kill: signalSaysRunning,
+          readProcessStat: reader,
+        })(1),
+      ).toBe(true);
+    });
   });
 });

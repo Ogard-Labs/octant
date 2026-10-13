@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   access,
   chmod,
@@ -33,20 +34,21 @@ const RUNTIME_VARIABLES = ["APPIMAGE", "APPDIR", "ARGV0", "OWD"] as const;
  * process has stopped.
  *
  * Without it the new image asks for the single-instance lock while the old
- * process is still stopping its host, loses it, and exits: measured as a
- * relaunched process that lives about two seconds while the old one takes
- * about five and a half to finish, leaving no Octant running. Waiting here,
- * rather than releasing the lock early, keeps two hosts from ever sharing one
- * data directory.
+ * process is still stopping its host, loses it, and exits. Measured on a real
+ * host: the relaunched image lived about two seconds, the old process took
+ * about five and a half to stop its host and exit, and nothing was left
+ * running. Waiting here, rather than releasing the lock early, keeps two hosts
+ * from ever sharing one data directory.
  */
 export const REPLACED_PROCESS_VARIABLE = "OCTANT_REPLACED_PROCESS_ID";
 
 /**
- * How long a relaunched image waits for the process it replaces. The measured
- * shutdown is about five and a half seconds; this is an order of magnitude
- * beyond it so a slow disk or a busy host still hands over, and short enough
- * that a process that never exits does not hide the app forever. Past it the
- * normal lock request runs and fails closed as it always has.
+ * How long a relaunched image waits for the process it replaces. Measured on a
+ * real host, the old process takes about five and a half seconds to stop its
+ * host and exit, and its launcher may take about seventeen more to reap it, so
+ * a normal hand-over finishes well inside this; the bound is a little under
+ * three times that sum and only matters for a process that never goes away.
+ * Past it the normal lock request runs and fails closed as it always has.
  */
 export const REPLACED_PROCESS_WAIT_BOUND_MS = 60_000;
 export const REPLACED_PROCESS_POLL_MS = 100;
@@ -392,13 +394,28 @@ export function takeReplacedProcessId(env: Record<string, string | undefined>): 
 }
 
 /**
- * Whether a process still exists. A process this user may not signal exists, so
- * only "no such process" counts as gone.
+ * Whether a process is still running.
+ *
+ * A signal check says a process exists until its parent has reaped it, and the
+ * launcher of a portable image reaps late (measured at about seventeen seconds
+ * after the process had exited). An exited process holds no lock, port or open
+ * file, so on Linux, where `/proc` is the source of truth, a process whose
+ * state is zombie or dead counts as gone. Anything that cannot be classified
+ * falls back to the signal check, where a process this user may not signal
+ * still counts as running and only "no such process" counts as gone.
  */
 export function defaultProcessIsAlive(
-  kill: (pid: number, signal: 0) => unknown = process.kill.bind(process),
+  input: {
+    readonly kill?: (pid: number, signal: 0) => unknown;
+    readonly platform?: string;
+    readonly readProcessStat?: (pid: number) => string;
+  } = {},
 ): (pid: number) => boolean {
-  return (pid) => {
+  const kill = input.kill ?? process.kill.bind(process);
+  const platform = input.platform ?? process.platform;
+  const readProcessStat =
+    input.readProcessStat ?? ((pid: number) => readFileSync(`/proc/${pid}/stat`, "utf8"));
+  const signalSaysRunning = (pid: number): boolean => {
     try {
       kill(pid, 0);
       return true;
@@ -411,6 +428,30 @@ export function defaultProcessIsAlive(
       );
     }
   };
+  return (pid) => {
+    if (platform !== "linux") return signalSaysRunning(pid);
+    let stat: string;
+    try {
+      stat = readProcessStat(pid);
+    } catch {
+      return signalSaysRunning(pid);
+    }
+    const state = processStateOf(stat);
+    if (state === undefined) return signalSaysRunning(pid);
+    return state !== "Z" && state !== "X";
+  };
+}
+
+/**
+ * The state letter of `/proc/<pid>/stat`. The command name sits in parentheses
+ * and may itself contain spaces and parentheses, so the state is the field
+ * after the last closing parenthesis.
+ */
+function processStateOf(stat: string): string | undefined {
+  const close = stat.lastIndexOf(")");
+  if (close < 0) return undefined;
+  const match = /^ ([A-Za-z])(?: |$)/.exec(stat.slice(close + 1));
+  return match?.[1];
 }
 
 export type ReplacedProcessWait =
