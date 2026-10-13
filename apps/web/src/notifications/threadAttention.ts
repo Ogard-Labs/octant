@@ -25,6 +25,12 @@ export interface ThreadAttentionSignal {
 export interface ThreadAttentionInput {
   /** Every signal currently outstanding, across modes. */
   readonly signals: ReadonlyArray<ThreadAttentionSignal>;
+  /**
+   * Threads with a subagent waiting on the person. They count toward the
+   * badge like a signal on that thread, once, and are never announced: the
+   * subagent's own request is what the Inbox lists.
+   */
+  readonly waitingThreadIds?: ReadonlyArray<string>;
   /** The thread the user is looking at, when the window has focus. */
   readonly watchedThreadId?: string;
   readonly windowFocused: boolean;
@@ -66,6 +72,9 @@ export function evaluateThreadAttention(
     if (isWatched(signal, input)) continue;
     badgedThreads.add(signal.threadId);
     if (!raised.has(key)) announce.push(signal);
+  }
+  for (const threadId of input.waitingThreadIds ?? []) {
+    if (!(input.windowFocused && threadId === input.watchedThreadId)) badgedThreads.add(threadId);
   }
   return { announce, badgeCount: badgedThreads.size, raised: nextRaised };
 }

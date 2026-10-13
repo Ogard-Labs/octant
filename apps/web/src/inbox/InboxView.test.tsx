@@ -4,7 +4,12 @@ import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { codeDecision, pendingIds } from "../palette/pendingRequests.test-fixtures";
+import {
+  codeChildQuestion,
+  codeDecision,
+  pendingIds,
+  workChildApproval,
+} from "../palette/pendingRequests.test-fixtures";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
 import { InboxView, type InboxDecisionSource } from "./InboxView";
 
@@ -124,6 +129,55 @@ describe("InboxView decisions", () => {
     await user.click(within(row).getByRole("button", { name: /Wait for review/ }));
     expect(await within(row).findByRole("status")).toHaveTextContent("A turn is already running.");
     expect(screen.queryByText("No thread is waiting on you.")).not.toBeInTheDocument();
+  });
+});
+
+describe("InboxView waiting subagents", () => {
+  it("lists a waiting subagent beside a decision and opens its request without answering it", async () => {
+    const user = userEvent.setup();
+    const clients = decisionClients();
+    const source = decisionSource(clients, [codeDecision(), workChildApproval()]);
+    render(
+      <InboxView attentionItems={[]} decisions={source} onClose={vi.fn()} onOpenThread={vi.fn()} />,
+    );
+
+    const row = await screen.findByRole("group", {
+      name: "Quarterly report has a subagent waiting for you",
+    });
+    expect(within(row).getByText("Research subagent needs your approval")).toBeInTheDocument();
+    expect(within(row).getByText("octant")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Fix the parser asks you to decide" })).toBeVisible();
+    expect(screen.queryByText("No thread is waiting on you.")).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: /Approve|Deny/ })).toBeNull();
+
+    await user.click(within(row).getByRole("button", { name: "Review request" }));
+    expect(source.onOpenThread).toHaveBeenCalledExactlyOnceWith(workChildApproval());
+    expect(clients.workRequestClient.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps a finished turn's own row beside a subagent's wait on the same thread", async () => {
+    render(
+      <InboxView
+        attentionItems={[
+          {
+            signal: {
+              threadId: pendingIds.codeThread,
+              reason: "turn-finished",
+              title: "Fix the parser",
+              source: "code",
+            },
+          },
+        ]}
+        decisions={decisionSource(decisionClients(), [codeChildQuestion()])}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("group", { name: "Fix the parser has a subagent waiting for you" }),
+    ).toBeVisible();
+    expect(screen.getByText("Finished a turn")).toBeVisible();
   });
 });
 

@@ -103,6 +103,7 @@ export function CommandPalette() {
             onOpenThread: needsYou.onOpenThread,
             onAnswerApproval: needsYou.onAnswerApproval,
             onAnswerDecision: needsYou.onAnswerDecision,
+            onOpenSubagentRequest: needsYou.onOpenSubagentRequest,
           }),
     [needsYou, open],
   );

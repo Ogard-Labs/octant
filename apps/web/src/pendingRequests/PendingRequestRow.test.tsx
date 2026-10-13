@@ -1,7 +1,11 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { codeDecision } from "../palette/pendingRequests.test-fixtures";
+import {
+  codeChildQuestion,
+  codeDecision,
+  workChildApproval,
+} from "../palette/pendingRequests.test-fixtures";
 import { PendingRequestRow } from "./PendingRequestRow";
 
 const NOW = Date.parse("2026-10-06T08:10:00.000Z");
@@ -64,6 +68,57 @@ describe("a decision row", () => {
     );
     await user.click(screen.getByRole("button", { name: "Reply…" }));
     expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+});
+
+describe("a waiting subagent row", () => {
+  it("names the parent thread and the subagent and offers only Review request", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn();
+    const onOpenThread = vi.fn();
+    const request = workChildApproval();
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={onAnswer}
+        onOpenThread={onOpenThread}
+        request={request}
+      />,
+    );
+    const row = screen.getByRole("group", {
+      name: "Quarterly report has a subagent waiting for you",
+    });
+    expect(within(row).getByText("Research subagent needs your approval")).toBeInTheDocument();
+    expect(within(row).getByText(/Collect last quarter's figures\./)).toBeInTheDocument();
+    expect(within(row).getByText("shell: bun run collect")).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Deny" })).toBeNull();
+    expect(
+      within(row)
+        .getAllByRole("button")
+        .slice(1)
+        .map((button) => button.textContent),
+    ).toEqual(["Review request"]);
+    await user.click(screen.getByRole("button", { name: "Review request" }));
+    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+
+  it("says a subagent asked a question and answers nothing from a number key", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn();
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={onAnswer}
+        onOpenThread={vi.fn()}
+        request={codeChildQuestion()}
+      />,
+    );
+    expect(screen.getByText("Review subagent asked a question")).toBeInTheDocument();
+    await user.tab();
+    await user.keyboard("1");
     expect(onAnswer).not.toHaveBeenCalled();
   });
 });

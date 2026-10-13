@@ -6,7 +6,7 @@ import { CircleDot, GitPullRequest, Inbox, ListTodo, RefreshCw } from "lucide-re
 import { useEffect, useState } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
-import { pendingRequestKey } from "../pendingRequests/pendingRequests";
+import { isChildPendingRequest, pendingRequestKey } from "../pendingRequests/pendingRequests";
 import {
   usePendingRequestRows,
   type PendingRequestRowsSource,
@@ -24,12 +24,16 @@ import { markInboxKeySeen, readSeenInboxKeys } from "./inboxSeen";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
 /**
- * The window's pending-request reader, for the decisions finished turns asked.
- * Absent in a remote window, which has no decision source.
+ * The window's pending-request reader, for the decisions finished turns asked
+ * and the subagents waiting on the person. Absent in a remote window, which
+ * has no such source.
  */
 export interface InboxDecisionSource extends PendingRequestRowsSource {
   readonly projectNames: ReadonlyMap<string, string>;
-  /** Opens the thread, where Reply… lets the person type their own answer. */
+  /**
+   * Opens the thread, where Reply… lets the person type their own answer; for a
+   * waiting subagent, opens the thread's Agents tool on that subagent.
+   */
   readonly onOpenThread: (request: PendingRequest) => void;
 }
 
@@ -149,10 +153,19 @@ export function InboxView(props: InboxViewProps) {
   const externalSectionsPresent = loadGithub !== undefined || loadLinear !== undefined;
   const decisions = props.decisions;
   const { rows: requestRows, answer } = usePendingRequestRows(decisions);
-  const decisionRows = (requestRows ?? []).filter((entry) => entry.request.kind === "decision");
+  // Decisions finished turns asked and subagents waiting on the person are the
+  // requests the Inbox lists from this read; its approvals and questions come
+  // from thread attention signals.
+  const decisionRows = (requestRows ?? []).filter(
+    (entry) => entry.request.kind === "decision" || isChildPendingRequest(entry.request),
+  );
   // A thread whose finished turn asked a decision is listed once, as that
   // decision, rather than again as a turn waiting to be read.
-  const deciding = new Set(decisionRows.map((entry) => String(entry.request.threadId)));
+  const deciding = new Set(
+    decisionRows
+      .filter((entry) => entry.request.kind === "decision")
+      .map((entry) => String(entry.request.threadId)),
+  );
   const attentionItems = props.attentionItems.filter(
     (item) => !(item.signal.reason === "turn-finished" && deciding.has(item.signal.threadId)),
   );

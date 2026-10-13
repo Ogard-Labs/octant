@@ -82,4 +82,30 @@ describe("thread attention", () => {
     expect(outcome.badgeCount).toBe(1);
     expect(outcome.announce).toHaveLength(2);
   });
+
+  it("counts a thread with a waiting subagent once, without announcing it", () => {
+    const outcome = evaluateThreadAttention(
+      {
+        signals: [finished],
+        waitingThreadIds: ["thread-a", "thread-c", "thread-c"],
+        windowFocused: false,
+      },
+      EMPTY_THREAD_ATTENTION,
+    );
+    expect(outcome.badgeCount).toBe(2);
+    expect(outcome.announce).toEqual([finished]);
+  });
+
+  it("does not count a waiting subagent on the thread the user is watching", () => {
+    const outcome = evaluateThreadAttention(
+      {
+        signals: [],
+        waitingThreadIds: ["thread-a"],
+        watchedThreadId: "thread-a",
+        windowFocused: true,
+      },
+      EMPTY_THREAD_ATTENTION,
+    );
+    expect(outcome.badgeCount).toBe(0);
+  });
 });

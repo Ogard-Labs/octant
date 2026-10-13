@@ -70,6 +70,24 @@ export function isChildPendingRequest(request: PendingRequest): request is Child
   return request.kind === "child-approval" || request.kind === "child-question";
 }
 
+const ROLE_WORD: Readonly<Record<ChildPendingRequest["child"]["role"], string>> = {
+  research: "Research",
+  implementation: "Implementation",
+  review: "Review",
+  custom: "Custom",
+};
+
+/**
+ * What a waiting subagent said, in the product's word for it: "Research
+ * subagent needs your approval" or "Review subagent asked a question".
+ */
+export function childRequestHeadline(request: ChildPendingRequest): string {
+  const subject = `${ROLE_WORD[request.child.role]} subagent`;
+  return request.kind === "child-approval"
+    ? `${subject} needs your approval`
+    : `${subject} asked a question`;
+}
+
 /** One request's identity across reads: the same waiting question keeps its key. */
 export function pendingRequestKey(request: PendingRequest): string {
   return `${request.mode}:${String(request.threadId)}:${answerHandle(request)}`;
