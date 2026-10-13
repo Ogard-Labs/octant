@@ -179,7 +179,11 @@ import { attachWorkRequestRuntime, WorkRequestRuntime } from "./work/workRequest
 import { WorkRequestService } from "./work/workRequestService";
 import { createWorkRequestRouteHandler } from "./workRequestRoutes";
 import { createFleetActivityRouteHandler } from "./fleetActivityRoutes";
-import { FleetActivityService, runningThreadsFromNavigation } from "./fleetActivityService";
+import {
+  FleetActivityService,
+  runningThreadsFromNavigation,
+  windowsBoundToAProject,
+} from "./fleetActivityService";
 import { createPendingRequestRouteHandler } from "./pendingRequestRoutes";
 import { PendingRequestService } from "./pendingRequestService";
 import { createWorkThreadRouteHandler } from "./workThreadRoutes";
@@ -9975,15 +9979,7 @@ export function startOctantServer(
           ...((await codeOperationRuntime?.pendingRequests?.(windowId)) ?? []),
           ...(await codeTurnDecisions.listForWindow(windowId)),
         ],
-        boundProjectWindows: () =>
-          persistence
-            .readWindowWorkspaces()
-            .filter(
-              ({ workspace }) =>
-                workspace.contextByMode.code.projectId != null ||
-                workspace.contextByMode.work.projectId != null,
-            )
-            .map(({ workspace }) => workspace.windowId),
+        boundProjectWindows: () => windowsBoundToAProject(persistence.readWindowWorkspaces()),
         childPending: childPendingForWindow,
         chat: () =>
           chatService

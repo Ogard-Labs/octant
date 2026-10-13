@@ -9,8 +9,27 @@ import {
   type ProductSurfaceSettings,
   type ProjectId,
   type WindowId,
+  type WindowWorkspace,
 } from "@octant/contracts";
 import { enabledModes } from "@octant/domain";
+
+/**
+ * The windows the menu bar's fleet read asks about waiting subagents: every
+ * saved local window whose workspace binds a Work or Code Project, whether or
+ * not that window is open now, because the menu bar exists for the moment no
+ * window is. A window bound to no Project could open no parent and adds nothing.
+ */
+export function windowsBoundToAProject(
+  workspaces: ReadonlyArray<{ readonly workspace: WindowWorkspace }>,
+): ReadonlyArray<WindowId> {
+  return workspaces
+    .filter(
+      ({ workspace }) =>
+        workspace.contextByMode.code.projectId != null ||
+        workspace.contextByMode.work.projectId != null,
+    )
+    .map(({ workspace }) => workspace.windowId);
+}
 
 /** A thread whose turn the journal projects as queued or running. */
 export interface FleetRunningThread {

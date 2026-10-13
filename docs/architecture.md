@@ -375,11 +375,14 @@ probe (every 2 s while a window is visible, 10 s otherwise). Every row names its
   per bound window and the menu bar's own window binds no Code Project, so its
   Code rows are the requests and decisions each local window with a persisted
   Code binding could answer; a Code Project no local window binds stays out. A
-  waiting subagent is listed the same way. The menu bar's window binds no
-  Project, so that row is one a persisted local window bound to the parent's
-  project already lists, and the parent is one needs-you row whose
-  `activitySource` is `session`. A thread that is both waiting and running is
-  listed once, as needs you.
+  waiting subagent is read the same way. The menu bar's window binds no
+  Project, so its subagent rows are the waits that each saved local window with
+  a Work or Code Project binding could open, whether or not that window is open
+  now; a window bound to no Project adds none. Each parent is one needs-you
+  row whose `activitySource` is `session`, and like every fleet row it carries
+  the thread title, mode, Project name, state, and time, never the request
+  text, the child's task, or its role. A thread that is both waiting and
+  running is listed once, as needs you.
 - **Working** is each mode's own navigation run state, the journaled fold the
   sidebar and board already use, so it is `journal`.
 - **Done since you looked** is the one state the host cannot know, because only
@@ -3882,7 +3885,8 @@ mechanisms are:
   native-harness question raised on a Code turn is a Code question and is
   listed. A child agent's approval or question (`source` set) is listed as a
   `child-approval` or `child-question` row on a Work or Code parent: it carries
-  the parent thread, the child's run, role, task (at most 200 characters),
+  the parent thread, the child's run, role, task (at most 200 characters, with
+  a Work parent's task redacted of paths and URLs as its request text is),
   provider, and model, and the request text, but no options and no answer
   handle, so the read adds no answer route. It is listed only while a waiter in
   this host can still settle it and the session view still holds the pending
@@ -3902,8 +3906,9 @@ mechanisms are:
   each mode's own bounds and sanitization. The read is local-window only: its
   path is outside every prefix the remote listener forwards, the remote action
   classifier names no action for it, and the route refuses a paired device's
-  principal. Freshness rides the Machine change feed: a harness session's approval or
-  question asked or settled publishes `work-navigation` and `code-navigation`,
+  principal. Freshness rides the Machine change feed: a child agent's approval or
+  question asked or settled publishes `work-navigation` and `code-navigation`
+  (a lead's own request publishes nothing new),
   a Work request's
   transitions and a Chat attempt's question are journaled, a Code request's ask,
   answer, and turn end are journaled stream events, and a Code browser-origin

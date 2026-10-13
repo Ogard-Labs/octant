@@ -7,7 +7,8 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
-import { defaultShellSettings } from "@octant/domain";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import { contextKeyForProject, defaultShellSettings, defaultWindowWorkspace } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { createFleetActivityRouteHandler } from "./fleetActivityRoutes";
@@ -15,6 +16,7 @@ import {
   FleetActivityService,
   type FleetActivitySources,
   type FleetRunningThread,
+  windowsBoundToAProject,
 } from "./fleetActivityService";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
@@ -176,6 +178,32 @@ describe("fleet activity route", () => {
     expect(sources.childPending).toHaveBeenNthCalledWith(1, boundWindow);
     expect(sources.childPending).toHaveBeenNthCalledWith(2, otherWindow);
     expect(sources.codePending).not.toHaveBeenCalled();
+  });
+
+  it("asks for a waiting subagent in every saved window bound to a Project, open or not, and in none bound to no Project", () => {
+    const unbound = decodeWindowId("00000000-0000-4000-8000-000000000811");
+    const codeBound = decodeWindowId("00000000-0000-4000-8000-000000000812");
+    const workBound = decodeWindowId("00000000-0000-4000-8000-000000000813");
+    const bind = (window: WindowId, mode: "code" | "work") => {
+      const empty = defaultWindowWorkspace(window);
+      return {
+        workspace: {
+          ...empty,
+          contextByMode: {
+            ...empty.contextByMode,
+            [mode]: contextKeyForProject(mode, LOCAL_HOST_ID, projectId, "/repo"),
+          },
+        },
+      };
+    };
+    expect(
+      windowsBoundToAProject([
+        { workspace: defaultWindowWorkspace(unbound) },
+        bind(codeBound, "code"),
+        bind(workBound, "work"),
+      ]),
+    ).toEqual([codeBound, workBound]);
+    expect(windowsBoundToAProject([{ workspace: defaultWindowWorkspace(unbound) }])).toEqual([]);
   });
 
   it("leaves a waiting subagent out of the menu bar when its mode is off", async () => {
