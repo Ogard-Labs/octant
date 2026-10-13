@@ -718,7 +718,10 @@ appends `thread.external-content-ingested@1` on the new thread
 (`external-content`, label `code-fork`, content reference
 `code-fork-<source thread>-<fork turn>`) before it journals the thread, so no
 moment exists at which the thread is created and unmarked; a mark that cannot
-be journaled refuses the creation and removes its worktree. An unmarked source
+be journaled refuses the creation and removes its worktree. The mark and the
+thread commit as one journal unit, so a creation that fails after the mark
+leaves no mark behind: only a person's clear may forget a mark, so a failed
+creation is never undone by a later event. An unmarked source
 makes an unmarked thread. The source's mark is read when the creation is
 checked, as its handoff reports it. A source a person cleared is unmarked, and
 its fork starts unmarked: the clear holds until the next ingestion, and a

@@ -190,6 +190,8 @@ const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const CODE_SETTINGS_AGGREGATE_ID = decodeAggregateId("00000000-0000-4000-8000-000000000020");
 const CODE_CHECKOUT_RECOVERY_PROBE_PATH = decodeCodeRelativePath("package.json");
+const FORK_MARK_REFUSAL =
+  "The thread this comes from read outside content, and the new thread could not be marked with it, so nothing was created. Try again.";
 
 /**
  * Credential-safe, actionable user-facing messages for managed-worktree
@@ -377,7 +379,8 @@ type CodeProviderTurnRecordedState = Extract<
 >;
 
 export interface CodePersistencePort {
-  readonly journal: Pick<Journal, "append" | "replay" | "replayAggregate">;
+  readonly journal: Pick<Journal, "append" | "replay" | "replayAggregate"> &
+    Partial<Pick<Journal, "transaction">>;
   readonly readCodeSettings: () => { readonly settings: CodeSettings } | undefined;
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
@@ -1417,7 +1420,6 @@ export class CodeService {
         let checkoutJournaled = false;
         let compensationFailed = false;
         try {
-          if (inheritedMark !== undefined) this.#markFork(thread.id, inheritedMark);
           this.#append(
             "code-checkout",
             checkout.id,
@@ -1426,13 +1428,15 @@ export class CodeService {
             { kind: "checkout-observed", checkout },
           );
           checkoutJournaled = true;
-          this.#append(
-            "code-thread",
-            thread.id,
-            0,
-            "code.thread-created@1",
-            { kind: "thread-created", thread: durableThread },
-            isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+          this.#journalNewThread(thread.id, inheritedMark, () =>
+            this.#append(
+              "code-thread",
+              thread.id,
+              0,
+              "code.thread-created@1",
+              { kind: "thread-created", thread: durableThread },
+              isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+            ),
           );
         } catch (bindingError) {
           if (checkoutJournaled) {
@@ -1715,11 +1719,12 @@ export class CodeService {
           thread.permissionPersistence === "current-session"
             ? decodeCodeThread({ ...thread, executionPolicy: "approval-gated" })
             : thread;
-        if (inheritedMark !== undefined) this.#markFork(thread.id, inheritedMark);
-        this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
-          kind: "thread-created",
-          thread: durableThread,
-        });
+        this.#journalNewThread(thread.id, inheritedMark, () =>
+          this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
+            kind: "thread-created",
+            thread: durableThread,
+          }),
+        );
         if (
           thread.executionPolicy === "full-access" &&
           thread.permissionPersistence === "current-session"
@@ -3591,9 +3596,31 @@ export class CodeService {
    * A fork or a restore copies its source's conversation (a harness fork its
    * tool results too), so outside text the source read is in the new thread's
    * context from its first turn. The mark is journaled on the new thread before the
-   * thread itself, so no moment exists at which it is created and unmarked,
-   * and a mark that cannot be journaled refuses the creation.
+   * thread itself, in one unit with it: no moment exists at which the thread is
+   * created and unmarked, a mark that cannot be journaled refuses the creation,
+   * and a creation that fails after the mark leaves no mark behind. Only a
+   * person's Clear may forget a mark, so a failed creation cannot undo one with
+   * a later event.
    */
+  #journalNewThread(
+    threadId: CodeThreadId,
+    inheritedMark: CodeThreadForkOrigin | undefined,
+    journalThread: () => void,
+  ): void {
+    if (inheritedMark === undefined) {
+      journalThread();
+      return;
+    }
+    const journal = this.#persistence.journal;
+    if (journal.transaction === undefined) {
+      throw this.#failure("unavailable", FORK_MARK_REFUSAL);
+    }
+    journal.transaction(() => {
+      this.#markFork(threadId, inheritedMark);
+      journalThread();
+    });
+  }
+
   #markFork(threadId: CodeThreadId, origin: CodeThreadForkOrigin): void {
     let recorded: ExternalContentIngestionResult | undefined;
     try {
@@ -3608,10 +3635,7 @@ export class CodeService {
       recorded = undefined;
     }
     if (recorded?.kind !== "recorded" && recorded?.kind !== "already-recorded") {
-      throw this.#failure(
-        "unavailable",
-        "The thread this comes from read outside content, and the new thread could not be marked with it, so nothing was created. Try again.",
-      );
+      throw this.#failure("unavailable", FORK_MARK_REFUSAL);
     }
   }
 

@@ -4216,6 +4216,7 @@ function serviceFixture(
       append: vi.fn(),
       replay: vi.fn(() => options.events ?? []),
       replayAggregate: vi.fn(() => options.events ?? []),
+      transaction: vi.fn(<A>(body: () => A): A => body()),
     },
   };
   const access = {

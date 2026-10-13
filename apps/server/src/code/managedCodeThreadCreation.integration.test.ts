@@ -219,7 +219,15 @@ function harness(
     readCodeThreadActivity: () => [],
     readCodeRuntimeWorks: () => [],
     readCodeCheckout: () => undefined,
-    readCodeCheckoutAggregateVersion: () => 0,
+    readCodeCheckoutAggregateVersion: (id) =>
+      options.journal === undefined
+        ? 0
+        : options.journal.replayAggregate({
+            aggregateType: "code-checkout",
+            aggregateId: String(id),
+            afterVersion: 0,
+            limit: 100,
+          }).length,
     readCodeCheckouts: () => [],
     readCodeFileReference: () => undefined,
     readCodeFileReferences: () => [],
@@ -865,7 +873,10 @@ function markingHost() {
 /** A harness whose new worktree reports the branch and revision a fork is created at. */
 function forkingHarness(
   host: ReturnType<typeof markingHost>,
-  options: Pick<Parameters<typeof harness>[0] & object, "recordExternalContentIngestion"> = {},
+  options: Pick<
+    Parameters<typeof harness>[0] & object,
+    "recordExternalContentIngestion" | "journal"
+  > = {},
 ) {
   const created = harness({
     threads: [sourceThread()],
@@ -875,7 +886,7 @@ function forkingHarness(
       files: { worktree: "f".repeat(40), index: "d".repeat(40) },
     },
     applySourceFiles: vi.fn(async () => "applied" as const),
-    journal: host.journal,
+    journal: options.journal ?? host.journal,
     uuid: host.uuid,
     forkConversation: forkConversationMarkedBy(host.marked),
     recordExternalContentIngestion:
@@ -1024,5 +1035,30 @@ describe("a thread made from a thread marked with outside content", () => {
       );
       expect(host.marked(String(threadId))).toBe(false);
     }
+  });
+
+  it("leaves no mark on a thread whose creation fails after the mark", async () => {
+    const host = markingHost();
+    host.markSource();
+    const failingJournal: CodePersistencePort["journal"] = {
+      append: (request) => {
+        if (JSON.stringify(request).includes('"eventName":"code.thread-created@1"')) {
+          throw new Error("disk full");
+        }
+        return host.journal.append(request);
+      },
+      replay: (cursor) => host.journal.replay(cursor),
+      replayAggregate: (query) => host.journal.replayAggregate(query),
+      transaction: (body) => host.journal.transaction(body),
+    };
+    const { codeService, git } = forkingHarness(host, { journal: failingJournal });
+
+    await expect(codeService.execute(windowId, forkCommand)).rejects.toMatchObject({
+      failure: { category: "interrupted" },
+    });
+    expect(git.removeWorktree).toHaveBeenCalled();
+    expect(host.marked(String(threadId))).toBe(false);
+    expect(host.marks(String(threadId))).toEqual([]);
+    expect(host.marked(String(sourceThreadId))).toBe(true);
   });
 });
