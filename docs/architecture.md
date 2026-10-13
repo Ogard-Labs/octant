@@ -3547,7 +3547,9 @@ prompt, schema, tool, route, model, or capability.
   that scope, offers only the selected tools, and refuses the turn when the
   provider or model cannot carry Octant's tools. Every call waits for an
   approval in the turn's window, shown in the open thread, unless a
-  remembered approval covers it (next item). An MCP
+  remembered approval covers it (next item). At most 32 of those approvals
+  wait at once; a call past that cap is denied immediately with the refusal
+  a declined call already uses, and answering or expiry frees the slot. An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
   carried it.
