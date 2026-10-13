@@ -1,15 +1,41 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  EventActor,
+  THREAD_EXTERNAL_CONTENT_AGGREGATE,
   decodeBindingRevisionId,
+  decodeCodeOperationId,
   decodeCodeRepositoryId,
   decodeCodeThread,
   decodeCodeThreadId,
   decodeProjectId,
+  decodeThreadRetentionThreadId,
   decodeWindowId,
   type CodeThread,
   type Project,
 } from "@octant/contracts";
-import { describe, expect, it, vi } from "vitest";
-import { CodeService, type CodeForkPoint, type CodePersistencePort } from "./codeService";
+import { Schema } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createCheckpointCodePort } from "../checkpoint/threadCheckpointPorts";
+import { ExternalContentClearStore } from "../context/externalContentClearStore";
+import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import {
+  ExternalContentTaintProjection,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { rebuildProjection } from "../persistence/projection";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite } from "../persistence/sqlitePort";
+import { erasePurgedThread } from "../persistence/threadPurge";
+import {
+  CodeService,
+  type CodeForkPoint,
+  type CodePersistencePort,
+  type CodeServiceOptions,
+} from "./codeService";
 import {
   createManagedCodeThreadCreationPort,
   deriveManagedWorktreeCheckoutId,
@@ -124,6 +150,10 @@ function harness(
     /** How a fork's conversation reads; defaults to a source whose history hands over. */
     readonly forkConversation?: CodeForkConversationReader;
     readonly applySourceFiles?: ManagedCodeThreadCreationDeps["applySourceFiles"];
+    /** A real journal, for what a creation leaves behind; defaults to a mock. */
+    readonly journal?: CodePersistencePort["journal"];
+    readonly uuid?: () => string;
+    readonly recordExternalContentIngestion?: CodeServiceOptions["recordExternalContentIngestion"];
   } = {},
 ) {
   // Observations: prepare repo-id lookup, prepare resolve fresh-state, commit plan fresh-state,
@@ -182,7 +212,7 @@ function harness(
     replayAggregate: vi.fn(() => []),
   };
   const persistence: CodePersistencePort = {
-    journal,
+    journal: options.journal ?? journal,
     readCodeSettings: () => undefined,
     readCodeThread: (id) => options.threads?.find((entry) => String(entry.id) === String(id)),
     readCodeThreads: () => [],
@@ -212,7 +242,7 @@ function harness(
       maximumEntries: 4,
       newContentId: () => "60000000-0000-4000-8000-000000000040",
     }),
-    uuid: () => "60000000-0000-4000-8000-000000000050",
+    uuid: options.uuid ?? (() => "60000000-0000-4000-8000-000000000050"),
     clock: () => now,
     workingDirectories: {
       resolve: async () => (project.type === "code" ? project.binding.canonicalRoot : undefined),
@@ -228,6 +258,9 @@ function harness(
         : { applySourceFiles: options.applySourceFiles }),
     }),
     forkConversation: options.forkConversation ?? readableForkConversation,
+    ...(options.recordExternalContentIngestion === undefined
+      ? {}
+      : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
     ...(options.forkPoint === undefined
       ? {}
       : { forkPoints: { resolve: vi.fn(async () => options.forkPoint as CodeForkPoint) } }),
@@ -237,33 +270,40 @@ function harness(
 
 const sourceThreadId = decodeCodeThreadId("60000000-0000-4000-8000-000000000070");
 
-/** A source whose conversation through the fork point can be handed over. */
-const readableForkConversation: CodeForkConversationReader = ({ source }) => ({
-  status: "available",
-  blocks: [
-    { kind: "conversation-summary", text: "summary" },
-    { kind: "user-message", text: "Forked conversation source: {}\nImplement this." },
-  ],
-  source: {
-    mode: "code",
-    threadId: String(source.id),
-    projectId: String(source.projectId),
-    threadVersion: source.version,
-    externalContentIngested: false,
-    point: {},
-  },
-  omissions: {
-    earlierMessages: 0,
-    unfinishedReplies: 0,
-    missingBodies: 0,
-    oversizedBodies: 0,
-    emptyBodies: 0,
-    attachments: 0,
-    truncatedMessages: 0,
-    truncatedCharacters: 0,
-    sourceTruncatedMessages: 0,
-  },
-});
+/**
+ * A source whose conversation through the fork point can be handed over,
+ * reporting the source's outside-content mark the way the host's selector does.
+ */
+const forkConversationMarkedBy =
+  (marked: (threadId: string) => boolean): CodeForkConversationReader =>
+  ({ source }) => ({
+    status: "available",
+    blocks: [
+      { kind: "conversation-summary", text: "summary" },
+      { kind: "user-message", text: "Forked conversation source: {}\nImplement this." },
+    ],
+    source: {
+      mode: "code",
+      threadId: String(source.id),
+      projectId: String(source.projectId),
+      threadVersion: source.version,
+      externalContentIngested: marked(String(source.id)),
+      point: {},
+    },
+    omissions: {
+      earlierMessages: 0,
+      unfinishedReplies: 0,
+      missingBodies: 0,
+      oversizedBodies: 0,
+      emptyBodies: 0,
+      attachments: 0,
+      truncatedMessages: 0,
+      truncatedCharacters: 0,
+      sourceTruncatedMessages: 0,
+    },
+  });
+
+const readableForkConversation = forkConversationMarkedBy(() => false);
 
 /** The thread a fork comes from, as the host holds it. */
 function sourceThread(): CodeThread {
@@ -739,5 +779,250 @@ describe("managed Code thread creation (composer submit -> worktree -> thread bi
         sourceRevision: "e".repeat(40),
       }),
     ).rejects.toThrow();
+  });
+});
+
+const decodeActor = Schema.decodeUnknownSync(EventActor);
+const directories: Array<string> = [];
+const throughOperationId = "60000000-0000-4000-8000-000000000071";
+const recordedRevision = "e".repeat(40);
+
+afterEach(() => {
+  for (const directory of directories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+/** A host journal with the outside-content projection, where a source can be marked and cleared. */
+function markingHost() {
+  const directory = mkdtempSync(join(tmpdir(), "octant-fork-mark-"));
+  directories.push(directory);
+  const connection = openSqlite(join(directory, "octant.sqlite3"));
+  applyMigrations(connection, MIGRATIONS, () => now);
+  const runtime = createPhase1RuntimeRegistries();
+  const journal = new Journal({
+    connection,
+    registry: runtime.events,
+    projections: runtime.projections,
+    clock: () => now,
+  });
+  let nextId = 0;
+  const uuid = () => `61000000-0000-4000-8000-${String(++nextId).padStart(12, "0")}`;
+  const ingestions = new ExternalContentIngestionStore({
+    journal,
+    connection,
+    uuid,
+    clock: () => now,
+    actor: decodeActor({ kind: "system", actorId: "61000000-0000-4000-8000-100000000000" }),
+  });
+  const clears = new ExternalContentClearStore({
+    journal,
+    connection,
+    uuid,
+    clock: () => now,
+    actor: decodeActor({ kind: "local-user", actorId: "61000000-0000-4000-8000-200000000000" }),
+  });
+  const marked = (id: string) =>
+    readThreadExternalContentTaint(connection, id).externalContentIngested;
+  return {
+    connection,
+    journal,
+    uuid,
+    ingestions,
+    marked,
+    markSource: () =>
+      ingestions.record({
+        threadId: sourceThreadId,
+        provenance: { origin: "tool-result", sourceLabel: "web-fetch" },
+        contentReference: "web-fetch-page-1",
+        correlationId: uuid(),
+        authorized: true,
+      }),
+    clearSource: () =>
+      clears.clear({
+        threadId: sourceThreadId,
+        windowId,
+        expectedVersion: clears.read(String(sourceThreadId)).version,
+        principal: "local-window",
+        turn: "idle",
+      }),
+    marks: (id: string) =>
+      journal.replayAggregate({
+        aggregateType: THREAD_EXTERNAL_CONTENT_AGGREGATE,
+        aggregateId: id,
+        afterVersion: 0,
+        limit: 100,
+      }),
+    eventOrder: () =>
+      (
+        connection
+          .prepare("SELECT event_name, aggregate_id FROM event_journal ORDER BY global_sequence")
+          .all() as ReadonlyArray<{ readonly event_name: string; readonly aggregate_id: string }>
+      ).map((row) => `${row.event_name} ${row.aggregate_id}`),
+  };
+}
+
+/** A harness whose new worktree reports the branch and revision a fork is created at. */
+function forkingHarness(
+  host: ReturnType<typeof markingHost>,
+  options: Pick<Parameters<typeof harness>[0] & object, "recordExternalContentIngestion"> = {},
+) {
+  const created = harness({
+    threads: [sourceThread()],
+    forkPoint: {
+      status: "resolved",
+      head: recordedRevision,
+      files: { worktree: "f".repeat(40), index: "d".repeat(40) },
+    },
+    applySourceFiles: vi.fn(async () => "applied" as const),
+    journal: host.journal,
+    uuid: host.uuid,
+    forkConversation: forkConversationMarkedBy(host.marked),
+    recordExternalContentIngestion:
+      options.recordExternalContentIngestion ?? ((input) => host.ingestions.record(input)),
+  });
+  (created.git.resolveRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+    status: "resolved",
+    oid: recordedRevision,
+  });
+  const calls = [observation(false), observation(false), observation(false), observation(false)];
+  const forkBranch = () =>
+    (created.git.addWorktree as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+      ?.branchIntent as string;
+  (created.repository.observe as ReturnType<typeof vi.fn>).mockImplementation(
+    async () => calls.shift() ?? observation(true, recordedRevision, forkBranch()),
+  );
+  return created;
+}
+
+const forkCommand = {
+  kind: "fork-code-thread",
+  threadId,
+  sourceThreadId,
+  throughOperationId,
+  title: "Source (fork)",
+} as const;
+
+describe("a thread made from a thread marked with outside content", () => {
+  it("marks a fork before the fork exists, naming the thread it came from", async () => {
+    const host = markingHost();
+    expect(host.markSource()).toMatchObject({ kind: "recorded" });
+    const { codeService } = forkingHarness(host);
+
+    const result = await codeService.execute(windowId, forkCommand);
+    expect(result.kind).toBe("managed-thread-created");
+
+    expect(host.marked(String(threadId))).toBe(true);
+    expect(host.marks(String(threadId)).map((event) => event.payload)).toEqual([
+      {
+        threadId,
+        correlationId: expect.any(String),
+        provenance: { origin: "external-content", sourceLabel: "code-fork" },
+        contentReference: `code-fork-${sourceThreadId}-${throughOperationId}`,
+      },
+    ]);
+    // There is no moment at which the fork is journaled and its mark is not.
+    const order = host.eventOrder();
+    expect(order.indexOf(`thread.external-content-ingested@1 ${threadId}`)).toBeLessThan(
+      order.indexOf(`code.thread-created@1 ${threadId}`),
+    );
+  });
+
+  it("marks a thread restored from a marked thread's turn", async () => {
+    const host = markingHost();
+    host.markSource();
+    const { codeService } = forkingHarness(host);
+    const restore = createCheckpointCodePort({
+      readCodeThread: (id) => (String(id) === String(sourceThreadId) ? sourceThread() : undefined),
+      readProject: () => project,
+      readOperationStart: () => undefined,
+      execute: (window, command) => codeService.execute(window, command),
+      uuid: () => String(threadId),
+      clock: () => now,
+    }).restore;
+
+    await expect(
+      restore({
+        authenticatedWindowId: windowId,
+        sourceThreadId,
+        operationId: decodeCodeOperationId(throughOperationId),
+        revision: recordedRevision,
+        title: "Source (restored)",
+      }),
+    ).resolves.toEqual({ status: "created", threadId });
+
+    expect(host.marked(String(threadId))).toBe(true);
+    expect(host.marks(String(threadId))[0]?.payload).toMatchObject({
+      provenance: { origin: "external-content", sourceLabel: "code-fork" },
+      contentReference: `code-fork-${sourceThreadId}-${throughOperationId}`,
+    });
+  });
+
+  it("leaves a fork of an unmarked thread unmarked", async () => {
+    const host = markingHost();
+    const { codeService } = forkingHarness(host);
+
+    await codeService.execute(windowId, forkCommand);
+
+    expect(host.marked(String(threadId))).toBe(false);
+    expect(host.marks(String(threadId))).toEqual([]);
+  });
+
+  it("leaves a fork unmarked when a person cleared the source before forking it", async () => {
+    const host = markingHost();
+    host.markSource();
+    expect(host.clearSource()).toMatchObject({ kind: "cleared" });
+    const { codeService } = forkingHarness(host);
+
+    await codeService.execute(windowId, forkCommand);
+
+    expect(host.marked(String(threadId))).toBe(false);
+  });
+
+  it("keeps the fork's mark through a replay and erases it with the fork's purge", async () => {
+    const host = markingHost();
+    host.markSource();
+    const { codeService } = forkingHarness(host);
+    await codeService.execute(windowId, forkCommand);
+
+    rebuildProjection({
+      connection: host.connection,
+      journal: host.journal,
+      projection: new ExternalContentTaintProjection(),
+      clock: () => now,
+    });
+    expect(host.marked(String(threadId))).toBe(true);
+
+    erasePurgedThread({
+      connection: host.connection,
+      mode: "code",
+      threadId: decodeThreadRetentionThreadId(String(threadId)),
+    });
+    expect(host.marked(String(threadId))).toBe(false);
+    expect(host.marks(String(threadId))).toEqual([]);
+    // The source keeps its own mark.
+    expect(host.marked(String(sourceThreadId))).toBe(true);
+  });
+
+  it("refuses the fork, and creates nothing, when its mark cannot be journaled", async () => {
+    for (const record of [
+      () => ({ kind: "refused", reason: "malformed" }) as const,
+      () => {
+        throw new Error("journal unavailable");
+      },
+    ]) {
+      const host = markingHost();
+      host.markSource();
+      const { codeService, git } = forkingHarness(host, { recordExternalContentIngestion: record });
+
+      await expect(codeService.execute(windowId, forkCommand)).rejects.toMatchObject({
+        failure: { message: expect.stringContaining("outside content") },
+      });
+      expect(git.removeWorktree).toHaveBeenCalled();
+      expect(host.eventOrder().some((event) => event.startsWith("code.thread-created@1"))).toBe(
+        false,
+      );
+      expect(host.marked(String(threadId))).toBe(false);
+    }
   });
 });

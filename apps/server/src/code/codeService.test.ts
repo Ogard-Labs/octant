@@ -1120,6 +1120,90 @@ describe("CodeService commands", () => {
     );
   });
 
+  describe("a thread created with a fork origin", () => {
+    const sourceId = decodeCodeThreadId(testUuid(1300));
+    const throughOperationId = testUuid(1301);
+    const forked = thread({
+      executionPolicy: "approval-gated",
+      forkedFrom: { threadId: sourceId, throughOperationId } as never,
+    });
+    const fixtureFromSource = (
+      marked: boolean,
+      record: NonNullable<CodeServiceOptions["recordExternalContentIngestion"]>,
+    ) =>
+      serviceFixture({
+        threads: [thread({ id: sourceId })],
+        forkConversation: ({ source }) => ({
+          status: "available",
+          blocks: [{ kind: "conversation-summary", text: "summary" }],
+          source: {
+            mode: "code",
+            threadId: String(source.id),
+            projectId: String(source.projectId),
+            threadVersion: source.version,
+            externalContentIngested: marked,
+            point: {},
+          },
+          omissions: {
+            earlierMessages: 0,
+            unfinishedReplies: 0,
+            missingBodies: 0,
+            oversizedBodies: 0,
+            emptyBodies: 0,
+            attachments: 0,
+            truncatedMessages: 0,
+            truncatedCharacters: 0,
+            sourceTruncatedMessages: 0,
+          },
+        }),
+        recordExternalContentIngestion: record,
+      });
+
+    it("is marked before it is journaled when its source is marked", async () => {
+      const record = vi.fn<NonNullable<CodeServiceOptions["recordExternalContentIngestion"]>>(
+        () => ({
+          kind: "recorded",
+          taint: { externalContentIngested: true, ingestedSources: ["code-fork"] },
+        }),
+      );
+      const fixture = fixtureFromSource(true, record);
+
+      await expect(
+        fixture.service.execute(ids.window, { kind: "create-code-thread", thread: forked }),
+      ).resolves.toMatchObject({ kind: "thread-created" });
+
+      expect(record).toHaveBeenCalledWith({
+        threadId: ids.thread,
+        provenance: { origin: "external-content", sourceLabel: "code-fork" },
+        contentReference: `code-fork-${sourceId}-${throughOperationId}`,
+        correlationId: expect.any(String),
+        authorized: true,
+      });
+      expect(record.mock.invocationCallOrder[0]).toBeLessThan(
+        fixture.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
+      );
+    });
+
+    it("is not marked when its source is not", async () => {
+      const record = vi.fn<NonNullable<CodeServiceOptions["recordExternalContentIngestion"]>>();
+      const fixture = fixtureFromSource(false, record);
+
+      await fixture.service.execute(ids.window, { kind: "create-code-thread", thread: forked });
+
+      expect(record).not.toHaveBeenCalled();
+      expect(fixture.persistence.journal.append).toHaveBeenCalledTimes(1);
+    });
+
+    it("is refused, and nothing is journaled, when its mark is refused", async () => {
+      const fixture = fixtureFromSource(true, () => ({ kind: "refused", reason: "malformed" }));
+
+      await expect(
+        fixture.service.execute(ids.window, { kind: "create-code-thread", thread: forked }),
+      ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    });
+  });
+
   it("leaves a thread that asks for less than its profile allows alone", async () => {
     const created = thread({
       executionPolicy: "plan",
@@ -4086,6 +4170,8 @@ function serviceFixture(
     readonly gitHistory?: CodeServiceOptions["gitHistory"];
     readonly liveTurns?: CodeServiceOptions["liveTurns"];
     readonly forkMergeBack?: CodeServiceOptions["forkMergeBack"];
+    readonly forkConversation?: CodeServiceOptions["forkConversation"];
+    readonly recordExternalContentIngestion?: CodeServiceOptions["recordExternalContentIngestion"];
   } = {},
 ) {
   const threads = options.threads ?? [thread()];
@@ -4193,6 +4279,12 @@ function serviceFixture(
     ...(options.pullRequests === undefined ? {} : { pullRequests: options.pullRequests }),
     ...(options.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
     ...(options.forkMergeBack === undefined ? {} : { forkMergeBack: options.forkMergeBack }),
+    ...(options.forkConversation === undefined
+      ? {}
+      : { forkConversation: options.forkConversation }),
+    ...(options.recordExternalContentIngestion === undefined
+      ? {}
+      : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
     ...(options.watcher === undefined
       ? {}
       : { watcher: options.watcher as unknown as NonNullable<CodeServiceOptions["watcher"]> }),
