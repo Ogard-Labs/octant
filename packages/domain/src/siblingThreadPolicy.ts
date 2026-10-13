@@ -1,5 +1,7 @@
 import type {
+  CodeThreadId,
   OctantMode,
+  ProjectId,
   SiblingThreadAction,
   SiblingThreadReference,
   SiblingThreadRefuseReason,
@@ -10,6 +12,8 @@ import {
   MAX_SIBLING_THREAD_READS_PER_TURN,
   MAX_SIBLING_THREAD_WAITS_PER_TURN,
   MAX_SIBLING_THREAD_WAIT_MS,
+  decodeCodeThreadId,
+  decodeProjectId,
   decodeSiblingThreadReference,
 } from "@octant/contracts";
 
@@ -30,9 +34,9 @@ export const SIBLING_THREAD_UNREACHABLE = "That thread cannot be read from this 
 
 /** Where the calling turn stands. */
 export interface SiblingThreadCaller {
-  readonly threadId: string;
+  readonly threadId: CodeThreadId;
   /** Absent for a thread outside any Project, which reads nothing. */
-  readonly projectId: string | undefined;
+  readonly projectId: ProjectId | undefined;
   readonly mode: OctantMode;
 }
 
@@ -42,8 +46,8 @@ export interface SiblingThreadCaller {
  * messaging, so its id refuses as an unknown one.
  */
 export interface SiblingThreadFacts {
-  readonly threadId: string;
-  readonly projectId: string | undefined;
+  readonly threadId: CodeThreadId;
+  readonly projectId: ProjectId | undefined;
   readonly mode: OctantMode;
   /** Completed or archived. A deleted thread does not resolve at all. */
   readonly closed: boolean;
@@ -63,18 +67,19 @@ export function siblingThreadReadable(
     caller.mode === "code" &&
     target.mode === "code" &&
     caller.projectId !== undefined &&
-    caller.projectId === target.projectId &&
-    target.threadId !== caller.threadId &&
+    target.projectId !== undefined &&
+    String(caller.projectId) === String(target.projectId) &&
+    String(target.threadId) !== String(caller.threadId) &&
     !target.closed
   );
 }
 
 /** The reference `list` returns for a readable thread. */
 export function siblingThreadReference(target: {
-  readonly threadId: string;
-  readonly projectId: string;
+  readonly threadId: CodeThreadId;
+  readonly projectId: ProjectId;
 }): SiblingThreadReference {
-  return decodeSiblingThreadReference(`${target.threadId}@${target.projectId}`);
+  return decodeSiblingThreadReference(`${String(target.threadId)}@${String(target.projectId)}`);
 }
 
 /**
@@ -84,15 +89,13 @@ export function siblingThreadReference(target: {
  */
 export function parseSiblingThreadReference(
   reference: string,
-): { readonly threadId: string; readonly projectId: string } | undefined {
-  let decoded: string;
+): { readonly threadId: CodeThreadId; readonly projectId: ProjectId } | undefined {
   try {
-    decoded = decodeSiblingThreadReference(reference);
+    const [threadId, projectId] = decodeSiblingThreadReference(reference).split("@");
+    return { threadId: decodeCodeThreadId(threadId), projectId: decodeProjectId(projectId) };
   } catch {
     return undefined;
   }
-  const [threadId, projectId] = decoded.split("@");
-  return threadId === undefined || projectId === undefined ? undefined : { threadId, projectId };
 }
 
 export type SiblingThreadTargetDecision =
@@ -118,8 +121,8 @@ export function decideSiblingThreadTarget(input: {
   if (
     named === undefined ||
     input.target === undefined ||
-    named.threadId !== input.target.threadId ||
-    named.projectId !== input.target.projectId ||
+    String(named.threadId) !== String(input.target.threadId) ||
+    String(named.projectId) !== String(input.target.projectId) ||
     !siblingThreadReadable(input.caller, input.target)
   ) {
     return { status: "refused", reason: "unauthorized", message: SIBLING_THREAD_UNREACHABLE };
@@ -143,7 +146,7 @@ export function listSiblingThreads<
     .toSorted(
       (left, right) =>
         Date.parse(right.stateChangedAt) - Date.parse(left.stateChangedAt) ||
-        left.threadId.localeCompare(right.threadId),
+        String(left.threadId).localeCompare(String(right.threadId)),
     );
   return {
     threads: readable.slice(0, MAX_SIBLING_THREAD_LIST_ROWS),

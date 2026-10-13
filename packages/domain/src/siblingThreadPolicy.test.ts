@@ -5,6 +5,8 @@ import {
   MAX_SIBLING_THREAD_READS_PER_TURN,
   MAX_SIBLING_THREAD_WAITS_PER_TURN,
   MAX_SIBLING_THREAD_WAIT_MS,
+  decodeCodeThreadId,
+  decodeProjectId,
 } from "@octant/contracts";
 import {
   SIBLING_THREAD_UNREACHABLE,
@@ -19,9 +21,10 @@ import {
   type SiblingThreadFacts,
 } from "./siblingThreadPolicy";
 
-const projectA = "a0000000-0000-4000-8000-000000000001";
-const projectB = "b0000000-0000-4000-8000-000000000001";
-const threadId = (n: number) => `c0000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const projectA = decodeProjectId("a0000000-0000-4000-8000-000000000001");
+const projectB = decodeProjectId("b0000000-0000-4000-8000-000000000001");
+const threadId = (n: number) =>
+  decodeCodeThreadId(`c0000000-0000-4000-8000-${String(n).padStart(12, "0")}`);
 
 const caller: SiblingThreadCaller = { threadId: threadId(1), projectId: projectA, mode: "code" };
 
