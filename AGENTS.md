@@ -127,8 +127,10 @@ test count.
 - Work never silently becomes Code. Coding work promotes to a linked Code
   thread only with explicit user approval.
 - Every supported provider reports capabilities honestly in every mode and
-  fails closed when unsupported. No core capability may require a specific
-  vendor.
+  fails closed when unsupported. A first-class provider may offer a capability
+  in full; every other provider gets a documented degraded form, listed in the
+  architecture's "degraded on" matrix, or reports the capability unsupported.
+  The matrix is not written yet.
 - Browser/computer use, tests, Apple validation, approvals, memory, and subagents
   are app-managed, provider-neutral capabilities. Core Apple development cannot
   depend on an optional extension.
@@ -145,11 +147,15 @@ test count.
 - Structured extension or plugin references cannot install, trust, enable,
   elevate, or bypass policy. Discover skills only from valid `.agents/skills/`
   packages in the permitted repository ancestry and user-global directory.
+  Not built yet: an allow-listed set of extra skill roots (for example
+  `.claude/skills`) joins them under the same activation ladder; until then
+  only `.agents/skills/` is read.
 - Use the unified real-thread hierarchy and server-authoritative Work/Code
   boards. Chat has no board.
-- A Work or Code thread is Done only when its user-confirmed delivery target is
-  objectively satisfied. Remote clients never exceed host, mode, provider,
-  Project, or thread authority.
+- A Code thread is Done only when its user-confirmed delivery target is
+  objectively satisfied. A Work thread is Done by the same rule, or, once it is
+  built, when a person marks it Done. Remote clients never exceed host, mode,
+  provider, Project, or thread authority.
 
 ## Originality, Privacy, And Architecture
 

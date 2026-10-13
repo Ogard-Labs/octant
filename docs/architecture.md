@@ -59,7 +59,12 @@ The design rests on a small set of invariants that every package obeys:
   duplicate answers, and settles the underlying callback only when complete.
 - **Capabilities are honest and fail closed.** Every provider reports what it
   supports in every mode; an unsupported capability is disabled or refused,
-  never silently emulated. No core capability may require a specific provider.
+  never silently emulated. A first-class provider may offer a capability in
+  full; every other provider gets a documented degraded form, listed in the
+  "degraded on" matrix, or reports the capability unsupported. Not built yet:
+  the matrix is not written, and which providers are first-class is not yet
+  named. The app-managed tools below stay provider-neutral, and a seam is never
+  widened for one vendor.
 - **Install ≠ trust ≠ enable.** Extensions contribute nothing until each of
   those steps has been taken explicitly, and even then only within the mode,
   Project, thread, and provider policy that applies.
@@ -646,6 +651,14 @@ threads without a Project need the further `allowDefaultFolderThreads` switch,
 which the host accepts only while Git is not required. See
 [decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md](decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md).
 
+Not built yet: two decisions change this paragraph, and the shipped host keeps
+the behavior above until they land. The default folder moves from
+`~/Documents/Octant` to `~/Octant`. The `requireGitRepository` and
+`allowDefaultFolderThreads` switches, and the row Work offers to start a thread
+in the default folder instead of a Project, fold into one choice. Both were
+decided together; the choice's wording, and what happens to values stored under
+the old default and the two old switches, are settled when it is built.
+
 Code task creation accepts a plain-folder checkout when the server admits it under
 Code settings. The renderer preserves its proposed branch as delivery intent without
 claiming a checked-out branch; detached Git checkouts remain refused. Git-dependent
@@ -684,7 +697,10 @@ read the same file on demand; nothing about its content is journaled. While
 disabled, Octant reads nothing from the folder for this purpose, adds no
 instruction, and writes nothing there; turning the setting off leaves an
 existing file untouched. Octant never writes an agent brief (`AGENTS.md`,
-`CLAUDE.md`, or similar) into a user folder. This narrows the always-on
+`CLAUDE.md`, or similar) into a user folder, and a Work turn does not read an
+existing one. Not built yet for Codex: a Codex Work turn starts at the Project
+root, and Codex still loads an `AGENTS.md` it finds there; Claude Work turns
+load no project settings or instruction files. This narrows the always-on
 behavior first recorded in
 [decisions/0119-a-work-project-keeps-its-status-in-its-folder.md](decisions/0119-a-work-project-keeps-its-status-in-its-folder.md).
 
@@ -973,7 +989,10 @@ Done); Chat has no board. Code lists active open and draft pull requests from
 connected Projects in a manually refreshed workspace and joins exact
 thread-owned PR status onto Code board cards. A Work or Code thread is Done
 only when its user-confirmed delivery target is objectively satisfied;
-ambiguous state resolves to Waiting.
+ambiguous state resolves to Waiting. Not built yet: a person may also mark a
+Work thread Done, and a Work thread so marked is Done. A Code thread keeps the objective rule, with no
+person's mark that overrides it. Until this is built, a Work thread reaches
+Done only through the rule above.
 
 **Pull-request merge.** The person at a local desktop window may merge one
 open pull request from its review (`POST /api/code/project-pull-requests/merge`).
@@ -2819,7 +2838,8 @@ ledger row however it ended — completed, failed, cancelled, or interrupted —
 and Work keeps usage the provider reports after a cancel. A turn that reached
 the provider and reported nothing (an ACP agent in Code reports no usage) is
 recorded as unreported and unpriced, so token and money ceilings refuse after
-it; a turn refused or failed before the provider leaves no row. A Code turn
+it (see the not-yet-built change below); a turn refused or failed before the
+provider leaves no row. A Code turn
 reaches the provider once its `provider-session-ready` frame is journaled,
 just before the prompt is sent, or when it completes. Any unpriced row in the
 window — a model with no price, a provider that reports no cost or no usage,
@@ -2829,6 +2849,15 @@ offers clearing the ceiling, waiting out a Project's calendar window, Usage,
 or pausing; a raise cannot price the usage, so it is not offered. Turns from
 before this behaviour that left no ledger row at all, including every child
 run's, are not counted.
+
+Not built yet: a provider that reports no usage is not counted against a
+ceiling. Its unreported turns neither raise spend nor refuse a later turn for
+that reason, and the composer and Usage say visibly that the provider is not
+measured, so a person is not led to read the ceiling as covering it. The rule
+concerns usage a provider does not report; a model with no known price, or
+usage journaled before the ledger carried cost, is a different case and still
+makes a money ceiling refuse `unknown-spend` as described above. Until this is
+built, the host refuses as the paragraph above describes.
 
 Money is checked between turns, like turns and run time, not reserved like
 tokens. A provider reports cost only when a turn settles and no per-turn price
@@ -3571,6 +3600,11 @@ prompt, schema, tool, route, model, or capability.
 - Skills are discovered only from valid `.agents/skills/` packages between the
   working directory and the Project or repository root, plus the user-global
   `~/.agents/skills/`.
+  Not built yet: discovery also reads an allow-listed set of extra skill roots
+  (for example `.claude/skills`), each entering the same activation ladder as
+  `.agents/skills/` (indexed disabled, then reviewed, then enabled; a
+  discovered skill is never trusted or active because of where it was found).
+  Until this is built, only `.agents/skills/` is read.
 - Marketplace network is on user action: curated catalog search is in-memory;
   inspect/install fetches the pinned GitHub tree; standalone skill search
   queries skills.sh and npm with the typed text; Agent Plugins search queries

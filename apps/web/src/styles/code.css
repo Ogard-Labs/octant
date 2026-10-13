@@ -2042,7 +2042,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   }
 }
 
-/* The composer's frame, placement, focus border, input, chips, bottom row,
+/* The composer's frame, placement, input, chips, bottom row,
    controls, and status line are the system's (`.composer`,
    `.thread-composer`, `.composer-row`, `.composer-status`, as in Chat and
    Work); this block only pads the pieces the system does not know about. */
