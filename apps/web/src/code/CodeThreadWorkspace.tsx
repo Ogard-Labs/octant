@@ -943,10 +943,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       }
       const result = await client.executeOperation(command);
       if (result.kind === "operation-failed") {
-        // The host refused before touching the files, so the point a past
-        // restore left behind is still the way back.
         setRestoreMessage(result.failure.message);
-        setRestoreUndo(previousUndo);
+        // A conflict is the host refusing before Git runs, so the point a past
+        // restore left behind is still the way back. Other failures include a
+        // restore that threw part way, which may have moved files.
+        if (result.failure.category === "conflict") setRestoreUndo(previousUndo);
       } else if (result.kind === "git-mutation-state" && result.state === "completed") {
         setRestoreMessage(completedMessage);
         // Keeping what the host replaced is what makes the overwrite reversible;

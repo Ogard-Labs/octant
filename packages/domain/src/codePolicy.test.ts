@@ -407,6 +407,11 @@ describe("in-place restore", () => {
     expect(text).not.toContain("x".repeat(101));
   });
 
+  it("never cuts a title through the middle of an emoji", () => {
+    const text = inPlaceRestoreRefusalText(`${"x".repeat(99)}😀tail`);
+    expect(text).toContain(`"${"x".repeat(99)}😀"`);
+  });
+
   it("does not name a thread from another Project", () => {
     expect(inPlaceRestoreRefusalText()).toBe(
       "A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then restore.",

@@ -239,7 +239,8 @@ export function inPlaceRestoreRefusalText(title?: string): string {
   if (title === undefined) {
     return "A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then restore.";
   }
-  const shown = title.slice(0, RESTORE_REFUSAL_TITLE_LIMIT);
+  // Cut by code point: a UTF-16 slice can split an emoji into a lone surrogate.
+  const shown = Array.from(title).slice(0, RESTORE_REFUSAL_TITLE_LIMIT).join("");
   return `Another thread is writing in this checkout: "${shown}". Wait for its turn to finish or stop it, then restore.`;
 }
 

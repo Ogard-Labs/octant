@@ -722,9 +722,13 @@ the id derives from Project and binding revision, so two Projects on one folder
 have different ids for one directory, and a managed worktree has its own path
 and so never matches. The refusal names the other thread by title (cut to 100
 characters) only when it is in the requesting thread's Project; otherwise it
-says a thread in another Project is writing. A turn that starts while a restore
-runs is not refused: its checkpoint capture queues behind the restore for the
-same checkout id, so it starts from the restored files. Restore from here and
+says a thread in another Project is writing. The check sees only turns the
+runtime has registered as live. A turn whose checkpoint capture begins after a
+restore has started queues behind it for the same checkout id, so it starts from
+the restored files. A writing turn that already captured its checkpoint but is
+still preparing to start (credentials, session seeding, fork preparation) is
+not yet live: a restore that arrives then is not refused, and that turn runs
+from files captured before the restore. Restore from here and
 Fork from here create a thread on its own worktree and are not subject to the
 check. Discard and revert also overwrite files and are not yet covered.
 
