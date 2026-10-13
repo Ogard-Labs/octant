@@ -34,25 +34,30 @@ export function erasePurgedThread(input: {
   const aggregates = collectOwnedAggregates(input.connection, input.mode, threadId);
   input.connection.pragma("foreign_keys = OFF");
   try {
-    purgeDerivedContent(input.connection, input.mode, threadId);
-    delinkUsageRecords(
-      input.connection,
-      input.mode,
-      threadId,
-      aggregates
-        .filter((aggregate) => aggregate.aggregateType === "agent-run")
-        .map((aggregate) => aggregate.aggregateId),
-    );
-    delinkProjectMemoryProvenance(input.connection, threadId);
-    deleteThreadScopedProjectionRows(input.connection, threadId);
-    eraseReplicaArtifactCopies(
-      input.connection,
-      aggregates
-        .filter((aggregate) => aggregate.aggregateType === "canvas")
-        .map((aggregate) => aggregate.aggregateId),
-    );
-    deleteJournalEvents(input.connection, aggregates);
-    reconcileAggregateHeads(input.connection);
+    // One transaction, so a crash cannot leave the compaction events gone and
+    // the surviving ledger versions half-renumbered.
+    input.connection.transaction(() => {
+      purgeDerivedContent(input.connection, input.mode, threadId);
+      delinkUsageRecords(
+        input.connection,
+        input.mode,
+        threadId,
+        aggregates
+          .filter((aggregate) => aggregate.aggregateType === "agent-run")
+          .map((aggregate) => aggregate.aggregateId),
+      );
+      delinkProjectMemoryProvenance(input.connection, threadId);
+      deleteThreadScopedProjectionRows(input.connection, threadId);
+      eraseReplicaArtifactCopies(
+        input.connection,
+        aggregates
+          .filter((aggregate) => aggregate.aggregateType === "canvas")
+          .map((aggregate) => aggregate.aggregateId),
+      );
+      deleteJournalEvents(input.connection, aggregates);
+      reconcileAggregateHeads(input.connection);
+      clampCheckpointsToJournalHead(input.connection);
+    })();
   } finally {
     input.connection.pragma("foreign_keys = ON");
   }
@@ -63,6 +68,20 @@ export function erasePurgedThread(input: {
  * with surviving events falls back to the surviving version and sequence, so
  * a later append expects a version that exists.
  */
+/**
+ * A projection caught up before the deletion has already applied every
+ * surviving event, which has a lower sequence. Pinning its checkpoint to the
+ * new head keeps it current; leaving it past the head is what the store
+ * verifier reports as corruption.
+ */
+function clampCheckpointsToJournalHead(connection: SqliteConnection): void {
+  connection.exec(
+    `UPDATE projection_checkpoints
+     SET last_sequence = (SELECT coalesce(max(global_sequence), 0) FROM event_journal)
+     WHERE last_sequence > (SELECT coalesce(max(global_sequence), 0) FROM event_journal)`,
+  );
+}
+
 function reconcileAggregateHeads(connection: SqliteConnection): void {
   connection.exec(
     `DELETE FROM aggregate_heads WHERE NOT EXISTS (

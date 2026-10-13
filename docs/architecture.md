@@ -2450,8 +2450,10 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   a thread purge erases it.
 - A thread purge erases the thread's compaction events and keeps the rest of
   its ledger as host accounting. The surviving ledger events are renumbered
-  contiguously, as journal compaction does, because the store verifier treats a
-  per-aggregate version gap as corruption.
+  contiguously in the same transaction, as journal compaction does, because the
+  store verifier treats a per-aggregate version gap as corruption. Checkpoints
+  that had passed the deleted events are pinned back to the journal head,
+  because a checkpoint past the head is the same kind of corruption.
 - Octant Harness appends a `compacted` event to `native-harness-transcript`
   that names the summary and the last turn it covers. Earlier messages stay in
   the aggregate; resume and replay build requests from the summary and the tail.

@@ -269,14 +269,14 @@ describe("compacting a session on request", () => {
       mode: "chat",
       threadId: threadId as never,
     });
-    // The ledger's surviving plan and summary events stay contiguous, so the
-    // store still verifies and the next append expects a version that exists.
+    // Deleting the compaction must not leave a version gap or a checkpoint
+    // past the journal head: either one makes the store read as corrupt.
     expect(
       verifyDatabase({
         connection: world.fixture.connection,
         journal: world.fixture.journal,
         projections: world.fixture.projections,
-      }).issues.filter((issue) => issue.kind.startsWith("aggregate-")),
+      }).issues,
     ).toEqual([]);
     world.fixture.connection.close();
 
