@@ -16,6 +16,12 @@ export interface PendingRequestSources {
   readonly code: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
   /** Chat questions a running attempt is parked on; Chat has no per-window authority. */
   readonly chat: () => ReadonlyArray<PendingRequest>;
+  /**
+   * Subagents waiting on the person in a thread this window can open. These
+   * rows carry no answer: they find the request, and answering stays in the
+   * parent thread's Agents tab.
+   */
+  readonly children: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
 }
 
 /**
@@ -34,12 +40,18 @@ export class PendingRequestService {
 
   async list(windowId: WindowId): Promise<PendingRequestList> {
     const modes = enabledModes(this.#sources.readSettings());
-    const [work, code] = await Promise.all([
+    const [work, code, children] = await Promise.all([
       modes.includes("work") ? this.#sources.work(windowId) : [],
       this.#sources.code(windowId),
+      this.#sources.children(windowId),
     ]);
     const chat = modes.includes("chat") ? this.#sources.chat() : [];
-    const oldestFirst = [...work, ...code, ...chat].sort(
+    const oldestFirst = [
+      ...work,
+      ...code,
+      ...chat,
+      ...children.filter((request) => modes.includes(request.mode)),
+    ].sort(
       (left, right) =>
         left.requestedAt.localeCompare(right.requestedAt) ||
         requestKey(left).localeCompare(requestKey(right)),
@@ -53,5 +65,9 @@ export class PendingRequestService {
 
 /** A stable tiebreak, so two requests asked in the same millisecond keep one order. */
 function requestKey(request: PendingRequest): string {
-  return `${request.mode}:${String(request.threadId)}:${JSON.stringify(request.answer)}`;
+  const handle =
+    request.kind === "child-approval" || request.kind === "child-question"
+      ? `${request.kind}:${String(request.child.runId)}:${request.text}`
+      : JSON.stringify(request.answer);
+  return `${request.mode}:${String(request.threadId)}:${handle}`;
 }

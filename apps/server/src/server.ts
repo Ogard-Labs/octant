@@ -382,6 +382,7 @@ import {
   type AgentRunProcessSupervisorPort,
   createInMemoryCapacityPort,
 } from "./agentRun/agentRunOrchestrationService";
+import { listChildPendingRequests } from "./agentRun/childPendingRequests";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
 import { AgentRunDependencyScheduler } from "./agentRun/agentRunDependencyScheduler";
 import { AgentResultDeliveryService } from "./agentRun/agentResultDeliveryService";
@@ -9901,6 +9902,24 @@ export function startOctantServer(
         ...(await codeTurnDecisions.listForWindow(windowId)),
       ],
       chat: () => chatService.listPendingQuestions(),
+      children: (windowId) =>
+        listChildPendingRequests(
+          {
+            approvals: nativeHarnessApprovals,
+            questions: nativeHarnessQuestionsLive,
+            readSession: (threadId) => nativeHarnessSessionsLive.read(threadId),
+            getRun: (id) => agentRunPersistence.getById(id),
+            parentThreadTitle: (run) =>
+              resolveAgentRunParentThreadTitle({
+                persistence,
+                workThreadProjection,
+                parentThreadId: run.parentThreadId,
+                mode: run.routingReceipt.mode,
+              }),
+            authorizeThread: authorizeFollowUpThread,
+          },
+          String(windowId),
+        ),
     });
     const pendingRequestRoutes = createPendingRequestRouteHandler({
       service: pendingRequestService,

@@ -57,13 +57,32 @@ export interface PendingRequestAnswerClients {
   readonly workTurnClient: Pick<WorkTurnClient, "startFirstTurn">;
 }
 
+/**
+ * A subagent waiting on the person. The row finds the request; the answer is
+ * given in the parent thread's Agents tab, so there is nothing to answer here.
+ */
+export type ChildPendingRequest = Extract<
+  PendingRequest,
+  { readonly kind: "child-approval" | "child-question" }
+>;
+
+export function isChildPendingRequest(request: PendingRequest): request is ChildPendingRequest {
+  return request.kind === "child-approval" || request.kind === "child-question";
+}
+
 /** One request's identity across reads: the same waiting question keeps its key. */
 export function pendingRequestKey(request: PendingRequest): string {
   return `${request.mode}:${String(request.threadId)}:${answerHandle(request)}`;
 }
 
-/** A decision is named by the turn that asked it; every other request by its own id. */
+/**
+ * A decision is named by the turn that asked it, a subagent's request by its
+ * run and when it asked, and every other request by its own id.
+ */
 function answerHandle(request: PendingRequest): string {
+  if (isChildPendingRequest(request)) {
+    return `${request.kind}:${String(request.child.runId)}:${request.requestedAt}:${request.text}`;
+  }
   if (request.kind === "decision") {
     return request.mode === "code"
       ? `decision:${String(request.answer.operationId)}`
@@ -114,6 +133,7 @@ export async function answerPendingRequest(
   response: PendingRequestResponse,
 ): Promise<PendingRequestAnswerResult> {
   try {
+    if (isChildPendingRequest(request)) return NOT_DELIVERED;
     if (request.kind === "decision") {
       if (response.kind !== "choice") return NOT_DELIVERED;
       if (!request.options.some((option) => option.label === response.label)) {

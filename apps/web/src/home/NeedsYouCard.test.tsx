@@ -73,7 +73,10 @@ const chatChoice = {
   threadId: "chat-choice-thread",
   threadTitle: "Pick a colour",
   options: [{ label: "Red", description: "Warm" }, { label: "Blue" }],
-  answer: { ...(chatQuestion.answer as object), threadId: "chat-choice-thread" },
+  answer: {
+    ...(chatQuestion as { readonly answer: object }).answer,
+    threadId: "chat-choice-thread",
+  },
 } as unknown as PendingRequest;
 
 function reader(...reads: ReadonlyArray<ReadonlyArray<PendingRequest>>): PendingRequestClient {
@@ -341,7 +344,8 @@ describe("the Needs you card", () => {
       threadId: workDecision().threadId,
       turnId: expect.any(String),
       prompt: "Headcount",
-      authority: (workDecision().answer as { readonly authority: unknown }).authority,
+      authority: (workDecision() as { readonly answer: { readonly authority: unknown } }).answer
+        .authority,
     });
     expect(answerClients.workRequestClient.execute).not.toHaveBeenCalled();
   });

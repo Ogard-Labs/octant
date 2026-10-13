@@ -49,7 +49,41 @@ const workApproval = decodePendingRequest({
   answer: { requestId: "00000000-0000-4000-8000-000000000903", expectedVersion: 1 },
 });
 
+const workThread = "00000000-0000-4000-8000-000000000902";
+const childRun = "00000000-0000-4000-8000-000000000a01";
+const waitingChild = (kind: "child-approval" | "child-question", requestedAt: string) =>
+  decodePendingRequest({
+    mode: "work",
+    kind,
+    projectId,
+    threadId: workThread,
+    threadTitle: "Quarterly report",
+    child: { runId: childRun, role: "research", task: "Collect the figures." },
+    text: kind === "child-approval" ? "Run `bun install`." : "Which quarter?",
+    requestedAt,
+  });
+
 describe("fleet activity route", () => {
+  it("lists a parent thread with waiting subagents as one needs-you row read from the session", async () => {
+    const { route } = fixture({
+      pending: [
+        waitingChild("child-approval", "2026-10-06T08:02:00.000Z"),
+        waitingChild("child-question", "2026-10-06T08:03:00.000Z"),
+      ],
+    });
+    expect((await (await route(request()))?.json()).threads).toEqual([
+      {
+        mode: "work",
+        threadId: workThread,
+        title: "Quarterly report",
+        projectName: "Reports",
+        state: "needs-you",
+        activitySource: "session",
+        since: "2026-10-06T08:02:00.000Z",
+      },
+    ]);
+  });
+
   it("lists needs-you before working, naming where each state was read", async () => {
     const { route } = fixture({
       chat: [{ threadId: "chat-1", title: "Trip plan", turnStartedAt: "2026-10-06T08:05:00.000Z" }],

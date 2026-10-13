@@ -182,9 +182,11 @@ export function runningThreadsFromNavigation(navigation: {
 /**
  * A Work request and any finished turn's decision are journaled records; a
  * Code approval or question and a Chat question live in the provider session
- * that is parked on them.
+ * that is parked on them. A subagent's wait is read from the parent thread's
+ * live harness session in every mode.
  */
 function pendingRequestSource(request: PendingRequest): FleetActivitySource {
+  if (request.kind === "child-approval" || request.kind === "child-question") return "session";
   if (request.kind === "decision" || request.mode === "work") return "journal";
   return "session";
 }

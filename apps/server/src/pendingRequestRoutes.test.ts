@@ -59,6 +59,35 @@ const chatQuestion = decodePendingRequest({
   },
 });
 
+const workChildApproval = decodePendingRequest({
+  mode: "work",
+  kind: "child-approval",
+  projectId,
+  threadId: "00000000-0000-4000-8000-000000000902",
+  threadTitle: "Quarterly report",
+  child: {
+    runId: "00000000-0000-4000-8000-000000000a01",
+    role: "research",
+    task: "Collect the figures.",
+  },
+  text: "Run `bun install`.",
+  requestedAt: "2026-10-06T08:04:00.000Z",
+});
+const codeChildQuestion = decodePendingRequest({
+  mode: "code",
+  kind: "child-question",
+  projectId,
+  threadId: "00000000-0000-4000-8000-000000000904",
+  threadTitle: "Fix the parser",
+  child: {
+    runId: "00000000-0000-4000-8000-000000000a02",
+    role: "review",
+    task: "Review the parser change.",
+  },
+  text: "Which fixture should I use?",
+  requestedAt: "2026-10-06T08:00:10.000Z",
+});
+
 const codeDecision = decodePendingRequest({
   mode: "code",
   kind: "decision",
@@ -87,6 +116,34 @@ describe("pending request route", () => {
       requests: [codeDecision, codeApproval, workApproval, chatQuestion],
       truncated: false,
     });
+  });
+
+  it("lists a waiting subagent beside the requests it works under, without a way to answer it", async () => {
+    const { route, sources } = fixture({ children: [workChildApproval, codeChildQuestion] });
+    const body = await (await route(request()))?.json();
+    expect(body.requests).toEqual([
+      codeChildQuestion,
+      codeApproval,
+      workApproval,
+      chatQuestion,
+      workChildApproval,
+    ]);
+    expect(body.requests[0]).not.toHaveProperty("answer");
+    expect(body.requests[0]).not.toHaveProperty("options");
+    expect(sources.children).toHaveBeenCalledWith(windowId);
+  });
+
+  it("lists no subagent row for a mode that is switched off", async () => {
+    const { route } = fixture({
+      settings: { ...defaultShellSettings(), workEnabled: false },
+      children: [workChildApproval, codeChildQuestion],
+    });
+    const body = await (await route(request()))?.json();
+    expect(body.requests.map((entry: { kind: string }) => entry.kind)).toEqual([
+      "child-question",
+      "approval",
+      "question",
+    ]);
   });
 
   it("gives a paired device no decision", async () => {
@@ -137,7 +194,7 @@ describe("pending request route", () => {
       decodePendingRequest({
         ...workApproval,
         requestedAt: new Date(Date.UTC(2026, 9, 6, 8, 0, index)).toISOString(),
-        answer: { ...workApproval.answer, expectedVersion: index + 1 },
+        answer: { requestId: "00000000-0000-4000-8000-000000000903", expectedVersion: index + 1 },
       }),
     ).reverse();
     const { route } = fixture({ work: many, code: [], chat: [] });
@@ -227,6 +284,7 @@ function fixture(
     readonly work?: ReadonlyArray<PendingRequest>;
     readonly code?: ReadonlyArray<PendingRequest> | (() => Promise<ReadonlyArray<PendingRequest>>);
     readonly chat?: ReadonlyArray<PendingRequest>;
+    readonly children?: ReadonlyArray<PendingRequest>;
   } = {},
 ) {
   const store = new WindowAuthorityStore();
@@ -237,6 +295,7 @@ function fixture(
     work: vi.fn(async () => [...(options.work ?? [workApproval])]),
     code: vi.fn(typeof code === "function" ? code : async () => code ?? [codeApproval]),
     chat: vi.fn(() => options.chat ?? [chatQuestion]),
+    children: vi.fn(async () => options.children ?? []),
   } satisfies PendingRequestSources;
   const route = createPendingRequestRouteHandler({
     service: new PendingRequestService(sources),
