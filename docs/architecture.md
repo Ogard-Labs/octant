@@ -1298,7 +1298,10 @@ or stops a thread.
   it never resolves to a different thread. The thread's working state is not
   part of it, since `wait` exists to see that state change. Every reference
   outside the set, malformed text included, refuses `unauthorized` with one
-  sentence, so a refusal confirms nothing outside the caller's Project. Inside
+  sentence, so a refusal confirms nothing outside the caller's Project. A call
+  whose input fails the tool's schema (an unknown action, an extra field, a
+  timeout out of range, a reference over 128 characters) or whose turn was
+  cancelled refuses `policy`; neither depends on any thread. Inside
   it, `list` makes the set visible on purpose; a `sent` answer from messaging
   already confirmed it.
 - **Taint and framing.** `read` text joins the turn inside the shared

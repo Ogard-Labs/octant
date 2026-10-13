@@ -76,9 +76,13 @@ export type SiblingThreadsToolInput = typeof SiblingThreadsToolInput.Type;
 
 /**
  * Why a call was refused. `unauthorized` covers every reference outside the
- * readable set in one sentence; `rate-limited` is a spent per-turn bound;
+ * readable set in one sentence, including reference text that does not parse
+ * as `<thread id>@<project id>`; `rate-limited` is a spent per-turn bound;
  * `unavailable` is a read the host could not mark as outside content, so it
- * returned nothing; `policy` is malformed input or a cancelled turn.
+ * returned nothing; `policy` is a call whose input fails
+ * `SiblingThreadsToolInput` (an unknown action, an extra field, a timeout out
+ * of range, a reference over 128 characters) or a cancelled turn. Neither
+ * `policy` case depends on any thread, so it confirms nothing about one.
  */
 export const SiblingThreadRefuseReason = Schema.Literal(
   "unauthorized",
