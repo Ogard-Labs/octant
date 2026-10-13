@@ -63,6 +63,15 @@ export interface SessionCompactionOptions {
   /** Thread kinds whose conversation the host plans. Any other kind cannot compact yet. */
   readonly threads: Partial<Record<"chat-thread" | "work-thread", SessionCompactionThreads>>;
   readonly modeEnabled: (mode: "chat" | "work") => boolean;
+  /**
+   * Who keeps the instance's conversation, read from its driver kind; undefined
+   * for an instance that no longer exists. It must not depend on readiness: a
+   * signed-out runtime still owns its session, so it cannot compact rather than
+   * merely being unavailable.
+   */
+  readonly conversationOwner: (
+    providerInstanceId: ProviderInstanceId,
+  ) => "runtime" | "host" | undefined;
   /** The instance's driver; undefined when it is disabled, signed out or unreachable. */
   readonly availableDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   readonly capacity: Pick<
@@ -353,7 +362,11 @@ export class SessionCompactionService {
     // Code threads are planned by Octant Harness or a runtime, and neither
     // offers a compaction request through its connection yet.
     const owner =
-      threads === undefined || driver?.conversationOwnership === "provider" ? "runtime" : "host";
+      threads === undefined ||
+      (thread !== undefined &&
+        this.#options.conversationOwner(thread.providerInstanceId) === "runtime")
+        ? "runtime"
+        : "host";
     const preview =
       owner === "host" && thread !== undefined && threads !== undefined
         ? harness.previewSessionCompaction({

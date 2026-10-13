@@ -1,4 +1,10 @@
-import { decodeContextSubjectRef, decodeProviderRuntimeEvent } from "@octant/contracts";
+import {
+  decodeContextCompactionId,
+  decodeContextSubjectRef,
+  decodeProviderRuntimeEvent,
+} from "@octant/contracts";
+import { makeProviderCapacityScheduler } from "../context/contextRuntime";
+import { SessionCompactionService } from "../context/sessionCompaction";
 import { ContextHarnessError, ContextHarnessService } from "../context/contextHarnessService";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -30,7 +36,7 @@ import {
   type Project,
   type UtcTimestamp,
 } from "@octant/contracts";
-import { Effect, Stream } from "effect";
+import { Effect, Queue, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { browserUseSelection } from "@octant/plugin-host/browser-use";
@@ -490,6 +496,139 @@ describe("WorkTurnService", () => {
           cost_kind: "provider-recorded",
         },
       ]);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("compacts a Work session on request and sends the summary on the next turn", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-work-compaction-"));
+    attachmentRoots.push(root);
+    const connection = openSqlite(join(root, "context.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      let sequence = 0;
+      const uuid = () => `83000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`;
+      const contextHarness = new ContextHarnessService({
+        persistence: { connection, journal, status: () => ({ state: "current", integrity: "ok" }) },
+        uuid,
+        clock: () => now,
+      });
+      const sent: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
+      const fixture = serviceFixture({
+        contextHarness,
+        turnRuntime: {
+          run: async (input) => {
+            sent.push(input.context ?? []);
+            return { kind: "completed", response: "Provider reply" };
+          },
+        },
+        contextFacts: {
+          observeModelLimits: () =>
+            Effect.succeed([
+              {
+                providerInstanceId: decodeProviderInstanceId(ids.provider),
+                modelId: decodeProviderModelId("model-a"),
+                contextWindow: 8_000,
+                maxOutput: 200,
+                source: "runtime-reported",
+                confidence: "high",
+                observedAt: now,
+              },
+            ]),
+          observeServiceLimits: () =>
+            Effect.succeed(
+              unavailableProviderServiceLimits(
+                decodeProviderInstanceId(ids.provider),
+                now,
+                "runtime-reported",
+              ),
+            ),
+        },
+      });
+      // Each prompt is long enough that only the most recent turns fit the
+      // tail, so the first exchange is what a compaction summarizes.
+      const prompt = (n: number) => `Turn ${n}:${" brief detail".repeat(160)}`;
+      const runTurn = async (n: number) => {
+        const suffix = n.toString(16).padStart(12, "0");
+        const requestId = decodeWorkTurnRequestId(`aaaaaaaa-aaaa-4aaa-8aaa-${suffix}`);
+        await fixture.service.startFirstTurn(ids.window, {
+          ...startCommand(),
+          requestId,
+          turnId: decodeWorkTurnId(`bbbbbbbb-bbbb-4bbb-8bbb-${suffix}`),
+          prompt: prompt(n),
+        });
+        await fixture.waitForIdle(requestId);
+      };
+      for (let n = 1; n <= 4; n += 1) await runTurn(n);
+      expect(sent.at(-1)?.some((block) => block.text === prompt(1))).toBe(true);
+
+      const subject = decodeContextSubjectRef({
+        aggregateType: "work-thread",
+        aggregateId: String(ids.thread),
+      });
+      const compaction = new SessionCompactionService({
+        harness: contextHarness,
+        threads: {
+          // The same Work service calls the host wires for a Work thread.
+          "work-thread": {
+            read: () => ({
+              mode: "work",
+              projectId: String(ids.project),
+              providerInstanceId: decodeProviderInstanceId(ids.provider),
+              modelId: decodeProviderModelId("model-a"),
+            }),
+            turnRunning: (threadId) => fixture.service.isTurnActive(decodeWorkThreadId(threadId)),
+            conversation: (threadId) =>
+              fixture.service.sessionCompactionConversation(decodeWorkThreadId(threadId)),
+            scratchRoot: async () => root,
+          },
+        },
+        modeEnabled: () => true,
+        conversationOwner: () => "host",
+        availableDriver: () => summaryDriver("The brief's first turn set the launch scope."),
+        capacity: makeProviderCapacityScheduler({
+          now: () => Date.parse(now),
+          random: () => 0,
+          maxRetryJitterMs: 1_000,
+          ambiguousReservationTtlMs: 60_000,
+        }),
+        uuid,
+        summaryTimeoutMs: 1_000,
+        summaryShutdownTimeoutMs: 50,
+      });
+      expect(compaction.inspect(subject, undefined, "local-window").compaction).toEqual({
+        status: "available",
+      });
+      compaction.start(
+        {
+          kind: "compact-session",
+          subject,
+          compactionId: decodeContextCompactionId("83000000-0000-4000-8000-00000000c0de"),
+        },
+        "local-window",
+      );
+      await compaction.settled();
+      expect(contextHarness.latestCompaction(subject)).toMatchObject({
+        status: "completed",
+        receipt: { trigger: "requested", summary: { visibility: "stored" } },
+      });
+
+      await runTurn(5);
+      const next = sent.at(-1) ?? [];
+      expect(next).toContainEqual({
+        kind: "conversation-summary",
+        text: expect.stringContaining("The brief's first turn set the launch scope."),
+      });
+      expect(next.some((block) => block.text === prompt(1))).toBe(false);
+      expect(next.some((block) => block.text === prompt(4))).toBe(true);
     } finally {
       connection.close();
     }
@@ -2643,4 +2782,35 @@ function deferred<T>() {
     resolve = res;
   });
   return { promise, resolve };
+}
+
+/** A summary provider that answers one prompt with `summary` and a usage report. */
+function summaryDriver(summary: string): ProviderDriver {
+  const queue = Effect.runSync(Queue.unbounded<never>());
+  const connection = {
+    subscribe: Effect.succeed(Stream.fromQueue(queue)),
+    start: (input: { readonly sessionId: string }) =>
+      Effect.succeed({ sessionId: input.sessionId }),
+    send: (input: { readonly sessionId: string }) =>
+      Effect.gen(function* () {
+        yield* Queue.offer(queue, {
+          kind: "text-delta",
+          sessionId: input.sessionId,
+          text: summary,
+        } as never);
+        yield* Queue.offer(queue, {
+          kind: "usage",
+          sessionId: input.sessionId,
+          inputTokens: 600,
+          outputTokens: 12,
+        } as never);
+        yield* Queue.offer(queue, { kind: "completed", sessionId: input.sessionId } as never);
+      }),
+    interrupt: () => Effect.void,
+    stop: () => Effect.void,
+    answerApproval: () => Effect.void,
+    answerUserInput: () => Effect.void,
+    answerTool: () => Effect.void,
+  };
+  return { acquire: () => Effect.succeed(connection) } as never;
 }

@@ -239,7 +239,7 @@ describe("compacting a session on request", () => {
     world.close();
   });
 
-  it("journals no outcome for a thread deleted mid-compaction, and its purge erases the request", async () => {
+  it("ends a compaction whose thread is deleted mid-compaction, and its purge erases the request", async () => {
     const world = createWorld({
       onSend: () => {
         world.state.thread = undefined;
@@ -249,10 +249,21 @@ describe("compacting a session on request", () => {
 
     world.service.start(command(), "local-window");
     await world.service.settled();
-    expect(world.harness.latestCompaction(subject)).toMatchObject({ status: "running" });
+    // An ordinary delete does not purge, so the request cannot wait for one.
+    expect(world.harness.latestCompaction(subject)).toMatchObject({
+      status: "failed",
+      reason: "subject-unavailable",
+      sessionMayHaveChanged: false,
+    });
+    expect(
+      world.harness
+        .inspect(subject)
+        .next.manifest.entries.some((entry) => entry.state === "summarized"),
+    ).toBe(false);
     expect(reportedCompactionUsage(world.fixture.connection)).toEqual([
       { input_tokens: 40, output_tokens: 12 },
     ]);
+    expect(world.harness.closeInterruptedCompactions()).toBe(0);
 
     erasePurgedThread({
       connection: world.fixture.connection,
@@ -411,6 +422,15 @@ describe("compacting a session on request", () => {
       arrange: (world) => {
         planSession(world);
         world.state.ownership = "provider";
+      },
+    },
+    {
+      name: "a signed-out thread whose runtime owns its conversation",
+      reason: "runtime-cannot-compact",
+      arrange: (world) => {
+        planSession(world);
+        world.state.ownership = "provider";
+        world.state.providerAvailable = false;
       },
     },
     {
@@ -603,6 +623,7 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
       },
     },
     modeEnabled: () => state.modeEnabled,
+    conversationOwner: () => (state.ownership === "provider" ? "runtime" : "host"),
     availableDriver: () => {
       if (state.driverThrows) throw new Error("Provider driver is not effective.");
       if (!state.providerAvailable) return undefined;

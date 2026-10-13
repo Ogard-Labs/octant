@@ -2311,8 +2311,10 @@ the thread keeps every message, tool call and result, and the compaction is
 itself an event in it.
 
 Who compacts follows who owns the conversation (`conversationOwnership` on the
-driver). Where Octant owns it, the host summarizes with the thread's own
-provider and model. Where a runtime owns it, only that runtime can change what
+driver), read from the instance's driver kind rather than from a driver that is
+ready now, so a signed-out runtime is still refused `runtime-cannot-compact`.
+Where Octant owns it, the host summarizes with the thread's own provider and
+model. Where a runtime owns it, only that runtime can change what
 its session sends, so Octant asks the runtime to compact and refuses where it
 cannot. The host never starts a replacement provider session seeded with its
 own summary behind the person's back; that is the existing fork handoff, which
@@ -2549,7 +2551,7 @@ _Failures._
 | The runtime lacks the request (older Codex, OpenCode, Pi, Claude)                                      | Refused `runtime-version-unsupported`, and the capability reports `unavailable` for that install.                                                                                                                                                                                                                                                                  |
 | The provider is disabled, signed out or over a spend ceiling                                           | Refused `provider-unavailable` or `spend-ceiling-reached`.                                                                                                                                                                                                                                                                                                         |
 | The thread's mode is disabled while compacting                                                         | A runtime that reports success has changed its session, so the compaction is journaled `completed` and the thread stays unusable until the mode returns. Only an interrupted or unknown outcome is `failed` (`subject-unavailable`), marked as one that may have changed the session. A host summary that has not been committed is dropped and recorded `failed`. |
-| The thread is deleted while compacting                                                                 | The result is discarded. Usage the provider reported is still journaled, because the request was spent; the thread's purge erases the compaction and keeps that usage.                                                                                                                                                                                             |
+| The thread is deleted while compacting                                                                 | The result is discarded and the request ends `failed` (`subject-unavailable`), because an ordinary delete keeps the ledger until a purge and a request left open would read as running. Usage the provider reported is still journaled, because the request was spent; the thread's purge erases the compaction and keeps that usage.                              |
 | The host restarts mid-compaction                                                                       | Recorded as `failed` (`interrupted`); for a runtime the line says it may have compacted, and the next usage report settles it.                                                                                                                                                                                                                                     |
 
 ### Stop reasons

@@ -845,6 +845,7 @@ import {
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
   isProviderAllowedByProjectPolicy,
+  providerKeepsConversation,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
   type PreviewPosture,
@@ -8192,8 +8193,16 @@ export function startOctantServer(
       }
     };
     // No route serves yet, so any compaction still running belongs to a host
-    // process that has gone.
-    contextHarness.closeInterruptedCompactions();
+    // process that has gone. A journal it cannot read must not keep the host
+    // from starting: the compaction stays running, which refuses another one
+    // on that thread, and every other surface still serves. The error is not
+    // logged because a parse failure can quote the payload, which holds the
+    // thread's identifiers.
+    try {
+      contextHarness.closeInterruptedCompactions();
+    } catch {
+      console.error("[context-compaction] Interrupted compactions could not be closed.");
+    }
     const modeEnabled = (mode: "chat" | "work") =>
       enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
         mode,
@@ -8253,6 +8262,11 @@ export function startOctantServer(
         },
       },
       modeEnabled,
+      conversationOwner: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId);
+        if (instance === undefined) return undefined;
+        return providerKeepsConversation(instance.driverKind) ? "runtime" : "host";
+      },
       availableDriver: (providerInstanceId) => {
         const instance = persistence.readProviderInstance(providerInstanceId);
         if (instance === undefined || !instance.enabled) return undefined;

@@ -240,8 +240,8 @@ export type CompactSessionResult =
       readonly record: ContextCompactionRecord;
       readonly snapshot?: ContextInspectorSnapshot;
     }
-  // The thread was deleted while the summary was written; its purge erases
-  // the request, so nothing is journaled for it.
+  // The thread was purged while the summary was written. The purge erased
+  // the request, so no outcome is journaled for it.
   | { readonly kind: "discarded" };
 
 export class ContextHarnessError extends Error {
@@ -861,10 +861,10 @@ export class ContextHarnessService {
     const availability = input.subjectAvailability();
 
     // A purge erases the request with the thread; nothing may bring it back.
-    // The summary's own spend is host accounting and stays, or a deleted
+    // The summary's own spend is host accounting and stays, or a purged
     // thread would understate what the provider was asked to do.
     const latest = this.compaction(input.subject, input.compactionId);
-    if (latest === undefined || availability === "deleted") {
+    if (latest === undefined) {
       this.#recordCompactionUsage(input.subject, current, usage, selected.materialTokens);
       return { kind: "discarded" };
     }
@@ -875,6 +875,10 @@ export class ContextHarnessService {
         basePlan: current,
         materialTokens: selected.materialTokens,
       });
+    // An ordinary delete keeps the thread's ledger until a purge, so the
+    // request must end here: left running, it would hold the subject until the
+    // next start closed it as interrupted. The summary is discarded either way.
+    if (availability === "deleted") return fail("subject-unavailable");
     if (availability === "context-changed") return fail("context-changed");
     if (outcome.kind === "failed") return fail(outcome.reason);
     if (availability === "mode-disabled") return fail("subject-unavailable");
@@ -1037,8 +1041,8 @@ export class ContextHarnessService {
 
   /**
    * Journals the summary request's reported usage without a compaction
-   * outcome. A deleted thread keeps no completed or failed event, but the
-   * tokens the provider reported were still spent.
+   * outcome. A purged thread keeps no compaction events, but the tokens the
+   * provider reported were still spent.
    */
   #recordCompactionUsage(
     subject: ContextSubjectRef,

@@ -64,11 +64,6 @@ export function erasePurgedThread(input: {
 }
 
 /**
- * Aggregate heads whose journal history is gone leave with it, and a head
- * with surviving events falls back to the surviving version and sequence, so
- * a later append expects a version that exists.
- */
-/**
  * A projection caught up before the deletion has already applied every
  * surviving event, which has a lower sequence. Pinning its checkpoint to the
  * new head keeps it current; leaving it past the head is what the store
@@ -82,6 +77,11 @@ function clampCheckpointsToJournalHead(connection: SqliteConnection): void {
   );
 }
 
+/**
+ * Aggregate heads whose journal history is gone leave with it, and a head
+ * with surviving events falls back to the surviving version and sequence, so
+ * a later append expects a version that exists.
+ */
 function reconcileAggregateHeads(connection: SqliteConnection): void {
   connection.exec(
     `DELETE FROM aggregate_heads WHERE NOT EXISTS (
