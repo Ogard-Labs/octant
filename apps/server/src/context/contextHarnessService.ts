@@ -158,6 +158,10 @@ export type MaintainContextTurnResult =
       readonly snapshot: ContextInspectorSnapshot;
     }
   | { readonly kind: "not-needed" }
+  // A pin, an exclusion, or a new plan changed the subject's context while the
+  // summary was being written. The summary was planned from the earlier state,
+  // so it is discarded and nothing is committed.
+  | { readonly kind: "context-changed" }
   | Exclude<ContextMaintenanceResult, { readonly kind: "summary-created" }>;
 
 export class ContextHarnessError extends Error {
@@ -482,6 +486,9 @@ export class ContextHarnessService {
     if (current === undefined) {
       throw new ContextHarnessError("unavailable", "Context is unavailable.");
     }
+    // Read before the summary is requested: the commit must see the same ledger
+    // version this plan was made from, not whatever the version is by then.
+    const plannedVersion = this.#aggregateVersion(input.subject.aggregateId);
     const contentByEntryId = new Map(
       input.materials.map((material) => [String(material.entryId), material.content]),
     );
@@ -589,6 +596,9 @@ export class ContextHarnessService {
     const produced = captured.at(-1);
     if (produced === undefined) {
       throw new ContextHarnessError("unavailable", "Context maintenance produced no summary.");
+    }
+    if (this.#aggregateVersion(input.subject.aggregateId) !== plannedVersion) {
+      return { kind: "context-changed" };
     }
     return this.#commitSummary(current, produced.summary, produced.content);
   }

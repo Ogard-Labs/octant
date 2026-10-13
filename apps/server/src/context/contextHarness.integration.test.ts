@@ -621,6 +621,68 @@ describe("ContextHarnessService integration", () => {
     restarted.connection.close();
   });
 
+  it("keeps an exclusion set while a summary is being written and commits no summary planned from the earlier state", async () => {
+    const fixture = createFixture();
+    const dropped = optionalEntry(500);
+    const otherHistory = decodeContextEntry({
+      ...optionalEntry(20),
+      id: "81000000-0000-4000-8000-000000000103",
+      source: { kind: "message", referenceId: "other-history" },
+      label: "Other earlier conversation",
+    });
+    const planned = fixture.service.planTurn({
+      subject,
+      displayLabel: "Code Project",
+      requestShape: "code-turn",
+      modelLimitObservations: [modelLimits()],
+      serviceLimits: serviceLimits(),
+      entries: [requiredEntry(300), dropped, otherHistory],
+      reserves: { response: 200, reasoning: 50, framing: 50, variance: 50, safety: 50 },
+      watchHeadroomTokens: 100,
+      capabilityCatalog: catalog([]),
+      capabilityRequest: {
+        providerInstanceId,
+        activeScope,
+        nativeToolSearch: "supported",
+        taskKeywords: [],
+        explicitSelections: [],
+      },
+    });
+    expect(planned.next.plan.entries).toContainEqual(
+      expect.objectContaining({ entryId: dropped.id, state: "omitted", reason: "omitted-to-fit" }),
+    );
+
+    const maintained = await fixture.service.maintainContext({
+      subject,
+      materials: [{ entryId: dropped.id, content: "Earlier conversation transcript." }],
+      generateSummary: async () => {
+        // The person excludes an entry while the summary is still being written.
+        fixture.service.execute({
+          kind: "update-context-overrides",
+          subject,
+          expectedManifestId: planned.next.manifest.id,
+          overrides: { pinnedEntryIds: [], excludedEntryIds: [otherHistory.id] },
+        });
+        return {
+          content: "The user asked about deployment.",
+          summaryTokens: { kind: "known", tokens: 120, accuracy: "conservative-heuristic" },
+        };
+      },
+      signal: new AbortController().signal,
+    });
+
+    const inspected = fixture.service.inspect(subject);
+    expect(inspected.next.manifest.overrides.excludedEntryIds).toEqual([otherHistory.id]);
+    expect(maintained).toEqual({ kind: "context-changed" });
+    expect(inspected.summaries).toEqual([]);
+    expect(
+      fixture.connection
+        .prepare("SELECT COUNT(*) AS count FROM event_journal WHERE event_name = ?")
+        .get("context.summary-created@1"),
+    ).toEqual({ count: 0 });
+    fixture.connection.close();
+  });
+
   it("records the provider's cost on the reconciled request and leaves an unpriced one without", () => {
     const fixture = createFixture();
     const plan = () =>
