@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+} from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -95,15 +103,6 @@ export interface SeedCanvasFixturesInput {
   readonly fixtures?: ReadonlyArray<string>;
   /** Directories no seed may touch, beyond the host's default data directory. */
   readonly protectedDirectories?: ReadonlyArray<string>;
-}
-
-interface SeedMarker {
-  readonly kind: "octant-canvas-fixtures";
-  readonly projectId: string | null;
-  readonly fixtures: ReadonlyArray<{
-    readonly fixture: CanvasFixtureName;
-    readonly threadId: string;
-  }>;
 }
 
 interface CanvasFixture {
@@ -255,49 +254,30 @@ function defaultDataDirectory(environment: Readonly<Record<string, string | unde
   );
 }
 
-function readMarker(dataDirectory: string): SeedMarker | undefined {
+/**
+ * Whether this script began seeding the directory. The marker says only that;
+ * which fixtures exist is read back from the journal, so a run that stopped
+ * between a journal write and a file write cannot be repeated by mistake.
+ */
+function hasSeedMarker(dataDirectory: string): boolean {
   try {
     const parsed: unknown = JSON.parse(readFileSync(join(dataDirectory, SEED_MARKER_FILE), "utf8"));
-    if (
+    return (
       typeof parsed === "object" &&
       parsed !== null &&
       "kind" in parsed &&
-      parsed.kind === "octant-canvas-fixtures" &&
-      "fixtures" in parsed &&
-      Array.isArray(parsed.fixtures)
-    ) {
-      const fixtures = parsed.fixtures.filter(
-        (entry): entry is SeedMarker["fixtures"][number] =>
-          typeof entry === "object" &&
-          entry !== null &&
-          "fixture" in entry &&
-          typeof entry.fixture === "string" &&
-          isFixtureName(entry.fixture) &&
-          "threadId" in entry &&
-          typeof entry.threadId === "string",
-      );
-      const projectId = "projectId" in parsed ? parsed.projectId : null;
-      return {
-        kind: "octant-canvas-fixtures",
-        projectId: typeof projectId === "string" ? projectId : null,
-        fixtures,
-      };
-    }
+      parsed.kind === "octant-canvas-fixtures"
+    );
   } catch {
-    return undefined;
+    return false;
   }
-  return undefined;
 }
 
 function judgeDataDirectory(input: {
   readonly dataDirectory: string;
   readonly protectedDirectories: ReadonlyArray<string>;
 }):
-  | {
-      readonly status: "ok";
-      readonly dataDirectory: string;
-      readonly marker: SeedMarker | undefined;
-    }
+  | { readonly status: "ok"; readonly dataDirectory: string }
   | { readonly status: "refused"; readonly reason: SeedRefusalReason; readonly message: string } {
   if (!isAbsolute(input.dataDirectory)) {
     return {
@@ -317,7 +297,7 @@ function judgeDataDirectory(input: {
       };
     }
   }
-  if (!existsSync(dataDirectory)) return { status: "ok", dataDirectory, marker: undefined };
+  if (!existsSync(dataDirectory)) return { status: "ok", dataDirectory };
   if (!lstatSync(dataDirectory).isDirectory()) {
     return {
       status: "refused",
@@ -325,18 +305,15 @@ function judgeDataDirectory(input: {
       message: "That path exists and is not a directory.",
     };
   }
-  if (readdirSync(dataDirectory).length === 0) {
-    return { status: "ok", dataDirectory, marker: undefined };
-  }
-  const marker = readMarker(dataDirectory);
-  if (marker === undefined) {
+  if (readdirSync(dataDirectory).length === 0) return { status: "ok", dataDirectory };
+  if (!hasSeedMarker(dataDirectory)) {
     return {
       status: "refused",
       reason: "unrecognised-data-directory",
       message: "That directory is not empty and was not seeded by this script.",
     };
   }
-  return { status: "ok", dataDirectory, marker };
+  return { status: "ok", dataDirectory };
 }
 
 /**
@@ -461,10 +438,10 @@ async function seedInto(input: {
   readonly persistence: PersistenceService;
   readonly dataDirectory: string;
   readonly fixtures: ReadonlyArray<CanvasFixtureName>;
-  readonly marker: SeedMarker;
 }): Promise<{
   readonly projectId: string;
   readonly threads: ReadonlyArray<SeededThread>;
+  readonly alreadySeeded: ReadonlyArray<CanvasFixtureName>;
 }> {
   const { persistence } = input;
   const clock = makeClock();
@@ -512,21 +489,36 @@ async function seedInto(input: {
     uuid,
     clock,
   });
-  let projectId = input.marker.projectId;
-  if (projectId === null || persistence.readProject(decodeProjectId(projectId)) === undefined) {
-    projectId = uuid();
+  let projectId = persistence
+    .readProjects({ type: "chat", lifecycle: "active" })
+    .find((project) => project.name === PROJECT_NAME)?.id;
+  if (projectId === undefined) {
+    const created = uuid();
     await projects.executeProject(decodeWindowId(uuid()), {
       kind: "create-chat-project",
-      projectId,
+      projectId: created,
       expectedVersion: 0,
       name: PROJECT_NAME,
       hostId: "local",
     });
+    projectId = decodeProjectId(created);
   }
-  const project = persistence.readProject(decodeProjectId(projectId));
-  if (project === undefined || project.type !== "chat" || project.lifecycle !== "active") {
-    throw new Error("The seeded Chat Project is not available.");
-  }
+  const seededProjectId = projectId;
+  const isSeeded = (name: CanvasFixtureName): boolean =>
+    persistence.readChatThreads().some(
+      (thread) =>
+        thread.lifecycle === "active" &&
+        thread.title === FIXTURES[name].title &&
+        thread.projectId !== undefined &&
+        String(thread.projectId) === String(seededProjectId) &&
+        persistence.canvasProjection.byThread({
+          mode: "chat",
+          threadId: String(thread.id),
+          projectId: seededProjectId,
+        }).length > 0,
+    );
+  const alreadySeeded = input.fixtures.filter(isSeeded);
+  const pending = input.fixtures.filter((name) => !isSeeded(name));
 
   let reply = "";
   const driver = scriptedDriver({ reply: () => reply, clock });
@@ -575,12 +567,8 @@ async function seedInto(input: {
     { authorize: () => false },
   );
 
-  const marker: { projectId: string; fixtures: Array<SeedMarker["fixtures"][number]> } = {
-    projectId,
-    fixtures: [...input.marker.fixtures],
-  };
   const threads: Array<SeededThread> = [];
-  for (const name of input.fixtures) {
+  for (const name of pending) {
     const fixture = FIXTURES[name];
     const created = await chat.execute({
       kind: "create-chat-thread",
@@ -632,18 +620,15 @@ async function seedInto(input: {
       canvasId: String(result.card.canvasId),
       presentation: result.card.presentation ?? "sidebar",
     });
-    marker.fixtures.push({ fixture: name, threadId });
-    await writeMarker(input.dataDirectory, marker);
   }
-  return { projectId, threads };
+  return { projectId: String(seededProjectId), threads, alreadySeeded };
 }
 
-async function writeMarker(
-  dataDirectory: string,
-  marker: { readonly projectId: string | null; readonly fixtures: SeedMarker["fixtures"] },
-): Promise<void> {
-  const body: SeedMarker = { kind: "octant-canvas-fixtures", ...marker };
-  await writeFile(join(dataDirectory, SEED_MARKER_FILE), `${JSON.stringify(body, null, 2)}\n`);
+async function writeSeedMarker(dataDirectory: string): Promise<void> {
+  await writeFile(
+    join(dataDirectory, SEED_MARKER_FILE),
+    `${JSON.stringify({ kind: "octant-canvas-fixtures" })}\n`,
+  );
 }
 
 export async function seedCanvasFixtures(input: SeedCanvasFixturesInput): Promise<SeedOutcome> {
@@ -668,17 +653,11 @@ export async function seedCanvasFixtures(input: SeedCanvasFixturesInput): Promis
   });
   if (judged.status === "refused") return judged;
 
-  const marker: SeedMarker = judged.marker ?? {
-    kind: "octant-canvas-fixtures",
-    projectId: null,
-    fixtures: [],
-  };
-  const done = new Set(marker.fixtures.map((entry) => entry.fixture));
-  const alreadySeeded = fixtures.filter((name) => done.has(name));
-  const pending = fixtures.filter((name) => !done.has(name));
-
   mkdirSync(judged.dataDirectory, { recursive: true, mode: 0o700 });
-  if (judged.marker === undefined) await writeMarker(judged.dataDirectory, marker);
+  // The host requires a private data directory; an existing empty one may have
+  // been created with a looser mode.
+  chmodSync(judged.dataDirectory, 0o700);
+  if (!hasSeedMarker(judged.dataDirectory)) await writeSeedMarker(judged.dataDirectory);
 
   const seeded = await Effect.runPromise(
     Effect.flatMap(Persistence, (persistence) =>
@@ -686,8 +665,7 @@ export async function seedCanvasFixtures(input: SeedCanvasFixturesInput): Promis
         seedInto({
           persistence,
           dataDirectory: judged.dataDirectory,
-          fixtures: pending,
-          marker,
+          fixtures,
         }),
       ),
     ).pipe(
@@ -701,7 +679,7 @@ export async function seedCanvasFixtures(input: SeedCanvasFixturesInput): Promis
     dataDirectory: judged.dataDirectory,
     projectId: seeded.projectId,
     threads: seeded.threads,
-    alreadySeeded,
+    alreadySeeded: seeded.alreadySeeded,
   };
 }
 

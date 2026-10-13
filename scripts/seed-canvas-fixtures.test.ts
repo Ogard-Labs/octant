@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeChatThreadId, decodeProjectId } from "@octant/contracts";
@@ -87,6 +87,15 @@ describe("seeding Canvas fixtures", () => {
 
     const again = await seedCanvasFixtures({ dataDirectory, fixtures: ["document"] });
     expect(again).toMatchObject({ status: "seeded", threads: [], alreadySeeded: ["document"] });
+  }, 60_000);
+
+  it("seeds an existing empty scratch directory that was created with open permissions", async () => {
+    const dataDirectory = scratch();
+    chmodSync(dataDirectory, 0o755);
+
+    await expect(
+      seedCanvasFixtures({ dataDirectory, fixtures: ["document"] }),
+    ).resolves.toMatchObject({ status: "seeded" });
   }, 60_000);
 
   it("refuses a directory it did not make, a real data directory, and a relative path without touching them", async () => {
