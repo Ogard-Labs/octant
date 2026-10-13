@@ -382,7 +382,10 @@ import {
   type AgentRunProcessSupervisorPort,
   createInMemoryCapacityPort,
 } from "./agentRun/agentRunOrchestrationService";
-import { listChildPendingRequests } from "./agentRun/childPendingRequests";
+import {
+  listChildPendingRequests,
+  windowMayListChildParent,
+} from "./agentRun/childPendingRequests";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
 import { AgentRunDependencyScheduler } from "./agentRun/agentRunDependencyScheduler";
 import { AgentResultDeliveryService } from "./agentRun/agentResultDeliveryService";
@@ -9916,7 +9919,57 @@ export function startOctantServer(
                 parentThreadId: run.parentThreadId,
                 mode: run.routingReceipt.mode,
               }),
-            authorizeThread: authorizeFollowUpThread,
+            authorizeThread: ({ threadId, windowId }) => {
+              // Purged threads stay out even when a projection row lingers.
+              if (
+                persistence.connection
+                  .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
+                  .get(threadId) !== undefined
+              ) {
+                return false;
+              }
+              let parent:
+                | {
+                    readonly mode: "code" | "work";
+                    readonly projectId: ProjectId;
+                    readonly active: boolean;
+                  }
+                | undefined;
+              try {
+                const codeThread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+                if (codeThread !== undefined) {
+                  parent = {
+                    mode: "code",
+                    projectId: codeThread.projectId,
+                    active: codeThread.lifecycle === "active",
+                  };
+                }
+              } catch {
+                // A Work thread id is not a Code thread id.
+              }
+              if (parent === undefined) {
+                try {
+                  const workThread = workThreadProjection.read(decodeWorkThreadId(threadId));
+                  if (workThread !== undefined) {
+                    parent = {
+                      mode: "work",
+                      projectId: workThread.projectId,
+                      active: workThread.lifecycle === "active",
+                    };
+                  }
+                } catch {
+                  // Neither mode owns this id.
+                }
+              }
+              return windowMayListChildParent({
+                workspace: persistence.readWindowWorkspace(decodeWindowId(windowId))?.workspace,
+                parent,
+                projectActive:
+                  parent === undefined
+                    ? false
+                    : projectService.hasActiveProject(parent.projectId, parent.mode),
+              });
+            },
           },
           String(windowId),
         ),

@@ -3883,9 +3883,12 @@ mechanisms are:
   handle, so the read adds no answer route. It is listed only while a waiter in
   this host can still settle it and the session view still holds the pending
   item (a restart, an expiry, a decision, or an eviction past the view's 50
-  entries removes it), and only for a window that passes the check the harness
-  session route applies to the parent thread, while the parent's mode is
-  enabled. A Chat child is never listed because Chat has no Agents tab to
+  entries removes it), and only for a window bound to the parent's project,
+  the same binding that lets that window open the thread. The harness session
+  route also requires the thread to be the open surface; the list does not,
+  because the row is how a person finds a request on a thread they are not
+  looking at. Answering still goes through that route after the row opens the
+  thread. A disabled parent mode is not listed. A Chat child is never listed because Chat has no Agents tab to
   review it in. An approval a child raises still covers that request only and
   never offers a remembered grant. A Code turn's Browser site ask
   is a Code approval and is listed with `browserOrigin`, the site it waits to

@@ -7,10 +7,13 @@ import {
   type NativeHarnessInteractionSource,
   type NativeHarnessSessionView,
   type PendingRequest,
+  type ProjectId,
   type UtcTimestamp,
+  type WindowWorkspace,
 } from "@octant/contracts";
 import type { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
 import type { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
+import { windowCanAccessCodeProject } from "../windowCodeProjectAccess";
 
 export interface ChildPendingRequestSources {
   readonly approvals: Pick<NativeHarnessApprovalStore, "waiting">;
@@ -18,11 +21,46 @@ export interface ChildPendingRequestSources {
   readonly readSession: (threadId: string) => NativeHarnessSessionView | undefined;
   readonly getRun: (id: AgentRunId) => AgentRun | undefined;
   readonly parentThreadTitle: (run: AgentRun) => string | undefined;
-  /** The authorization the harness session route applies before it shows a thread's session. */
+  /**
+   * Whether this window may open the parent. That is the project binding, not
+   * the harness session route: the session route also requires the thread to
+   * be the open surface, which would hide the row everywhere except the
+   * thread the person is already on.
+   */
   readonly authorizeThread: (input: {
     readonly threadId: string;
     readonly windowId: string;
   }) => boolean | Promise<boolean>;
+}
+
+/**
+ * A window may see a waiting child when it is bound to the parent's project.
+ * The thread does not have to be the open surface: the row exists to find a
+ * request on a thread the person is not looking at. Answering still requires
+ * the session route, which runs after Review request opens the thread.
+ */
+export function windowMayListChildParent(input: {
+  readonly workspace: WindowWorkspace | undefined;
+  readonly parent:
+    | {
+        readonly mode: "code" | "work";
+        readonly projectId: ProjectId;
+        readonly active: boolean;
+      }
+    | undefined;
+  readonly projectActive: boolean;
+}): boolean {
+  const parent = input.parent;
+  if (parent === undefined || !parent.active || !input.projectActive) return false;
+  if (parent.mode === "code") {
+    return windowCanAccessCodeProject({
+      workspace: input.workspace,
+      projectId: parent.projectId,
+      hasActiveCodeProject: () => true,
+    });
+  }
+  const bound = input.workspace?.contextByMode.work.projectId;
+  return bound != null && String(bound) === String(parent.projectId);
 }
 
 /**

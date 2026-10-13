@@ -5,10 +5,14 @@ import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   decodeNativeHarnessSlotCandidate,
+  decodeProjectId,
+  decodeWindowId,
   EventActor,
   type AgentRun,
   type NativeHarnessInteractionSource,
 } from "@octant/contracts";
+import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import { contextKeyForProject, defaultWindowWorkspace } from "@octant/domain";
 import { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
@@ -19,7 +23,7 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
-import { listChildPendingRequests } from "./childPendingRequests";
+import { listChildPendingRequests, windowMayListChildParent } from "./childPendingRequests";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -234,5 +238,67 @@ describe("subagent pending requests", () => {
     expect(
       await list({ run: { ...childRun, parentThreadId: "other" } as unknown as AgentRun }),
     ).toEqual([]);
+  });
+});
+
+describe("windowMayListChildParent", () => {
+  const window = decodeWindowId("00000000-0000-4000-8000-000000000801");
+  const project = decodeProjectId("00000000-0000-4000-8000-00000000c010");
+  const other = decodeProjectId("00000000-0000-4000-8000-00000000c011");
+  const bound = {
+    ...defaultWindowWorkspace(window),
+    contextByMode: {
+      ...defaultWindowWorkspace(window).contextByMode,
+      code: contextKeyForProject("code", LOCAL_HOST_ID, project, "/repo"),
+      work: contextKeyForProject("work", LOCAL_HOST_ID, project, "/repo"),
+    },
+  };
+
+  it("lists a child on a thread the window is not showing, when the window is bound to that project", () => {
+    expect(
+      windowMayListChildParent({
+        workspace: bound,
+        parent: { mode: "code", projectId: project, active: true },
+        projectActive: true,
+      }),
+    ).toBe(true);
+    expect(
+      windowMayListChildParent({
+        workspace: bound,
+        parent: { mode: "work", projectId: project, active: true },
+        projectActive: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("refuses a child whose project this window is not bound to, and an inactive parent", () => {
+    expect(
+      windowMayListChildParent({
+        workspace: bound,
+        parent: { mode: "code", projectId: other, active: true },
+        projectActive: true,
+      }),
+    ).toBe(false);
+    expect(
+      windowMayListChildParent({
+        workspace: defaultWindowWorkspace(window),
+        parent: { mode: "code", projectId: project, active: true },
+        projectActive: true,
+      }),
+    ).toBe(false);
+    expect(
+      windowMayListChildParent({
+        workspace: bound,
+        parent: { mode: "code", projectId: project, active: false },
+        projectActive: true,
+      }),
+    ).toBe(false);
+    expect(
+      windowMayListChildParent({
+        workspace: bound,
+        parent: undefined,
+        projectActive: true,
+      }),
+    ).toBe(false);
   });
 });
