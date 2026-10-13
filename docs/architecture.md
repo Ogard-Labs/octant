@@ -3038,7 +3038,8 @@ native harness in `apps/server/src/harness`:
   hosted third-party search provider ships. A tool the thread was not offered
   refuses as `tool-unavailable` without reaching policy or a person. The harness has no
   per-host network rules, rule expiry, or learn mode yet: a tool process gets the
-  thread's OS-level `none` or `allow`. The approved design for them, not yet built, is
+  thread's OS-level `none` or `allow`. The approved design for them, with only its pure
+  decision and event schemas built so far, is
   [Harness tool egress rules](#harness-tool-egress-rules). `nativeHarnessEgress.hostile.test.ts` holds the
   adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
   Seatbelt and shows only the networked one reaching a loopback listener.
@@ -3241,8 +3242,11 @@ composer. The web shows open offers as cards above the chips.
 
 ### Harness tool egress rules
 
-**Status: design approved by the maintainer on 2026-10-13. Nothing in this
-section is implemented.** Today a harness tool process gets the thread's
+**Status: design approved by the maintainer on 2026-10-13. Phase 1 is in:
+the rule model and decision (`decideToolEgress` in
+`packages/domain/src/toolEgressPolicy.ts`) and the event schemas
+(`packages/contracts/src/toolEgress.ts`). Nothing calls them yet, so nothing
+that runs has changed.** Today a harness tool process gets the thread's
 OS-level `none` or `allow` (see Egress and hostile content above). This is the
 approved-but-unfinished design, and the phases below track its delivery. Its
 approval replaces the "no local egress proxy in this release" decision in the
@@ -3432,13 +3436,14 @@ confirmed call. A child's proposals surface on its parent's thread with the
 child named, and granting them grants the parent. With learn mode off, the
 refusal reaches the command's output and nothing is proposed.
 
-**Audit journal.** On the thread aggregate unless noted; payloads carry host,
+**Audit journal.** On the thread's own `thread-egress` aggregate unless noted,
+not on the thread aggregate; payloads carry host,
 port, scope, `expiresAt`, rule and launch identity, the server-resolved
 principal, and the thread's taint at the time, never a token, URL path, header,
 or body:
 
 - `thread.egress-rule-granted@1`, `thread.egress-rule-revoked@1`, and on the
-  Project aggregate `project.egress-rule-granted@1` and
+  Project's `project-egress` aggregate `project.egress-rule-granted@1` and
   `project.egress-rule-revoked@1`. A grant is journal-first: a rule whose event
   cannot be appended is not in force.
 - `thread.egress-proposal-raised@1` and `thread.egress-proposal-declined@1`.

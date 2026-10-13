@@ -101,6 +101,7 @@ export * from "./theme";
 export * from "./contentProvenance";
 export * from "./toolActions";
 export * from "./toolCatalog";
+export * from "./toolEgress";
 export * from "./appleToolchain";
 export * from "./appleToolchainRpc";
 export * from "./androidToolchain";
