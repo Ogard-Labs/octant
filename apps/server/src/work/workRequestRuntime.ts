@@ -263,7 +263,12 @@ export function normalizedProviderCallbackId(value: string): string | undefined 
   return value.length > 0 && value.length <= 16_384 ? value : undefined;
 }
 
-function sanitizeRequestText(value: string, fallback: string): string {
+/**
+ * Work's request text: paths and URLs redacted, whitespace folded, at most
+ * 2,000 characters. Every Work-facing request row, a subagent's included, uses
+ * this, so none is looser than the Work request contract.
+ */
+export function sanitizeRequestText(value: string, fallback: string): string {
   const withoutPathOrUrl = value
     .trim()
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s]*/gi, "[redacted reference]")

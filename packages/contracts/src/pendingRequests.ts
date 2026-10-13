@@ -154,7 +154,6 @@ const sameThread = (request: {
 
 /** A subagent's task, cut to what a row can name it by. */
 export const MAX_CHILD_PENDING_REQUEST_TASK_LENGTH = 200;
-export const MAX_CHILD_PENDING_REQUEST_TEXT_LENGTH = 2048;
 
 /**
  * A subagent waiting on the person. It exists so the request can be found from
@@ -183,8 +182,28 @@ const ChildPendingRequestFields = {
     providerName: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
     modelId: Schema.optional(ProviderModelId),
   }).annotations(strict),
-  text: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_CHILD_PENDING_REQUEST_TEXT_LENGTH)),
+  text: Schema.NonEmptyTrimmedString,
 } as const;
+
+const isWorkRequestText = Schema.is(WorkRequestSanitizedText);
+const isCodeApprovalText = Schema.is(CodeApprovalSummaryText);
+const isCodeQuestionText = Schema.is(CodeQuestionPromptText);
+
+/**
+ * A subagent row is never looser than the parent mode's own rows: Work text is
+ * Work's sanitized request text, with no path or URL, and Code text keeps the
+ * byte bound of a Code approval summary or question prompt.
+ */
+const childTextKeepsModeBounds = (request: {
+  readonly mode: "work" | "code";
+  readonly kind: "child-approval" | "child-question";
+  readonly text: string;
+}): boolean =>
+  request.mode === "work"
+    ? isWorkRequestText(request.text)
+    : request.kind === "child-approval"
+      ? isCodeApprovalText(request.text)
+      : isCodeQuestionText(request.text);
 
 export const PendingRequest = Schema.Union(
   Schema.Struct({ ...WorkPendingRequestFields, kind: Schema.Literal("approval") }).annotations(
@@ -246,11 +265,15 @@ export const PendingRequest = Schema.Union(
   Schema.Struct({
     ...ChildPendingRequestFields,
     kind: Schema.Literal("child-approval"),
-  }).annotations(strict),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter(childTextKeepsModeBounds, { jsonSchema: {} })),
   Schema.Struct({
     ...ChildPendingRequestFields,
     kind: Schema.Literal("child-question"),
-  }).annotations(strict),
+  })
+    .annotations(strict)
+    .pipe(Schema.filter(childTextKeepsModeBounds, { jsonSchema: {} })),
   Schema.Struct({
     ...PendingRequestFields,
     mode: Schema.Literal("chat"),

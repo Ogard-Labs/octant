@@ -1507,10 +1507,6 @@ function LaunchedShell(
     workTurnClient,
   } = launchedClients;
   const machineChanges = useMachineChangeFeed(machineChangeClient);
-  // What moves the pending-request read: a thread raising or clearing a
-  // question journals on its own mode's navigation topic.
-  const pendingRequestFeedRevision =
-    machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
   // One Navigator reader for the whole window: the dock panel and Zen's
   // assistant are two fronts on it, so a turn sent from either is immediately
   // on screen in both.
@@ -2005,8 +2001,11 @@ function LaunchedShell(
   // The row count mirrors the dock badge: distinct threads waiting, minus the
   // one the user is looking at, whose signal the open thread already answers.
   // A thread whose subagent waits on the person counts too, once.
+  // Only Work and Code threads have subagent rows, and a subagent's ask or
+  // settle moves both of those topics. Chat navigation moves on every streaming
+  // delta, so following it would re-read pending requests for every token.
   const subagentWaitRead = usePendingRequestRead(pendingRequestClient, {
-    feedRevision: pendingRequestFeedRevision,
+    feedRevision: machineChanges.workNavigation + machineChanges.codeNavigation,
     settings: controller.settings,
     workspace: controller.workspace,
   }).read;
@@ -3438,9 +3437,17 @@ function LaunchedShell(
    * the one on screen.
    */
   function openSubagentRequest(request: ChildPendingRequest) {
-    const key = threadUtilityDockKey(request.mode, String(request.threadId));
-    if (request.mode === "work") selectWorkThread(String(request.threadId));
-    else selectCodeThread(String(request.threadId));
+    const threadId = String(request.threadId);
+    // A parent this window cannot select would leave the Agents tab opening
+    // over whatever thread is on screen, so the row does nothing instead.
+    const listed =
+      request.mode === "work"
+        ? workNavigation.navigation.some((thread) => String(thread.threadId) === threadId)
+        : codeController.navigation.some((thread) => String(thread.threadId) === threadId);
+    if (!listed) return;
+    const key = threadUtilityDockKey(request.mode, threadId);
+    if (request.mode === "work") selectWorkThread(threadId);
+    else selectCodeThread(threadId);
     setAddAgentInvokedByThread((current) => {
       if (current.has(key)) return current;
       return new Set(current).add(key);
@@ -4337,6 +4344,10 @@ function LaunchedShell(
     props.hostBridge === undefined
       ? remoteHostLabel(props.launch.serverUrl, localHost?.displayName)
       : undefined;
+  // What moves the pending-request read: a thread raising or clearing a
+  // question journals on its own mode's navigation topic.
+  const pendingRequestFeedRevision =
+    machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
   const computerSnapshots = hostFederationLifecycle?.list() ?? [];
   const computerLaunchHostId =
     props.hostBridge !== undefined

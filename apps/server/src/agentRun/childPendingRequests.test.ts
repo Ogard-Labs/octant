@@ -4,8 +4,11 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  decodeAgentRun,
+  decodeAgentRunId,
   decodeNativeHarnessSlotCandidate,
   decodeProjectId,
+  decodeProviderModelId,
   decodeWindowId,
   EventActor,
   type AgentRun,
@@ -23,7 +26,12 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
-import { listChildPendingRequests, windowMayListChildParent } from "./childPendingRequests";
+import {
+  listChildPendingRequests,
+  windowMayListChildParent,
+  windowMayListChildThread,
+  type ChildParentReads,
+} from "./childPendingRequests";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -45,20 +53,90 @@ const windowId = "00000000-0000-4000-8000-000000000801";
 const projectId = "00000000-0000-4000-8000-000000000901";
 const childRunId = "00000000-0000-4000-8000-000000000090";
 const source = {
-  runId: childRunId as never,
+  runId: decodeAgentRunId(childRunId),
   providerInstanceId: lead.providerInstanceId,
-  modelId: "worker-model" as never,
+  modelId: decodeProviderModelId("worker-model"),
   providerName: "Local model",
 } satisfies NativeHarnessInteractionSource;
 
-const childRun = {
-  id: childRunId,
-  parentThreadId: parentThread,
-  role: "research",
-  task: "t".repeat(300),
-  routingReceipt: { mode: "work" },
-  workspaceReceipt: { kind: "work-project", mode: "work", projectId },
-} as unknown as AgentRun;
+function agentRun(
+  input: { readonly mode?: "chat" | "work" | "code"; readonly parentThreadId?: string } = {},
+): AgentRun {
+  const mode = input.mode ?? "work";
+  const permissions = {
+    filesystem: false,
+    shell: false,
+    git: false,
+    network: false,
+    tools: true,
+    subagents: false,
+  };
+  return decodeAgentRun({
+    id: childRunId,
+    requestId: "00000000-0000-4000-8000-000000000091",
+    parentThreadId: input.parentThreadId ?? parentThread,
+    depth: 1,
+    role: "research",
+    task: "t".repeat(300),
+    creationPosture: "automatic",
+    executionKind: "octant-managed",
+    lifecycleStatus: "running",
+    authority: {
+      ...permissions,
+      executionPolicy: "plan",
+      permissionPersistence: "current-session",
+    },
+    routingReceipt: {
+      executionResolution: {
+        providerInstanceId: lead.providerInstanceId,
+        modelId: "worker-model",
+        hostId: "local",
+        executionPolicy: "plan",
+        permissionPersistence: "current-session",
+        effectivePermissions: permissions,
+        source: "project-default",
+        fallbackChain: ["project-default"],
+        downgradeReasons: [],
+      },
+      selectedExecutionKind: "octant-managed",
+      attemptedExecutionKind: "octant-managed",
+      selectedProviderInstanceId: lead.providerInstanceId,
+      selectedModelId: "worker-model",
+      fallbackCandidates: [],
+      capabilityDegradations: [],
+      contextSnapshotId: "00000000-0000-4000-8000-000000000092",
+      effectiveAuthorityDigest: "digest-1",
+      usageQuality: "provider-reported",
+      hostId: "local",
+      mode,
+    },
+    workspaceReceipt:
+      mode === "chat"
+        ? { kind: "chat-virtual", mode: "chat" }
+        : mode === "code"
+          ? {
+              kind: "code-worktree",
+              mode: "code",
+              projectId,
+              checkoutRoot: "/projects/parser",
+              worktreeRoot: "/projects/parser",
+              verified: true,
+            }
+          : {
+              kind: "work-root",
+              mode: "work",
+              projectId,
+              bindingRevisionId: "00000000-0000-4000-8000-000000000093",
+              canonicalRoot: "/projects/report",
+            },
+    resultAcknowledgement: { required: false, acknowledged: false },
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+const childRun = agentRun();
 
 function fixture(options: { readonly timeoutMs?: number } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "octant-child-pending-"));
@@ -90,23 +168,23 @@ function fixture(options: { readonly timeoutMs?: number } = {}) {
     clock: () => now,
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   });
-  const askApproval = (input: { readonly child: boolean }) =>
+  const askApproval = (input: { readonly child: boolean; readonly summary?: string }) =>
     approvals.ask({
       threadId: parentThread,
       mode: "work",
       lead,
       toolName: "provider-action",
       ...(input.child ? { source } : {}),
-      summary: "shell: bun run test",
+      summary: input.summary ?? "shell: bun run test",
       approvalClass: "child-provider-action",
     });
-  const askQuestion = () =>
+  const askQuestion = (prompt = "Which fixture should I use?") =>
     questions.ask({
       threadId: parentThread,
       mode: "work",
       lead,
       source,
-      prompt: "Which fixture should I use?",
+      prompt,
       options: ["a", "b"],
     });
   const list = (
@@ -226,8 +304,25 @@ describe("subagent pending requests", () => {
   it("does not list a Chat subagent, whose parent has no Agents tab to answer in", async () => {
     const { askApproval, list } = fixture();
     void askApproval({ child: true });
-    const chatRun = { ...childRun, routingReceipt: { mode: "chat" } } as unknown as AgentRun;
-    expect(await list({ run: chatRun })).toEqual([]);
+    expect(await list({ run: agentRun({ mode: "chat" }) })).toEqual([]);
+  });
+
+  it("redacts a path or URL from a Work subagent's request, as a Work request does", async () => {
+    const { askApproval, list } = fixture();
+    void askApproval({
+      child: true,
+      summary: "edit /Users/me/report.md from https://example.com/x",
+    });
+    const [request] = await list();
+    expect(request?.text).toBe("edit [redacted path] from [redacted reference]");
+  });
+
+  it("keeps a Code subagent's question within a Code question's byte bound", async () => {
+    const { askQuestion, list } = fixture();
+    void askQuestion("é".repeat(5000));
+    const [request] = await list({ run: agentRun({ mode: "code" }) });
+    expect(request).toMatchObject({ mode: "code", kind: "child-question" });
+    expect(new TextEncoder().encode(request?.text).byteLength).toBe(8192);
   });
 
   it("leaves out a request whose run or parent title cannot be read", async () => {
@@ -236,7 +331,7 @@ describe("subagent pending requests", () => {
     expect(await list({ run: undefined })).toEqual([]);
     expect(await list({ title: undefined })).toEqual([]);
     expect(
-      await list({ run: { ...childRun, parentThreadId: "other" } as unknown as AgentRun }),
+      await list({ run: agentRun({ parentThreadId: "00000000-0000-4000-8000-000000000025" }) }),
     ).toEqual([]);
   });
 });
@@ -300,5 +395,56 @@ describe("windowMayListChildParent", () => {
         projectActive: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe("windowMayListChildThread", () => {
+  const window = decodeWindowId(windowId);
+  const project = decodeProjectId(projectId);
+  const bound = {
+    ...defaultWindowWorkspace(window),
+    contextByMode: {
+      ...defaultWindowWorkspace(window).contextByMode,
+      work: contextKeyForProject("work", LOCAL_HOST_ID, project, "/repo"),
+    },
+  };
+  const reads = (overrides: Partial<ChildParentReads> = {}): ChildParentReads => ({
+    purged: () => false,
+    codeThread: () => undefined,
+    workThread: () => ({ projectId: project, lifecycle: "active" }),
+    workspace: () => bound,
+    hasActiveProject: () => true,
+    ...overrides,
+  });
+  const ask = { threadId: parentThread, windowId };
+
+  it("lists a child under an active Work parent in the window's bound project", () => {
+    expect(windowMayListChildThread(reads(), ask)).toBe(true);
+  });
+
+  it("lists nothing under a purged parent, even while its projection row lingers", () => {
+    expect(windowMayListChildThread(reads({ purged: () => true }), ask)).toBe(false);
+  });
+
+  it("lists nothing under an archived or deleted parent", () => {
+    for (const lifecycle of ["archived", "deleting", "deleted"]) {
+      expect(
+        windowMayListChildThread(
+          reads({ workThread: () => ({ projectId: project, lifecycle }) }),
+          ask,
+        ),
+      ).toBe(false);
+    }
+    expect(
+      windowMayListChildThread(
+        reads({ codeThread: () => ({ projectId: project, lifecycle: "archived" }) }),
+        ask,
+      ),
+    ).toBe(false);
+  });
+
+  it("lists nothing when the parent's project is gone or the parent is unknown", () => {
+    expect(windowMayListChildThread(reads({ hasActiveProject: () => false }), ask)).toBe(false);
+    expect(windowMayListChildThread(reads({ workThread: () => undefined }), ask)).toBe(false);
   });
 });

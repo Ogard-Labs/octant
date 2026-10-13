@@ -1,7 +1,7 @@
 import {
   decodePendingRequest,
   MAX_CHILD_PENDING_REQUEST_TASK_LENGTH,
-  MAX_CHILD_PENDING_REQUEST_TEXT_LENGTH,
+  MAX_CODE_OPERATION_SUMMARY_BYTES,
   type AgentRun,
   type AgentRunId,
   type NativeHarnessInteractionSource,
@@ -13,6 +13,7 @@ import {
 } from "@octant/contracts";
 import type { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
 import type { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
+import { sanitizeRequestText } from "../work/workRequestRuntime";
 import { windowCanAccessCodeProject } from "../windowCodeProjectAccess";
 
 export interface ChildPendingRequestSources {
@@ -63,6 +64,48 @@ export function windowMayListChildParent(input: {
   return bound != null && String(bound) === String(parent.projectId);
 }
 
+/** What the host reads to decide whether a window may list a waiting child. */
+export interface ChildParentReads {
+  /** A purged thread stays out even when a projection row lingers. */
+  readonly purged: (threadId: string) => boolean;
+  /** Undefined when the id is not a Code thread's. */
+  readonly codeThread: (
+    threadId: string,
+  ) => { readonly projectId: ProjectId; readonly lifecycle: string } | undefined;
+  /** Undefined when the id is not a Work thread's. */
+  readonly workThread: (
+    threadId: string,
+  ) => { readonly projectId: ProjectId; readonly lifecycle: string } | undefined;
+  readonly workspace: (windowId: string) => WindowWorkspace | undefined;
+  readonly hasActiveProject: (projectId: ProjectId, mode: "code" | "work") => boolean;
+}
+
+/**
+ * Whether a window may list a child waiting under `threadId`: the parent is a
+ * live, active Code or Work thread in an active project that window is bound
+ * to. A purged, archived, or unknown parent, or one whose project is gone,
+ * lists nothing.
+ */
+export function windowMayListChildThread(
+  reads: ChildParentReads,
+  input: { readonly threadId: string; readonly windowId: string },
+): boolean {
+  if (reads.purged(input.threadId)) return false;
+  const code = reads.codeThread(input.threadId);
+  const work = code === undefined ? reads.workThread(input.threadId) : undefined;
+  const parent =
+    code !== undefined
+      ? { mode: "code" as const, projectId: code.projectId, active: code.lifecycle === "active" }
+      : work !== undefined
+        ? { mode: "work" as const, projectId: work.projectId, active: work.lifecycle === "active" }
+        : undefined;
+  return windowMayListChildParent({
+    workspace: reads.workspace(input.windowId),
+    parent,
+    projectActive: parent !== undefined && reads.hasActiveProject(parent.projectId, parent.mode),
+  });
+}
+
 /**
  * The subagent approvals and questions a window could answer from the parent
  * thread's Agents tab, as rows that find the request and cannot answer it.
@@ -106,7 +149,7 @@ export async function listChildPendingRequests(
       authorized.set(wait.threadId, mayOpen);
     }
     if (!mayOpen) continue;
-    const text = cut(item.text, MAX_CHILD_PENDING_REQUEST_TEXT_LENGTH);
+    const text = modeText(run.routingReceipt.mode, wait.kind, item.text);
     const task = cut(run.task, MAX_CHILD_PENDING_REQUEST_TASK_LENGTH);
     if (text === undefined || task === undefined) continue;
     try {
@@ -161,6 +204,47 @@ function pendingItem(
     text: "summary" in item ? item.summary : item.prompt,
     askedAt: item.askedAt,
   };
+}
+
+/** The bytes a Code question prompt may carry, as `CodeQuestionPromptText` bounds it. */
+const MAX_CODE_QUESTION_PROMPT_BYTES = 8 * 1024;
+
+/**
+ * The request text as the parent mode's own rows would carry it: Work redacts
+ * paths and URLs exactly as a Work request does, and Code keeps the byte bound
+ * of a Code approval summary or question prompt.
+ */
+function modeText(
+  mode: "work" | "code",
+  kind: "approval" | "question",
+  value: string,
+): string | undefined {
+  if (mode === "work") {
+    return sanitizeRequestText(
+      value,
+      kind === "approval" ? "Approval requested" : "Input requested",
+    );
+  }
+  const maxBytes =
+    kind === "approval" ? MAX_CODE_OPERATION_SUMMARY_BYTES : MAX_CODE_QUESTION_PROMPT_BYTES;
+  const text = withinBytes(value, maxBytes).trim();
+  return text.length === 0 ? undefined : text;
+}
+
+const encoder = new TextEncoder();
+
+/** The longest prefix of whole code points that fits `maxBytes` of UTF-8. */
+function withinBytes(value: string, maxBytes: number): string {
+  if (encoder.encode(value).byteLength <= maxBytes) return value;
+  let bytes = 0;
+  let end = 0;
+  for (const codePoint of value) {
+    const size = encoder.encode(codePoint).byteLength;
+    if (bytes + size > maxBytes) break;
+    bytes += size;
+    end += codePoint.length;
+  }
+  return value.slice(0, end);
 }
 
 function cut(value: string, max: number): string | undefined {

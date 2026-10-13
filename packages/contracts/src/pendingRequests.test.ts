@@ -309,6 +309,25 @@ describe("pending request contract", () => {
     expect(() => decodePendingRequest({ ...childApproval, text: " " })).toThrow();
   });
 
+  it("keeps a subagent row's text to its parent mode's own bounds and sanitization", () => {
+    // Code counts bytes, as a Code approval summary does.
+    expect(() => decodePendingRequest({ ...childApproval, text: "é".repeat(1025) })).toThrow();
+    expect(
+      decodePendingRequest({ ...childApproval, kind: "child-question", text: "x".repeat(8192) }),
+    ).toMatchObject({ kind: "child-question" });
+    // Work refuses a path or URL and anything past a Work request's length.
+    expect(() =>
+      decodePendingRequest({ ...childQuestion, text: "Edit /Users/me/notes.md?" }),
+    ).toThrow();
+    expect(() =>
+      decodePendingRequest({ ...childQuestion, text: "Open https://example.com?" }),
+    ).toThrow();
+    expect(() => decodePendingRequest({ ...childQuestion, text: "x".repeat(2001) })).toThrow();
+    expect(decodePendingRequest({ ...childQuestion, text: "x".repeat(2000) })).toMatchObject({
+      kind: "child-question",
+    });
+  });
+
   it("bounds the list and requires the truncation flag", () => {
     expect(() => decodePendingRequestList({ requests: [workApproval] })).toThrow();
     expect(() =>
