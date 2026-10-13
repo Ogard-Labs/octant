@@ -90,9 +90,23 @@ client's `frame-src` to that path on its own origin.
   controls. Closing it needs a boundary the Electron session does not give: a
   resolver rule for one session, or a prototype host that is a process of its
   own.
-- The contained surface was measured on Electron 43.1.0 on macOS only. It was
-  not measured in a packaged, signed app, and the pointer was not driven through
-  a scaled surface on a real window (the scale was checked by reading pixels).
+- The contained surface was measured on Electron 43.1.0 on macOS only, with
+  input delivered through the debugger and Electron's input API rather than
+  by the operating system, and with the window never focused. The containment
+  probe clicks a phone prototype scaled to half size with real pointer events
+  routed through the window: a click on the scaled target landed on it at the
+  page's own coordinates (260, 660 for a click computed from the scaled
+  rectangle), and clicks past the scaled box reached nothing. The same flow ran
+  in the unpackaged desktop app (its main process, its renderer, and its host's
+  design-page route, on a scratch data directory): a running design opened from
+  a Canvas card ran on open, stayed alive past 19 seconds of heartbeats, grew a
+  document prototype from 121 to 461 pixels as its page grew, took pointer clicks
+  at half scale, returned focus to Stop on the reserved shortcut, was removed with
+  its guest by Stop, and started a fresh guest on Run again; both guests were
+  in the contained partition and resolved a public and a loopback address to the
+  dead proxy. Not measured: a packaged, signed app; the in-thread placement of a
+  prototype, which needs a settled turn in the transcript and so a provider turn
+  or a seeded one; real operating-system keyboard and pointer input.
 - A running frame in a remote browser is also not contained against a
   self-navigation to a page that runs its own script and makes its own
   requests (F7). What it can send is bounded by what the frame holds, which
