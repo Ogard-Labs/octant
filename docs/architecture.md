@@ -292,15 +292,15 @@ Each mode offers only its admitted tools, so every runtime receives the same
 definitions without a separate global tool installation or prompt catalogue,
 through the transport its adapter verified:
 
-| Runtime                                 | App-managed tool transport                                                                                                                                                                                                |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code                             | The Agent SDK's in-process MCP server `octant`, owned by the provider connection                                                                                                                                          |
-| Codex                                   | App-server `thread/start.dynamicTools`                                                                                                                                                                                    |
-| OpenCode                                | A connection-private loopback MCP endpoint, registered through OpenCode's own server API                                                                                                                                  |
-| ACP runtimes                            | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate                                                                                                     |
-| Pi                                      | Octant's own Pi extension, calling a token-authenticated loopback bridge                                                                                                                                                  |
-| Native harness and direct endpoints     | Definitions in the request, for models with verified tool support                                                                                                                                                         |
-| A CLI typed into a Code thread terminal | The thread's Browser only, on a loopback HTTP MCP endpoint of its own, found through two `OCTANT_*` variables the terminal was started with; partly built, see [Terminal Browser grant](design/terminal-browser-grant.md) |
+| Runtime                             | App-managed tool transport                                                                                            |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Claude Code                         | The Agent SDK's in-process MCP server `octant`, owned by the provider connection                                      |
+| Codex                               | App-server `thread/start.dynamicTools`                                                                                |
+| OpenCode                            | A connection-private loopback MCP endpoint, registered through OpenCode's own server API                              |
+| ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate |
+| Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                              |
+| Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                     |
+| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant; partly built ([detail](design/terminal-browser-grant.md))         |
 
 No transport edits a person's provider MCP, hook, or global configuration;
 OpenCode's per-launch posture stays in its connection-private configuration.
