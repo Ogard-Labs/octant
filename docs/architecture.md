@@ -2935,7 +2935,7 @@ native harness in `apps/server/src/harness`:
   ordinary approvals; the catalog's `resultTaintsThread` marks each tool and
   `nativeHarnessResultTaintsThread` decides, failing closed for a name it does
   not know. A command under OS-level `allow` egress keeps today's posture and
-  its output does not taint; under the proposed `proxied` level a `bash` call
+  its output does not taint; under the approved, unbuilt `proxied` level a `bash` call
   taints when its launch received bytes from an outside host, as the
   [egress rules](#harness-tool-egress-rules) describe. Once tainted, `bash`, `edit`,
   `write`, `goal-check`, and `web-fetch` need a person's confirmation for every
@@ -2960,7 +2960,7 @@ native harness in `apps/server/src/harness`:
   hosted third-party search provider ships. A tool the thread was not offered
   refuses as `tool-unavailable` without reaching policy or a person. The harness has no
   per-host network rules, rule expiry, or learn mode yet: a tool process gets the
-  thread's OS-level `none` or `allow`. The proposed design for them is
+  thread's OS-level `none` or `allow`. The approved design for them, not yet built, is
   [Harness tool egress rules](#harness-tool-egress-rules). `nativeHarnessEgress.hostile.test.ts` holds the
   adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
   Seatbelt and shows only the networked one reaching a loopback listener.
@@ -3163,14 +3163,14 @@ composer. The web shows open offers as cards above the chips.
 
 ### Harness tool egress rules
 
-**Status: proposed design, pending the maintainer's approval. Nothing in this
+**Status: design approved by the maintainer on 2026-10-13. Nothing in this
 section is implemented.** Today a harness tool process gets the thread's
-OS-level `none` or `allow` (see Egress and hostile content above). Once
-approved, this section becomes the approved-but-unfinished design and the
-phases below track its delivery; it replaces the "no local egress proxy in
-this release" decision in the
+OS-level `none` or `allow` (see Egress and hostile content above). This is the
+approved-but-unfinished design, and the phases below track its delivery. Its
+approval replaces the "no local egress proxy in this release" decision in the
 [threat model](security/security-architecture-threat-model.md#approved-decisions-henrik-2026-08-12)
-for native-harness tool processes only.
+for native-harness tool processes only; until a phase lands, that decision
+still describes what runs.
 
 **Outcome.** A command the harness runs for a thread reaches exactly the
 destination hosts and ports a person allowed for that thread, until the
