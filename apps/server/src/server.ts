@@ -3661,6 +3661,7 @@ export function startOctantServer(
         // read now, through the same selector its first turn uses.
         forkConversation: ({ source, throughOperationId }) =>
           selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
+        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         // Late-bound for the same reason: the runtime owns the journal a merge
         // is recorded in and the turns that carry it.
         forkMergeBack: {

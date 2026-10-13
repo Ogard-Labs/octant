@@ -107,6 +107,8 @@ export class Journal {
   readonly #clock: () => string;
   readonly #onCommitted: ((append: CommittedAppend) => void) | undefined;
   readonly #committedListeners = new Set<(append: CommittedAppend) => void>();
+  /** Appends inside `transaction`, published only once the whole unit commits. */
+  #heldAppends: Array<CommittedAppend> | undefined;
   readonly #hasActorJson: boolean;
   readonly #selectHead: SqliteStatement;
   readonly #insertEvent: SqliteStatement;
@@ -486,6 +488,32 @@ export class Journal {
       throw new JournalWriteFailed({ operation: "append" });
     }
 
+    if (this.#heldAppends === undefined) this.#publish(committed);
+    else this.#heldAppends.push(committed);
+    return committed;
+  }
+
+  /**
+   * Runs `body` as one unit: every append inside it, to any aggregate, commits
+   * or rolls back together, and none is published until all of them have
+   * committed. A subscriber never sees an append that a later failure in the
+   * same unit took back. A unit inside a unit joins the outer one.
+   */
+  transaction<A>(body: () => A): A {
+    if (this.#heldAppends !== undefined) return body();
+    const held: Array<CommittedAppend> = [];
+    this.#heldAppends = held;
+    let result: A;
+    try {
+      result = this.#connection.transaction(body)();
+    } finally {
+      this.#heldAppends = undefined;
+    }
+    for (const committed of held) this.#publish(committed);
+    return result;
+  }
+
+  #publish(committed: CommittedAppend): void {
     try {
       this.#onCommitted?.(committed);
     } catch {
@@ -499,7 +527,6 @@ export class Journal {
         // One runtime observer cannot change the committed journal or starve peers.
       }
     }
-    return committed;
   }
 
   subscribeCommitted(listener: (append: CommittedAppend) => void): () => void {

@@ -12,6 +12,7 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "agent-message": "A message from another agent",
   "browser-observation": "Pages seen in the browser",
   "browser-page": "A browser page sent as feedback",
+  "code-fork": "The thread this was forked or restored from",
   "fork-merge-back": "Changes merged back from a fork",
   "github-issue": "A GitHub issue",
   "github-issues": "GitHub issues",

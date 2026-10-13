@@ -178,6 +178,10 @@ import {
 } from "./codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { isRoutineHostScope } from "../routineHostScope";
+import type {
+  ExternalContentIngestionResult,
+  RecordExternalContentIngestionInput,
+} from "../context/externalContentIngestionStore";
 
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -186,6 +190,8 @@ const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const CODE_SETTINGS_AGGREGATE_ID = decodeAggregateId("00000000-0000-4000-8000-000000000020");
 const CODE_CHECKOUT_RECOVERY_PROBE_PATH = decodeCodeRelativePath("package.json");
+const FORK_MARK_REFUSAL =
+  "The thread this comes from read outside content, and the new thread could not be marked with it, so nothing was created. Try again.";
 
 /**
  * Credential-safe, actionable user-facing messages for managed-worktree
@@ -373,7 +379,8 @@ type CodeProviderTurnRecordedState = Extract<
 >;
 
 export interface CodePersistencePort {
-  readonly journal: Pick<Journal, "append" | "replay" | "replayAggregate">;
+  readonly journal: Pick<Journal, "append" | "replay" | "replayAggregate"> &
+    Partial<Pick<Journal, "transaction">>;
   readonly readCodeSettings: () => { readonly settings: CodeSettings } | undefined;
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
@@ -621,6 +628,14 @@ export interface CodeServiceOptions {
    */
   readonly forkConversation?: CodeForkConversationReader;
   /**
+   * Journals the outside-content mark a thread made from a marked thread
+   * starts with. Without it such a thread is refused; an unmarked source
+   * needs nothing.
+   */
+  readonly recordExternalContentIngestion?: (
+    input: RecordExternalContentIngestionInput,
+  ) => ExternalContentIngestionResult;
+  /**
    * Merges a fork's conversation back into the thread it was forked from.
    * Without it a merge is refused as unsupported.
    */
@@ -816,6 +831,7 @@ export class CodeService {
   readonly #forkPoints: CodeForkPointPort | undefined;
   readonly #forkMergeBack: CodeServiceOptions["forkMergeBack"];
   readonly #forkConversation: CodeForkConversationReader | undefined;
+  readonly #recordExternalContentIngestion: CodeServiceOptions["recordExternalContentIngestion"];
   readonly #probeProvider: CodeServiceOptions["probeProvider"];
   readonly #isProviderModelAllowed: CodeServiceOptions["isProviderModelAllowed"];
   readonly #workingDirectories: CodeServiceOptions["workingDirectories"];
@@ -865,6 +881,7 @@ export class CodeService {
     this.#forkPoints = options.forkPoints;
     this.#forkMergeBack = options.forkMergeBack;
     this.#forkConversation = options.forkConversation;
+    this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#probeProvider = options.probeProvider;
     this.#isProviderModelAllowed = options.isProviderModelAllowed;
     this.#workingDirectories = options.workingDirectories;
@@ -1185,7 +1202,11 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.threadId) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
-        this.#requireForkOrigin(command.projectId, command.threadId, command.forkedFrom);
+        const inheritedMark = this.#requireForkOrigin(
+          command.projectId,
+          command.threadId,
+          command.forkedFrom,
+        );
         if (Object.keys(command.modelOptionValues ?? {}).length > 0) {
           await this.#requireProviderModel(
             command.providerInstanceId,
@@ -1407,15 +1428,17 @@ export class CodeService {
             { kind: "checkout-observed", checkout },
           );
           checkoutJournaled = true;
-          this.#append(
-            "code-thread",
-            thread.id,
-            0,
-            "code.thread-created@1",
-            { kind: "thread-created", thread: durableThread },
-            isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+          this.#journalNewThread(thread.id, inheritedMark, () =>
+            this.#append(
+              "code-thread",
+              thread.id,
+              0,
+              "code.thread-created@1",
+              { kind: "thread-created", thread: durableThread },
+              isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+            ),
           );
-        } catch {
+        } catch (bindingError) {
           if (checkoutJournaled) {
             // Compensate the orphan checkout so replay/projections stay clean.
             try {
@@ -1452,6 +1475,7 @@ export class CodeService {
               "Managed Code worktree was rolled back but the checkout journal entry is pending recovery.",
             );
           }
+          if (bindingError instanceof CodeServiceError) throw bindingError;
           throw this.#failure(
             "interrupted",
             "Managed Code worktree creation was rolled back after a binding failure.",
@@ -1592,7 +1616,7 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.thread.id) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
-        this.#requireForkOrigin(
+        const inheritedMark = this.#requireForkOrigin(
           command.thread.projectId,
           command.thread.id,
           command.thread.forkedFrom,
@@ -1695,10 +1719,12 @@ export class CodeService {
           thread.permissionPersistence === "current-session"
             ? decodeCodeThread({ ...thread, executionPolicy: "approval-gated" })
             : thread;
-        this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
-          kind: "thread-created",
-          thread: durableThread,
-        });
+        this.#journalNewThread(thread.id, inheritedMark, () =>
+          this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
+            kind: "thread-created",
+            thread: durableThread,
+          }),
+        );
         if (
           thread.executionPolicy === "full-access" &&
           thread.permissionPersistence === "current-session"
@@ -3535,13 +3561,16 @@ export class CodeService {
    * its first turn runs. The text handoff is what every fork can fall back to,
    * so a fork whose handoff cannot be built now is refused here, before a
    * worktree or thread exists, rather than created to answer from nothing.
+   *
+   * Returns the origin when its source is marked with outside content, which
+   * the new thread must then start with (`#markFork`).
    */
   #requireForkOrigin(
     projectId: string,
     threadId: string,
     forkedFrom: CodeThreadForkOrigin | undefined,
-  ): void {
-    if (forkedFrom === undefined) return;
+  ): CodeThreadForkOrigin | undefined {
+    if (forkedFrom === undefined) return undefined;
     if (String(forkedFrom.threadId) === String(threadId)) {
       throw this.#failure("invalid", "A thread cannot be forked from itself.");
     }
@@ -3559,6 +3588,54 @@ export class CodeService {
         handoff.reason === "unsupported" ? "unavailable" : "conflict",
         CODE_FORK_HANDOFF_REFUSALS[handoff.reason],
       );
+    }
+    return handoff.selection.source.externalContentIngested ? forkedFrom : undefined;
+  }
+
+  /**
+   * A fork or a restore copies its source's conversation (a harness fork its
+   * tool results too), so outside text the source read is in the new thread's
+   * context from its first turn. The mark is journaled on the new thread before the
+   * thread itself, in one unit with it: no moment exists at which the thread is
+   * created and unmarked, a mark that cannot be journaled refuses the creation,
+   * and a creation that fails after the mark leaves no mark behind. Only a
+   * person's Clear may forget a mark, so a failed creation cannot undo one with
+   * a later event.
+   */
+  #journalNewThread(
+    threadId: CodeThreadId,
+    inheritedMark: CodeThreadForkOrigin | undefined,
+    journalThread: () => void,
+  ): void {
+    if (inheritedMark === undefined) {
+      journalThread();
+      return;
+    }
+    const journal = this.#persistence.journal;
+    if (journal.transaction === undefined) {
+      throw this.#failure("unavailable", FORK_MARK_REFUSAL);
+    }
+    journal.transaction(() => {
+      this.#markFork(threadId, inheritedMark);
+      journalThread();
+    });
+  }
+
+  #markFork(threadId: CodeThreadId, origin: CodeThreadForkOrigin): void {
+    let recorded: ExternalContentIngestionResult | undefined;
+    try {
+      recorded = this.#recordExternalContentIngestion?.({
+        threadId,
+        provenance: { origin: "external-content", sourceLabel: "code-fork" },
+        contentReference: `code-fork-${String(origin.threadId)}-${String(origin.throughOperationId)}`,
+        correlationId: this.#uuid(),
+        authorized: true,
+      });
+    } catch {
+      recorded = undefined;
+    }
+    if (recorded?.kind !== "recorded" && recorded?.kind !== "already-recorded") {
+      throw this.#failure("unavailable", FORK_MARK_REFUSAL);
     }
   }
 

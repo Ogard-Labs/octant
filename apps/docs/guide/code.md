@@ -119,6 +119,11 @@ the source's session stay behind. The fork's first reply says which happened
 and what was left out. If no readable conversation is left to hand over,
 Octant refuses to create the fork, or refuses its first message, and says why.
 
+If this thread is marked as having read outside content, a fork or a restored
+thread made from it starts marked too, because it carries the same
+conversation. A thread whose mark you cleared makes an unmarked fork. Clear
+the new thread's mark from its own notice like any other.
+
 **Merge back to source** appears on a fork's own finished replies. It hands the
 fork's conversation — its messages after the fork point, or after its previous
 merge back, up to that reply — back to the thread it was forked from as text,

@@ -13,6 +13,7 @@ const RECORDED_LABELS: ReadonlyArray<string> = [
   "agent-message",
   "browser-observation",
   "browser-page",
+  "code-fork",
   "fork-merge-back",
   "github-issue",
   "github-issues",

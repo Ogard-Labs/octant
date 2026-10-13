@@ -394,6 +394,50 @@ describe("Journal", () => {
     connection.close();
   });
 
+  it("keeps and publishes nothing from a unit whose later append fails", () => {
+    const connection = openMigratedConnection();
+    const published: Array<unknown> = [];
+    const journal = createJournal(connection, (append) => published.push(append));
+    const otherAggregate = "00000000-0000-4000-8000-000000000007";
+
+    expect(() =>
+      journal.transaction(() => {
+        journal.append({
+          ...appendRequest([pendingEvent(ids.event1)]),
+          aggregate: { aggregateType: "fixture", aggregateId: otherAggregate },
+        });
+        journal.append(appendRequest([pendingEvent(ids.event2)], 3));
+      }),
+    ).toThrow(ConcurrencyConflict);
+
+    expect(published).toEqual([]);
+    expect(rowCount(connection, "event_journal")).toBe(0);
+    expect(rowCount(connection, "aggregate_heads")).toBe(0);
+    connection.close();
+  });
+
+  it("publishes every append of a unit only after the whole unit commits", () => {
+    const connection = openMigratedConnection();
+    const published: Array<unknown> = [];
+    const journal = createJournal(connection, (append) => published.push(append));
+    const otherAggregate = "00000000-0000-4000-8000-000000000007";
+
+    const committed = journal.transaction(() => {
+      const first = journal.append({
+        ...appendRequest([pendingEvent(ids.event1)]),
+        aggregate: { aggregateType: "fixture", aggregateId: otherAggregate },
+      });
+      expect(published).toEqual([]);
+      const second = journal.append(appendRequest([pendingEvent(ids.event2)]));
+      expect(published).toEqual([]);
+      return [first, second];
+    });
+
+    expect(published).toEqual(committed);
+    expect(rowCount(connection, "event_journal")).toBe(2);
+    connection.close();
+  });
+
   it("appends a same-aggregate batch with contiguous versions and sequences", () => {
     const connection = openMigratedConnection();
     const journal = createJournal(connection);

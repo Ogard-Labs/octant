@@ -740,6 +740,26 @@ Restore from here whose handoff cannot be built is refused with the reason
 before any worktree is prepared, because the text handoff is the one
 conversation transfer every fork can fall back to.
 
+A fork or Restore from here copies its source's conversation, and a harness
+fork its tool results too, so a thread made from a source marked with
+outside content starts marked. A Code creation with a `forkedFrom` origin
+whose source is marked appends `thread.external-content-ingested@1` on the new
+thread
+(`external-content`, label `code-fork`, content reference
+`code-fork-<source thread>-<fork turn>`) before it journals the thread, so no
+moment exists at which the thread is created and unmarked; a mark that cannot
+be journaled refuses the creation and removes its worktree. The mark and the
+thread commit as one journal unit, so a creation that fails after the mark
+leaves no mark behind: only a person's clear may forget a mark, so a failed
+creation is never undone by a later event. An unmarked source
+makes an unmarked thread. The source's mark is read when the creation is
+checked, as its handoff reports it. A source a person cleared is unmarked, and
+its fork starts unmarked: the clear holds until the next ingestion, and a
+fork brings in nothing the person has not reviewed. A source marked again
+after its clear marks its fork. The new thread's mark is its own. It
+survives replay, a purge of the new thread erases it, and a person clears it
+there like any other.
+
 An in-place restore (`restore-git-checkpoint`, sent by both Restore files to
 this point and Undo restore) overwrites a checkout other threads may share, so
 the host refuses it, as a `conflict` before Git is touched and before any undo
@@ -1418,7 +1438,8 @@ flowchart LR
     structured reference, agent message, or host-run turn (routine, goal
     loop, usage-limit resume, child-run delivery) can clear.
   - One clear covers that thread and only it. A child run and a fork keep
-    their own taint.
+    their own taint; a Code fork starts with its source's mark when it is
+    made (see the Code fork rule under Modes).
   - A clear removes the mark only. Nothing leaves the model's context and the
     provider session is not restarted, so what the thread read can still steer
     the model.
