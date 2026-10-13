@@ -1555,6 +1555,21 @@ export function useCodeController(options: CodeControllerOptions) {
     };
   }, [applyNavigationRefresh, client, nextNavigationRead, options.changeRevision]);
 
+  /**
+   * Reads the thread list once now, for a caller that needs to know whether a
+   * thread the host just named is in it. A read that fails leaves the list as
+   * it was.
+   */
+  const refreshNavigation = useCallback(async (): Promise<void> => {
+    const read = nextNavigationRead();
+    try {
+      const next = await client.navigation();
+      if (mounted.current) applyNavigationRefresh(next, read);
+    } catch {
+      // The list stays as it was; the caller decides what a missing thread means.
+    }
+  }, [applyNavigationRefresh, client, nextNavigationRead]);
+
   const execute = useCallback(
     async (command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult | undefined> => {
       clearFailure();
@@ -2478,6 +2493,7 @@ export function useCodeController(options: CodeControllerOptions) {
     providerAnswerRefusal,
     refreshFollowUp,
     refreshConversation,
+    refreshNavigation,
     restoreUndo,
     noteRestoreUndo,
     // A retry issued from a thread view is asking for that thread back, not

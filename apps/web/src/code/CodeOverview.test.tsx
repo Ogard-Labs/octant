@@ -565,6 +565,7 @@ function controller(): CodeController {
     markFollowUp: vi.fn(async () => true),
     markThreadRead: vi.fn(),
     refreshConversation: vi.fn(() => true),
+    refreshNavigation: vi.fn(async () => undefined),
     navigation: [],
     pendingDraft: "",
     pendingDraftCaret: 0,

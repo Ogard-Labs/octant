@@ -171,7 +171,7 @@ subagent needs your approval" or "Review subagent asked a question" (the
 child's role), under the parent thread's title, with the child's task and the
 request text. It has one action, **Review request**, which opens the parent
 thread on its Agents tab with that child selected; it offers no Approve, Deny,
-or choices, so the answer is given in the child's own detail view. Chat has no
+or choices, so the answer is given in the child's own detail view. If the window's thread list does not hold the parent yet, it reads the list once more and, when the parent is still missing, says it could not open the thread rather than doing nothing. Chat has no
 Agents tab, so a Chat subagent is never listed. At most five rows show, then **+N more**, which
 opens the Inbox. The card is hidden while nothing waits, and unavailable where
 this window has no reader (a remote window).

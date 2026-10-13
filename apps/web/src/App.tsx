@@ -2009,6 +2009,26 @@ function LaunchedShell(
     settings: controller.settings,
     workspace: controller.workspace,
   }).read;
+  // A Review request pressed before this window's thread list held the parent
+  // waits here for one re-read: it opens once the parent is listed, and says so
+  // when the re-read still does not list it.
+  const [awaitedSubagentOpen, setAwaitedSubagentOpen] = useState<{
+    readonly request: ChildPendingRequest;
+    readonly refreshed: boolean;
+  }>();
+  useEffect(() => {
+    if (awaitedSubagentOpen === undefined) return;
+    if (subagentParentListed(awaitedSubagentOpen.request)) {
+      setAwaitedSubagentOpen(undefined);
+      openSubagentRequest(awaitedSubagentOpen.request);
+    } else if (awaitedSubagentOpen.refreshed) {
+      setAwaitedSubagentOpen(undefined);
+      setThreadExportNotice(
+        `Octant could not open ${awaitedSubagentOpen.request.threadTitle}: this window no longer lists that thread.`,
+      );
+    }
+    // The helpers read the lists named here; nothing else decides when to look again.
+  }, [awaitedSubagentOpen, workNavigation.navigation, codeController.navigation]);
   const waitingThreadIds = useMemo(
     () =>
       subagentWaitRead.status === "ready"
@@ -3430,6 +3450,12 @@ function LaunchedShell(
       );
     }
   }
+  function subagentParentListed(request: ChildPendingRequest): boolean {
+    const threadId = String(request.threadId);
+    return request.mode === "work"
+      ? workNavigation.navigation.some((thread) => String(thread.threadId) === threadId)
+      : codeController.navigation.some((thread) => String(thread.threadId) === threadId);
+  }
   /**
    * Choosing a waiting subagent's row shows its parent thread with the Agents
    * tool open on that subagent. The dock keeps its own state per thread, so
@@ -3438,13 +3464,21 @@ function LaunchedShell(
    */
   function openSubagentRequest(request: ChildPendingRequest) {
     const threadId = String(request.threadId);
-    // A parent this window cannot select would leave the Agents tab opening
-    // over whatever thread is on screen, so the row does nothing instead.
-    const listed =
-      request.mode === "work"
-        ? workNavigation.navigation.some((thread) => String(thread.threadId) === threadId)
-        : codeController.navigation.some((thread) => String(thread.threadId) === threadId);
-    if (!listed) return;
+    // The host lists this row only for a window that may open the parent, so a
+    // parent missing from this window's list is a list that has not caught up.
+    // Opening it anyway would leave the Agents tab over whatever thread is on
+    // screen, so the list is read once more first.
+    if (!subagentParentListed(request)) {
+      setAwaitedSubagentOpen({ request, refreshed: false });
+      const reread =
+        request.mode === "work" ? workNavigation.refresh() : codeController.refreshNavigation();
+      void reread.finally(() =>
+        setAwaitedSubagentOpen((current) =>
+          current?.request === request ? { request, refreshed: true } : current,
+        ),
+      );
+      return;
+    }
     const key = threadUtilityDockKey(request.mode, threadId);
     if (request.mode === "work") selectWorkThread(threadId);
     else selectCodeThread(threadId);
