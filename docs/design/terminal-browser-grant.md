@@ -79,16 +79,16 @@ A grant is bound to one host run, one thread, one terminal session, and one
 window. It lives only in host memory; a restarted host mints nothing by itself.
 It ends when:
 
-| Reason                 | Cause                                                                                                                                              |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `switched-off`         | The person switches it off (`revoke-terminal-browser-grant`), any window that can open the thread, in any posture, since it only narrows authority |
-| `terminal-closed`      | The terminal stops, exits, or is replaced; also found by any call that sees the shell not running                                                  |
-| `terminal-not-started` | The terminal's launch failed after the grant was minted                                                                                            |
-| `thread-completed`     | The thread is completed                                                                                                                            |
-| `thread-archived`      | The thread is archived                                                                                                                             |
-| `thread-deleted`       | The thread is purged                                                                                                                               |
-| `window-revoked`       | The window that switched it on loses host authority                                                                                                |
-| `host-stopped`         | The host shuts down cleanly                                                                                                                        |
+| Reason                 | Cause                                                                                                                                                                                                          |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `switched-off`         | The person switches it off (`revoke-terminal-browser-grant`), any window that can open the thread, in any posture and whether or not the thread's checkout is still available, since it only narrows authority |
+| `terminal-closed`      | The terminal stops, exits, or is replaced; also found by any call that sees the shell not running                                                                                                              |
+| `terminal-not-started` | The terminal's launch failed, or returned a shell that had already exited, after the grant was minted; the start result reports the grant revoked, never granted                                               |
+| `thread-completed`     | The thread is completed                                                                                                                                                                                        |
+| `thread-archived`      | The thread is archived                                                                                                                                                                                         |
+| `thread-deleted`       | The thread is purged                                                                                                                                                                                           |
+| `window-revoked`       | The window that switched it on loses host authority                                                                                                                                                            |
+| `host-stopped`         | The host shuts down cleanly                                                                                                                                                                                    |
 
 ## Persistence
 

@@ -908,4 +908,25 @@ describe("terminal Browser grant", () => {
       fixture.grantEvents().map((event) => (event.payload as { reason?: string }).reason),
     ).toEqual([undefined, "terminal-not-started"]);
   });
+
+  it("reports how a grant ended when its shell never ran, and the endpoint refuses afterwards", async (context) => {
+    const fixture = harness();
+    const opening = await open(fixture);
+    if (opening.kind === "refused")
+      return void context.skip("loopback listeners are not permitted");
+    const { url, token } = environmentOf(fixture, opening);
+
+    const ended = fixture.service.abandon(terminalA);
+
+    expect(ended).toMatchObject({
+      status: "revoked",
+      reason: "terminal-not-started",
+      terminalId: ids.terminalA,
+    });
+    expect(fixture.service.abandon(terminalA)).toBeUndefined();
+    await expect(connect(url, token)).rejects.toThrow();
+    expect(
+      fixture.grantEvents().map((event) => (event.payload as { reason?: string }).reason),
+    ).toEqual([undefined, "terminal-not-started"]);
+  });
 });

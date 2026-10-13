@@ -300,10 +300,17 @@ export class TerminalBrowserGrantService {
     return grant.environment.get(reference);
   }
 
-  /** A terminal whose launch failed after its grant was minted never ran with it. */
-  abandon(terminalId: CodeTerminalId): void {
+  /**
+   * A terminal that did not end up running after its grant was minted never ran
+   * with it. Returns how the grant ended, or undefined when it held none.
+   */
+  abandon(
+    terminalId: CodeTerminalId,
+  ): Extract<TerminalBrowserGrantOutcome, { readonly status: "revoked" }> | undefined {
     const grant = this.#byTerminal.get(String(terminalId));
-    if (grant !== undefined) this.#end(grant, "terminal-not-started", this.#hostActor);
+    return grant === undefined
+      ? undefined
+      : this.#end(grant, "terminal-not-started", this.#hostActor);
   }
 
   /** The person switching a live grant off, without closing the terminal. */
