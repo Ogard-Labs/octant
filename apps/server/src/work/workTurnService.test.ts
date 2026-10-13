@@ -15,7 +15,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   decodeAgentRun,
+  decodeMentionableThreadId,
   decodeWorkAttachmentId,
+  decodeWorkThreadTranscript,
   decodeWorkTurnAccepted,
   decodeWorkThread,
   decodeWorkThreadId,
@@ -32,6 +34,9 @@ import { Effect, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { browserUseSelection } from "@octant/plugin-host/browser-use";
+import { createWorkThreadMentionDirectory } from "../chat/threadMentionService";
+import { createWorkTurnRouteHandler } from "../workTurnRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { WorkAttachmentStore } from "./workAttachmentStore";
 import { WorkTurnProjection } from "./workTurnProjection";
 import {
@@ -1710,6 +1715,100 @@ describe("WorkTurnService", () => {
     expect(fixture.threads.bootstrap).not.toHaveBeenCalled();
   });
 
+  describe("a thread with more turns than one transcript carries", () => {
+    it("serves the newest 64 turns of a 65-turn thread, oldest first", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 65);
+
+      const transcript = await fixture.service.transcript(ids.window, ids.thread);
+
+      expect(transcript.turns).toHaveLength(64);
+      expect(transcript.turns.map((turn) => turn.prompt)).toEqual(
+        Array.from({ length: 64 }, (_, index) => `Prompt ${index + 2}`),
+      );
+      expect(transcript.turns.at(-1)?.prompt).toBe("Prompt 65");
+    });
+
+    it("answers the transcript route for a 65-turn thread with a body the unchanged decoder reads", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 65);
+      const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+      const store = new WindowAuthorityStore();
+      store.register({ windowId: ids.window, capability, now: 0 });
+      const route = createWorkTurnRouteHandler({
+        service: fixture.service,
+        windowAuthorityStore: store,
+        now: () => 1,
+      });
+
+      const response = await route(
+        new Request(`http://127.0.0.1/api/work/turns/transcript/${ids.thread}`, {
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+
+      expect(response?.status).toBe(200);
+      const body = decodeWorkThreadTranscript(await response!.json());
+      expect(body.turns).toHaveLength(64);
+      expect(body.turns.at(-1)?.prompt).toBe("Prompt 65");
+    });
+
+    it("lets the host read every turn of the thread, oldest first", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 65);
+
+      const turns = await fixture.service.turns(ids.window, ids.thread);
+
+      expect(turns.map((turn) => turn.prompt)).toEqual(
+        Array.from({ length: 65 }, (_, index) => `Prompt ${index + 1}`),
+      );
+    });
+
+    it("resolves a #thread mention of the thread from the host-wide read", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 65);
+      const directory = createWorkThreadMentionDirectory({
+        bootstrap: async () => ({ threads: [] }),
+        transcript: async (windowId, threadId) => ({
+          turns: await fixture.service.turns(windowId, threadId),
+        }),
+      });
+
+      const entries = await directory.readTranscript(
+        ids.window,
+        decodeMentionableThreadId(String(ids.thread)),
+      );
+
+      expect(entries).toHaveLength(130);
+      expect(entries?.at(-2)).toMatchObject({ role: "user", text: "Prompt 65" });
+    });
+
+    it("refuses both reads for a window that cannot read the thread", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 2);
+      fixture.threads.read.mockResolvedValue(undefined as never);
+
+      await expect(fixture.service.transcript(ids.window, ids.thread)).rejects.toMatchObject({
+        failure: { category: "unauthorized" },
+      });
+      await expect(fixture.service.turns(ids.window, ids.thread)).rejects.toMatchObject({
+        failure: { category: "unauthorized" },
+      });
+    });
+
+    it("serves a 64-turn thread whole from both reads", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 64);
+
+      const transcript = await fixture.service.transcript(ids.window, ids.thread);
+      const turns = await fixture.service.turns(ids.window, ids.thread);
+
+      expect(transcript.turns).toHaveLength(64);
+      expect(transcript.turns.at(0)?.prompt).toBe("Prompt 1");
+      expect(turns).toEqual(transcript.turns);
+    });
+  });
+
   it("streams response deltas immediately and settles through a cursor-safe frame", async () => {
     const gate = deferred<void>();
     const fixture = serviceFixture({
@@ -2152,6 +2251,24 @@ describe("WorkTurnService", () => {
     expect(result.turn.delivery).toEqual({ kind: "agent-result", runId: run.id });
   });
 });
+
+/** Run `count` turns on the one thread, each settled before the next starts. */
+async function settleTurns(
+  fixture: ReturnType<typeof serviceFixture>,
+  count: number,
+): Promise<void> {
+  for (let n = 1; n <= count; n += 1) {
+    const suffix = n.toString(16).padStart(12, "0");
+    const requestId = decodeWorkTurnRequestId(`aaaaaaaa-aaaa-4aaa-8aaa-${suffix}`);
+    await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      requestId,
+      turnId: decodeWorkTurnId(`bbbbbbbb-bbbb-4bbb-8bbb-${suffix}`),
+      prompt: `Prompt ${n}`,
+    });
+    await fixture.waitForIdle(requestId);
+  }
+}
 
 function startCommand() {
   return {
