@@ -2287,9 +2287,15 @@ session's `usage` and `metrics` totals fold them, so a Code turn on a direct
 endpoint no longer records zero tokens. Chat, Work and Code on every provider
 journal the frame; the harness additionally keeps its own record.
 
-**Compacting a session on request.** Not built yet: this is the design the
-implementation follows, and until it lands `compact-range` stays a listed remedy
-with no action behind it. **Compact session** replaces what the model sees from
+**Compacting a session on request.** Built so far: the host path for Chat and
+Work on a direct endpoint — the `compact-session` command, its receipt,
+refusals and journal events, the per-thread `compaction` answer on the
+inspector snapshot, and the host summary. Not built yet: the provider seam and
+every runtime row, so a runtime-owned conversation and every Code thread is
+refused `runtime-cannot-compact`; the receipt on the live stream; the send
+block while a compaction runs, so until then a turn that starts mid-compaction
+fails it as `context-changed`; and the UI, so `compact-range` stays a listed
+remedy with no action behind it. **Compact session** replaces what the model sees from
 the next turn on with a summary of the earlier conversation and a recent tail,
 when the person asks, outside a turn. It never deletes or rewrites the journal:
 the thread keeps every message, tool call and result, and the compaction is
@@ -2375,7 +2381,11 @@ server checks it before any side effect:
 - The request costs tokens. It is reserved through the capacity scheduler as
   Chat maintenance is, recorded in the usage ledger under the thread with request
   shape `context-compaction`, priced, and counted against the Project's spend
-  ceilings.
+  ceilings. It reserves and settles tokens like a turn but is not counted as
+  one, and the thread's latest usage leaves it out, because it is a summary
+  request, not a reply the window was sized for. Before a host has run a turn
+  on the provider since it started, the plan's stored service limits stand in
+  for capacity facts, one request at a time.
 
 _Command and receipt._ One new `ContextCommand` kind in
 `packages/contracts/src/contextRpc.ts`:
@@ -2516,6 +2526,7 @@ _Failures._
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | A turn is running, or another compaction is                        | Refused before anything is journaled; the same `compactionId` returns the compaction already under way.                                                                                                                                                                                                                                                            |
 | The runtime reports failure (Pi with no `result`, Claude `failed`) | `failed` (`runtime-failed`), carrying the adapter's `sessionMayHaveChanged`. Unchanged (Pi) reads as nothing changed and the person can retry; may-have-changed (Claude today) says so, and the next usage report settles it.                                                                                                                                      |
+| The host summary request fails                                     | `failed` (`summary-failed`); nothing changes, and the person can retry.                                                                                                                                                                                                                                                                                            |
 | The host summary is not smaller than what it replaces              | `failed` (`summary-not-smaller`); nothing changes.                                                                                                                                                                                                                                                                                                                 |
 | A pin or exclusion changes while the host summary is being written | `failed` (`context-changed`); nothing is committed, and the person can compact again.                                                                                                                                                                                                                                                                              |
 | The request times out                                              | `failed` (`timed-out`) on the existing maintenance timeout; a host summary call is cancelled, a runtime is interrupted.                                                                                                                                                                                                                                            |
