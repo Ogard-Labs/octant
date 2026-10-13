@@ -9887,6 +9887,74 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const childPendingForWindow = (windowId: WindowId) =>
+      listChildPendingRequests(
+        {
+          approvals: nativeHarnessApprovals,
+          questions: nativeHarnessQuestionsLive,
+          readSession: (threadId) => nativeHarnessSessionsLive.read(threadId),
+          getRun: (id) => agentRunPersistence.getById(id),
+          parentThreadTitle: (run) =>
+            resolveAgentRunParentThreadTitle({
+              persistence,
+              workThreadProjection,
+              parentThreadId: run.parentThreadId,
+              mode: run.routingReceipt.mode,
+            }),
+          authorizeThread: ({ threadId, windowId }) => {
+            // Purged threads stay out even when a projection row lingers.
+            if (
+              persistence.connection
+                .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
+                .get(threadId) !== undefined
+            ) {
+              return false;
+            }
+            let parent:
+              | {
+                  readonly mode: "code" | "work";
+                  readonly projectId: ProjectId;
+                  readonly active: boolean;
+                }
+              | undefined;
+            try {
+              const codeThread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+              if (codeThread !== undefined) {
+                parent = {
+                  mode: "code",
+                  projectId: codeThread.projectId,
+                  active: codeThread.lifecycle === "active",
+                };
+              }
+            } catch {
+              // A Work thread id is not a Code thread id.
+            }
+            if (parent === undefined) {
+              try {
+                const workThread = workThreadProjection.read(decodeWorkThreadId(threadId));
+                if (workThread !== undefined) {
+                  parent = {
+                    mode: "work",
+                    projectId: workThread.projectId,
+                    active: workThread.lifecycle === "active",
+                  };
+                }
+              } catch {
+                // Neither mode owns this id.
+              }
+            }
+            return windowMayListChildParent({
+              workspace: persistence.readWindowWorkspace(decodeWindowId(windowId))?.workspace,
+              parent,
+              projectActive:
+                parent === undefined
+                  ? false
+                  : projectService.hasActiveProject(parent.projectId, parent.mode),
+            });
+          },
+        },
+        String(windowId),
+      );
     const pendingRequestService = new PendingRequestService({
       readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
       work: async (windowId) => [
@@ -9905,81 +9973,16 @@ export function startOctantServer(
         ...(await codeTurnDecisions.listForWindow(windowId)),
       ],
       chat: () => chatService.listPendingQuestions(),
-      children: (windowId) =>
-        listChildPendingRequests(
-          {
-            approvals: nativeHarnessApprovals,
-            questions: nativeHarnessQuestionsLive,
-            readSession: (threadId) => nativeHarnessSessionsLive.read(threadId),
-            getRun: (id) => agentRunPersistence.getById(id),
-            parentThreadTitle: (run) =>
-              resolveAgentRunParentThreadTitle({
-                persistence,
-                workThreadProjection,
-                parentThreadId: run.parentThreadId,
-                mode: run.routingReceipt.mode,
-              }),
-            authorizeThread: ({ threadId, windowId }) => {
-              // Purged threads stay out even when a projection row lingers.
-              if (
-                persistence.connection
-                  .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
-                  .get(threadId) !== undefined
-              ) {
-                return false;
-              }
-              let parent:
-                | {
-                    readonly mode: "code" | "work";
-                    readonly projectId: ProjectId;
-                    readonly active: boolean;
-                  }
-                | undefined;
-              try {
-                const codeThread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-                if (codeThread !== undefined) {
-                  parent = {
-                    mode: "code",
-                    projectId: codeThread.projectId,
-                    active: codeThread.lifecycle === "active",
-                  };
-                }
-              } catch {
-                // A Work thread id is not a Code thread id.
-              }
-              if (parent === undefined) {
-                try {
-                  const workThread = workThreadProjection.read(decodeWorkThreadId(threadId));
-                  if (workThread !== undefined) {
-                    parent = {
-                      mode: "work",
-                      projectId: workThread.projectId,
-                      active: workThread.lifecycle === "active",
-                    };
-                  }
-                } catch {
-                  // Neither mode owns this id.
-                }
-              }
-              return windowMayListChildParent({
-                workspace: persistence.readWindowWorkspace(decodeWindowId(windowId))?.workspace,
-                parent,
-                projectActive:
-                  parent === undefined
-                    ? false
-                    : projectService.hasActiveProject(parent.projectId, parent.mode),
-              });
-            },
-          },
-          String(windowId),
-        ),
+      children: childPendingForWindow,
     });
     const pendingRequestRoutes = createPendingRequestRouteHandler({
       service: pendingRequestService,
       windowAuthorityStore,
     });
-    // The menu bar's roster: needs-you is the pending-request read, working is
-    // each mode's journaled run state. Nothing here reads a terminal's screen.
+    // The menu bar's roster: needs-you is the pending-request read, plus the
+    // Code requests and subagent waits each persisted local window could
+    // already open. The menu bar's own window binds no Project. Nothing here
+    // reads a terminal's screen.
     const fleetActivityRoutes = createFleetActivityRouteHandler({
       service: new FleetActivityService({
         readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -9993,6 +9996,16 @@ export function startOctantServer(
           ...((await codeOperationRuntime?.pendingRequests?.(windowId)) ?? []),
           ...(await codeTurnDecisions.listForWindow(windowId)),
         ],
+        boundProjectWindows: () =>
+          persistence
+            .readWindowWorkspaces()
+            .filter(
+              ({ workspace }) =>
+                workspace.contextByMode.code.projectId != null ||
+                workspace.contextByMode.work.projectId != null,
+            )
+            .map(({ workspace }) => workspace.windowId),
+        childPending: childPendingForWindow,
         chat: () =>
           chatService
             .navigation()

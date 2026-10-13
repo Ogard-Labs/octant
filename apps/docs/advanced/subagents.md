@@ -192,7 +192,7 @@ only; it does not grant access to siblings or later requests. Unanswered
 requests expire when the child stops or Octant restarts.
 
 A Work or Code subagent that is waiting also appears in **Needs you** on the
-start screen, in the Inbox, and in the command palette. The row names the parent
+start screen, in the Inbox, in the command palette, and in the menu bar. The row names the parent
 thread and the child (for example "Research subagent needs your approval") and
 has one action, **Review request**, which opens the parent thread on its Agents
 tab with that child selected. Answer there; the row has no Approve or Deny of

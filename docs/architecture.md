@@ -375,7 +375,11 @@ probe (every 2 s while a window is visible, 10 s otherwise). Every row names its
   per bound window and the menu bar's own window binds no Code Project, so its
   Code rows are the requests and decisions each local window with a persisted
   Code binding could answer; a Code Project no local window binds stays out. A
-  thread that is both waiting and running is listed once, as needs you.
+  waiting subagent is listed the same way. The menu bar's window binds no
+  Project, so that row is one a persisted local window bound to the parent's
+  project already lists, and the parent is one needs-you row whose
+  `activitySource` is `session`. A thread that is both waiting and running is
+  listed once, as needs you.
 - **Working** is each mode's own navigation run state, the journaled fold the
   sidebar and board already use, so it is `journal`.
 - **Done since you looked** is the one state the host cannot know, because only
@@ -3884,7 +3888,9 @@ mechanisms are:
   this host can still settle it and the session view still holds the pending
   item (a restart, an expiry, a decision, or an eviction past the view's 50
   entries removes it), and only for a window bound to the parent's project,
-  the same binding that lets that window open the thread. The harness session
+  the same binding that lets that window open the thread. The menu bar's own
+  window binds no Project, so its fleet read asks those persisted windows and
+  still lists the parent once. The harness session
   route also requires the thread to be the open surface; the list does not,
   because the row is how a person finds a request on a thread they are not
   looking at. Answering still goes through that route after the row opens the
@@ -3909,8 +3915,9 @@ mechanisms are:
   Project name, and `activitySource` (`journal`, `session`, or the reserved
   `screen`, which can never say needs you). It composes the pending-requests
   read, the Code requests and decisions each local window with a persisted Code
-  binding could answer, and each mode's own navigation run state, and adds no
-  authority or state.
+  binding could answer, the subagent waits each persisted local window bound to
+  the parent's project could open, and each mode's own navigation run state,
+  and adds no authority or state.
   It is local-window only under the same rules as pending requests: outside
   every forwarded prefix, no remote action, and a paired device's principal is
   refused. The [desktop menu bar](#desktop-menu-bar) is its reader.
