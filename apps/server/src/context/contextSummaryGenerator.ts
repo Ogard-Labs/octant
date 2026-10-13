@@ -5,7 +5,7 @@ import type {
   ProviderSessionId,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
-import { Effect, Fiber, Stream, type Scope } from "effect";
+import { Effect, Either, Fiber, Stream, type Scope } from "effect";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import type {
   ContextMaintenanceMaterial,
@@ -38,8 +38,27 @@ const SUMMARY_INSTRUCTION = [
   "commentary, and do not invent detail that is not present.",
 ].join(" ");
 
+/**
+ * What {@link summaryPrompt} adds around the material, at the planner's
+ * four-characters-a-token estimate: the instruction, and per excerpt its
+ * header and the longest speaker label a requested compaction prefixes.
+ */
+export const SUMMARY_PROMPT_FRAMING = {
+  fixedTokens: Math.ceil(SUMMARY_INSTRUCTION.length / 4),
+  perItemTokens: Math.ceil(("\n\n--- excerpt 9999 ---\n".length + "Earlier summary: ".length) / 4),
+} as const;
+
 export class ContextSummaryGenerationFailed extends Error {
   override readonly name = "ContextSummaryGenerationFailed";
+
+  constructor(
+    message: string,
+    // A requested compaction reports a deadline separately from a failure: a
+    // slow provider may answer on retry, a failing one will not.
+    readonly reason: "timed-out" | "failed" = "failed",
+  ) {
+    super(message);
+  }
 }
 
 export interface ContextSummaryGeneratorOptions {
@@ -90,7 +109,7 @@ export function makeContextSummaryGenerator(
       terminal: undefined,
       outputTokens: undefined,
     };
-    const content = await Effect.runPromise(
+    const outcome = await Effect.runPromise(
       // The deadline covers the whole scoped operation — acquisition, startup,
       // the send, and collection — because the turn awaits this before it
       // dispatches the user's own message. A collection-only deadline never
@@ -105,15 +124,22 @@ export function makeContextSummaryGenerator(
             onTimeout: () =>
               new ContextSummaryGenerationFailed(
                 "The maintenance model did not answer within its deadline.",
+                "timed-out",
               ),
           }),
         ),
-      ),
-    ).catch((error: unknown) => {
-      throw error instanceof ContextSummaryGenerationFailed
-        ? error
-        : new ContextSummaryGenerationFailed("Context maintenance request failed.");
+      ).pipe(Effect.either),
+    ).catch(() => {
+      throw new ContextSummaryGenerationFailed("Context maintenance request failed.");
     });
+    // A rejected run promise wraps its failure, so the typed failure is read
+    // here instead; otherwise every deadline would surface as a plain failure.
+    if (Either.isLeft(outcome)) {
+      throw outcome.left instanceof ContextSummaryGenerationFailed
+        ? outcome.left
+        : new ContextSummaryGenerationFailed("Context maintenance request failed.");
+    }
+    const content = outcome.right;
     return {
       content,
       summaryTokens:

@@ -6,7 +6,12 @@ import {
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { ContextHarnessError } from "./context/contextHarnessService";
-import { createContextRouteHandler } from "./contextRoutes";
+import {
+  createContextRouteHandler,
+  type ContextRoutePrincipal,
+  type ContextRouteService,
+} from "./contextRoutes";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -16,6 +21,7 @@ const subjectOf = (aggregateType: string): ContextSubjectRef =>
   decodeContextSubjectRef({ aggregateType, aggregateId: subjectId });
 const subject = subjectOf("chat-thread");
 const manifestId = "82000000-0000-4000-8000-000000000003";
+const compactionId = "82000000-0000-4000-8000-000000000005";
 const commandsFor = (commandSubject: ContextSubjectRef) =>
   [
     {
@@ -28,6 +34,7 @@ const commandsFor = (commandSubject: ContextSubjectRef) =>
       },
     },
     { kind: "rebuild-context-plan", subject: commandSubject, expectedManifestId: manifestId },
+    { kind: "compact-session", subject: commandSubject, compactionId },
   ] as const;
 
 describe("context routes", () => {
@@ -38,7 +45,7 @@ describe("context routes", () => {
 
     const inspected = await route(request("/api/context/inspect", { subject }));
     expect(inspected?.status).toBe(200);
-    expect(inspect).toHaveBeenCalledWith(subject, undefined);
+    expect(inspect).toHaveBeenCalledWith(subject, undefined, "local-window");
 
     const command = {
       kind: "rebuild-context-plan",
@@ -47,7 +54,7 @@ describe("context routes", () => {
     } as const;
     const executed = await route(request("/api/context/commands", command));
     expect(executed?.status).toBe(200);
-    expect(execute).toHaveBeenCalledWith(command);
+    expect(execute).toHaveBeenCalledWith(command, "local-window");
 
     const forged = await route(request("/api/context/inspect", { subject, windowId }, capability));
     expect(forged?.status).toBe(400);
@@ -151,7 +158,7 @@ describe("context routes", () => {
       for (const command of commandsFor(threadSubject)) {
         const response = await route(request("/api/context/commands", command));
         expect(response?.status).toBe(200);
-        expect(execute).toHaveBeenLastCalledWith(command);
+        expect(execute).toHaveBeenLastCalledWith(command, "local-window");
       }
       expect(windowCanOpenThread).toHaveBeenCalledWith(windowId, aggregateType, subjectId);
     },
@@ -172,6 +179,51 @@ describe("context routes", () => {
     },
   );
 
+  it("answers a refused compaction with its reason and no private detail", async () => {
+    const route = handler({
+      execute: () => ({ kind: "compaction-refused", reason: "turn-running" }),
+    });
+
+    const response = await route(
+      request("/api/context/commands", { kind: "compact-session", subject, compactionId }),
+    );
+
+    expect(response?.status).toBe(409);
+    await expect(response?.json()).resolves.toEqual({
+      category: "compaction-refused",
+      message: "Octant cannot compact this session now.",
+      reason: "turn-running",
+    });
+  });
+
+  it("tells the service a paired device is asking, so it refuses that device a compaction", async () => {
+    const execute = vi.fn((_command: unknown, principal: ContextRoutePrincipal) => {
+      if (principal === "remote-device") {
+        return { kind: "compaction-refused", reason: "remote-client" } as const;
+      }
+      return { kind: "compaction-started" } as never;
+    });
+    const route = handler({ execute });
+    const remote = request("/api/context/commands", {
+      kind: "compact-session",
+      subject,
+      compactionId,
+    });
+    bindPrincipalRouteContext(remote, {
+      principal: { kind: "remote-device" } as never,
+      scopeId: windowId,
+    });
+
+    const response = await route(remote);
+
+    expect(response?.status).toBe(409);
+    await expect(response?.json()).resolves.toMatchObject({ reason: "remote-client" });
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "compact-session" }),
+      "remote-device",
+    );
+  });
+
   it("answers a subject nothing has planned yet without claiming the service failed", async () => {
     const notPlanned = handler({
       inspect: () => {
@@ -191,8 +243,15 @@ describe("context routes", () => {
 
 function handler(
   service: Partial<{
-    inspect: (contextSubject: ContextSubjectRef, afterSequence?: number) => never;
-    execute: (command: unknown) => never;
+    inspect: (
+      contextSubject: ContextSubjectRef,
+      afterSequence: number | undefined,
+      principal: ContextRoutePrincipal,
+    ) => never;
+    execute: (
+      command: unknown,
+      principal: ContextRoutePrincipal,
+    ) => ReturnType<ContextRouteService["execute"]>;
   }> = {},
   windowCanOpenThread: (
     windowId: WindowId,

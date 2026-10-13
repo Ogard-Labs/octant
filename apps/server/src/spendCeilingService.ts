@@ -52,6 +52,12 @@ export interface SpendCeilingTurnRequest {
   readonly projectId?: string;
   readonly turnUpperBoundTokens?: number;
   readonly childSubjectIds?: ReadonlyArray<string>;
+  /**
+   * False for spend that is not a turn of its own, such as a requested context
+   * compaction: its tokens count against the ceilings, but it uses up no turn
+   * and no run time.
+   */
+  readonly countsAsTurn?: boolean;
 }
 
 interface InFlightTurn {
@@ -121,6 +127,12 @@ export class SpendCeilingService {
     readonly threadId?: string;
     readonly threadType?: SpendCeilingThreadType;
     readonly projectId?: string;
+    /**
+     * The spend this caller would reserve. Absent, the preview only asks
+     * whether a single token would pass, which a compaction must not use: a
+     * ceiling that can cover one token and not the summary would look open.
+     */
+    readonly turnUpperBoundTokens?: number;
   }): SpendCeilingSnapshot | { readonly kind: "unauthorized" } {
     if (!authorizeSpendCeilingRead(input.principalKind)) return { kind: "unauthorized" };
     const threadScope =
@@ -156,7 +168,7 @@ export class SpendCeilingService {
     const preview = evaluateSpendCeilingAdmission({
       ...(threadFacts === undefined ? {} : { thread: threadFacts }),
       ...(projectFacts === undefined ? {} : { project: projectFacts }),
-      turnUpperBoundTokens: 1,
+      turnUpperBoundTokens: input.turnUpperBoundTokens ?? 1,
     });
     return {
       ...(thread === undefined ? {} : { thread }),
@@ -220,7 +232,7 @@ export class SpendCeilingService {
 
   admit(request: SpendCeilingTurnRequest): SpendCeilingAdmission {
     const admission = this.#admit(request);
-    if (admission.status === "admitted") {
+    if (admission.status === "admitted" && request.countsAsTurn !== false) {
       this.#turns.set(String(request.reservationId), {
         threadType: request.threadType,
         threadId: request.threadId,

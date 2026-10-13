@@ -361,6 +361,9 @@ describe("context contracts", () => {
       "context.summary-created@1",
       "context.usage-reconciled@1",
       "context.capacity-reservation-updated@1",
+      "context.compaction-requested@1",
+      "context.compaction-completed@1",
+      "context.compaction-failed@1",
     ]);
   });
 });

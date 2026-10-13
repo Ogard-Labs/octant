@@ -319,6 +319,7 @@ import { createComputerUseValidationEvidenceRecorder } from "./computerUse/compu
 import { createComputerUseRouteHandler } from "./computerUseRoutes";
 import { CodeEnvironmentService } from "./codeEnvironmentService";
 import { ContextHarnessService } from "./context/contextHarnessService";
+import { SessionCompactionService } from "./context/sessionCompaction";
 import {
   makeProviderCapacityScheduler,
   makeUnobservedProviderCapacityFacts,
@@ -844,6 +845,7 @@ import {
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
   isProviderAllowedByProjectPolicy,
+  providerKeepsConversation,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
   type PreviewPosture,
@@ -8191,8 +8193,130 @@ export function startOctantServer(
         return false;
       }
     };
+    // No route serves yet, so any compaction still running belongs to a host
+    // process that has gone. A journal it cannot read must not keep the host
+    // from starting: the compaction stays running, which refuses another one
+    // on that thread, and every other surface still serves. The error is not
+    // logged because a parse failure can quote the payload, which holds the
+    // thread's identifiers.
+    try {
+      contextHarness.closeInterruptedCompactions();
+    } catch {
+      console.error("[context-compaction] Interrupted compactions could not be closed.");
+    }
+    const modeEnabled = (mode: "chat" | "work") =>
+      enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+        mode,
+      );
+    const sessionCompaction = new SessionCompactionService({
+      harness: contextHarness,
+      threads: {
+        "chat-thread": {
+          read: (threadId) => {
+            const thread = persistence.readChatThread(decodeChatThreadId(threadId));
+            return thread === undefined ||
+              thread.lifecycle === "deleting" ||
+              thread.lifecycle === "deleted"
+              ? undefined
+              : {
+                  mode: "chat",
+                  ...(thread.projectId === undefined
+                    ? {}
+                    : { projectId: String(thread.projectId) }),
+                  providerInstanceId: thread.providerInstanceId,
+                  modelId: thread.modelId,
+                };
+          },
+          turnRunning: (threadId) => chatService.isTurnActive(decodeChatThreadId(threadId)),
+          conversation: (threadId) =>
+            chatService.sessionCompactionConversation(decodeChatThreadId(threadId)),
+          scratchRoot: (threadId) => chatService.scratchRoot(decodeChatThreadId(threadId)),
+        },
+        "work-thread": {
+          read: (threadId) => {
+            const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+            if (
+              thread === undefined ||
+              thread.lifecycle === "deleting" ||
+              thread.lifecycle === "deleted"
+            ) {
+              return undefined;
+            }
+            // The policy a Work turn on this thread is admitted under. A thread
+            // whose Project cannot be read has no policy to check, so it has no
+            // session to compact: an unreadable Project never reads as "no
+            // policy, allowed".
+            const project = persistence.readProject(thread.projectId);
+            if (project === undefined || project.type !== "work") return undefined;
+            const providerPolicy = project.providerPolicy;
+            return {
+              mode: "work",
+              projectId: String(thread.projectId),
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+              ...(providerPolicy === undefined ? {} : { providerPolicy }),
+            };
+          },
+          turnRunning: (threadId) => workTurnService.isTurnActive(decodeWorkThreadId(threadId)),
+          conversation: (threadId) =>
+            workTurnService.sessionCompactionConversation(decodeWorkThreadId(threadId)),
+          // A Work turn's provider session starts in the bound root; the
+          // tool-free summary request starts there too and gains nothing.
+          scratchRoot: async (threadId) => {
+            const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+            const project =
+              thread === undefined ? undefined : persistence.readProject(thread.projectId);
+            if (project === undefined || !("binding" in project)) {
+              throw new Error("Work project is unavailable.");
+            }
+            return project.binding.canonicalRoot;
+          },
+        },
+      },
+      modeEnabled,
+      conversationOwner: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId);
+        if (instance === undefined) return undefined;
+        return providerKeepsConversation(instance.driverKind) ? "runtime" : "host";
+      },
+      providerFacts: (providerInstanceId, modelId) => {
+        const provider = persistence.readProviderInstance(providerInstanceId);
+        if (provider === undefined) return undefined;
+        const model = persistence
+          .readProviderCatalog?.(providerInstanceId)
+          ?.models.find((candidate) => String(candidate.id) === String(modelId));
+        return { provider, ...(model === undefined ? {} : { model }) };
+      },
+      availableDriver: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId);
+        if (instance === undefined || !instance.enabled) return undefined;
+        const readiness = providerRuntimeRegistry.observedState(providerInstanceId)?.readiness;
+        if (
+          readiness === "unavailable" ||
+          readiness === "unauthenticated" ||
+          readiness === "incompatible"
+        ) {
+          return undefined;
+        }
+        try {
+          return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+        } catch {
+          return undefined;
+        }
+      },
+      capacity: capacityScheduler,
+      spendCeiling: spendCeilingService,
+      uuid: randomUUID,
+    });
     const contextRoutes = createContextRouteHandler({
-      service: contextHarness,
+      service: {
+        inspect: (subject, afterSequence, principal) =>
+          sessionCompaction.inspect(subject, afterSequence, principal),
+        execute: (command, principal) =>
+          command.kind === "compact-session"
+            ? sessionCompaction.start(command, principal)
+            : contextHarness.execute(command),
+      },
       windowCanOpenThread,
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
