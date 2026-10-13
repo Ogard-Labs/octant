@@ -155,9 +155,10 @@ describe("makeContextSummaryGenerator", () => {
   it("gives up on a maintenance request wedged in its send", async () => {
     const provider = fakeProvider({ wedge: "send" });
 
-    await expect(
-      generateSummary(provider)(request, new AbortController().signal),
-    ).rejects.toBeInstanceOf(ContextSummaryGenerationFailed);
+    const failure = generateSummary(provider)(request, new AbortController().signal);
+    await expect(failure).rejects.toBeInstanceOf(ContextSummaryGenerationFailed);
+    // A requested compaction tells a person a slow provider apart from a failing one.
+    await expect(failure).rejects.toMatchObject({ reason: "timed-out" });
     expect(provider.sends).toEqual([sessionId]);
     expect(provider.stops).toEqual([sessionId]);
   });
