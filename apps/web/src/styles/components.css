@@ -1085,6 +1085,167 @@ html[data-octant-reduced-motion="true"] .turn-header svg {
   color: var(--octant-warning-text);
 }
 
+/* Tool rows: what a turn did, one 28px row per call, between the turn header
+   and the reply. The name reads at the body size; the state sits at the
+   right edge as quiet detail text with a 12px mark (a spinner while it runs,
+   a check when it is done, a cross when it failed). Rows are parted by
+   hairlines and share one indent, so a tool row is the same object in every
+   mode that grows one. Before this a dotted rail ran down the left, the name
+   was 11px, and the state word was larger than the name. */
+.turn-activity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0 0 8px;
+}
+
+.turn-activity__disclosure {
+  min-width: 0;
+}
+
+.turn-activity__disclosure + .turn-activity__disclosure {
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.turn-activity__disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  overflow: hidden;
+  padding: 0 2px;
+  cursor: default;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  list-style: none;
+}
+
+.turn-activity__disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.turn-activity__chevron {
+  flex: none;
+  color: var(--oct-meta);
+  transition: transform var(--oct-motion-fast) ease;
+}
+
+.turn-activity__disclosure[open] > summary .turn-activity__chevron {
+  transform: rotate(90deg);
+}
+
+.turn-activity__name {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The settled fold ("2 tool calls · 1 file edited") is a summary, so it keeps
+   the quiet colour; the rows it opens onto indent by one chevron. */
+.turn-activity__disclosure--toolchain > summary .turn-activity__name {
+  color: var(--oct-muted);
+}
+
+.turn-activity__toolchain {
+  display: flex;
+  flex-direction: column;
+  padding-left: 20px;
+}
+
+.turn-activity__toolchain > .turn-activity__disclosure:first-child {
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.turn-activity__disclosure--thinking > summary .turn-activity__name {
+  color: var(--oct-muted);
+}
+
+.turn-activity__outcome {
+  flex: none;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+.turn-activity__status-icon {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.turn-activity__disclosure[data-state="failed"] .turn-activity__outcome,
+.turn-activity__disclosure[data-state="failed"] .turn-activity__status-icon {
+  color: var(--oct-danger-fg);
+}
+
+.turn-activity__disclosure[data-state="started"] .turn-activity__status-icon,
+.turn-activity__disclosure[data-state="running"] .turn-activity__status-icon {
+  animation: turn-header-spin var(--oct-motion-spin) linear infinite;
+}
+
+/* The journaled summary, expanded: detail-size mono on a surface set into
+   the row, indented to where the name starts. */
+.turn-activity__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 8px 20px;
+  padding: 8px 10px;
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fill-4);
+}
+
+.turn-activity__pre {
+  margin: 0;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-detail);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.turn-activity__thinking-body {
+  margin: 0 0 8px 20px;
+  padding: 0 0 0 var(--oct-space-4);
+  border-left: 2px solid var(--oct-border);
+  color: var(--oct-muted);
+  font-family: var(--oct-font-transcript);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-body);
+  white-space: pre-wrap;
+}
+
+.turn-activity__truncated {
+  margin: 0 0 2px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.turn-activity__empty-detail {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-detail);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-activity__chevron {
+    transition: none;
+  }
+
+  .turn-activity__status-icon {
+    animation: none;
+  }
+}
+
+html[data-octant-reduced-motion="true"] .turn-activity__status-icon {
+  animation: none;
+}
+
 /* The mark for the owned checkbox recipe. `appearance: none` removes the
    control the operating system drew for itself — which ignored the theme — so
    the tick has to be drawn here. Two borders on a rotated box keep it a shape
