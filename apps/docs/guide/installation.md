@@ -70,9 +70,9 @@ Produces:
 - `out/Octant-<version>-linux-x64.AppImage` — portable dogfood artifact
 - `out/Octant-linux-x64/` — electron-packager directory kept beside it for inspection
 
-The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. The image file is not code-signed the way the Apple Silicon app is. When you launch that image, Octant checks the same signed `<ring>/linux-x64.json` feed, downloads the new image, and verifies the signature and the hash before it writes anything. It then writes the new image beside the one you started, flushes it to disk, renames it into place, and relaunches. If relaunch fails, the previous image is restored.
+The AppImage is a peer Machine: Electron owns the local server lifecycle the same way the macOS app does. The image file is not code-signed the way the Apple Silicon app is. When you launch that image, Octant checks the same signed `<ring>/linux-x64.json` feed, downloads the new image, and verifies the signature and the hash before it writes anything. It then writes the new image beside the one you started, flushes it to disk, renames it into place, and relaunches. The new build starts after the old one has finished stopping, so the two never run side by side. If relaunch fails, the previous image is restored.
 
-It will not update a package or an unpacked archive, and it will not update an image it cannot write. The reason appears in **Settings → General → Updates**. It also will not relaunch while an agent is still working or a thread is waiting on you — the same rule as on macOS. A launch that is not the portable image does not contact the update service.
+It will not update a package or an unpacked archive, and it will not update an image it cannot write. The reason appears in **Settings → General → Updates**. It also will not relaunch while an agent is still working or a thread is waiting on you — the same rule as on macOS. A provider that is not installed or not signed in, or one you switched off, does not hold the update back, because stopping Octant interrupts nothing for it. A launch that is not the portable image does not contact the update service.
 
 Launch:
 

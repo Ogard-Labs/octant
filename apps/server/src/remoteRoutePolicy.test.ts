@@ -643,6 +643,38 @@ describe("remote route policy", () => {
     expect(accepted.status).toBe(200);
   });
 
+  it("refuses a paired device listing or answering extension tool approvals", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    for (const method of ["GET", "POST"] as const) {
+      const decision = routePolicy.inspect(
+        request("/api/extensions/tool-approvals", {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST" ? { "content-type": "application/json" } : {}),
+          },
+          ...(method === "POST" ? { body: "{}" } : {}),
+        }),
+      );
+      expect(decision).toMatchObject({ kind: "reject", facts: { surface: "local-only" } });
+      if (decision.kind === "reject") expect(decision.response.status).toBe(404);
+    }
+    expect(() =>
+      createRemoteRoutePolicy({
+        origin,
+        authenticatedRoutes: [
+          {
+            id: "extension-tool-approvals",
+            match: { kind: "exact", path: "/api/extensions/tool-approvals" },
+            surface: "authenticated-product",
+            methods: ["GET", "POST"],
+          },
+        ],
+      }),
+    ).toThrow("local-only");
+  });
+
   it("rejects unsafe route registrations instead of allowing a local route by configuration", () => {
     expect(() =>
       createRemoteRoutePolicy({

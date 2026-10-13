@@ -3,12 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import {
   ACCESSIBLE_SUMMARY_LIMIT,
-  CodeTranscriptRow,
   TOOL_SUMMARY_PREVIEW_LIMIT,
-} from "./CodeTranscriptRow";
-import type { CodeTurnActivity } from "./transcriptActivity";
+  TurnActivityRows,
+} from "./TurnActivityRows";
+import type { TurnActivity } from "./turnActivity";
 
-const mixed: CodeTurnActivity = {
+const mixed: TurnActivity = {
   reasoning: "Check the failing suite first.",
   rows: [
     {
@@ -38,10 +38,10 @@ function disclosure(name: string): HTMLDetailsElement {
   return details;
 }
 
-describe("CodeTranscriptRow", () => {
+describe("TurnActivityRows", () => {
   it("reveals reasoning-only history with one disclosure instead of nested Thinking rows", async () => {
     render(
-      <CodeTranscriptRow
+      <TurnActivityRows
         activity={{ reasoning: "Check the two sources.", rows: [] }}
         running={false}
         settled
@@ -56,7 +56,7 @@ describe("CodeTranscriptRow", () => {
 
   it("stops presenting unfinished tools as running after the turn settles", () => {
     render(
-      <CodeTranscriptRow
+      <TurnActivityRows
         activity={{
           rows: [{ kind: "tool", id: "open", toolName: "Browser", state: "running" }],
           reasoning: "",
@@ -69,7 +69,7 @@ describe("CodeTranscriptRow", () => {
     expect(screen.getByRole("button", { name: "Browser, unfinished" })).toBeInTheDocument();
   });
   it("renders each tool as its own collapsed row naming the tool and outcome", () => {
-    render(<CodeTranscriptRow activity={mixed} running={false} />);
+    render(<TurnActivityRows activity={mixed} running={false} />);
 
     const bash = disclosure("Bash, done");
     const read = disclosure("Read, failed");
@@ -86,7 +86,7 @@ describe("CodeTranscriptRow", () => {
     expect(bash).toHaveTextContent("done");
     expect(read).toHaveTextContent("failed");
     expect(read).toHaveAttribute("data-state", "failed");
-    expect(thinking).toHaveClass("code-transcript-row__disclosure--thinking");
+    expect(thinking).toHaveClass("turn-activity__disclosure--thinking");
 
     // Collapsed bodies stay in the document so in-page find can match them.
     expect(screen.getByText("exit 0")).not.toBeVisible();
@@ -95,17 +95,17 @@ describe("CodeTranscriptRow", () => {
   });
 
   it("keeps a failed call obviously not-ok while it is still collapsed", () => {
-    render(<CodeTranscriptRow activity={mixed} running={false} />);
+    render(<TurnActivityRows activity={mixed} running={false} />);
 
     const read = disclosure("Read, failed");
     expect(read.open).toBe(false);
     expect(within(read).getByText("failed")).toBeVisible();
-    expect(read.querySelector(".code-transcript-row__status-icon")).not.toBeNull();
+    expect(read.querySelector(".turn-activity__status-icon")).not.toBeNull();
   });
 
   it("names a collapsed task by its summary so concurrent tasks stay distinct", () => {
     render(
-      <CodeTranscriptRow
+      <TurnActivityRows
         activity={{
           reasoning: "",
           rows: [
@@ -121,8 +121,8 @@ describe("CodeTranscriptRow", () => {
     const write = disclosure("Write mapper, queued");
     expect(inspect.open).toBe(false);
     expect(write.open).toBe(false);
-    expect(inspect.querySelector(".code-transcript-row__name")).toHaveTextContent("Inspect types");
-    expect(write.querySelector(".code-transcript-row__name")).toHaveTextContent("Write mapper");
+    expect(inspect.querySelector(".turn-activity__name")).toHaveTextContent("Inspect types");
+    expect(write.querySelector(".turn-activity__name")).toHaveTextContent("Write mapper");
     expect(screen.queryByRole("button", { name: "Task, running" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Task, queued" })).not.toBeInTheDocument();
   });
@@ -131,7 +131,7 @@ describe("CodeTranscriptRow", () => {
     const summary = `${"Inspect the generated mapper types ".repeat(20)}TAIL`;
     expect(summary.length).toBeGreaterThan(ACCESSIBLE_SUMMARY_LIMIT);
     render(
-      <CodeTranscriptRow
+      <TurnActivityRows
         activity={{
           reasoning: "",
           rows: [{ kind: "task", id: "task-1", state: "running", summary }],
@@ -151,7 +151,7 @@ describe("CodeTranscriptRow", () => {
 
   it("expands one row to its journaled summary without claiming it is arguments or output", async () => {
     const user = userEvent.setup();
-    render(<CodeTranscriptRow activity={mixed} running={false} />);
+    render(<TurnActivityRows activity={mixed} running={false} />);
 
     await user.click(screen.getByRole("button", { name: "Bash, done" }));
 
@@ -169,7 +169,7 @@ describe("CodeTranscriptRow", () => {
   it("does not present a provider progress message as tool arguments", async () => {
     const user = userEvent.setup();
     render(
-      <CodeTranscriptRow
+      <TurnActivityRows
         activity={{
           reasoning: "",
           rows: [
@@ -194,10 +194,10 @@ describe("CodeTranscriptRow", () => {
 
   it("keeps thinking visually apart from the reply and closed until opened", async () => {
     const user = userEvent.setup();
-    render(<CodeTranscriptRow activity={mixed} running={false} />);
+    render(<TurnActivityRows activity={mixed} running={false} />);
 
     const thinking = disclosure("Thinking");
-    expect(thinking).toHaveClass("code-transcript-row__disclosure--thinking");
+    expect(thinking).toHaveClass("turn-activity__disclosure--thinking");
     expect(screen.getByText("Check the failing suite first.")).not.toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Thinking" }));
@@ -207,7 +207,7 @@ describe("CodeTranscriptRow", () => {
 
   it("remembers each row's expanded state across a streaming update", async () => {
     const user = userEvent.setup();
-    const running: CodeTurnActivity = {
+    const running: TurnActivity = {
       reasoning: "planning.",
       rows: [
         {
@@ -219,13 +219,13 @@ describe("CodeTranscriptRow", () => {
         },
       ],
     };
-    const { rerender } = render(<CodeTranscriptRow activity={running} running />);
+    const { rerender } = render(<TurnActivityRows activity={running} running />);
 
     await user.click(screen.getByRole("button", { name: "Bash, running" }));
     expect(disclosure("Bash, running").open).toBe(true);
 
     rerender(
-      <CodeTranscriptRow
+      <TurnActivityRows
         activity={{
           reasoning: "planning.",
           rows: [
@@ -249,7 +249,7 @@ describe("CodeTranscriptRow", () => {
   });
 
   it("opens a disclosure from the keyboard alone", () => {
-    render(<CodeTranscriptRow activity={mixed} running={false} />);
+    render(<TurnActivityRows activity={mixed} running={false} />);
 
     const bash = screen.getByRole("button", { name: "Bash, done" });
     bash.focus();
@@ -270,7 +270,7 @@ describe("CodeTranscriptRow", () => {
     const summary = `${"line\n".repeat(400)}TAIL`;
     expect(summary.length).toBeGreaterThan(TOOL_SUMMARY_PREVIEW_LIMIT);
     render(
-      <CodeTranscriptRow
+      <TurnActivityRows
         activity={{
           reasoning: "",
           rows: [
@@ -297,7 +297,7 @@ describe("CodeTranscriptRow", () => {
   });
 
   it("folds a settled turn's toolchain behind one summary line by default", () => {
-    const settled: CodeTurnActivity = {
+    const settled: TurnActivity = {
       reasoning: "Check the failing suite first.",
       rows: [
         {
@@ -316,7 +316,7 @@ describe("CodeTranscriptRow", () => {
         },
       ],
     };
-    render(<CodeTranscriptRow activity={settled} running={false} settled />);
+    render(<TurnActivityRows activity={settled} running={false} settled />);
 
     const fold = disclosure("2 tool calls · 1 file edited");
     expect(fold.open).toBe(false);
@@ -330,23 +330,23 @@ describe("CodeTranscriptRow", () => {
 
   it("keeps expanded reasoning visible when a tool turn finishes", async () => {
     const user = userEvent.setup();
-    const activity: CodeTurnActivity = {
+    const activity: TurnActivity = {
       reasoning: "Check the failing suite first.",
       rows: [
         { kind: "tool", id: "call-1", toolName: "Bash", state: "completed", summary: "exit 0" },
       ],
     };
-    const { rerender } = render(<CodeTranscriptRow activity={activity} running />);
+    const { rerender } = render(<TurnActivityRows activity={activity} running />);
     await user.click(screen.getByRole("button", { name: "Thinking" }));
     expect(screen.getByText("Check the failing suite first.")).toBeVisible();
-    rerender(<CodeTranscriptRow activity={activity} running={false} settled />);
+    rerender(<TurnActivityRows activity={activity} running={false} settled />);
     expect(screen.getByText("Check the failing suite first.")).toBeVisible();
     expect(disclosure("1 tool call").open).toBe(false);
   });
 
   it("keeps a waiting approval row visible outside the settled fold", () => {
     render(
-      <CodeTranscriptRow
+      <TurnActivityRows
         activity={{
           reasoning: "",
           rows: [
@@ -377,7 +377,7 @@ describe("CodeTranscriptRow", () => {
   });
 
   it("leaves a live turn unfolded even when marked settled", () => {
-    render(<CodeTranscriptRow activity={mixed} running settled />);
+    render(<TurnActivityRows activity={mixed} running settled />);
 
     expect(screen.queryByRole("button", { name: /tool call/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Bash, done" })).toBeVisible();
@@ -385,18 +385,18 @@ describe("CodeTranscriptRow", () => {
 
   it("expands one settled toolchain without re-folding another", async () => {
     const user = userEvent.setup();
-    const first: CodeTurnActivity = {
+    const first: TurnActivity = {
       reasoning: "",
       rows: [{ kind: "tool", id: "a", toolName: "Read", state: "completed", summary: "a" }],
     };
-    const second: CodeTurnActivity = {
+    const second: TurnActivity = {
       reasoning: "",
       rows: [{ kind: "tool", id: "b", toolName: "Bash", state: "completed", summary: "b" }],
     };
     render(
       <>
-        <CodeTranscriptRow activity={first} running={false} settled />
-        <CodeTranscriptRow activity={second} running={false} settled />
+        <TurnActivityRows activity={first} running={false} settled />
+        <TurnActivityRows activity={second} running={false} settled />
       </>,
     );
 

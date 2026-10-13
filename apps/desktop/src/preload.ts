@@ -20,6 +20,7 @@ export const IPC_CHANNELS = {
   browserSurfaceOpenExternal: "octant:browser-surface:open-external",
   browserSurfaceState: "octant:browser-surface:state",
   browserSurfaceTab: "octant:browser-surface:tab",
+  canvasPrototypeSurface: "octant:canvas:prototype-surface:prepare",
   appUpdateState: "octant:app-update:state",
   appUpdateCheck: "octant:app-update:check",
   appUpdateDownload: "octant:app-update:download",
@@ -399,6 +400,12 @@ export interface OctantHostBridge {
   readonly setManagedToolAutomaticUpdates: (enabled: boolean) => Promise<unknown>;
   readonly notifyAttention: (request: AttentionNotificationBridgeRequest) => Promise<void>;
   readonly setAttentionBadge: (count: number) => Promise<void>;
+  /**
+   * Asks the main process to close the network of the surface a running Canvas
+   * prototype is drawn in. A prototype is only drawn once this is ready, and is
+   * never drawn anywhere else.
+   */
+  readonly prepareCanvasPrototypeSurface: () => Promise<CanvasPrototypeSurfacePreparation>;
   readonly attachBrowserSurface: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
@@ -619,6 +626,10 @@ export function createHostBridge(
       }
       return invoke(IPC_CHANNELS.attentionBadge, count);
     },
+    prepareCanvasPrototypeSurface: async () =>
+      decodeCanvasPrototypeSurfacePreparation(
+        await ipc.invoke(IPC_CHANNELS.canvasPrototypeSurface),
+      ),
     attachBrowserSurface: async (request: BrowserSurfaceRequest) => {
       validateBrowserSurfaceRequest(request);
       return decodeBrowserSurfaceState(
@@ -1757,6 +1768,23 @@ function validateExternalBrowserUrl(value: string): void {
   } catch {
     throw new TypeError("Invalid external Browser URL.");
   }
+}
+
+export type CanvasPrototypeSurfacePreparation =
+  | { readonly status: "ready" }
+  | { readonly status: "unavailable"; readonly reason: string };
+
+function decodeCanvasPrototypeSurfacePreparation(
+  value: unknown,
+): CanvasPrototypeSurfacePreparation {
+  if (isRecord(value) && value.status === "ready") return { status: "ready" };
+  return {
+    status: "unavailable",
+    reason:
+      isRecord(value) && typeof value.reason === "string" && value.reason.length <= 280
+        ? value.reason
+        : "Octant could not start the prototype surface, so it does not run.",
+  };
 }
 
 function decodeBrowserSurfaceState(value: unknown): BrowserSurfaceState {

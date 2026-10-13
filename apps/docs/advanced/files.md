@@ -365,10 +365,13 @@ agent asks for your theme.
   the thread it starts when you press **Run**. While it runs, Octant shows
   **Running** and **Stop** above it, outside the prototype. A prototype
   cannot reach Octant or your files, and it cannot load a page, an image, or
-  data from the internet. One way out is not blocked yet: its script can open
-  a direct connection to another computer and send what the prototype itself
-  holds, which is its own screens and any image it shows. Octant says so under
-  every prototype. Run one only if you would be comfortable with that. If it stops responding, or tries to open another page, Octant
+  data from the internet. In the Octant app a prototype also runs with no
+  network connection at all: it cannot open a connection to another computer,
+  and if Octant cannot set that up, the prototype does not run and says why.
+  One thing is not blocked: its script can still make Octant look up host
+  names, which can carry a small amount of what the prototype itself holds,
+  which is its own screens and any image it shows. Octant says so under every
+  prototype. If it stops responding, or tries to open another page, Octant
   stops it and offers **Run again**. Script errors appear as text under it.
 - If a prototype holds on to the keyboard, press **Command-Escape**
   (**Control-Escape** outside macOS) in the Octant app to move focus to its
@@ -376,7 +379,9 @@ agent asks for your theme.
   stopped.
 - In a web browser connected to your Mac, a prototype runs in the browser
   and Octant cannot stop it from opening another page before it removes it,
-  so the **Run** control says it is not network-contained there. To leave a
+  or from connecting to another computer, so the **Run** control says it is
+  not network-contained there and Octant says its script can still connect out.
+  Run one there only if you would be comfortable with that. To leave a
   prototype from the keyboard in a browser, use the browser's own focus keys
   (such as **F6**) or the **Stop** button. If a prototype stopped responding
   in a browser, open Octant in a new tab to run one again.

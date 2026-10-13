@@ -30,4 +30,10 @@ export default defineConfig([
     entry: ["src/codeOperationApprovalViewPreload.ts"],
     format: [DESKTOP_PRELOAD_FORMAT],
   },
+  {
+    ...shared,
+    clean: false,
+    entry: ["src/canvasPrototypePreload.ts"],
+    format: [DESKTOP_PRELOAD_FORMAT],
+  },
 ]);

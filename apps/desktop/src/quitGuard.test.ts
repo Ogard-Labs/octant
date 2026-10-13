@@ -40,6 +40,33 @@ describe("desktop quit guard", () => {
     expect(confirm).not.toHaveBeenCalled();
   });
 
+  it("quits without a prompt when the host only reports a provider that needs sign-in", async () => {
+    const confirm = vi.fn(async () => false);
+    await expect(
+      evaluateQuitRequest({
+        refreshActivity: async () => undefined,
+        snapshot: () => ({ ...snapshot(0), state: "attention-required", attentionRequired: true }),
+        confirm,
+      }),
+    ).resolves.toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("asks before quitting when the desktop could not confirm what the host is running", async () => {
+    const confirm = vi.fn(async () => true);
+    await evaluateQuitRequest({
+      refreshActivity: async () => undefined,
+      snapshot: () => ({
+        ...snapshot(0),
+        state: "attention-required",
+        attentionRequired: true,
+        activityUnconfirmed: true,
+      }),
+      confirm,
+    });
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
   it("names the active work and keeps cancellation as the default", () => {
     expect(buildQuitConfirmation(snapshot(2))).toEqual({
       title: "Quit Octant?",

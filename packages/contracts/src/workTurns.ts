@@ -305,12 +305,20 @@ export const WorkTurnCancelResult = Schema.Struct({
 export type WorkTurnCancelResult = typeof WorkTurnCancelResult.Type;
 
 /**
- * Thread-scoped transcript bootstrap for reconnect. Returns every retained
- * turn for the exact Work thread the window is authorized to read.
+ * The most turns one transcript answer carries. A thread may hold more; the
+ * answer then holds its newest turns, because a client that cannot decode the
+ * answer cannot open the thread at all.
+ */
+export const MAX_WORK_TRANSCRIPT_TURNS = 64;
+
+/**
+ * Thread-scoped transcript bootstrap for reconnect. Returns the newest
+ * `MAX_WORK_TRANSCRIPT_TURNS` turns, oldest first, of the exact Work thread
+ * the window is authorized to read.
  */
 export const WorkThreadTranscript = Schema.Struct({
   threadId: WorkThreadId,
-  turns: Schema.Array(WorkTurnState).pipe(Schema.maxItems(64)),
+  turns: Schema.Array(WorkTurnState).pipe(Schema.maxItems(MAX_WORK_TRANSCRIPT_TURNS)),
   liveCursor: Schema.optionalWith(Schema.Int.pipe(Schema.nonNegative()), { default: () => 0 }),
 }).annotations(strict);
 export type WorkThreadTranscript = typeof WorkThreadTranscript.Type;

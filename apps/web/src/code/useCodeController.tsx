@@ -44,13 +44,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
-import {
-  EMPTY_TURN_ACTIVITY,
-  appendReasoning,
-  applyActivityEvent,
-  forgetWrittenPath,
-  type CodeTurnActivity,
-} from "./transcriptActivity";
+import { appendReasoning, applyActivityEvent, forgetWrittenPath } from "./transcriptActivity";
+import { EMPTY_TURN_ACTIVITY, type TurnActivity } from "../transcript/turnActivity";
 import { samePollingData } from "../polling/samePollingData";
 import {
   documentIsVisible,
@@ -390,7 +385,7 @@ export function useCodeController(options: CodeControllerOptions) {
     const request = providerRequestFromEvent(event);
     if (request !== undefined) setProviderRequests((current) => [...current, request]);
   }, []);
-  const [turnActivity, setTurnActivity] = useState<ReadonlyMap<string, CodeTurnActivity>>(
+  const [turnActivity, setTurnActivity] = useState<ReadonlyMap<string, TurnActivity>>(
     () => new Map(),
   );
   // What this thread has consumed and how much of the provider's usage windows

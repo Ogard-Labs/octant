@@ -413,6 +413,40 @@ describe("serverSpawnSpec", () => {
     });
   });
 
+  it("passes the packaged app version to the host and drops a stale inherited value", () => {
+    const spec = serverSpawnSpec({
+      browserBrokerToken: "browser-token",
+      browserBrokerUrl: "http://127.0.0.1:42000/",
+      desktopBridgeSecret: "desktop-secret",
+      root: "/repo",
+      port: 13_773,
+      instanceId: "managed-instance",
+      packaged: true,
+      appVersion: "0.1.1",
+      execPath: "/Applications/Octant.app/Contents/MacOS/Octant",
+      env: { PATH: "/usr/bin:/bin", OCTANT_ARTIFACT_VERSION: "9.9.9" },
+    });
+
+    expect((spec.env as NodeJS.ProcessEnv).OCTANT_ARTIFACT_VERSION).toBe("0.1.1");
+  });
+
+  it("does not give a development host an artifact version", () => {
+    const spec = serverSpawnSpec({
+      browserBrokerToken: "browser-token",
+      browserBrokerUrl: "http://127.0.0.1:42000/",
+      desktopBridgeSecret: "desktop-secret",
+      root: "/repo",
+      port: 13_773,
+      instanceId: "managed-instance",
+      packaged: false,
+      appVersion: "0.1.1",
+      execPath: "/Applications/Octant.app/Contents/MacOS/Octant",
+      env: { PATH: "/usr/bin:/bin", OCTANT_ARTIFACT_VERSION: "9.9.9" },
+    });
+
+    expect((spec.env as NodeJS.ProcessEnv).OCTANT_ARTIFACT_VERSION).toBeUndefined();
+  });
+
   it("marks the packaged server environment explicitly", () => {
     const spec = serverSpawnSpec({
       browserBrokerToken: "browser-token",

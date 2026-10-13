@@ -6799,7 +6799,11 @@ export function startOctantServer(
           // down; the directory only calls them per request, never at
           // construction.
           bootstrap: (windowId) => workThreadService.bootstrap(windowId),
-          transcript: (windowId, threadId) => workTurnService.transcript(windowId, threadId),
+          // Every turn, not the transcript route's newest window: the mention
+          // bounds its own entries and reports `truncated` from what it saw.
+          transcript: async (windowId, threadId) => ({
+            turns: await workTurnService.turns(windowId, threadId),
+          }),
           projectLabel: projectMentionLabel,
         }),
         createCodeThreadMentionDirectory({
@@ -7373,11 +7377,11 @@ export function startOctantServer(
         read: async (windowId, threadId) => {
           try {
             const id = decodeWorkThreadId(threadId);
-            const transcript = await workTurnService.transcript(windowId, id);
+            const turns = await workTurnService.turns(windowId, id);
             const bootstrap = await workThreadService.bootstrap(windowId);
             const thread = bootstrap.threads.find((candidate) => String(candidate.id) === threadId);
             if (thread === undefined) return undefined;
-            return { thread, turns: transcript.turns };
+            return { thread, turns };
           } catch {
             return undefined;
           }
