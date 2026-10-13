@@ -4618,8 +4618,14 @@ there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
   checks the code signature as an independent second gate. A Linux AppImage
   is not code-signed, so the feed signature and artifact hash are its whole
   trust root: Octant replaces only the image it was launched from (`APPIMAGE`)
-  atomically, and refuses a package or archive launch before any request. A
-  platform with no signed channel (`supportsSignedDesktopUpdateChannel`:
+  atomically, and refuses a package or archive launch before any request. The
+  relaunched image is told which process it replaces
+  (`OCTANT_REPLACED_PROCESS_ID`, removed from its environment as it starts) and
+  waits, for at most a minute, until that process has exited (on Linux, exited but
+  not yet reaped counts) before it asks for
+  the single-instance lock, so it never starts a host while the old one is
+  still stopping; the old instance keeps its lock until it exits. A platform
+  with no signed channel (`supportsSignedDesktopUpdateChannel`:
   macOS and Linux today) refuses with "untrusted-signature".
 - Unverifiable is refused, never downgraded: an unparseable feed, unknown key,
   version that is not strictly newer, wrong platform or ring, unreachable
@@ -4709,7 +4715,8 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   helpers. A dogfood AppImage is not code-signed. An AppImage launch checks
   the signed `<base>/<ring>/linux-x64.json` feed, verifies the signature and
   hash before use, replaces the image atomically (write beside, fsync,
-  rename), and relaunches. A bad signature, a non-writable location, or a
+  rename), and relaunches; the new build starts after the old one has stopped.
+  A bad signature, a non-writable location, or a
   launch that is not that image fails closed, and the reason is shown in
   Settings. Windows stays out. Override with
   `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64` on a matching host only.
