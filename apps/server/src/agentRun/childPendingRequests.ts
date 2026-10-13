@@ -2,6 +2,7 @@ import {
   decodePendingRequest,
   MAX_CHILD_PENDING_REQUEST_TASK_LENGTH,
   MAX_CODE_OPERATION_SUMMARY_BYTES,
+  MAX_CODE_QUESTION_PROMPT_BYTES,
   type AgentRun,
   type AgentRunId,
   type NativeHarnessInteractionSource,
@@ -150,7 +151,10 @@ export async function listChildPendingRequests(
     }
     if (!mayOpen) continue;
     const text = modeText(run.routingReceipt.mode, wait.kind, item.text);
-    const task = cut(run.task, MAX_CHILD_PENDING_REQUEST_TASK_LENGTH);
+    const task = cut(
+      run.routingReceipt.mode === "work" ? sanitizeRequestText(run.task, "Subagent task") : run.task,
+      MAX_CHILD_PENDING_REQUEST_TASK_LENGTH,
+    );
     if (text === undefined || task === undefined) continue;
     try {
       requests.push(
@@ -206,9 +210,6 @@ function pendingItem(
   };
 }
 
-/** The bytes a Code question prompt may carry, as `CodeQuestionPromptText` bounds it. */
-const MAX_CODE_QUESTION_PROMPT_BYTES = 8 * 1024;
-
 /**
  * The request text as the parent mode's own rows would carry it: Work redacts
  * paths and URLs exactly as a Work request does, and Code keeps the byte bound
@@ -247,7 +248,16 @@ function withinBytes(value: string, maxBytes: number): string {
   return value.slice(0, end);
 }
 
+/**
+ * The longest prefix of whole code points that fits `max` UTF-16 units, as the
+ * contract counts a task's length. A plain slice could end on half an emoji.
+ */
 function cut(value: string, max: number): string | undefined {
-  const text = value.slice(0, max).trim();
+  let end = 0;
+  for (const codePoint of value) {
+    if (end + codePoint.length > max) break;
+    end += codePoint.length;
+  }
+  const text = value.slice(0, end).trim();
   return text.length === 0 ? undefined : text;
 }

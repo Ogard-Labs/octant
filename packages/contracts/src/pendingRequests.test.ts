@@ -328,6 +328,31 @@ describe("pending request contract", () => {
     });
   });
 
+  it("refuses a Work subagent row whose task names a path or URL, and shows a Code task as written", () => {
+    const workTask = (task: string) => ({ ...childQuestion.child, task });
+    expect(() =>
+      decodePendingRequest({
+        ...childQuestion,
+        child: workTask("Summarise /Users/me/clients/acme/report.xlsx"),
+      }),
+    ).toThrow();
+    expect(() =>
+      decodePendingRequest({
+        ...childQuestion,
+        child: workTask("Read https://example.com/private"),
+      }),
+    ).toThrow();
+    expect(
+      decodePendingRequest({ ...childQuestion, child: workTask("Summarise the client report") }),
+    ).toMatchObject({ kind: "child-question" });
+    expect(
+      decodePendingRequest({
+        ...childApproval,
+        child: { ...childApproval.child, task: "Fix /src/parser.ts" },
+      }),
+    ).toMatchObject({ kind: "child-approval" });
+  });
+
   it("bounds the list and requires the truncation flag", () => {
     expect(() => decodePendingRequestList({ requests: [workApproval] })).toThrow();
     expect(() =>

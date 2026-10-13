@@ -60,7 +60,11 @@ const source = {
 } satisfies NativeHarnessInteractionSource;
 
 function agentRun(
-  input: { readonly mode?: "chat" | "work" | "code"; readonly parentThreadId?: string } = {},
+  input: {
+    readonly mode?: "chat" | "work" | "code";
+    readonly parentThreadId?: string;
+    readonly task?: string;
+  } = {},
 ): AgentRun {
   const mode = input.mode ?? "work";
   const permissions = {
@@ -77,7 +81,7 @@ function agentRun(
     parentThreadId: input.parentThreadId ?? parentThread,
     depth: 1,
     role: "research",
-    task: "t".repeat(300),
+    task: input.task ?? "t".repeat(300),
     creationPosture: "automatic",
     executionKind: "octant-managed",
     lifecycleStatus: "running",
@@ -315,6 +319,32 @@ describe("subagent pending requests", () => {
     });
     const [request] = await list();
     expect(request?.text).toBe("edit [redacted path] from [redacted reference]");
+  });
+
+  it("redacts a path or URL from a Work subagent's task, and leaves a Code task as written", async () => {
+    const { askApproval, list } = fixture();
+    void askApproval({ child: true });
+    const task = "Summarise /Users/x/clients/acme/report.xlsx and https://example.com/a?b=1";
+    const [work] = await list({ run: agentRun({ task }) });
+    expect(work?.kind === "child-approval" ? work.child.task : undefined).toBe(
+      "Summarise [redacted path] and [redacted reference]",
+    );
+    const [code] = await list({ run: agentRun({ mode: "code", task }) });
+    expect(code?.kind === "child-approval" ? code.child.task : undefined).toBe(task);
+  });
+
+  it("cuts a task after redacting it, and never inside a surrogate pair", async () => {
+    const { askApproval, list } = fixture();
+    void askApproval({ child: true });
+    const long = `/Users/x/${"d".repeat(400)}/report.xlsx ${"y".repeat(300)}`;
+    const [redacted] = await list({ run: agentRun({ task: long }) });
+    const redactedTask = redacted?.kind === "child-approval" ? redacted.child.task : "";
+    expect(redactedTask.startsWith("[redacted path] yyy")).toBe(true);
+    expect(redactedTask).toHaveLength(200);
+    const [emoji] = await list({ run: agentRun({ mode: "code", task: "\u{1F600}".repeat(150) }) });
+    const emojiTask = emoji?.kind === "child-approval" ? emoji.child.task : "";
+    expect(emojiTask).toBe("\u{1F600}".repeat(100));
+    expect(emojiTask.isWellFormed()).toBe(true);
   });
 
   it("keeps a Code subagent's question within a Code question's byte bound", async () => {

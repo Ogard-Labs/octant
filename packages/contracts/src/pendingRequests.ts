@@ -190,17 +190,19 @@ const isCodeApprovalText = Schema.is(CodeApprovalSummaryText);
 const isCodeQuestionText = Schema.is(CodeQuestionPromptText);
 
 /**
- * A subagent row is never looser than the parent mode's own rows: Work text is
- * Work's sanitized request text, with no path or URL, and Code text keeps the
- * byte bound of a Code approval summary or question prompt.
+ * A subagent row is never looser than the parent mode's own rows: Work text and
+ * the delegated task are Work's sanitized request text, with no path or URL,
+ * and Code text keeps the byte bound of a Code approval summary or question
+ * prompt (a Code task is shown as written).
  */
 const childTextKeepsModeBounds = (request: {
   readonly mode: "work" | "code";
   readonly kind: "child-approval" | "child-question";
   readonly text: string;
+  readonly child: { readonly task: string };
 }): boolean =>
   request.mode === "work"
-    ? isWorkRequestText(request.text)
+    ? isWorkRequestText(request.text) && isWorkRequestText(request.child.task)
     : request.kind === "child-approval"
       ? isCodeApprovalText(request.text)
       : isCodeQuestionText(request.text);
