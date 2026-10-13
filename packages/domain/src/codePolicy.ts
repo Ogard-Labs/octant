@@ -206,6 +206,43 @@ export function mayWriteToRepository(posture: ProviderExecutionPolicy): boolean 
   return posture !== "plan";
 }
 
+export interface InPlaceRestoreTurn {
+  readonly threadId: string;
+  readonly checkoutRoot: string;
+  readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
+  readonly posture: ProviderExecutionPolicy;
+}
+
+/**
+ * Whether another thread's live turn would race an in-place restore of the
+ * requester's checkout. A turn parked on an approval counts: it writes as soon
+ * as it is answered. Roots are compared as paths, never by checkout id, which
+ * differs between two Projects on one folder; a managed worktree has its own
+ * path and so never matches.
+ */
+export function turnBlocksInPlaceRestore(
+  turn: InPlaceRestoreTurn,
+  requester: { readonly threadId: string; readonly checkoutRoot: string },
+): boolean {
+  return (
+    turn.threadId !== requester.threadId &&
+    turn.checkoutRoot === requester.checkoutRoot &&
+    (turn.state === "running" || turn.state === "waiting") &&
+    mayWriteToRepository(turn.posture)
+  );
+}
+
+const RESTORE_REFUSAL_TITLE_LIMIT = 100;
+
+/** `title` is given only when the writing thread is in the requester's Project. */
+export function inPlaceRestoreRefusalText(title?: string): string {
+  if (title === undefined) {
+    return "A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then restore.";
+  }
+  const shown = title.slice(0, RESTORE_REFUSAL_TITLE_LIMIT);
+  return `Another thread is writing in this checkout: "${shown}". Wait for its turn to finish or stop it, then restore.`;
+}
+
 function standingGrantForPosture(posture: ProviderExecutionPolicy): StandingApprovalGrant {
   if (posture === "full-access") return "remembered-full-access";
   if (posture === "approval-gated" || posture === "auto-accept-edits") return "session";

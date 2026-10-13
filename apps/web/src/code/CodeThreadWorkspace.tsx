@@ -921,6 +921,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     const nextUuid = props.nextUuid;
     if (checkpoint === undefined || client === undefined || nextUuid === undefined) return;
     if (view === undefined) return;
+    const previousUndo = restoreUndo;
     setRestoreMessage(undefined);
     setRestoreUndo(undefined);
     setRestoring(true);
@@ -941,8 +942,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         return;
       }
       const result = await client.executeOperation(command);
-      if (result.kind === "operation-failed") setRestoreMessage(result.failure.message);
-      else if (result.kind === "git-mutation-state" && result.state === "completed") {
+      if (result.kind === "operation-failed") {
+        // The host refused before touching the files, so the point a past
+        // restore left behind is still the way back.
+        setRestoreMessage(result.failure.message);
+        setRestoreUndo(previousUndo);
+      } else if (result.kind === "git-mutation-state" && result.state === "completed") {
         setRestoreMessage(completedMessage);
         // Keeping what the host replaced is what makes the overwrite reversible;
         // dropping it here would strand the only copy of the previous state.

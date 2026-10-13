@@ -91,6 +91,7 @@ import {
   isAndroidEmulatorOpenInputKind,
   harnessAutoReviewEffective,
   mayWriteToRepository,
+  turnBlocksInPlaceRestore,
   unsupportedModelOptionValues,
 } from "@octant/domain";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
@@ -2555,6 +2556,31 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       pending.push(...asked.values());
     }
     return pending;
+  }
+
+  /**
+   * The other threads whose live turn would race an in-place restore of this
+   * checkout root. `executionPolicy` on a live turn's thread is its clamped
+   * posture, so a Plan turn is not reported.
+   */
+  threadsWritingIn(checkoutRoot: string, exceptThreadId: CodeThreadId): ReadonlyArray<CodeThread> {
+    const writing: CodeThread[] = [];
+    for (const active of this.#active.values()) {
+      if (
+        turnBlocksInPlaceRestore(
+          {
+            threadId: String(active.thread.id),
+            checkoutRoot: active.checkoutRoot,
+            state: active.state,
+            posture: active.thread.executionPolicy,
+          },
+          { threadId: String(exceptThreadId), checkoutRoot },
+        )
+      ) {
+        writing.push(active.thread);
+      }
+    }
+    return writing;
   }
 
   #operationFrames(active: ActiveTurn): ReadonlyArray<CodeOperationEventFrame> {

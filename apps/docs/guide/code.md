@@ -140,7 +140,11 @@ deleted, the lineage says the origin is no longer available rather than
 hiding that the thread is a fork. **Restore files to this point** overwrites
 the working tree in place: it is named separately, still asks for
 confirmation, and still goes through the thread's approval path. Undo restore
-stays on the thread after a successful overwrite.
+stays on the thread after a successful overwrite. Octant refuses the restore,
+and Undo restore, while another thread has a turn writing in the same
+checkout, and names that thread when it is in the same Project. Wait for its
+turn to finish or stop it, then restore; the Undo restore button stays after a
+refusal. A thread on its own worktree is not held up by other threads.
 
 A checkpoint marker stays on the turn only when that point is marked.
 

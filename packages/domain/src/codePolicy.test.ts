@@ -6,6 +6,9 @@ import {
   authorizeCodeOperation,
   clampTurnAccessPosture,
   harnessAutoReviewEffective,
+  inPlaceRestoreRefusalText,
+  turnBlocksInPlaceRestore,
+  type InPlaceRestoreTurn,
   type CodeActor,
   type CodeOperation,
   type CodePolicyDecision,
@@ -346,5 +349,67 @@ describe("harnessAutoReviewEffective", () => {
         capabilitySupported: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe("in-place restore", () => {
+  const requester = { threadId: "thread-a", checkoutRoot: "/work/app" };
+  const writing: InPlaceRestoreTurn = {
+    threadId: "thread-b",
+    checkoutRoot: "/work/app",
+    state: "running",
+    posture: "approval-gated",
+  };
+
+  it("is blocked by another thread's running turn on the same checkout", () => {
+    expect(turnBlocksInPlaceRestore(writing, requester)).toBe(true);
+  });
+
+  it("is blocked by a turn parked on an approval", () => {
+    expect(turnBlocksInPlaceRestore({ ...writing, state: "waiting" }, requester)).toBe(true);
+  });
+
+  it("is not blocked by a settled turn", () => {
+    for (const state of ["completed", "interrupted", "failed"] as const) {
+      expect(turnBlocksInPlaceRestore({ ...writing, state }, requester)).toBe(false);
+    }
+  });
+
+  it("is not blocked by a Plan turn", () => {
+    expect(turnBlocksInPlaceRestore({ ...writing, posture: "plan" }, requester)).toBe(false);
+  });
+
+  it("is blocked by every posture that may write", () => {
+    for (const posture of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+      expect(turnBlocksInPlaceRestore({ ...writing, posture }, requester)).toBe(true);
+    }
+  });
+
+  it("is not blocked by a turn on a different checkout path", () => {
+    expect(
+      turnBlocksInPlaceRestore({ ...writing, checkoutRoot: "/work/app-worktree" }, requester),
+    ).toBe(false);
+  });
+
+  it("is not blocked by the requesting thread's own turn", () => {
+    expect(turnBlocksInPlaceRestore({ ...writing, threadId: "thread-a" }, requester)).toBe(false);
+  });
+
+  it("names the writing thread when the refusal carries its title", () => {
+    expect(inPlaceRestoreRefusalText("Fix the parser")).toBe(
+      'Another thread is writing in this checkout: "Fix the parser". Wait for its turn to finish or stop it, then restore.',
+    );
+  });
+
+  it("cuts a long title to 100 characters", () => {
+    const text = inPlaceRestoreRefusalText("x".repeat(300));
+    expect(text).toContain(`"${"x".repeat(100)}"`);
+    expect(text).not.toContain("x".repeat(101));
+  });
+
+  it("does not name a thread from another Project", () => {
+    expect(inPlaceRestoreRefusalText()).toBe(
+      "A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then restore.",
+    );
   });
 });

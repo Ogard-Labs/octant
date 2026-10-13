@@ -1003,6 +1003,39 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("The restore was undone.")).toBeVisible();
   });
 
+  it("keeps the Undo restore button when the host refuses an undo because another thread is writing", async () => {
+    const user = userEvent.setup();
+    const undo = { worktree: "e".repeat(40), index: "f".repeat(40) };
+    const refusal =
+      'Another thread is writing in this checkout: "Fix the parser". Wait for its turn to finish or stop it, then restore.';
+    const executeOperation = vi.fn(async () => ({
+      kind: "operation-failed" as const,
+      operationId: "30000000-0000-4000-8000-000000000001",
+      failure: { category: "conflict" as const, message: refusal },
+    }));
+    function Harness() {
+      const [restoreUndo, noteRestoreUndo] = useState<unknown>(undo);
+      return (
+        <CodeThreadWorkspace
+          controller={controller({ conversation: [], restoreUndo, noteRestoreUndo } as never)}
+          nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+          operationClient={{ executeOperation } as never}
+          requestApproval={vi.fn(async () => "40000000-0000-4000-8000-000000000001" as never)}
+          threadId={threadId}
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(await screen.findByRole("button", { name: "Undo restore" }));
+
+    await waitFor(() => expect(screen.getByText(refusal)).toBeVisible());
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "restore-git-checkpoint", checkpoint: undo }),
+    );
+    expect(screen.getByRole("button", { name: "Undo restore" })).toBeVisible();
+  });
+
   it("dates each turn from the moment the journal recorded it", async () => {
     const at = new Date();
     at.setHours(9, 14, 0, 0);

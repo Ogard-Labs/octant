@@ -411,6 +411,63 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("refuses another thread's in-place restore while a writing turn is live and allows it once the turn is cancelled", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const restoringThread = decodeCodeThread({
+      ...thread(),
+      id: decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1"),
+      title: "Restoring thread",
+    });
+    fixture.setOtherThread(restoringThread);
+    const restore = (id: number) =>
+      fixture.runtime.execute(windowId, {
+        kind: "restore-git-checkpoint",
+        operationId: operationId(id),
+        gitOperationId: operationId(id + 1) as never,
+        threadId: restoringThread.id,
+        checkoutId,
+        checkpoint: { worktree: "c".repeat(40), index: "d".repeat(40) } as never,
+      });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(31),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+    await expect(restore(32)).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: {
+        category: "conflict",
+        message:
+          'Another thread is writing in this checkout: "Runtime". Wait for its turn to finish or stop it, then restore.',
+      },
+    });
+
+    await fixture.runtime.execute(windowId, {
+      kind: "cancel-provider-turn",
+      operationId: operationId(34),
+      threadId,
+      checkoutId,
+    });
+
+    const afterCancel = await restore(35);
+    // The fixture's checkout cannot be observed, so the restore reaches Git and
+    // finds it unavailable: the settled turn no longer holds it back.
+    expect(afterCancel).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable", message: "Git mutation is unavailable." },
+    });
+    fixture.close();
+  });
+
   it("releases the spend reservation when a Code turn fails to start", async () => {
     const settle = vi.fn();
     const admit = vi.fn().mockReturnValue({

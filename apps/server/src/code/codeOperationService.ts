@@ -55,6 +55,7 @@ import type { CodeProfileSkillResolver } from "./codeProfileSkillResolver";
 import {
   authorizeCodeOperation,
   clampTurnAccessPosture,
+  inPlaceRestoreRefusalText,
   mayWriteToRepository,
   type CodeOperation,
 } from "@octant/domain/code-policy";
@@ -670,6 +671,15 @@ export interface CodeOperationTurnPort {
   }) => Promise<CodeOperationTurnResult>;
   /** What running turns are waiting on, before any window's authority is applied. */
   readonly pendingRequests?: () => ReadonlyArray<CodeTurnPendingRequest>;
+  /**
+   * The other threads with a live turn that may write to this checkout root.
+   * A port that cannot say refuses nothing, so a restore is never held up by
+   * a host that does not track live turns.
+   */
+  readonly threadsWritingIn?: (
+    checkoutRoot: string,
+    exceptThreadId: CodeThreadId,
+  ) => ReadonlyArray<CodeThread>;
 }
 
 /** One approval or question a running turn is parked on, as its stream journaled it. */
@@ -2201,6 +2211,17 @@ export class CodeOperationService {
             "unavailable",
             "Restoring a checkpoint is unavailable.",
           );
+        const writers = this.#options.turns.threadsWritingIn?.(root.checkoutRoot, thread.id) ?? [];
+        const writer = writers[0];
+        if (writer !== undefined) {
+          return this.#failed(
+            command.operationId,
+            "conflict",
+            inPlaceRestoreRefusalText(
+              String(writer.projectId) === String(thread.projectId) ? writer.title : undefined,
+            ),
+          );
+        }
         return this.#gitMutation(
           command.operationId,
           command.gitOperationId,
@@ -3263,7 +3284,8 @@ export class CodeOperationService {
       | "waiting"
       | "failed"
       | "invalid"
-      | "stale",
+      | "stale"
+      | "conflict",
     message: string,
     admission?: "refused",
   ): CodeOperationResult {
