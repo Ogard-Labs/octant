@@ -1,4 +1,8 @@
 import {
+  NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
+  NATIVE_HARNESS_SESSION_EVENT_NAMES,
+} from "@octant/contracts";
+import {
   decodeMachineChangeFrame,
   type MachineChangeFrame,
   type MachineChangeTopic,
@@ -42,6 +46,7 @@ export class MachineChangeFeed {
   publishCommitted(input: {
     readonly events: ReadonlyArray<{
       readonly aggregateType: string;
+      readonly eventName?: string;
       readonly payload?: unknown;
     }>;
   }): void {
@@ -147,9 +152,17 @@ export class MachineChangeFeed {
 
 function topicsForEvent(event: {
   readonly aggregateType: string;
+  readonly eventName?: string;
   readonly payload?: unknown;
 }): ReadonlyArray<MachineChangeTopic> {
   const { aggregateType } = event;
+  if (aggregateType === NATIVE_HARNESS_SESSION_AGGREGATE_TYPE) {
+    // A subagent's approval or question is read from this session by the
+    // pending-request read, which follows the Work and Code navigation topics.
+    return event.eventName !== undefined && HARNESS_SESSION_REQUEST_EVENT_NAMES.has(event.eventName)
+      ? ["work-navigation", "code-navigation"]
+      : [];
+  }
   if (aggregateType === "project") {
     return ["projects", "chat-navigation", "work-navigation", "code-navigation"];
   }
@@ -163,6 +176,13 @@ function topicsForEvent(event: {
   if (aggregateType.startsWith("extension-")) return ["extensions"];
   return [];
 }
+
+const HARNESS_SESSION_REQUEST_EVENT_NAMES: ReadonlySet<string> = new Set([
+  NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalAsked,
+  NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalSettled,
+  NATIVE_HARNESS_SESSION_EVENT_NAMES.questionAsked,
+  NATIVE_HARNESS_SESSION_EVENT_NAMES.questionSettled,
+]);
 
 const CODE_NAVIGATION_EVENT_KINDS = new Set([
   "conversation-turn-started",

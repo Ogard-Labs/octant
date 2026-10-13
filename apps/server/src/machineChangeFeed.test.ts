@@ -30,6 +30,38 @@ describe("MachineChangeFeed", () => {
     await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 
+  it("invalidates the Work and Code navigation reads when a harness session asks or settles an approval or question", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+
+    feed.publishCommitted({
+      events: [
+        { aggregateType: "native-harness-session", eventName: "native-harness-approval-asked@1" },
+      ],
+    });
+    feed.publishCommitted({
+      events: [
+        { aggregateType: "native-harness-session", eventName: "native-harness-question-settled@1" },
+      ],
+    });
+    feed.publishCommitted({
+      events: [
+        { aggregateType: "native-harness-session", eventName: "native-harness-turn-settled@1" },
+      ],
+    });
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { sequence: 1, topics: ["work-navigation", "code-navigation"] },
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { sequence: 2, topics: ["work-navigation", "code-navigation"] },
+    });
+    controller.abort();
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+    expect(feed.head()).toBe(2);
+  });
+
   it("requires a snapshot when the requested cursor fell outside replay", async () => {
     const feed = new MachineChangeFeed({ maxFrames: 1 });
     feed.publish(["chat-navigation"]);
