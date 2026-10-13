@@ -1,3 +1,5 @@
+import type { UpdateWorkInFlight } from "@octant/domain";
+
 export type LocalHostOwnership = "desktop-owned" | "managed";
 export type LocalHostState = "stopped" | "starting" | "running" | "attention-required";
 
@@ -9,7 +11,19 @@ export interface LocalHostDescriptor {
 
 export interface LocalHostActivity {
   readonly activeAgentCount: number;
+  /**
+   * The host needs a look: a provider that is not ready, a lost host, a stranded
+   * session. It drives the menu-bar mark and the "attention" state. It does not
+   * say anything is running, so a signed-out provider sets it with no work at
+   * all; whether stopping would interrupt something is `workInFlight`.
+   */
   readonly attentionRequired: boolean;
+  /**
+   * The desktop could not confirm what the host is running (it did not answer
+   * its health check, or its window authority could not be refreshed), so its
+   * zero agent count proves nothing and stopping may still interrupt work.
+   */
+  readonly activityUnconfirmed?: boolean;
 }
 
 export interface LocalHostSnapshot extends LocalHostActivity {
@@ -35,11 +49,30 @@ export function canRunHostAction(snapshot: LocalHostSnapshot, action: HostAction
   return snapshot.state !== "stopped" && snapshot.ownership === "desktop-owned";
 }
 
+/**
+ * What stopping this host now would interrupt, for the two questions that ask
+ * it: quitting, and installing a downloaded update. Both read this one value so
+ * they cannot disagree.
+ *
+ * Running agents count, and so does a thread parked on an approval or question,
+ * because its session is still live. A provider that merely needs sign-in or is
+ * not installed interrupts nothing and does not count. Work the desktop could
+ * not confirm counts as attention, so the install waits and quit asks rather
+ * than trusting a zero it could not check.
+ */
+export function workInFlight(snapshot: LocalHostActivity): UpdateWorkInFlight {
+  return {
+    activeAgentCount: snapshot.activeAgentCount,
+    attentionRequired: snapshot.activityUnconfirmed === true,
+  };
+}
+
 export function shouldConfirmQuit(snapshot: LocalHostSnapshot): boolean {
+  const work = workInFlight(snapshot);
   return (
     snapshot.state !== "stopped" &&
     snapshot.ownership === "desktop-owned" &&
-    (snapshot.activeAgentCount > 0 || snapshot.attentionRequired)
+    (work.activeAgentCount > 0 || work.attentionRequired)
   );
 }
 
@@ -100,7 +133,7 @@ export function createHostLifecycleController(operations: HostLifecycleOperation
       const replacement = await operations.attach();
       if (replacement?.ownership !== "managed") {
         state = "attention-required";
-        activity = { activeAgentCount: 0, attentionRequired: true };
+        activity = { activeAgentCount: 0, attentionRequired: true, activityUnconfirmed: true };
         return undefined;
       }
       host = replacement;

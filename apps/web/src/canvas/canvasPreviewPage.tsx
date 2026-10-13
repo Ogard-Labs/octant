@@ -121,8 +121,10 @@ function readInput(): CanvasPreviewReading {
           : { kind: "ready", url: page.path };
       },
       // Nothing leaves the preview browser: the host answers this page's own
-      // files and aborts every other request.
+      // files and aborts every other request. It is an ordinary browser, which
+      // knows a frame and not the desktop app's surface.
       contained: true,
+      drawnIn: "frame",
       runsOnOpen: true,
     };
     return { kind: "ready", input: { definition, theme, placement, designAssets, designRun } };

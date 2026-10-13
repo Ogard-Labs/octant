@@ -183,6 +183,45 @@ describe("ProviderRuntimeRegistry", () => {
     expect(registry.attentionRequired()).toBe(true);
   });
 
+  it("reports a provider that needs sign-in as attention while counting no running work", () => {
+    const registry = new ProviderRuntimeRegistry();
+    registry.setObservedState(
+      decodeProviderObservedState({
+        instanceId,
+        readiness: "unauthenticated",
+        processState: "stopped",
+        models: [],
+        capabilities,
+        observedAt: "2026-07-14T10:00:00.000Z",
+      }),
+    );
+
+    expect(registry.attentionRequired()).toBe(true);
+    expect(registry.activeSessionTotal()).toBe(0);
+  });
+
+  it("reports a provider process that stopped under live sessions, but not a running one", () => {
+    const registry = new ProviderRuntimeRegistry();
+    const observe = (processState: "running" | "stopped") =>
+      registry.setObservedState(
+        decodeProviderObservedState({
+          instanceId,
+          readiness: "ready",
+          processState,
+          models: [],
+          capabilities,
+          observedAt: "2026-07-14T10:00:00.000Z",
+        }),
+      );
+    registry.setActiveSessionCount(instanceId, 1);
+
+    observe("running");
+    expect(registry.attentionRequired()).toBe(false);
+    observe("stopped");
+    expect(registry.attentionRequired()).toBe(true);
+    expect(registry.activeSessionTotal()).toBe(1);
+  });
+
   it("shares an in-flight runtime for one instance and isolates different instances", async () => {
     const observedAcquireMs: number[] = [];
     const acquireKinds: string[] = [];

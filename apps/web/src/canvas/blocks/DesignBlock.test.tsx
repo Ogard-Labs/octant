@@ -1,5 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { decodeCanvasBlock, type CanvasDesignBlock } from "@octant/contracts/canvas";
+import {
+  CANVAS_DESIGN_VIEWPORT,
+  decodeCanvasBlock,
+  decodeCanvasId,
+  type CanvasDesignBlock,
+} from "@octant/contracts/canvas";
 import {
   launchDeckExampleBlock,
   onboardingFlowExampleBlock,
@@ -10,6 +15,7 @@ import { CanvasDocument } from "../CanvasDocument";
 import { canvasFixture } from "../test-fixtures";
 import { designAssetPlaceholder, type DesignAssetRuntime } from "./designDocument";
 import {
+  designRunRuntimeFor,
   readDesignBridgeMessage,
   RUNNING_DESIGN_FIRST_HEARTBEAT_MS,
   RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS,
@@ -41,7 +47,39 @@ function prototype(size: CanvasDesignBlock["size"] = "phone"): CanvasDesignBlock
 
 function runRuntime(fields: Partial<DesignRunRuntime> = {}) {
   const start = vi.fn<DesignRunRuntime["start"]>(async () => ({ kind: "ready", url: PAGE }));
-  return { start, runtime: { start, contained: true, runsOnOpen: false, ...fields } };
+  return {
+    start,
+    runtime: { start, contained: false, drawnIn: "frame" as const, runsOnOpen: false, ...fields },
+  };
+}
+
+/** What the desktop's surface for a prototype reports for its page, as the element delivers it. */
+function surfaceBridge(view: Element, data: Record<string, unknown>, channel?: string) {
+  const event = Object.assign(new Event("ipc-message"), {
+    channel: channel ?? "octant-canvas-prototype-bridge",
+    args: [{ channel: "octant-design-frame@1", ...data }],
+  });
+  view.dispatchEvent(event);
+}
+
+function views(container: ParentNode): ReadonlyArray<Element> {
+  return Array.from(container.querySelectorAll("webview"));
+}
+
+function installDesktopBridge(fields: Record<string, unknown> = {}) {
+  (window as { octantHost?: unknown }).octantHost = {
+    setProviderCredential: () => undefined,
+    providerCredentialStatus: () => undefined,
+    clearProviderCredential: () => undefined,
+    listProviderApiKeys: () => undefined,
+    addProviderApiKey: () => undefined,
+    renameProviderApiKey: () => undefined,
+    replaceProviderApiKey: () => undefined,
+    removeProviderApiKey: () => undefined,
+    setActiveProviderApiKey: () => undefined,
+    moveProviderApiKey: () => undefined,
+    ...fields,
+  };
 }
 
 function bridge(frame: HTMLIFrameElement, data: Record<string, unknown>, source?: unknown) {
@@ -399,6 +437,7 @@ describe("running prototype", () => {
     expect(frames(region)).toHaveLength(0);
     expect(start).not.toHaveBeenCalled();
     expect(within(region).getByText(/not network-contained/)).toBeVisible();
+    expect(within(region).getByText(/can still connect to another computer/)).toBeVisible();
 
     fireEvent.click(within(region).getByRole("button", { name: "Run" }));
     const frame = await within(region).findByTitle("Checkout, running prototype");
@@ -413,21 +452,29 @@ describe("running prototype", () => {
     expect(within(region).getByRole("button", { name: "Run again" })).toBeVisible();
   });
 
-  it("runs on open in the sidebar without taking focus, and in the desktop app says only that its script can still connect out", async () => {
-    const { start, runtime } = runRuntime({ runsOnOpen: true, contained: true });
+  it("runs on open in the sidebar without taking focus, and in the desktop app says it has no network and what still leaves", async () => {
+    installDesktopBridge({ prepareCanvasPrototypeSurface: async () => ({ status: "ready" }) });
+    const { start, runtime } = runRuntime({
+      runsOnOpen: true,
+      contained: true,
+      drawnIn: "desktop-surface",
+    });
     render(
       <CanvasDocument
         definition={{ ...canvasFixture, blocks: [prototype()] }}
         designRunRuntime={runtime}
       />,
     );
-    const frame = await screen.findByTitle("Checkout, running prototype");
+    const view = await screen.findByTitle("Checkout, running prototype");
     expect(start).toHaveBeenCalledOnce();
-    expect(frame).toHaveAttribute("tabindex", "-1");
+    expect(view.tagName).toBe("WEBVIEW");
+    expect(view).toHaveAttribute("tabindex", "-1");
+    // The desktop draws it in a surface of its own, never in a frame.
+    expect(frames(document)).toHaveLength(0);
     expect(screen.queryByText(/not network-contained/)).toBeNull();
-    // No client stops a peer connection over TCP, the desktop app included,
-    // so the person is told while it runs as well as before.
-    expect(screen.getByText(/can still connect to another computer/)).toBeVisible();
+    expect(screen.queryByText(/can still connect to another computer/)).toBeNull();
+    expect(screen.getByText(/no network connection/)).toBeVisible();
+    expect(screen.getByText(/look up host names/)).toBeVisible();
   });
 
   it("cannot run where the host serves no prototypes, and shows why a refused run stopped", async () => {
@@ -588,81 +635,311 @@ describe("running prototype", () => {
     expect(errors.querySelector("b")).toBeNull();
     expect(errors.textContent?.length).toBeLessThanOrEqual(280);
   });
+});
 
-  it("hands focus to Stop when the desktop's reserved shortcut fires while the frame holds it", async () => {
+describe("running prototype in the desktop app", () => {
+  function runDesktop(fields: Partial<DesignRunRuntime> = {}, size?: CanvasDesignBlock["size"]) {
+    if ((window as { octantHost?: unknown }).octantHost === undefined) {
+      installDesktopBridge({ prepareCanvasPrototypeSurface: async () => ({ status: "ready" }) });
+    }
+    const run = runRuntime({ contained: true, drawnIn: "desktop-surface", ...fields });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype(size)] }}
+        designRunRuntime={run.runtime}
+      />,
+    );
+    return run;
+  }
+
+  it("draws the page in a surface of its own with the host's ticketed address and nothing else", async () => {
+    runDesktop();
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    const view = await screen.findByTitle("Checkout, running prototype");
+    expect(view.tagName).toBe("WEBVIEW");
+    expect(view).toHaveAttribute("src", PAGE);
+    // The renderer names no partition, preload, or preference of its own.
+    for (const attribute of ["partition", "preload", "webpreferences", "allowpopups"]) {
+      expect(view).not.toHaveAttribute(attribute);
+    }
+    expect(view).not.toHaveAttribute("sandbox");
+    expect(frames(document)).toHaveLength(0);
+    // Pressed by the person, so the surface may take focus.
+    expect(view).toHaveAttribute("tabindex", "0");
+  });
+
+  it("keeps a prototype running while its page beats, stops it when the beats stop, and offers to run it again", async () => {
+    vi.useFakeTimers();
+    runDesktop({ runsOnOpen: true });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const view = screen.getByTitle("Checkout, running prototype");
+    for (let second = 0; second < 12; second += 1) {
+      act(() => {
+        surfaceBridge(view, { type: "heartbeat" });
+        vi.advanceTimersByTime(1_000);
+      });
+    }
+    expect(views(document)).toHaveLength(1);
+
+    // Beats on any other channel keep nothing alive.
+    for (let second = 0; second <= RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS / 1_000 + 1; second += 1) {
+      act(() => {
+        surfaceBridge(view, { type: "heartbeat" }, "other-channel");
+        vi.advanceTimersByTime(1_000);
+      });
+    }
+    expect(views(document)).toHaveLength(0);
+    expect(screen.getByText(/stopped responding/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Run again" })).toBeVisible();
+    expect(screen.queryByText(/open Octant in a new tab/)).toBeNull();
+  });
+
+  it("sizes a running document from its bridge within bounds, ignoring forged messages, and shows its script errors as text", async () => {
+    runDesktop({ runsOnOpen: true }, "document");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const view = screen.getByTitle("Checkout, running prototype");
+    act(() => surfaceBridge(view, { type: "size", height: 640 }));
+    expect((view as HTMLElement).style.height).toBe("640px");
+    act(() => surfaceBridge(view, { type: "size", height: 10_000_000 }));
+    expect((view as HTMLElement).style.height).toBe("12000px");
+    act(() => surfaceBridge(view, { type: "size", height: "300" }));
+    act(() => surfaceBridge(view, { channel: "other", type: "size", height: 300 }));
+    act(() => surfaceBridge(view, { type: "navigate", url: "https://example.test" }));
+    act(() => surfaceBridge(view, { type: "size", height: 300 }, "other-channel"));
+    expect((view as HTMLElement).style.height).toBe("12000px");
+
+    act(() => surfaceBridge(view, { type: "error", message: `<b>boom</b>${"x".repeat(1_000)}` }));
+    const errors = screen.getByRole("list", { name: "Prototype script errors" });
+    expect(errors.textContent?.startsWith("<b>boom</b>")).toBe(true);
+    expect(errors.querySelector("b")).toBeNull();
+    expect(errors.textContent?.length).toBeLessThanOrEqual(280);
+  });
+
+  it("scales a device-sized prototype to the column like a frame does", async () => {
+    runDesktop({ runsOnOpen: true });
+    const view = await screen.findByTitle("Checkout, running prototype");
+    expect((view as HTMLElement).style.width).toBe(
+      `${String(CANVAS_DESIGN_VIEWPORT.phone.width)}px`,
+    );
+    expect((view as HTMLElement).style.height).toBe(
+      `${String(CANVAS_DESIGN_VIEWPORT.phone.height)}px`,
+    );
+    expect((view as HTMLElement).style.transform).toBe("scale(1)");
+  });
+
+  it("removes a prototype that floods the bridge, so the person can still press Stop", async () => {
+    vi.useFakeTimers();
+    runDesktop({ runsOnOpen: true }, "document");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const view = screen.getByTitle("Checkout, running prototype");
+    act(() => {
+      for (let sent = 0; sent <= RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND; sent += 1) {
+        surfaceBridge(view, { type: "error", message: `boom ${String(sent)}` });
+      }
+    });
+    expect(views(document)).toHaveLength(0);
+    expect(screen.getByText(/sent too many messages/)).toBeVisible();
+  });
+
+  it("removes a prototype that loads a second page or whose surface goes away", async () => {
+    runDesktop({ runsOnOpen: true });
+    const view = await screen.findByTitle("Checkout, running prototype");
+    fireEvent(view, new Event("did-navigate"));
+    expect(views(document)).toHaveLength(1);
+    fireEvent(view, new Event("did-navigate"));
+    expect(views(document)).toHaveLength(0);
+    expect(screen.getByText(/tried to load another page/)).toBeVisible();
+    cleanup();
+
+    runDesktop({ runsOnOpen: true });
+    const crashed = await screen.findByTitle("Checkout, running prototype");
+    fireEvent(crashed, new Event("render-process-gone"));
+    expect(views(document)).toHaveLength(0);
+    expect(screen.getByText(/stopped responding/)).toBeVisible();
+  });
+
+  it("hands focus to Stop when the desktop's reserved shortcut fires while the prototype holds it", async () => {
     let escape: (() => void) | undefined;
-    (window as { octantHost?: unknown }).octantHost = {
-      setProviderCredential: () => undefined,
-      providerCredentialStatus: () => undefined,
-      clearProviderCredential: () => undefined,
-      listProviderApiKeys: () => undefined,
-      addProviderApiKey: () => undefined,
-      renameProviderApiKey: () => undefined,
-      replaceProviderApiKey: () => undefined,
-      removeProviderApiKey: () => undefined,
-      setActiveProviderApiKey: () => undefined,
-      moveProviderApiKey: () => undefined,
+    installDesktopBridge({
+      prepareCanvasPrototypeSurface: async () => ({ status: "ready" }),
       subscribeCanvasFrameFocusEscape: (listener: () => void) => {
         escape = listener;
         return () => {
           escape = undefined;
         };
       },
-    };
-    const { runtime } = runRuntime();
-    render(
-      <CanvasDocument
-        definition={{ ...canvasFixture, blocks: [prototype()] }}
-        designRunRuntime={runtime}
-      />,
-    );
+    });
+    runDesktop();
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
-    const frame = await screen.findByTitle<HTMLIFrameElement>("Checkout, running prototype");
-    frame.focus();
-    expect(document.activeElement).toBe(frame);
+    const view = await screen.findByTitle("Checkout, running prototype");
+    (view as HTMLElement).focus();
+    expect(document.activeElement).toBe(view);
     act(() => escape?.());
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Stop" }));
   });
-});
 
-describe("running prototype focus", () => {
-  it("stops a frame that takes the keyboard straight back after the reserved shortcut", async () => {
+  it("stops a prototype that takes the keyboard straight back after the reserved shortcut", async () => {
     let escape: (() => void) | undefined;
-    (window as { octantHost?: unknown }).octantHost = {
-      setProviderCredential: () => undefined,
-      providerCredentialStatus: () => undefined,
-      clearProviderCredential: () => undefined,
-      listProviderApiKeys: () => undefined,
-      addProviderApiKey: () => undefined,
-      renameProviderApiKey: () => undefined,
-      replaceProviderApiKey: () => undefined,
-      removeProviderApiKey: () => undefined,
-      setActiveProviderApiKey: () => undefined,
-      moveProviderApiKey: () => undefined,
+    installDesktopBridge({
+      prepareCanvasPrototypeSurface: async () => ({ status: "ready" }),
       subscribeCanvasFrameFocusEscape: (listener: () => void) => {
         escape = listener;
         return () => undefined;
       },
+    });
+    runDesktop();
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    const view = await screen.findByTitle("Checkout, running prototype");
+    vi.useFakeTimers();
+    (view as HTMLElement).focus();
+    act(() => escape?.());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Stop" }));
+    // The page refocuses itself, as one listening for blur can.
+    (view as HTMLElement).focus();
+    act(() => vi.advanceTimersByTime(200));
+    expect(views(document)).toHaveLength(0);
+    expect(screen.getByText(/kept taking the keyboard back/)).toBeVisible();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Run again" }));
+  });
+});
+
+describe("where a running prototype is drawn", () => {
+  const client = () => {
+    const runDesign = vi.fn(async () => ({ kind: "ready" as const, url: PAGE }));
+    return {
+      runDesign,
+      runtime: designRunRuntimeFor(
+        { runDesign },
+        {
+          canvasId: decodeCanvasId("22222222-2222-4222-8222-222222222222"),
+          versionId: "33333333-3333-4333-8333-333333333333",
+          runsOnOpen: false,
+        },
+      ),
     };
-    const { runtime } = runRuntime();
+  };
+
+  function runFromThread(runtime: DesignRunRuntime) {
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+        placement="thread"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+  }
+
+  it("draws on the desktop's own surface only in the desktop app, and in a frame in a browser", () => {
+    installDesktopBridge();
+    expect(client().runtime).toMatchObject({ contained: true, drawnIn: "desktop-surface" });
+    delete (window as { octantHost?: unknown }).octantHost;
+    expect(client().runtime).toMatchObject({ contained: false, drawnIn: "frame" });
+  });
+
+  it("draws the preview browser's prototype in a frame, because that browser has no route out and no desktop surface", async () => {
+    // The preview page says it is contained and draws a frame: ordinary
+    // Chromium does not know a webview, so a surface there would never load.
+    const prepare = vi.fn(async () => ({ status: "ready" as const }));
+    installDesktopBridge({ prepareCanvasPrototypeSurface: prepare });
+    const { start, runtime } = runRuntime({ contained: true, drawnIn: "frame", runsOnOpen: true });
     render(
       <CanvasDocument
         definition={{ ...canvasFixture, blocks: [prototype()] }}
         designRunRuntime={runtime}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
     const frame = await screen.findByTitle<HTMLIFrameElement>("Checkout, running prototype");
-    vi.useFakeTimers();
-    frame.focus();
-    act(() => escape?.());
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Stop" }));
-    // The page refocuses itself, as one listening for blur can.
-    frame.focus();
-    act(() => vi.advanceTimersByTime(200));
-    expect(frames(document)).toHaveLength(0);
-    expect(screen.getByText(/kept taking the keyboard back/)).toBeVisible();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Run again" }));
+    expect(frame.tagName).toBe("IFRAME");
+    expect(frame.getAttribute("src")).toBe(PAGE);
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(views(document)).toHaveLength(0);
+    expect(start).toHaveBeenCalledOnce();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(screen.queryByText(/not network-contained/)).toBeNull();
+    expect(screen.queryByText(/look up host names/)).toBeNull();
+    expect(screen.getByText(/no network connection/)).toBeVisible();
+  });
+
+  it("closes the desktop surface's network before it asks any runtime for a page", async () => {
+    const order: Array<string> = [];
+    installDesktopBridge({
+      prepareCanvasPrototypeSurface: async () => {
+        order.push("surface");
+        return { status: "ready" };
+      },
+    });
+    const { runDesign, runtime } = client();
+    runDesign.mockImplementation(async () => {
+      order.push("ticket");
+      return { kind: "ready" as const, url: PAGE };
+    });
+    runFromThread(runtime!);
+    expect(await screen.findByTitle("Checkout, running prototype")).toHaveAttribute("src", PAGE);
+    expect(order).toEqual(["surface", "ticket"]);
+  });
+
+  it("does not run a prototype drawn on the surface, and never asks for a page, when the surface cannot be made", async () => {
+    const cases: Array<[string, Record<string, unknown>]> = [
+      [
+        "Octant could not close the prototype surface's network, so it does not run.",
+        {
+          prepareCanvasPrototypeSurface: async () => ({
+            status: "unavailable",
+            reason: "Octant could not close the prototype surface's network, so it does not run.",
+          }),
+        },
+      ],
+      [
+        "Octant could not start the prototype surface, so it does not run.",
+        {
+          prepareCanvasPrototypeSurface: async () => {
+            throw new Error("ipc failed");
+          },
+        },
+      ],
+      ["This version of Octant cannot contain a prototype, so it does not run.", {}],
+    ];
+    for (const [reason, bridgeFields] of cases) {
+      cleanup();
+      installDesktopBridge(bridgeFields);
+      const { runDesign, runtime } = client();
+      runFromThread(runtime!);
+      expect(await screen.findByText(reason)).toBeVisible();
+      expect(runDesign).not.toHaveBeenCalled();
+      expect(frames(document)).toHaveLength(0);
+      expect(views(document)).toHaveLength(0);
+    }
+  });
+
+  it("prepares for a runtime built anywhere else that says it draws on the surface", async () => {
+    // A shared snapshot builds its own runtime; the block, not each builder,
+    // is what makes sure the surface exists first.
+    const prepare = vi.fn(async () => ({
+      status: "unavailable" as const,
+      reason: "Closed for repairs.",
+    }));
+    installDesktopBridge({ prepareCanvasPrototypeSurface: prepare });
+    const { start, runtime } = runRuntime({ contained: true, drawnIn: "desktop-surface" });
+    runFromThread(runtime);
+    expect(await screen.findByText("Closed for repairs.")).toBeVisible();
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("runs in a frame, with no surface to prepare, where there is no desktop app", async () => {
+    const { runDesign, runtime } = client();
+    runFromThread(runtime!);
+    const frame = await screen.findByTitle<HTMLIFrameElement>("Checkout, running prototype");
+    expect(frame.tagName).toBe("IFRAME");
+    expect(runDesign).toHaveBeenCalledOnce();
+    expect(screen.getByText(/can still connect to another computer/)).toBeVisible();
   });
 });
 

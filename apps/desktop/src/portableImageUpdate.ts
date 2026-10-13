@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   access,
   chmod,
@@ -27,6 +28,31 @@ const PORTABLE_IMAGE_PATH_VARIABLE = "APPIMAGE";
  * the relaunched process makes the new image believe it is still the old one.
  */
 const RUNTIME_VARIABLES = ["APPIMAGE", "APPDIR", "ARGV0", "OWD"] as const;
+
+/**
+ * Names the process a relaunched image replaces, so it starts after that
+ * process has stopped.
+ *
+ * Without it the new image asks for the single-instance lock while the old
+ * process is still stopping its host, loses it, and exits. Measured on a real
+ * host: the relaunched image lived about two seconds, the old process took
+ * about five and a half to stop its host and exit, and nothing was left
+ * running. Waiting here, rather than releasing the lock early, keeps two hosts
+ * from ever sharing one data directory.
+ */
+export const REPLACED_PROCESS_VARIABLE = "OCTANT_REPLACED_PROCESS_ID";
+
+/**
+ * How long a relaunched image waits for the process it replaces. Measured on a
+ * real host, the old process takes about five and a half seconds to stop its
+ * host and exit, so a normal hand-over finishes well inside this. The bound is
+ * about ten times that and only matters for a process that never goes away,
+ * including one that has exited but whose parent is slow to reap it (seen at
+ * about seventeen seconds under a test script). Past it the normal lock request
+ * runs and fails closed as it always has.
+ */
+export const REPLACED_PROCESS_WAIT_BOUND_MS = 60_000;
+export const REPLACED_PROCESS_POLL_MS = 100;
 
 /** Type-2 image magic at offset 8: `AI` plus the format version. */
 const IMAGE_MAGIC_OFFSET = 8;
@@ -297,10 +323,13 @@ export async function relaunchPortableImage(
   options: {
     readonly spawnImpl?: PortableImageSpawn;
     readonly env?: Readonly<Record<string, string | undefined>>;
+    /** The process the new image replaces; this one unless a test says otherwise. */
+    readonly replacedProcessId?: number;
   } = {},
 ): Promise<void> {
   const spawnImpl = options.spawnImpl ?? defaultSpawn;
   const env = relaunchEnvironment(options.env ?? process.env);
+  env[REPLACED_PROCESS_VARIABLE] = String(options.replacedProcessId ?? process.pid);
   await new Promise<void>((resolvePromise, reject) => {
     let settled = false;
     const child = spawnImpl(path, [], { detached: true, stdio: "ignore", env });
@@ -349,6 +378,111 @@ export function createPortableImagePort(options: {
   };
 }
 
+/**
+ * Read the process this launch replaces, and remove the variable.
+ *
+ * Removed whether or not it parsed: the host and every other child inherit the
+ * environment, and one of them acting on a stale process id would wait for
+ * nothing. Only a positive whole number counts; anything else is treated as
+ * not set, so an ordinary launch is never delayed by a malformed value.
+ */
+export function takeReplacedProcessId(env: Record<string, string | undefined>): number | undefined {
+  const raw = env[REPLACED_PROCESS_VARIABLE]?.trim() ?? "";
+  delete env[REPLACED_PROCESS_VARIABLE];
+  if (!/^[1-9][0-9]*$/.test(raw)) return undefined;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : undefined;
+}
+
+/**
+ * Whether a process is still running.
+ *
+ * A signal check says a process exists until its parent has reaped it, and a
+ * busy parent can reap late (seen at about seventeen seconds after the process
+ * had exited). An exited process holds no lock, port or open
+ * file, so on Linux, where `/proc` is the source of truth, a process whose
+ * state is zombie or dead counts as gone. Anything that cannot be classified
+ * falls back to the signal check, where a process this user may not signal
+ * still counts as running and only "no such process" counts as gone.
+ */
+export function defaultProcessIsAlive(
+  input: {
+    readonly kill?: (pid: number, signal: 0) => unknown;
+    readonly platform?: string;
+    readonly readProcessStat?: (pid: number) => string;
+  } = {},
+): (pid: number) => boolean {
+  const kill = input.kill ?? process.kill.bind(process);
+  const platform = input.platform ?? process.platform;
+  const readProcessStat =
+    input.readProcessStat ?? ((pid: number) => readFileSync(`/proc/${pid}/stat`, "utf8"));
+  const signalSaysRunning = (pid: number): boolean => {
+    try {
+      kill(pid, 0);
+      return true;
+    } catch (error) {
+      return !(
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ESRCH"
+      );
+    }
+  };
+  return (pid) => {
+    if (platform !== "linux") return signalSaysRunning(pid);
+    let stat: string;
+    try {
+      stat = readProcessStat(pid);
+    } catch {
+      return signalSaysRunning(pid);
+    }
+    const state = processStateOf(stat);
+    if (state === undefined) return signalSaysRunning(pid);
+    return state !== "Z" && state !== "X";
+  };
+}
+
+/**
+ * The state letter of `/proc/<pid>/stat`. The command name sits in parentheses
+ * and may itself contain spaces and parentheses, so the state is the field
+ * after the last closing parenthesis.
+ */
+function processStateOf(stat: string): string | undefined {
+  const close = stat.lastIndexOf(")");
+  if (close < 0) return undefined;
+  const match = /^ ([A-Za-z])(?: |$)/.exec(stat.slice(close + 1));
+  return match?.[1];
+}
+
+export type ReplacedProcessWait =
+  | { readonly kind: "exited"; readonly waitedMs: number }
+  | { readonly kind: "timed-out"; readonly waitedMs: number };
+
+/**
+ * Wait until the process this launch replaces has exited, or the bound passes.
+ *
+ * Polls rather than retrying the lock: a lock request from here would raise
+ * `second-instance` on the instance that is still shutting down.
+ */
+export async function waitForReplacedProcessExit(input: {
+  readonly processId: number;
+  readonly boundMs: number;
+  readonly pollMs: number;
+  /** Elapsed milliseconds from a clock that never jumps; not the wall clock. */
+  readonly now: () => number;
+  readonly isAlive: (processId: number) => boolean;
+  readonly sleep: (ms: number) => Promise<void>;
+}): Promise<ReplacedProcessWait> {
+  const started = input.now();
+  for (;;) {
+    const waitedMs = input.now() - started;
+    if (!input.isAlive(input.processId)) return { kind: "exited", waitedMs };
+    if (waitedMs >= input.boundMs) return { kind: "timed-out", waitedMs };
+    await input.sleep(Math.min(input.pollMs, input.boundMs - waitedMs));
+  }
+}
+
 function defaultSpawn(
   path: string,
   args: readonly string[],
@@ -376,6 +510,8 @@ function relaunchEnvironment(
   for (const [key, value] of Object.entries(source)) {
     if (value === undefined) continue;
     if (RUNTIME_VARIABLES.some((name) => name === key)) continue;
+    // An answer from an earlier relaunch is about a process that is long gone.
+    if (key === REPLACED_PROCESS_VARIABLE) continue;
     env[key] = value;
   }
   return env;

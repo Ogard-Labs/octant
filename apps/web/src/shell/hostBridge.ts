@@ -154,6 +154,10 @@ export type BrowserSurfaceTabCommand =
   | { readonly kind: "select"; readonly tabId: string }
   | { readonly kind: "close"; readonly tabId: string };
 
+export type CanvasPrototypeSurfacePreparation =
+  | { readonly status: "ready" }
+  | { readonly status: "unavailable"; readonly reason: string };
+
 export interface BrowserSurfaceRequest {
   readonly contextId: string;
   readonly threadId: string;
@@ -362,6 +366,12 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
   readonly setMenuBarOpenThread?: (thread: MenuBarOpenThread | null) => Promise<void>;
   readonly subscribeMenuBarTask?: (listener: (target: MenuBarOpenThread) => void) => () => void;
   readonly setAttentionBadge?: (count: number) => Promise<void>;
+  /**
+   * Closes the network of the surface a running Canvas prototype is drawn in.
+   * A prototype runs in the desktop app only once this is ready, and nowhere
+   * else there. Absent outside the desktop app.
+   */
+  readonly prepareCanvasPrototypeSurface?: () => Promise<CanvasPrototypeSurfacePreparation>;
   readonly attachBrowserSurface?: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds?: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface?: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
@@ -484,7 +494,7 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
    */
   /**
    * The desktop's reserved shortcut for leaving a running Canvas prototype,
-   * read before the frame sees the key. Absent outside the desktop app.
+   * read before the prototype sees the key. Absent outside the desktop app.
    */
   readonly subscribeCanvasFrameFocusEscape?: (listener: () => void) => () => void;
   readonly subscribeResolvedSidebarVibrancy?: (

@@ -454,10 +454,17 @@ document as a future version. Frames follow the
   `allow-same-origin`, `allow-top-navigation`, `allow-popups`, or
   `allow-forms`. A host-written bridge reports size, script errors, and a
   heartbeat, grants no tool, journal, or file capability, and a frame that
-  stops answering or loads a second page is removed. Desktop runs these frames
-  out of process, cancels any navigation away from the frame's own page, and
-  reserves a shortcut frame script cannot intercept to return focus to host
-  chrome. A remote browser cannot cancel a frame's own navigation, so there a
+  stops answering or loads a second page is removed. Desktop does not draw a
+  running design in a frame: a page policy does not cover WebRTC, so the
+  prototype is a `<webview>` in a session of its own whose every connection,
+  loopback included, goes to a proxy that is never a proxy. The main process
+  attaches that surface only for a ticketed design page it was named, serves the
+  page itself under a private scheme, refuses new windows, navigation,
+  permissions, and downloads, and reserves a shortcut page script cannot
+  intercept to return focus to host chrome. If the surface cannot be made the
+  prototype does not run. A name lookup the page asks the resolver for can still
+  leave the app, and the notice under the prototype says so. A remote browser cannot
+  cancel a frame's own navigation or contain its peer connections, so there a
   running frame is not network-contained; that exposure is accepted, bounded
   by what the frame holds, and the Run control there says so. This tier has
   shipped.
@@ -1433,7 +1440,9 @@ flowchart LR
   conversation evidence is read in bounded batches and page results paint as
   they arrive; live Code operation frames carry bounded display text beside
   their durable evidence references. Work uses a bounded delta feed over its
-  durable transcript. One post-commit Machine change feed invalidates mode
+  durable transcript. The Work transcript route answers with the newest 64
+  turns of a longer thread, oldest first; export and `#thread` mentions read the
+  whole thread on the host. One post-commit Machine change feed invalidates mode
   navigation and Project/extension projections instead of independent polling
   timers. A running turn's start time and latest step (a tool name and one
   redacted, truncated argument, or a wait on approval or an answer) ride on the
@@ -4629,8 +4638,14 @@ there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
   checks the code signature as an independent second gate. A Linux AppImage
   is not code-signed, so the feed signature and artifact hash are its whole
   trust root: Octant replaces only the image it was launched from (`APPIMAGE`)
-  atomically, and refuses a package or archive launch before any request. A
-  platform with no signed channel (`supportsSignedDesktopUpdateChannel`:
+  atomically, and refuses a package or archive launch before any request. The
+  relaunched image is told which process it replaces
+  (`OCTANT_REPLACED_PROCESS_ID`, removed from its environment as it starts) and
+  waits, for at most a minute, until that process has exited (on Linux, exited but
+  not yet reaped counts) before it asks for
+  the single-instance lock, so it never starts a host while the old one is
+  still stopping; the old instance keeps its lock until it exits. A platform
+  with no signed channel (`supportsSignedDesktopUpdateChannel`:
   macOS and Linux today) refuses with "untrusted-signature".
 - Unverifiable is refused, never downgraded: an unparseable feed, unknown key,
   version that is not strictly newer, wrong platform or ring, unreachable
@@ -4647,8 +4662,13 @@ there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
   most 4,096 characters) and fail with it; notes for the running build are a
   bundled file read from disk, so What's New never adds a request.
 - The person controls application: an update is staged and applied on a
-  relaunch they start, and install waits while agents are active or a thread
-  needs attention. Automatic checks are a setting; the host starts with them
+  relaunch they start, and install waits while agents are active (a thread
+  parked on an approval or question is still an active agent) or while the
+  desktop cannot confirm what the host is running. A provider that is not
+  signed in, not installed, or disabled never holds an install back: quitting
+  asks on the same terms, because both read the one `workInFlight` reading of
+  the host rather than its `attentionRequired` flag, which also marks the menu
+  bar for provider readiness. Automatic checks are a setting; the host starts with them
   off until the persisted choice arrives, then checks daily. A check is a
   plain GET carrying only version, platform, and architecture (the ring is in
   the path); it is not a telemetry channel.
@@ -4715,7 +4735,8 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   helpers. A dogfood AppImage is not code-signed. An AppImage launch checks
   the signed `<base>/<ring>/linux-x64.json` feed, verifies the signature and
   hash before use, replaces the image atomically (write beside, fsync,
-  rename), and relaunches. A bad signature, a non-writable location, or a
+  rename), and relaunches; the new build starts after the old one has stopped.
+  A bad signature, a non-writable location, or a
   launch that is not that image fails closed, and the reason is shown in
   Settings. Windows stays out. Override with
   `OCTANT_PACKAGE_TARGET=darwin-arm64|linux-x64` on a matching host only.
