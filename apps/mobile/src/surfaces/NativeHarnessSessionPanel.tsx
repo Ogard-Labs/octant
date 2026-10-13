@@ -176,21 +176,32 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           style={[styles.question, { borderColor: colors.border }]}
           testID="mobile-native-harness-approval"
         >
+          {pendingApproval.source === undefined ? null : (
+            <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
+              Child {String(pendingApproval.source.runId).slice(0, 8)} ·{" "}
+              {pendingApproval.source.providerName ?? "Provider"} · {pendingApproval.source.modelId}
+            </Text>
+          )}
           <Text style={[mobileTypography.body, { color: colors.textPrimary }]}>
             {pendingApproval.toolName} · {pendingApproval.summary.replace(/^[a-z-]+: /, "")}
           </Text>
           <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
-            Needs your say-so ({pendingApproval.approvalClass}).
+            {pendingApproval.source === undefined
+              ? `Needs your say-so (${pendingApproval.approvalClass}).`
+              : "Allow this request for this child."}
           </Text>
           <View style={styles.chips}>
             <GlassChip active={false} label="Allow" onPress={() => decide("approve")} />
-            {pendingApproval.singleUse === true ? null : (
+            {/* A child request is never remembered, and neither is a call after
+                the thread took in outside content. Offering the session choice
+                there would describe a decision the host ignores. */}
+            {pendingApproval.source === undefined && pendingApproval.singleUse !== true ? (
               <GlassChip
                 active={false}
                 label="Allow this session"
                 onPress={() => decide("approve-always")}
               />
-            )}
+            ) : null}
             <GlassChip active={false} label="Deny" onPress={() => decide("deny")} />
           </View>
         </View>
