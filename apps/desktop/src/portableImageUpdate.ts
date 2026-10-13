@@ -45,10 +45,11 @@ export const REPLACED_PROCESS_VARIABLE = "OCTANT_REPLACED_PROCESS_ID";
 /**
  * How long a relaunched image waits for the process it replaces. Measured on a
  * real host, the old process takes about five and a half seconds to stop its
- * host and exit, and its launcher may take about seventeen more to reap it, so
- * a normal hand-over finishes well inside this; the bound is a little under
- * three times that sum and only matters for a process that never goes away.
- * Past it the normal lock request runs and fails closed as it always has.
+ * host and exit, so a normal hand-over finishes well inside this. The bound is
+ * about ten times that and only matters for a process that never goes away,
+ * including one that has exited but whose parent is slow to reap it (seen at
+ * about seventeen seconds under a test script). Past it the normal lock request
+ * runs and fails closed as it always has.
  */
 export const REPLACED_PROCESS_WAIT_BOUND_MS = 60_000;
 export const REPLACED_PROCESS_POLL_MS = 100;
@@ -396,9 +397,9 @@ export function takeReplacedProcessId(env: Record<string, string | undefined>): 
 /**
  * Whether a process is still running.
  *
- * A signal check says a process exists until its parent has reaped it, and the
- * launcher of a portable image reaps late (measured at about seventeen seconds
- * after the process had exited). An exited process holds no lock, port or open
+ * A signal check says a process exists until its parent has reaped it, and a
+ * busy parent can reap late (seen at about seventeen seconds after the process
+ * had exited). An exited process holds no lock, port or open
  * file, so on Linux, where `/proc` is the source of truth, a process whose
  * state is zombie or dead counts as gone. Anything that cannot be classified
  * falls back to the signal check, where a process this user may not signal
