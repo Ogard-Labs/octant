@@ -468,7 +468,23 @@ guidance instead.
   `allow`) with broker-level host allowlists (Henrik decision 2026-08-12); a local egress proxy is
   deferred. Where Seatbelt cannot express a host allowlist, the finer host-level policy is
   enforced by the Octant-owned brokered tools (browser origin allowlist, research backends);
-  this limitation is stated honestly rather than simulated.
+  this limitation is stated honestly rather than simulated. One consequence is an exception to
+  decision 3 below: the output of a command launched under OS-level `allow` does not taint its
+  thread, because the host cannot observe what the command received, so standing approvals stay
+  active after it. The harness tool egress rules remove the exception for native-harness tool
+  processes on `provider-endpoints-only` threads once built; it remains under `unrestricted`,
+  where the person accepted open network.
+- **Harness tool egress rules (approved 2026-10-13, not built).** For native-harness tool processes
+  on a `provider-endpoints-only` thread, a host-owned per-launch forward proxy will replace OS
+  `allow` with a third OS level, `proxied`: Seatbelt opens only the proxy's loopback port and
+  bubblewrap gives a private network namespace an in-capsule forwarder, so direct egress and DNS
+  are denied and every connection is checked against per-host, per-thread or per-Project rules
+  that always expire. Private and loopback destinations refuse under every rule, taint suspends
+  standing rules, and learn mode only proposes. The design, its audit events, failure modes, and
+  phased acceptance live in
+  [`docs/architecture.md`, Harness tool egress rules](../architecture.md#harness-tool-egress-rules);
+  its approval supersedes decision 4 below for those processes only, and decision 4 still
+  describes what runs until the design is built.
 - **Equal-or-narrower child sandboxes.** A child agent's sandbox profile derives from its clamped
   authority, never from its parent's raw profile: a child without `network` gets a no-egress
   profile even if the parent had egress; a child's write scope is its own isolated worktree, never
@@ -538,12 +554,13 @@ the gate.
 
 ### Fixtures
 
-| Fixture                      | Contents                                                                                                                                                                                                                                                                             | Drives abuse case |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------- |
-| `injected-readme`            | A repository/Work root whose `README.md`, file names, and embedded tool-result text contain instruction payloads: fake approval grants, `curl … \| sh`, invented tool-call transcripts, `@plugin`/`$skill` imitations                                                                | AC1               |
-| `rogue-mcp-server`           | An installable extension whose MCP server declares read-only capability but requests shell/filesystem/credential tools, registers a tool named after a core tool, returns oversized and instruction-shaped results, and attempts writes outside its scope                            | AC2               |
-| `scope-widening-child`       | AgentRun requests that ask for wider filesystem/shell/git/network authority than the parent, `full-access` under an approval-gated parent, `project-default` persistence under a session grant, depth 3, a foreign Project root as workspace, and a forged verified-worktree receipt | AC3               |
-| `overreaching-remote-client` | A paired remote principal replaying expired sessions and attempting local-only actions (extension trust, credential write, Project bind, device approval), principal-kind laundering, direct approval of local-confirmation classes, and push/PR without credential clamps           | AC4               |
+| Fixture                      | Contents                                                                                                                                                                                                                                                                                                                                                                          | Drives abuse case |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| `injected-readme`            | A repository/Work root whose `README.md`, file names, and embedded tool-result text contain instruction payloads: fake approval grants, `curl … \| sh`, invented tool-call transcripts, `@plugin`/`$skill` imitations                                                                                                                                                             | AC1               |
+| `rogue-mcp-server`           | An installable extension whose MCP server declares read-only capability but requests shell/filesystem/credential tools, registers a tool named after a core tool, returns oversized and instruction-shaped results, and attempts writes outside its scope                                                                                                                         | AC2               |
+| `scope-widening-child`       | AgentRun requests that ask for wider filesystem/shell/git/network authority than the parent, `full-access` under an approval-gated parent, `project-default` persistence under a session grant, depth 3, a foreign Project root as workspace, and a forged verified-worktree receipt                                                                                              | AC3               |
+| `egress-rule-bypass`         | A fixture, not yet written, for harness tool egress rules: commands that connect directly, resolve names, reach another loopback port or the Octant server through the proxy, use an expired rule or another thread's rule, forge the launch token, rebind a name to a private address, mismatch the TLS server name, and retry a learn-mode refusal hoping it turns into a grant | AC1               |
+| `overreaching-remote-client` | A paired remote principal replaying expired sessions and attempting local-only actions (extension trust, credential write, Project bind, device approval), principal-kind laundering, direct approval of local-confirmation classes, and push/PR without credential clamps                                                                                                        | AC4               |
 
 ### Suite composition
 
@@ -594,6 +611,11 @@ Waived or skipped rows never count as passing (consistent with the Phase 4/16 ev
 - A thread's `external-content-ingested` mark cleared by anything other than a person at a local
   window.
 - Network egress from a tool subprocess whose resolved egress policy was `none`.
+- Under the harness tool egress rules, once built, a connection from a `proxied` launch to a
+  destination no live applicable rule covers, after its rule expired, or to a private address.
+  Applicable means a `call` rule of that launch, a rule of that thread, a rule of its Project, or,
+  for a child, its parent's live rules; none applies while the thread or its parent is tainted,
+  except `call` rules a person confirmed for that launch.
 
 ### Medium
 
@@ -645,6 +667,9 @@ crosses a server authority or sandbox boundary without additional local compromi
 3. **Taint scope:** thread lifetime once any external content was ingested (not per-session).
 4. **Seatbelt host-level egress:** two-level OS enforcement (`none` / `allow`) with broker-level
    host allowlists for V1; no local egress proxy in this release.
+   _Superseded for native-harness tool processes only by the harness tool egress rules, which the
+   maintainer approved on 2026-10-13 and which are not built yet. It still governs every other
+   process._
 
 This document is **approved**.
 
