@@ -477,7 +477,7 @@ guidance instead.
   active after it. The harness tool egress rules remove the exception for native-harness tool
   processes on `provider-endpoints-only` threads once built; it remains under `unrestricted`,
   where the person accepted open network.
-- **Harness tool egress rules (approved 2026-10-13, not built).** For native-harness tool processes
+- **Harness tool egress rules (approved 2026-10-13; decision and host proxy built, not wired).** For native-harness tool processes
   on a `provider-endpoints-only` thread, a host-owned per-launch forward proxy will replace OS
   `allow` with a third OS level, `proxied`: Seatbelt opens only the proxy's loopback port and
   bubblewrap gives a private network namespace an in-capsule forwarder, so direct egress and DNS
