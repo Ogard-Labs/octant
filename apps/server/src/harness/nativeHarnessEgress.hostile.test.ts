@@ -2492,7 +2492,7 @@ describe("native harness tool egress grants and learn mode", () => {
     } = {},
   ) {
     const network = fixtureNetwork(
-      new Map(options.origin === undefined ? [] : [["203.0.113.10", options.origin]]),
+      new Map(options.origin === undefined ? [] : [["93.184.216.10", options.origin]]),
     );
     const started = await host.rules.startLaunch({
       launch: options.launch ?? launchFor(),
@@ -2609,7 +2609,7 @@ describe("native harness tool egress grants and learn mode", () => {
       const host = egressHost();
       expect(grantThreadRule(host, "lan.example.com")).toMatchObject({ kind: "answered" });
       const launch = await startLaunch(host, {
-        resolveAll: async (name) => (name === "lan.example.com" ? ["10.0.0.5"] : ["203.0.113.10"]),
+        resolveAll: async (name) => (name === "lan.example.com" ? ["10.0.0.5"] : ["93.184.216.10"]),
       });
       expect(await ask(launch, "lan.example.com:443")).toBe(
         "octant-egress-refused: private-destination lan.example.com:443",

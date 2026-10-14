@@ -365,7 +365,7 @@ export function clientHello(serverNames: ReadonlyArray<string>, recordSize = 16_
 
 /**
  * The injected resolver and dialer a launch started through the rules store
- * uses: every name answers a documentation address, and each such address is
+ * uses: every name answers one public address, and that address is
  * routed to a loopback fixture.
  */
 export function fixtureNetwork(routes: ReadonlyMap<string, number>): {
@@ -379,7 +379,7 @@ export function fixtureNetwork(routes: ReadonlyMap<string, number>): {
   return {
     resolveAll: async (host) => {
       resolved.push(host);
-      return ["203.0.113.10"];
+      return ["93.184.216.10"];
     },
     connect: ({ address, port }) => {
       dialed.push({ address, port });
