@@ -123,8 +123,8 @@ same User-Agent on every marketplace request).
 search falls back to the in-memory curated entries, and Search skills,
 Inspect, preview, and install refuse rather than calling out. Opening the
 Marketplace tab still does not fetch on its own. Skills already on disk under
-`.agents/skills/` and plugins imported from a local folder never contact a
-registry.
+`.agents/skills/` or `.claude/skills/` and plugins imported from a local folder
+never contact a registry.
 
 Every marketplace and catalog HTTPS request uses User-Agent
 `octant-skill-marketplace` with no app or runtime version — the same
@@ -206,16 +206,18 @@ list is available at a window on the host, not from a paired device.
 
 Skills are prompt-only, non-executable instruction content that still
 requires source and content review before enablement. They are discovered
-from `<directory>/.agents/skills/<skill-name>/SKILL.md` in the working
+from `<directory>/.agents/skills/<skill-name>/SKILL.md` and
+`<directory>/.claude/skills/<skill-name>/SKILL.md` in the working
 directory and each parent up to the Project or repository root, plus the
 user-global `~/.agents/skills/`. Octant does not scan arbitrary files
-elsewhere under `.agents/`.
+elsewhere under `.agents/` or `.claude/`.
 
 Every discovered skill gets a source-qualified identity, content digest,
 provenance, and diagnostic state. New or changed skills are indexed
-**disabled** until review and desired-enabled state allow use. Invocation is
-explicit with **`$skill-name`** in the composer, or `@plugin-name/skill-name`
-for a plugin-contributed skill. Unambiguous discovery must hold; an
+**disabled** until review and desired-enabled state allow use. Only one
+same-named skill can be enabled at a time: enabling one disables the other,
+and `$skill-name` resolves to the single enabled skill (or `@plugin-name/skill-name`
+for a plugin-contributed skill). Unambiguous discovery must hold; an
 ambiguous unqualified invocation opens a chooser or fails closed.
 
 Type `/` in a Chat, Work, or Code composer — including Chat's first message — to find commands and enabled skills. Browser and Computer entries appear only when those capabilities are available.

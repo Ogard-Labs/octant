@@ -931,7 +931,13 @@ const qwenProfile: AcpProviderProfile = {
   },
 };
 
-const FX_WORKSPACE_DENIED_ENTRIES = [".fx.json", ".mcp.json", "AGENTS.md", ".agents"] as const;
+const FX_WORKSPACE_DENIED_ENTRIES = [
+  ".fx.json",
+  ".mcp.json",
+  "AGENTS.md",
+  ".agents",
+  ".claude/skills",
+] as const;
 
 /**
  * fx has no profile-path variable: its settings, sessions, permission rules,
@@ -1060,7 +1066,7 @@ const kimiProfile: AcpProviderProfile = {
     // AGENTS.md. Deny those surfaces in the OS profile so reused login cannot
     // start extra executables; config.toml and credentials stay readable.
     hostDeniedEntries: ["AGENTS.md", "mcp.json", "skills", "plugins", "hooks"],
-    forbiddenRootEntries: [".kimi-code", ".agents"],
+    forbiddenRootEntries: [".kimi-code", ".agents", ".claude/skills"],
     // Authentication lives in the provider-owned Kimi data root. The process
     // still runs inside Octant's project/managed-home Seatbelt boundary and
     // the reviewed command inventory remains the authority for ACP commands.

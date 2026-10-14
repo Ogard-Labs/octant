@@ -1654,6 +1654,7 @@ describe("ACP provider driver profile quirks", () => {
       ".mcp.json",
       "AGENTS.md",
       ".agents",
+      ".claude/skills",
     ]);
   });
 

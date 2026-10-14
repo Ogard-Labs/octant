@@ -106,6 +106,26 @@ describe("structured extension addressing", () => {
       kind: "ambiguous",
       candidates: [skillId, collidingSkillId],
     });
+    const resolvedCollision = catalog({
+      skills: [
+        {
+          ...catalog().skills[0]!,
+          effectiveState: { kind: "blocked", reason: "superseded" },
+        },
+        {
+          ...duplicateSkill,
+          effectiveState: { kind: "effective" },
+        },
+      ],
+    });
+    expect(resolveDraftExtensionReference("$review", resolvedCollision, "draft-4b")).toMatchObject({
+      kind: "selected",
+      selection: {
+        kind: "skill",
+        skillId: collidingSkillId,
+        packageDigest: otherDigest,
+      },
+    });
     expect(
       resolveDraftExtensionReference("@build-tools/server", catalog(), "draft-5"),
     ).toMatchObject({ kind: "blocked", reason: "component-disabled" });

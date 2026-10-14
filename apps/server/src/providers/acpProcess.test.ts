@@ -1188,6 +1188,12 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(profileText).toContain(
       `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
     );
+    expect(profileText).toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
+    );
+    expect(profileText).not.toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude")}"))`,
+    );
   });
 
   it("still denies reused MCP, skills, plugins, and hooks under Full access", async () => {
@@ -1204,6 +1210,7 @@ describe("Kimi Code host-profile extension surfaces", () => {
     const canonicalHostPath = realpathSync(hostAuthenticationPath);
     mkdirSync(join(target.canonicalRoot, ".kimi-code"));
     mkdirSync(join(target.canonicalRoot, ".agents"));
+    mkdirSync(join(target.canonicalRoot, ".claude", "skills"), { recursive: true });
     const launch = await Effect.runPromise(
       makeAcpConfinementLive({
         platform: "darwin",
@@ -1240,6 +1247,47 @@ describe("Kimi Code host-profile extension surfaces", () => {
     );
     expect(profileText).toContain(
       `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
+    );
+    expect(profileText).toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
+    );
+    expect(profileText).not.toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude")}"))`,
+    );
+  });
+
+  it("denies .claude/skills for fx while leaving the rest of .claude readable", async () => {
+    const target = fixture(fx);
+    const managedHome = join(target.canonicalRoot, "managed-fx");
+    mkdirSync(join(target.canonicalRoot, ".claude", "skills"), { recursive: true });
+    const launch = await Effect.runPromise(
+      makeAcpConfinementLive({
+        platform: "darwin",
+        sandboxPath: target.sandboxPath,
+        temporaryDirectory: join(target.canonicalRoot, "tmp"),
+      }).prepare({
+        profile: fx,
+        binaryPath: target.binaryPath,
+        root: target.canonicalRoot,
+        managedHome,
+        mode: "code",
+        executionPolicy: "approval-gated",
+        environment: sanitizeAcpEnvironment(
+          fx,
+          { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+          { managedHome, executionPolicy: "approval-gated" },
+        ),
+      }),
+    );
+    const profileText = seatbeltProfile(launch);
+    expect(profileText).toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
+    );
+    expect(profileText).toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
+    );
+    expect(profileText).not.toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude")}"))`,
     );
   });
 

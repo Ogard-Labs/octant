@@ -2017,7 +2017,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and Plan before any process starts, runs its `ask` mode below Full access
   and `code` only on Full access, authenticates only with a broker-held AI
   Gateway API key, and cannot read or write the Project root's `AGENTS.md`,
-  `.mcp.json`, `.fx.json`, or `.agents`. Image profiles are
+  `.mcp.json`, `.fx.json`, `.agents`, or `.claude/skills`. Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
   Generation itself is a journaled job with adapters for the dedicated image
   kinds `openai-image`, `gemini-native-image`, `bfl-image` (Black Forest Labs),
@@ -3731,14 +3731,33 @@ prompt, schema, tool, route, model, or capability.
   `/` and metadata of every parent folder of those roots, because a runtime
   such as node will not start without them. Metadata names a folder; it does
   not read its contents.
-- Skills are discovered only from valid `.agents/skills/` packages between the
-  working directory and the Project or repository root, plus the user-global
-  `~/.agents/skills/`.
-  Not built yet: discovery also reads an allow-listed set of extra skill roots
-  (for example `.claude/skills`), each entering the same activation ladder as
-  `.agents/skills/` (indexed disabled, then reviewed, then enabled; a
-  discovered skill is never trusted or active because of where it was found).
-  Until this is built, only `.agents/skills/` is read.
+- Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
+  packages between the working directory and the Project or repository root
+  (the closed `PROJECT_SKILL_ROOTS` allow-list), plus the user-global
+  `~/.agents/skills/`. Every root enters the same activation ladder (indexed
+  disabled, then reviewed, then enabled; a discovered skill is never trusted or
+  active because of where it was found) with its own `sourceRef` so
+  same-named skills across roots collide visibly and only one same-named skill
+  can be enabled at a time. Enabling one disables the other through collision
+  selection, and `$name` resolves to the single enabled skill when only one
+  same-named skill is effective. Runtimes never auto-load unreviewed
+  `<project>/.claude/skills` behind Octant's back: `fx` and `kimi-code` deny
+  `<project>/.claude/skills` via `forbiddenRootEntries` while leaving the rest
+  of `<project>/.claude` readable; `claude` (Agent SDK `settingSources: []`,
+  `skills: []`), `opencode` (`OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1`,
+  `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`, `OPENCODE_DISABLE_PROJECT_CONFIG=1` /
+  `OPENCODE_PURE=1`, and `skill` permission denied), `kilo`
+  (`KILO_DISABLE_EXTERNAL_SKILLS=1`, `KILO_DISABLE_PROJECT_CONFIG=1`,
+  `KILO_PURE=1`), `devin` (`read_config_from.claude: false`,
+  `read_config_from.agents_standard: false`), `mistral-vibe`
+  (`VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`,
+  `VIBE_INCLUDE_PROJECT_CONTEXT="false"`), `pi` (`--no-skills`), and `oh-my-pi`
+  (`--no-skills`) switch off external/project skill loading by launch flag, env,
+  or config; and `codex`, direct HTTP/image drivers (`openai-compatible`,
+  `anthropic-compatible`, `azure-foundry`, `ollama`, `openai-image`,
+  `gemini-native-image`, `bfl-image`, `ideogram-image`), and the remaining ACP
+  profiles (`grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`) do not
+  auto-load `<project>/.claude/skills`.
 - Marketplace network is on user action: curated catalog search is in-memory;
   inspect/install fetches the pinned GitHub tree; standalone skill search
   queries skills.sh and npm with the typed text; Agent Plugins search queries

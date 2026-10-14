@@ -3,6 +3,11 @@ import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import type { SkillMarketplaceEntry } from "@octant/contracts/extension-rpc";
 import type { ExtensionPackageManifest, StandaloneSkillRecord } from "@octant/contracts/extensions";
 import type { StandaloneSkillActivationState } from "@octant/contracts/shell";
+import { admitApprovedProfileSkills } from "@octant/domain/agent-profile-policy";
+import {
+  resolveDraftExtensionReference,
+  type ExtensionAddressingCatalog,
+} from "@octant/plugin-host";
 import {
   calculateExtensionPackageDigest,
   type ExtensionArchiveEntry,
@@ -476,5 +481,184 @@ describe("standalone skill activation", () => {
     );
     expect(selected?.effectiveState).toEqual({ kind: "effective" });
     expect(superseded?.effectiveState).toEqual({ kind: "blocked", reason: "superseded" });
+
+    const projectQualifiedId = String(projectSkill.skill.qualifiedId);
+    await service.execute({
+      kind: "select-skill-collision",
+      name: "colliding",
+      qualifiedId: projectQualifiedId,
+    });
+
+    const switched = service.snapshot(baseSnapshot);
+    const newlySelected = switched.skills?.find(
+      (candidate) => String(candidate.skill.qualifiedId) === projectQualifiedId,
+    );
+    const previouslySelected = switched.skills?.find(
+      (candidate) => String(candidate.skill.qualifiedId) === qualifiedId,
+    );
+    expect(newlySelected?.desiredEnabled).toBe(true);
+    expect(newlySelected?.effectiveState).toEqual({ kind: "effective" });
+    expect(previouslySelected?.desiredEnabled).toBe(false);
+    expect(previouslySelected?.effectiveState).toEqual({ kind: "blocked", reason: "superseded" });
+  });
+
+  it("disables the first same-named skill when a second project root is enabled so Chat/Work, Code, and Canvas see only one", async () => {
+    const agentsDigest = `sha256:${"3".repeat(64)}` as never;
+    const claudeDigest = `sha256:${"4".repeat(64)}` as never;
+    const agentsSkill: StandaloneSkillRecord = {
+      ...discoveredSkill("deploy", "# agents deploy"),
+      displayName: "Agents deploy",
+      source: { kind: "agents-skills-directory", sourceRef: "project:project-1:working" as never },
+      skill: {
+        ...discoveredSkill("deploy", "# agents deploy").skill,
+        digest: agentsDigest,
+        qualifiedId:
+          `agents-skills-directory:project:project-1:working:deploy:${agentsDigest}` as never,
+      },
+    };
+    const claudeSkill: StandaloneSkillRecord = {
+      ...discoveredSkill("deploy", "# claude deploy"),
+      displayName: "Secondary deploy",
+      source: {
+        kind: "agents-skills-directory",
+        sourceRef: "project:project-1:claude:working" as never,
+      },
+      skill: {
+        ...discoveredSkill("deploy", "# claude deploy").skill,
+        digest: claudeDigest,
+        qualifiedId:
+          `agents-skills-directory:project:project-1:claude:working:deploy:${claudeDigest}` as never,
+      },
+    };
+    const { store } = memoryActivationStore();
+    const service = new StandaloneSkillService({
+      discovery: {
+        snapshot: () => ({ skills: [agentsSkill, claudeSkill], collisions: [] }),
+        reconcile: async () => ({ skills: [agentsSkill, claudeSkill], collisions: [] }),
+      },
+      lifecycle: {
+        snapshot: () => baseSnapshot,
+        install: async () => baseSnapshot,
+        update: async () => baseSnapshot,
+        uninstall: async () => baseSnapshot,
+      },
+      activationStore: store,
+    });
+
+    await service.reconcile();
+    const agentsId = String(agentsSkill.skill.qualifiedId);
+    const claudeId = String(claudeSkill.skill.qualifiedId);
+
+    // Both start disabled behind the activation ladder.
+    expect(
+      service
+        .snapshot(baseSnapshot)
+        .skills?.filter((candidate) => candidate.skill.name === "deploy")
+        .map((candidate) => candidate.effectiveState),
+    ).toEqual([
+      { kind: "blocked", reason: "untrusted" },
+      { kind: "blocked", reason: "untrusted" },
+    ]);
+
+    // Enable the first skill through the activation ladder.
+    await service.execute({ kind: "review-skill", qualifiedId: agentsId, digest: agentsDigest });
+    await service.execute({
+      kind: "trust-skill-source",
+      qualifiedId: agentsId,
+      digest: agentsDigest,
+      trusted: true,
+    });
+    await service.execute({
+      kind: "set-skill-desired",
+      qualifiedId: agentsId,
+      digest: agentsDigest,
+      desired: true,
+    });
+
+    const firstEnabled = service.snapshot(baseSnapshot);
+    expect(
+      firstEnabled.skills?.find((candidate) => String(candidate.skill.qualifiedId) === agentsId)
+        ?.effectiveState,
+    ).toEqual({ kind: "effective" });
+
+    // Enabling the second same-named skill disables the first.
+    await service.execute({ kind: "review-skill", qualifiedId: claudeId, digest: claudeDigest });
+    await service.execute({
+      kind: "trust-skill-source",
+      qualifiedId: claudeId,
+      digest: claudeDigest,
+      trusted: true,
+    });
+    await service.execute({
+      kind: "set-skill-desired",
+      qualifiedId: claudeId,
+      digest: claudeDigest,
+      desired: true,
+    });
+
+    const secondEnabled = service.snapshot(baseSnapshot);
+    const skills = secondEnabled.skills ?? [];
+    const firstAfter = skills.find((candidate) => String(candidate.skill.qualifiedId) === agentsId);
+    const secondAfter = skills.find(
+      (candidate) => String(candidate.skill.qualifiedId) === claudeId,
+    );
+    expect(firstAfter?.desiredEnabled).toBe(false);
+    expect(firstAfter?.effectiveState).toEqual({ kind: "blocked", reason: "superseded" });
+    expect(secondAfter?.desiredEnabled).toBe(true);
+    expect(secondAfter?.effectiveState).toEqual({ kind: "effective" });
+
+    // Chat/Work resolveDraftExtensionReference (resolveSkill) sees only the active skill.
+    const addressingCatalog: ExtensionAddressingCatalog = {
+      epoch: `sha256:${"e".repeat(64)}` as never,
+      plugins: [],
+      skills: skills.map((candidate) => ({
+        skillId: candidate.skill.qualifiedId,
+        name: candidate.skill.name,
+        label: candidate.displayName,
+        packageDigest: candidate.skill.digest,
+        effectiveState: candidate.effectiveState,
+      })),
+    };
+    expect(
+      resolveDraftExtensionReference("$deploy", addressingCatalog, "draft-deploy"),
+    ).toMatchObject({
+      kind: "selected",
+      label: "Secondary deploy",
+      selection: {
+        kind: "skill",
+        skillId: claudeId,
+        packageDigest: claudeDigest,
+      },
+    });
+
+    // Code admitApprovedProfileSkills sees only the active skill.
+    expect(
+      admitApprovedProfileSkills({
+        approvedSkillIds: ["deploy"],
+        skills: skills.map((candidate) => ({
+          qualifiedId: String(candidate.skill.qualifiedId),
+          name: candidate.skill.name,
+          displayName: candidate.displayName,
+          effective: candidate.effectiveState.kind === "effective",
+        })),
+      }),
+    ).toEqual([
+      {
+        qualifiedId: claudeId,
+        name: "deploy",
+        displayName: "Secondary deploy",
+      },
+    ]);
+
+    // Canvas refresh skill list sees only the active deploy skill.
+    const canvasSkills = skills.filter(
+      (candidate) =>
+        candidate.skill.name === "deploy" &&
+        candidate.desiredEnabled &&
+        candidate.effectiveState.kind === "effective",
+    );
+    expect(canvasSkills.map((candidate) => String(candidate.skill.qualifiedId))).toEqual([
+      claudeId,
+    ]);
   });
 });

@@ -81,4 +81,90 @@ describe("bounded standalone skill discovery", () => {
       result.skills.find((entry) => entry.skill.name === "escape")?.skill.diagnostic?.code,
     ).toBe("symlink-package");
   });
+
+  it("discovers .claude/skills in bounded project ancestry while keeping .agents/skills keys unchanged and ignoring non-allowlisted roots", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-skill-discovery-claude-"));
+    directories.push(root);
+    const projectRoot = join(root, "project");
+    const workingDirectory = join(projectRoot, "packages", "app");
+    const globalRoot = join(root, "global", ".agents", "skills");
+    await mkdir(workingDirectory, { recursive: true });
+    await mkdir(join(projectRoot, ".agents", "skills", "shared"), { recursive: true });
+    await writeFile(join(projectRoot, ".agents", "skills", "shared", "SKILL.md"), "# agents\n");
+
+    const baselineService = new SkillDiscoveryService({
+      roots: {
+        resolve: async () => [
+          {
+            workingDirectory,
+            projectRoot,
+            projectRef: "project:fixture",
+            userGlobalSkillsRoot: globalRoot,
+          },
+        ],
+      },
+    });
+    const baseline = await baselineService.reconcile();
+    const baselineAgentsKey = baseline.skills.find((entry) => entry.skill.name === "shared")?.skill
+      .qualifiedId;
+    expect(baselineAgentsKey).toBeDefined();
+
+    await mkdir(join(projectRoot, ".claude", "skills", "shared"), { recursive: true });
+    await writeFile(join(projectRoot, ".claude", "skills", "shared", "SKILL.md"), "# claude\n");
+    await mkdir(join(workingDirectory, ".claude", "skills", "claude-local"), { recursive: true });
+    await writeFile(
+      join(workingDirectory, ".claude", "skills", "claude-local", "SKILL.md"),
+      "# local\n",
+    );
+    await symlink(join(root, "outside"), join(projectRoot, ".claude", "skills", "claude-escape"));
+    await mkdir(join(root, "outside-root", "escaped-skill"), { recursive: true });
+    await writeFile(join(root, "outside-root", "escaped-skill", "SKILL.md"), "# escaped\n");
+    await mkdir(join(projectRoot, "packages", ".claude"), { recursive: true });
+    await symlink(join(root, "outside-root"), join(projectRoot, "packages", ".claude", "skills"));
+    await mkdir(join(projectRoot, ".cursor", "skills", "unlisted"), { recursive: true });
+    await writeFile(join(projectRoot, ".cursor", "skills", "unlisted", "SKILL.md"), "# no\n");
+    await mkdir(join(root, "global", ".claude", "skills", "global-claude"), { recursive: true });
+    await writeFile(
+      join(root, "global", ".claude", "skills", "global-claude", "SKILL.md"),
+      "# no\n",
+    );
+
+    const result = await baselineService.reconcile();
+    const agentsShared = result.skills.find(
+      (entry) =>
+        entry.skill.name === "shared" &&
+        entry.source.kind === "agents-skills-directory" &&
+        entry.source.sourceRef === "project:project:fixture:root",
+    );
+    const claudeShared = result.skills.find(
+      (entry) =>
+        entry.skill.name === "shared" &&
+        entry.source.kind === "agents-skills-directory" &&
+        entry.source.sourceRef === "project:project:fixture:claude:root",
+    );
+    const claudeLocal = result.skills.find((entry) => entry.skill.name === "claude-local");
+    const claudeEscape = result.skills.find((entry) => entry.skill.name === "claude-escape");
+
+    expect(agentsShared?.skill.qualifiedId).toBe(baselineAgentsKey);
+    expect(claudeShared).toBeDefined();
+    expect(claudeShared?.skill.qualifiedId).not.toBe(baselineAgentsKey);
+    expect(claudeShared?.desiredEnabled).toBe(false);
+    expect(claudeShared?.effectiveState).toEqual({ kind: "blocked", reason: "review-required" });
+    expect(claudeLocal?.source).toEqual({
+      kind: "agents-skills-directory",
+      sourceRef: "project:project:fixture:claude:working",
+    });
+    expect(claudeLocal?.desiredEnabled).toBe(false);
+    expect(claudeEscape?.skill.available).toBe(false);
+    expect(claudeEscape?.skill.diagnostic?.code).toBe("symlink-package");
+    expect(result.skills.some((entry) => entry.skill.name === "escaped-skill")).toBe(false);
+    expect(result.skills.some((entry) => entry.skill.name === "unlisted")).toBe(false);
+    expect(result.skills.some((entry) => entry.skill.name === "global-claude")).toBe(false);
+    expect(result.collisions).toEqual([
+      {
+        name: "shared",
+        candidates: [claudeShared?.skill.qualifiedId, agentsShared?.skill.qualifiedId],
+      },
+    ]);
+  });
 });

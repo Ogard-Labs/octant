@@ -199,12 +199,17 @@ export class StandaloneSkillService {
           [key]: { ...existing, reviewed: true, trusted: command.trusted },
         };
         break;
-      case "set-skill-desired":
+      case "set-skill-desired": {
+        const updated = command.desired
+          ? this.#disableOtherSameNamedSkills(key, this.#skillNameOf(key))
+          : {};
         this.#activations = {
           ...this.#activations,
+          ...updated,
           [key]: { ...existing, desiredEnabled: command.desired },
         };
         break;
+      }
       case "select-skill-collision": {
         const selectedKey = command.qualifiedId;
         const selected = this.#activations[selectedKey] ?? {
@@ -212,12 +217,7 @@ export class StandaloneSkillService {
           trusted: false,
           desiredEnabled: false,
         };
-        const updated: Record<string, StandaloneSkillActivationState> = {};
-        for (const [candidateKey, candidate] of Object.entries(this.#activations)) {
-          if (candidateKey !== selectedKey && candidateKey.startsWith(`${command.name}:`)) {
-            updated[candidateKey] = { ...candidate, desiredEnabled: false };
-          }
-        }
+        const updated = this.#disableOtherSameNamedSkills(selectedKey, command.name);
         this.#activations = {
           ...this.#activations,
           ...updated,
@@ -228,6 +228,28 @@ export class StandaloneSkillService {
     }
     await this.#activationStore.write(this.#activations);
     return this.snapshot(this.#lifecycle.snapshot());
+  }
+
+  #skillNameOf(qualifiedId: string): string | undefined {
+    const record = [...this.#discovery.snapshot().skills, ...bundledSkillRecords()].find(
+      (candidate) => String(candidate.skill.qualifiedId) === qualifiedId,
+    );
+    if (record !== undefined) return record.skill.name;
+    return /:([^:]+):(?:sha256:)?[0-9a-f]{64}$/.exec(qualifiedId)?.[1];
+  }
+
+  #disableOtherSameNamedSkills(
+    selectedKey: string,
+    name: string | undefined,
+  ): Readonly<Record<string, StandaloneSkillActivationState>> {
+    if (name === undefined) return {};
+    const updated: Record<string, StandaloneSkillActivationState> = {};
+    for (const [candidateKey, candidate] of Object.entries(this.#activations)) {
+      if (candidateKey !== selectedKey && this.#skillNameOf(candidateKey) === name) {
+        updated[candidateKey] = { ...candidate, desiredEnabled: false };
+      }
+    }
+    return updated;
   }
 
   #applyActivation(record: StandaloneSkillRecord): StandaloneSkillRecord {

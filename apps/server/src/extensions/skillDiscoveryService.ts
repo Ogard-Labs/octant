@@ -15,6 +15,10 @@ import { sourceQualifiedSkillId, buildSkillCatalog, type SkillCatalog } from "@o
 
 const DEFAULT_MAX_CONTENT_BYTES = 256 * 1024;
 const skillNamePattern = /^[a-z][a-z0-9-]{0,63}$/;
+export const PROJECT_SKILL_ROOTS = [
+  { segments: [".agents", "skills"] as const, sourcePrefix: "" },
+  { segments: [".claude", "skills"] as const, sourcePrefix: "claude:" },
+] as const;
 
 export interface SkillDiscoveryRootSet {
   readonly workingDirectory: string;
@@ -79,7 +83,9 @@ export class SkillDiscoveryService {
       ) {
         let current = workingDirectory;
         while (true) {
-          await this.#watchDirectory(join(current, ".agents", "skills"), seen, boundRoot);
+          for (const rootEntry of PROJECT_SKILL_ROOTS) {
+            await this.#watchDirectory(join(current, ...rootEntry.segments), seen, boundRoot);
+          }
           if (current === boundRoot) break;
           const parent = dirname(current);
           if (parent === current || !isWithin(boundRoot, parent)) break;
@@ -139,20 +145,21 @@ export class SkillDiscoveryService {
     let current = workingDirectory;
     let depth = 0;
     while (true) {
-      records.push(
-        ...(await this.#scanSkillsDirectory(
-          join(current, ".agents", "skills"),
-          current === boundRoot
-            ? `project:${roots.projectRef}:root`
-            : roots.scope === undefined
-              ? `project:${roots.projectRef}:${depth === 0 ? "working" : `parent-${depth}`}`
-              : `project:${roots.projectRef}:thread:${roots.scope.threadRef}:${
-                  depth === 0 ? "working" : `parent-${depth}`
-                }`,
-          boundRoot,
-          current === boundRoot ? undefined : roots.scope,
-        )),
-      );
+      const position = depth === 0 ? "working" : `parent-${depth}`;
+      for (const rootEntry of PROJECT_SKILL_ROOTS) {
+        records.push(
+          ...(await this.#scanSkillsDirectory(
+            join(current, ...rootEntry.segments),
+            current === boundRoot
+              ? `project:${roots.projectRef}:${rootEntry.sourcePrefix}root`
+              : roots.scope === undefined
+                ? `project:${roots.projectRef}:${rootEntry.sourcePrefix}${position}`
+                : `project:${roots.projectRef}:thread:${roots.scope.threadRef}:${rootEntry.sourcePrefix}${position}`,
+            boundRoot,
+            current === boundRoot ? undefined : roots.scope,
+          )),
+        );
+      }
       if (current === boundRoot) break;
       const parent = dirname(current);
       if (parent === current || !isWithin(boundRoot, parent)) break;
