@@ -536,6 +536,9 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
                 : "The continuation was not admitted.",
             );
       } catch (error) {
+        // A compaction that began while the prompt was being staged refuses the
+        // turn; the continuation still waits it out.
+        if (deps.code.compacting?.(threadId) === true) return COMPACTION_DEFERRAL;
         return refused(refusalDetail(error));
       }
     },

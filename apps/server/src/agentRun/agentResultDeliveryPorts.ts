@@ -155,9 +155,11 @@ export function createCodeAgentResultDeliveryPort(
       }
       // The result waits the compaction out rather than being spent on a
       // refused turn; it is offered again when the compaction ends.
-      if (input.compacting?.(thread.id) === true) {
-        return { kind: "deferred", detail: "The parent Code thread's session is being compacted." };
-      }
+      const compactionDeferral = {
+        kind: "deferred",
+        detail: "The parent Code thread's session is being compacted.",
+      } as const;
+      if (input.compacting?.(thread.id) === true) return compactionDeferral;
       try {
         const prompt = await input.stageEvidence(
           ROUTINE_HOST_SCOPE_ID,
@@ -184,6 +186,9 @@ export function createCodeAgentResultDeliveryPort(
                   : "The delivery was not admitted.",
             };
       } catch (error) {
+        // A compaction that began while the result was being staged refuses
+        // the turn; the result still waits it out.
+        if (input.compacting?.(thread.id) === true) return compactionDeferral;
         return { kind: "refused", detail: refusalDetail(error) };
       }
     },

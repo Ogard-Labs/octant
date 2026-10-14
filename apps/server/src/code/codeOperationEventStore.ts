@@ -26,6 +26,7 @@ import {
   type CodeThreadId,
   type ProviderContextBreakdown,
   type ProviderInstanceId,
+  type ProviderSessionId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
@@ -310,12 +311,14 @@ export class CodeOperationEventStore {
   }
 
   /**
-   * How full the provider session's window was at the thread's latest usage
+   * How full a provider session's window was at the thread's latest usage
    * report: the occupancy the provider reported, or else the input its last
-   * request carried, which is what the window held then. Undefined when no
-   * turn reported usage or the record does not decode.
+   * request carried, which is what the window held then. Undefined when that
+   * report came from a turn on another session (a switch, or a fresh session
+   * whose turns reported nothing yet), when no turn reported usage, or when a
+   * record does not decode.
    */
-  latestWindowOccupancy(threadId: CodeThreadId): number | undefined {
+  latestWindowOccupancy(threadId: CodeThreadId, sessionId: ProviderSessionId): number | undefined {
     try {
       const envelope = this.#journal.latestThreadEvents({
         aggregateType: "code-operation",
@@ -331,6 +334,20 @@ export class CodeOperationEventStore {
         return undefined;
       const frame = decodeCodeOperationEventFrame(envelope.payload);
       if (String(frame.threadId) !== String(threadId) || frame.event.kind !== "usage")
+        return undefined;
+      const sessionReady = this.#journal
+        .latestThreadEvents({
+          aggregateType: "code-operation",
+          threadId: String(threadId),
+          kind: "provider-session-ready",
+          limit: MAX_SESSION_READY_RECORDS,
+        })
+        .map((ready) => decodeCodeOperationEventFrame(ready.payload))
+        .find((ready) => String(ready.operationId) === String(frame.operationId));
+      if (
+        sessionReady?.event.kind !== "provider-session-ready" ||
+        String(sessionReady.event.sessionId) !== String(sessionId)
+      )
         return undefined;
       return frame.event.contextTokens ?? frame.event.inputTokens;
     } catch {

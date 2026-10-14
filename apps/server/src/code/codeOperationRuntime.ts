@@ -1337,7 +1337,12 @@ export function createCodeOperationRuntime(
     turnInProgress: (threadId) => startingTurns.has(threadId) || turns.holdsTurn(threadId),
     compactionSessions: {
       exists: (threadId) => compactableSession(decodeCodeThreadId(threadId)) !== undefined,
-      occupancy: (threadId) => events.latestWindowOccupancy(decodeCodeThreadId(threadId)),
+      occupancy: (threadId) => {
+        const found = compactableSession(decodeCodeThreadId(threadId));
+        return found === undefined
+          ? undefined
+          : events.latestWindowOccupancy(found.thread.id, found.sessionId);
+      },
       open: async (threadId, windowId) => {
         if (windowId === undefined) return undefined;
         const found = compactableSession(decodeCodeThreadId(threadId));
