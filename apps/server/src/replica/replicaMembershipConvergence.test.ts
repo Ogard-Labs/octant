@@ -421,6 +421,7 @@ function makeComputer(store: LaggedStore, name: string, rng: Rng): Computer {
     state: () => projection.state(),
     localHostId: LOCAL_HOST_ID,
     clock: () => NOW,
+    syncOff: async () => undefined,
   });
   return { name, service, projection, credentials, stolen: false };
 }

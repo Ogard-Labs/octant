@@ -11132,9 +11132,7 @@ export function startOctantServer(
       clock: () => Date.now(),
       restoreStopped: () => replicaArtifactSync.service?.restoreProgress()?.state === "stopped",
       // A computer that left its replica says so on the switch too.
-      syncOff: async () => {
-        await replicaStoreSettingsService.turnSyncOff();
-      },
+      syncOff: () => replicaStoreSettingsService.turnSyncOff(),
     });
     // Publish and pull for artifacts. With sync off, or no identity in a
     // replica, nothing is queued and no store is called; a Code thread under

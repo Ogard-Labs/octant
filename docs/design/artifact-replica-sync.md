@@ -190,11 +190,15 @@ them in.
   the join reads them again. Revoking needs good standing and a
   subject this computer brought in, directly or through others; a sibling
   or cousin is revoked from a shared ancestor, the founder at worst.
-  Revoke reads the store first, then cuts at the highest sequence of the
-  subject's valid signed entries this computer holds or just read,
-  artifact entries included, so what the subject already signed keeps
-  counting; a store that cannot be read leaves that cut at the membership
-  records this computer already holds, and the result says so. A revoke
+  Revoke reads the store first, then cuts at the end of the subject's
+  unbroken run of slots from its first: each slot the store listed, or
+  this computer holds or settled, artifact entries included, so what the
+  subject already signed keeps counting. A slot missing from the run ends
+  it, so a stolen key cannot fill a hole below the cut after the
+  revocation; a slot the store does not list yet (a lagging sync client)
+  moves the cut earlier, never later. A store that cannot be read leaves
+  that cut at the slots this computer already holds or settled, and the
+  result says so. A revoke
   preview returns that cut, the computers the subject brought in that are
   not revoked yet, each with its parent and the parent's sequence of its
   approval, and the revocations the subject itself already wrote, each at
@@ -238,8 +242,12 @@ them in.
   in the store and keeps counting, as a revoked computer's entries up to
   its cut do. A joining computer, a revoked one, or one cut out above it
   writes nothing when it leaves: no record of it would count. The founder
-  may leave too; the computers it approved stay, and none of them can then
-  be revoked, the same as when the founder is lost.
+  may leave too (maintainer decision, 2026-10-14). The cost: the computers
+  it approved directly can never be revoked afterwards, since only a strict
+  ancestor revokes and the founder was their only one, and no computer can
+  take over as founder; the replica keeps working for everyone else, the
+  same as when the founder is lost. Refusing it would instead leave the
+  founder unable ever to change its store.
 - **Leaving with the store out of reach.** When the record cannot be
   published - sync is off (`not-configured`), the store does not take it,
   or the key cannot sign - leaving is refused and nothing changes: the
@@ -250,7 +258,8 @@ them in.
   and a write into a store the person may be leaving because they no
   longer trust it. For a store that is gone for good, the person can
   leave `withoutStore` after a second confirmation; nothing is written, and
-  the other computers keep listing this one until an ancestor revokes it.
+  the other computers keep listing this one until an ancestor revokes it;
+  a founder that leaves this way stays listed for good.
   Its key is deleted either way, so nothing new can be signed with it here.
 - **Writing.** A command that publishes journals the signed entry before
   either file is written, writes the signature and then the entry, and
@@ -276,7 +285,15 @@ them in.
   listing does not end inside its bound is refused rather than read in
   part. Approvals a stolen key made before the revoker read the store
   still count under the default cut, which is why the revoke preview lists
-  them.
+  them. The default cut closes the holes the revoker can see in the
+  subject's own slots, but a revocation names only its cut, not the slots
+  the revoker saw. A slot below the cut whose file the revoker counted as
+  present without reading it as the subject's - another writer's file, or
+  one the sync client had not downloaded - can be replaced by someone
+  holding the subject's key and write access to the store, and a computer
+  that reads the replacement first counts it, membership records
+  included. Committing a revocation to the slot set its writer saw is a
+  follow-up.
 - **Keys.** Device signing keys live per instance in their own namespace of
   the host credential store - a separate macOS Keychain service,
   `app.octant.replica-device-keys.v1`, or a separate Secret Service

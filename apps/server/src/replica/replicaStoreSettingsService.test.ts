@@ -775,6 +775,25 @@ describe("replica store settings", () => {
     expect(existsSync(join(first, "Octant Sync", String(founded.instanceId), "2.json"))).toBe(true);
   });
 
+  it("refuses to report sync off when another window changed the settings first", async () => {
+    const opened = connection();
+    const first = host(opened);
+    const chosen = expectView(
+      await first.settings.chooseFolder({ folder: syncFolder(), expectedVersion: 0 }),
+    );
+    await first.settings.setSync({ syncOn: true, expectedVersion: chosen.version });
+    // A second host on the same journal read the settings before the first changed them again.
+    const second = host(opened);
+    const off = expectView(
+      await first.settings.setSync({ syncOn: false, expectedVersion: chosen.version + 1 }),
+    );
+    await first.settings.setSync({ syncOn: true, expectedVersion: off.version });
+
+    await expect(second.settings.turnSyncOff()).rejects.toThrow("stale-version");
+    await first.settings.turnSyncOff();
+    expect(first.settings.settings().syncOn).toBe(false);
+  });
+
   it("lets a replica member rotate its bucket's key pair but not move the bucket", async () => {
     const server = bucketServer();
     const credentials = memoryCredentials();

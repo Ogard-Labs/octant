@@ -260,6 +260,7 @@ function computer(
     state: () => membershipProjection.state(),
     localHostId: LOCAL_HOST_ID,
     clock: () => Date.parse(NOW),
+    syncOff: () => settings.turnSyncOff(),
     restoreStopped: () => {
       const local = membershipProjection.state().local;
       return (
@@ -915,6 +916,50 @@ describe("artifact sync", () => {
       .state()
       .members.find((member) => member.displayName === laptop.name);
     expect(laptopNode).toMatchObject({ left: true });
+  });
+
+  it("cuts a revoked computer below a slot it left empty, so what it writes there later is refused", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    const local = laptop.membershipProjection.state().local;
+    if (local === undefined) throw new Error("no identity");
+    const writer = (sequence: number) => ({
+      keys: laptop.disk.deviceKeys,
+      instanceId: String(local.instanceId),
+      displayName: local.displayName,
+      publicKey: local.publicKey,
+      sequence,
+    });
+    // The laptop's key writes at 4 and leaves 3 empty.
+    await writeArtifactEntry(
+      memory.files,
+      writer(4),
+      canvasVersion({ canvasId: ids.second, versionId: ids.v2a, sequence: 1, text: "Above" }),
+    );
+    const revoked = expectKind(
+      await studio.membership.execute({ kind: "revoke", subject: local.instanceId }),
+      "revoked",
+    );
+    expect(revoked.entry.cut).toBe(2);
+
+    // Written into the empty slot after the revocation: past the cut.
+    await writeArtifactEntry(
+      memory.files,
+      writer(3),
+      canvasVersion({ canvasId: ids.third, versionId: ids.v2b, sequence: 1, text: "Filled in" }),
+    );
+    const pulled = expectKind(await studio.sync.pull(), "pulled");
+    expect(pulled.refused).toContainEqual({
+      instanceId: local.instanceId,
+      sequence: 3,
+      reason: "revoked-instance",
+    });
+    expect(studio.artifactProjection.state().artifact(ids.third)).toBeUndefined();
+    expect(studio.artifactProjection.state().artifact(ids.second)).toBeUndefined();
   });
 
   it("journals a refused pull once and holds no content from it", async () => {

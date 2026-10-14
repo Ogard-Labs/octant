@@ -600,6 +600,30 @@ describe("SyncMembershipSections", () => {
     expect(await screen.findByText("Left the replica. Sync is off.")).toBeVisible();
   });
 
+  it("does not promise a revoke for the computer that set up sync when it leaves without the store", async () => {
+    const founder = view({
+      thisComputer: { kind: "founder", instanceId: studio, displayName: "Studio Mac" },
+      members: founderMembers,
+    });
+    const { fake } = client(founder, () => ({
+      kind: "store-failed",
+      message: "The replica store did not take the entry.",
+    }));
+    renderSections(fake);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Leave…" }));
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Leave the replica?" })).getByRole(
+        "button",
+        { name: "Leave replica" },
+      ),
+    );
+    await user.click(await screen.findByRole("button", { name: "Leave without telling them…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Leave without telling them?" });
+    expect(within(dialog).getByText(/none of them can revoke it/)).toBeVisible();
+    expect(within(dialog).queryByText(/until one of them revokes it/)).toBeNull();
+  });
+
   it("lists a computer that left as left, not revoked", async () => {
     const { fake } = client(
       view({

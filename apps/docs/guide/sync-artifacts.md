@@ -243,7 +243,8 @@ remove the computer that brought it in.
 whether it was revoked or left. **Revoke…** appears only on computers yours brought
 in. Before it revokes, your computer reads the store, so what the revoked
 computer already signed - artifact versions and approvals alike - keeps
-counting and the computers it brought in stay. The revoke screen lists those
+counting and the computers it brought in stay. Counting stops at the first
+place it skipped, so it cannot fill that gap later. The revoke screen lists those
 computers, so you can revoke them in the same step, for example when the
 computer was stolen, and it lists the revocations the computer already wrote.
 You can also stop counting before the first of those revocations; computers
@@ -291,7 +292,7 @@ If the store cannot be reached, or sync is off, leaving stops and nothing
 changes, so you can try again once the store is back. If the store is gone
 for good, **Leave without telling them…** leaves without writing the record;
 your other computers then keep listing this computer until one of them
-revokes it. A computer that only asked to join, or that was revoked, writes
+revokes it, or for good if it is the computer that set up the store. A computer that only asked to join, or that was revoked, writes
 nothing when it leaves.
 
 ## Sync status

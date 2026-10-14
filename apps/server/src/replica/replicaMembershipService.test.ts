@@ -147,6 +147,8 @@ function computer(options: {
   const credentials = memoryCredentialStore();
   let uuid = 0;
   const power = { stopAfter: options.stopAfter, stopped: false };
+  /** Settings › Sync's switch as leaving sees it: each refusal fails one try. */
+  const syncSwitch = { calls: 0, refusals: 0 };
   const selection = options.store;
   const service = new ReplicaMembershipService({
     store: typeof selection === "function" ? selection : () => selection,
@@ -170,6 +172,13 @@ function computer(options: {
     state: () => projection.state(),
     localHostId: LOCAL_HOST_ID,
     clock: options.now ?? (() => NOW),
+    syncOff: async () => {
+      syncSwitch.calls += 1;
+      if (syncSwitch.refusals > 0) {
+        syncSwitch.refusals -= 1;
+        throw new Error("Sync could not be turned off: stale-version.");
+      }
+    },
   });
   const events = () =>
     journal
@@ -185,7 +194,17 @@ function computer(options: {
     power.stopAfter = undefined;
     power.stopped = false;
   };
-  return { service, projection, journal, connection, credentials, events, id, restart };
+  return {
+    service,
+    projection,
+    journal,
+    connection,
+    credentials,
+    events,
+    id,
+    restart,
+    syncSwitch,
+  };
 }
 
 /** A journal that refuses every append after the named event, as a host that stopped would. */
@@ -603,6 +622,25 @@ describe("replica membership service", () => {
       "revoked",
     );
     expect(revoked.entry.cut).toBe(3);
+  });
+
+  it("cuts by default at the end of the revoked computer's unbroken run, below a slot it left empty", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    // South leaves its sequence 3 empty and writes at 4.
+    await writeRecord(store, south.credentials, artifactEntry(south, 4));
+    const preview = expectKind(
+      await north.service.execute({ kind: "revoke-preview", subject: south.id() }),
+      "revoke-preview",
+    );
+    expect(preview.cut).toBe(2);
+    expect(
+      await north.service.execute({ kind: "revoke", subject: south.id(), cut: 3 }),
+    ).toMatchObject({ kind: "refused", reason: "invalid-cut" });
+    expect(
+      expectKind(await north.service.execute({ kind: "revoke", subject: south.id() }), "revoked")
+        .entry.cut,
+    ).toBe(2);
   });
 
   it("shows the revocations a computer already wrote, so its cut can move before them", async () => {
@@ -1066,6 +1104,7 @@ describe("replica membership service", () => {
       state: () => north.projection.state(),
       localHostId: LOCAL_HOST_ID,
       clock: () => NOW,
+      syncOff: async () => undefined,
     });
     const outcome = await reader.execute({ kind: "pull" });
     expect(outcome).toMatchObject({ kind: "refused", reason: "store-unavailable" });
@@ -1708,6 +1747,78 @@ describe("leaving a replica", () => {
     locked.delete = remove;
     await south.service.execute({ kind: "pull" });
     expect(await south.credentials.has(String(southId))).toBe(false);
+    expect(south.projection.state().unfinishedLeaves).toEqual([]);
+  });
+
+  it("reports a leave whose record landed before the host stopped as told, without a second record", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const southId = south.id();
+    await writeRecord(
+      store,
+      south.credentials,
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "replica-left",
+        origin: originOf(south, nextSequence(store, southId)),
+        founder: north.id(),
+      }),
+    );
+    // The host holds its own record but never journaled the leave.
+    expectKind(await south.service.execute({ kind: "pull" }), "pulled");
+    expect(south.projection.state().local?.instanceId).toBe(southId);
+
+    expect(await south.service.execute({ kind: "leave" })).toEqual({
+      kind: "left",
+      instanceId: southId,
+      toldStore: true,
+      keyRemoved: true,
+    });
+    expect(leftRecords(store, southId)).toHaveLength(1);
+  });
+
+  it("completes a leave whose record it holds when the host starts", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const southId = south.id();
+    await writeRecord(
+      store,
+      south.credentials,
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "replica-left",
+        origin: originOf(south, nextSequence(store, southId)),
+        founder: north.id(),
+      }),
+    );
+    expectKind(await south.service.execute({ kind: "pull" }), "pulled");
+
+    await south.service.finishLeaving();
+    expect(south.projection.state().local).toBeUndefined();
+    expect(
+      south.events().filter((e) => e.eventName === REPLICA_MEMBERSHIP_EVENT_NAMES.left),
+    ).toEqual([
+      {
+        eventName: REPLICA_MEMBERSHIP_EVENT_NAMES.left,
+        payload: { instanceId: southId, toldStore: true },
+      },
+    ]);
+    expect(await south.credentials.has(String(southId))).toBe(false);
+    expect(south.projection.state().unfinishedLeaves).toEqual([]);
+  });
+
+  it("turns sync off again on the next command when the switch refused the first time", async () => {
+    const store = memoryStore();
+    const { south } = await joinedPair(store);
+    const southId = south.id();
+    south.syncSwitch.refusals = 1;
+    expectKind(await south.service.execute({ kind: "leave" }), "left");
+    expect(south.projection.state().unfinishedLeaves).toEqual([
+      { instanceId: southId, syncOff: false, keyRemoved: true },
+    ]);
+
+    await south.service.execute({ kind: "pull" });
+    expect(south.syncSwitch.calls).toBe(2);
     expect(south.projection.state().unfinishedLeaves).toEqual([]);
   });
 

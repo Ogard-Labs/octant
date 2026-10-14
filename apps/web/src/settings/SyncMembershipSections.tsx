@@ -509,7 +509,11 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
             </SettingRow>
             {leaveStuck && member ? (
               <SettingRow
-                description="For a store that is gone for good. Your other computers keep listing this one until one of them revokes it."
+                description={
+                  here.kind === "founder"
+                    ? "For a store that is gone for good. Your other computers keep listing this one, and none of them can revoke it."
+                    : "For a store that is gone for good. Your other computers keep listing this one until one of them revokes it."
+                }
                 label="Leave without telling them"
                 scope="host"
                 settingId="sync-leave-without-store"
@@ -637,8 +641,13 @@ function leaveSentence(
     standing === "founder"
       ? "Computers this one approved stay in the replica, and no computer can revoke them after it leaves."
       : "Computers this one approved stay in the replica; only the computers that brought this one in can revoke them.";
+  // Nobody can revoke the computer that set up sync, so it stays listed.
+  const listed =
+    standing === "founder"
+      ? "your other computers keep listing this one as a member, and none of them can revoke it"
+      : "your other computers keep listing this one as a member until one of them revokes it";
   return how === "without-store"
-    ? `Nothing is written to the store, so your other computers keep listing this one as a member until one of them revokes it. ${after}`
+    ? `Nothing is written to the store, so ${listed}. ${after}`
     : `This computer writes a signed record into the store saying it left, so your other computers show it as left. What it already published stays there. ${approved} ${after}`;
 }
 

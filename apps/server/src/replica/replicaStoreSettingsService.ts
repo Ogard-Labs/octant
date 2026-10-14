@@ -316,10 +316,14 @@ export class ReplicaStoreSettingsService {
    * Turn sync off, whatever version the settings are at: this computer left
    * its replica, and nothing a window changed since should keep it on.
    */
-  turnSyncOff(): Promise<ReplicaStoreSettingsResult> {
+  turnSyncOff(): Promise<void> {
     return this.#serially(async () => {
-      if (!this.#settings.syncOn) return this.view();
-      return this.#commit(this.#settings.store, false);
+      if (!this.#settings.syncOn) return;
+      const result = await this.#commit(this.#settings.store, false);
+      // A refusal leaves the switch on; the caller tries again.
+      if (result.kind === "replica-store-refused") {
+        throw new Error(`Sync could not be turned off: ${result.reason}.`);
+      }
     });
   }
 

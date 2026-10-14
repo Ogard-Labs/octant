@@ -302,6 +302,7 @@ describe("replica membership routes", () => {
         state: () => projection.state(),
         localHostId: LOCAL_HOST_ID,
         clock: () => 0,
+        syncOff: async () => undefined,
       }),
       view: () => emptyView,
       windowAuthorityStore: windowStore(),

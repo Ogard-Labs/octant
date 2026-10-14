@@ -310,7 +310,7 @@ export interface ReplicaMembershipState {
   /**
    * The highest sequence of an instance among the valid signed entries this
    * host holds: membership records, and artifact entries it published or
-   * settled. It is the cut a revoke takes when the store cannot be read.
+   * settled.
    */
   readonly heldSequence: (instanceId: ReplicaInstanceId) => number;
   /**
