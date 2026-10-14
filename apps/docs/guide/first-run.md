@@ -98,9 +98,14 @@ the selected mode. Your choice becomes what new tasks in that mode start with:
 Work's default model in Work settings, or the model the Code composer
 remembers. You can change the model for any task in the composer.
 
-On an empty Code screen, **Add a folder** opens Project setup. If threads
-without a Project are disabled, the screen explains this and links directly
-to **Code settings**. Choosing a folder does not change access permissions.
+On an empty Code screen, **Add a folder** opens Project setup. A task can
+also start with **No project**, in the default folder, `~/Octant` unless you
+choose another in Settings: Work always offers it, and Code offers it once
+**Code needs a Git repository** is off in **Code settings**, the same switch
+that lets Code use any plain folder. While it is on, the screen explains this
+and links directly to **Code settings**. An install that already stored a
+default folder, such as `~/Documents/Octant`, keeps it. Choosing a folder does
+not change access permissions.
 
 The selected root is validated to exist. The renderer receives an opaque,
 single-use receipt rather than the raw path.

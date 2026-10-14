@@ -1144,7 +1144,7 @@ describe("ShellService", () => {
 
     expect(service.bootstrap(ids.window)).toEqual({
       // The default folder is a host fact filled in on read, never stored.
-      settings: { ...defaultShellSettings(), defaultFolder: "/Users/ada/Documents/Octant" },
+      settings: { ...defaultShellSettings(), defaultFolder: "/Users/ada/Octant" },
       workspace,
       availableSurfaces: {
         chat: resolveSurfaceDescriptors(workspace.contextByMode.chat),
@@ -1268,6 +1268,26 @@ describe("ShellService", () => {
         }),
       ),
     ).toMatchObject({ kind: "settings-replaced", settings: { rememberedBrowserOrigins: [] } });
+  });
+
+  it("keeps reporting a folder stored under Documents after the host default moved", () => {
+    const stored = decodeShellSettings({
+      ...defaultShellSettings(),
+      defaultFolder: "/Users/ada/Documents/Octant",
+    });
+    const { persistence } = persistenceStub({
+      settings: { settings: stored, aggregateVersion: 3 as never },
+    });
+    const service = new ShellService({
+      persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+      home: "/Users/ada",
+    });
+
+    expect(service.bootstrap(ids.window).settings.defaultFolder).toBe(
+      "/Users/ada/Documents/Octant",
+    );
   });
 
   it("refuses a default folder outside the home folder before journaling it", () => {

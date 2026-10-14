@@ -659,23 +659,32 @@ A Work or Code thread started without a chosen Project lands in the mode's
 **default Project**: the host provisions `<default folder>/Work` or
 `<default folder>/Code` on first use, binds it as an ordinary Project marked
 `origin: "default-folder"`, and reuses it after. The default folder is the
-`defaultFolder` shell setting (`~/Documents/Octant` unless changed, always
-inside the user's home), and artifact files mirror under its `Artifacts`
-subfolder until a mirror setting says otherwise. With the Code setting
-`requireGitRepository` off, a Code thread may start in a folder that is not a
-repository on a `plain-folder` checkout whose head is `none`; every Git-backed
-feature reports itself unavailable there rather than inventing a revision. Code
-threads without a Project need the further `allowDefaultFolderThreads` switch,
-which the host accepts only while Git is not required. See
+`defaultFolder` shell setting (`~/Octant` unless changed, always inside the
+user's home), and artifact files mirror under its `Artifacts` subfolder until a
+mirror setting says otherwise. It sits at the top of home rather than in
+`~/Documents`, which macOS guards with a privacy prompt. Work always offers its
+default Project. Code has one choice, the `requireGitRepository` setting ("Code
+needs a Git repository", on by default). Off, a Code thread may start in a
+folder that is not a repository on a `plain-folder` checkout whose head is
+`none`, and that includes the Code default Project; every Git-backed feature
+reports itself unavailable there rather than inventing a revision. On, both are
+refused. See
 [decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md](decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md).
 
-Not built yet: two decisions change this paragraph, and the shipped host keeps
-the behavior above until they land. The default folder moves from
-`~/Documents/Octant` to `~/Octant`. The `requireGitRepository` and
-`allowDefaultFolderThreads` switches, and the row Work offers to start a thread
-in the default folder instead of a Project, fold into one choice. Both were
-decided together; the choice's wording, and what happens to values stored under
-the old default and the two old switches, are settled when it is built.
+The default folder used to be `~/Documents/Octant`, and threads without a
+Project in Code had a separate `allowDefaultFolderThreads` switch beside the Git
+requirement. A stored folder is kept, so an install that stored
+`~/Documents/Octant` keeps it; only an install that never stored one follows
+the new default. A window saves shell settings whole, filled-in folder
+included, so in practice any install that saved a setting while the old default
+was in effect stored it. Default Projects already bound under the old folder
+stay ordinary Projects with their threads, and a changed folder creates a new
+default Project beside them. Settings, journal events, and update commands that
+still carry `allowDefaultFolderThreads` decode, and the switch is dropped: the
+Git requirement each install stored is the one choice it keeps. The host only
+ever stored that switch on with Git not required, so on-and-on never existed;
+an install that had Git off and the switch off now also offers the Code
+default Project, which is the one combination the single choice cannot keep.
 
 Code task creation accepts a plain-folder checkout when the server admits it under
 Code settings. The renderer preserves its proposed branch as delivery intent without

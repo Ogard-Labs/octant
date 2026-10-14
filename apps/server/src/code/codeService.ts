@@ -1603,21 +1603,10 @@ export class CodeService {
             ? {}
             : { externalEditor: command.externalEditor }),
           requireGitRepository: command.requireGitRepository ?? current.requireGitRepository,
-          allowDefaultFolderThreads:
-            command.allowDefaultFolderThreads ?? current.allowDefaultFolderThreads,
           defaultDiffLayout: command.defaultDiffLayout ?? current.defaultDiffLayout,
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        // The default folder is not a repository, so a thread there can only
-        // start while Git is not required. Refuse the pair rather than store a
-        // switch whose thread would never start.
-        if (settings.allowDefaultFolderThreads && settings.requireGitRepository) {
-          throw this.#failure(
-            "invalid",
-            "Threads without a Project need the Git requirement turned off first.",
-          );
-        }
         this.#append(
           "code-settings",
           CODE_SETTINGS_AGGREGATE_ID,
@@ -3066,7 +3055,6 @@ export class CodeService {
       defaultExecutionPolicy: "approval-gated",
       defaultPermissionPersistence: "current-session",
       requireGitRepository: true,
-      allowDefaultFolderThreads: false,
       defaultDiffLayout: "unified",
       version: 0 as AggregateVersion,
       updatedAt: decodeTimestamp(this.#clock()),

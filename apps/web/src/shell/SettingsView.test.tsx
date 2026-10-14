@@ -687,10 +687,11 @@ describe("SettingsView", () => {
     } as unknown as CodeController;
     renderSettings({
       codeController,
-      initialDeepLink: { section: "code", setting: "code-default-folder-threads" },
+      initialDeepLink: { section: "code", setting: "code-require-git" },
     });
     expect(screen.getByRole("heading", { name: "Code defaults" })).toBeVisible();
-    expect(screen.getByRole("switch", { name: "Threads without a Project" })).toHaveFocus();
+    expect(screen.getByRole("switch", { name: "Code needs a Git repository" })).toHaveFocus();
+    expect(screen.queryByRole("switch", { name: "Threads without a Project" })).toBeNull();
   });
 
   it("sets Glass from one control: Off paints the sidebar solid, a level turns glass back on", async () => {
