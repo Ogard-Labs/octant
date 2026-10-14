@@ -1378,32 +1378,44 @@ or stops a thread.
   is the id messaging addresses. It grants nothing; `read` and `wait` re-decide
   the set at the call, so a reference refuses once its thread is completed,
   archived, deleted, or in another Project than the one it was listed in, and
-  it never resolves to a different thread. The thread's working state is not
-  part of it, since `wait` exists to see that state change. Every reference
-  outside the set, malformed text included, refuses `unauthorized` with one
-  sentence, so a refusal confirms nothing outside the caller's Project. A call
+  it never resolves to a different thread. `read` decides again after its
+  transcript read, and `wait` on every look, so a thread that closes or moves
+  meanwhile refuses too, as does one the `#thread` mention read cannot serve.
+  A reference does not carry the thread's working state, since `wait` exists
+  to see that state change. Every reference outside the set, malformed text
+  included, refuses `unauthorized` with one sentence, so a refusal confirms
+  nothing outside the caller's Project. A call
   whose input fails the tool's schema (an unknown action, an extra field, a
-  timeout out of range, a reference over 128 characters) or whose turn was
-  cancelled refuses `policy`; neither depends on any thread. Inside
+  timeout out of range, a reference over 128 characters), whose turn was
+  cancelled, whose profile leaves the tool out, or whose caller is unknown,
+  completed, or archived refuses `policy`; none depends on another thread.
+  The caller and the turn are re-checked wherever the target is. Inside
   it, `list` makes the set visible on purpose; a `sent` answer from messaging
   already confirmed it.
-- **Taint and framing.** `read` text joins the turn inside the shared
-  external-data frame, like a delivered agent message. `read` and `list` (a
-  title is text a person or an agent wrote) mark the caller with
+- **Taint and framing.** A `read` or `list` answer joins the turn inside the
+  shared external-data frame, like a delivered agent message. `read` and
+  `list` (a title is text a person or an agent wrote) mark the caller with
   `thread.external-content-ingested@1` before the result returns, every time;
-  a call that cannot be marked returns `unavailable` and nothing else. `wait`
-  returns a closed set of states and does not mark. A thread that lists its
-  siblings therefore asks for single-use confirmation on risky actions
-  afterwards, and that mark clears only by a person.
+  a call that cannot be marked returns `unavailable` and nothing else. Each
+  call journals its own mark, under the source label `sibling-thread`,
+  whether or not the caller was already marked. `wait` returns a closed set
+  of states and does not mark. A thread that lists its siblings therefore
+  asks for single-use confirmation on risky actions afterwards, and that mark
+  clears only by a person.
 - **Offer and bounds.** The tool is offered in Plan, since no action changes
   anything outside the caller's own context, and omitted from a turn whose
   profile allowlist leaves it out. A turn may make 8 `read` and 4 `wait`
-  calls; the next refuses `rate-limited`. `list` is not counted. Each `read`
-  and `wait` is journaled on the reader's thread with reader, target, action,
-  time, and the size returned, never the text.
-- **Not built.** The contract and the pure rules exist; the host actions, the
-  journal record, and the registration on Code turns do not, so no turn is
-  offered the tool yet.
+  calls; the next refuses `rate-limited`. Every `read` and `wait` whose input
+  decodes counts, refused or not, so probing references spends the same
+  budget as reading them. `list` is not counted. Each answered `read` and
+  `wait` is journaled as `thread.sibling-observed@1` on the reader's own
+  `sibling-thread-observation` stream with reader, target, action, time, and
+  the bytes returned, never the text; purging the reader purges it. A call
+  the host cannot journal returns `unavailable` and nothing else. A refused
+  call is not journaled, and `list` is recorded only by its mark.
+- **Not built.** The contract, the pure rules, and the host's three actions
+  exist; the registration on Code turns does not, so no turn is offered the
+  tool yet.
 
 ## Agent task display
 

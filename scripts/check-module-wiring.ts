@@ -87,14 +87,14 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/security/escapeSuite/evaluateEscapeSuite.ts",
     "Evaluator for the security escape suite, driven by escapeSuite.server.test.ts as its runner. Remove once a product runner imports it or the suite is retired.",
   ],
+  [
+    "apps/server/src/siblingThreads/siblingThreadTools.ts",
+    "The host's list, read, and wait actions for the sibling-threads tool, landed ahead of the Code turn registration that offers them. Remove once the Code runtime composes the tool set for its turns.",
+  ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
   [
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
-  ],
-  [
-    "packages/domain/src/siblingThreadPolicy.ts",
-    "Eligibility, reference, and per-turn bounds for the sibling-threads tool, landed ahead of the host actions that call them. Remove once the server's sibling-threads tool imports it.",
   ],
   [
     "packages/domain/src/toolEgressPolicy.ts",
