@@ -212,9 +212,11 @@ function resolveSkill(
   originReference: string,
 ): ExtensionDraftResolution {
   const exact = catalog.skills.find((candidate) => candidate.skillId === query);
-  const candidates =
+  const matched =
     exact === undefined ? catalog.skills.filter((skill) => skill.name === query) : [exact];
-  if (candidates.length === 0) return { kind: "blocked", reason: "not-found" };
+  if (matched.length === 0) return { kind: "blocked", reason: "not-found" };
+  const effective = matched.filter((skill) => skill.effectiveState.kind === "effective");
+  const candidates = matched.length > 1 && effective.length === 1 ? effective : matched;
   if (candidates.length > 1) {
     return {
       kind: "ambiguous",

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { watch, type FSWatcher } from "node:fs";
 import { lstat, readdir, readFile, realpath } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import type {
   ExtensionContentDigest,
@@ -16,6 +17,15 @@ import { sourceQualifiedSkillId, buildSkillCatalog, type SkillCatalog } from "@o
 
 const DEFAULT_MAX_CONTENT_BYTES = 256 * 1024;
 const skillNamePattern = /^[a-z][a-z0-9-]{0,63}$/;
+/**
+ * The closed list of skill folders read in a Project's ancestry. A
+ * `.claude/skills` folder inside the home folder's own `.claude` is never one
+ * of them: that is a runtime's user-global folder, not a Project's.
+ */
+export const PROJECT_SKILL_ROOTS = [
+  { segments: [".agents", "skills"] as const, sourcePrefix: "", userFolder: undefined },
+  { segments: [".claude", "skills"] as const, sourcePrefix: "claude:", userFolder: ".claude" },
+] as const;
 
 export interface SkillDiscoveryRootSet {
   readonly workingDirectory: string;
@@ -45,11 +55,14 @@ export interface SkillDiscoveryRootProvider {
 export interface SkillDiscoveryServiceOptions {
   readonly roots: SkillDiscoveryRootProvider;
   readonly maximumContentBytes?: number;
+  /** The person's home folder; defaults to the host's. */
+  readonly homeDirectory?: string;
 }
 
 export class SkillDiscoveryService {
   readonly #roots: SkillDiscoveryRootProvider;
   readonly #maximumContentBytes: number;
+  readonly #homeDirectory: string;
   #catalog: SkillCatalog = { skills: [], collisions: [] };
   #watchers: FSWatcher[] = [];
   #reconcileTimer: ReturnType<typeof setTimeout> | undefined;
@@ -57,6 +70,7 @@ export class SkillDiscoveryService {
   constructor(options: SkillDiscoveryServiceOptions) {
     this.#roots = options.roots;
     this.#maximumContentBytes = options.maximumContentBytes ?? DEFAULT_MAX_CONTENT_BYTES;
+    this.#homeDirectory = options.homeDirectory ?? homedir();
   }
 
   snapshot(): SkillCatalog {
@@ -91,9 +105,13 @@ export class SkillDiscoveryService {
         workingDirectory !== undefined &&
         isWithin(boundRoot, workingDirectory)
       ) {
+        const userFolders = await this.#userFolders();
         let current = workingDirectory;
         while (true) {
-          await this.#watchDirectory(join(current, ".agents", "skills"), seen, boundRoot);
+          for (const rootEntry of PROJECT_SKILL_ROOTS) {
+            if (insideUserFolder(current, rootEntry.userFolder, userFolders)) continue;
+            await this.#watchDirectory(join(current, ...rootEntry.segments), seen, boundRoot);
+          }
           if (current === boundRoot) break;
           const parent = dirname(current);
           if (parent === current || !isWithin(boundRoot, parent)) break;
@@ -150,29 +168,34 @@ export class SkillDiscoveryService {
     }
 
     const records: Array<StandaloneSkillRecord> = [];
+    const userFolders = await this.#userFolders();
     let current = workingDirectory;
     let depth = 0;
     while (true) {
-      records.push(
-        ...(await this.#scanSkillsDirectory(
-          join(current, ".agents", "skills"),
-          current === boundRoot
-            ? `project:${roots.projectRef}:root`
-            : roots.scope === undefined
-              ? `project:${roots.projectRef}:${depth === 0 ? "working" : `parent-${depth}`}`
-              : `project:${roots.projectRef}:thread:${roots.scope.threadRef}:${
-                  depth === 0 ? "working" : `parent-${depth}`
-                }`,
-          boundRoot,
-          current === boundRoot
-            ? roots.projectScope === undefined
-              ? {}
-              : { projectScope: roots.projectScope }
-            : roots.scope === undefined
-              ? {}
-              : { scope: roots.scope },
-        )),
-      );
+      const position = depth === 0 ? "working" : `parent-${depth}`;
+      for (const rootEntry of PROJECT_SKILL_ROOTS) {
+        // The host's fallback root is its own working directory, which can be
+        // the home folder; its `.claude` must still never be read.
+        if (insideUserFolder(current, rootEntry.userFolder, userFolders)) continue;
+        records.push(
+          ...(await this.#scanSkillsDirectory(
+            join(current, ...rootEntry.segments),
+            current === boundRoot
+              ? `project:${roots.projectRef}:${rootEntry.sourcePrefix}root`
+              : roots.scope === undefined
+                ? `project:${roots.projectRef}:${rootEntry.sourcePrefix}${position}`
+                : `project:${roots.projectRef}:thread:${roots.scope.threadRef}:${rootEntry.sourcePrefix}${position}`,
+            boundRoot,
+            current === boundRoot
+              ? roots.projectScope === undefined
+                ? {}
+                : { projectScope: roots.projectScope }
+              : roots.scope === undefined
+                ? {}
+                : { scope: roots.scope },
+          )),
+        );
+      }
       if (current === boundRoot) break;
       const parent = dirname(current);
       if (parent === current || !isWithin(boundRoot, parent)) break;
@@ -180,6 +203,17 @@ export class SkillDiscoveryService {
       depth += 1;
     }
     return records;
+  }
+
+  /** The home folder as written and as resolved, so a linked home still matches. */
+  async #userFolders(): Promise<ReadonlyArray<string>> {
+    const written = resolve(this.#homeDirectory);
+    try {
+      const resolved = await realpath(written);
+      return resolved === written ? [written] : [written, resolved];
+    } catch {
+      return [written];
+    }
   }
 
   async #discoverUserGlobal(
@@ -353,6 +387,16 @@ async function canonicalDirectory(path: string): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/** Is `<directory>/<userFolder>` the home folder's own folder, or inside it? */
+function insideUserFolder(
+  directory: string,
+  userFolder: string | undefined,
+  homeFolders: ReadonlyArray<string>,
+): boolean {
+  if (userFolder === undefined) return false;
+  return homeFolders.some((home) => isWithin(join(home, userFolder), join(directory, userFolder)));
 }
 
 function isWithin(root: string, candidate: string): boolean {

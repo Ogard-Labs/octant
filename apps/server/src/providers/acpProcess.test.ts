@@ -1188,6 +1188,11 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(profileText).toContain(
       `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
     );
+    // Kimi loads Project skills from .agents/skills and .kimi-code/skills,
+    // never .claude/skills, so that folder stays readable like any file.
+    expect(profileText).not.toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
+    );
   });
 
   it("still denies reused MCP, skills, plugins, and hooks under Full access", async () => {
@@ -1249,7 +1254,7 @@ describe("Kimi Code host-profile extension surfaces", () => {
     const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
     directories.push(hostHome);
     const hostAuthenticationPath = join(hostHome, ".kimi-code");
-    mkdirSync(hostAuthenticationPath, { recursive: true });
+    mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
     writeFileSync(join(hostAuthenticationPath, "mcp.json"), "{}\n");
     const canonicalHostPath = realpathSync(hostAuthenticationPath);
     const launch = await Effect.runPromise(
@@ -1283,6 +1288,9 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(launch.args).toContainEqual("--tmpfs");
     expect(launch.args).toContain(join(canonicalHostPath, "skills"));
     expect(launch.args).toContain(join(canonicalHostPath, "mcp.json"));
+    // A denied entry the Project does not have is not created in it.
+    expect(launch.args).not.toContain(join(target.canonicalRoot, ".agents"));
+    expect(existsSync(join(target.canonicalRoot, ".agents"))).toBe(false);
   });
 
   it("uses native sandbox-exec so a Full access child cannot read planted MCP config", async () => {
@@ -1330,6 +1338,95 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(allowed.status).toBe(0);
     expect(allowed.stdout).toContain("telemetry = false");
   });
+});
+
+describe.each([fx, copilot, grok, goose, cline])(
+  "Project .claude/skills for a runtime that loads it by itself ($displayName)",
+  (profile) => {
+    it("denies <project>/.claude/skills and leaves the rest of .claude readable", async () => {
+      const target = fixture(profile);
+      const managedHome = join(target.canonicalRoot, "managed-home");
+      const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+      mkdirSync(hostAuthenticationPath, { recursive: true });
+      mkdirSync(join(target.canonicalRoot, ".claude", "skills"), { recursive: true });
+      const launch = await Effect.runPromise(
+        makeAcpConfinementLive({
+          platform: "darwin",
+          sandboxPath: target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath,
+        }).prepare({
+          profile,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome,
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: sanitizeAcpEnvironment(
+            profile,
+            { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+            { managedHome, executionPolicy: "approval-gated" },
+          ),
+        }),
+      );
+      const profileText = seatbeltProfile(launch);
+      expect(profileText).toContain(
+        `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
+      );
+      expect(profileText).toContain(
+        `(deny file-write* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
+      );
+      expect(profileText).not.toContain(
+        `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude")}"))`,
+      );
+    });
+  },
+);
+
+describe("Linux deny paths below Full access", () => {
+  it.each([
+    ["approval-gated", "a writable"],
+    ["plan", "a read-only"],
+  ] as const)(
+    "masks an existing denied folder and leaves a missing one alone (%s, %s Project root)",
+    async (executionPolicy, _root) => {
+      const target = fixture(copilot);
+      const managedHome = join(target.canonicalRoot, "managed-home");
+      const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+      mkdirSync(hostAuthenticationPath, { recursive: true });
+      const prepare = () =>
+        Effect.runPromise(
+          makeAcpConfinementLive({
+            platform: "linux",
+            sandboxPath: target.bwrapPath,
+            temporaryDirectory: join(target.canonicalRoot, "tmp"),
+            hostAuthenticationPath,
+          }).prepare({
+            profile: copilot,
+            binaryPath: target.binaryPath,
+            root: target.canonicalRoot,
+            managedHome,
+            mode: "code",
+            executionPolicy,
+            environment: {},
+          }),
+        );
+      const denied = join(target.canonicalRoot, ".claude", "skills");
+
+      // Mounting over a missing path makes Bubblewrap create it: an empty
+      // folder in the person's Project, or a failed start on a read-only root.
+      const missing = await prepare();
+      expect(missing.args).toContain(target.binaryPath);
+      expect(missing.args).not.toContain(denied);
+      expect(existsSync(join(target.canonicalRoot, ".claude"))).toBe(false);
+
+      mkdirSync(denied, { recursive: true });
+      const present = await prepare();
+      const mounted = present.args.indexOf(denied);
+      expect(mounted).toBeGreaterThan(0);
+      expect(present.args[mounted - 1]).toBe("--tmpfs");
+    },
+  );
 });
 
 describe("ACP probe confinement", () => {
