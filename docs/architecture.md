@@ -2217,9 +2217,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   login. A confined Plan launch refuses an account directory that
   is the checkout, sits inside it, or is an ancestor of it
   ([0145](decisions/0145-a-plan-turn-is-confined-by-octant.md)).
-  Plan stays read-only for the project and checkout. The only write
-  a confined Plan Claude launch receives is that assigned leaf plus
-  the launch temporary directory.
+  Plan stays read-only for the project and checkout. A confined Plan
+  Claude launch reads that assigned leaf and writes only its runtime
+  folders, plus the launch temporary directory, as the
+  [security section](#security-and-authority) states.
   A thread stays on the instance it started with; there is no
   automatic failover, rotation, or load-balancing between accounts. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
@@ -5109,12 +5110,12 @@ mechanisms are:
   because Bubblewrap would create it in the person's own Project (see
   [Extensions and skills](#extensions-and-skills)).
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                         |
-  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------ |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                       |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only the assigned account leaf |
-  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                      |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                         |
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                             |
+  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                           |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only the account's runtime folders |
+  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                          |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                             |
 
   Codex is unwrapped because its app-server is leased once per provider
   instance: `providerRuntimeRegistry` keys runtimes by `instanceId`, so one
@@ -5137,11 +5138,35 @@ mechanisms are:
   `thread.external-content-ingested@1`, and the gate that mark applies to
   Octant's computer-use, MCP, and native-harness calls does not cover a tool
   the runtime executes itself.
-  A confined Claude Plan launch may write only the assigned leaf of that
-  account's state directory (`~/.claude` or
-  `~/.claude-accounts/<instanceId>`) and the launch temporary directory.
-  The checkout must not be that leaf, sit inside it, or be an ancestor of
-  it, so Plan cannot reopen the project through the account grant.
+  A confined Claude Plan launch reads the assigned leaf of that account's
+  state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
+  writes only two folders in it, `sessions/` and `projects/`, plus the
+  launch temporary directory. Octant creates the two folders before the
+  launch. Measured on macOS 27 with Claude Code 2.1.299, one Plan turn
+  wrote session records in `sessions/`, its transcript in `projects/`, and
+  `.claude.json` (with a lock, a temporary file and a copy in `backups/`)
+  and `.last-cleanup` at the top of the leaf. The top-level writes are
+  refused, and the runtime carries on without them: a second measured
+  Plan turn under this grant answered and completed while its
+  `.claude.json` lock and temporary file and its `.last-cleanup` were
+  denied, its transcript landed in `projects/`, and the sandbox refused
+  nothing else that the first turn had been allowed. That keeps a Plan
+  launch from writing what a later session outside this sandbox would
+  load: `settings.json` and its hooks, `.claude.json` and its per-project
+  MCP servers, `skills/`, `plugins/`, `agents/` and `commands/`. An
+  earlier smoke test planted a `SessionStart` hook in `settings.json` from a
+  Plan launch that was allowed to run Git. A subscription login kept in a
+  file rather than the macOS Keychain, as on Linux, is the one file also
+  writable, `.credentials.json` in the secure-storage directory, so the
+  runtime can save a refreshed login (maintainer decision, 2026-10-14).
+  The cost is that a Plan launch there could replace the stored login. An
+  API-key launch and a macOS launch get no such file. `projects/` stays writable because resume
+  reads transcripts from there, so other sessions' transcripts and the
+  per-project `memory/` folders beside them, which a later session also
+  reads, stay writable too.
+  The checkout must not be the leaf or a granted folder, sit inside
+  one, or be an ancestor of one, so Plan cannot reopen the project
+  through the account grant.
   A confined Claude launch on a subscription account signs in with the
   unmodified CLI, which on macOS reads its login by running
   `/usr/bin/security` against the login keychain. Measured on macOS 27.0.1
