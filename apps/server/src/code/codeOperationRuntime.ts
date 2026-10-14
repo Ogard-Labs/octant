@@ -397,6 +397,17 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly readPosture: () => CodeThread["executionPolicy"];
   }) => AppManagedToolSet | undefined;
+  /**
+   * The sibling-threads tool set for one turn: a read-only view of the other
+   * Code threads of this thread's Project, answered by the server for the
+   * turn's window. Asked once per turn, so its read and wait bounds are the
+   * turn's. Offered in Plan too, since no action changes anything outside the
+   * caller's own record.
+   */
+  readonly siblingThreads?: (input: {
+    readonly windowId: WindowId;
+    readonly thread: CodeThread;
+  }) => AppManagedToolSet | undefined;
   /** Lets the model offer out-of-scope work as a side task the person may start. */
   readonly sideTasks?: (input: { readonly thread: CodeThread }) => AppManagedToolSet | undefined;
   /** Lets the model author a Canvas bound to this thread's checkout. */
@@ -2991,6 +3002,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                 active.thread.executionPolicy,
             }),
         }),
+        this.#options.siblingThreads?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.sideTasks?.({ thread: active.thread }),
         this.#options.canvas?.({ windowId: active.windowId, thread: active.thread }),
         this.#options.agents?.({ windowId: active.windowId, thread: active.thread }),

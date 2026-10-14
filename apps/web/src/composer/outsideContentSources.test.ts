@@ -22,6 +22,7 @@ const RECORDED_LABELS: ReadonlyArray<string> = [
   "linear-issue",
   "mcp-tool",
   "product-feedback-comment",
+  "sibling-thread",
   "simulator-screen",
   "subagent-result",
   "Synced from Studio laptop",

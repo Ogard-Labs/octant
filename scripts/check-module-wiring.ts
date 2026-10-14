@@ -87,10 +87,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/security/escapeSuite/evaluateEscapeSuite.ts",
     "Evaluator for the security escape suite, driven by escapeSuite.server.test.ts as its runner. Remove once a product runner imports it or the suite is retired.",
   ],
-  [
-    "apps/server/src/siblingThreads/siblingThreadTools.ts",
-    "The host's list, read, and wait actions for the sibling-threads tool, landed ahead of the Code turn registration that offers them. Remove once the Code runtime composes the tool set for its turns.",
-  ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
   [
     "packages/provider-sdk/src/contextFactsConformance.ts",
