@@ -725,9 +725,10 @@ disabled, Octant reads nothing from the folder for this purpose, adds no
 instruction, and writes nothing there; turning the setting off leaves an
 existing file untouched. Octant never writes an agent brief (`AGENTS.md`,
 `CLAUDE.md`, or similar) into a user folder, and a Work turn does not read an
-existing one. Not built yet for Codex: a Codex Work turn starts at the Project
-root, and Codex still loads an `AGENTS.md` it finds there; Claude Work turns
-load no project settings or instruction files. This narrows the always-on
+existing one: Claude Work turns load no project settings or instruction files,
+and Codex Work threads start and resume with `project_doc_max_bytes = 0`, which
+skips the `AGENTS.md` discovery Codex otherwise runs from the repository root
+down to the Project root. This narrows the always-on
 behavior first recorded in
 [decisions/0119-a-work-project-keeps-its-status-in-its-folder.md](decisions/0119-a-work-project-keeps-its-status-in-its-folder.md).
 
