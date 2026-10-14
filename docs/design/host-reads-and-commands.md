@@ -75,9 +75,9 @@ newest window again. Each read is a GET, runs the same authority check as the
 whole-thread read beside it before reading anything, and is a
 `project.overview.read` for a paired device.
 
-| Mode | Route                                  | Anchor                         | Page                                                                                                      |
-| ---- | -------------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| Work | `GET /api/work/turns/window/:threadId` | `before=<requestId>` (or none) | `limit` 1 to 64 (the client asks 30), at most 2 MiB of prompt and response text, always at least one turn |
+| Mode | Route                                  | Anchor                         | Page                                                                                                                                        |
+| ---- | -------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Work | `GET /api/work/turns/window/:threadId` | `before=<requestId>` (or none) | `limit` 1 to 64 (the client asks 30), at most 2 MiB of encoded turns (a paired device's response is cut at 8 MiB), always at least one turn |
 
 A host without a window route answers 404, and the client reads the thread's
 whole-transcript route instead and shows it as fully loaded. A fresh newest

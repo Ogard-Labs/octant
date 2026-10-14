@@ -2004,7 +2004,7 @@ describe("WorkTurnService", () => {
       ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
     });
 
-    it("stops a window short of its limit once the turns' text passes the page budget", async () => {
+    it("stops a window short of its limit once its encoded turns pass the page budget", async () => {
       const fixture = serviceFixture();
       // Projected directly: a provider turn this size would not pass the
       // input budget, but a thread can still hold many large turns.
@@ -2043,7 +2043,7 @@ describe("WorkTurnService", () => {
       expect(window.turns.at(-1)?.prompt.startsWith("40 ")).toBe(true);
       expect(window.hasEarlier).toBe(true);
       const bytes = window.turns.reduce(
-        (total, turn) => total + turn.prompt.length + (turn.response?.length ?? 0),
+        (total, turn) => total + new TextEncoder().encode(JSON.stringify(turn)).byteLength,
         0,
       );
       expect(bytes).toBeLessThanOrEqual(2 * 1024 * 1024);

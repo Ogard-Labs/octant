@@ -150,12 +150,13 @@ function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>):
 }
 
 /**
- * How much prompt and response text one transcript window may carry before it
- * stops adding turns. A Work turn can hold a 200 000-character prompt and a
- * 64 KiB reply, so a page of the maximum 64 turns could otherwise reach tens
- * of megabytes on a paired phone.
+ * How many bytes of encoded turns one transcript window may carry before it
+ * stops adding turns. A Work turn can hold a 200 000-character prompt, its
+ * reply twice (as `response` and in `transcript`), a task list, and child
+ * observations, so a page of the maximum 64 turns could otherwise pass the
+ * 8 MiB a paired device's response is cut at and fail to decode there.
  */
-export const WORK_TRANSCRIPT_WINDOW_TEXT_BYTES = 2 * 1024 * 1024;
+export const WORK_TRANSCRIPT_WINDOW_BYTES = 2 * 1024 * 1024;
 
 export class WorkTurnServiceError extends Error {
   override readonly name = "WorkTurnServiceError";
@@ -1000,8 +1001,8 @@ export class WorkTurnService {
   /**
    * One page of the thread for a client that opens on its newest turns and
    * loads earlier ones on request. The page walks back from the newest turn,
-   * or from just before `before`, until it holds `limit` turns or its prompt
-   * and response text would pass `WORK_TRANSCRIPT_WINDOW_TEXT_BYTES`; it
+   * or from just before `before`, until it holds `limit` turns or its encoded
+   * turns would pass `WORK_TRANSCRIPT_WINDOW_BYTES`; it
    * always holds at least one turn when the thread has one. A `before` the
    * thread does not hold is `stale`: the client re-reads the newest page.
    */
@@ -1031,9 +1032,8 @@ export class WorkTurnService {
       const candidate = all[start - 1];
       if (candidate === undefined) break;
       const turn = this.#withLive(candidate);
-      const size =
-        Buffer.byteLength(turn.prompt, "utf8") + Buffer.byteLength(turn.response ?? "", "utf8");
-      if (turns.length > 0 && bytes + size > WORK_TRANSCRIPT_WINDOW_TEXT_BYTES) break;
+      const size = Buffer.byteLength(JSON.stringify(turn), "utf8");
+      if (turns.length > 0 && bytes + size > WORK_TRANSCRIPT_WINDOW_BYTES) break;
       bytes += size;
       turns.unshift(turn);
       start -= 1;

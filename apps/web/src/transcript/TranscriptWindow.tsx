@@ -128,6 +128,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   >(undefined);
   const firstKeyRef = useRef(firstKey);
   const lastKeyRef = useRef(lastKeyOf(items, itemKey));
+  const countRef = useRef(items.length);
   // One index map per item list: the reveal target and every pinned key resolve
   // from it instead of an O(items) findIndex each. Streaming transcripts change
   // `items` per delta, so the scans this replaces were the hot path.
@@ -227,6 +228,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     setStickyIndexes(new Set());
     setLiveMessage("");
     lastKeyRef.current = lastKeyOf(items, itemKey);
+    countRef.current = items.length;
   }, [restoreKey]);
 
   useLayoutEffect(() => {
@@ -243,13 +245,17 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     appliedRevealKeyRef.current = revealKey;
   }, [itemKey, items, revealKey, virtualizer]);
 
-  // Only a new last row is news. Earlier rows loaded above, or a row that
-  // grows while it streams, change the list without saying anything new.
+  // Only a row added at the end is news. Earlier rows loaded above, a row that
+  // grows while it streams, and an older row exposed when the last one is
+  // removed change the list without saying anything new.
   useLayoutEffect(() => {
     const previous = lastKeyRef.current;
+    const previousCount = countRef.current;
     const next = lastKeyOf(items, itemKey);
     lastKeyRef.current = next;
+    countRef.current = items.length;
     if (next === undefined || previous === undefined || next === previous) return;
+    if (items.length <= previousCount) return;
     const appended = items[items.length - 1];
     if (appended === undefined) return;
     setLiveMessage(

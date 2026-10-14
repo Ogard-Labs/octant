@@ -299,6 +299,31 @@ describe("TranscriptWindow", () => {
     expect(liveRegion()).toHaveTextContent("Row 4");
   });
 
+  it("does not announce an older row that a removed last row exposes", () => {
+    function Harness() {
+      const [items, setItems] = useState(() => rows(5));
+      return (
+        <div>
+          <button onClick={() => setItems((current) => current.slice(0, -1))} type="button">
+            Remove last
+          </button>
+          <TranscriptWindow
+            announceItem={(item) => item.label}
+            itemKey={(item) => item.id}
+            items={items}
+            listLabel="Transcript"
+            renderItem={(item) => <button type="button">{item.label}</button>}
+            restoreKey="remove-last"
+          />
+        </div>
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove last" }));
+    expect(liveRegion()).toBeEmptyDOMElement();
+  });
+
   it("lets the caller constrain the list width", () => {
     renderWindow(rows(3));
     expect(list().style.width).toBe("");
