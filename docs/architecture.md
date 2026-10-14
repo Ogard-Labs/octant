@@ -2366,7 +2366,9 @@ prompt: `renderProviderTurnPrompt` puts the context blocks in the prompt text as
 JSON, and attachments travel as the prompt's images. A runtime that keeps its
 prompts therefore holds one copy per turn, and a running total is right only
 while every copy is accounted for. The adapter, which knows its runtime, says on
-each usage report what the runtime does with the prompt (`promptRetention`):
+each usage report what the runtime does with the prompt (`promptRetention`), and
+the turn runner reports `compacted` for the rest of a turn once the adapter's
+`context-compacted` event arrives:
 
 | Runtime           | What earlier copies do                                                                                                                                                                                                                                                                                                                                                                                                     | `promptRetention`                                                                         | Source                                                                                                                            |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -2939,7 +2941,11 @@ watched has ended.
   timeline divider): "Compacted · 41.2K freed · summary by Codex", "Compacted ·
   freed amount shows after the next reply · summary by Codex", "Compacted ·
   freed amount not reported · summary by Codex", "Compacted · nothing freed ·
-  summary by Codex", or "Couldn't compact: {reason}." A completed line names
+  summary by Codex", or "Couldn't compact: {reason}." A runtime's own
+  compaction reads "Compacted automatically by Codex · 41.2K freed", "Compacted
+  automatically by Codex · nothing freed", or, when the runtime reported no
+  amount, "Compacted automatically by Codex": nothing revisits that receipt, so
+  the line promises no later figure. A completed line names
   who wrote the summary and ends without a full stop; a failure is a sentence
   and ends with one, and one that may have changed the session adds "The
   session may have changed; the next reply shows what it holds." A refused
