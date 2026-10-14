@@ -114,13 +114,13 @@ see the origin chain and any direct forks and switch to one of them. If the
 origin has been archived or deleted, the lineage says the origin is no longer
 available rather than hiding that the thread is a fork.
 
-## Complete and snooze threads
+## Put away and snooze threads
 
 A thread you are done with can be put away without archiving it. Choose
-**Complete** from the row's menu (right-click, or the ⋯ control on hover) and
-the thread moves to the collapsed **Completed** shelf at the foot of the
+**Put away** from the row's menu (right-click, or the ⋯ control on hover) and
+the thread moves to the collapsed **Put away** shelf at the foot of the
 sidebar. Everything about it stays. **Reopen** brings it back, and so does
-sending it a new message. Octant refuses to complete a thread while an answer
+sending it a new message. Octant refuses to put a thread away while an answer
 is still running.
 
 **Snooze** hides a thread until a time you pick, in its own collapsed shelf
@@ -128,8 +128,8 @@ with the time until it returns. It comes back early if the answer that was runni
 ends the row reappears marked **Woke** until you open it; **Wake** ends a
 snooze by hand.
 
-Completed threads move to the archive on their own after a week. Change that
-window, or turn it off, under **Settings › General › Archive completed
+Put-away threads move to the archive on their own after a week. Change that
+window, or turn it off, under **Settings › General › Archive put-away
 threads**. Archiving keeps every thread; only a confirmed purge deletes.
 
 ## Long threads

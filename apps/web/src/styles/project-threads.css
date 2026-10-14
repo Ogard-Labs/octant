@@ -537,7 +537,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The Snoozed and Completed shelves share the archive shelf's quiet summary
+/* The Snoozed and Put away shelves share the archive shelf's quiet summary
    row; their rows are ordinary thread rows, so nothing else is restyled. */
 .project-shelf > .project-threads {
   margin-top: 4px;

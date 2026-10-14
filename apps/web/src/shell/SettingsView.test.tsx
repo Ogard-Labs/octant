@@ -167,10 +167,10 @@ describe("SettingsView", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("offers the completed-thread archive window in General and reports Never as off", async () => {
+  it("offers the put-away archive window in General and reports Never as off", async () => {
     const user = userEvent.setup();
     const { props } = renderSettings();
-    const select = screen.getByRole("combobox", { name: "Archive completed threads" });
+    const select = screen.getByRole("combobox", { name: "Archive put-away threads" });
     expect(select).toHaveTextContent("After 7 days");
     await user.click(select);
     await user.click(await screen.findByRole("option", { name: "Never" }));

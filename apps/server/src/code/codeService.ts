@@ -755,9 +755,9 @@ function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
 }
 
 const COMPLETE_REFUSALS = {
-  archived: "An archived thread cannot be completed.",
-  executing: "Wait for the running turn to finish before completing this thread.",
-  "awaiting-input": "This thread is waiting on you; answer it before completing it.",
+  archived: "An archived thread cannot be put away.",
+  executing: "Wait for the running turn to finish before putting this thread away.",
+  "awaiting-input": "This thread is waiting on you; answer it before putting it away.",
 } as const;
 
 const SNOOZE_REFUSALS = {
@@ -2064,7 +2064,7 @@ export class CodeService {
                 }
               : command.kind === "complete-code-thread"
                 ? // Completing is "I'm done here": the pin and any snooze
-                  // would keep the row out of the Completed shelf, so both go.
+                  // would keep the row out of the Put away shelf, so both go.
                   {
                     ...withoutPinned(withoutRest(current)),
                     completedAt: updatedAt,
