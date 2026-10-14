@@ -135,6 +135,30 @@ describe("marking a thread whose runtime ran its own web tool", () => {
     host.connection.close();
   });
 
+  it("redacts credentials and local paths a provider put in the tool's name or call id", () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-runtime-web-redact-"));
+    directories.push(directory);
+    const host = openHost(join(directory, "octant.sqlite3"));
+    expect(
+      markThreadReadByRuntime({
+        record: (input) => host.ingestions.record(input),
+        threadId,
+        event: read({
+          toolName:
+            "Fetch https://user:hunter2@example.invalid/docs?api_key=sk-12345678901234567890",
+          toolCallId: "call\n/Users/someone/private/notes.txt",
+          target: undefined,
+        }),
+      }),
+    ).toEqual({ status: "marked" });
+
+    const [row] = ingestionRows(host) as ReadonlyArray<{ readonly content_reference: string }>;
+    expect(row?.content_reference).toContain("example.invalid");
+    expect(row?.content_reference).toContain("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
+    expect(row?.content_reference).not.toMatch(/hunter2|sk-1234|someone|private|[/\\]/);
+    host.connection.close();
+  });
+
   it("keeps the mark through a projection rebuild and a restart", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-runtime-web-replay-"));
     directories.push(directory);

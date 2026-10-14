@@ -201,6 +201,25 @@ describe("ACP event normalization", () => {
     expect(
       update({ sessionUpdate: "tool_call_update", toolCallId: "p-4", status: "failed" }),
     ).toMatchObject([{ kind: "tool-failure", toolCallId: "tool-4" }]);
+
+    // A title first given on an update is bounded for a summary; the event
+    // still names the tool within its label bound, without the credential.
+    const [late] = update({
+      sessionUpdate: "tool_call",
+      toolCallId: "p-5",
+      title: "Fetch",
+    });
+    expect(late).toMatchObject({ kind: "tool-start" });
+    const [read] = update({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "p-5",
+      kind: "fetch",
+      title: `Fetch https://user:hunter2@example.invalid/${"x".repeat(900)}`,
+      status: "in_progress",
+    });
+    if (read?.kind !== "outside-content-read") throw new Error("Expected a web read");
+    expect(Array.from(read.toolName).length).toBeLessThanOrEqual(256);
+    expect(read.toolName).not.toContain("hunter2");
   });
 
   it("shows the provider's reason when a tool call fails", () => {

@@ -1690,8 +1690,9 @@ flowchart LR
     marks the run's own id, which is where its harness tools read the mark.
   - The label is `runtime-web-search` or `runtime-web-fetch`, with origin
     `tool-result`. The reference names the runtime tool, the turn, the call,
-    and the query or address with its separators replaced, cut to 256
-    characters. It never holds page content.
+    and the query or address. Each provider-authored part is redacted as a
+    live step's argument is, separators are replaced, and the whole is cut to
+    256 characters. It never holds page content.
   - A mark that cannot be recorded stops the turn, because the content has
     already reached the model.
   - Marking is all this does. The mark gates computer-use, MCP, and the native

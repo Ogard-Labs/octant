@@ -246,7 +246,9 @@ function outsideContentRead(
     event(context, {
       kind: "outside-content-read",
       toolCallId: state.toolCallId,
-      toolName: state.title ?? "Tool",
+      // A late title is bounded for a summary, not a label, and an agent may
+      // name the address it fetches in it.
+      toolName: summarizeStepArgument(state.title ?? "", LABEL_MAX_CHARACTERS) ?? "Tool",
       source: "web-fetch",
       ...(target === undefined ? {} : { target }),
     }),
