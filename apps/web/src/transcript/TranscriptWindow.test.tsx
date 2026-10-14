@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TRANSCRIPT_FIND_CLOSED_EVENT, TranscriptWindow } from "./TranscriptWindow";
 
 interface Row {
@@ -177,6 +177,64 @@ describe("TranscriptWindow", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /Rerender/ }));
     expect(screen.getByRole("button", { name: "Row 0" })).toBeVisible();
+  });
+
+  describe("a one-time jump target", () => {
+    function jump(revealKey: string | undefined, onRevealed: (key: string) => void) {
+      return (
+        <TranscriptWindow
+          itemKey={(item: Row) => item.id}
+          items={rows(1000)}
+          listLabel="Transcript"
+          onRevealed={onRevealed}
+          renderItem={(item) => <button type="button">{item.label}</button>}
+          restoreKey="jump-target"
+          {...(revealKey === undefined ? {} : { revealKey })}
+        />
+      );
+    }
+
+    it("reveals the same row again when it is asked for again after being dropped", async () => {
+      const onRevealed = vi.fn();
+      const { rerender } = render(jump("row-500", onRevealed));
+      expect(await screen.findByRole("button", { name: "Row 500" })).toBeVisible();
+      await waitFor(() => expect(onRevealed).toHaveBeenCalledOnce());
+
+      // The owner drops the spent target and the reader scrolls away.
+      rerender(jump(undefined, onRevealed));
+      scroller().scrollTop = 0;
+      fireEvent.scroll(scroller());
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: "Row 500" })).not.toBeInTheDocument();
+      });
+
+      // The same search hit is chosen again.
+      rerender(jump("row-500", onRevealed));
+      expect(await screen.findByRole("button", { name: "Row 500" })).toBeVisible();
+      await waitFor(() => expect(onRevealed).toHaveBeenCalledTimes(2));
+    });
+
+    it("spends the target when the list goes away while the reveal settles", async () => {
+      const onRevealed = vi.fn();
+      const { unmount } = render(jump("row-500", onRevealed));
+      expect(onRevealed).not.toHaveBeenCalled();
+
+      unmount();
+
+      await waitFor(() => expect(onRevealed).toHaveBeenCalledWith("row-500"));
+    });
+
+    it("does not spend the target while the frame has no size yet", async () => {
+      const onRevealed = vi.fn();
+      const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(0);
+      try {
+        render(jump("row-500", onRevealed));
+        await new Promise((resolve) => setTimeout(resolve, 1_700));
+        expect(onRevealed).not.toHaveBeenCalled();
+      } finally {
+        height.mockRestore();
+      }
+    });
   });
 
   it("mounts off-window rows so in-page find can read them", async () => {
