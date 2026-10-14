@@ -116,11 +116,15 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
       );
     }
     try {
-      return response(
+      const answer = response(
         dependencies.service.compactionState(subject, requestPrincipal(request)),
         200,
         origin,
       );
+      // A GET may otherwise be kept by a cache, and this answer changes with
+      // every turn and compaction.
+      answer.headers.set("cache-control", "no-store");
+      return answer;
     } catch (error) {
       if (error instanceof ContextHarnessError) return harnessFailure(error, origin);
       return failure("unavailable", "Octant Context service is unavailable.", 503, origin);

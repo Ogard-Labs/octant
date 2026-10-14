@@ -1395,6 +1395,26 @@ describe("ChatService", () => {
     expect(service.read(sidecar.thread.id).thread.title).toBe("Side Chat about Release notes");
   });
 
+  it("tells a compaction that a turn on an archived thread would be refused", async () => {
+    const { service } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Quiet title",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    expect(service.turnStandingRefusal(created.thread.id)).toBeUndefined();
+
+    await service.execute({
+      kind: "change-chat-thread-lifecycle",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      lifecycle: "archived",
+    });
+
+    expect(service.turnStandingRefusal(created.thread.id)).toBe("project-unavailable");
+  });
+
   it("finds a phrase that lives only in an archived message body", async () => {
     const { service } = openFixture();
     const created = await service.execute({

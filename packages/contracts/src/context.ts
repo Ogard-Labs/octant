@@ -629,6 +629,13 @@ export const ContextCompactionRefusalReason = Schema.Literal(
   "spend-ceiling-reached",
   "mode-disabled",
   "remote-client",
+  // A turn on the thread would be refused for the same reason, so a summary
+  // nobody could send next is not paid for: the thread or its Project is
+  // archived or gone, the saved model options are no longer offered, or the
+  // harness session is paused.
+  "project-unavailable",
+  "model-options-unsupported",
+  "thread-paused",
 );
 export type ContextCompactionRefusalReason = typeof ContextCompactionRefusalReason.Type;
 

@@ -5741,6 +5741,21 @@ export class ChatService {
   }
 
   /**
+   * Why a turn on this thread would be refused for the thread's own standing:
+   * the check every Chat send, edit, retry and resume makes first. A
+   * compaction refuses where it does.
+   */
+  turnStandingRefusal(threadId: ChatThreadId): "project-unavailable" | undefined {
+    try {
+      this.#requireActiveThread(threadId);
+      return undefined;
+    } catch (error) {
+      if (error instanceof ChatServiceError) return "project-unavailable";
+      throw error;
+    }
+  }
+
+  /**
    * Whether a new turn is queued or being prepared on this thread. Its plan
    * is journaled before its attempt is, so a compaction admitted in between
    * would be failed by that plan after its summary was paid for.

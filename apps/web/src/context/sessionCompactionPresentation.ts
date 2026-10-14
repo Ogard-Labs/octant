@@ -10,8 +10,9 @@ import { driverLabel, isModelEndpointDriverKind } from "../providers/providerSet
 import { compactTokenCount } from "./contextInspectorModel";
 
 /**
- * The names the window knows for a provider instance and its models. Absent
- * names fall back to plain words; an id is never shown in their place.
+ * The names the window knows for a provider instance and its models. A
+ * provider with no known name reads as "the thread's provider"; a model with
+ * none is shown by its model id.
  */
 export interface CompactionNames {
   readonly provider: (providerInstanceId: ProviderInstanceId) => string | undefined;
@@ -75,6 +76,12 @@ export function refusalClause(reason: ContextCompactionRefusalReason): string {
       return "this mode is turned off";
     case "remote-client":
       return "a session is compacted from a window on the host";
+    case "project-unavailable":
+      return "the thread or its Project is archived or unavailable";
+    case "model-options-unsupported":
+      return "the model no longer offers this thread's saved options";
+    case "thread-paused":
+      return "the thread is paused; resume its harness session first";
   }
 }
 

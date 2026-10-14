@@ -277,6 +277,7 @@ describe("context routes", () => {
       const response = await route(read(query(codeSubject)));
 
       expect(response?.status).toBe(200);
+      expect(response?.headers.get("cache-control")).toBe("no-store");
       await expect(response?.json()).resolves.toEqual({
         subject: codeSubject,
         compaction: { status: "refused", reason: "no-session" },

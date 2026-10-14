@@ -1617,6 +1617,54 @@ describe("WorkTurnService", () => {
     expect(disk.get("/private/tmp/knowledge/STATUS.md")).toBe(written);
   });
 
+  it("tells a compaction when the thread's next turn would be refused for its Project or binding", async () => {
+    const fixture = serviceFixture();
+    const thread = decodeWorkThread({
+      id: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      lifecycle: "active",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      bindingRevisionId: ids.binding,
+      workingDirectory: ".",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    // A thread that never took a turn has nothing a compaction could carry on.
+    expect(fixture.service.turnStandingRefusal(thread)).toBeUndefined();
+
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    expect(fixture.service.turnStandingRefusal(thread)).toBeUndefined();
+
+    fixture.persistence.readProject.mockReturnValue(workProject({ lifecycle: "archived" }));
+    expect(fixture.service.turnStandingRefusal(thread)).toBe("project-unavailable");
+
+    fixture.persistence.readProject.mockReturnValue(
+      workProject({
+        bindingHistory: [
+          ...workProject().bindingHistory,
+          {
+            revisionId: "99999999-9999-4999-8999-999999999999" as never,
+            revision: 2,
+            currentBinding: { canonicalRoot: "/private/tmp/elsewhere" },
+            actor: {
+              kind: "local-user",
+              actorId: "72000000-0000-4000-8000-000000000009" as never,
+            },
+            changedAt: now as never,
+          },
+        ],
+      }),
+    );
+    expect(fixture.service.turnStandingRefusal(thread)).toBe("binding-changed");
+    expect(fixture.service.turnStandingRefusal({ ...thread, lifecycle: "archived" })).toBe(
+      "project-unavailable",
+    );
+  });
+
   it("preserves draft semantics by rejecting a stale binding without creating a turn", async () => {
     const fixture = serviceFixture({
       project: {

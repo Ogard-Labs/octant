@@ -547,6 +547,35 @@ export class WorkTurnService {
     }
   }
 
+  /**
+   * Why a turn on this thread would be refused for its own standing, judged by
+   * the decision every Work turn passes. The authority is the one a window
+   * showing the thread now would send: the thread's last turn, on the Project's
+   * current binding, with the thread's own folder, provider and model. A thread
+   * with no turn has nothing to judge here.
+   */
+  turnStandingRefusal(thread: WorkThread): "project-unavailable" | "binding-changed" | undefined {
+    const last = this.#projection.latestForThread(thread.id)?.authority;
+    if (last === undefined) return undefined;
+    const project = this.#persistence.readProject(thread.projectId);
+    const currentBinding = project?.type === "work" ? project.bindingHistory.at(-1) : undefined;
+    const decision = decideWorkTurnAuthority({
+      authority: {
+        ...last,
+        projectId: thread.projectId,
+        bindingRevisionId: currentBinding?.revisionId ?? last.bindingRevisionId,
+        workingDirectory: thread.workingDirectory ?? last.workingDirectory,
+        providerInstanceId: thread.providerInstanceId,
+        modelId: thread.modelId,
+      },
+      expectedHostId: this.#expectedHostId,
+      project: workTurnProjectFacts(project),
+      thread: workTurnThreadFacts(thread),
+    });
+    if (decision.kind === "allow") return undefined;
+    return decision.category === "stale" ? "binding-changed" : "project-unavailable";
+  }
+
   /** Whether a turn on this thread is being prepared and not yet accepted. */
   isTurnStarting(threadId: WorkThreadId): boolean {
     return this.#startingTurns.has(String(threadId));
@@ -623,33 +652,8 @@ export class WorkTurnService {
     const decision = decideWorkTurnAuthority({
       authority: command.authority,
       expectedHostId: this.#expectedHostId,
-      project:
-        project === undefined
-          ? undefined
-          : {
-              type: project.type,
-              lifecycle: project.lifecycle,
-              bindingHistory: project.type === "work" ? project.bindingHistory : [],
-              binding:
-                project.type === "work"
-                  ? { canonicalRoot: project.binding.canonicalRoot }
-                  : { canonicalRoot: "" },
-            },
-      thread:
-        thread === undefined
-          ? undefined
-          : {
-              projectId: String(thread.projectId),
-              lifecycle: thread.lifecycle,
-              providerInstanceId: String(thread.providerInstanceId),
-              modelId: String(thread.modelId),
-              bindingRevisionId:
-                thread.bindingRevisionId === undefined
-                  ? undefined
-                  : String(thread.bindingRevisionId),
-              workingDirectory:
-                thread.workingDirectory === undefined ? undefined : String(thread.workingDirectory),
-            },
+      project: workTurnProjectFacts(project),
+      thread: workTurnThreadFacts(thread),
     });
     if (decision.kind === "deny") {
       throw this.#failure(decision.category, decision.message);
@@ -2149,4 +2153,39 @@ function sameAttachmentIds(
   const right = named?.map((attachmentId) => String(attachmentId)) ?? [];
   if (left.length !== right.length) return false;
   return left.every((id, index) => id === right[index]);
+}
+
+/** The Project as the Work turn decision reads it. */
+function workTurnProjectFacts(
+  project: Project | undefined,
+): Parameters<typeof decideWorkTurnAuthority>[0]["project"] {
+  return project === undefined
+    ? undefined
+    : {
+        type: project.type,
+        lifecycle: project.lifecycle,
+        bindingHistory: project.type === "work" ? project.bindingHistory : [],
+        binding:
+          project.type === "work"
+            ? { canonicalRoot: project.binding.canonicalRoot }
+            : { canonicalRoot: "" },
+      };
+}
+
+/** The thread as the Work turn decision reads it. */
+function workTurnThreadFacts(
+  thread: WorkThread | undefined,
+): Parameters<typeof decideWorkTurnAuthority>[0]["thread"] {
+  return thread === undefined
+    ? undefined
+    : {
+        projectId: String(thread.projectId),
+        lifecycle: thread.lifecycle,
+        providerInstanceId: String(thread.providerInstanceId),
+        modelId: String(thread.modelId),
+        bindingRevisionId:
+          thread.bindingRevisionId === undefined ? undefined : String(thread.bindingRevisionId),
+        workingDirectory:
+          thread.workingDirectory === undefined ? undefined : String(thread.workingDirectory),
+      };
 }
