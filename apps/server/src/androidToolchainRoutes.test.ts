@@ -99,6 +99,87 @@ describe("Android toolchain routes", () => {
     expect(service.discover).toHaveBeenCalledWith(expect.any(Object), context);
   });
 
+  describe("Open URL", () => {
+    const openUrl = {
+      actionId: "60000000-0000-4000-8000-000000000008",
+      correlationId: "60000000-0000-4000-8000-000000000009",
+      authority,
+      ...scope,
+      kind: "open-url",
+      emulatorId: "Pixel_8_API_34",
+      url: "https://example.com/welcome",
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      timeoutMs: 30_000,
+      approval: { kind: "approved", approvalId: "60000000-0000-4000-8000-00000000000b" },
+    };
+    function routes(resolveContext: ReturnType<typeof vi.fn>) {
+      const service = {
+        discover: vi.fn(),
+        execute: vi.fn(async () => ({
+          actionId: openUrl.actionId,
+          correlationId: openUrl.correlationId,
+          authority,
+          kind: "open-url",
+          outcome: "succeeded",
+          emulatorId: openUrl.emulatorId,
+          requestedBy: openUrl.requestedBy,
+          diagnostics: [],
+          artifacts: [],
+          cleanup: "complete",
+          durationMs: 5,
+          completedAt: "2026-10-14T20:00:01.000Z",
+        })),
+        cancel: vi.fn(),
+        snapshot: vi.fn(),
+        readScreenshotArtifact: vi.fn(),
+        watchScreen: vi.fn(),
+      };
+      const handler = createAndroidToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        resolveContext,
+        service,
+        now: () => 2,
+      });
+      return { handler, service };
+    }
+
+    it("hands an address the window may open to the host with that window's authority", async () => {
+      const { handler, service } = routes(vi.fn(async () => context));
+
+      const response = await handler(request({ kind: "android-action-request", request: openUrl }));
+
+      expect(response?.status).toBe(200);
+      expect(service.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "open-url", url: "https://example.com/welcome" }),
+        context,
+      );
+    });
+
+    it("refuses an app-content or script address before authority is checked or the host is reached", async () => {
+      for (const url of ["content://contacts/people/1", "javascript:alert(1)"]) {
+        const resolveContext = vi.fn(async () => context);
+        const { handler, service } = routes(resolveContext);
+
+        const response = await handler(
+          request({ kind: "android-action-request", request: { ...openUrl, url } }),
+        );
+
+        expect(response?.status, url).toBe(400);
+        expect(resolveContext).not.toHaveBeenCalled();
+        expect(service.execute).not.toHaveBeenCalled();
+      }
+    });
+
+    it("refuses an Open URL for a thread the window has no authority over", async () => {
+      const { handler, service } = routes(vi.fn(async () => undefined));
+
+      const response = await handler(request({ kind: "android-action-request", request: openUrl }));
+
+      expect(response?.status).toBe(403);
+      expect(service.execute).not.toHaveBeenCalled();
+    });
+  });
+
   it("tells the pane which emulators the thread may send input to without a new approval", async () => {
     const snapshot = {
       sequence: 4,

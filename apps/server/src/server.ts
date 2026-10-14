@@ -6309,6 +6309,9 @@ export function startOctantServer(
           options: question.options,
         });
       },
+      // Settled anywhere (another surface, expiry, cancellation): the inline
+      // copy goes too, so Code never lists or accepts an answer to it.
+      onSettled: (input) => codeOperationRuntime?.withdrawHarnessQuestion?.(input),
     });
     const nativeHarnessQuestionsLive = nativeHarnessQuestions;
     const nativeHarnessApprovals = new NativeHarnessApprovalStore({
@@ -6409,6 +6412,7 @@ export function startOctantServer(
       store: {
         read: (threadId) => {
           nativeHarnessApprovals.expireOverdue();
+          nativeHarnessQuestionsLive.expireOverdue();
           const view = nativeHarnessSessionsLive.read(threadId);
           const suggestions = threadFollowUpSuggestions.read(threadId);
           return view === undefined || suggestions === undefined

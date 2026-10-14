@@ -549,7 +549,9 @@ channel with actor attribution and the remote/headless fail-closed attach gate;
 an input whose delivery is unknown is reported `interrupted`, not `failed`, and an off-screen point or unsupported keyboard layout is refused,
 never clamped or guessed. Octant does not script Simulator.app, and an agent
 must not launch Simulator.app, `serve-sim`, or `serve-avd`. **Repair input**
-runs only when a person requests it. Pane states, discovery, capture, input
+runs only when a person requests it. **Open URL** opens a credential-free
+`http`/`https` address a person asked for; it is an effect confirmed per
+address (Allow input never covers it), and evidence keeps only the origin. Pane states, discovery, capture, input
 delivery, keyboard layouts, and the managed streaming tools are specified in
 [Device workbench](design/device-workbench.md).
 
@@ -3819,19 +3821,23 @@ native harness in `apps/server/src/harness`:
   what it asked for, ok/refused/failed, duration), noted live on the session
   while the turn runs and journaled with the record when it ends. `NativeHarnessQuestionStore` blocks an `ask-user` call until an
   answer arrives from any surface (`POST /api/native-harness/sessions/:thread/questions`,
-  or the Code thread's own inline question path), or until it expires or the
-  turn is interrupted. `NativeHarnessApprovalStore` likewise blocks a tool
-  call that needs a person until a decision arrives
+  or the Code thread's own inline question path), or until the turn is
+  interrupted or ten minutes pass. `NativeHarnessApprovalStore` likewise
+  blocks a tool call that needs a person until a decision arrives
   (`POST /api/native-harness/sessions/:thread/approvals`), the turn is
-  interrupted, or ten minutes pass. Expiry denies the call and is journaled as
-  `expired`, the same way whether the timer or the clock caught it: the host
-  checks the clock whenever an approval is asked, answered, or listed
-  (including a read of the session view), so an approval whose timer fired
-  late (a busy host, a machine that slept) is never still shown as pending,
-  approvable, or holding a slot. At most 32 approvals wait at once across the
-  whole host, the cap MCP and browser tool approvals use; a call past it is
-  refused at once as `approval-too-many-waiting`, journals no approval, and
-  tells the lead nobody was asked. `NativeHarnessTurnObserver` puts the stable
+  interrupted, or ten minutes pass. For both, expiry ends the call (as
+  `question-expired`, or as a denied call) and is journaled as `expired`, the
+  same way whether the timer or the clock caught it: the host checks the
+  clock whenever a question or approval is asked, answered, or listed
+  (including a read of the session view), so one whose timer fired late (a
+  busy host, a machine that slept) is never still shown as pending,
+  answerable, or holding a slot. A Code thread's inline copy of a question is
+  withdrawn whenever the question settles, however it settled. At most 32
+  questions and 32 approvals wait at once across the whole host, the cap MCP
+  and browser tool approvals use; one
+  past it is refused at once as `question-too-many-waiting` or
+  `approval-too-many-waiting`, journals nothing, and tells the lead nobody
+  was asked. `NativeHarnessTurnObserver` puts the stable
   instructions block in front of every harness turn, records the completed
   reply, and asks the `advisor` slot for a review. An advisor with no model of
   its own is off: unlike other jobs, its unconfigured slot does not fall back

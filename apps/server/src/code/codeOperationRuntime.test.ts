@@ -267,6 +267,58 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("shows the whole address in an Open URL confirmation and approves only that address", async () => {
+    const fixture = runtimeFixture({ approvalValidator: false });
+    const url = "https://example.com/reset?token=abc&next=%2Fhome";
+    const request = {
+      actionId: operationId(830) as never,
+      correlationId: operationId(831) as never,
+      authority: {
+        hostId: "90000000-0000-4000-8000-000000000010" as never,
+        mode: "code" as const,
+        projectId: thread().projectId,
+        providerInstanceId: thread().providerInstanceId,
+        extension: { kind: "core" as const },
+      },
+      threadId,
+      checkoutId,
+      kind: "open-url" as const,
+      simulatorId: "90000000-0000-4000-8000-000000000011" as never,
+      requestedBy: { kind: "local-user" as const, actorId: operationId(832) as never },
+      url,
+      timeoutMs: 30_000,
+      approval: { kind: "pending" as const },
+    };
+    const challenge = await fixture.runtime.prepareApproval(windowId, {
+      effect: { kind: "apple-action", request },
+    });
+    expect(challenge?.message).toBe("Open this URL on the Simulator?");
+    expect(challenge?.detail).toContain(`URL: ${url}`);
+    expect(challenge?.detail).not.toContain("15 minutes");
+
+    const receipt = await fixture.runtime.confirmApproval(windowId, {
+      challengeId: challenge!.challengeId,
+    });
+    const validate = (
+      fixture.runtime as unknown as {
+        validateAppleApproval: (windowId: WindowId, request: unknown) => Promise<boolean>;
+      }
+    ).validateAppleApproval;
+    const approval = { kind: "approved" as const, approvalId: receipt!.approvalId };
+    // The approval is for that address; another one under it is refused.
+    await expect(
+      validate.call(fixture.runtime, windowId, {
+        ...request,
+        url: "https://example.com/elsewhere",
+        approval,
+      }),
+    ).resolves.toBe(false);
+    await expect(validate.call(fixture.runtime, windowId, { ...request, approval })).resolves.toBe(
+      true,
+    );
+    fixture.close();
+  });
+
   it("prepares and consumes one-shot approval for the exact core Apple action", async () => {
     const fixture = runtimeFixture({ approvalValidator: false });
     const request = {
@@ -2439,6 +2491,33 @@ describe("CodeOperationRuntime", () => {
     ]);
     // Still owed an answer to the question; the board keeps the thread Waiting.
     expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(true);
+
+    // A harness question settled elsewhere (expired, say) leaves this surface.
+    fixture.runtime.raiseHarnessQuestion?.({
+      threadId: String(threadId),
+      questionId: "harness-question-expired",
+      prompt: "Still there?",
+      options: [],
+    });
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toHaveLength(2);
+    fixture.runtime.withdrawHarnessQuestion?.({
+      threadId: String(threadId),
+      questionId: "harness-question-expired",
+    });
+    expect(
+      (await fixture.runtime.pendingRequests?.(windowId))?.map((request) =>
+        request.mode === "code" && request.kind === "question" ? request.answer.requestId : "",
+      ),
+    ).toEqual(["harness-question-listed"]);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-input",
+        operationId: operationId(904),
+        ...question.answer,
+        requestId: "harness-question-expired",
+        response: fixture.response,
+      }),
+    ).resolves.toMatchObject({ state: "failed" });
 
     await fixture.runtime.execute(windowId, {
       kind: "answer-provider-input",
