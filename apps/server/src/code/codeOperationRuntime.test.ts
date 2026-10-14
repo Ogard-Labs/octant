@@ -543,7 +543,7 @@ describe("CodeOperationRuntime", () => {
           checkoutId,
           checkpoint: { worktree: "c".repeat(40), index: "d".repeat(40) } as never,
         });
-      return { fixture, starting, credential, restore };
+      return { fixture, connection, starting, credential, restore };
     }
 
     it.each([
@@ -592,6 +592,39 @@ describe("CodeOperationRuntime", () => {
         fixture.close();
       },
     );
+
+    it("releases the checkout when a turn is stopped while its preparation never returns", async () => {
+      const { fixture, connection, starting, credential, restore } = await preparingTurn();
+      await expect(restore(32)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "conflict" },
+      });
+
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(34),
+          threadId,
+          checkoutId,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+      // The credential read is still outstanding; the restore no longer waits on it.
+      await expect(restore(35)).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        mutation: "restore-checkpoint",
+      });
+      expect(fixture.restoredTrees()).toBe(1);
+
+      // When the read finally returns, the stopped turn never reaches its provider.
+      credential.resolve("secret");
+      await expect(starting).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "interrupted",
+      });
+      expect(connection.start).not.toHaveBeenCalled();
+      expect(connection.send).not.toHaveBeenCalled();
+      fixture.close();
+    });
 
     it.each([
       {

@@ -149,7 +149,8 @@ stays on the thread after a successful overwrite. Octant refuses the restore,
 and Undo restore, while another thread has a turn writing in the same
 checkout, and names that thread when it is in the same Project. Wait for its
 turn to finish or stop it, then restore; the Undo restore button stays after a
-refusal. A thread on its own worktree is not held up by other threads.
+refusal. A restore is also refused while another restore of the same folder is
+still running. A thread on its own worktree is not held up by other threads.
 
 A checkpoint marker stays on the turn only when that point is marked.
 

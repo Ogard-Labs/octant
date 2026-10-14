@@ -882,6 +882,17 @@ export interface CodeOperationServiceOptions {
   };
 }
 
+/**
+ * A turn holding its checkout root while it starts. Stopping it marks it
+ * cancelled and releases the root at once: a preparation step that never
+ * returns (a stuck credential read) must not block restores until a restart.
+ */
+interface StartingTurn {
+  readonly thread: CodeThread;
+  readonly checkoutRoot: string;
+  cancelled: boolean;
+}
+
 export class CodeOperationService {
   readonly #options: CodeOperationServiceOptions;
   readonly #terminalOwners = new Map<string, TerminalOwner>();
@@ -900,10 +911,7 @@ export class CodeOperationService {
    * and fork preparation are done; a restore that landed before then passed
    * its check, and the turn then started on the overwritten files.
    */
-  readonly #startingTurns = new Set<{
-    readonly thread: CodeThread;
-    readonly checkoutRoot: string;
-  }>();
+  readonly #startingTurns = new Set<StartingTurn>();
   /**
    * In-place restores past their check and still overwriting files. Git
    * queues work per checkout id, and two Projects on one folder have two ids,
@@ -1114,11 +1122,17 @@ export class CodeOperationService {
             // A writing turn holds its checkout against an in-place restore
             // from before its checkpoint is captured until the runtime has
             // either taken it on, and so reports it live, or let it go.
-            const startingTurn =
+            const startingTurn: StartingTurn | undefined =
               command.kind === "start-provider-turn"
-                ? { thread: turnThread, checkoutRoot: root.checkoutRoot }
+                ? { thread: turnThread, checkoutRoot: root.checkoutRoot, cancelled: false }
                 : undefined;
             if (startingTurn !== undefined) this.#startingTurns.add(startingTurn);
+            // A start stopped while it prepares is refused at its next
+            // admission check, at the latest just before the runtime takes it on.
+            const admissionCurrent =
+              startingTurn === undefined
+                ? options.admissionCurrent
+                : () => !startingTurn.cancelled && options.admissionCurrent?.() !== false;
             try {
               // Held first, so no restore starts after this; one already
               // overwriting the files finishes before the checkpoint is taken.
@@ -1143,7 +1157,7 @@ export class CodeOperationService {
                 // an intervening parent admission cannot acquire a stale delivery mark.
                 const afterCheckpoint = this.#agentResultDelivery(command);
                 if (afterCheckpoint !== undefined) return afterCheckpoint;
-                if (options.admissionCurrent?.() === false) {
+                if (admissionCurrent?.() === false) {
                   turnRefusal = this.#failed(
                     command.operationId,
                     "unauthorized",
@@ -1187,7 +1201,7 @@ export class CodeOperationService {
                         scope.checkout,
                         root,
                         starting.attachments,
-                        options.admissionCurrent,
+                        admissionCurrent,
                         initiator,
                       );
               } catch (error) {
@@ -1199,6 +1213,15 @@ export class CodeOperationService {
                   `Octant code operation ${command.kind} failed unexpectedly: ${(error instanceof Error ? error.message : String(error)).slice(0, 400)}`,
                 );
                 result = this.#failed(command.operationId, category, "Code operation failed.");
+              }
+              // The refusal came from the person stopping the turn, not from
+              // lost authority, so the start reads as a stopped turn.
+              if (
+                startingTurn?.cancelled === true &&
+                "admission" in result &&
+                result.admission === "refused"
+              ) {
+                result = this.#providerResult(command.operationId, { state: "interrupted" });
               }
             } finally {
               if (startingTurn !== undefined) this.#startingTurns.delete(startingTurn);
@@ -1271,15 +1294,20 @@ export class CodeOperationService {
     }
     // A recovered start prepares in the runtime like a new one, so it holds
     // its checkout against an in-place restore the same way.
-    let startingTurn: { readonly thread: CodeThread; readonly checkoutRoot: string } | undefined;
+    let startingTurn: StartingTurn | undefined;
     try {
       const frames = this.#replay(command.threadId, command.operationId, 0, 256).frames;
       const turnThread = threadForTurn(
         thread,
         turnAccessPosture(thread, command, recordedTurnAccessPosture(frames)),
       );
-      startingTurn = { thread: turnThread, checkoutRoot: root.checkoutRoot };
-      this.#startingTurns.add(startingTurn);
+      const held: StartingTurn = {
+        thread: turnThread,
+        checkoutRoot: root.checkoutRoot,
+        cancelled: false,
+      };
+      startingTurn = held;
+      this.#startingTurns.add(held);
       const restoring = this.#restoreInFlight(root.checkoutRoot);
       if (restoring !== undefined) await restoring;
       const recovered = await this.#providerTurn(
@@ -1288,8 +1316,10 @@ export class CodeOperationService {
         turnThread,
         root.checkoutRoot,
         recordedTurnAttachments(frames),
-        admissionCurrent,
+        () => !held.cancelled && admissionCurrent?.() !== false,
       );
+      if (held.cancelled && "admission" in recovered && recovered.admission === "refused")
+        return this.#providerResult(command.operationId, { state: "interrupted" });
       return recovered.kind === "provider-turn-state" ||
         (recovered.kind === "operation-failed" && recovered.failure.category === "unauthorized")
         ? recovered
@@ -2275,6 +2305,15 @@ export class CodeOperationService {
             ),
           );
         }
+        // Git queues per checkout id, so two Projects on one folder would
+        // otherwise overwrite it at the same time.
+        if (this.#restoreInFlight(root.checkoutRoot) !== undefined) {
+          return this.#failed(
+            command.operationId,
+            "conflict",
+            "Another restore is overwriting this checkout. Wait for it to finish, then restore.",
+          );
+        }
         // Registered in the same step as the check above, with nothing
         // awaited between them, so a turn either was refused here or waits.
         const restoring = restore({
@@ -2353,11 +2392,30 @@ export class CodeOperationService {
             decision: command.decision,
           }),
         );
-      case "cancel-provider-turn":
+      case "cancel-provider-turn": {
+        // A turn still preparing is not the runtime's yet, so the runtime
+        // cannot stop it; releasing it here is what lets a refused restore
+        // through, as the refusal promised.
+        let stoppedStart = false;
+        for (const starting of this.#startingTurns) {
+          if (
+            String(starting.thread.id) === String(thread.id) &&
+            starting.checkoutRoot === root.checkoutRoot
+          ) {
+            starting.cancelled = true;
+            this.#startingTurns.delete(starting);
+            stoppedStart = true;
+          }
+        }
+        const cancelled = await this.#options.turns.cancel({
+          thread,
+          checkoutRoot: root.checkoutRoot,
+        });
         return this.#providerResult(
           command.operationId,
-          await this.#options.turns.cancel({ thread, checkoutRoot: root.checkoutRoot }),
+          stoppedStart && cancelled.state === "failed" ? { state: "interrupted" } : cancelled,
         );
+      }
     }
   }
 

@@ -814,16 +814,21 @@ says a thread in another Project is writing. A writing turn counts from just
 before the host captures its checkpoint, through the runtime's preparation
 (credentials, session seeding, fork preparation), until the runtime has taken
 it on, so a restore cannot land between the capture and the launch. A start
-that is refused or fails while preparing stops counting at once and never holds
-restores back. The other order is serialized by root too: a turn that starts
-while a restore that passed this check is still overwriting the same root holds
-the root, so no further restore starts, and waits for the overwrite to finish
-before it captures its checkpoint, so it starts from the restored files. Git
-alone queues only per checkout id, which would let a turn in another Project on
-the same folder, or a recovered start that captures nothing, run on a
-half-restored tree. Restore from here and
-Fork from here create a thread on its own worktree and are not subject to the
-check. Discard and revert also overwrite files and are not yet covered.
+that is refused or fails while preparing stops counting at once and holds
+nothing back after that. Stopping a turn that is still preparing releases its
+root at once, even if a preparation step never returns, and the turn is
+refused at its next admission check, at the latest just before the runtime
+takes it on, so it never reaches its provider. The other order is serialized
+by root too: a turn that starts while a restore that passed this check is still
+overwriting the same root holds the root, so no further restore starts, and
+waits for the overwrite to finish before it captures its checkpoint, so it
+starts from the restored files. A second restore of a root that is being
+overwritten is refused as a `conflict` as well. Git alone queues only per
+checkout id, which would let a turn or a restore in another Project on the same
+folder, or a recovered start that captures nothing, run on a half-restored
+tree. Restore from here and Fork from here create a thread on its own worktree
+and are not subject to the check. Discard and revert also overwrite files and
+are not yet covered.
 
 A child AgentRun starts only when the thread's agent delegates through the
 Octant Harness `delegate` tool or a provider harness's `octant_agents` tool.

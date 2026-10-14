@@ -1545,6 +1545,46 @@ describe("CodeOperationService", () => {
       return { service, restoreCheckpoint, checkpoint, start };
     }
 
+    it("refuses a restore while another Project's restore is overwriting the same folder", async () => {
+      const otherRestorer = decodeCodeThread({
+        ...thread(),
+        id: decodeCodeThreadId("13131313-1313-4313-8313-131313131313"),
+        projectId: otherProject,
+      });
+      const { service, restoreCheckpoint } = restoreFixture([], thread(), [otherRestorer]);
+      const entered = Promise.withResolvers<void>();
+      const overwrite = Promise.withResolvers<void>();
+      restoreCheckpoint.mockImplementationOnce(async () => {
+        entered.resolve();
+        await overwrite.promise;
+        return { status: "applied", undo: { worktree: "e".repeat(40), index: "f".repeat(40) } };
+      });
+
+      const first = service.execute(ids.window, restoreCommand);
+      await entered.promise;
+      await expect(
+        service.execute(ids.window, {
+          ...restoreCommand,
+          operationId: decodeCodeOperationId("54545454-5454-4545-8545-545454545454"),
+          threadId: otherRestorer.id,
+        }),
+      ).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message:
+            "Another restore is overwriting this checkout. Wait for it to finish, then restore.",
+        },
+      });
+      expect(restoreCheckpoint).toHaveBeenCalledOnce();
+
+      overwrite.resolve();
+      await expect(first).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        state: "completed",
+      });
+    });
+
     it("makes a turn that starts while another Project restores the same folder wait for the files", async () => {
       const writer = liveTurn({}).thread;
       const restorer = decodeCodeThread({ ...thread(), projectId: otherProject });
@@ -1572,7 +1612,14 @@ describe("CodeOperationService", () => {
           ...restoreCommand,
           operationId: decodeCodeOperationId("54545454-5454-4545-8545-545454545454"),
         }),
-      ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "conflict" } });
+      ).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message:
+            "A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then restore.",
+        },
+      });
 
       overwrite.resolve();
       await expect(restoring).resolves.toMatchObject({
@@ -2489,6 +2536,8 @@ describe("CodeOperationService", () => {
       sessionId: startProviderTurn.sessionId,
       checkoutRoot: "/private/exact-checkout",
       prompt: "does this still hold?",
+      // Always present: stopping a turn that is still preparing refuses it here.
+      admissionCurrent: expect.any(Function),
     });
   });
 
