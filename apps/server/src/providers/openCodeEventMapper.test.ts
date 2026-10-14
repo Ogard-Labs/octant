@@ -80,7 +80,7 @@ describe("mapOpenCodeEvent", () => {
           callID: "call-1",
           tool: "read_file",
           input: { privateInput: "must-not-cross" },
-          provider: { executed: true, metadata: { privateProvider: { value: "hidden" } } },
+          provider: { executed: false, metadata: { privateProvider: { value: "hidden" } } },
         },
       }),
       expected: { kind: "tool-start", toolCallId: "call-1", toolName: "read_file" },
@@ -779,6 +779,74 @@ describe("OpenCode 2.0.22 events", () => {
         calls,
       ),
     ).toMatchObject([{ kind: "tool-failure", toolCallId: "call_1" }]);
+  });
+
+  it("marks the thread when OpenCode or its provider reads the web itself, and for no other tool", () => {
+    const calls = new Map<string, string>();
+    const called = (id: string, name: string, input: Record<string, unknown>) => {
+      const call = { assistantMessageID, id };
+      adaptAndMap("session.tool.input.started", { ...call, name }, calls);
+      return adaptAndMap("session.tool.called", { ...call, input, executed: false }, calls);
+    };
+
+    expect(called("call_1", "read", { filePath: "/repo/README.md" })).toEqual([
+      expect.objectContaining({ kind: "tool-start", toolName: "read" }),
+    ]);
+    expect(
+      called("call_2", "webfetch", { url: "https://example.invalid/a", format: "markdown" }),
+    ).toEqual([
+      expect.objectContaining({ kind: "tool-start", toolCallId: "call_2", sequence: 41 }),
+      expect.objectContaining({
+        kind: "outside-content-read",
+        toolCallId: "call_2",
+        toolName: "webfetch",
+        source: "web-fetch",
+        target: "https://example.invalid/a",
+        sequence: 42,
+      }),
+    ]);
+    // A tool the model's provider runs on its own servers marks the thread too.
+    expect(
+      adaptAndMap(
+        "session.tool.called",
+        {
+          assistantMessageID,
+          id: "call_hosted",
+          input: { query: "release notes" },
+          executed: true,
+        },
+        new Map([["call_hosted", "web_search"]]),
+      ),
+    ).toMatchObject([
+      { kind: "tool-start", toolName: "web_search" },
+      { kind: "outside-content-read", source: "hosted-tool", target: "release notes" },
+    ]);
+    expect(
+      mapped(
+        official({
+          id: "event-hosted",
+          type: "session.next.tool.called",
+          properties: {
+            timestamp: 1,
+            sessionID: "provider-session",
+            assistantMessageID: "message-1",
+            callID: "call-sdk",
+            tool: "code_interpreter",
+            input: {},
+            provider: { executed: true },
+          },
+        }),
+      ),
+    ).toMatchObject([
+      { kind: "tool-start", toolName: "code_interpreter" },
+      { kind: "outside-content-read", source: "hosted-tool", toolName: "code_interpreter" },
+    ]);
+    for (const name of ["websearch", "codesearch"]) {
+      expect(called(`call_${name}`, name, { query: "effect schema union" })).toMatchObject([
+        { kind: "tool-start", toolName: name },
+        { kind: "outside-content-read", source: "web-search", target: "effect schema union" },
+      ]);
+    }
   });
 
   it("ignores a tool update that names no call", () => {

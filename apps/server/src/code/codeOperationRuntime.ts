@@ -132,6 +132,7 @@ import type {
 } from "../harness/nativeHarnessTurnObserver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
+import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { decodeAgentRunAdmittedContext, type ProviderContextBlock } from "@octant/contracts";
 import type {
@@ -496,6 +497,8 @@ export interface CodeOperationRuntimeOptions {
     readonly answerQuestion?: (threadId: string, questionId: string, answer: string) => void;
   };
   readonly recordExternalContentIngestion?: CodeAppManagedToolsOptions["recordExternalContentIngestion"];
+  /** Marks a thread whose runtime read outside content with its own tools. */
+  readonly outsideContentMarks?: RuntimeOutsideContentMarking;
   /**
    * Reads whether a thread has ingested untrusted external content. Used to
    * clamp harness-delegated approvals back to user-answered prompts when taint
@@ -3522,6 +3525,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               );
             },
           },
+          ...(this.#options.outsideContentMarks === undefined
+            ? {}
+            : { outsideContentMarks: this.#options.outsideContentMarks }),
           sanitizeProviderEvent: ({ event }) =>
             Effect.try({
               try: () => sanitizeProviderEvent(event, active.checkoutRoot, active.secrets),

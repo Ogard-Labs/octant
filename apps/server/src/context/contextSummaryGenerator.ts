@@ -108,6 +108,7 @@ export function makeContextSummaryGenerator(
       handled: 0,
       terminal: undefined,
       outputTokens: undefined,
+      readOutsideContent: false,
     };
     const outcome = await Effect.runPromise(
       // The deadline covers the whole scoped operation — acquisition, startup,
@@ -160,6 +161,8 @@ interface SummaryTurnState {
   terminal: ProviderRuntimeEvent | undefined;
   /** The provider's own output count, when it reported one. */
   outputTokens: number | undefined;
+  /** The runtime read outside content with its own tools while answering. */
+  readOutsideContent: boolean;
 }
 
 /**
@@ -205,6 +208,7 @@ function runSummaryTurn(
             Effect.sync(() => {
               state.handled += 1;
               if (state.handled > MAX_EVENTS) return;
+              if (event.kind === "outside-content-read") state.readOutsideContent = true;
               if (event.kind === "text-delta") state.summary += event.text;
               if (event.kind === "usage") {
                 state.outputTokens = event.outputTokens;
@@ -226,6 +230,16 @@ function runSummaryTurn(
       }),
     });
     yield* Fiber.join(events);
+    // A summary steered by a page the runtime read would enter the thread
+    // with no mark to say so; nothing here can mark the thread, so it is not
+    // used.
+    if (state.readOutsideContent) {
+      return yield* Effect.fail(
+        new ContextSummaryGenerationFailed(
+          "The maintenance model read outside content, so its summary was not used.",
+        ),
+      );
+    }
     if (state.terminal?.kind !== "completed" || state.summary.trim().length === 0) {
       return yield* Effect.fail(
         new ContextSummaryGenerationFailed("The maintenance model produced no usable summary."),

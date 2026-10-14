@@ -320,9 +320,18 @@ guidance instead.
   named reason (`search-query-refused-under-taint: …`) before any request leaves (Henrik decision
   2026-10-10). Residual risk: a short plain-word query can still leak a few words, but only to the
   endpoint the person chose. Revisit if a default hosted third-party search provider ships.
-  A provider runtime's own built-in web search or page fetch does not append
-  `external-content-ingested`. Residual risk: that read leaves the thread unmarked, and the
-  mark's gate does not cover a tool the runtime executes itself.
+  A provider runtime's own built-in web search or page fetch, or a tool its provider hosts, appends
+  `external-content-ingested` (labels `runtime-web-search`, `runtime-web-fetch`,
+  `runtime-hosted-tool`, with an opaque hashed reference) when its adapter first sees the call. The
+  runtime may already hold the result by then, and it can act on it before Octant's next gated call;
+  what the mark changes is that call and every later turn. A Code turn whose approvals the runtime's own
+  reviewer answers is stopped at the mark so the next approval goes to a person, and a mark that cannot be
+  recorded stops the turn and refuses the thread's next turn until it is recorded (Henrik decision
+  2026-10-14: track it). Residual risks: the mark's gate does not cover a tool the runtime executes
+  itself; an owed mark lives in the host process and a restart forgets it; an ACP agent's web search
+  reported under the `search` kind with a path-like input, or with no `query`, leaves the thread
+  unmarked. Which calls each runtime exposes is listed in `docs/architecture.md`, Persistence,
+  Provider runtimes' own web tools.
 - **A person may clear the mark.** The mark keeps its thread lifetime, and a person at a local
   window may clear it after reviewing what the thread read (Henrik decision 2026-10-12). The clear
   is journaled with who and when (`thread.external-content-cleared@1`: the thread, the window, the

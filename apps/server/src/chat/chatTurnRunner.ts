@@ -35,6 +35,11 @@ import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Cause, Deferred, Effect, Fiber, Option, Schema, Scope, Stream } from "effect";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import { TurnCompactions } from "../context/automaticCompaction";
+import {
+  NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
+  RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+  type RuntimeOutsideContentMarking,
+} from "../context/runtimeOutsideContentMark";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import {
@@ -275,6 +280,12 @@ export interface ChatTurnRunnerInput {
   readonly onHarnessRetryCleared?: () => void;
   /** Tells the navigation read what the running turn is doing, from its start to its end. */
   readonly liveTurn?: LiveTurnTracker;
+  /**
+   * Records that the runtime's own web search, page fetch, or hosted tool put
+   * outside content in front of the model. Without it such a call stops the
+   * turn.
+   */
+  readonly outsideContentMarks?: RuntimeOutsideContentMarking;
 }
 
 export type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -409,6 +420,21 @@ export class ChatTurnRunner {
           terminalOutcome = "failed";
           return yield* Effect.fail(error);
         });
+
+      const outsideContentMarks = input.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS;
+      const unmarked = () =>
+        failTurn(
+          {
+            code: decodeDiagnosticFailureCode("outside-content-unmarked"),
+            message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+          },
+          decodeChatFailure({ category: "failed", message: RUNTIME_OUTSIDE_CONTENT_REFUSAL }),
+        );
+      // An earlier attempt's read that could not be marked is still in the
+      // session this attempt would resume.
+      if (outsideContentMarks.settleOwed(String(input.thread.id)).status === "refused") {
+        return yield* unmarked();
+      }
 
       capacityScheduler.updateProviderFacts({
         limits: input.serviceLimits,
@@ -934,6 +960,19 @@ export class ChatTurnRunner {
                   input.onHarnessRetryCleared?.();
                 }
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
+                if (event.kind === "outside-content-read") {
+                  // Marked before the budget or a cancel is looked at: what
+                  // the runtime read reached its model either way.
+                  if (
+                    outsideContentMarks.mark(String(input.thread.id), event).status === "refused"
+                  ) {
+                    yield* connection
+                      .interrupt(input.attempt.providerSessionId)
+                      .pipe(Effect.catchAll(() => Effect.void));
+                    return yield* unmarked();
+                  }
+                  if (input.signal?.aborted !== true && handledEvents <= maxEvents) return;
+                }
                 if (handledEvents > maxEvents) {
                   yield* persistOutcome("interrupted", {
                     code: decodeDiagnosticFailureCode("event-budget-exceeded"),

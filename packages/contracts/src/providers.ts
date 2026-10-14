@@ -2120,6 +2120,26 @@ export const ProviderRuntimeEvent = Schema.Union(
      */
     argument: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
   }).annotations(strict),
+  /**
+   * The runtime is running one of its own tools that puts outside content in
+   * front of the model: its built-in web search or page fetch, or a tool the
+   * model's provider runs on its own servers (`hosted-tool`). Octant never
+   * sees the result, so the adapter sends this when it first learns of the
+   * call; a call that later fails, is denied, or is cancelled may still have
+   * handed the model a page. `target` is the query or address, reduced by the
+   * adapter to one bounded line, when the runtime reported one. It never
+   * carries page content. A driver may send it whether or not it reports tool
+   * activity.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("outside-content-read"),
+    toolCallId: Schema.NonEmptyTrimmedString,
+    /** The runtime's own name for the tool. */
+    toolName: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
+    source: Schema.Literal("web-search", "web-fetch", "hosted-tool"),
+    target: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024))),
+  }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("tool-progress"),

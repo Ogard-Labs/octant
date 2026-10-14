@@ -2414,6 +2414,25 @@ describe("provider runtime contracts", () => {
     { kind: "text-delta", text: "Hello" },
     { kind: "reasoning-delta", text: "Consider" },
     { kind: "tool-start", toolCallId: "tool-1", toolName: "read" },
+    {
+      kind: "outside-content-read",
+      toolCallId: "tool-2",
+      toolName: "webSearch",
+      source: "web-search",
+      target: "release notes",
+    },
+    {
+      kind: "outside-content-read",
+      toolCallId: "tool-3",
+      toolName: "WebFetch",
+      source: "web-fetch",
+    },
+    {
+      kind: "outside-content-read",
+      toolCallId: "tool-4",
+      toolName: "web_search",
+      source: "hosted-tool",
+    },
     { kind: "tool-progress", toolCallId: "tool-1", message: "Reading" },
     { kind: "tool-success", toolCallId: "tool-1", summary: "Read file" },
     { kind: "tool-failure", toolCallId: "tool-1", message: "Denied" },
@@ -2519,6 +2538,19 @@ describe("provider runtime contracts", () => {
     expect(decodeProviderRuntimeEvent({ ...common, ...event })).toMatchObject(event);
     expect(() =>
       decodeProviderRuntimeEvent({ ...common, ...event, providerPayload: { private: true } }),
+    ).toThrow();
+  });
+
+  it("refuses an outside-content read of an unknown source or with an unbounded target", () => {
+    const read = {
+      ...common,
+      kind: "outside-content-read",
+      toolCallId: "tool-1",
+      toolName: "webSearch",
+    } as const;
+    expect(() => decodeProviderRuntimeEvent({ ...read, source: "shell" })).toThrow();
+    expect(() =>
+      decodeProviderRuntimeEvent({ ...read, source: "web-search", target: "q".repeat(1_025) }),
     ).toThrow();
   });
 
