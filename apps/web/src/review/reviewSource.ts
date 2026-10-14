@@ -1,5 +1,5 @@
 import type { ChatClient } from "@octant/client-runtime/chat-client";
-import type { CodeClient } from "@octant/client-runtime/code-client";
+import { CodeClientFailure, type CodeClient } from "@octant/client-runtime/code-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import {
@@ -131,15 +131,36 @@ function workReviewFacts(card: WorkBoardCard): ReviewFacts {
 }
 
 /**
+ * Clients whose host answered 404 for the conversation window: an older host
+ * that only has the forward read. Asked once per client.
+ */
+const clientsWithoutConversationWindow = new WeakSet<CodeClient>();
+
+/**
  * The newest turn of a Code thread, read the way the thread's own transcript
  * reads it, without activating the thread: opening a thread to see its last
  * answer would spend its unread mark.
+ *
+ * One newest-first window of one turn, so the cost does not grow with the
+ * thread. A host without the window read is walked page by page instead.
  */
 async function readLastCodeTurn(
   client: CodeClient,
   threadId: ReturnType<typeof decodeCodeThreadId>,
   signal: AbortSignal,
 ): Promise<CodeConversationTurn | undefined> {
+  if (
+    typeof client.conversationWindow === "function" &&
+    !clientsWithoutConversationWindow.has(client)
+  ) {
+    try {
+      const window = await client.conversationWindow(threadId, { limit: 1 }, signal);
+      return window.turns.at(-1);
+    } catch (error) {
+      if (!(error instanceof CodeClientFailure && error.status === 404)) throw error;
+      clientsWithoutConversationWindow.add(client);
+    }
+  }
   let cursor = 0;
   let last: CodeConversationTurn | undefined;
   for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {

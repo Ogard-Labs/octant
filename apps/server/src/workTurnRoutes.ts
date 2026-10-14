@@ -229,6 +229,7 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
           ),
           200,
           origin,
+          { "cache-control": "no-store" },
         );
       }
       if (isWindow) {

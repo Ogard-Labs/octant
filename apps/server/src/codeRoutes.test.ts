@@ -585,6 +585,7 @@ describe("Code routes", () => {
     );
 
     expect(response?.status).toBe(200);
+    expect(response?.headers.get("cache-control")).toBe("no-store");
     await expect(response?.json()).resolves.toEqual({
       version: 3,
       threadId,

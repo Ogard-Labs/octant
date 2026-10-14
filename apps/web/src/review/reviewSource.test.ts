@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CodeBoardCard } from "@octant/contracts";
+import { CodeClientFailure } from "@octant/client-runtime/code-client";
+import { MAX_CODE_CONVERSATION_PAGE_SIZE, type CodeBoardCard } from "@octant/contracts";
 import { codeReviewFacts, createReviewSource, type ReviewSourceClients } from "./reviewSource";
 import type { ReviewEntry } from "./reviewModel";
 
@@ -121,6 +122,80 @@ describe("review source", () => {
     expect(again.get(`code:${codeEntry.threadId}`)?.finishedAt).toBe("2026-10-06T07:00:00.000Z");
     // A finished thread's turn time does not change, so it is read once.
     expect(wired.code.conversation).toHaveBeenCalledOnce();
+  });
+
+  /** A thread of `count` turns, answered the way the host's forward and newest-first reads do. */
+  function longThread(count: number) {
+    const turns = Array.from({ length: count }, (_, index) => ({
+      updatedAt: new Date(Date.UTC(2026, 9, 6, 0, 0, index)).toISOString(),
+    }));
+    return {
+      queryBoard: vi.fn(async () => ({ cards: [card()] })),
+      conversation: vi.fn(async (_threadId: string, afterCursor: number, limit: number) => {
+        const page = turns.slice(afterCursor, afterCursor + limit);
+        return {
+          turns: page,
+          hasMore: afterCursor + page.length < turns.length,
+          nextCursor: afterCursor + page.length,
+        };
+      }),
+      conversationWindow: vi.fn(async (_threadId: string, request: { readonly limit: number }) => ({
+        turns: turns.slice(-request.limit),
+        hasEarlier: turns.length > request.limit,
+        hasLater: false,
+      })),
+    };
+  }
+
+  it("reads the last turn of a thread longer than one forward page from the newest window alone", async () => {
+    const count = MAX_CODE_CONVERSATION_PAGE_SIZE * 2 + 50;
+    const windowed = longThread(count);
+    const walked = longThread(count);
+    const signal = new AbortController().signal;
+
+    const fromWindow = await createReviewSource(clients({ code: windowed as never })).loadFacts(
+      [codeEntry],
+      signal,
+    );
+    const fromPages = await createReviewSource(
+      clients({ code: { ...walked, conversationWindow: undefined } as never }),
+    ).loadFacts([codeEntry], signal);
+
+    expect(fromWindow.get(`code:${codeEntry.threadId}`)?.finishedAt).toBe(
+      new Date(Date.UTC(2026, 9, 6, 0, 0, count - 1)).toISOString(),
+    );
+    expect(fromWindow).toEqual(fromPages);
+    expect(windowed.conversationWindow).toHaveBeenCalledOnce();
+    expect(windowed.conversationWindow).toHaveBeenCalledWith(
+      codeEntry.threadId,
+      { limit: 1 },
+      signal,
+    );
+    expect(windowed.conversation).not.toHaveBeenCalled();
+    expect(walked.conversation).toHaveBeenCalledTimes(3);
+  });
+
+  it("walks the forward pages once for a host that has no window read", async () => {
+    const thread = longThread(MAX_CODE_CONVERSATION_PAGE_SIZE + 1);
+    thread.conversationWindow.mockRejectedValue(
+      new CodeClientFailure({ category: "unsupported", message: "No window." }, 404),
+    );
+    const source = createReviewSource(clients({ code: thread as never }));
+    const signal = new AbortController().signal;
+    const second: ReviewEntry = {
+      ...codeEntry,
+      threadId: "00000000-0000-4000-8000-000000000003",
+    };
+
+    const first = await source.loadFacts([codeEntry], signal);
+    await source.loadFacts([second], signal);
+
+    expect(first.get(`code:${codeEntry.threadId}`)?.finishedAt).toBe(
+      new Date(Date.UTC(2026, 9, 6, 0, 0, MAX_CODE_CONVERSATION_PAGE_SIZE)).toISOString(),
+    );
+    // The refusal is asked once per client, not once per thread.
+    expect(thread.conversationWindow).toHaveBeenCalledOnce();
+    expect(thread.conversation).toHaveBeenCalledTimes(4);
   });
 
   it("keeps the other mode's facts when one board cannot be read", async () => {
