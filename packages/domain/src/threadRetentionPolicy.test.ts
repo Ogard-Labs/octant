@@ -205,6 +205,18 @@ describe("decidePurgeThreads", () => {
       }),
     ).toEqual({ kind: "allow" });
   });
+
+  it("refuses a thread whose id another mode's thread also holds", () => {
+    expect(
+      decidePurgeThreads({
+        principalKind: "local-window",
+        confirm: true,
+        scope: threadScope,
+        threadExists: true,
+        threadIdHeldByAnotherMode: true,
+      }),
+    ).toMatchObject({ kind: "refused", reason: "invalid" });
+  });
 });
 
 describe("selectThreadsForPurge", () => {

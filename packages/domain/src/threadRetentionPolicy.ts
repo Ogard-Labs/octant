@@ -144,6 +144,12 @@ export function decidePurgeThreads(input: {
   readonly scope: RetentionScope;
   readonly threadExists?: boolean;
   readonly threadAlreadyPurged?: boolean;
+  /**
+   * Another mode's thread holds the same id. Every thread trace the purge
+   * erases is keyed by the bare id, so purging this thread would erase that
+   * one's mark, history, and files too.
+   */
+  readonly threadIdHeldByAnotherMode?: boolean;
   readonly projectExists?: boolean;
 }): ThreadRetentionDecision {
   const authority = authorizeThreadRetentionAction({
@@ -164,6 +170,14 @@ export function decidePurgeThreads(input: {
       kind: "refused",
       reason: "unknown-thread",
       guidance: "That thread is not on this host.",
+    };
+  }
+  if (input.scope.kind === "thread" && input.threadIdHeldByAnotherMode === true) {
+    return {
+      kind: "refused",
+      reason: "invalid",
+      guidance:
+        "A thread in another mode has the same ID, so purging this one would erase that thread too.",
     };
   }
   if (input.scope.kind === "project" && input.projectExists === false) {

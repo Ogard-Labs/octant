@@ -49,6 +49,12 @@ export interface TranscriptWindowProps<T> {
   readonly itemTag?: "div" | "li";
   readonly revealKey?: string;
   /**
+   * Called once the `revealKey` row has been brought into view, so the owner
+   * can drop a one-time jump target instead of passing it on to a list that
+   * mounts again later and would jump back to it.
+   */
+  readonly onRevealed?: (key: string) => void;
+  /**
    * Keys that must stay mounted even when they leave the window. Chat uses this
    * for the turn being edited so the draft is not discarded by recycling.
    */
@@ -58,6 +64,12 @@ export interface TranscriptWindowProps<T> {
    * the top and stays there until the reader scrolls.
    */
   readonly align?: "start" | "end";
+  /**
+   * Whether an end-aligned list follows new output at the bottom. A run of
+   * earlier rows the reader jumped to does not end at the newest output, so a
+   * page arriving below it must not carry the reader to its end.
+   */
+  readonly followOutput?: boolean;
   readonly role?: "log" | "region";
   readonly ariaLabel?: string;
   readonly lead?: ReactNode;
@@ -100,6 +112,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const overscan = props.overscan ?? DEFAULT_OVERSCAN;
   const gap = props.gap ?? 0;
   const align = props.align ?? "end";
+  const follows = align === "end" && props.followOutput !== false;
   const ListTag = props.listTag ?? "div";
   const ItemTag = props.itemTag ?? "div";
   const scrollElementRef = useRef<HTMLDivElement>(null);
@@ -118,9 +131,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const firstKey = items[0] === undefined ? undefined : itemKey(items[0], 0);
   const remembered = scrollMemory.get(restoreKey);
   const restored = remembered?.firstKey === firstKey ? remembered : undefined;
-  const followingRef = useRef(
-    restored?.following === true || (restored === undefined && align === "end"),
-  );
+  const followingRef = useRef(follows && (restored?.following === true || restored === undefined));
   const appliedRevealKeyRef = useRef<string | undefined>(undefined);
   const sawFindMatchRef = useRef(false);
   const pendingFocusRef = useRef<
@@ -157,7 +168,13 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     gap,
     scrollMargin,
     scrollEndThreshold: FOLLOW_THRESHOLD_PX,
-    ...(align === "end" ? { anchorTo: "end" as const, followOnAppend: true } : {}),
+    // Follow appended rows only while this list is following. The virtualizer
+    // on its own follows whenever the view sits at the end, which carried a
+    // reader at the bottom of a jumped-to run to the newest message when the
+    // run joined the newest turns, past the page they had just loaded.
+    ...(align === "end"
+      ? { anchorTo: "end" as const, followOnAppend: follows && followingRef.current }
+      : {}),
     useFlushSync: false,
     getItemKey: (index) => {
       const item = items[index];
@@ -191,6 +208,9 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       setScrollMargin(computeScrollMargin(scroll, leadRef.current));
       const trail = trailRef.current;
       setTrailSize(trail === null ? 0 : trail.offsetHeight);
+      // The frame itself can shrink under a following list, as when the
+      // composer below it grows; the list stays at its end.
+      if (followingRef.current && align === "end") scrollToContentEnd(scroll);
     };
     update();
     if (typeof ResizeObserver === "undefined") return;
@@ -200,7 +220,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     if (leadRef.current !== null) observer.observe(leadRef.current);
     if (trailRef.current !== null) observer.observe(trailRef.current);
     return () => observer.disconnect();
-  }, [items.length, props.lead, props.trail]);
+  }, [align, items.length, props.lead, props.trail]);
 
   useLayoutEffect(() => {
     return () => {
@@ -222,8 +242,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   }, [firstKey]);
 
   useLayoutEffect(() => {
-    followingRef.current =
-      restored?.following === true || (restored === undefined && align === "end");
+    followingRef.current = follows && (restored?.following === true || restored === undefined);
     appliedRevealKeyRef.current = undefined;
     setStickyIndexes(new Set());
     setLiveMessage("");
@@ -231,18 +250,77 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     countRef.current = items.length;
   }, [restoreKey]);
 
+  // Rows measure taller than their estimate once they mount, which moves the
+  // end of the list after it was scrolled there. Following the total size
+  // keeps a following list at its end within the same commit; reacting later
+  // let the scroll event from the first placement see the list short of its
+  // end and stop following, and a long Chat thread opened about two thousand
+  // pixels above its newest message.
+  const totalSize = virtualizer.getTotalSize();
   useLayoutEffect(() => {
     const scroll = scrollElementRef.current;
     if (scroll === null || align !== "end" || !followingRef.current) return;
     scrollToContentEnd(scroll);
-  }, [align, items.length, restoreKey, trailSize, scrollMargin, virtualizer]);
+  }, [align, items.length, restoreKey, trailSize, scrollMargin, totalSize, virtualizer]);
+
+  // The key-to-index map of the latest render, for the reveal settling below,
+  // which outlives the render that started it.
+  const keyIndexRef = useRef(keyIndex);
+  keyIndexRef.current = keyIndex;
+  const onRevealedRef = useRef(props.onRevealed);
+  onRevealedRef.current = props.onRevealed;
+  const settleRevealRef = useRef<RevealSettling | undefined>(undefined);
+  // A list that goes away while a reveal settles (the reader left the thread,
+  // or the run holding the row was let go) has done what it could with the
+  // target: it is spent, so a later list does not jump back to it. The spend
+  // waits a tick and a remount cancels it, because development mode unmounts
+  // and remounts every list once on mount; spending then stopped the reveal
+  // before it had moved anything.
+  const unmountSpendRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (unmountSpendRef.current !== undefined) {
+      clearTimeout(unmountSpendRef.current);
+      unmountSpendRef.current = undefined;
+    }
+    return () => {
+      const settling = settleRevealRef.current;
+      if (settling === undefined) return;
+      unmountSpendRef.current = setTimeout(() => settling.stop("spend"), 0);
+    };
+  }, []);
 
   useLayoutEffect(() => {
-    if (revealKey === undefined || revealKey === appliedRevealKeyRef.current) return;
+    if (revealKey === undefined) {
+      // The owner dropped the target, so the same row asked for again later
+      // is a new request rather than one this list already applied.
+      appliedRevealKeyRef.current = undefined;
+      settleRevealRef.current?.stop("keep");
+      settleRevealRef.current = undefined;
+      return;
+    }
+    if (revealKey === appliedRevealKeyRef.current) return;
     const index = items.findIndex((item, itemIndex) => itemKey(item, itemIndex) === revealKey);
     if (index < 0) return;
     virtualizer.scrollToIndex(index, { align: "center" });
     appliedRevealKeyRef.current = revealKey;
+    const key = revealKey;
+    const scroll = scrollElementRef.current;
+    settleRevealRef.current?.stop("keep");
+    settleRevealRef.current =
+      scroll === null
+        ? undefined
+        : settleReveal(
+            scroll,
+            () => keyIndexRef.current.get(key),
+            // Through the virtualizer, so its own correction for the jump
+            // aims where this one does instead of pulling the row back.
+            (offset) => virtualizer.scrollToOffset(offset, { align: "start" }),
+            () => {
+              settleRevealRef.current = undefined;
+              onRevealedRef.current?.(key);
+            },
+          );
+    if (settleRevealRef.current === undefined) onRevealedRef.current?.(key);
   }, [itemKey, items, revealKey, virtualizer]);
 
   // Only a row added at the end is news. Earlier rows loaded above, a row that
@@ -426,7 +504,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   function onScroll(): void {
     const scroll = scrollElementRef.current;
     if (scroll === null) return;
-    followingRef.current = align === "end" && isAtContentEnd(scroll);
+    followingRef.current = follows && isAtContentEnd(scroll);
   }
 
   const list = (
@@ -495,6 +573,95 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       </div>
     </div>
   );
+}
+
+interface RevealSettling {
+  /** Ends the settling; `spend` reports the reveal done, `keep` does not. */
+  readonly stop: (outcome: "spend" | "keep") => void;
+}
+
+/** How long a reveal keeps correcting against the rendered rows. */
+const REVEAL_SETTLE_MS = 1_500;
+/**
+ * Frames the revealed row and the list's height must hold still, and the time
+ * that must pass, before the reveal counts as done. Rows measure a few frames
+ * after they mount; counting still frames from before that let the reveal end
+ * while rows above the target were still growing and pushing it down.
+ */
+const REVEAL_STABLE_FRAMES = 6;
+const REVEAL_MIN_SETTLE_MS = 250;
+
+/**
+ * Centres a revealed row against the rendered rows, frame by frame, until it
+ * stays put. The virtualizer scrolls to the row from estimated heights; rows
+ * then measure taller as they mount, and its own correction can stop short,
+ * which left a search hit far back in a jumped-to run a thousand pixels below
+ * the view. It reports the reveal done once the row holds still, once the row
+ * is no longer in the list, or as soon as the reader scrolls by hand. A frame
+ * with no size yet (not laid out) is not a reveal: if the frame never gets one
+ * within the time allowed, the reveal is left unspent. Answers undefined where
+ * frames are unavailable.
+ */
+function settleReveal(
+  scroll: HTMLElement,
+  indexOfTarget: () => number | undefined,
+  scrollTo: (offset: number) => void,
+  done: () => void,
+): RevealSettling | undefined {
+  if (typeof requestAnimationFrame !== "function") return undefined;
+  const startedAt = performance.now();
+  const inputs = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+  let stable = 0;
+  let lastHeight = -1;
+  let handle: number | undefined;
+  let finished = false;
+  const stop = (outcome: "spend" | "keep") => {
+    if (finished) return;
+    finished = true;
+    if (handle !== undefined) cancelAnimationFrame(handle);
+    for (const type of inputs) scroll.removeEventListener(type, onInput);
+    if (outcome === "spend") done();
+  };
+  const onInput = () => stop("spend");
+  for (const type of inputs) scroll.addEventListener(type, onInput, { passive: true });
+  const step = () => {
+    handle = undefined;
+    const outOfTime = performance.now() - startedAt >= REVEAL_SETTLE_MS;
+    const index = indexOfTarget();
+    if (index === undefined) {
+      stop("spend");
+      return;
+    }
+    if (scroll.clientHeight === 0) {
+      if (outOfTime) stop("keep");
+      else handle = requestAnimationFrame(step);
+      return;
+    }
+    const row = scroll.querySelector(`[data-transcript-row][data-index="${String(index)}"]`);
+    if (row instanceof HTMLElement) {
+      const frameRect = scroll.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const offset = rowRect.top + rowRect.height / 2 - (frameRect.top + frameRect.height / 2);
+      const height = scroll.scrollHeight;
+      const max = height - scroll.clientHeight;
+      const target = Math.max(0, Math.min(max, scroll.scrollTop + offset));
+      if (Math.abs(target - scroll.scrollTop) > 1) {
+        scrollTo(target);
+        stable = 0;
+      } else if (height !== lastHeight) {
+        stable = 0;
+      } else {
+        stable += 1;
+      }
+      lastHeight = height;
+    }
+    const settled =
+      stable >= REVEAL_STABLE_FRAMES && performance.now() - startedAt >= REVEAL_MIN_SETTLE_MS;
+    if (settled || outOfTime) stop("spend");
+    else handle = requestAnimationFrame(step);
+  };
+  handle = requestAnimationFrame(step);
+  return { stop };
 }
 
 function lastKeyOf<T>(

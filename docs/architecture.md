@@ -70,12 +70,12 @@ The design rests on a small set of invariants that every package obeys:
   duplicate answers, and settles the underlying callback only when complete.
 - **Capabilities are honest and fail closed.** Every provider reports what it
   supports in every mode; an unsupported capability is disabled or refused,
-  never silently emulated. A first-class provider may offer a capability in
-  full; every other provider gets a documented degraded form, listed in the
-  "degraded on" matrix, or reports the capability unsupported. Not built yet:
-  the matrix is not written, and which providers are first-class is not yet
-  named. The app-managed tools below stay provider-neutral, and a seam is never
-  widened for one vendor.
+  never silently emulated. Claude Code and Codex are the first-class providers
+  and may offer a capability in full; every other provider gets a documented
+  degraded form, listed in the [provider capability
+  matrix](#security-and-authority) ("degraded on"), or reports the capability
+  unsupported. The app-managed tools below stay provider-neutral, and a seam is
+  never widened for one vendor.
 - **Install ≠ trust ≠ enable.** Extensions contribute nothing until each of
   those steps has been taken explicitly, and even then only within the mode,
   Project, thread, and provider policy that applies.
@@ -1608,6 +1608,12 @@ flowchart LR
     route sits on the loopback chain only. No tool, command, model output,
     structured reference, agent message, or host-run turn (routine, goal
     loop, usage-limit resume, child-run delivery) can clear.
+  - The mark is keyed by the bare thread id, and Chat, Work, and Code
+    threads share one id space: the journal refuses to start a thread under an
+    id another mode's thread already holds, so a client-chosen id cannot share
+    another mode's mark or, by being purged, erase it. A mark that threads of
+    two modes already share (history from before that check) cannot be told
+    apart, so a clear of it is refused as `thread-unavailable`.
   - One clear covers that thread and only it. A child run and a fork keep
     their own taint; a Code fork, a Chat branch or restore, a follow-up or
     side task, and a thread confirmed from a planner proposal start with their
@@ -1684,10 +1690,13 @@ flowchart LR
   conversation evidence is read in bounded batches and page results paint as
   they arrive; live Code operation frames carry bounded display text beside
   their durable evidence references. Work uses a bounded delta feed over its
-  durable transcript. A Work thread opens on its newest turns through a
-  windowed read and loads earlier pages on request; each page is one
+  durable transcript. Work and Chat threads open on their newest turns through
+  a windowed read and load earlier pages on request; each page is one
   contiguous run of whole turns, bounded by count and by text, and the
   journal and projection stay complete ([thread windows](design/host-reads-and-commands.md#thread-windows)).
+  Chat pages over the active conversation only and counts the turns edits
+  superseded, so nothing derived from the whole thread goes partial; the
+  Markdown copy and the thread's totals read the whole thread first.
   The older whole-transcript route answers with the newest 64 turns of a longer
   thread, oldest first; export and `#thread` mentions read the whole thread on
   the host. One post-commit Machine change feed invalidates mode
@@ -1751,7 +1760,10 @@ flowchart LR
   erases the named thread; a Project- or host-scoped purge erases only threads
   whose last update is older than their effective window; purging an
   already-purged thread succeeds idempotently. A remote principal can neither
-  set a window nor purge. See
+  set a window nor purge. A purge erases by the bare thread id, so a thread
+  whose id another mode's thread also holds (history from before the journal
+  refused that, below) is never purged: a thread-scoped purge refuses it as
+  `invalid`, and a Project- or host-scoped purge passes over it. See
   `docs/decisions/0035`. The one self-applying
   exception is startup journal compaction, which removes a
   `code.checkout-observed@1` event only when the next event of the same
@@ -4048,40 +4060,54 @@ prompt, schema, tool, route, model, or capability.
   listed only where one thread would see several sources without exactly one
   in use. Installed marketplace skills are switched with their package, not
   here.
-  Runtimes that load `<project>/.claude/skills` by themselves are denied that
-  one folder in the OS profile (`forbiddenRootEntries`, read and write, in
-  every posture including Full access); the rest of `<project>/.claude` stays
-  readable. The deny covers the Project root only. Copilot and Grok also walk
-  upward from the session folder (the Project root) to the repository root,
-  Copilot to the home folder when there is none, so when a Project is a
-  subfolder of a repository a `.claude/skills` in a folder above the Project
-  root is not covered. Below Full access the profile hides such a folder only
-  when it lies inside the home folder. Loading of `.agents/skills` and
-  runtime-specific folders by these runtimes is a separate gap. On Linux a
-  deny path the Project does not have is skipped in every posture, because
-  Bubblewrap would create it as a mount point (an empty folder, or a failed
-  start on a read-only root); a denied folder that appears mid-session is
-  therefore not masked until the runtime restarts, while macOS Seatbelt
-  `subpath` denies cover a missing path.
+  A runtime that loads Project skill folders by itself is denied each such
+  folder in the OS profile (`forbiddenRootEntries`, read and write, in every
+  posture including Full access) unless a switch of its own is proven to turn
+  that loading off. Codex is the exception: it has no Octant OS profile, so
+  its `.agents/skills` loading is not handled yet. Only the skill folder is
+  denied; the folder around it (`.claude`, `.github`, `.grok`, and so on)
+  stays readable, because it holds the runtime's own settings or the
+  Project's other content. fx and Kimi Code deny all of `.agents`. Because the
+  deny covers writing as well as reading, a Code agent's own `git` commands on
+  these runtimes warn about tracked files in a denied folder, and a
+  `git checkout`, rebase, or pull across commits that touch such a folder
+  fails with a misleading "local changes would be overwritten" error. No data
+  is lost, and Octant's own server-side Git is unaffected. That is the
+  accepted cost of keeping unreviewed skills out of the runtime; fx and Kimi
+  Code have had it for `.agents` all along. The deny covers the Project root
+  only. Copilot, Grok, and Devin also walk upward from the
+  session folder (the Project root) to the repository root, Copilot to the
+  home folder when there is none, so when a Project is a subfolder of a
+  repository a skill folder above the Project root is not covered. No switch
+  closes that: Copilot's `enableConfigDiscovery` is a session option its ACP
+  server never sets and no flag or variable reaches, and neither Grok nor
+  Devin has one. Below Full access the profile hides such a folder only when
+  it lies inside the home folder. On Linux a deny path the Project does not
+  have is skipped in every posture, because Bubblewrap would create it as a
+  mount point (an empty folder, or a failed start on a read-only root); a
+  denied folder that appears mid-session is therefore not masked until the
+  runtime restarts, while macOS Seatbelt `subpath` denies cover a missing
+  path.
 
-  | Runtime                       | `<project>/.claude/skills`                                                                                   | How                                                                                                                                                      |
-  | ----------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | GitHub Copilot (ACP)          | Loads it by itself: the ACP session never sets `enableConfigDiscovery`, which defaults on (CLI 1.0.90)       | Denied (`forbiddenRootEntries`); no flag or variable turns discovery off in ACP                                                                          |
-  | Grok Build (ACP)              | Loads it by itself (`compat.claude.skills`, default on)                                                      | Denied. `GROK_CLAUDE_SKILLS_ENABLED=false` is not relied on: `grok inspect --json` on 1.0.50 still listed a Project `.claude/skills` package with it set |
-  | fx (ACP)                      | Merges workspace skill roots by itself                                                                       | Denied, with `.agents`, `AGENTS.md`, `.mcp.json`, `.fx.json`                                                                                             |
-  | Goose (ACP)                   | Loads it by itself, per its documentation (not installed here)                                               | Denied; no documented switch                                                                                                                             |
-  | Cline (ACP)                   | Loads it by itself, per its documentation (not installed here)                                               | Denied; only a per-skill toggle is documented                                                                                                            |
-  | Kimi Code (ACP)               | Not read: loads only `.agents/skills` and `.kimi-code/skills` (0.38 bundle)                                  | Readable; `.agents` and `.kimi-code` stay denied                                                                                                         |
-  | Gemini CLI, Qwen Code (ACP)   | Not read, per their documentation (`.gemini/skills` or `.agents/skills`; `.qwen/skills`); not installed here | Readable                                                                                                                                                 |
-  | GLM Agent (ACP)               | Unverified: not installed here and no documentation found                                                    | Readable                                                                                                                                                 |
-  | Claude (Agent SDK)            | Switched off                                                                                                 | `settingSources: []`, `skills: []`                                                                                                                       |
-  | OpenCode (server and ACP)     | Switched off                                                                                                 | `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1`, `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`, project config off, `skill` permission denied                             |
-  | Kilo (ACP)                    | Switched off                                                                                                 | `KILO_DISABLE_EXTERNAL_SKILLS=1`, `KILO_DISABLE_PROJECT_CONFIG=1`, `KILO_PURE=1`                                                                         |
-  | Devin (ACP)                   | Switched off                                                                                                 | `read_config_from.claude: false`, `read_config_from.agents_standard: false`                                                                              |
-  | Mistral Vibe (ACP)            | Switched off                                                                                                 | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`                                                          |
-  | Pi, Oh My Pi                  | Switched off                                                                                                 | `--no-skills`                                                                                                                                            |
-  | Codex                         | Not read (no `.claude/skills` path in the 0.162 binary)                                                      | Readable                                                                                                                                                 |
-  | Direct HTTP and image drivers | Not read: no runtime of their own                                                                            | n/a                                                                                                                                                      |
+  | Runtime                       | Project skill folders it loads by itself                                                                                                                                            | How                                                                                                                                                             |
+  | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | GitHub Copilot (ACP)          | `.agents/skills`, `.claude/skills`, `.github/skills`: the ACP session never sets `enableConfigDiscovery`, which defaults on (`copilot skill list`, CLI 1.0.90)                      | Denied (`forbiddenRootEntries`); no flag or variable turns discovery off in ACP                                                                                 |
+  | Grok Build (ACP)              | In a trusted folder: `.agents/skills`, `.agents/commands`, `.claude/skills`, `.claude/commands`, `.cursor/skills`, `.grok/skills`, `.grok/commands` (`grok inspect --json`, 1.0.50) | Denied. `GROK_CLAUDE_SKILLS_ENABLED=false` and `GROK_CURSOR_SKILLS_ENABLED=false` are not relied on: inspect still listed those folders' packages with them set |
+  | Devin (ACP)                   | `.agents/skills`, `.cognition/skills`, `.devin/skills`, and `.github/skills` unless switched off (`devin skills list`, 3000.10.27 and 3000.11.3)                                    | `read_config_from` sets every source false, `copilot` included, which removes `.github/skills`; the other three are denied, since no source turns them off      |
+  | fx (ACP)                      | Merges workspace skill roots by itself                                                                                                                                              | Denied: `.agents` and `.claude/skills`, with `AGENTS.md`, `.mcp.json`, `.fx.json`                                                                               |
+  | Goose (ACP)                   | `.agents/skills`, `.claude/skills`, `.goose/skills`, per its documentation (not installed here)                                                                                     | Denied; no documented switch                                                                                                                                    |
+  | Cline (ACP)                   | `.agents/skills`, `.claude/skills`, `.cline/skills`, `.clinerules/skills`, per its documentation and source (not installed here)                                                    | Denied; only a per-skill toggle is documented                                                                                                                   |
+  | Gemini CLI (ACP)              | `.agents/skills`, `.gemini/skills` once the folder is trusted, per its documentation and source (not installed here)                                                                | Denied; no documented variable or flag                                                                                                                          |
+  | Qwen Code (ACP)               | `.agents/skills`, `.qwen/skills`, per its source (not installed here)                                                                                                               | Denied; only bare mode skips them                                                                                                                               |
+  | GLM Agent (ACP)               | `.claude/skills`, advertised as commands and put into the message when `/name` is typed, per its README (not installed here)                                                        | Denied                                                                                                                                                          |
+  | Kimi Code (ACP)               | `.agents/skills`, `.kimi-code/skills` (0.38 bundle)                                                                                                                                 | Denied: `.agents` and `.kimi-code`                                                                                                                              |
+  | Claude (Agent SDK)            | None: switched off                                                                                                                                                                  | `settingSources: []`, `skills: []`                                                                                                                              |
+  | OpenCode (server and ACP)     | None: switched off                                                                                                                                                                  | `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1`, `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`, project config off, `skill` permission denied                                    |
+  | Kilo (ACP)                    | None: switched off                                                                                                                                                                  | `KILO_DISABLE_EXTERNAL_SKILLS=1`, `KILO_DISABLE_PROJECT_CONFIG=1`, `KILO_PURE=1`                                                                                |
+  | Mistral Vibe (ACP)            | None: switched off                                                                                                                                                                  | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`                                                                 |
+  | Pi, Oh My Pi                  | None: switched off                                                                                                                                                                  | `--no-skills`                                                                                                                                                   |
+  | Codex                         | `.agents/skills`, in the Project and up to the repository root (app-server `skills/list`, 0.162.1); not `.claude/skills`                                                            | Not handled yet: Codex runs without an Octant OS profile, so a root deny does not apply                                                                         |
+  | Direct HTTP and image drivers | None: no runtime of their own                                                                                                                                                       | n/a                                                                                                                                                             |
 
   Where a skill is found decides who sees it, in the catalog, the palette, the
   turn resolver, presets, Code profile admission, and Canvas refresh. A skill
@@ -4754,6 +4780,106 @@ mechanisms are:
   reads its product from the same directory without write access; XCTest
   results also land inside it. Simulator captures remain isolated in their own
   private directory and are writable only by the capture launch.
+
+- **Provider capability matrix ("degraded on").** Claude Code and Codex are the
+  first-class providers: the two subscription coding runtimes the product is
+  built around. A feature may be built in full for them first. Every other
+  provider is listed below with what is weaker, and reports the capability
+  `unsupported` or `unavailable` and fails closed where it has no form of it.
+  Nothing in code makes the providers match; the conformance harness checks
+  that a driver reports its own capabilities honestly, not that drivers agree.
+  A feature only some providers have still reaches the others through
+  `@octant/provider-sdk` or `@octant/plugin-api`, and no seam is widened for one
+  vendor.
+
+  The first token of each cell is what the driver declares in its static
+  capability block (`ProviderCapabilitySupport`, or `absent` where the block
+  omits an optional capability, which reads as `unsupported`; `varies` where the
+  value is computed per install, profile, or model). The words after it say how
+  that value is refined once the driver probes or runs. A refinement that
+  upgrades a declaration (`unavailable` to `supported` after a reply reports
+  usage) is the degraded form: the capability exists but is not promised before
+  it is seen.
+
+  | Capability               | Claude Code                                                  | Codex                                                     | OpenCode                                                          | Pi                                                                             | ACP agents                                                                    | Ollama                                                    | Harness endpoints                                                                 | Oh My Pi                              |
+  | ------------------------ | ------------------------------------------------------------ | --------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------- |
+  | `streaming`              | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`                                                                   | `unavailable` until a reply streams                       | `unavailable` until a reply streams; a chat-completions endpoint may answer whole | `supported`                           |
+  | `resume`                 | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`; `unsupported` when the agent offers neither load nor resume      | `supported` by replaying history Octant holds             | `supported` by replaying history Octant holds                                     | `unsupported`                         |
+  | `interruption`           | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`                                                                   | `supported`                                               | `supported`                                                                       | `supported`                           |
+  | `approvals`              | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`                                                                   | `unsupported`                                             | `unsupported`; every Harness tool call passes the server instead                  | `unsupported`                         |
+  | `userQuestions`          | `supported`                                                  | `unsupported`                                             | `supported`; `unsupported` on the 2.x route                       | `unsupported`                                                                  | `varies`: `unsupported` on Mistral Vibe and fx                                | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+  | `reasoning`              | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `unavailable`; `supported` when the agent reports a reasoning option or model | `varies`: from each model's reported thinking             | `unavailable` until a response carries reasoning                                  | `supported`                           |
+  | `usage`                  | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `unsupported`; turns are not measured                                         | `unavailable` until a reply reports counts                | `unavailable` until a response reports usage                                      | `unsupported`; turns are not measured |
+  | `toolActivity`           | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`                                                                   | `varies`: from the models' tool support                   | `unsupported`                                                                     | `unsupported`                         |
+  | `fileChanges`            | `supported`                                                  | `supported`                                               | `unsupported`                                                     | `unavailable`                                                                  | `unavailable`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unavailable`                         |
+  | `diffs`                  | `supported`                                                  | `supported`                                               | `supported`                                                       | `unavailable`                                                                  | `unavailable`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unavailable`                         |
+  | `taskProgress`           | `supported`                                                  | `supported`                                               | `supported`                                                       | `unavailable`                                                                  | `supported`                                                                   | `unsupported`                                             | `unsupported`                                                                     | `unavailable`                         |
+  | `nativeChildAgents`      | `unsupported`; Octant owns delegation                        | `unsupported`; Octant owns delegation                     | `unsupported`                                                     | `unsupported`                                                                  | `unavailable`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+  | `nativeAttachments`      | `unsupported`                                                | `unsupported`; `supported` when a model takes image input | `unsupported`; `supported` when a model takes non-text input      | `unsupported`                                                                  | `unsupported`                                                                 | `varies`: `supported` when a model takes images           | `unsupported`                                                                     | `unsupported`                         |
+  | `nativeWebResearch`      | `unsupported`                                                | `unsupported`                                             | `unsupported`                                                     | `unsupported`                                                                  | `unsupported`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+  | `appManagedTools`        | `supported`                                                  | `supported`                                               | `unsupported`; `supported` on macOS in a verified isolated config | `unsupported`; `supported` once the probe attests the tool bridge on Pi 0.85.1 | `varies`: `supported` on macOS when the agent serves HTTP MCP                 | `unsupported`                                             | `unsupported`; `supported` for each model a person verified                       | `unsupported`                         |
+  | `acpClientCapabilities`  | `absent`                                                     | `absent`                                                  | `absent`                                                          | `absent`                                                                       | `supported`                                                                   | `absent`                                                  | `absent`                                                                          | `absent`                              |
+  | `modelSwitch`            | `supported`                                                  | `supported`                                               | `absent`; the session stays on its model                          | `absent`; same                                                                 | `absent`; same                                                                | `absent`; Octant replays history, so the model may change | `absent`; Octant replays history, so the model may change                         | `absent`                              |
+  | `sessionCompaction.chat` | `supported`; `unavailable` when the install lacks `/compact` | `supported`; `unavailable` before Codex 0.162.1           | `absent`                                                          | `absent`                                                                       | `absent`                                                                      | `absent`; Octant summarizes                               | `unsupported`; Octant summarizes                                                  | `absent`                              |
+  | `sessionCompaction.work` | as Chat                                                      | as Chat                                                   | `absent`                                                          | `absent`                                                                       | `absent`                                                                      | `absent`                                                  | `unsupported`; Octant summarizes                                                  | `absent`                              |
+  | `sessionCompaction.code` | as Chat                                                      | as Chat                                                   | `absent`                                                          | `absent`                                                                       | `absent`                                                                      | `absent`                                                  | `supported`; Octant Harness compacts its own transcript                           | `absent`                              |
+  | `citations`              | `unsupported`                                                | `unsupported`                                             | `unsupported`                                                     | `unsupported`                                                                  | `unsupported`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+  | `harnessAutoReview`      | `supported`                                                  | `supported`                                               | `unsupported`                                                     | `unsupported`                                                                  | `unsupported`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+
+  Which driver kinds each column covers, and how each may be used in a mode, as
+  `providerCatalogCapabilities` in `@octant/domain` holds it. A runtime's Work and
+  Code tools reach the models its connection check reports with tool use;
+  Harness endpoints reach them only for models a person verified.
+
+  | Column            | Driver kinds                                                                                                     | Chat  | Work              | Code              | Agent loop       |
+  | ----------------- | ---------------------------------------------------------------------------------------------------------------- | ----- | ----------------- | ----------------- | ---------------- |
+  | Claude Code       | `claude`                                                                                                         | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Codex             | `codex`                                                                                                          | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | OpenCode          | `opencode`                                                                                                       | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Pi                | `pi`                                                                                                             | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | ACP agents        | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Ollama            | `ollama`                                                                                                         | `yes` | `no`              | `no`              | `replies-only`   |
+  | Harness endpoints | `openai-compatible`, `anthropic-compatible`, `azure-foundry`                                                     | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Oh My Pi          | `oh-my-pi`                                                                                                       | `no`  | `no`              | `no`              | `none`           |
+
+  The image profiles (`openai-image`, `gemini-native-image`, `bfl-image`,
+  `ideogram-image`) are not turn drivers and are not in the matrix.
+
+  Where each provider is weaker than Claude Code and Codex:
+
+  - **Codex** has no user questions, so a question the model would ask is not
+    offered. It takes image input only when a model reports it. Compaction
+    needs Codex 0.162.1 or newer.
+  - **OpenCode** reports no file changes, has no model switch inside a session
+    and no runtime compaction, and offers Octant's tools only on macOS in the
+    verified isolated configuration. A 2.x runtime whose confined jail cannot
+    serve a Git work tree is listing-only: models show, no turn is offered.
+  - **Pi** reports no user questions, file changes, diffs, or task progress,
+    and offers Octant's tools only after its probe attests the tool bridge on
+    the one release that bridge was read against.
+  - **ACP agents** do not report usage, so a spend ceiling leaves their turns
+    out and says so. They report no file changes or diffs, ask no user
+    questions on Mistral Vibe and fx, resume only when the agent offers load or
+    resume, and offer Octant's tools only on macOS when the agent serves HTTP
+    MCP. fx is also refused in Chat and Plan.
+  - **Ollama** is replies only: Chat, no tools, no approvals, no questions, no
+    file changes. Streaming, reasoning, usage, and tool activity are claimed
+    only after a reply shows them.
+  - **Harness endpoints** carry the Octant Harness agent loop. They have no
+    provider approvals or questions, claim streaming, reasoning, and usage only
+    after a response shows them, and offer Octant's tools per verified model.
+    Chat and Work compaction is the host's, not the endpoint's.
+  - **Oh My Pi** lists models and starts no session; its driver refuses
+    `acquire`, so it never reaches a picker.
+
+  `providerFeatureMatrix.test.ts` pins this section: every
+  `ProviderCapabilities` field has a row, every non-image driver kind appears in
+  exactly one column, the leading token of each cell equals the value in the
+  driver's static capability block, and the mode columns equal
+  `providerCatalogCapabilities`. It cannot see a refinement made at probe time
+  (the words after the first token), nor the compaction rows, which the drivers
+  assign outside the static blocks; the conformance harness covers the
+  compaction claim, and the rest is reviewed with the driver.
 
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,

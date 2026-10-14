@@ -349,6 +349,13 @@ describe("a person's clear of a thread's outside-content mark", () => {
     });
   });
 
+  it("refuses a mark whose id threads of more than one mode share", () => {
+    expect(decideExternalContentClear({ ...reviewed, threadIdShared: true })).toEqual({
+      kind: "refuse",
+      reason: "thread-unavailable",
+    });
+  });
+
   it("answers already clear for an unmarked thread, whatever version was named", () => {
     expect(decideExternalContentClear({ ...reviewed, tainted: false, shownVersion: 1 })).toEqual({
       kind: "already-clear",

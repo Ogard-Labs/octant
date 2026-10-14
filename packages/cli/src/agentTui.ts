@@ -16,6 +16,7 @@ import {
   changeAgentModel,
   commandAgentSession,
   contextPercent,
+  approvalMayBeRemembered,
   decideAgentApproval,
   listAgentModels,
   listAgentThreads,
@@ -650,11 +651,11 @@ class AgentScreen {
       this.#panel.title = " Approval ";
       this.#panel.borderColor = p.warning;
       const summary = approval.summary.replace(/^[a-z-]+: /, "");
-      // A single-use ask has no session-wide choice: the thread took in outside content.
-      this.#panelText.content =
-        approval.singleUse === true
-          ? t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`
-          : t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" allow for this session · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
+      // A child's ask and a single-use ask (the thread took in outside content)
+      // have no session-wide choice: the host would take it as a single approval.
+      this.#panelText.content = !approvalMayBeRemembered(approval)
+        ? t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`
+        : t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" allow for this session · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
       this.#panel.visible = true;
     } else if (site !== undefined) {
       this.#panel.title = " Site approval ";
@@ -1092,13 +1093,15 @@ class AgentScreen {
       const decision =
         lowered === "y" || lowered === "yes"
           ? "approve"
-          : lowered === "a" || lowered === "always"
+          : (lowered === "a" || lowered === "always") && approvalMayBeRemembered(approval)
             ? "approve-always"
             : lowered === "n" || lowered === "no"
               ? "deny"
               : undefined;
       if (decision === undefined) {
-        this.#note = "Answer the approval first: y, a, or n.";
+        this.#note = approvalMayBeRemembered(approval)
+          ? "Answer the approval first: y, a, or n."
+          : "Answer the approval first: y or n.";
         this.#draw();
         return;
       }

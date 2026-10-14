@@ -274,9 +274,10 @@ a `[y]es / [a]lways / [n]o` prompt in line mode. **Allow** runs it once;
 project file writes, …) for the rest of the thread's session and nothing
 beyond it — the thread's posture is untouched, and a restart asks again. It
 stops covering the thread once the thread takes in outside content: from then
-on each such call asks again, and the choice is not offered. On the harness
-card and the phone panel, a request from a child names that child, its
-provider, and its model, and the session-wide choice is not offered.
+on each such call asks again, and the choice is not offered. A request from a
+child is answered once as well: the terminal prompt, the terminal UI, the
+harness card, and the phone panel offer no session-wide choice for it, and the
+card and the phone panel name that child, its provider, and its model.
 **Deny** tells the lead not to retry. Every approval and decision is
 journaled with the session.
 

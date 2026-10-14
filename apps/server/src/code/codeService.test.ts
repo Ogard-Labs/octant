@@ -4243,6 +4243,9 @@ function serviceFixture(
         : { profile: found, scope: options.profileScope ?? { scopeKind: "user", scopeRef: "me" } };
     }),
     readCodeThread: vi.fn((threadId) => threads.find((candidate) => candidate.id === threadId)),
+    readThreadIdModes: vi.fn((threadId: string) =>
+      threads.some((candidate) => String(candidate.id) === threadId) ? ["code" as const] : [],
+    ),
     readCodeThreads: vi.fn(() => threads),
     readCodeThreadActivity: vi.fn(
       () => options.activity ?? ([] as ReturnType<CodePersistencePort["readCodeThreadActivity"]>),
