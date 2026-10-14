@@ -331,13 +331,12 @@ export function buildCatalogs(
       );
     }
   }
-  const scopedSkills =
-    subject.threadId === null
-      ? (snapshot.skills ?? []).filter((skill) => skill.scope === undefined)
-      : filterSkillCatalogForScope(
-          { skills: snapshot.skills ?? [], collisions: snapshot.collisions },
-          { mode: subject.mode, projectId: subject.projectId, threadRef: subject.threadId },
-        ).skills;
+  // A new-task draft has no thread yet, so it sees its Project's skills and
+  // the shared ones, never a thread's own.
+  const scopedSkills = filterSkillCatalogForScope(
+    { skills: snapshot.skills ?? [], collisions: snapshot.collisions },
+    { mode: subject.mode, projectId: subject.projectId, threadRef: subject.threadId },
+  ).skills;
   const skills = scopedSkills.map((skill) => {
     const installed = installedSkills.get(skill.skill.qualifiedId);
     const effectiveState: ExtensionEffectiveState =

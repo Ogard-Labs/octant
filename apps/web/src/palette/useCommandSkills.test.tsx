@@ -113,4 +113,37 @@ describe("useCommandSkills", () => {
     );
     expect(screen.getByLabelText("servers")).not.toHaveTextContent("mcp-off");
   });
+
+  it("offers a Project-root skill only from its own Project, never from another or from Chat", async () => {
+    const projectA = "71000000-0000-4000-8000-000000000001";
+    const projectB = "71000000-0000-4000-8000-000000000002";
+    const snapshot = vi.fn(async () => ({
+      packages: [],
+      skills: [
+        {
+          ...skillRecord("Alpha notes", true),
+          projectScope: { mode: "code", projectId: projectA },
+        },
+        skillRecord("Shared notes", true),
+      ],
+    }));
+    function Scoped(props: { readonly mode: "chat" | "code"; readonly projectId: string | null }) {
+      const { skills } = useCommandExtensions(stubClient(snapshot as never), {
+        refreshMs: 10,
+        audience: { mode: props.mode, projectId: props.projectId, threadId: null },
+      });
+      return (
+        <output aria-label="skills">{skills.map((skill) => skill.displayName).join(",")}</output>
+      );
+    }
+    const { rerender } = render(<Scoped mode="code" projectId={projectA} />);
+    await waitFor(() =>
+      expect(screen.getByLabelText("skills")).toHaveTextContent("Alpha notes,Shared notes"),
+    );
+
+    rerender(<Scoped mode="code" projectId={projectB} />);
+    expect(screen.getByLabelText("skills")).toHaveTextContent(/^Shared notes$/);
+    rerender(<Scoped mode="chat" projectId={null} />);
+    expect(screen.getByLabelText("skills")).toHaveTextContent(/^Shared notes$/);
+  });
 });

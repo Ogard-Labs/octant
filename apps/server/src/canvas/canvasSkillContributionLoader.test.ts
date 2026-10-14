@@ -292,4 +292,17 @@ describe("offeredCanvasDocumentRecipes", () => {
     ]);
     expect(offered.map((recipe) => String(recipe.id))).not.toContain("field-notes");
   });
+
+  it("does not offer recipes from a skill found at a Project root", () => {
+    const offered = offeredCanvasDocumentRecipes([
+      record({
+        canvasContribution: contributionWith([fieldNotes]),
+        projectScope: {
+          mode: "code",
+          projectId: ids.project,
+        } as StandaloneSkillRecord["projectScope"],
+      }),
+    ]);
+    expect(offered.map((recipe) => String(recipe.id))).not.toContain("field-notes");
+  });
 });

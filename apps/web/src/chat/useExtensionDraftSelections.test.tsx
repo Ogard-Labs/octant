@@ -164,4 +164,64 @@ describe("draft extension selections", () => {
       { status: { kind: "blocked", reason: "invalid-scope" } },
     ]);
   });
+
+  it("offers a Project-root skill only in its own Project's palette", async () => {
+    const digest = `sha256:${"d".repeat(64)}`;
+    const snapshot = {
+      sequence: 3,
+      snapshotAt: "2026-10-14T00:00:00.000Z",
+      packages: [],
+      collisions: [],
+      skills: [
+        {
+          skill: {
+            qualifiedId: `agents-skills-directory:project:${projectA}:root:alpha-notes:${digest}`,
+            name: "alpha-notes",
+            sourceKind: "agents-skills-directory",
+            digest,
+            available: true,
+          },
+          source: { kind: "agents-skills-directory", sourceRef: `project:${projectA}:root` },
+          displayName: "alpha-notes",
+          provenance: { reviewed: true },
+          contentBytes: 16,
+          reviewed: true,
+          desiredEnabled: true,
+          effectiveState: { kind: "effective" },
+          projectScope: { mode: "code", projectId: projectA },
+        },
+      ],
+    } as unknown as ExtensionSnapshot;
+    const client = {
+      snapshot: vi.fn(async () => snapshot),
+      effectiveState: vi.fn<ExtensionClient["effectiveState"]>(async ({ scope }) => ({
+        sequence: snapshot.sequence,
+        snapshotAt: snapshot.snapshotAt,
+        scope,
+        catalogEpoch: `sha256:${"e".repeat(64)}` as never,
+        catalogStatus: "available",
+        stale: false,
+        packages: [],
+        collisions: [],
+      })),
+    };
+    const { result, rerender } = renderHook(
+      ({ projectId }) =>
+        useExtensionDraftSelections({ client, mode: "code", projectId, providerFamily }),
+      { initialProps: { projectId: projectA } },
+    );
+    await act(async () => {
+      await result.current.resolveReference("$alpha-notes");
+    });
+    expect(result.current.receipts.map((receipt) => receipt.status)).toEqual([
+      { kind: "selected" },
+    ]);
+
+    act(() => result.current.clear());
+    rerender({ projectId: projectB });
+    await act(async () => {
+      await result.current.resolveReference("$alpha-notes");
+    });
+    expect(result.current.receipts.map((receipt) => receipt.status.kind)).not.toContain("selected");
+  });
 });

@@ -59,9 +59,22 @@ describe("standalone skill catalog", () => {
     expect(result.skills.every((entry) => entry.effectiveState.kind === "blocked")).toBe(true);
   });
 
-  it("keeps root skills and filters nested skills to the exact thread scope", () => {
-    const root = record(
-      `agents-skills-directory:project-root:review:${digestA}`,
+  it("shares a Project-root skill across that Project's threads and keeps nested skills to their exact thread", () => {
+    // A Project-root skill used to be unscoped and so reached every Project
+    // and every Chat thread; it now carries its Project.
+    const root = {
+      ...record(
+        `agents-skills-directory:project-root:review:${digestA}`,
+        "agents-skills-directory",
+        digestA,
+      ),
+      projectScope: {
+        mode: "code",
+        projectId: "11111111-1111-4111-8111-111111111111" as never,
+      },
+    } satisfies StandaloneSkillRecord;
+    const userGlobal = record(
+      `agents-skills-directory:user-global:review:${digestA}`,
       "agents-skills-directory",
       digestA,
     );
@@ -77,7 +90,7 @@ describe("standalone skill catalog", () => {
         threadRef: "22222222-2222-4222-8222-222222222222" as never,
       },
     } satisfies StandaloneSkillRecord;
-    const catalog = buildSkillCatalog([root, nested]);
+    const catalog = buildSkillCatalog([root, userGlobal, nested]);
 
     expect(
       filterSkillCatalogForScope(catalog, {
@@ -85,29 +98,63 @@ describe("standalone skill catalog", () => {
         projectId: "11111111-1111-4111-8111-111111111111",
         threadRef: "22222222-2222-4222-8222-222222222222",
       }).skills,
-    ).toHaveLength(2);
+    ).toEqual([nested, root, userGlobal]);
     expect(
       filterSkillCatalogForScope(catalog, {
         mode: "code",
         projectId: "11111111-1111-4111-8111-111111111111",
         threadRef: "33333333-3333-4333-8333-333333333333",
       }).skills,
-    ).toEqual([root]);
+    ).toEqual([root, userGlobal]);
+    // A new-task draft has no thread yet: its Project's skills, never a thread's.
+    expect(
+      filterSkillCatalogForScope(catalog, {
+        mode: "code",
+        projectId: "11111111-1111-4111-8111-111111111111",
+        threadRef: null,
+      }).skills,
+    ).toEqual([root, userGlobal]);
+    // Another Project, and Chat (whose Projects have no filesystem), see only shared skills.
+    expect(
+      filterSkillCatalogForScope(catalog, {
+        mode: "code",
+        projectId: "99999999-9999-4999-8999-999999999999",
+        threadRef: "33333333-3333-4333-8333-333333333333",
+      }).skills,
+    ).toEqual([userGlobal]);
+    expect(
+      filterSkillCatalogForScope(catalog, {
+        mode: "chat",
+        projectId: "11111111-1111-4111-8111-111111111111",
+        threadRef: "44444444-4444-4444-8444-444444444444",
+      }).skills,
+    ).toEqual([userGlobal]);
     expect(
       filterSkillCatalogForScope(catalog, {
         mode: "chat",
         projectId: null,
         threadRef: "44444444-4444-4444-8444-444444444444",
       }).skills,
-    ).toEqual([root]);
+    ).toEqual([userGlobal]);
   });
 
   it("keeps a Project's skills out of a thread that belongs to no Project", () => {
-    const root = record(
-      `agents-skills-directory:project-root:review:${digestA}`,
+    const userGlobal = record(
+      `agents-skills-directory:user-global:review:${digestA}`,
       "agents-skills-directory",
       digestA,
     );
+    const root = {
+      ...record(
+        `agents-skills-directory:project-root:review:${digestA}`,
+        "agents-skills-directory",
+        digestA,
+      ),
+      projectScope: {
+        mode: "code",
+        projectId: "11111111-1111-4111-8111-111111111111" as never,
+      },
+    } satisfies StandaloneSkillRecord;
     const scoped = {
       ...record(
         `agents-skills-directory:thread-a:review:${digestB}`,
@@ -120,7 +167,7 @@ describe("standalone skill catalog", () => {
         threadRef: "22222222-2222-4222-8222-222222222222" as never,
       },
     } satisfies StandaloneSkillRecord;
-    const catalog = buildSkillCatalog([root, scoped]);
+    const catalog = buildSkillCatalog([userGlobal, root, scoped]);
 
     // An unfiled thread names no Project. Absence matches only absence, so a
     // Project's own skill stays with that Project rather than reaching a thread
@@ -131,7 +178,7 @@ describe("standalone skill catalog", () => {
         projectId: null,
         threadRef: "22222222-2222-4222-8222-222222222222",
       }).skills,
-    ).toEqual([root]);
+    ).toEqual([userGlobal]);
   });
 
   it("matches a scope reference by its value on both sides, not by one side's spelling", () => {

@@ -211,6 +211,11 @@ directory and each parent up to the Project or repository root, plus the
 user-global `~/.agents/skills/`. Octant does not scan arbitrary files
 elsewhere under `.agents/`.
 
+A skill at a Project's root is available to every thread in that Project and
+to no other Project. A skill in a subfolder is available only to a thread
+working in that folder or below it. Chat threads see only your user-global and built-in
+skills, because a Chat Project has no folder.
+
 Every discovered skill gets a source-qualified identity, content digest,
 provenance, and diagnostic state. New or changed skills are indexed
 **disabled** until review and desired-enabled state allow use. Invocation is

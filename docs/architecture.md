@@ -3901,6 +3901,16 @@ prompt, schema, tool, route, model, or capability.
 - Skills are discovered only from valid `.agents/skills/` packages between the
   working directory and the Project or repository root, plus the user-global
   `~/.agents/skills/`.
+  Where a skill is found decides who sees it, in the catalog, the palette, the
+  turn resolver, presets, Code profile admission, and Canvas refresh. A skill
+  below the Project root belongs to the one thread whose working directory
+  reaches it (`scope`). A skill at a Work or Code Project root belongs to that
+  Project (`projectScope`): every thread and new-task draft of the Project
+  shares it, and no other Project sees it. Chat matches no Project scope,
+  because a Chat Project has no folder. User-global and bundled skills carry
+  neither and reach every thread. A Project scope is its own field, not a
+  `scope` without a thread, so a client that predates it drops the field
+  rather than refusing the snapshot; the host still filters every turn.
   Not built yet: discovery also reads an allow-listed set of extra skill roots
   (for example `.claude/skills`), each entering the same activation ladder as
   `.agents/skills/` (indexed disabled, then reviewed, then enabled; a

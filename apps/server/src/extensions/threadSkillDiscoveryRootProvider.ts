@@ -36,6 +36,9 @@ export function createThreadSkillDiscoveryRootProvider(options: {
         String(left.id).localeCompare(String(right.id)),
       );
       for (const project of projects) {
+        // A skill at the Project root is shared by this Project's threads and
+        // reaches no other Project, so both root sets carry the Project.
+        const projectScope = { mode: project.mode, projectId: project.id };
         for (const thread of threads) {
           if (
             thread.lifecycle !== "active" ||
@@ -56,6 +59,7 @@ export function createThreadSkillDiscoveryRootProvider(options: {
               projectRoot: project.root,
               projectRef: String(project.id),
               userGlobalSkillsRoot: options.userGlobalSkillsRoot,
+              projectScope,
               scope: {
                 mode: thread.mode,
                 projectId: project.id,
@@ -71,6 +75,7 @@ export function createThreadSkillDiscoveryRootProvider(options: {
           projectRoot: project.root,
           projectRef: String(project.id),
           userGlobalSkillsRoot: options.userGlobalSkillsRoot,
+          projectScope,
         });
       }
       return roots;
