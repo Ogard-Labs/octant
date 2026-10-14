@@ -228,6 +228,13 @@ import {
   type ThreadWorkCommandResult,
 } from "./threadWorkService";
 import { MultiModelRouteService } from "./multiModelRouteService";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  INHERITED_MARK_REFUSAL,
+  journalWithInheritedMark,
+  type InheritedExternalContentMark,
+  type RecordExternalContentIngestion,
+} from "../context/inheritedExternalContentMark";
 
 const RESEARCH_TOOL_NAME = "octant_web_research";
 const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
@@ -465,6 +472,12 @@ export interface ChatServiceExecutionContext {
    * reply ends.
    */
   readonly onTurnAccepted?: () => void;
+  /**
+   * The outside-content mark a thread this command creates starts with, set
+   * by a host caller that makes it from a marked thread (a follow-up).
+   * Host-only: the wire commands cannot carry it.
+   */
+  readonly inheritedMark?: InheritedExternalContentMark;
 }
 
 interface PreparedChatContent {
@@ -485,6 +498,12 @@ export interface ChatServiceOptions {
   readonly attachmentStore?: ChatAttachmentStore;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly persistence: PersistenceService;
+  /**
+   * Journals the outside-content mark a thread made from a marked thread
+   * starts with. Without it such a thread is refused; an unmarked source
+   * needs nothing.
+   */
+  readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
   readonly dataDirectory: string;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -747,6 +766,7 @@ export interface ChatSubscribeOptions {
 
 export class ChatService {
   readonly #persistence: PersistenceService;
+  readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #driver: ChatServiceOptions["driver"];
@@ -801,6 +821,7 @@ export class ChatService {
 
   constructor(options: ChatServiceOptions) {
     this.#persistence = options.persistence;
+    this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#driver = options.driver;
@@ -1215,7 +1236,7 @@ export class ChatService {
       const command = decodeChatCommand(input);
       switch (command.kind) {
         case "create-chat-thread":
-          return await this.#createThread(command);
+          return await this.#createThread(command, executionContext?.inheritedMark);
         case "rename-chat-thread":
         case "move-chat-thread":
         case "change-chat-thread-lifecycle":
@@ -1692,6 +1713,7 @@ export class ChatService {
 
   async #createThread(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "create-chat-thread" }>,
+    inheritedMark: InheritedExternalContentMark | undefined,
   ): Promise<ChatCommandResult> {
     this.#assertReady();
     if (command.projectId !== undefined) {
@@ -1739,11 +1761,13 @@ export class ChatService {
       createdAt: timestamp,
     });
     await this.#scratchStore.acquire(thread.id);
-    this.#persistence.journal.append({
-      aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
-      expectedVersion: 0,
-      events: [this.#pending("chat.thread-created@1", { kind: "thread-created", thread })],
-    });
+    this.#journalNewThread(thread.id, inheritedMark, () =>
+      this.#persistence.journal.append({
+        aggregate: { aggregateType: "chat-thread", aggregateId: thread.id },
+        expectedVersion: 0,
+        events: [this.#pending("chat.thread-created@1", { kind: "thread-created", thread })],
+      }),
+    );
     if (preparedIssue.status === "ready" && command.issueContext !== undefined) {
       try {
         this.#issueContext?.bindCreatedThread({
@@ -2791,26 +2815,65 @@ export class ChatService {
       version: (branchTurns.length + 2) as AggregateVersion,
       updatedAt: timestamp,
     });
+    // The branch copies the source's conversation, so what the source read is
+    // in the branch's context from its first turn. The source's mark is read
+    // as the branch is made: a source a person cleared makes an unmarked
+    // branch, the way a Code fork does.
+    const inheritedMark: InheritedExternalContentMark | undefined = readThreadExternalContentTaint(
+      this.#persistence.connection,
+      String(source.id),
+    ).externalContentIngested
+      ? {
+          sourceLabel: "chat-branch",
+          contentReference: `chat-branch-${String(source.id)}-${String(command.turnId)}`,
+        }
+      : undefined;
     await this.#scratchStore.acquire(branch.id);
-    this.#persistence.journal.append(
-      {
-        aggregate: { aggregateType: "chat-thread", aggregateId: branch.id },
-        expectedVersion: 0,
-        events: [
-          this.#pending("chat.thread-created@1", { kind: "thread-created", thread: branch }),
-          ...branchTurns.map((turn) =>
-            this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
-          ),
-          this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: settled }),
-        ],
-      },
-      {
-        beforeEvents: (connection) => {
-          for (const content of copiedContent) this.#writePreparedContent(connection, content);
+    this.#journalNewThread(branch.id, inheritedMark, () =>
+      this.#persistence.journal.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: branch.id },
+          expectedVersion: 0,
+          events: [
+            this.#pending("chat.thread-created@1", { kind: "thread-created", thread: branch }),
+            ...branchTurns.map((turn) =>
+              this.#pending("chat.turn-created@1", { kind: "turn-created", turn }),
+            ),
+            this.#pending("chat.thread-updated@1", { kind: "thread-updated", thread: settled }),
+          ],
         },
-      },
+        {
+          beforeEvents: (connection) => {
+            for (const content of copiedContent) this.#writePreparedContent(connection, content);
+          },
+        },
+      ),
     );
     return { kind: "thread-created", thread: settled };
+  }
+
+  /**
+   * Journals a new thread, after the outside-content mark it inherits when it
+   * is made from a marked thread, in one journal unit with it
+   * (`journalWithInheritedMark`). A mark that cannot be journaled refuses the
+   * creation, so the thread never exists unmarked.
+   */
+  #journalNewThread(
+    threadId: ChatThreadId,
+    inheritedMark: InheritedExternalContentMark | undefined,
+    journalThread: () => void,
+  ): void {
+    const journaled = journalWithInheritedMark({
+      journal: this.#persistence.journal,
+      record: this.#recordExternalContentIngestion,
+      threadId: String(threadId),
+      mark: inheritedMark,
+      correlationId: () => this.#uuid(),
+      journalThread,
+    });
+    if (journaled.status === "refused") {
+      throw new ChatServiceError({ category: "unavailable", message: INHERITED_MARK_REFUSAL });
+    }
   }
 
   /**

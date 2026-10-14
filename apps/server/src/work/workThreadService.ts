@@ -49,6 +49,12 @@ import {
   decideSnoozeThread,
 } from "@octant/domain/thread-completion-policy";
 import { isRoutineHostScope } from "../routineHostScope";
+import {
+  INHERITED_MARK_REFUSAL,
+  journalWithInheritedMark,
+  type InheritedExternalContentMark,
+  type RecordExternalContentIngestion,
+} from "../context/inheritedExternalContentMark";
 import type {
   CompletedThreadArchiveInput,
   CompletedThreadArchiveOutcome,
@@ -125,6 +131,8 @@ export interface WorkThreadServiceDependencies {
           readonly payload: unknown;
         }>;
       }) => void;
+      /** One journal unit; a creation with an inherited mark needs it. */
+      readonly transaction?: <A>(body: () => A) => A;
     };
   };
   readonly projects: {
@@ -181,6 +189,21 @@ export interface WorkThreadServiceDependencies {
   ) => Promise<WorkStatusDatedItem | undefined>;
   readonly issueContext?: GithubIssueContextPort;
   readonly linearIssueContext?: LinearIssueContextPort;
+  /**
+   * Journals the outside-content mark a thread made from a marked thread
+   * starts with. Without it such a thread is refused; an unmarked source
+   * needs nothing.
+   */
+  readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
+}
+
+/** Host-only facts a caller adds to a command; the wire commands cannot carry them. */
+export interface WorkThreadExecutionContext {
+  /**
+   * The outside-content mark a thread this command creates starts with, set
+   * by a host caller that makes it from a marked thread (a follow-up).
+   */
+  readonly inheritedMark?: InheritedExternalContentMark;
 }
 
 export class WorkThreadServiceError extends Error {
@@ -208,6 +231,7 @@ export class WorkThreadService {
   readonly #projectDueReminder?: WorkThreadServiceDependencies["projectDueReminder"];
   readonly #issueContext?: GithubIssueContextPort;
   readonly #linearIssueContext?: LinearIssueContextPort;
+  readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
 
   constructor(dependencies: WorkThreadServiceDependencies) {
     this.#persistence = dependencies.persistence;
@@ -220,6 +244,7 @@ export class WorkThreadService {
     this.#clock = dependencies.clock;
     this.#workingDirectories = dependencies.workingDirectories;
     this.#onWorkingDirectoryChanged = dependencies.onWorkingDirectoryChanged;
+    this.#recordExternalContentIngestion = dependencies.recordExternalContentIngestion;
     if (dependencies.observeRuntime !== undefined) {
       this.#observeRuntime = dependencies.observeRuntime;
     }
@@ -328,7 +353,11 @@ export class WorkThreadService {
     }
   }
 
-  async execute(authenticatedWindowId: WindowId, input: unknown): Promise<WorkThreadCommandResult> {
+  async execute(
+    authenticatedWindowId: WindowId,
+    input: unknown,
+    executionContext?: WorkThreadExecutionContext,
+  ): Promise<WorkThreadCommandResult> {
     this.#assertReady();
     try {
       const command = decodeWorkThreadCommand(input);
@@ -446,13 +475,26 @@ export class WorkThreadService {
           createdAt: decodeTimestamp(this.#clock()),
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        this.#append(
-          created.id,
-          0,
-          "work.thread-created@1",
-          { kind: "thread-created", thread: created },
-          isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
-        );
+        // A follow-up from a marked thread carries text an agent wrote there,
+        // so the thread starts marked, in one journal unit with its creation.
+        const journaled = journalWithInheritedMark({
+          journal: this.#persistence.journal,
+          record: this.#recordExternalContentIngestion,
+          threadId: String(created.id),
+          mark: executionContext?.inheritedMark,
+          correlationId: () => this.#uuid(),
+          journalThread: () =>
+            this.#append(
+              created.id,
+              0,
+              "work.thread-created@1",
+              { kind: "thread-created", thread: created },
+              isRoutineHostScope(authenticatedWindowId) ? "system" : "local-user",
+            ),
+        });
+        if (journaled.status === "refused") {
+          throw this.#failure("unavailable", INHERITED_MARK_REFUSAL);
+        }
         this.#projection.apply({ kind: "thread-created", thread: created });
         if (preparedIssue.status === "ready" && command.issueContext !== undefined) {
           try {

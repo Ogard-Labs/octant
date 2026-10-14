@@ -778,6 +778,27 @@ after its clear marks its fork. The new thread's mark is its own. It
 survives replay, a purge of the new thread erases it, and a person clears it
 there like any other.
 
+A Chat branch (`branch-chat-thread`, which Chat's Restore from here also
+sends) copies its source's messages and completed replies, so a branch of a
+marked source starts marked by the same rule: the mark (`external-content`,
+label `chat-branch`, content reference
+`chat-branch-<source thread>-<branch turn>`) and the branch commit as one
+journal unit with the mark first, and a mark that cannot be journaled refuses
+the branch with nothing created. The source's mark is read from its
+outside-content projection when the branch is made; the cleared-source,
+replay, purge, and clear rules above hold unchanged.
+
+A follow-up or side task a model suggested on a marked thread starts marked
+too, in every mode, by the same rule (label `follow-up`, content reference
+`follow-up-<source thread>-<new thread>`). It copies no transcript, but its
+title and prompt are text an agent wrote after reading what marked the source,
+nothing bounds what that text can carry, and a side task sends its prompt as
+the new thread's first message. Starting one is not a review the way a clear
+is. The host's follow-up creator reads the source's mark when it creates the
+thread and hands the mark to the Chat, Work, or Code creation as a host-only
+input no wire command can carry; a source a person cleared passes on nothing.
+Fork, branch, and follow-up journal their marks through one shared step.
+
 An in-place restore (`restore-git-checkpoint`, sent by both Restore files to
 this point and Undo restore) overwrites a checkout other threads may share, so
 the host refuses it, as a `conflict` before Git is touched and before any undo
@@ -1545,8 +1566,9 @@ flowchart LR
     structured reference, agent message, or host-run turn (routine, goal
     loop, usage-limit resume, child-run delivery) can clear.
   - One clear covers that thread and only it. A child run and a fork keep
-    their own taint; a Code fork starts with its source's mark when it is
-    made (see the Code fork rule under Modes).
+    their own taint; a Code fork, a Chat branch or restore, and a follow-up
+    or side task start with their source's mark when they are made (see the
+    Code fork rule under Modes).
   - A clear removes the mark only. Nothing leaves the model's context and the
     provider session is not restarted, so what the thread read can still steer
     the model.

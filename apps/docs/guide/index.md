@@ -150,7 +150,8 @@ start a thread on its own worktree — and nothing happens until you choose
 **Start** (or **Use prompt**). The new thread opens on the same model with
 the prompt waiting in its composer; sending it is still your move. A Code
 follow-up starts approval-gated, because Full access is remembered per
-thread.
+thread. A follow-up or side task from a thread marked as having read outside
+content starts marked too, because a model that had read it wrote the prompt.
 
 ### Side tasks
 

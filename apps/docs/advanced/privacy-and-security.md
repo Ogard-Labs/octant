@@ -143,8 +143,9 @@ where the thread read from, how often, and when. **Clear the mark** tells Octant
 you looked at it, so those actions stop asking because of it.
 
 Clearing removes nothing from what the model already read, and the next outside
-content marks the thread again. A Code thread forked or restored from a marked
-thread starts marked, and clearing one never clears the other. A running or queued turn holds the button back
+content marks the thread again. A thread forked, branched, or restored from a
+marked thread starts marked, and so does a thread started from a follow-up or
+side task a marked thread suggested; clearing one never clears the other. A running or queued turn holds the button back
 until the thread is idle. You can clear a mark only at a window on the computer
 that hosts the thread, not from a paired phone or browser.
 
