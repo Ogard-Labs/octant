@@ -81,12 +81,30 @@ function serialNumber(): Buffer {
   }
 }
 
+/**
+ * A DNS name the certificate may carry: lowercase ASCII labels of 1 to 63
+ * letters, digits, and inner hyphens, at most 253 characters, with no empty
+ * label and no trailing dot.
+ */
+export function isListenerDnsName(name: string): boolean {
+  return (
+    name.length > 0 &&
+    name.length <= 253 &&
+    name.split(".").every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
+  );
+}
+
 function subjectAltName(hostname: string): Buffer {
+  // `isIP` accepts an IPv6 zone such as `%en0`, which has no place in a
+  // certificate and would otherwise be dropped silently by the expansion.
+  if (hostname.includes("%")) {
+    throw new Error("The listener certificate cannot name a scoped IPv6 address.");
+  }
   const family = isIP(hostname);
   if (family === 4) return tagged(0x87, ipv4Bytes(hostname));
   if (family === 6) return tagged(0x87, ipv6Bytes(hostname));
   const name = hostname.toLowerCase();
-  if (name.length === 0 || name.length > 253 || !/^[a-z0-9.-]+$/.test(name)) {
+  if (!isListenerDnsName(name)) {
     throw new Error("The listener certificate needs an address or an ASCII DNS name.");
   }
   return tagged(0x82, Buffer.from(name, "ascii"));

@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -410,6 +411,42 @@ describe("removeAllLocalData", () => {
     expect(existsSync(tlsCertificate)).toBe(false);
     expect(existsSync(setting)).toBe(false);
     expect(existsSync(unrelatedRemoteState)).toBe(true);
+  });
+
+  it("removes listener staging leftovers and a linked key as the link itself", async () => {
+    const { directory, databasePath } = temporaryStore();
+    migratedConnection(databasePath).close();
+    const remoteDirectory = join(directory, "remote");
+    mkdirSync(remoteDirectory);
+    const outside = join(directory, "outside-key.pem");
+    writeFileSync(outside, "not Octant's to remove");
+    symlinkSync(outside, join(remoteDirectory, "private-listener-tls-key.pem"));
+    const leftovers = [
+      "private-listener-tls-key.pem.4242.tmp",
+      "private-listener-tls-cert.pem.4242.tmp",
+      "private-listener-setting.json.4242.tmp",
+    ];
+    for (const leftover of leftovers) writeFileSync(join(remoteDirectory, leftover), "staged");
+    const unrelated = ["private-listener-tls-key.pem.tmp", "private-listener-other.pem.4242.tmp"];
+    for (const entry of unrelated) writeFileSync(join(remoteDirectory, entry), "must remain");
+
+    const report = await removeAllLocalDataWithCredentialPurge({
+      dataDirectory: directory,
+      databasePath,
+      platform: "darwin",
+      credentialPurge: async ({ dryRun }) =>
+        dryRun ? { kind: "dry-run", matchedCount: 0 } : { kind: "completed", deletedCount: 0 },
+    });
+
+    expect(report.removedArtifacts).toEqual(
+      [
+        "octant.sqlite3",
+        join("remote", "private-listener-tls-key.pem"),
+        ...leftovers.map((leftover) => join("remote", leftover)),
+      ].sort(),
+    );
+    expect(readdirSync(remoteDirectory).sort()).toEqual([...unrelated].sort());
+    expect(readFileSync(outside, "utf8")).toBe("not Octant's to remove");
   });
 
   it("keeps the private-listener host identity staged when Keychain reconciliation is indeterminate", async () => {

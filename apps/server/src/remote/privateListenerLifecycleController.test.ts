@@ -483,6 +483,19 @@ describe("private listener lifecycle controller with a self-made certificate", (
     expect(running.status()).toMatchObject({ state: "failed", errorCode: "tls-key-exposed" });
   });
 
+  it("refuses a public, unspecified, or malformed address before any key or certificate is made", async () => {
+    const { directory, controller } = setup();
+    for (const hostname of ["8.8.8.8", "0.0.0.0", "fe80::1%en0", "a\u0000b"]) {
+      await expect(
+        controller.enable({ ...SELF_MADE, hostname, origin: `https://${hostname}:8443` }),
+      ).rejects.toMatchObject({ code: "invalid-bind" });
+    }
+    await expect(
+      controller.enable({ ...SELF_MADE, origin: "https://100.64.0.8:8443" }),
+    ).rejects.toMatchObject({ code: "invalid-origin" });
+    expect(existsSync(join(directory, "remote"))).toBe(false);
+  });
+
   it("refuses a self-made listener when the host has no certificate store", async () => {
     const controller = createPrivateListenerLifecycleController({
       createGateway: () => fakeGateway().gateway,

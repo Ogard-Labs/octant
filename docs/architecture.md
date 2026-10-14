@@ -5627,17 +5627,33 @@ mechanisms are:
     reader and complete a TLS handshake against it.
   - **Storage.** The key is `remote/private-listener-tls-key.pem` and the
     certificate `remote/private-listener-tls-cert.pem` under the data
-    directory. The directory is narrowed to `0700` and each file written
-    `0600` to a staging file and renamed. The host refuses a key file that
-    another OS user owns or that other users can open: the listener reports
-    failed with `tls-key-exposed` and serves nothing, and the file is left as
-    it is. A key file reached through a link, or that is not a P-256 key,
-    fails as `invalid-tls` and is likewise never overwritten. Disabling the
-    listener keeps the key; complete data removal deletes the key, the
-    certificate, and the remembered listener setting with the store, so the
-    listener stays off afterwards. The key never appears in a route response,
-    the status projection, a log line, the journal, a diagnostics read or
-    export, or an error message.
+    directory. The directory is narrowed to `0700`. Each file is written to a
+    staging file created exclusively, `0600`, without following a link, then
+    flushed, renamed over the target, and the directory flushed, so a crash
+    leaves the old file or the whole new one. Both files are opened without
+    following a link and without blocking, and anything but a regular file is
+    refused. The listener's bind and origin are checked before either file is
+    touched, so a public or malformed address never makes a key, and a name
+    the certificate cannot carry (an IPv6 zone, or a DNS name that is not
+    lowercase ASCII labels of 1 to 63 characters) is refused.
+  - **Key refusals.** The host refuses a key file that another OS user owns
+    or that other users can open: the listener reports failed with
+    `tls-key-exposed` and serves nothing, and the file is left as it is. That
+    check reads the owner and mode bits only; an access control list that
+    lets another user read the file is not detected. A key file reached
+    through a link, that is not a regular file, or that is not a P-256 key
+    fails as `invalid-tls` and is never overwritten, because a new key would
+    silently change the pin. The one exception is an empty, owner-only key
+    file, which holds nothing that could have leaked and is what a crash
+    before the contents reached the disk can leave: the host makes a new key
+    in its place.
+  - **Keeping and removing.** Disabling the listener keeps the key. Complete
+    data removal deletes the key, the certificate, the remembered listener
+    setting, and any staging file a stopped write left beside them, with the
+    store, so the listener stays off afterwards; a link in place of one of
+    those files is removed as the link, and its target is left alone. The key
+    never appears in a route response, the status projection, a log line,
+    the journal, a diagnostics read or export, or an error message.
   - **Renewal.** Every enable, restart, and server start checks the
     certificate. One that is missing, unreadable, made for another key or
     address, not yet valid, or within 30 days of its end is replaced by a new

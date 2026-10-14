@@ -224,7 +224,7 @@ export function createPrivateListener(options: PrivateListenerOptions): PrivateL
   };
 }
 
-export function validatePrivateListenerConfig(config: PrivateListenerConfig): void {
+export function validatePrivateListenerConfig(config: Omit<PrivateListenerConfig, "tls">): void {
   if (
     config.hostname.trim() !== config.hostname ||
     config.hostname === "" ||

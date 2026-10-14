@@ -5,10 +5,13 @@ import {
   generateKeyPairSync,
   X509Certificate,
 } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -162,6 +165,19 @@ describe("listener certificate DER writer", () => {
         notAfter,
       }),
     ).toThrow();
+    for (const hostname of [
+      "a..b.ts.net",
+      "-station.ts.net",
+      "station-.ts.net",
+      `${"a".repeat(64)}.ts.net`,
+      "station.ts.net.",
+      "fe80::1%en0",
+      "a\u0000b",
+    ]) {
+      expect(() =>
+        encodeListenerCertificate({ privateKey, publicKey, hostname, notBefore, notAfter }),
+      ).toThrow();
+    }
   });
 
   it("passes the listener's own certificate check for the address it names", () => {
@@ -323,6 +339,87 @@ describe("self-made listener certificate", () => {
       expect(readFileSync(keyPath, "utf8")).toBe(key);
       expect(statSync(keyPath).mode & 0o777).toBe(mode);
     }
+  });
+
+  it("refuses a name it cannot certify without making a key or throwing", () => {
+    const directory = dataDirectory();
+    const store = createSelfMadeListenerCertificateStore({ dataDirectory: directory });
+    for (const hostname of ["a\u0000b", "a..b.ts.net", "-station.ts.net", "fe80::1%en0"]) {
+      expect(store.ensure(hostname)).toEqual({ status: "refused", code: "invalid-tls" });
+    }
+    expect(existsSync(join(directory, "remote"))).toBe(false);
+
+    // A certificate already made for the unscoped address does not make a
+    // scoped one acceptable.
+    ready(store.ensure("fe80::1"));
+    expect(store.ensure("fe80::1%en0")).toEqual({ status: "refused", code: "invalid-tls" });
+    expect(store.ensure("[fe80::1%en0]")).toEqual({ status: "refused", code: "invalid-tls" });
+  });
+
+  it("refuses a FIFO in place of the key without waiting for a writer, and replaces one in place of the certificate", () => {
+    const directory = dataDirectory();
+    const remote = join(directory, "remote");
+    mkdirSync(remote, { mode: 0o700 });
+    const keyPath = join(remote, SELF_MADE_LISTENER_KEY_FILE);
+    execFileSync("mkfifo", ["-m", "600", keyPath]);
+    const store = createSelfMadeListenerCertificateStore({ dataDirectory: directory });
+    expect(store.ensure("100.64.0.7")).toEqual({ status: "refused", code: "invalid-tls" });
+    expect(statSync(keyPath).isFIFO()).toBe(true);
+
+    rmSync(keyPath);
+    const first = ready(store.ensure("100.64.0.7"));
+    const certificatePath = join(remote, SELF_MADE_LISTENER_CERTIFICATE_FILE);
+    rmSync(certificatePath);
+    execFileSync("mkfifo", ["-m", "600", certificatePath]);
+    const replaced = ready(store.ensure("100.64.0.7"));
+    expect(replaced.tlsPin).toBe(first.tlsPin);
+    expect(statSync(certificatePath).isFile()).toBe(true);
+  });
+
+  it("makes a new key only in place of an empty owner-only key file", () => {
+    const directory = dataDirectory();
+    const remote = join(directory, "remote");
+    mkdirSync(remote, { mode: 0o700 });
+    const keyPath = join(remote, SELF_MADE_LISTENER_KEY_FILE);
+    const store = createSelfMadeListenerCertificateStore({ dataDirectory: directory });
+
+    writeFileSync(keyPath, "", { mode: 0o644 });
+    chmodSync(keyPath, 0o644);
+    expect(store.ensure("100.64.0.7")).toEqual({ status: "refused", code: "tls-key-exposed" });
+    expect(readFileSync(keyPath, "utf8")).toBe("");
+
+    chmodSync(keyPath, 0o600);
+    const made = ready(store.ensure("100.64.0.7"));
+    expect(readFileSync(keyPath, "utf8")).toBe(made.tls.key);
+    expect(statSync(keyPath).mode & 0o777).toBe(0o600);
+
+    const truncated = String(made.tls.key).slice(0, 60);
+    writeFileSync(keyPath, truncated, { mode: 0o600 });
+    expect(store.ensure("100.64.0.7")).toEqual({ status: "refused", code: "invalid-tls" });
+    expect(readFileSync(keyPath, "utf8")).toBe(truncated);
+  });
+
+  it("writes past a staging file or link a crashed write left behind, without following it", () => {
+    const directory = dataDirectory();
+    const remote = join(directory, "remote");
+    mkdirSync(remote, { mode: 0o700 });
+    const elsewhere = join(directory, "elsewhere.txt");
+    writeFileSync(elsewhere, "outside");
+    symlinkSync(elsewhere, join(remote, `${SELF_MADE_LISTENER_KEY_FILE}.${process.pid}.tmp`));
+    writeFileSync(
+      join(remote, `${SELF_MADE_LISTENER_CERTIFICATE_FILE}.${process.pid}.tmp`),
+      "old",
+      {
+        mode: 0o644,
+      },
+    );
+    const made = ready(
+      createSelfMadeListenerCertificateStore({ dataDirectory: directory }).ensure("100.64.0.7"),
+    );
+    expect(readFileSync(elsewhere, "utf8")).toBe("outside");
+    expect(readFileSync(join(remote, SELF_MADE_LISTENER_KEY_FILE), "utf8")).toBe(made.tls.key);
+    expect(statSync(join(remote, SELF_MADE_LISTENER_CERTIFICATE_FILE)).mode & 0o777).toBe(0o600);
+    expect(readdirSync(remote).filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
   });
 
   it("refuses a key reached through a link or that is not a P-256 key, and keeps it", () => {

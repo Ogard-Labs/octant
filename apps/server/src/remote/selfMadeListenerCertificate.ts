@@ -27,16 +27,22 @@ import {
   closeSync,
   constants,
   fstatSync,
+  fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
   renameSync,
-  writeFileSync,
+  unlinkSync,
+  writeSync,
 } from "node:fs";
 import { isIP } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { PrivateListenerTls } from "../privateListener";
-import { certificatePem, encodeListenerCertificate } from "./listenerCertificateDer";
+import {
+  certificatePem,
+  encodeListenerCertificate,
+  isListenerDnsName,
+} from "./listenerCertificateDer";
 
 const REMOTE_SUBDIR = "remote";
 export const SELF_MADE_LISTENER_KEY_FILE = "private-listener-tls-key.pem";
@@ -89,7 +95,8 @@ export function createSelfMadeListenerCertificateStore(
 
   return {
     ensure: (hostname) => {
-      const address = hostname.replace(/^\[/, "").replace(/\]$/, "");
+      const address = listenerAddress(hostname);
+      if (address === undefined) return { status: "refused", code: "invalid-tls" };
       let keyPem: string;
       try {
         mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -159,24 +166,61 @@ type LoadedKey =
   | { readonly status: "loaded"; readonly pem: string };
 
 /**
+ * The name the certificate is made for: an IPv4 or unscoped IPv6 address
+ * (brackets dropped), or a DNS name `isListenerDnsName` accepts. Anything else
+ * is refused before a key or certificate is touched.
+ */
+function listenerAddress(hostname: string): string | undefined {
+  const address = hostname.replace(/^\[/, "").replace(/\]$/, "").toLowerCase();
+  if (address.includes("%")) return undefined;
+  if (isIP(address) !== 0) return address;
+  return isListenerDnsName(address) ? address : undefined;
+}
+
+/**
+ * Opens a listener file without following a link and without blocking: a
+ * FIFO put at the path would otherwise hold the open until a writer appears.
+ * Anything but a regular file is refused once it is open.
+ */
+function openRegularFile(path: string): number {
+  const descriptor = openSync(
+    path,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  );
+  if (!fstatSync(descriptor).isFile()) {
+    closeSync(descriptor);
+    throw new Error("The listener file is not a regular file.");
+  }
+  return descriptor;
+}
+
+/**
  * Reads the key through one descriptor opened without following a link, so
- * the owner and mode checked are those of the file actually read.
+ * the owner and mode checked are those of the file actually read. The check
+ * reads the owner and mode bits only; an access control list that grants
+ * another user read access is not seen.
+ *
+ * An empty key file that is owner-only counts as missing, so a new key is
+ * made: a crash or power loss can leave a renamed file whose contents never
+ * reached the disk, and an empty file holds no key that could have leaked.
+ * Any other unreadable key, a truncated one included, stays refused, because
+ * replacing it would silently change the pin.
  */
 function readOwnerOnlyKey(path: string): LoadedKey {
   let descriptor: number;
   try {
-    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    descriptor = openRegularFile(path);
   } catch (error) {
     if (errorCode(error) === "ENOENT") return { status: "missing" };
     throw error;
   }
   try {
     const stats = fstatSync(descriptor);
-    if (!stats.isFile()) throw new Error("The listener key is not a regular file.");
     const uid = process.getuid?.();
     if ((uid !== undefined && stats.uid !== uid) || (stats.mode & 0o077) !== 0) {
       return { status: "exposed" };
     }
+    if (stats.size === 0) return { status: "missing" };
     return { status: "loaded", pem: readFileSync(descriptor, "utf8") };
   } finally {
     closeSync(descriptor);
@@ -192,7 +236,12 @@ function readUsableCertificate(
   let pem: string;
   let certificate: X509Certificate;
   try {
-    pem = readFileSync(path, "utf8");
+    const descriptor = openRegularFile(path);
+    try {
+      pem = readFileSync(descriptor, "utf8");
+    } finally {
+      closeSync(descriptor);
+    }
     certificate = new X509Certificate(pem);
   } catch {
     return undefined;
@@ -210,19 +259,59 @@ function readUsableCertificate(
   ) {
     return undefined;
   }
-  const name = address.toLowerCase();
-  const covered =
-    isIP(name) === 0 ? certificate.checkHost(name) === name : certificate.checkIP(name) === name;
-  return covered ? pem : undefined;
+  try {
+    const covered =
+      isIP(address) === 0
+        ? certificate.checkHost(address) === address
+        : certificate.checkIP(address) === address;
+    return covered ? pem : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
+/**
+ * Writes a staging file created exclusively, owner-only, and without following
+ * a link, flushes it, renames it over the target, and flushes the directory,
+ * so a crash leaves either the old file or the complete new one.
+ */
 function writeOwnerOnly(path: string, contents: string): void {
   const staging = `${path}.${process.pid}.tmp`;
-  writeFileSync(staging, contents, { mode: 0o600 });
-  // writeFileSync applies the mode only when it creates the file, so a staging
-  // file left behind by a crashed write is narrowed here too.
-  chmodSync(staging, 0o600);
+  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+  let descriptor: number;
+  try {
+    descriptor = openSync(staging, flags, 0o600);
+  } catch (error) {
+    if (errorCode(error) !== "EEXIST") throw error;
+    // A staging file a crashed write left under this process id. Unlinking
+    // removes the entry itself, never a link's target.
+    unlinkSync(staging);
+    descriptor = openSync(staging, flags, 0o600);
+  }
+  try {
+    const bytes = Buffer.from(contents, "utf8");
+    let written = 0;
+    while (written < bytes.length) {
+      written += writeSync(descriptor, bytes, written, bytes.length - written);
+    }
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
   renameSync(staging, path);
+  syncDirectory(dirname(path));
+}
+
+function syncDirectory(directory: string): void {
+  const descriptor = openSync(directory, constants.O_RDONLY);
+  try {
+    fsyncSync(descriptor);
+  } catch (error) {
+    // Some file systems cannot flush a directory; the rename itself is done.
+    if (errorCode(error) !== "EINVAL" && errorCode(error) !== "ENOTSUP") throw error;
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function errorCode(error: unknown): unknown {

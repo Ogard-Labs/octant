@@ -32,6 +32,7 @@ import { createHash } from "node:crypto";
 import { classifyRemoteListenerAddress } from "@octant/domain";
 import {
   isPrivateListenerFailureCode,
+  validatePrivateListenerConfig,
   type PrivateListenerConfig,
   type PrivateListenerFailureCode,
 } from "../privateListener";
@@ -306,6 +307,13 @@ export function createPrivateListenerLifecycleController(
     }
     if (options.selfMadeCertificate === undefined)
       return { status: "refused", code: "invalid-tls" };
+    // The bind and origin are checked before any key or certificate is made,
+    // so a public or malformed address never writes one.
+    try {
+      validatePrivateListenerConfig(requested);
+    } catch (error) {
+      return { status: "refused", code: classifyLifecycleFailure(error, "invalid-bind") };
+    }
     const made = options.selfMadeCertificate.ensure(requested.hostname);
     if (made.status === "refused") return { status: "refused", code: made.code };
     return {
