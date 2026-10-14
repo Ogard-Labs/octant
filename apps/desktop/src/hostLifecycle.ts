@@ -49,6 +49,11 @@ export function canRunHostAction(snapshot: LocalHostSnapshot, action: HostAction
   return snapshot.state !== "stopped" && snapshot.ownership === "desktop-owned";
 }
 
+export interface FreshHostActivitySource {
+  readonly refreshActivity: () => Promise<void>;
+  readonly snapshot: () => LocalHostSnapshot;
+}
+
 /**
  * What stopping this host now would interrupt, for the two questions that ask
  * it: quitting, and installing a downloaded update. Both read this one value so
@@ -57,22 +62,46 @@ export function canRunHostAction(snapshot: LocalHostSnapshot, action: HostAction
  * Running agents count, and so does a thread parked on an approval or question,
  * because its session is still live. A provider that merely needs sign-in or is
  * not installed interrupts nothing and does not count. Work the desktop could
- * not confirm counts as attention, so the install waits and quit asks rather
- * than trusting a zero it could not check.
+ * not confirm sets `activityUnconfirmed`, so the install waits and quit asks
+ * rather than trusting a zero it could not check.
  */
-export function workInFlight(snapshot: LocalHostActivity): UpdateWorkInFlight {
+export function workInFlight(snapshot: LocalHostActivity): UpdateWorkInFlight;
+export function workInFlight(source: FreshHostActivitySource): Promise<UpdateWorkInFlight>;
+export function workInFlight(
+  input: LocalHostActivity | FreshHostActivitySource,
+): UpdateWorkInFlight | Promise<UpdateWorkInFlight> {
+  if ("refreshActivity" in input) {
+    return refreshWorkInFlight(input);
+  }
   return {
-    activeAgentCount: snapshot.activeAgentCount,
-    attentionRequired: snapshot.activityUnconfirmed === true,
+    activeAgentCount: input.activeAgentCount,
+    activityUnconfirmed: input.activityUnconfirmed === true,
   };
 }
 
-export function shouldConfirmQuit(snapshot: LocalHostSnapshot): boolean {
-  const work = workInFlight(snapshot);
+async function refreshWorkInFlight(source: FreshHostActivitySource): Promise<UpdateWorkInFlight> {
+  let refreshFailed = false;
+  try {
+    await source.refreshActivity();
+  } catch {
+    refreshFailed = true;
+  }
+  const snapshot = source.snapshot();
+  const activeHost = snapshot.state !== "stopped" && snapshot.ownership !== undefined;
+  return {
+    activeAgentCount: snapshot.activeAgentCount,
+    activityUnconfirmed: snapshot.activityUnconfirmed === true || (refreshFailed && activeHost),
+  };
+}
+
+export function shouldConfirmQuit(
+  snapshot: LocalHostSnapshot,
+  work: UpdateWorkInFlight = workInFlight(snapshot),
+): boolean {
   return (
     snapshot.state !== "stopped" &&
     snapshot.ownership === "desktop-owned" &&
-    (work.activeAgentCount > 0 || work.attentionRequired)
+    (work.activeAgentCount > 0 || work.activityUnconfirmed)
   );
 }
 

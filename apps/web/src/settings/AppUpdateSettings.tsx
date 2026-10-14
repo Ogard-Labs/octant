@@ -272,12 +272,8 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
 }
 
 function describeWaiting(work: Extract<AppUpdateInstallOutcome, { kind: "wait" }>): string {
-  const parts: string[] = [];
   if (work.activeAgentCount > 0) {
-    parts.push(
-      `${work.activeAgentCount} ${work.activeAgentCount === 1 ? "agent is" : "agents are"} still working`,
-    );
+    return `Octant will not relaunch while ${work.activeAgentCount} ${work.activeAgentCount === 1 ? "agent is" : "agents are"} still working. Let the work finish or checkpoint it, then relaunch.`;
   }
-  if (work.attentionRequired) parts.push("a thread is waiting on you");
-  return `Octant will not relaunch while ${parts.join(" and ")}. Let the work finish or checkpoint it, then relaunch.`;
+  return "Octant could not check what is running, so it did not relaunch. Try again in a moment.";
 }

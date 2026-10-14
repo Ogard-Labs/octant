@@ -149,7 +149,7 @@ export type AppUpdateInstallOutcome =
   | {
       readonly kind: "wait";
       readonly activeAgentCount: number;
-      readonly attentionRequired: boolean;
+      readonly activityUnconfirmed: boolean;
     }
   | { readonly kind: "not-ready" };
 
@@ -2027,14 +2027,14 @@ function decodeAppUpdateInstallOutcome(value: unknown): AppUpdateInstallOutcome 
   if (
     value.kind !== "wait" ||
     !Number.isInteger(value.activeAgentCount) ||
-    typeof value.attentionRequired !== "boolean"
+    typeof value.activityUnconfirmed !== "boolean"
   ) {
     throw new TypeError("Invalid update install outcome.");
   }
   return Object.freeze({
     kind: "wait",
     activeAgentCount: value.activeAgentCount as number,
-    attentionRequired: value.attentionRequired,
+    activityUnconfirmed: value.activityUnconfirmed,
   });
 }
 
