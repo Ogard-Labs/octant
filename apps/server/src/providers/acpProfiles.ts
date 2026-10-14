@@ -8,7 +8,7 @@
  * guards, managed-home layout, Seatbelt strategy, ACP mode mapping, and
  * capability quirks. Everything else is shared behavior.
  */
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ProviderModel, ProviderDriverKind, ProviderExecutionPolicy } from "@octant/contracts";
@@ -153,6 +153,13 @@ export interface AcpProviderProfile {
    * auto-reviewing `code` mode.
    */
   readonly refuses?: (mode: AcpSessionMode, policy: ProviderExecutionPolicy) => string | undefined;
+  /**
+   * The sentence a Project root earns a refusal with, before a session process
+   * starts, when it holds files the agent loads by itself and that start tools
+   * (MCP servers, hooks, extensions). Used where the entry cannot be denied
+   * because the agent fails to start without being able to read it.
+   */
+  readonly refusesProject?: (root: string) => string | undefined;
   /** Overrides the default `session/set_config_option` call for setting the model. */
   readonly setModelCall?: (
     sessionId: string,
@@ -837,10 +844,55 @@ const glmProfile: AcpProviderProfile = {
   },
 };
 
+/**
+ * Whether a Project root holds `entry`: a file or link of any kind, or a folder
+ * with something in it. An entry that cannot be inspected counts as present,
+ * because the refusal fails closed.
+ */
+const projectHoldsEntry = (root: string, entry: string): boolean => {
+  const path = join(root, entry);
+  try {
+    return lstatSync(path).isDirectory() ? readdirSync(path).length > 0 : true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code !== "ENOENT" && code !== "ENOTDIR";
+  }
+};
+
+/**
+ * Gemini CLI and Qwen Code read their settings from the session folder only
+ * (no walk to a parent or the repository root) and start the tools those files
+ * declare with their folder trust off by default. Denying the files fails their
+ * settings loader at start-up, so the Project is refused instead. A Project
+ * that is the person's home folder is exempt: both runtimes skip workspace
+ * settings there, and the files are the person's own profile.
+ */
+const refusesProjectEntries =
+  (displayName: string, entries: ReadonlyArray<string>) =>
+  (root: string): string | undefined => {
+    const safeReal = (path: string) => {
+      try {
+        return realpathSync(path);
+      } catch {
+        return path;
+      }
+    };
+    if (safeReal(root) === safeReal(homedir())) return undefined;
+    const found = entries.filter((entry) => projectHoldsEntry(root, entry));
+    if (found.length === 0) return undefined;
+    const names = found.map((entry) => `\`${entry}\``).join(", ");
+    return `${displayName} starts the MCP servers, hooks, and extensions that ${names} in this Project declare, without Octant's approval, so it does not start here. Remove or rename ${found.length === 1 ? "it" : "them"}, or use another provider in this Project.`;
+  };
+
 const geminiProfile: AcpProviderProfile = {
   kind: "gemini",
   displayName: "Gemini CLI",
   reasoningOptionId: "thinking",
+  refusesProject: refusesProjectEntries("Gemini CLI", [
+    ".gemini/settings.json",
+    ".gemini/agents",
+    ".gemini/extensions",
+  ]),
   // `autoEdit` auto-approves edits inside the agent and would bypass Octant's
   // approval bridge, so it is never selected.
   sessionMode: (mode, policy) => {
@@ -1030,6 +1082,12 @@ const qwenProfile: AcpProviderProfile = {
   kind: "qwen",
   displayName: "Qwen Code",
   reasoningOptionId: "thinking",
+  refusesProject: refusesProjectEntries("Qwen Code", [
+    ".qwen/settings.json",
+    ".qwen/agents",
+    ".qwen/extensions",
+    ".mcp.json",
+  ]),
   // `auto-edit` and `auto` auto-approve edits inside the agent and would bypass
   // Octant's approval bridge, so they are never selected.
   sessionMode: (mode, policy) => {
