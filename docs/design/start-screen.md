@@ -253,10 +253,7 @@ started it. Each row
 has **Open** and **Stop**. Open places the page the host prepared: as a Browser
 tab of the thread whose own worktree the server runs in, otherwise in this
 computer's own browser, and only there, so a window reading another computer
-never opens that computer's loopback address on its own. A proposal to open
-an Octant-owned server live on the paired computer, none of it built, is in
-[Architecture: opening a dev server from another computer](../architecture.md#opening-a-dev-server-from-another-computer).
-Stop is the
+never opens that computer's loopback address on its own. Stop is the
 Environment's authorized stop unchanged: a server Octant owns stops at once, one
 it does not own asks for the same confirmation naming process, folder, and port,
 and a Stop the host will not offer (a server in a Plan thread's own worktree, a
