@@ -2240,6 +2240,107 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.usage).toEqual({ inputTokens: 12, outputTokens: 8 });
   });
 
+  it("journals each compaction the runtime made by itself during the attempt once, and leaves a requested one to its command", async () => {
+    const recordAutomaticCompaction = vi.fn(() => "recorded" as const);
+    const harness = {
+      reconcileUsage: vi.fn(() => ({ variance: { varianceTokens: 0 }, snapshot: {} as never })),
+      recordAutomaticCompaction,
+    } as unknown as ContextHarnessService;
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const offer = (event: Record<string, unknown>) =>
+      Queue.offer(queue, { sessionId, ...event } as never);
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          yield* offer({ kind: "usage", sequence: 1, inputTokens: 1, outputTokens: 1 });
+          yield* offer({
+            kind: "context-compacted",
+            sequence: 2,
+            trigger: "automatic",
+            tokensBefore: 150_000,
+          });
+          yield* offer({
+            kind: "context-compacted",
+            sequence: 2,
+            trigger: "automatic",
+            tokensBefore: 150_000,
+          });
+          yield* offer({ kind: "context-compacted", sequence: 3, trigger: "requested" });
+          yield* offer({ kind: "text-delta", sequence: 4, text: "Done" });
+          yield* offer({ kind: "completed", sequence: 5 });
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: harness,
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { kind: "claude", acquire: () => Effect.succeed(connection) } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchEnabled: false,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          persistAttempt: () => Effect.void,
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+              digest: "f".repeat(64),
+              byteLength: 5,
+            }),
+        }),
+      ),
+    );
+
+    expect(recordAutomaticCompaction.mock.calls).toEqual([
+      [
+        {
+          subject,
+          turnKey: String(attemptId),
+          sighting: {
+            position: 1,
+            tokensBefore: { kind: "known", tokens: 150_000, accuracy: "provider-reported" },
+          },
+          executor: {
+            kind: "runtime",
+            driverKind: "claude",
+            providerInstanceId,
+            modelId: "model-a",
+          },
+        },
+      ],
+    ]);
+  });
+
   describe("what a turn leaves behind for its observers", () => {
     const base = Date.parse(now);
     const at = (ms: number) => new Date(base + ms).toISOString();

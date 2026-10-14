@@ -23,6 +23,19 @@ export interface TerminalCredentialReference {
   readonly reference: string;
 }
 
+/**
+ * The `octant` command a packaged desktop app ships for a terminal with a
+ * Browser grant (`octant mcp` only). A terminal started with it finds the
+ * command first on its `PATH`, and its confinement may read what the command
+ * needs to start and nothing more.
+ */
+export interface TerminalLauncher {
+  /** Holds the `octant` command and nothing else. */
+  readonly directory: string;
+  /** Read-only: the directory itself and the runtime the command runs with. */
+  readonly readRoots: ReadonlyArray<string>;
+}
+
 export interface TerminalLaunchRequest {
   readonly terminalId: string;
   readonly shell: string;
@@ -32,6 +45,8 @@ export interface TerminalLaunchRequest {
   readonly columns: number;
   readonly rows: number;
   readonly credentialReferences: readonly TerminalCredentialReference[];
+  /** Only for a terminal started with a Browser grant; see {@link TerminalLauncher}. */
+  readonly launcher?: TerminalLauncher;
   readonly executionPolicy?: TerminalLaunchInput["executionPolicy"];
 }
 
@@ -153,6 +168,15 @@ export class TerminalService {
       environment[credential.environmentName] = value;
       if (value.length > 0) secrets.push(value);
     }
+    if (request.launcher !== undefined) {
+      // First, so a CLI configured with a bare `octant mcp` reaches this one
+      // rather than another `octant` on PATH; the person's own rc files run
+      // after this and can still put theirs ahead.
+      environment.PATH =
+        environment.PATH === undefined || environment.PATH === ""
+          ? request.launcher.directory
+          : `${request.launcher.directory}:${environment.PATH}`;
+    }
 
     const process = this.#options.port.start({
       shell: request.shell,
@@ -161,6 +185,9 @@ export class TerminalService {
       environment,
       columns: request.columns,
       rows: request.rows,
+      ...(request.launcher === undefined
+        ? {}
+        : { additionalReadRoots: request.launcher.readRoots }),
       ...(request.executionPolicy === undefined
         ? {}
         : { executionPolicy: request.executionPolicy }),

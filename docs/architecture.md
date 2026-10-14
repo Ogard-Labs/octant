@@ -322,7 +322,7 @@ through the transport its adapter verified:
 | ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate                                                                                                                                      |
 | Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                                                                                                                                                                   |
 | Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                                                                                                                                                          |
-| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant, reached through `octant mcp`; the person adds that command to their CLI, and Octant writes no provider configuration. Not yet packaged in the desktop app ([detail](design/terminal-browser-grant.md)) |
+| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant, reached through `octant mcp`; the person adds that command to their CLI, and Octant writes no provider configuration. The macOS app ships the command too ([detail](design/terminal-browser-grant.md)) |
 
 No transport edits a person's provider MCP, hook, or global configuration;
 OpenCode's per-launch posture stays in its connection-private configuration.
@@ -725,9 +725,10 @@ disabled, Octant reads nothing from the folder for this purpose, adds no
 instruction, and writes nothing there; turning the setting off leaves an
 existing file untouched. Octant never writes an agent brief (`AGENTS.md`,
 `CLAUDE.md`, or similar) into a user folder, and a Work turn does not read an
-existing one. Not built yet for Codex: a Codex Work turn starts at the Project
-root, and Codex still loads an `AGENTS.md` it finds there; Claude Work turns
-load no project settings or instruction files. This narrows the always-on
+existing one: Claude Work turns load no project settings or instruction files,
+and Codex Work threads start and resume with `project_doc_max_bytes = 0`, which
+skips the `AGENTS.md` discovery Codex otherwise runs from the repository root
+down to the Project root. This narrows the always-on
 behavior first recorded in
 [decisions/0119-a-work-project-keeps-its-status-in-its-folder.md](decisions/0119-a-work-project-keeps-its-status-in-its-folder.md).
 
@@ -870,7 +871,13 @@ that is refused or fails while preparing stops counting at once and holds
 nothing back after that. Stopping a turn that is still preparing releases its
 root at once, even if a preparation step never returns, and the turn is
 refused at its next admission check, at the latest just before the runtime
-takes it on, so it never reaches its provider. The other order is serialized
+takes it on, so it never reaches its provider. The stop is journaled as the
+start's result when Stop returns, so the transcript shows the turn stopped and a
+retry of that operation, including a start recovered after a restart, answers
+from the journal instead of launching it. A stopped start whose preparation
+settles later clears and settles only its own runtime bookkeeping (pending
+start, spend reservation), keyed by its operation, never that of a newer turn
+on the same thread. The other order is serialized
 by root too: a turn that starts while a restore that passed this check is still
 overwriting the same root holds the root, so no further restore starts, and
 waits for the overwrite to finish before it captures its checkpoint, so it
@@ -1111,12 +1118,44 @@ Threads form one real hierarchy (Project → thread → linked or child thread).
 Work and Code have server-derived thread boards (Ready / In progress / Waiting /
 Done); Chat has no board. Code lists active open and draft pull requests from
 connected Projects in a manually refreshed workspace and joins exact
-thread-owned PR status onto Code board cards. A Work or Code thread is Done
-only when its user-confirmed delivery target is objectively satisfied;
-ambiguous state resolves to Waiting. Not built yet: a person may also mark a
-Work thread Done, and a Work thread so marked is Done. A Code thread keeps the objective rule, with no
-person's mark that overrides it. Until this is built, a Work thread reaches
-Done only through the rule above.
+thread-owned PR status onto Code board cards. A Code thread is Done only when
+its user-confirmed delivery target is objectively satisfied; ambiguous state
+resolves to Waiting, and no person's mark overrides it. A Work thread is Done
+when a person
+marks it Done (`confirm-work-thread-completion`, naming the thread's current
+title). The mark is final: it needs no evidence text, and stale supporting
+evidence, a later rename, or an outstanding child run does not return the card
+to Waiting. Requiring fresh, matching evidence filled boards with Waiting cards
+for work the person had already finished. The host refuses the mark from a
+routine or anything else acting as the host, and no provider tool can send it,
+so an agent cannot mark a thread Done. An optional note sent with the mark is
+kept as the thread's completion evidence; without one the thread carries no
+evidence record.
+
+The mark locks the thread on the host until the thread is archived and
+reactivated, which clears it; a lock only in the window let a queued message,
+a routine, or a child's result start a turn anyway. Work turn admission, the
+one path every Work turn takes, refuses a turn on a marked thread before it
+counts as the person re-engaging, whoever sends it: a window or phone, the
+message queue, a usage-limit continuation, a child run's result delivery, a
+goal round, or a routine. The host also refuses a provider or model change
+and a new resume-at-reset opt-in. Each refusal reaches the window and the
+phone through the ordinary refusal of that command. Renaming, archiving,
+putting away and cancelling a scheduled resume stay open. Nothing owed to the
+thread is dropped silently:
+
+- The message queue holds. It refuses a new message, keeps the messages it
+  already has with the visible `thread-unavailable` hold, and the person
+  resumes or removes them after reactivating.
+- A child run's result waits, readable on the run, and is delivered as a turn
+  once reactivation commits.
+- A resume-at-reset that falls due while the mark stands ends as
+  `invalidated` with a note on the thread. Held until reactivation, it would
+  run at a time the person never chose.
+
+Work artifacts belong to the Project, not the thread, so the mark does not
+lock them; changes from the thread happen in turns, which it refuses. A turn
+already running when the mark lands finishes normally.
 
 **Pull-request merge.** The person at a local desktop window may merge one
 open pull request from its review (`POST /api/code/project-pull-requests/merge`).
@@ -1924,7 +1963,8 @@ flowchart LR
   regardless of harness. Every dispatch checks the current Project, provider,
   model, checkout, access and context policy. Only normal turn completion
   advances the queue automatically. Cancellation, failure, changed authority,
-  unavailable attachments and uncertain delivery hold it with a visible reason.
+  unavailable attachments, uncertain delivery and a Work thread's Done mark
+  hold it with a visible reason.
   Restart recovery also holds pending work until an authenticated user resumes
   it; recovery never restores a temporary grant or guesses that an ambiguous
   send failed. Closing a composer cannot delete an accepted queued attachment.
@@ -2445,7 +2485,9 @@ prompt: `renderProviderTurnPrompt` puts the context blocks in the prompt text as
 JSON, and attachments travel as the prompt's images. A runtime that keeps its
 prompts therefore holds one copy per turn, and a running total is right only
 while every copy is accounted for. The adapter, which knows its runtime, says on
-each usage report what the runtime does with the prompt (`promptRetention`):
+each usage report what the runtime does with the prompt (`promptRetention`), and
+the turn runner reports `compacted` for the rest of a turn once the adapter's
+`context-compacted` event arrives:
 
 | Runtime           | What earlier copies do                                                                                                                                                                                                                                                                                                                                                                                                     | `promptRetention`                                                                         | Source                                                                                                                            |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -2602,11 +2644,12 @@ through their runtime where its adapter claims `sessionCompaction`, with the
 same send block on Code turns; and the window: the **Compact session** button in
 the context popover and the inspector, its confirm, the running state, the
 result line, and the composer's held send, read from a per-thread compaction
-state every thread kind answers, Code included. Not built yet: journaling a
-runtime's automatic compactions; replacing the `windowCompacted` flags, which
-still drive `promptRetention`, so the turn after a requested compaction still
-counts Octant's earlier per-turn context as held in a window breakdown it
-estimates; and the compaction divider on the thread's timeline. **Compact session** replaces
+state every thread kind answers, Code included; and the Chat, Work and Code turn
+runners journal a runtime's own compactions on the same ledger, which, with the
+requested ones, now decide when a Code window breakdown stops counting Octant's
+per-turn context as held. Not built yet: the compaction divider on the thread's
+timeline. No compaction, requested or automatic, has been run against a real
+runtime yet. **Compact session** replaces
 what the model sees from the next turn on with a summary of the earlier
 conversation and a recent tail, when the person asks, outside a turn. It never
 deletes or rewrites the journal: the thread keeps every message, tool call and
@@ -2847,8 +2890,18 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   `system` actor. Its compaction id is derived by the host from the thread, the
   turn, and the position of that compaction among the turn's compactions, so
   the same runtime notification seen again after a recovery maps to the same id
-  and is journaled once. The request-then-terminal pairing, and the
-  interrupted-request rule below, apply to requested compactions only.
+  and is journaled once. The turn is the provider send that saw it: the Chat
+  attempt (a retry is a new one), the Work turn, or the Code operation. A
+  notification delivered twice within one turn carries the same event sequence
+  and counts once. Its `tokensBefore` is the runtime's own figure, else the
+  turn's latest usage report (only an upper bound once an earlier compaction in
+  the turn came after it), else the session's occupancy read as a requested
+  compaction reads it; a compaction with no figure at all is not journaled,
+  because a receipt never guesses. Its `usage` is `unreported`: the runtime's
+  summary request rode inside the turn, whose own usage reports carry it. A
+  child run's compaction is not journaled, because a child's session is not the
+  thread's window and no reader shows it. The request-then-terminal pairing, and
+  the interrupted-request rule below, apply to requested compactions only.
 - The host path also appends `context.manifest-created@1`,
   `context.summary-created@1` and `context.plan-created@1` as `#commitSummary`
   does today; the summary text stays subject content, outside the journal, where
@@ -2874,7 +2927,13 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
 - The thread's timeline shows a compaction divider from the completed event.
   Everything above it stays visible, searchable and exported.
 - A completed compaction marks a runtime's session `compacted`, so the window
-  breakdown goes `uncounted` with that reason under the existing rule.
+  breakdown goes `uncounted` with that reason under the existing rule. Within
+  a turn, the runner that sees `context-compacted` reports the turn's later
+  usage as `compacted`. Across turns, a Code turn that resumes a session stops
+  carrying the previous turn's counted copies when the ledger records a
+  compaction after that turn's last usage report in journal order (not by the
+  events' clocks, which can tie): a completed one, or a failed one that may
+  have changed the session.
 - A request with no terminal event when the host starts is closed as
   `context.compaction-failed@1` with `interrupted`; for a runtime executor the
   session may have changed, and the next usage report shows what it holds.
@@ -2911,13 +2970,17 @@ Codex RPC itself.
   Claude's `compact_boundary` (`requested` only while the connection's
   `compact` waits on it; a `/compact` the person typed into the session is the
   runtime's own, `automatic`), Octant Harness
-  once its marker is journaled, and, once their rows are probed, the OpenCode
-  events and Pi's `compaction_end` with a `result`. A Code turn leaves the
-  event out of the turn's own events. It
-  replaces the per-driver `windowCompacted` flags as the source of
-  `promptRetention: "compacted"`, and the turn runner journals it, so a
-  runtime's automatic compactions get the same receipt. Provider payloads stop
-  at the adapter.
+  once its marker is journaled, and, as `automatic`, the OpenCode events and
+  Pi's `compaction_end` with a `result`, which those adapters already read to
+  tell a compacted window. They claim no requested compaction until their rows
+  are probed. OpenCode may announce one compaction under more than one of its
+  names, so its adapter reports the first since the latest usage report. A
+  Code turn leaves the event out of the turn's own events. It replaces the
+  per-driver `windowCompacted` flags as the source of
+  `promptRetention: "compacted"`: an adapter's usage reports say only whether
+  the runtime keeps each prompt, and the turn runner journals the compaction,
+  so a runtime's automatic compactions get the same receipt. Provider payloads
+  stop at the adapter.
 - The provider-sdk conformance harness checks that a driver claiming
   `sessionCompaction` implements `compact`, emits `context-compacted` with
   `requested` before it resolves, and leaves the session resumable, and that a
@@ -2997,7 +3060,11 @@ watched has ended.
   timeline divider): "Compacted · 41.2K freed · summary by Codex", "Compacted ·
   freed amount shows after the next reply · summary by Codex", "Compacted ·
   freed amount not reported · summary by Codex", "Compacted · nothing freed ·
-  summary by Codex", or "Couldn't compact: {reason}." A completed line names
+  summary by Codex", or "Couldn't compact: {reason}." A runtime's own
+  compaction reads "Compacted automatically by Codex · 41.2K freed", "Compacted
+  automatically by Codex · nothing freed", or, when the runtime reported no
+  amount, "Compacted automatically by Codex": nothing revisits that receipt, so
+  the line promises no later figure. A completed line names
   who wrote the summary and ends without a full stop; a failure is a sentence
   and ends with one, and one that may have changed the session adds "The
   session may have changed; the next reply shows what it holds." A refused
@@ -3454,11 +3521,21 @@ native harness in `apps/server/src/harness`:
   (its arguments are a URL and a size), so a public
   inference host sees an anonymous GET and a local one (Ollama, LM Studio) is a
   private destination it refuses. Private means loopback, unspecified, RFC 1918,
-  CGNAT, link-local (including cloud metadata), multicast, and reserved IPv4;
-  in IPv6 all of `::/64` other than IPv4-mapped, unique-local, link-local
-  `fe80::/10`, site-local, and multicast. An IPv6 address is judged by its
-  value rather than its spelling, and mapped, NAT64 (`64:ff9b::/96`), and 6to4
-  addresses by the IPv4 address they carry. Every redirect hop is checked
+  CGNAT, link-local (including cloud metadata), multicast, and reserved IPv4,
+  plus the IETF protocol assignments `192.0.0.0/24`, the 6to4 and 6a44 relay
+  anycast block `192.88.99.0/24`, benchmarking `198.18.0.0/15`, and the three
+  documentation blocks; in IPv6 all of `::/64`
+  other than IPv4-mapped, `100::/64` and `100:0:0:1::/64`, the IETF protocol
+  assignments `2001::/23` other than Teredo, documentation `2001:db8::/32`
+  and `3fff::/20`, segment-routing `5f00::/16`, unique-local, link-local
+  `fe80::/10`, site-local, and multicast. That is every block the IANA
+  special-purpose registries mark not globally reachable; the two IETF
+  protocol-assignment blocks and the relay anycast block are refused whole,
+  including their reachable anycast addresses, which answer from the nearest
+  server. An IPv6 address is
+  judged by its value rather than its spelling, and mapped, NAT64
+  (`64:ff9b::/96`), 6to4, and Teredo (server and client) addresses by the IPv4
+  address they carry. Every redirect hop is checked
   again, and a scheme other than `http`/`https`, credentials in the URL, or a
   sixth redirect refuses. A harness child without network authority is offered
   no web tool, and its `bash` runs on a shell whose Seatbelt profile has no
@@ -5065,7 +5142,7 @@ mechanisms are:
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
-- **Terminal Browser grant (built except desktop packaging).** A person may start a Code thread
+- **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per
   terminal, and honored only from a local window: a paired device, a routine, or
@@ -5084,8 +5161,11 @@ mechanisms are:
   and end are journaled without the token or address. The window switches a
   terminal on with a restart the person confirms, shows the state the host
   reports, and shows the first effect on an origin as a request from the
-  terminal, not from the thread's agent. Not built: desktop packaging of the
-  `octant` command. Detail is in
+  terminal, not from the thread's agent. The packaged macOS app ships an
+  `octant` that runs only `octant mcp`, with the app's own executable in Node
+  mode; a granted terminal, and no other, starts with its folder first on
+  `PATH` and may read that folder and the app runtime it starts with, nothing
+  more. Detail is in
   [Terminal Browser grant](design/terminal-browser-grant.md).
 - **Terminal shell configuration.** On macOS a thread or Project terminal is
   the person's login shell (`-l`), and its read roots add, read-only and only

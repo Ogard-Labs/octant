@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
 import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
 import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
-import { MCP_COMMAND_HELP, runMcpCommand } from "./mcpCommand";
+import { runMcpCliCommand } from "./mcpCommand";
 import {
   resolveAuthCliCommand,
   resolveListenerCliCommand,
@@ -62,17 +62,7 @@ async function main(): Promise<number> {
   if (args.command === "mcp") {
     // Before anything that resolves a data directory or opens a host session:
     // this command's only inputs are the two grant variables.
-    const flagNames = Object.keys(args.flags);
-    if (args.positional.length === 0 && flagNames.length === 1 && args.flags.help === true) {
-      process.stdout.write(MCP_COMMAND_HELP);
-      return 0;
-    }
-    if (args.positional.length > 0 || flagNames.length > 0) {
-      // stdout carries protocol frames only.
-      process.stderr.write("octant mcp takes no arguments. Run `octant mcp --help`.\n");
-      return 1;
-    }
-    return await runMcpCommand({
+    return await runMcpCliCommand(process.argv.slice(3), {
       environment: process.env,
       input: process.stdin,
       stdout: process.stdout,

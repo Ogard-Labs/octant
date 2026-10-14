@@ -10,6 +10,7 @@ import {
   parseHostServiceMode,
   parseServerInstanceId,
   parseServerPort,
+  parseTerminalLauncher,
 } from "./serverConfig";
 
 const directories: string[] = [];
@@ -41,6 +42,54 @@ describe("parseCodeFileHelperPath", () => {
       }
     },
   );
+});
+
+describe("parseTerminalLauncher", () => {
+  const packagedMac = {
+    packaged: true,
+    platform: "darwin" as const,
+    execPath: "/Users/person/Applications/Octant.app/Contents/MacOS/Octant",
+  };
+
+  it("lets a granted terminal read the launcher and the app runtime it starts with, and nothing else", () => {
+    expect(parseTerminalLauncher(undefined, packagedMac)).toBeUndefined();
+    expect(
+      parseTerminalLauncher(
+        "/Users/person/Applications/Octant.app/Contents/Resources/terminal-launcher",
+        packagedMac,
+      ),
+    ).toEqual({
+      directory: "/Users/person/Applications/Octant.app/Contents/Resources/terminal-launcher",
+      readRoots: [
+        "/Users/person/Applications/Octant.app/Contents/Resources/terminal-launcher",
+        "/Users/person/Applications/Octant.app/Contents/MacOS/Octant",
+        "/Users/person/Applications/Octant.app/Contents/Frameworks",
+      ],
+    });
+  });
+
+  it("refuses a relative folder, and any host that is not the packaged macOS app", () => {
+    expect(() => parseTerminalLauncher("terminal-launcher", packagedMac)).toThrow(
+      "OCTANT_TERMINAL_LAUNCHER_DIRECTORY must be an absolute path",
+    );
+    for (const runtime of [
+      { ...packagedMac, packaged: false },
+      { ...packagedMac, platform: "linux" as const },
+    ]) {
+      expect(() => parseTerminalLauncher("/opt/octant/terminal-launcher", runtime)).toThrow(
+        "OCTANT_TERMINAL_LAUNCHER_DIRECTORY is only for the packaged macOS app",
+      );
+    }
+  });
+
+  it("gives no launcher for a folder that cannot be one PATH entry", () => {
+    expect(
+      parseTerminalLauncher(
+        "/Users/person/a:b/Octant.app/Contents/Resources/terminal-launcher",
+        packagedMac,
+      ),
+    ).toBeUndefined();
+  });
 });
 
 describe("parseServerPort", () => {

@@ -1487,6 +1487,14 @@ describe("CodeOperationService", () => {
       }));
       const checkpoint = vi.fn(async () => ({ status: "unavailable" as const }));
       const start = vi.fn(async () => ({ state: "running" as const }));
+      // The runtime has no live turn of its own to stop.
+      const cancel = vi.fn(
+        async (): Promise<{
+          readonly state: "failed" | "interrupted";
+          readonly stoppedOperationId?: typeof ids.operation;
+        }> => ({ state: "failed" }),
+      );
+      const append = vi.fn();
       const service = new CodeOperationService({
         authority: {
           readThread: vi.fn(
@@ -1520,7 +1528,7 @@ describe("CodeOperationService", () => {
           start,
           answerInput: vi.fn(),
           answerApproval: vi.fn(),
-          cancel: vi.fn(),
+          cancel,
           threadsWritingIn: (checkoutRoot: string, exceptThreadId: CodeThread["id"]) =>
             live
               .filter((turn) =>
@@ -1539,10 +1547,10 @@ describe("CodeOperationService", () => {
         evidence: { put: vi.fn(), read: vi.fn(async () => "Implement this.") } as never,
         events: {
           replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
-          append: vi.fn(),
+          append,
         } as never,
       });
-      return { service, restoreCheckpoint, checkpoint, start };
+      return { service, restoreCheckpoint, checkpoint, start, cancel, append };
     }
 
     it("refuses a restore while another Project's restore is overwriting the same folder", async () => {
@@ -1633,6 +1641,92 @@ describe("CodeOperationService", () => {
       expect(checkpoint).toHaveBeenCalledOnce();
       expect(restoreCheckpoint).toHaveBeenCalledOnce();
     });
+
+    it("captures no checkpoint for a turn stopped while it waited for another Project's restore", async () => {
+      const writer = liveTurn({}).thread;
+      const restorer = decodeCodeThread({ ...thread(), projectId: otherProject });
+      const { service, restoreCheckpoint, checkpoint, start } = restoreFixture([], restorer, [
+        writer,
+      ]);
+      const entered = Promise.withResolvers<void>();
+      const overwrite = Promise.withResolvers<void>();
+      restoreCheckpoint.mockImplementationOnce(async () => {
+        entered.resolve();
+        await overwrite.promise;
+        return { status: "applied", undo: { worktree: "e".repeat(40), index: "f".repeat(40) } };
+      });
+
+      const restoring = service.execute(ids.window, restoreCommand);
+      await entered.promise;
+      const starting = service.execute(ids.window, { ...startProviderTurn, threadId: writer.id });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await expect(
+        service.execute(ids.window, {
+          kind: "cancel-provider-turn",
+          operationId: decodeCodeOperationId("55555555-5555-4555-8555-555555555555"),
+          threadId: writer.id,
+          checkoutId: ids.checkout,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+
+      overwrite.resolve();
+      await restoring;
+      await expect(starting).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "interrupted",
+      });
+      expect(checkpoint).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      { live: "another turn", stoppedOperationId: ids.operation, atStop: 1 },
+      { live: "the start itself", stoppedOperationId: startProviderTurn.operationId, atStop: 0 },
+    ])(
+      "journals a preparing start as stopped when Stop also ends $live only if the runtime had not taken it on",
+      async ({ stoppedOperationId, atStop }) => {
+        const writer = liveTurn({}).thread;
+        const restorer = decodeCodeThread({ ...thread(), projectId: otherProject });
+        const { service, restoreCheckpoint, cancel, append } = restoreFixture([], restorer, [
+          writer,
+        ]);
+        cancel.mockResolvedValueOnce({ state: "interrupted", stoppedOperationId });
+        const entered = Promise.withResolvers<void>();
+        const overwrite = Promise.withResolvers<void>();
+        restoreCheckpoint.mockImplementationOnce(async () => {
+          entered.resolve();
+          await overwrite.promise;
+          return { status: "applied", undo: { worktree: "e".repeat(40), index: "f".repeat(40) } };
+        });
+        const startResults = () =>
+          append.mock.calls.filter(
+            ([input]) =>
+              String(input.operationId) === String(startProviderTurn.operationId) &&
+              input.event.kind === "operation-result",
+          );
+
+        const restoring = service.execute(ids.window, restoreCommand);
+        await entered.promise;
+        const starting = service.execute(ids.window, { ...startProviderTurn, threadId: writer.id });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await service.execute(ids.window, {
+          kind: "cancel-provider-turn",
+          operationId: decodeCodeOperationId("55555555-5555-4555-8555-555555555555"),
+          threadId: writer.id,
+          checkoutId: ids.checkout,
+        });
+        expect(startResults()).toHaveLength(atStop);
+
+        overwrite.resolve();
+        await restoring;
+        await expect(starting).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
+        expect(startResults()).toHaveLength(1);
+        expect(startResults()[0]?.[0].event.result).toMatchObject({ state: "interrupted" });
+      },
+    );
 
     it("refuses to restore while another thread is writing in the same checkout and names it", async () => {
       const { service, restoreCheckpoint } = restoreFixture([liveTurn({})]);
@@ -2544,6 +2638,7 @@ describe("CodeOperationService", () => {
     expect(fixture.turns.start).toHaveBeenCalledWith({
       windowId: ids.window,
       thread: thread(),
+      operationId: startProviderTurn.operationId,
       sessionId: startProviderTurn.sessionId,
       checkoutRoot: "/private/exact-checkout",
       prompt: "does this still hold?",
@@ -3325,6 +3420,29 @@ describe("CodeOperationService terminal Browser grant", () => {
       browserGrant: granted,
     });
     expect(JSON.stringify(result)).not.toContain("terminal-browser-grant:");
+  });
+
+  it("puts the app's launcher only on a terminal started with a grant", async () => {
+    const launcher = {
+      directory: "/Applications/Octant.app/Contents/Resources/terminal-launcher",
+      readRoots: ["/Applications/Octant.app/Contents/Resources/terminal-launcher"],
+    };
+    const opening = {
+      kind: "granted",
+      outcome: granted,
+      credentialReferences: references,
+      launcher,
+    };
+    const granting = fixture(opening);
+    await granting.service.execute(ids.window, startWithGrant, { initiator: "user" });
+    expect(granting.terminals.launch).toHaveBeenCalledWith(expect.objectContaining({ launcher }));
+
+    const plain = fixture(opening);
+    const { browserGrant: _off, ...withoutGrant } = startWithGrant;
+    await plain.service.execute(ids.window, withoutGrant, { initiator: "user" });
+    expect(plain.terminals.launch).toHaveBeenCalledWith(
+      expect.not.objectContaining({ launcher: expect.anything() }),
+    );
   });
 
   it("starts no terminal when the host refuses the grant, so it never looks as if it has one", async () => {

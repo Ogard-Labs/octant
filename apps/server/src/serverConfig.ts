@@ -1,6 +1,7 @@
 import { accessSync, constants, realpathSync, statSync } from "node:fs";
-import { delimiter, isAbsolute, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 import type { HostRuntimeServiceMode } from "@octant/host-runtime";
+import type { TerminalLauncher } from "./code/terminalService";
 
 const DEFAULT_SERVER_PORT = 13_773;
 const TRUSTED_PACKAGED_GH_DIRECTORIES = [
@@ -37,6 +38,40 @@ export function parseCodeFileHelperPath(value: string | undefined): string | und
 }
 
 /**
+ * The packaged macOS app's terminal launcher. Its `octant` runs the app's own
+ * executable in Node mode, which is the runtime this host itself runs under,
+ * so a terminal with a Browser grant may read the launcher folder, that
+ * executable, and the frameworks it loads. All three sit inside the app
+ * bundle and hold nothing private; where the app is installed under
+ * `/Applications` the terminal could read them already, and the grant matters
+ * for an app the confinement otherwise hides (in the home folder, or
+ * translocated under `/private`).
+ */
+export function parseTerminalLauncher(
+  value: string | undefined,
+  runtime: {
+    readonly packaged: boolean;
+    readonly platform: NodeJS.Platform;
+    readonly execPath: string;
+  },
+): TerminalLauncher | undefined {
+  if (value === undefined) return undefined;
+  if (!isAbsolute(value)) {
+    throw new Error("OCTANT_TERMINAL_LAUNCHER_DIRECTORY must be an absolute path");
+  }
+  if (!runtime.packaged || runtime.platform !== "darwin") {
+    throw new Error("OCTANT_TERMINAL_LAUNCHER_DIRECTORY is only for the packaged macOS app");
+  }
+  // A folder whose path holds the separator cannot be one PATH entry; such a
+  // terminal gets no launcher rather than a broken PATH.
+  if (value.includes(delimiter)) return undefined;
+  return {
+    directory: value,
+    readRoots: [value, runtime.execPath, join(dirname(dirname(runtime.execPath)), "Frameworks")],
+  };
+}
+
+/**
  * Resolve the host's `gh` command once during launch. Child processes later
  * receive this canonical absolute executable instead of consulting PATH again.
  */
@@ -70,6 +105,7 @@ export type ServerLaunchEnvironment = Readonly<Record<string, string | undefined
 
 export interface ServerLaunchConfig {
   readonly codeFileHelperPath?: string;
+  readonly terminalLauncher?: TerminalLauncher;
   readonly ghExecutable?: string;
   readonly credentialBrokerToken?: string;
   readonly credentialBrokerUrl?: string;
@@ -101,7 +137,13 @@ export function parseServerInstanceId(value: string | undefined): string | undef
   return value;
 }
 
-export function parseServerLaunchConfig(environment: ServerLaunchEnvironment): ServerLaunchConfig {
+export function parseServerLaunchConfig(
+  environment: ServerLaunchEnvironment,
+  runtime: { readonly platform: NodeJS.Platform; readonly execPath: string } = {
+    platform: process.platform,
+    execPath: process.execPath,
+  },
+): ServerLaunchConfig {
   const packagedRuntime = environment.OCTANT_PACKAGED_RUNTIME;
   if (packagedRuntime !== undefined && packagedRuntime !== "1") {
     throw new Error("OCTANT packaged runtime is invalid");
@@ -109,6 +151,10 @@ export function parseServerLaunchConfig(environment: ServerLaunchEnvironment): S
   const isPackagedRuntime = packagedRuntime === "1" || environment.ELECTRON_RUN_AS_NODE === "1";
   const instanceId = parseServerInstanceId(environment.OCTANT_SERVER_INSTANCE_ID);
   const codeFileHelperPath = parseCodeFileHelperPath(environment.OCTANT_CODE_FILE_HELPER_PATH);
+  const terminalLauncher = parseTerminalLauncher(environment.OCTANT_TERMINAL_LAUNCHER_DIRECTORY, {
+    packaged: isPackagedRuntime,
+    ...runtime,
+  });
   const ghExecutable = resolveGhExecutableFromPath(environment.PATH, {
     trustedOnly: isPackagedRuntime,
   });
@@ -133,6 +179,7 @@ export function parseServerLaunchConfig(environment: ServerLaunchEnvironment): S
     port: parseServerPort(environment.OCTANT_SERVER_PORT),
     hostServiceMode: parseHostServiceMode(environment.OCTANT_HOST_SERVICE_MODE),
     ...(codeFileHelperPath === undefined ? {} : { codeFileHelperPath }),
+    ...(terminalLauncher === undefined ? {} : { terminalLauncher }),
     ...(ghExecutable === undefined ? {} : { ghExecutable }),
     ...(instanceId === undefined ? {} : { instanceId }),
     ...(desktopBridgeSecret === undefined ? {} : { desktopBridgeSecret }),

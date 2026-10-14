@@ -192,6 +192,7 @@ import {
   KEYCHAIN_HELPER_FILENAME,
   resolveDesktopNativeHelperPath,
   resolveManagedToolsDirectory,
+  resolveTerminalLauncherDirectory,
   type DesktopNativeHelperPathOptions,
 } from "./runtimePaths";
 import {
@@ -1767,6 +1768,10 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           resourcesPath: process.resourcesPath,
           moduleUrl: import.meta.url,
         });
+        const terminalLauncherDirectory = resolveTerminalLauncherDirectory({
+          packaged: app.isPackaged,
+          resourcesPath: process.resourcesPath,
+        });
         const spec = serverSpawnSpec({
           browserBrokerToken: nextBrowserRuntimeBroker.token,
           browserBrokerUrl: nextBrowserRuntimeBroker.url,
@@ -1782,6 +1787,11 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
           serveAvdBrokerToken: nextServeAvdBroker.token,
           ...(process.platform === "darwin" && existsSync(codeFileHelperPath)
             ? { codeFileHelperPath }
+            : {}),
+          ...(process.platform === "darwin" &&
+          terminalLauncherDirectory !== undefined &&
+          existsSync(terminalLauncherDirectory)
+            ? { terminalLauncherDirectory }
             : {}),
           ...(broker === undefined
             ? {}
