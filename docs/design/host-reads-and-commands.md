@@ -120,8 +120,10 @@ provider the thread is on now, and `restoreUndo`, the way back from the newest
 restore that ran (a rejected restore is passed over); earlier windows carry
 neither. The read never scans the thread from its start: it reads the newest
 turn starts below the anchor from the thread-kind index, each page turn's own
-frames through its operation, and one last usage report per older turn, and a
-turn is folded exactly as the forward page folds it. `through` is the page that
+frames through its operation, and each older turn's last usage report; that
+last read walks every usage report the thread holds through the thread-kind
+index and decodes one per older turn. A turn is folded exactly as the forward
+page folds it. `through` is the page that
 ends with the named turn. A fork opens on its own newest turns; once those run
 out, **Load earlier messages** reads its source `through` the fork point, then
 `before` that page's first turn, and on up the lineage to at most 32 threads.

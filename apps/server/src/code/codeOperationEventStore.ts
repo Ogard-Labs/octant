@@ -764,8 +764,10 @@ export class CodeOperationEventStore {
    * ends `through` one. It never scans the thread from its start. The turn
    * starts are read newest first from the thread-kind index, each page turn's
    * own frames are read through its operation's index, and the usage of every
-   * older turn is folded from one last-report-per-turn read, so a page costs
-   * its own turns plus one usage row per older turn that reported any. The
+   * older turn is folded from one read of each turn's last report. That read
+   * walks every usage report of the thread through the thread-kind index and
+   * decodes one per older turn that reported any, so a page costs its own
+   * turns plus that walk and those decodes. The
    * newest page adds the current provider's limits from the thread's newest
    * limit reports and the way back from its newest restore that ran.
    */
@@ -1028,6 +1030,8 @@ export class CodeOperationEventStore {
    * The way back from the thread's newest restore that ran. A rejected
    * restore never touched the checkout, so the read walks past it to the one
    * before; a restore that ran and carried no way back retracts the offer.
+   * Only restore results are read, so a thread full of commits and pushes and
+   * no restore costs an index walk, not a decode of each of them.
    */
   #newestRestoreUndo(
     threadId: CodeThreadId,
@@ -1039,6 +1043,7 @@ export class CodeOperationEventStore {
         aggregateType: "code-operation",
         threadId: String(threadId),
         resultKind: "git-mutation-state",
+        mutation: "restore-checkpoint",
         limit: MAX_RESTORE_RESULTS_PER_READ,
         ...(beforeSequence === undefined ? {} : { beforeSequence }),
       });

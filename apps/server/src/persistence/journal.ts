@@ -92,6 +92,17 @@ const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursorSchema);
 const decodeEventEnvelope = Schema.decodeUnknownSync(EventEnvelopeSchema);
 const decodeEventActor = Schema.decodeUnknownSync(EventActor);
 
+/** The index migration 61 adds; a journal opened on an older schema plans without it. */
+const THREAD_KIND_INDEX = "event_journal_thread_kind_sequence";
+
+function eventJournalHasIndex(connection: SqliteConnection, name: string): boolean {
+  return (
+    connection
+      .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'index' AND name = ?")
+      .get(name) !== undefined
+  );
+}
+
 function eventJournalHasActorJson(connection: SqliteConnection): boolean {
   return (
     connection
@@ -208,7 +219,9 @@ export class Journal {
       ORDER BY global_sequence DESC LIMIT ?
     `);
     // The same newest-first thread read keyed on an operation result's kind,
-    // through the result-kind index (migration 63).
+    // through the result-kind index (migration 63), optionally narrowed to
+    // one mutation so a reader looking for the newest restore does not decode
+    // every commit and push result before it.
     this.#latestThreadResultRows = options.connection.prepare(`
       SELECT global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
         event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
@@ -216,6 +229,7 @@ export class Journal {
       FROM event_journal
       WHERE aggregate_type = ? AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
         AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.result.kind') END = ?
+        AND (? IS NULL OR CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.result.mutation') END = ?)
         AND global_sequence < ?
       ORDER BY global_sequence DESC LIMIT ?
     `);
@@ -224,8 +238,18 @@ export class Journal {
     // journaled: a Code turn's own usage figure is its last report, the turns
     // are the operations that started one, and a fold over them must run in
     // turn order even when an older turn's report landed after a newer one's.
-    // Membership is by the anchor, not by where the report landed. Both
-    // groupings read the thread-kind index; only the chosen rows decode.
+    // Membership is by the anchor, not by where the report landed. The anchor
+    // grouping reads the thread's anchors and the report grouping reads every
+    // report of that kind the thread holds, both through the thread-kind
+    // index; only the chosen rows decode. The index is named because the
+    // grouping by aggregate made the planner prefer the aggregate's own index,
+    // which walked every row of the type on the host and parsed each payload:
+    // 176 ms for a 40-turn thread among a million Code rows, 0.07 ms on the
+    // thread-kind index for the same rows. The host never runs ANALYZE, so
+    // the planner has nothing better to go on.
+    const threadKindIndex = eventJournalHasIndex(options.connection, THREAD_KIND_INDEX)
+      ? `INDEXED BY ${THREAD_KIND_INDEX}`
+      : "";
     this.#latestThreadKindPerAggregateRows = options.connection.prepare(`
       SELECT anchors.anchor_sequence AS anchor_sequence,
         event.global_sequence, event.event_id, event.aggregate_type, event.aggregate_id,
@@ -234,7 +258,8 @@ export class Journal {
         ${this.#hasActorJson ? "event.actor_json" : "NULL AS actor_json"}, event.occurred_at,
         event.payload_json
       FROM (
-        SELECT aggregate_id, min(global_sequence) AS anchor_sequence FROM event_journal
+        SELECT aggregate_id, min(global_sequence) AS anchor_sequence
+        FROM event_journal ${threadKindIndex}
         WHERE aggregate_type = ?
           AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
           AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
@@ -242,7 +267,8 @@ export class Journal {
         GROUP BY aggregate_id
       ) AS anchors
       JOIN (
-        SELECT aggregate_id, max(global_sequence) AS last_sequence FROM event_journal
+        SELECT aggregate_id, max(global_sequence) AS last_sequence
+        FROM event_journal ${threadKindIndex}
         WHERE aggregate_type = ?
           AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
           AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
@@ -756,11 +782,15 @@ export class Journal {
     ).map((row) => this.#decodeRow(row));
   }
 
-  /** A thread's newest events carrying a result of one kind, newest first, below an exclusive sequence. */
+  /**
+   * A thread's newest events carrying a result of one kind, and of one
+   * `mutation` when given, newest first, below an exclusive sequence.
+   */
   latestThreadResults(input: {
     readonly aggregateType: string;
     readonly threadId: string;
     readonly resultKind: string;
+    readonly mutation?: string;
     readonly limit: number;
     readonly beforeSequence?: number;
   }): ReadonlyArray<EventEnvelope> {
@@ -768,6 +798,7 @@ export class Journal {
       input.aggregateType.trim().length === 0 ||
       input.threadId.trim().length === 0 ||
       input.resultKind.trim().length === 0 ||
+      (input.mutation !== undefined && input.mutation.trim().length === 0) ||
       !validBound(input.beforeSequence) ||
       !Number.isSafeInteger(input.limit) ||
       input.limit < 1 ||
@@ -779,6 +810,8 @@ export class Journal {
         input.aggregateType,
         input.threadId,
         input.resultKind,
+        input.mutation ?? null,
+        input.mutation ?? null,
         input.beforeSequence ?? Number.MAX_SAFE_INTEGER,
         input.limit,
       ) as Array<JournalRow>

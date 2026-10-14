@@ -1091,6 +1091,48 @@ describe("CodeOperationEventStore conversation window", () => {
     fixture.connection.close();
   });
 
+  it("finds the newest restore behind many other Git results without reading them", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    seedHistory(store);
+    const git = turnOperation(800);
+    for (let index = 0; index < 70; index += 1) {
+      store.append({
+        threadId,
+        operationId: git,
+        expectedCursor: index,
+        event: decodeCodeOperationEvent({
+          kind: "operation-result",
+          result: {
+            kind: "git-mutation-state",
+            operationId: git,
+            gitOperationId: "89000000-0000-4000-8000-000000000061",
+            mutation: "commit",
+            state: "completed",
+          },
+        }),
+      });
+    }
+    const results = vi.spyOn(fixture.journal, "latestThreadResults");
+    const read = store.conversationWindow({ threadId, limit: 1 });
+    expect(read.status === "ok" ? read.window.restoreUndo : undefined).toEqual(ranRestore);
+    const mutations = results.mock.results.flatMap((result) =>
+      result.type === "return"
+        ? (result.value as ReadonlyArray<{ readonly payload: unknown }>).map(
+            (envelope) =>
+              (
+                envelope.payload as {
+                  readonly event: { readonly result: { readonly mutation: string } };
+                }
+              ).event.result.mutation,
+          )
+        : [],
+    );
+    // The restore that ran and the rejected one after it; none of the commits.
+    expect(mutations).toEqual(["restore-checkpoint", "restore-checkpoint"]);
+    fixture.connection.close();
+  });
+
   it("folds the turns before a window in the order they started, whatever order their reports landed in", () => {
     const fixture = openJournal();
     const store = createStore(fixture.journal);

@@ -250,9 +250,15 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   // where the reader had been while the frame showed the empty space above
   // them, and a thread came back blank until it was scrolled. The offset is
   // applied again each frame until it holds, and never after the reader moves.
+  // A jump to a row decides where the list opens instead, so a pending reveal
+  // skips the restore or ends it, rather than the two pulling the frame back
+  // and forth.
+  const revealPendingRef = useRef(revealKey !== undefined);
+  revealPendingRef.current = revealKey !== undefined;
   useLayoutEffect(() => {
     const scroll = scrollElementRef.current;
     if (scroll === null || restored === undefined || restored.following) return;
+    if (revealPendingRef.current) return;
     const offset = restored.offset;
     const inputs = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
     let handle: number | undefined;
@@ -264,6 +270,10 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     };
     const apply = () => {
       handle = undefined;
+      if (revealPendingRef.current) {
+        stop();
+        return;
+      }
       scroll.scrollTop = offset;
       if (Math.abs(scroll.scrollTop - offset) <= 1 || (attempts += 1) >= RESTORE_ATTEMPT_FRAMES) {
         stop();
