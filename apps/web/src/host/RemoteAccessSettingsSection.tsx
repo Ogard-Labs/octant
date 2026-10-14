@@ -69,6 +69,8 @@ const LISTENER_FAILURE_COPY: Readonly<Record<string, string>> = {
   "invalid-bind": "Octant refuses to bind that address. Use a private LAN or Tailscale address.",
   "invalid-origin": "The origin must be HTTPS and match the address and port.",
   "invalid-tls": "The certificate or private key could not be read.",
+  "tls-key-exposed":
+    "The listener's certificate key can be read by other users on this computer, so Octant won't use it.",
   "occupied-port": "Another process is already using that port.",
   "interface-unavailable": "That network interface is not available right now.",
   "bind-failed": "Octant could not bind the listener.",

@@ -8,6 +8,7 @@ export type PrivateListenerControlFailureCode =
   | "invalid-bind"
   | "invalid-origin"
   | "invalid-tls"
+  | "tls-key-exposed"
   | "occupied-port"
   | "interface-unavailable"
   | "bind-failed"
@@ -20,6 +21,7 @@ const FAILURE_CODES: ReadonlySet<string> = new Set([
   "invalid-bind",
   "invalid-origin",
   "invalid-tls",
+  "tls-key-exposed",
   "occupied-port",
   "interface-unavailable",
   "bind-failed",
@@ -34,6 +36,8 @@ const FAILURE_MESSAGES: Readonly<Record<PrivateListenerControlFailureCode, strin
   "invalid-bind": "Octant rejected an invalid private listener address.",
   "invalid-origin": "Octant rejected an invalid private listener origin.",
   "invalid-tls": "Octant rejected an invalid private listener certificate.",
+  "tls-key-exposed":
+    "The listener's certificate key can be read by other users on this computer, so Octant won't use it.",
   "occupied-port": "Octant could not bind the private listener because the port is occupied.",
   "interface-unavailable":
     "Octant could not bind the private listener because the interface is unavailable.",

@@ -16,6 +16,7 @@ export type PrivateListenerFailureCode =
   | "invalid-bind"
   | "invalid-origin"
   | "invalid-tls"
+  | "tls-key-exposed"
   | "occupied-port"
   | "interface-unavailable"
   | "cancelled"
@@ -26,6 +27,7 @@ const PRIVATE_LISTENER_FAILURE_CODES: ReadonlySet<string> = new Set([
   "invalid-bind",
   "invalid-origin",
   "invalid-tls",
+  "tls-key-exposed",
   "occupied-port",
   "interface-unavailable",
   "cancelled",

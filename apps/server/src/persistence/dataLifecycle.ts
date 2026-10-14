@@ -252,15 +252,17 @@ const REMOVE_ALL_DELETED: ReadonlyArray<DeletedScope> = [
   "projections",
 ];
 
-// The private listener's host identifier and private signing key are local
-// data, too. They intentionally live outside the SQLite filename family so
-// the listener can be lazily provisioned, but a confirmed complete-data
-// removal must stage and remove them with the selected store. Keep this list
-// exact: a `remote/` directory can hold future unrelated state and must never
-// become an implicit recursive deletion target.
+// The private listener's host identifier, private signing key, and self-made
+// TLS key and certificate are local data, too. They intentionally live outside
+// the SQLite filename family so the listener can be lazily provisioned, but a
+// confirmed complete-data removal must stage and remove them with the selected
+// store. Keep this list exact: a `remote/` directory can hold future unrelated
+// state and must never become an implicit recursive deletion target.
 const PRIVATE_LISTENER_HOST_IDENTITY_ARTIFACTS = [
   join("remote", "private-listener-host-id"),
   join("remote", "private-listener-host-key.pem"),
+  join("remote", "private-listener-tls-cert.pem"),
+  join("remote", "private-listener-tls-key.pem"),
 ] as const;
 
 /**

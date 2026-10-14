@@ -206,6 +206,7 @@ export type PrivateListenerControlFailureCode =
   | "invalid-bind"
   | "invalid-origin"
   | "invalid-tls"
+  | "tls-key-exposed"
   | "occupied-port"
   | "interface-unavailable"
   | "bind-failed"
@@ -2119,6 +2120,7 @@ function decodePrivateListenerStatus(value: unknown): PrivateListenerPublicStatu
         "invalid-bind",
         "invalid-origin",
         "invalid-tls",
+        "tls-key-exposed",
         "occupied-port",
         "interface-unavailable",
         "bind-failed",

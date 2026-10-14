@@ -115,10 +115,22 @@ describe("resolveListenerCliCommand", () => {
       action: "listener-enable",
       hostname: "station.example.ts.net",
       port: 8455,
-      certificatePath: "/etc/octant/station.crt",
-      privateKeyPath: "/etc/octant/station.key",
+      pasted: {
+        certificatePath: "/etc/octant/station.crt",
+        privateKeyPath: "/etc/octant/station.key",
+      },
     });
     expect(resolveListenerCliCommand(["disable"], {})).toEqual({ action: "listener-disable" });
+  });
+
+  it("asks the host for its own certificate when neither a certificate nor a key is named", () => {
+    expect(resolveListenerCliCommand(["enable"], { hostname: "100.64.0.7", port: "8455" })).toEqual(
+      {
+        action: "listener-enable",
+        hostname: "100.64.0.7",
+        port: 8455,
+      },
+    );
   });
 
   it("refuses an enable missing its address, port, certificate, or key", () => {
@@ -218,8 +230,10 @@ describe("runRemoteAccessCliCommand", () => {
         action: "listener-enable",
         hostname: "station.example.ts.net",
         port: 8455,
-        certificatePath: "/etc/octant/station.crt",
-        privateKeyPath: "/etc/octant/station.key",
+        pasted: {
+          certificatePath: "/etc/octant/station.crt",
+          privateKeyPath: "/etc/octant/station.key",
+        },
       }),
     ).toBe(0);
     expect(test.sent[0]).toEqual({
@@ -239,6 +253,30 @@ describe("runRemoteAccessCliCommand", () => {
     expect(printed).not.toContain("PRIVATE KEY");
   });
 
+  it("sends no certificate or key for a self-made listener and prints its key pin", async () => {
+    const test = fixture(() => ({
+      status: 200,
+      body: {
+        status: {
+          ...READY_STATUS,
+          certificateSource: "self-made",
+          tlsPin: "sha256-47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
+        },
+      },
+    }));
+    expect(await test.run({ action: "listener-enable", hostname: "100.64.0.7", port: 8455 })).toBe(
+      0,
+    );
+    expect(test.sent[0]).toEqual({
+      path: "/api/desktop/private-listener/enable",
+      method: "POST",
+      body: { hostname: "100.64.0.7", port: 8455, origin: "https://100.64.0.7:8455" },
+    });
+    const printed = test.out.join("");
+    expect(printed).toContain("Certificate source self-made");
+    expect(printed).toContain("Key pin sha256-47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU");
+  });
+
   it("drops the default HTTPS port from the origin as Settings does", async () => {
     const test = fixture(() => ({ status: 200, body: { status: READY_STATUS } }), {
       "/c.pem": "cert",
@@ -248,8 +286,7 @@ describe("runRemoteAccessCliCommand", () => {
       action: "listener-enable",
       hostname: "192.168.1.20",
       port: 443,
-      certificatePath: "/c.pem",
-      privateKeyPath: "/k.pem",
+      pasted: { certificatePath: "/c.pem", privateKeyPath: "/k.pem" },
     });
     expect(test.sent[0]?.body).toMatchObject({ origin: "https://192.168.1.20" });
   });
@@ -263,8 +300,7 @@ describe("runRemoteAccessCliCommand", () => {
       action: "listener-enable",
       hostname: "fd7a:115c:a1e0::7033:4105",
       port: 8455,
-      certificatePath: "/c.pem",
-      privateKeyPath: "/k.pem",
+      pasted: { certificatePath: "/c.pem", privateKeyPath: "/k.pem" },
     });
     expect(test.sent[0]?.body).toMatchObject({
       hostname: "fd7a:115c:a1e0::7033:4105",
@@ -281,8 +317,7 @@ describe("runRemoteAccessCliCommand", () => {
         action: "listener-enable",
         hostname: "192.168.1.20",
         port: 8455,
-        certificatePath: "/c.pem",
-        privateKeyPath: "/missing.pem",
+        pasted: { certificatePath: "/c.pem", privateKeyPath: "/missing.pem" },
       }),
     ).toBe(1);
     expect(test.sent).toHaveLength(0);
@@ -306,8 +341,7 @@ describe("runRemoteAccessCliCommand", () => {
         action: "listener-enable",
         hostname: "192.168.1.20",
         port: 8455,
-        certificatePath: "/c.pem",
-        privateKeyPath: "/k.pem",
+        pasted: { certificatePath: "/c.pem", privateKeyPath: "/k.pem" },
       }),
     ).toBe(1);
     expect(test.err.join("")).toContain("occupied port");

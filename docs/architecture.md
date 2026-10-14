@@ -5497,16 +5497,63 @@ mechanisms are:
   `octant listener` / `octant pair` / `octant auth` commands use; the private
   listener forwards none of those routes. A listener enabled there is
   remembered owner-only under the data directory (the boundary that holds the
-  host identity key), including its TLS key, and re-enabled when the server
+  host identity key), with a pasted certificate's TLS key or, for a self-made
+  certificate, only that it is self-made, and re-enabled when the server
   starts; a server shutdown keeps it and only a local disable forgets it.
   A paired client may click, scroll, and press keys in the host's agent
   browser, but may not navigate it, type into it, or close a tab. Those clicks
   and keys can still follow a link or submit a form within the context's
   approved origins; the host's navigation guards refuse any page outside them,
   so a paired client cannot take the host browser to a new origin.
-- **Adding a computer in one step.** Planned, not built: the host makes its own
-  listener certificate and the pairing code carries its pin, in
-  [the plan](plans/one-step-pairing.md).
+- **Listener certificate.** The listener serves a certificate and key the
+  person pastes exactly as given, or, when enabled with neither (the
+  administration route without PEMs, or `octant listener enable` without
+  `--cert` and `--key`), a certificate the host makes itself. A pasted
+  certificate always wins, and the self-made key then stays unused on disk.
+  - **Key and certificate.** The self-made key is its own ECDSA P-256 key, not
+    the host identity key, which signs the remote hello and whose rotation
+    revokes every device. The certificate is a self-signed X.509 v3 leaf for
+    it: SHA-256 signature, a random 128-bit serial, basic constraints not a
+    certificate authority, extended key usage server authentication, one
+    subject alternative name for the listener's address (an IP entry for an
+    address, a DNS entry for a name), valid for one year. An in-tree DER
+    writer encodes that one shape, because the platform crypto API makes keys
+    but not certificates; its tests read the result with the platform X.509
+    reader and complete a TLS handshake against it.
+  - **Storage.** The key is `remote/private-listener-tls-key.pem` and the
+    certificate `remote/private-listener-tls-cert.pem` under the data
+    directory. The directory is narrowed to `0700` and each file written
+    `0600` to a staging file and renamed. The host refuses a key file that
+    another OS user owns or that other users can open: the listener reports
+    failed with `tls-key-exposed` and serves nothing, and the file is left as
+    it is. A key file reached through a link, or that is not a P-256 key,
+    fails as `invalid-tls` and is likewise never overwritten. Disabling the
+    listener keeps the key; complete data removal deletes the key and
+    certificate with the store. The key never appears in a route response,
+    the status projection, a log line, the journal, a diagnostics read or
+    export, or an error message.
+  - **Renewal.** Every enable, restart, and server start checks the
+    certificate. One that is missing, unreadable, made for another key or
+    address, not yet valid, or within 30 days of its end is replaced by a new
+    one for the same key, so renewal and a moved address never change the
+    pin. Nothing renews a certificate while the listener keeps running.
+  - **Pin and status.** The listener status carries `certificateSource`
+    (`self-made` or `pasted`) and, for a self-made certificate, `tlsPin`:
+    `sha256-` followed by the unpadded base64url SHA-256 of the certificate's
+    DER SubjectPublicKeyInfo. The existing `certificateFingerprint` hashes the
+    PEM text and is not a pin. Only the loopback administration status
+    carries the pin; `octant listener status` prints it.
+  - **No client pins yet.** A self-made listener is served, but no Octant
+    client takes or checks a pin, and a client that relies on platform trust
+    refuses the certificate, so only a pasted certificate can be reached by
+    a client today. Settings still asks for a certificate and key, and
+    `octant listener`'s usage line still names them. Settings also still
+    offers a browser pairing link for any ready listener; for a self-made one
+    the browser shows its own certificate warning, and the pairing-code slice
+    of the plan removes that link.
+- **Adding a computer in one step.** Partly built: the host certificate above.
+  The pairing code that carries the pin, the client pin rule, and the rest are
+  planned in [the plan](plans/one-step-pairing.md).
 - **Provider keys on a host without the desktop app.** _Designed, not yet
   built._ The desktop saves an endpoint's API key or bearer token over
   native IPC from its own renderer, so a browser client — local or paired —
