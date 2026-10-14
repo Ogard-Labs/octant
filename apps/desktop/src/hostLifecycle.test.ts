@@ -269,6 +269,27 @@ describe("desktop host lifecycle", () => {
     });
   });
 
+  it("waits on unconfirmed activity when the fresh reading never finishes, instead of hanging", async () => {
+    const idle: LocalHostSnapshot = {
+      state: "running",
+      ownership: "desktop-owned",
+      activeAgentCount: 0,
+      attentionRequired: false,
+    };
+
+    await expect(
+      workInFlight({
+        refreshActivity: () => new Promise<void>(() => undefined),
+        snapshot: () => idle,
+        boundMs: 10,
+      }).then(resolveUpdateInstallReadiness),
+    ).resolves.toEqual({
+      kind: "wait",
+      activeAgentCount: 0,
+      activityUnconfirmed: true,
+    });
+  });
+
   it("treats a managed host that cannot be re-attached as unconfirmed work", async () => {
     const attach = vi.fn().mockResolvedValueOnce(managedHost).mockResolvedValueOnce(undefined);
     const lifecycle = createHostLifecycleController({

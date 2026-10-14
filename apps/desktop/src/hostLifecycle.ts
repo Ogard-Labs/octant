@@ -52,7 +52,17 @@ export function canRunHostAction(snapshot: LocalHostSnapshot, action: HostAction
 export interface FreshHostActivitySource {
   readonly refreshActivity: () => Promise<void>;
   readonly snapshot: () => LocalHostSnapshot;
+  /** How long the fresh reading may take before it counts as unconfirmed. */
+  readonly boundMs?: number;
 }
+
+/**
+ * The desktop's activity refresh also re-reads window authorities and, with a
+ * menu bar, the fleet roster, and those requests carry no timeout of their own.
+ * Without a bound one stalled request would leave Relaunch to update, or Quit,
+ * waiting forever.
+ */
+const FRESH_ACTIVITY_BOUND_MS = 2_000;
 
 /**
  * What stopping this host now would interrupt, for the two questions that ask
@@ -81,10 +91,21 @@ export function workInFlight(
 
 async function refreshWorkInFlight(source: FreshHostActivitySource): Promise<UpdateWorkInFlight> {
   let refreshFailed = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await source.refreshActivity();
+    // A reading that does not finish in time is one the desktop could not
+    // confirm, so the install waits and quit asks, as for a failed one.
+    const outcome = await Promise.race([
+      source.refreshActivity().then(() => "refreshed" as const),
+      new Promise<"timed-out">((resolve) => {
+        timer = setTimeout(() => resolve("timed-out"), source.boundMs ?? FRESH_ACTIVITY_BOUND_MS);
+      }),
+    ]);
+    refreshFailed = outcome === "timed-out";
   } catch {
     refreshFailed = true;
+  } finally {
+    clearTimeout(timer);
   }
   const snapshot = source.snapshot();
   const activeHost = snapshot.state !== "stopped" && snapshot.ownership !== undefined;
