@@ -1,12 +1,12 @@
 # Open a dev server from another computer
 
-**Status: approved by the maintainer on 2026-10-14, not built.** Nothing here
-is in force. [Architecture](../architecture.md) holds only the rules that are
-true today; each slice below moves its rules there when it lands. Today a
-paired device that opens a server from Local servers or Running services gets
-a Browser tab on the host and sees the host browser's picture of the page,
-never the live page. This plan does not authorize merging or releasing
-anything.
+**Status: approved by the maintainer on 2026-10-14; slice 1 built, nothing
+reachable.** Nothing here is in force. [Architecture](../architecture.md) holds
+only the rules that are true today; each slice below moves its rules there when
+it lands. Today a paired device that opens a server from Local servers or
+Running services gets a Browser tab on the host and sees the host browser's
+picture of the page, never the live page. This plan does not authorize
+merging or releasing anything.
 
 ## Design
 
@@ -323,6 +323,37 @@ dark; slice 5 makes the feature reachable.
    owned by Octant, a server in the Project folder, an unknown or
    unresponsive health, and an unreadable thread; contract round-trip and
    strictness (no port, PID, or command line accepted from the client).
+
+   **Built.** The contracts are `packages/contracts/src/remoteServerGrants.ts`:
+   the request names the listing its id came from (a thread's Local servers
+   with that thread and Project, or Running services with neither), the
+   answer is the grant id, thread, and port or a typed refusal, and the
+   opened and closed journal payloads carry the device, thread, and port and
+   nothing about the endpoint. The policy is
+   `packages/domain/src/remoteServerGrantPolicy.ts`. Rules this slice
+   resolved, which the route must keep:
+   - The checks run in a fixed order, and the first failure answers: local
+     principal, unreadable thread, unlisted id, not Octant-owned, no thread,
+     not listening, posture. Thread readability comes before the listing, so a
+     device that cannot read a thread learns nothing about which ids are
+     listed in it.
+   - A server belongs to a thread only when it runs in that thread's own
+     worktree: a Running services row that names the thread, or a Local
+     servers row in the thread's checkout when that checkout is its own
+     worktree. A Local servers row outside the checkout gets `not-in-thread`
+     like the Project folder does, because Octant's ownership is host-wide and
+     the server may be another thread's.
+   - The posture check calls the local Open decision unchanged. It allows
+     every posture today, so its refusal (`open-denied`) cannot occur yet; it
+     exists so a later change to local Open reaches paired devices too. A
+     local decision that asks for a confirmation or an approval refuses the
+     grant, because a paired device cannot give either for the host.
+   - Close reasons are the losses listed under revocation, plus the proxy
+     session ending, since a grant is bound to its session.
+
+   The grant cap refusal and its contract arrive with the grant service in
+   slice 2. No rule moved to the architecture: no route, service, or client
+   reaches the contracts or the policy yet.
 
 2. **Grant service and route on the host.** Minting and closing grants,
    re-observation by listener id, journal events for open and close, grant
