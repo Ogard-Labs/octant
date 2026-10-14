@@ -5698,6 +5698,8 @@ mechanisms are:
   paired device may stop only a server Octant owns; the actor comes
   from the request's authenticated principal. A window reads the host it is
   connected to; All Hosts federation does not carry these rows.
+  Planned, not built: opening such a server live on a paired computer, in
+  [the plan](plans/open-a-dev-server-from-another-computer.md).
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and
