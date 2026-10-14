@@ -1534,6 +1534,71 @@ describe("Codex thread and turn lifecycle", () => {
     }
   });
 
+  it("starts and resumes without skill rules on a Codex older than Project skills that does not know skills/list", async () => {
+    for (const mode of ["chat", "work", "code"] as const) {
+      const f = fixture({
+        version: "0.65.0",
+        skillsList: async () => {
+          throw new CodexRpcClientFailure("remote", "Codex request failed.", {
+            remoteCode: -32601,
+            remoteMessage: "Method not found",
+          });
+        },
+      });
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), mode);
+      await startSession(acquired.connection);
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId: secondSessionId,
+          resumeCursor: { driverKind: "codex", value: "thread-existing" },
+          executionPolicy: "approval-gated",
+        }),
+      );
+      for (const method of ["thread/start", "thread/resume"]) {
+        expect(f.calls.find((call) => call.method === method)?.input, mode).not.toHaveProperty([
+          "config",
+          "skills",
+        ]);
+      }
+      await acquired.close();
+    }
+
+    const failing = fixture({
+      version: "0.65.0",
+      skillsList: async () => {
+        throw new CodexRpcClientFailure("timeout", "synthetic timeout");
+      },
+    });
+    const acquired = await acquireConnection(makeCodexDriver(failing.options()), "code");
+    await expect(startSession(acquired.connection)).rejects.toThrow();
+    expect(failing.calls.some(({ method }) => method === "thread/start")).toBe(false);
+    await acquired.close();
+  });
+
+  it("refuses every thread on a Codex that loads Project skills but cannot take a thread's skill rules", async () => {
+    for (const version of ["0.66.0", "0.107.2", "0.108.0-alpha.1"]) {
+      const f = fixture({ version });
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), "code");
+      await expect(startSession(acquired.connection)).rejects.toThrow(/0\.108\.0 or later/);
+      await expect(
+        Effect.runPromise(
+          acquired.connection.resume({
+            sessionId: secondSessionId,
+            resumeCursor: { driverKind: "codex", value: "thread-existing" },
+            executionPolicy: "approval-gated",
+          }),
+        ),
+      ).rejects.toThrow(/0\.108\.0 or later/);
+      expect(
+        f.calls.some(({ method }) =>
+          ["skills/list", "thread/start", "thread/resume"].includes(method),
+        ),
+        version,
+      ).toBe(false);
+      await acquired.close();
+    }
+  });
+
   it("refuses to start or resume a thread in any mode when Codex cannot list its skills", async () => {
     for (const mode of ["chat", "work", "code"] as const) {
       const f = fixture({

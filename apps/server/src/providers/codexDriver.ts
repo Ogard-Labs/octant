@@ -193,6 +193,11 @@ function codexChatThreadConfig(
  */
 const CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT = new Set(["user", "system", "admin"]);
 
+/** The first release that loads a Project's skills by itself (see below). */
+const CODEX_PROJECT_SKILLS_RELEASE = [0, 66, 0] as const;
+/** The first release that reads `skills.config` rules from a thread's `config`. */
+const CODEX_THREAD_SKILL_RULES_RELEASE = [0, 108, 0] as const;
+
 /**
  * Codex loads every `.agents/skills` package in the folders from the
  * repository root down to `cwd` by itself, as `scope: "repo"`, enabled, so a
@@ -212,22 +217,55 @@ const CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT = new Set(["user", "system", "admin
  *
  * The rules hold for the thread as started or resumed: a skill created in the
  * Project later is enabled from the next turn until the thread is resumed.
+ *
+ * Older releases, read at their source tags: `rust-v0.66.0` is the first to
+ * load a Project's skills by itself (`.codex/skills` at the repository root,
+ * behind a `skills` feature that is on by default from 0.79.0 and always on
+ * from 0.80.0; `.agents/skills` from 0.94.0). `skills/list` arrived in 0.73.0
+ * and `skills.config` path rules in 0.88.0, but until 0.108.0 those rules were
+ * read from the user's own config file only, never from a thread's `config`.
+ * A release from 0.66.0 up to 0.108.0 therefore refuses every thread. One
+ * older than 0.66.0 loads no Project skill and has no `skills/list`, so a
+ * method-not-found answer there leaves nothing to switch off.
  */
 function codexProjectSkillsConfig(
   client: CodexClientPort,
+  version: string,
   cwd: string,
-): Effect.Effect<NonNullable<CodexThreadConfig["skills"]>, ProviderFailure> {
-  return request(() => client.skillsList({ cwds: [cwd], forceReload: true })).pipe(
-    Effect.map((result) => ({
-      config: result.data.flatMap((entry) =>
-        [
-          ...entry.skills.filter(
-            (skill) => !CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT.has(skill.scope),
-          ),
-          ...entry.errors,
-        ].map((skill) => ({ path: skill.path, enabled: false as const })),
+): Effect.Effect<CodexThreadConfig["skills"], ProviderFailure> {
+  const projectSkillsOff = (result: CodexSkillsListResult) => ({
+    config: result.data.flatMap((entry) =>
+      [
+        ...entry.skills.filter((skill) => !CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT.has(skill.scope)),
+        ...entry.errors,
+      ].map((skill) => ({ path: skill.path, enabled: false as const })),
+    ),
+  });
+  if (isAtLeastRelease(version, CODEX_THREAD_SKILL_RULES_RELEASE)) {
+    return request(() => client.skillsList({ cwds: [cwd], forceReload: true })).pipe(
+      Effect.map(projectSkillsOff),
+    );
+  }
+  if (isAtLeastRelease(version, CODEX_PROJECT_SKILLS_RELEASE)) {
+    return Effect.fail(
+      failure(
+        "incompatible",
+        `Codex ${version} loads a Project's skills by itself and cannot switch them off for a thread. Update Codex to 0.108.0 or later.`,
       ),
-    })),
+    );
+  }
+  return Effect.tryPromise({
+    try: () => client.skillsList({ cwds: [cwd], forceReload: true }),
+    catch: (error) => error,
+  }).pipe(
+    Effect.map(projectSkillsOff),
+    Effect.catchAll((error) =>
+      error instanceof CodexRpcClientFailure &&
+      error.kind === "remote" &&
+      error.remoteCode === -32601
+        ? Effect.succeed(undefined)
+        : Effect.fail(providerFailure(error)),
+    ),
   );
 }
 
@@ -995,14 +1033,14 @@ function makeConnection(
     let pendingLifecycleRegistrations = 0;
     const modeThreadConfig = (): Effect.Effect<CodexThreadConfig, ProviderFailure> =>
       Effect.gen(function* () {
-        const skills = yield* codexProjectSkillsConfig(client, projectRoot);
+        const skills = yield* codexProjectSkillsConfig(client, version, projectRoot);
         const modeConfig =
           mode === "chat"
             ? yield* codexChatThreadConfig(client, projectRoot)
             : mode === "work"
               ? CODEX_WORK_CONFIG
               : {};
-        return { ...modeConfig, skills };
+        return skills === undefined ? modeConfig : { ...modeConfig, skills };
       });
 
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
