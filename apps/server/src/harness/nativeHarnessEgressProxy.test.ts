@@ -2,7 +2,11 @@ import { mkdtempSync, realpathSync, rmSync, statSync, existsSync } from "node:fs
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { connect as tlsConnect, createServer as createTlsServer } from "node:tls";
+import {
+  checkServerIdentity,
+  connect as tlsConnect,
+  createServer as createTlsServer,
+} from "node:tls";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   PRIVATE_LISTENER_TEST_CERT,
@@ -95,8 +99,11 @@ describe("native harness tool egress proxy", () => {
         const secure = tlsConnect({
           socket: tunnel.socket,
           servername: "Registry.Example.com",
-          // The fixture certificate names another host; this test is about the tunnel.
-          rejectUnauthorized: false,
+          ca: PRIVATE_LISTENER_TEST_CERT,
+          // The chain is verified against the fixture; its certificate names
+          // the address it was issued for, so the identity is checked there.
+          checkServerIdentity: (_host, certificate) =>
+            checkServerIdentity("192.168.1.20", certificate),
         });
         secure.on("data", (chunk: Buffer) => {
           text += chunk.toString();
