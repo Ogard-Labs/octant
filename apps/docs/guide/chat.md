@@ -86,6 +86,9 @@ Side Chat can only read. It cannot send the source thread messages, approve, ste
 Edit, branch, checkpoint, and copy live in each turn's **More actions** menu
 (the ⋯ control that appears when the turn is hovered or focused). The same
 items are on the turn's context menu, so right-click is never the only route.
+A branch or a restored thread made from a thread marked as having read
+outside content starts marked too, because it carries the same conversation.
+A thread whose mark you cleared makes an unmarked branch.
 Retrying a failed or interrupted response stays on the turn itself; a
 completed response carries a **Regenerate** control next to its timestamp and
 copy control — asking for a different answer to the same message. The previous

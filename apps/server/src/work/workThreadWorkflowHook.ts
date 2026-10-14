@@ -1,6 +1,7 @@
 import type { WorkThreadCommandResult, WorkThreadId, ProjectId, WindowId } from "@octant/contracts";
 import type { WorkThreadRouteService } from "../workThreadRoutes";
 import type { WorkflowThreadLifecycle } from "./workflowService";
+import type { WorkThreadExecutionContext } from "./workThreadService";
 
 export interface WorkThreadWorkflowPort {
   recordThreadLifecycle(input: {
@@ -38,8 +39,16 @@ export function withWorkflowLifecycle(
       dependencies.threads.bootstrap(authenticatedWindowId),
     navigation: (authenticatedWindowId: WindowId) =>
       dependencies.threads.navigation(authenticatedWindowId),
-    async execute(authenticatedWindowId: WindowId, input: unknown) {
-      const result = await dependencies.threads.execute(authenticatedWindowId, input);
+    async execute(
+      authenticatedWindowId: WindowId,
+      input: unknown,
+      executionContext?: WorkThreadExecutionContext,
+    ) {
+      const result = await dependencies.threads.execute(
+        authenticatedWindowId,
+        input,
+        executionContext,
+      );
       recordIfLifecycleFact(dependencies.workflows, input, result);
       return result;
     },

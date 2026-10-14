@@ -6687,6 +6687,7 @@ export function startOctantServer(
     let purgeQueuedChatMessages: ((threadId: ChatThreadId) => Promise<void>) | undefined;
     const chatService = new ChatService({
       liveTurns,
+      recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       attachmentStore: chatAttachmentStore,
       beforeAttachmentPurge: async (threadId) => {
         if (purgeQueuedChatMessages === undefined)
@@ -7158,6 +7159,7 @@ export function startOctantServer(
     };
     const workThreadService = new WorkThreadService({
       persistence,
+      recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       projects: projectService,
       projection: workThreadProjection,
       turnProjection: workTurnProjection,
@@ -7744,6 +7746,8 @@ export function startOctantServer(
       code: codeService,
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       readProject: (projectId) => persistence.readProject(projectId),
+      isMarkedWithOutsideContent: (threadId) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
       hostId: LOCAL_HOST_ID,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),

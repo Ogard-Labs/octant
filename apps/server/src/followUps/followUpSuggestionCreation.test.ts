@@ -47,6 +47,7 @@ function dependencies(
     code: undefined,
     readCodeThread: () => undefined,
     readProject: () => undefined,
+    isMarkedWithOutsideContent: () => false,
     hostId: "local" as never,
     uuid: () => "00000000-0000-4000-8000-000000000099",
     clock: () => now,
@@ -269,5 +270,101 @@ describe("follow-up creation", () => {
     expect(created.deliveryTarget.branchIntent).not.toBe("feature/parent");
     expect(created.deliveryTarget.branchIntent).toMatch(/^octant\//);
     expect(created.deliveryTarget.proposedOutcome).toBeUndefined();
+  });
+
+  it("asks every mode to start a follow-up of a marked thread marked, naming that thread", async () => {
+    const contexts: Array<{ readonly mode: string; readonly context: unknown }> = [];
+    const parent = {
+      id: parentThreadId,
+      projectId,
+      deliveryTarget: {
+        branchIntent: "feature/parent",
+        remoteName: "origin",
+        proposedBaseRepository: "octant/octant",
+        proposedBaseBranch: "main",
+        outcomeKind: "local-implementation",
+        confirmedAt: now,
+      },
+    };
+    const deps = (marked: boolean) =>
+      dependencies({
+        isMarkedWithOutsideContent: (threadId) => marked && threadId === parentThreadId,
+        readProject: () =>
+          ({ bindingHistory: [{ revisionId: "00000000-0000-4000-8000-0000000000c1" }] }) as never,
+        readCodeThread: () => parent as never,
+        chat: {
+          execute: async (command: unknown, context?: unknown) => {
+            const { kind, threadId } = command as { kind: string; threadId: string };
+            if (kind === "create-chat-thread") contexts.push({ mode: "chat", context });
+            return { kind: "thread-created", thread: { id: threadId, version: 1 } } as never;
+          },
+        },
+        work: {
+          execute: async (_windowId, command, context) => {
+            contexts.push({ mode: "work", context });
+            return {
+              kind: "thread-created",
+              thread: { id: (command as { threadId: string }).threadId },
+            } as never;
+          },
+        },
+        code: {
+          execute: (_windowId, command, _signal, context) => {
+            if (command.kind === "prepare-code-project-checkout") {
+              return {
+                kind: "checkout-prepared",
+                bindingRevisionId: "00000000-0000-4000-8000-0000000000c1",
+                checkout: {
+                  id: "00000000-0000-4000-8000-0000000000d1",
+                  repositoryId: `repo_${"e".repeat(64)}`,
+                  kind: "existing-worktree",
+                  availability: "available",
+                  head: { kind: "branch", name: "feature/parent", oid: "b".repeat(40) },
+                  observedAt: now,
+                },
+              } as never;
+            }
+            contexts.push({ mode: command.kind, context });
+            return (
+              command.kind === "create-managed-code-thread"
+                ? { kind: "managed-thread-created", thread: { id: "created" } }
+                : { kind: "thread-created", thread: { id: "created" } }
+            ) as never;
+          },
+        },
+      });
+    const creations = [
+      ["chat", { kind: "new-thread", mode: "chat", projectId, title: "Next" }],
+      ["work", { kind: "new-thread", mode: "work", projectId, title: "Next" }],
+      ["code", { kind: "new-thread", mode: "code", projectId, title: "Next" }],
+      ["code", { kind: "new-worktree", mode: "code", projectId, title: "Next" }],
+    ] as const;
+    for (const [mode, creation] of creations) {
+      await expect(
+        createFollowUp(deps(true), { windowId, view: view(mode), creation: creation as never }),
+      ).resolves.toMatchObject({ kind: "created" });
+    }
+    const mark = {
+      inheritedMark: {
+        sourceLabel: "follow-up",
+        contentReference: `follow-up-${parentThreadId}-00000000-0000-4000-8000-000000000099`,
+      },
+    };
+    expect(contexts).toEqual([
+      { mode: "chat", context: mark },
+      { mode: "work", context: mark },
+      { mode: "create-code-thread", context: mark },
+      { mode: "create-managed-code-thread", context: mark },
+    ]);
+
+    contexts.length = 0;
+    for (const [mode, creation] of creations) {
+      await createFollowUp(deps(false), {
+        windowId,
+        view: view(mode),
+        creation: creation as never,
+      });
+    }
+    expect(contexts.map((entry) => entry.context)).toEqual([{}, {}, {}, {}]);
   });
 });

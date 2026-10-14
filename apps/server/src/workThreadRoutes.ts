@@ -18,6 +18,7 @@ import { Schema } from "effect";
 import { authenticateRouteWindowId } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
+import type { WorkThreadExecutionContext } from "./work/workThreadService";
 
 const JSON_BODY_LIMIT = 1_048_576;
 const METHODS = "GET, POST, OPTIONS";
@@ -34,6 +35,7 @@ export interface WorkThreadRouteService {
   readonly execute: (
     authenticatedWindowId: WindowId,
     command: unknown,
+    executionContext?: WorkThreadExecutionContext,
   ) => Promise<WorkThreadCommandResult> | WorkThreadCommandResult;
   readonly queryBoard?: (
     authenticatedWindowId: WindowId,
