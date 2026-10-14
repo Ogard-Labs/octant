@@ -91,6 +91,69 @@ describe("chat client", () => {
     });
   });
 
+  it("reads a thread window with its page size and anchor in the query", async () => {
+    const turnId = "00000000-0000-4000-8000-000000000805";
+    const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
+      Response.json({
+        version: 1,
+        view: {
+          thread: {
+            id: threadId,
+            title: "Windowed",
+            lifecycle: "active",
+            providerInstanceId: "10000000-0000-4000-8000-000000000001",
+            modelId: "model-a",
+            researchEnabled: false,
+            researchRouting: "automatic",
+            personalityInstructions: "Be calm.",
+            version: 2,
+            createdAt: now,
+            updatedAt: now,
+          },
+          turns: [],
+          lastSequence: 4,
+          contents: [],
+          attachments: [],
+          citations: [],
+          workItems: [],
+          workListVersion: 0,
+          followUpVersion: 0,
+        },
+        hasEarlier: true,
+        hasLater: false,
+        supersededTurnCount: 1,
+      }),
+    );
+    const client = createChatClient({ baseUrl, fetch, windowCapability: capability });
+
+    const window = await client.threadWindow(threadId as never, {
+      limit: 30,
+      through: turnId as never,
+    });
+
+    expect(window).toMatchObject({ hasEarlier: true, supersededTurnCount: 1 });
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/chat/threads/${threadId}/window?limit=30&through=${turnId}`,
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({ "x-octant-window-capability": capability }),
+      }),
+    );
+  });
+
+  it("reports a host without the window route as a 404 and asks nothing it would refuse", async () => {
+    const fetch = vi.fn(async () => new Response("Not Found", { status: 404 }));
+    const client = createChatClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.threadWindow(threadId as never, { limit: 30 })).rejects.toMatchObject({
+      status: 404,
+    });
+    await expect(client.threadWindow(threadId as never, { limit: 51 })).rejects.toMatchObject({
+      category: "invalid",
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("strictly decodes bootstrap success and failure payloads", async () => {
     const fetch = vi
       .fn()

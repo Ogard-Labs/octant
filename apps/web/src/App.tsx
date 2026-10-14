@@ -1069,6 +1069,11 @@ function LaunchedShell(
   const [revealChatTurn, setRevealChatTurn] = useState<
     { readonly threadId: ChatThreadId; readonly turnId: ChatTurnId } | undefined
   >(undefined);
+  // A search hit is a one-time jump: once the transcript has shown it, the
+  // target is dropped, so a list that mounts again (a jumped-to run joining
+  // the newest messages, or Jump to latest followed by Load earlier) does not
+  // jump the reader back to it.
+  const spendRevealChatTurn = useCallback(() => setRevealChatTurn(undefined), []);
   const openThreadSearch = useCallback(() => {
     setSearchQuery("");
     setRevealChatTurn(undefined);
@@ -1300,6 +1305,18 @@ function LaunchedShell(
     controller.workspace === undefined || activePaneId === undefined || activeMode !== "chat"
       ? undefined
       : activeChatThreadTabId(controller.workspace.layouts.chat, activePaneId);
+  // A search hit is a one-time jump. Once the reader leaves the hit's thread,
+  // coming back opens it on its newest messages instead of jumping to the hit
+  // again after they had already gone back to the newest ones.
+  const previousActiveChatThreadId = useRef(activeChatThreadId);
+  useEffect(() => {
+    const previous = previousActiveChatThreadId.current;
+    previousActiveChatThreadId.current = activeChatThreadId;
+    if (previous === undefined || String(previous) === String(activeChatThreadId ?? "")) return;
+    setRevealChatTurn((current) =>
+      current !== undefined && String(current.threadId) === String(previous) ? undefined : current,
+    );
+  }, [activeChatThreadId]);
   const activeCodeThreadId =
     controller.workspace === undefined || activePaneId === undefined || activeMode !== "code"
       ? undefined
@@ -7565,6 +7582,7 @@ function LaunchedShell(
                         chatController={chatController}
                         chatReadCursorStore={chatReadCursorStore}
                         {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
+                        onChatTurnRevealed={spendRevealChatTurn}
                         onPinTerminal={(request) => void zen.pinTerminal(request)}
                         onPinCanvasInFocusZone={(request) => void zen.pinCanvas(request)}
                         onStartPlanTask={(request) => {

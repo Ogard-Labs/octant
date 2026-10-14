@@ -2984,6 +2984,65 @@ describe("ChatWorkspace", () => {
     vi.unstubAllGlobals();
   });
 
+  it("exports the whole conversation when only the newest messages are loaded", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { ...globalThis.navigator, clipboard: { writeText } });
+    const loaded = controllerFixture().activeView!;
+    const whole = decodeChatThreadView({ ...loaded, thread: { ...loaded.thread, title: "Whole" } });
+    const readWholeThread = vi.fn(async () => whole);
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({
+          readWholeThread,
+          transcriptWindow: {
+            threadKey: threadId,
+            windowed: true,
+            hasEarlier: true,
+            offerEarlier: true,
+            supersededTurnCount: 0,
+            earlier: "idle",
+            shownRun: 0,
+          },
+        })}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Thread actions" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Copy conversation" }));
+
+    expect(await screen.findByText(/Conversation copied as Markdown\./)).toBeVisible();
+    expect(readWholeThread).toHaveBeenCalledWith(loaded.thread.id);
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("# Whole"));
+    vi.unstubAllGlobals();
+  });
+
+  it("asks for the page that holds a search hit the view has not loaded", async () => {
+    const revealTurn = vi.fn(async () => undefined);
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({
+          revealTurn,
+          transcriptWindow: {
+            threadKey: threadId,
+            windowed: true,
+            hasEarlier: true,
+            offerEarlier: true,
+            supersededTurnCount: 0,
+            earlier: "idle",
+            shownRun: 0,
+          },
+        })}
+        providerSnapshot={providerSnapshot()}
+        revealTurnId={turnId as never}
+      />,
+    );
+
+    await waitFor(() => expect(revealTurn).toHaveBeenCalledWith(turnId));
+    expect(revealTurn).toHaveBeenCalledOnce();
+  });
+
   it("says the copy failed when the window has no Clipboard API", async () => {
     const user = userEvent.setup();
     vi.stubGlobal("navigator", { ...globalThis.navigator, clipboard: undefined });

@@ -5,6 +5,8 @@ import {
   decodeChatEventFrame,
   decodeChatFailure,
   decodeChatThreadId,
+  decodeChatThreadWindow,
+  decodeChatThreadWindowRequest,
   MAX_CHAT_NDJSON_LINE_BYTES,
   GlobalSequence,
   type ChatAttachment,
@@ -15,6 +17,7 @@ import {
   type ChatThread,
   type ChatThreadId,
   type ChatThreadView,
+  type ChatThreadWindowRequest,
   type WindowId,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -89,9 +92,11 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
     const isAttachments = url.pathname === "/api/chat/attachments";
     const threadMatch = /^\/api\/chat\/threads\/([^/]+)$/.exec(url.pathname);
     const eventsMatch = /^\/api\/chat\/threads\/([^/]+)\/events$/.exec(url.pathname);
+    const windowMatch = /^\/api\/chat\/threads\/([^/]+)\/window$/.exec(url.pathname);
     const attachmentMatch = /^\/api\/chat\/attachments\/([^/]+)$/.exec(url.pathname);
     const isThread = threadMatch !== null;
     const isEvents = eventsMatch !== null;
+    const isWindow = windowMatch !== null;
     const isAttachmentRead = attachmentMatch !== null;
     if (
       !isBootstrap &&
@@ -102,6 +107,7 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
       !isAttachments &&
       !isThread &&
       !isEvents &&
+      !isWindow &&
       !isAttachmentRead
     ) {
       return undefined;
@@ -239,6 +245,39 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
           );
         }
         return jsonResponse(dependencies.service.read(threadId), 200, origin);
+      }
+      if (isWindow) {
+        if (request.method !== "GET") {
+          return failureResponse(
+            { category: "unsupported", message: "HTTP method is not supported for this route." },
+            400,
+            origin,
+          );
+        }
+        let threadId: ChatThreadId;
+        try {
+          threadId = decodeChatThreadId(decodeURIComponent(windowMatch[1] ?? ""));
+        } catch {
+          return failureResponse(
+            { category: "invalid", message: "Chat thread ID is invalid." },
+            400,
+            origin,
+          );
+        }
+        const windowRequest = readThreadWindowRequest(url);
+        if (windowRequest === undefined) {
+          return failureResponse(
+            { category: "invalid", message: "Chat window query is invalid." },
+            400,
+            origin,
+          );
+        }
+        return jsonResponse(
+          decodeChatThreadWindow(dependencies.service.readWindow(threadId, windowRequest)),
+          200,
+          origin,
+          { "cache-control": "no-store" },
+        );
       }
       if (isEvents) {
         if (request.method !== "GET") {
@@ -555,8 +594,45 @@ function failureResponse(
   return jsonResponse(decodeChatFailure(failure), status, origin);
 }
 
-function jsonResponse(body: unknown, status: number, origin: string | null): Response {
-  return Response.json(body, { status, headers: corsHeaders(origin) });
+function jsonResponse(
+  body: unknown,
+  status: number,
+  origin: string | null,
+  extraHeaders: Record<string, string> = {},
+): Response {
+  const headers = corsHeaders(origin);
+  for (const [name, value] of Object.entries(extraHeaders)) headers.set(name, value);
+  return Response.json(body, { status, headers });
+}
+
+/**
+ * `limit` once, and at most one of `before`, `after`, or `through`, once;
+ * nothing else. A malformed query is refused rather than read as the newest
+ * page, because a client that asked for an earlier page must never be handed
+ * the newest one in its place.
+ */
+function readThreadWindowRequest(url: URL): ChatThreadWindowRequest | undefined {
+  const anchors = ["before", "after", "through"] as const;
+  const keys = [...url.searchParams.keys()];
+  const limit = url.searchParams.getAll("limit");
+  if (
+    keys.some((key) => key !== "limit" && !anchors.some((anchor) => anchor === key)) ||
+    limit.length !== 1 ||
+    !/^[0-9]{1,3}$/.test(limit[0] ?? "") ||
+    anchors.some((anchor) => url.searchParams.getAll(anchor).length > 1)
+  ) {
+    return undefined;
+  }
+  const named: Partial<Record<(typeof anchors)[number], string>> = {};
+  for (const anchor of anchors) {
+    const value = url.searchParams.get(anchor);
+    if (value !== null) named[anchor] = value;
+  }
+  try {
+    return decodeChatThreadWindowRequest({ limit: Number(limit[0]), ...named });
+  } catch {
+    return undefined;
+  }
 }
 
 function ndjsonStreamResponse(

@@ -2106,6 +2106,10 @@ function createMockClient(
   overrides: Partial<ChatClient> & Pick<ChatClient, "bootstrap" | "thread" | "subscribe">,
 ): ChatClient {
   return {
+    // A host from before thread windows unless a test gives it the window read.
+    threadWindow: vi.fn(async () => {
+      throw new ChatClientFailure({ category: "unsupported", message: "Not found." }, 404);
+    }),
     search: vi.fn(async () => []),
     searchTranscript: vi.fn(async () => ({ query: "", hits: [], truncated: false })),
     navigation: vi.fn(async () => ({ threads: [] })),
@@ -2244,5 +2248,343 @@ describe("useChatController streaming", () => {
     expect(result.current.activeView?.turns[0]?.attempts[0]?.responseRefs).toHaveLength(2);
     expect(thread).toHaveBeenCalledTimes(1);
     unmount();
+  });
+});
+
+describe("useChatController thread windows", () => {
+  const turnIdAt = (index: number) =>
+    `00000000-0000-4000-8000-${String(100_000 + index).padStart(12, "0")}`;
+  const contentIdAt = (index: number) =>
+    `00000000-0000-4000-9000-${String(100_000 + index).padStart(12, "0")}`;
+
+  function exchange(index: number, supersedes?: number) {
+    const body = `Message ${String(index)}`;
+    return {
+      turn: {
+        id: turnIdAt(index),
+        threadId,
+        sequence: index + 1,
+        userMessageRef: { contentId: contentIdAt(index), digest: "a".repeat(64), byteLength: 9 },
+        attachmentIds: [],
+        attempts: [],
+        ...(supersedes === undefined ? {} : { supersedes: turnIdAt(supersedes) }),
+        createdAt: now,
+      },
+      content: {
+        contentId: contentIdAt(index),
+        role: "user" as const,
+        body,
+        digest: "a".repeat(64),
+        byteLength: body.length,
+      },
+    };
+  }
+
+  /**
+   * A host that pages the active turns the way the window route does: the
+   * newest `limit`, or the page before, after, or ending with a named turn.
+   */
+  function windowHost(count: number) {
+    let active = Array.from({ length: count }, (_, index) => exchange(index));
+    let superseded = 0;
+    const view = (slice: typeof active) =>
+      decodeChatThreadView({
+        ...threadView(10),
+        turns: slice.map((entry) => entry.turn),
+        contents: slice.map((entry) => entry.content),
+      });
+    const threadWindow = vi.fn(
+      async (
+        _threadId: ChatThreadId,
+        request: Parameters<ChatClient["threadWindow"]>[1],
+      ): Promise<Awaited<ReturnType<ChatClient["threadWindow"]>>> => {
+        const ids = active.map((entry) => entry.turn.id);
+        const anchorId = request.before ?? request.after ?? request.through;
+        const at = anchorId === undefined ? -1 : ids.indexOf(String(anchorId));
+        if (anchorId !== undefined && at === -1) {
+          throw new ChatClientFailure({ category: "stale", message: "Gone." });
+        }
+        let start: number;
+        let end: number;
+        if (request.after !== undefined) {
+          start = at + 1;
+          end = Math.min(active.length, start + request.limit);
+        } else {
+          end =
+            request.before !== undefined
+              ? at
+              : request.through !== undefined
+                ? at + 1
+                : active.length;
+          start = Math.max(0, end - request.limit);
+        }
+        return {
+          version: 1,
+          view: view(active.slice(start, end)),
+          hasEarlier: start > 0,
+          hasLater: end < active.length,
+          supersededTurnCount: superseded,
+        };
+      },
+    );
+    return {
+      threadWindow,
+      thread: vi.fn(async () => view(active)),
+      /** An edit of the turn at `index`: it and everything after it leave the conversation. */
+      edit(index: number) {
+        superseded += active.length - index;
+        active = [...active.slice(0, index), exchange(count + superseded, index)];
+      },
+    };
+  }
+
+  function renderWindowed(host: ReturnType<typeof windowHost>, client?: Partial<ChatClient>) {
+    const mock = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: host.thread,
+      threadWindow: host.threadWindow,
+      subscribe: vi.fn(async function* () {}),
+      ...client,
+    });
+    return {
+      client: mock,
+      ...renderHook(() =>
+        useChatController({
+          client: mock,
+          serverUrl: "http://127.0.0.1",
+          windowCapability: capability,
+          activeThreadId: threadId,
+          navigationRefreshMs: 0,
+        }),
+      ),
+    };
+  }
+
+  const indexes = (view: ChatThreadView | undefined) =>
+    (view?.turns ?? []).map((turn) => Number(String(turn.id).slice(-6)) - 100_000);
+
+  it("opens a long Chat thread on its newest turns without the whole-thread read", async () => {
+    const host = windowHost(100);
+    const { result } = renderWindowed(host);
+
+    await waitFor(() => expect(indexes(result.current.activeView)).toHaveLength(30));
+    expect(indexes(result.current.activeView)[0]).toBe(70);
+    expect(result.current.transcriptWindow).toMatchObject({
+      windowed: true,
+      hasEarlier: true,
+      offerEarlier: true,
+    });
+    expect(host.threadWindow).toHaveBeenCalledWith(threadId, { limit: 30 });
+    expect(host.thread).not.toHaveBeenCalled();
+  });
+
+  it("adds the previous page above the loaded turns until none are left", async () => {
+    const host = windowHost(45);
+    const { result } = renderWindowed(host);
+    await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(15));
+
+    await act(async () => result.current.loadEarlier());
+
+    expect(indexes(result.current.activeView)).toEqual(Array.from({ length: 45 }, (_, i) => i));
+    expect(result.current.transcriptWindow).toMatchObject({
+      hasEarlier: false,
+      offerEarlier: true,
+      earlier: "idle",
+    });
+  });
+
+  it("drops the turns an edit superseded when the newest window is read again", async () => {
+    const host = windowHost(45);
+    const execute = vi.fn(async () => {
+      host.edit(40);
+      return decodeChatCommandResult({ kind: "thread-updated", thread: bootstrap().threads[0]! });
+    });
+    const { result } = renderWindowed(host, { execute });
+    await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(15));
+    await act(async () => result.current.loadEarlier());
+
+    await act(async () => {
+      await result.current.execute({
+        kind: "edit-chat-turn",
+        threadId,
+        expectedVersion: result.current.activeView!.thread.version,
+        turnId: turnIdAt(40) as never,
+        prompt: "Revised",
+      });
+    });
+
+    await waitFor(() => expect(result.current.transcriptWindow?.supersededTurnCount).toBe(5));
+    // The earlier pages stay, the revised turns go, and the new turn ends the run.
+    expect(indexes(result.current.activeView)).toEqual([
+      ...Array.from({ length: 40 }, (_, i) => i),
+      50,
+    ]);
+  });
+
+  it("starts again from the newest page when the page it walked back from is gone", async () => {
+    const host = windowHost(45);
+    const { result } = renderWindowed(host);
+    await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(15));
+    host.edit(10);
+
+    await act(async () => result.current.loadEarlier());
+
+    // The view keeps a transcript: the newest page, with nothing marked failed.
+    expect(indexes(result.current.activeView)).toEqual([
+      ...Array.from({ length: 10 }, (_, i) => i).slice(-29),
+      80,
+    ]);
+    expect(result.current.transcriptWindow).toMatchObject({ earlier: "idle", hasEarlier: false });
+    expect(result.current.errorMessage).toBeUndefined();
+  });
+
+  it("opens a search hit on an unloaded turn by reading the page that holds it", async () => {
+    const host = windowHost(100);
+    const { result } = renderWindowed(host);
+    await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(70));
+
+    await act(async () => result.current.revealTurn(turnIdAt(5) as never));
+
+    expect(host.threadWindow).toHaveBeenCalledWith(threadId, {
+      limit: 30,
+      through: turnIdAt(5),
+    });
+    const detached = result.current.transcriptWindow?.detached;
+    expect(indexes(detached?.view)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(detached).toMatchObject({ hasEarlier: false, hasLater: true });
+    // The newest turns stay what the rest of the thread reads.
+    expect(indexes(result.current.activeView)[0]).toBe(70);
+
+    const jumpedRun = result.current.transcriptWindow?.shownRun ?? 0;
+    act(() => result.current.jumpToLatest());
+    expect(result.current.transcriptWindow?.detached).toBeUndefined();
+    // A different run is on screen, so the list starts over at the end.
+    expect(result.current.transcriptWindow?.shownRun).toBe(jumpedRun + 1);
+  });
+
+  it("keeps the later of two jumps when the earlier one's page answers last", async () => {
+    const host = windowHost(100);
+    const held = deferred<void>();
+    const threadWindow = vi.fn(
+      async (id: ChatThreadId, request: Parameters<ChatClient["threadWindow"]>[1]) => {
+        if (request.through === turnIdAt(5)) await held.promise;
+        return host.threadWindow(id, request);
+      },
+    );
+    const { result } = renderWindowed(host, { threadWindow });
+    await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(70));
+
+    let first: Promise<void> | undefined;
+    act(() => {
+      first = result.current.revealTurn(turnIdAt(5) as never);
+    });
+    await act(async () => result.current.revealTurn(turnIdAt(40) as never));
+    held.resolve();
+    await act(async () => first);
+
+    expect(indexes(result.current.transcriptWindow?.detached?.view).at(-1)).toBe(40);
+  });
+
+  it("drops a page read for an earlier jump once a later jump lands inside the run already shown", async () => {
+    const host = windowHost(100);
+    const held = deferred<void>();
+    const threadWindow = vi.fn(
+      async (id: ChatThreadId, request: Parameters<ChatClient["threadWindow"]>[1]) => {
+        if (request.through === turnIdAt(5)) await held.promise;
+        return host.threadWindow(id, request);
+      },
+    );
+    const { result } = renderWindowed(host, { threadWindow });
+    await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(70));
+    await act(async () => result.current.revealTurn(turnIdAt(40) as never));
+
+    let earlier: Promise<void> | undefined;
+    act(() => {
+      earlier = result.current.revealTurn(turnIdAt(5) as never);
+    });
+    // Already in the run on screen, so no read; it is still the newest jump.
+    await act(async () => result.current.revealTurn(turnIdAt(35) as never));
+    held.resolve();
+    await act(async () => earlier);
+
+    expect(indexes(result.current.transcriptWindow?.detached?.view).at(-1)).toBe(40);
+  });
+
+  it("lets a jumped-to run go when an edit inside it lands, even after an earlier page was read", async () => {
+    const host = windowHost(100);
+    const execute = vi.fn(async () =>
+      decodeChatCommandResult({ kind: "thread-updated", thread: bootstrap().threads[0]! }),
+    );
+    const { result } = renderWindowed(host, { execute });
+    await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(70));
+    await act(async () => result.current.revealTurn(turnIdAt(40) as never));
+    expect(indexes(result.current.transcriptWindow?.detached?.view)).toHaveLength(30);
+
+    // Turn 30 is revised: 30 to 99 leave the conversation.
+    host.edit(30);
+    // A page before the run still answers (turn 11 is active) and carries the new count.
+    await act(async () => result.current.loadEarlier());
+    await act(async () => {
+      await result.current.execute({
+        kind: "rename-chat-thread",
+        threadId,
+        expectedVersion: result.current.activeView!.thread.version,
+        title: "Renamed",
+      });
+    });
+
+    await waitFor(() => expect(result.current.transcriptWindow?.detached).toBeUndefined());
+    expect(indexes(result.current.activeView)).not.toContain(35);
+    expect(indexes(result.current.activeView).at(-1)).toBe(170);
+  });
+
+  it("joins the jumped-to run onto the newest turns once loading later pages reaches them", async () => {
+    const host = windowHost(70);
+    const { result } = renderWindowed(host);
+    await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(40));
+    await act(async () => result.current.revealTurn(turnIdAt(9) as never));
+    expect(indexes(result.current.transcriptWindow?.detached?.view)).toHaveLength(10);
+    const jumpedRun = result.current.transcriptWindow?.shownRun;
+
+    await act(async () => result.current.loadLater());
+    expect(indexes(result.current.transcriptWindow?.detached?.view)).toHaveLength(40);
+
+    await act(async () => result.current.loadLater());
+
+    expect(result.current.transcriptWindow?.detached).toBeUndefined();
+    expect(indexes(result.current.activeView)).toEqual(Array.from({ length: 70 }, (_, i) => i));
+    expect(result.current.transcriptWindow?.hasEarlier).toBe(false);
+    // Still the run the reader jumped to, so the list keeps their place.
+    expect(result.current.transcriptWindow?.shownRun).toBe(jumpedRun);
+  });
+
+  it("brings the reader back to the newest turns before sending", async () => {
+    const host = windowHost(100);
+    const { result } = renderWindowed(host);
+    await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(70));
+    await act(async () => result.current.revealTurn(turnIdAt(5) as never));
+    expect(result.current.transcriptWindow?.detached).toBeDefined();
+
+    await act(async () => {
+      await result.current.sendTurn("Next question");
+    });
+
+    expect(result.current.transcriptWindow?.detached).toBeUndefined();
+  });
+
+  it("falls back to the whole-thread read when the host has no window route", async () => {
+    const host = windowHost(40);
+    const threadWindow = vi.fn(async () => {
+      throw new ChatClientFailure({ category: "unsupported", message: "Not found." }, 404);
+    });
+    const { result } = renderWindowed(host, { threadWindow });
+
+    await waitFor(() => expect(indexes(result.current.activeView)).toHaveLength(40));
+    expect(result.current.transcriptWindow).toMatchObject({
+      windowed: false,
+      hasEarlier: false,
+      offerEarlier: false,
+    });
+    expect(threadWindow).toHaveBeenCalledOnce();
   });
 });

@@ -177,6 +177,8 @@ export interface WorkspaceViewProps {
     readonly threadId: import("@octant/contracts/chat").ChatThreadId;
     readonly turnId: import("@octant/contracts/chat").ChatTurnId;
   };
+  /** Called once the Chat pane has shown `revealChatTurn`; the jump is spent. */
+  readonly onChatTurnRevealed?: () => void;
   readonly codeController: CodeController;
   /**
    * One controller per open Code thread. Every Code surface reads the one for
@@ -1595,6 +1597,15 @@ function renderNonCodeTab(
         projects={props.projects}
         tab={tab}
         providerController={props.providerController}
+        {...(props.revealChatTurn !== undefined &&
+        String(props.revealChatTurn.threadId) === String(tab.threadId)
+          ? {
+              revealTurnId: props.revealChatTurn.turnId,
+              ...(props.onChatTurnRevealed === undefined
+                ? {}
+                : { onTurnRevealed: props.onChatTurnRevealed }),
+            }
+          : {})}
         {...(props.projectServerUrl === undefined
           ? {}
           : { projectServerUrl: props.projectServerUrl })}
@@ -1710,10 +1721,6 @@ function renderNonCodeTab(
                   : { requestClient: props.workRequestClient })}
                 threadClient={workThreadClient}
                 threadId={tab.threadId}
-                {...(props.revealChatTurn !== undefined &&
-                String(props.revealChatTurn.threadId) === String(tab.threadId)
-                  ? { revealTurnId: props.revealChatTurn.turnId }
-                  : {})}
                 title={tab.title}
                 providerGroups={props.workProviderGroups ?? []}
                 {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
@@ -2359,6 +2366,7 @@ function ChatThreadWorkspace(props: {
   readonly onOpenAgents?: (runId?: string) => void;
   readonly environmentOpen?: boolean;
   readonly revealTurnId?: import("@octant/contracts/chat").ChatTurnId;
+  readonly onTurnRevealed?: () => void;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly spendCeilingClient?: import("@octant/client-runtime").SpendCeilingClient;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
@@ -2411,6 +2419,7 @@ function ChatThreadWorkspace(props: {
         controller={controller}
         providerGroups={providerGroups}
         {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
+        {...(props.onTurnRevealed === undefined ? {} : { onTurnRevealed: props.onTurnRevealed })}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
         onClearCanvasSelections={props.onClearCanvasSelections}
         onRemoveCanvasSelection={props.onRemoveCanvasSelection}

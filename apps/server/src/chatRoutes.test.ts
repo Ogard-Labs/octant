@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MachineChangeFeed } from "./machineChangeFeed";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { createChatRouteHandler } from "./chatRoutes";
+import { ChatServiceError } from "./chat/chatService";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000801");
@@ -436,6 +437,106 @@ describe("Chat routes", () => {
     const response = await route(request(`/api/chat/threads/${threadId}/events?afterSequence=41`));
     expect(response?.status).toBe(200);
     await expect(response?.text()).rejects.toThrow("Chat replay frame is too large.");
+  });
+
+  const turnId = "00000000-0000-4000-8000-000000000805";
+  const windowView = {
+    thread: threadFixture,
+    turns: [],
+    lastSequence: 4,
+    contents: [],
+    attachments: [],
+    citations: [],
+    workItems: [],
+    workListVersion: 0,
+    followUpVersion: 0,
+  };
+
+  it("answers a thread window with the page the service read and no-store", async () => {
+    const readWindow = vi.fn(() => ({
+      version: 1,
+      view: windowView,
+      hasEarlier: true,
+      hasLater: true,
+      supersededTurnCount: 2,
+    }));
+    const route = routeFixture({ readWindow });
+    const response = await route(
+      request(`/api/chat/threads/${threadId}/window?limit=30&through=${turnId}`),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("cache-control")).toBe("no-store");
+    await expect(response?.json()).resolves.toMatchObject({
+      version: 1,
+      hasEarlier: true,
+      hasLater: true,
+      supersededTurnCount: 2,
+    });
+    expect(readWindow).toHaveBeenCalledWith(threadId, { limit: 30, through: turnId });
+  });
+
+  it("refuses a malformed window query before reading anything", async () => {
+    const readWindow = vi.fn();
+    const route = routeFixture({ readWindow });
+    for (const query of [
+      "",
+      "?limit=0",
+      "?limit=51",
+      "?limit=30&limit=30",
+      "?limit=-1",
+      "?limit=30&cursor=next",
+      `?limit=30&before=${turnId}&before=${turnId}`,
+      `?limit=30&before=${turnId}&after=${turnId}`,
+      "?limit=30&before=not-a-turn",
+    ]) {
+      const response = await route(request(`/api/chat/threads/${threadId}/window${query}`));
+      expect(response?.status, query).toBe(400);
+    }
+    const posted = await route(
+      request(`/api/chat/threads/${threadId}/window?limit=30`, { method: "POST" }),
+    );
+    expect(posted?.status).toBe(400);
+    expect(readWindow).not.toHaveBeenCalled();
+  });
+
+  it("refuses a window read without a window capability", async () => {
+    const readWindow = vi.fn();
+    const route = routeFixture({ readWindow });
+    const response = await route(
+      new Request(`http://127.0.0.1/api/chat/threads/${threadId}/window?limit=30`),
+    );
+
+    expect(response?.status).toBe(401);
+    expect(readWindow).not.toHaveBeenCalled();
+  });
+
+  it("answers 409 stale for a window anchored on a turn the conversation no longer holds", async () => {
+    const readWindow = vi.fn(() => {
+      throw new ChatServiceError({
+        category: "stale",
+        message: "That Chat message is no longer part of this conversation.",
+      });
+    });
+    const route = routeFixture({ readWindow });
+    const response = await route(
+      request(`/api/chat/threads/${threadId}/window?limit=30&before=${turnId}`),
+    );
+
+    expect(response?.status).toBe(409);
+    await expect(response?.json()).resolves.toMatchObject({ category: "stale" });
+  });
+
+  it("still answers the whole-thread read with the view the service read", async () => {
+    const read = vi.fn(() => windowView);
+    const readWindow = vi.fn();
+    const route = routeFixture({ read, readWindow });
+    const response = await route(request(`/api/chat/threads/${threadId}`));
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("cache-control")).toBeNull();
+    await expect(response?.json()).resolves.toEqual(windowView);
+    expect(readWindow).not.toHaveBeenCalled();
   });
 });
 

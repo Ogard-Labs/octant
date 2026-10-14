@@ -92,6 +92,7 @@ import {
   readChatContent,
   readChatSettings,
   readChatThreadView,
+  readChatThreadWindow,
   readPendingChatPurges,
   searchChatThreads,
   searchChatTranscript,
@@ -442,6 +443,10 @@ function openFixture(options?: {
     },
     readChatNavigation: () => readChatNavigation(connection),
     readChatThreadView: (threadId: ChatThreadId) => readChatThreadView(connection, threadId),
+    readChatThreadWindow: (
+      threadId: ChatThreadId,
+      request: Parameters<PersistenceService["readChatThreadWindow"]>[1],
+    ) => readChatThreadWindow(connection, threadId, request),
     readChatContent: (contentId: string) => readChatContent(connection, contentId),
     searchChatThreads: (query: string) => searchChatThreads(connection, query),
     searchChatTranscript: (query: string, excludeThreadIds?: ReadonlySet<string>) =>
@@ -5603,6 +5608,12 @@ describe("ChatService", () => {
     } catch (error) {
       expect(error).toMatchObject({ failure: { category: "invalid" } });
     }
+    try {
+      service.readWindow(threadId, { limit: 30 });
+      expect.unreachable("Deleted thread must not be readable through a window.");
+    } catch (error) {
+      expect(error).toMatchObject({ failure: { category: "invalid" } });
+    }
 
     await expect(
       service.execute({
@@ -8043,6 +8054,47 @@ describe("ChatService", () => {
       expect(planned?.entries.filter((entry) => entry.category === "conversation")).toEqual([]);
       expect(planned?.entries.map((entry) => entry.label)).toContain("First question, revised");
       expect(activeChatTurns(afterEdit.turns).map((turn) => turn.id)).toEqual([edited.turn.id]);
+    });
+
+    it("pages a window over the conversation as it stands and refuses one anchored on a superseded turn", async () => {
+      const { service } = openFixture();
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Windowed edit",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      const threadId = created.thread.id;
+      const first = await service.execute({
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        prompt: "First question",
+      });
+      if (first.kind !== "turn-created") throw new Error("Expected turn-created result.");
+      await service.execute({
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        prompt: "Second question",
+      });
+      const edited = await service.execute({
+        kind: "edit-chat-turn",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        turnId: first.turn.id,
+        prompt: "First question, revised",
+      });
+      if (edited.kind !== "turn-created") throw new Error("Expected turn-created result.");
+
+      const window = service.readWindow(threadId, { limit: 30 });
+      expect(window.view.turns.map((turn) => turn.id)).toEqual([edited.turn.id]);
+      expect(window).toMatchObject({ hasEarlier: false, hasLater: false, supersededTurnCount: 2 });
+      // The window carries the same thread version a command must present.
+      expect(window.view.thread.version).toBe(service.read(threadId).thread.version);
+      expect(() => service.readWindow(threadId, { limit: 30, before: first.turn.id })).toThrow(
+        expect.objectContaining({ failure: expect.objectContaining({ category: "stale" }) }),
+      );
     });
 
     it("refuses a stale edit and an edit of an already superseded turn", async () => {

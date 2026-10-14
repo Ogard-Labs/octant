@@ -132,6 +132,16 @@ Completed threads move to the archive on their own after a week. Change that
 window, or turn it off, under **Settings › General › Archive completed
 threads**. Archiving keeps every thread; only a confirmed purge deletes.
 
+## Long threads
+
+A long Chat thread opens on its newest messages, so it is ready to read and
+reply to straight away. **Load earlier messages** at the top adds the messages
+before the oldest one shown; the message you were reading stays where it is.
+Opening a search result far back shows the messages around it, with **Load
+later messages** and **Jump to latest** underneath; sending a message also
+takes you back to the newest messages. Find in page searches the messages
+loaded so far. Export and purge always cover the whole thread.
+
 ## Export
 
 These actions live in the thread header's **Thread actions** menu (the ⋯
@@ -144,8 +154,8 @@ Attachment file bytes stay off the export and are listed as omissions.
 Secrets, credentials, and provider payloads never appear.
 
 **Copy conversation** and **Save as Markdown** remain a convenience for
-reading the prose. They are assembled from what this window last saw and are
-not the authoritative cut.
+reading the prose. They read the whole conversation from the host first, even
+when only its newest messages are loaded, and are not the authoritative cut.
 
 A paired device can export a thread it can already open. It cannot dump the
 host.
