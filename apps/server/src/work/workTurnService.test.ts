@@ -6,6 +6,7 @@ import {
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import { SessionCompactionService } from "../context/sessionCompaction";
 import { ContextHarnessError, ContextHarnessService } from "../context/contextHarnessService";
+import { automaticCompactionId } from "../context/automaticCompaction";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -432,6 +433,72 @@ describe("WorkTurnService", () => {
         contextTokens: 188,
         contextWindow: 1000,
       });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("journals a compaction the runtime made by itself on the thread's context ledger, once per turn and place", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
+    attachmentRoots.push(root);
+    const connection = openSqlite(join(root, "context.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      let sequence = 0;
+      const contextHarness = new ContextHarnessService({
+        persistence: { connection, journal, status: () => ({ state: "current", integrity: "ok" }) },
+        uuid: () => `83000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+        clock: () => now,
+      });
+      const sighting = {
+        position: 1,
+        tokensBefore: { kind: "known", tokens: 900, accuracy: "provider-reported" },
+      } as const;
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        input.onAutomaticCompaction?.(sighting);
+        // The same compaction seen again, as a recovered stream would show it.
+        input.onAutomaticCompaction?.(sighting);
+        return { kind: "completed" as const, response: "Ready" };
+      });
+      const fixture = serviceFixture({ contextHarness, turnRuntime: { run } });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(run).toHaveBeenCalledOnce();
+      const subject = decodeContextSubjectRef({
+        aggregateType: "work-thread",
+        aggregateId: String(ids.thread),
+      });
+      const runInput = run.mock.calls[0]?.[0];
+      expect(contextHarness.latestCompaction(subject)).toMatchObject({
+        status: "completed",
+        receipt: {
+          compactionId: automaticCompactionId(subject, String(runInput?.command.turnId), 1),
+          trigger: "automatic",
+          executor: {
+            kind: "runtime",
+            driverKind: runInput?.driver.kind,
+            providerInstanceId: runInput?.command.authority.providerInstanceId,
+            modelId: runInput?.command.authority.modelId,
+          },
+          tokensBefore: sighting.tokensBefore,
+          summary: { visibility: "runtime-only" },
+        },
+      });
+      expect(
+        connection
+          .prepare(
+            `SELECT COUNT(*) AS count FROM event_journal
+             WHERE aggregate_type = 'context-ledger' AND event_name LIKE 'context.compaction-%'`,
+          )
+          .get(),
+      ).toEqual({ count: 1 });
     } finally {
       connection.close();
     }

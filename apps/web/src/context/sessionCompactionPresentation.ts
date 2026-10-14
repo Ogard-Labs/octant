@@ -141,8 +141,16 @@ export function compactionResultLine(
       : `Couldn't compact: ${reason}.`;
   }
   const { receipt } = record;
-  const by = `summary by ${executorName(receipt.executor, names)}`;
   const freed = receipt.tokensFreed;
+  if (receipt.trigger === "automatic") {
+    // Nothing revisits a receipt the runtime's own compaction left, so an
+    // amount it did not report is left out rather than promised for later.
+    const line = `Compacted automatically by ${executorName(receipt.executor, names)}`;
+    if (freed.kind === "unknown") return line;
+    if (freed.tokens === 0) return `${line} · nothing freed`;
+    return `${line} · ${compactTokenCount(freed.tokens)} freed`;
+  }
+  const by = `summary by ${executorName(receipt.executor, names)}`;
   if (freed.kind === "unknown") {
     return freed.reason === "awaiting-next-report"
       ? `Compacted · freed amount shows after the next reply · ${by}`

@@ -29,6 +29,7 @@ import {
   type CodeConversationPage,
   type CodeForkMergeBackOutcome,
   type ProviderSessionId,
+  type ContextCompactionExecutor,
   type CodeEvidenceBatchRequest,
   type CodeEvidenceBatchResponse,
   type CodeOperationApprovalReceipt,
@@ -128,6 +129,7 @@ import type {
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { decodeAgentRunAdmittedContext, type ProviderContextBlock } from "@octant/contracts";
 import type {
@@ -358,6 +360,23 @@ export interface CodeOperationRuntimeOptions {
    * meanwhile: it would resume the session the runtime is rewriting.
    */
   readonly compactionRunning?: (threadId: CodeThreadId) => boolean;
+  /**
+   * The thread's context ledger, for compactions a turn's runtime makes by
+   * itself: each one is journaled there, and any compaction journaled since
+   * the previous turn's usage report leaves Octant's earlier per-turn context
+   * uncounted in the next turn's window breakdown.
+   */
+  readonly sessionCompactions?: {
+    readonly record: (input: {
+      readonly threadId: CodeThreadId;
+      readonly turnKey: string;
+      readonly sighting: AutomaticCompactionSighting;
+      readonly executor: Extract<ContextCompactionExecutor, { readonly kind: "runtime" }>;
+      readonly priorOccupancy?: { readonly tokens: number; readonly observedAt: string };
+    }) => void;
+    /** Whether the ledger records a compaction after this journal position. */
+    readonly compactedAfter: (threadId: CodeThreadId, globalSequence: number) => boolean;
+  };
   /**
    * Reads the thread's own earlier conversation for a provider-switch handoff,
    * through the bounded selector a child's parent context uses. Absent means
@@ -2313,6 +2332,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         forkSeeded,
         priorTurn,
         previousBreakdown: recovered.priorTurnBreakdown,
+        compactedSinceReport:
+          recovered.priorTurnReportSequence !== undefined &&
+          this.#options.sessionCompactions?.compactedAfter(
+            input.thread.id,
+            recovered.priorTurnReportSequence,
+          ) === true,
       }),
       ...(input.sentContext === undefined ? {} : { sentContext: input.sentContext }),
       ...(input.onContextDelivered === undefined
@@ -3335,6 +3360,29 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           prompt,
           ...(fullContext.length === 0 ? {} : { context: fullContext }),
           contextAccount,
+          ...(this.#options.sessionCompactions === undefined
+            ? {}
+            : {
+                onAutomaticCompaction: (sighting: AutomaticCompactionSighting) => {
+                  const occupancy = this.#events.latestWindowOccupancy(
+                    active.thread.id,
+                    decodeProviderSessionId(active.sessionId),
+                  );
+                  this.#options.sessionCompactions?.record({
+                    threadId: active.thread.id,
+                    // A Code turn is one operation; its id is the turn's.
+                    turnKey: String(active.operationId),
+                    sighting,
+                    executor: {
+                      kind: "runtime",
+                      driverKind: active.driver.kind,
+                      providerInstanceId: active.thread.providerInstanceId,
+                      modelId: active.thread.modelId,
+                    },
+                    ...(occupancy === undefined ? {} : { priorOccupancy: occupancy }),
+                  });
+                },
+              }),
           onTurnEnded: (ended) => {
             endedTurn = ended;
           },

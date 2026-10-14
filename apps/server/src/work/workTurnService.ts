@@ -9,6 +9,7 @@ import {
   type ContextHarnessService,
   type SessionConversationMessage,
 } from "../context/contextHarnessService";
+import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
 import { observeWorkContext } from "./workContextInspection";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
@@ -1408,6 +1409,26 @@ export class WorkTurnService {
         onPromptSent: () => {
           promptSent = true;
         },
+        ...(this.#contextHarness === undefined
+          ? {}
+          : {
+              onAutomaticCompaction: (sighting: AutomaticCompactionSighting) => {
+                this.#contextHarness?.recordAutomaticCompaction({
+                  subject: decodeContextSubjectRef({
+                    aggregateType: "work-thread",
+                    aggregateId: String(input.command.threadId),
+                  }),
+                  turnKey: String(input.command.turnId),
+                  sighting,
+                  executor: {
+                    kind: "runtime",
+                    driverKind: input.driver.kind,
+                    providerInstanceId: input.command.authority.providerInstanceId,
+                    modelId: input.command.authority.modelId,
+                  },
+                });
+              },
+            }),
         onUsage: (usage) => {
           // What the turn cost counts even when its report arrives after a
           // cancel: a cancelled Claude turn's total comes in its result, after

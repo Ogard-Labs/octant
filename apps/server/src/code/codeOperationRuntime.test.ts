@@ -1553,6 +1553,115 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("stops counting earlier turns' instructions once the ledger records a compaction, and records one the runtime made by itself under its turn", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const recorded: Array<unknown> = [];
+    const compactedAfter: Array<number> = [];
+    let ledgerCompacted = false;
+    const fixture = runtimeFixture({
+      provider: { ...providerDriver(connection), kind: "codex" },
+      sessionCompactions: {
+        record: (input) => {
+          recorded.push(input);
+        },
+        compactedAfter: (_, globalSequence) => {
+          compactedAfter.push(globalSequence);
+          return ledgerCompacted;
+        },
+      },
+    });
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        profileId: "60000000-0000-4000-8000-000000000001",
+        profileContext: {
+          displayName: "Reviewer",
+          instructions: "Review as a skeptic. ".repeat(40).trim(),
+          approvedSkillIds: [],
+        },
+      }),
+    );
+    const usage = (sequence: number) =>
+      providerEvent({
+        kind: "usage",
+        inputTokens: 10,
+        outputTokens: 2,
+        contextTokens: 9_000,
+        promptRetention: "kept",
+        sequence,
+      });
+    const reports = async (operation: ReturnType<typeof operationId>, count: number) => {
+      let accounting: Array<unknown> = [];
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+        accounting = frames.flatMap((frame) =>
+          frame.event.kind === "usage" ? [frame.event.contextBreakdown?.sentContext] : [],
+        );
+        if (accounting.length < count) throw new Error("not every report yet");
+      });
+      return accounting;
+    };
+    const turn = async (operation: number, prompt: string, events: ProviderRuntimeEvent[]) => {
+      const reference = storedEvidence(operation + 100, prompt);
+      fixture.evidenceValues.set(reference.contentId, prompt);
+      const sends = vi.mocked(connection.send).mock.calls.length;
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(operation),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: reference,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(sends + 1));
+      for (const event of events) await Effect.runPromise(Queue.offer(queue, event));
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+    };
+    try {
+      await turn(90, "first", [usage(1)]);
+      expect(await reports(operationId(90), 1)).toEqual([{ status: "counted" }]);
+      await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
+
+      // A compaction the ledger records after that report, such as one the
+      // person asked for between turns, means the session no longer holds
+      // every copy the first turn sent.
+      ledgerCompacted = true;
+      await turn(91, "second", [
+        usage(1),
+        providerEvent({ kind: "context-compacted", trigger: "automatic", sequence: 2 }),
+        usage(3),
+      ]);
+      expect(await reports(operationId(91), 2)).toEqual([
+        { status: "uncounted", reason: "compacted" },
+        { status: "uncounted", reason: "compacted" },
+      ]);
+      // Asked after the first turn's report, by its place in the journal.
+      expect(compactedAfter).toEqual([expect.any(Number)]);
+      expect(compactedAfter[0]).toBeGreaterThan(0);
+      expect(recorded).toEqual([
+        {
+          threadId,
+          turnKey: String(operationId(91)),
+          sighting: {
+            position: 1,
+            tokensBefore: { kind: "known", tokens: 9_000, accuracy: "provider-reported" },
+          },
+          executor: {
+            kind: "runtime",
+            driverKind: "codex",
+            providerInstanceId: thread().providerInstanceId,
+            modelId: thread().modelId,
+          },
+          priorOccupancy: { tokens: 9_000, observedAt: now },
+        },
+      ]);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each([true, false])(
     "carries the conversation on after a switch to another model of the same provider only when it can: %s",
     async (canSwitch) => {
@@ -5371,6 +5480,7 @@ function runtimeFixture(options: {
   >[0]["resolveProviderDriver"];
   isProviderModelAllowed?: (thread: CodeThread) => boolean;
   compactionRunning?: (threadId: CodeThreadId) => boolean;
+  sessionCompactions?: Parameters<typeof createCodeOperationRuntime>[0]["sessionCompactions"];
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
   nativeHarness?: Parameters<typeof createCodeOperationRuntime>[0]["nativeHarness"];
   onPendingRequestWithdrawn?: () => void;
@@ -5692,6 +5802,9 @@ function runtimeFixture(options: {
     ...(options.compactionRunning === undefined
       ? {}
       : { compactionRunning: options.compactionRunning }),
+    ...(options.sessionCompactions === undefined
+      ? {}
+      : { sessionCompactions: options.sessionCompactions }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     ...(options.nativeHarness === undefined ? {} : { nativeHarness: options.nativeHarness }),
     ...(options.onPendingRequestWithdrawn === undefined

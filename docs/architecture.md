@@ -2453,7 +2453,9 @@ prompt: `renderProviderTurnPrompt` puts the context blocks in the prompt text as
 JSON, and attachments travel as the prompt's images. A runtime that keeps its
 prompts therefore holds one copy per turn, and a running total is right only
 while every copy is accounted for. The adapter, which knows its runtime, says on
-each usage report what the runtime does with the prompt (`promptRetention`):
+each usage report what the runtime does with the prompt (`promptRetention`), and
+the turn runner reports `compacted` for the rest of a turn once the adapter's
+`context-compacted` event arrives:
 
 | Runtime           | What earlier copies do                                                                                                                                                                                                                                                                                                                                                                                                     | `promptRetention`                                                                         | Source                                                                                                                            |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -2610,11 +2612,12 @@ through their runtime where its adapter claims `sessionCompaction`, with the
 same send block on Code turns; and the window: the **Compact session** button in
 the context popover and the inspector, its confirm, the running state, the
 result line, and the composer's held send, read from a per-thread compaction
-state every thread kind answers, Code included. Not built yet: journaling a
-runtime's automatic compactions; replacing the `windowCompacted` flags, which
-still drive `promptRetention`, so the turn after a requested compaction still
-counts Octant's earlier per-turn context as held in a window breakdown it
-estimates; and the compaction divider on the thread's timeline. **Compact session** replaces
+state every thread kind answers, Code included; and the Chat, Work and Code turn
+runners journal a runtime's own compactions on the same ledger, which, with the
+requested ones, now decide when a Code window breakdown stops counting Octant's
+per-turn context as held. Not built yet: the compaction divider on the thread's
+timeline. No compaction, requested or automatic, has been run against a real
+runtime yet. **Compact session** replaces
 what the model sees from the next turn on with a summary of the earlier
 conversation and a recent tail, when the person asks, outside a turn. It never
 deletes or rewrites the journal: the thread keeps every message, tool call and
@@ -2855,8 +2858,18 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   `system` actor. Its compaction id is derived by the host from the thread, the
   turn, and the position of that compaction among the turn's compactions, so
   the same runtime notification seen again after a recovery maps to the same id
-  and is journaled once. The request-then-terminal pairing, and the
-  interrupted-request rule below, apply to requested compactions only.
+  and is journaled once. The turn is the provider send that saw it: the Chat
+  attempt (a retry is a new one), the Work turn, or the Code operation. A
+  notification delivered twice within one turn carries the same event sequence
+  and counts once. Its `tokensBefore` is the runtime's own figure, else the
+  turn's latest usage report (only an upper bound once an earlier compaction in
+  the turn came after it), else the session's occupancy read as a requested
+  compaction reads it; a compaction with no figure at all is not journaled,
+  because a receipt never guesses. Its `usage` is `unreported`: the runtime's
+  summary request rode inside the turn, whose own usage reports carry it. A
+  child run's compaction is not journaled, because a child's session is not the
+  thread's window and no reader shows it. The request-then-terminal pairing, and
+  the interrupted-request rule below, apply to requested compactions only.
 - The host path also appends `context.manifest-created@1`,
   `context.summary-created@1` and `context.plan-created@1` as `#commitSummary`
   does today; the summary text stays subject content, outside the journal, where
@@ -2882,7 +2895,13 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
 - The thread's timeline shows a compaction divider from the completed event.
   Everything above it stays visible, searchable and exported.
 - A completed compaction marks a runtime's session `compacted`, so the window
-  breakdown goes `uncounted` with that reason under the existing rule.
+  breakdown goes `uncounted` with that reason under the existing rule. Within
+  a turn, the runner that sees `context-compacted` reports the turn's later
+  usage as `compacted`. Across turns, a Code turn that resumes a session stops
+  carrying the previous turn's counted copies when the ledger records a
+  compaction after that turn's last usage report in journal order (not by the
+  events' clocks, which can tie): a completed one, or a failed one that may
+  have changed the session.
 - A request with no terminal event when the host starts is closed as
   `context.compaction-failed@1` with `interrupted`; for a runtime executor the
   session may have changed, and the next usage report shows what it holds.
@@ -2919,13 +2938,17 @@ Codex RPC itself.
   Claude's `compact_boundary` (`requested` only while the connection's
   `compact` waits on it; a `/compact` the person typed into the session is the
   runtime's own, `automatic`), Octant Harness
-  once its marker is journaled, and, once their rows are probed, the OpenCode
-  events and Pi's `compaction_end` with a `result`. A Code turn leaves the
-  event out of the turn's own events. It
-  replaces the per-driver `windowCompacted` flags as the source of
-  `promptRetention: "compacted"`, and the turn runner journals it, so a
-  runtime's automatic compactions get the same receipt. Provider payloads stop
-  at the adapter.
+  once its marker is journaled, and, as `automatic`, the OpenCode events and
+  Pi's `compaction_end` with a `result`, which those adapters already read to
+  tell a compacted window. They claim no requested compaction until their rows
+  are probed. OpenCode may announce one compaction under more than one of its
+  names, so its adapter reports the first since the latest usage report. A
+  Code turn leaves the event out of the turn's own events. It replaces the
+  per-driver `windowCompacted` flags as the source of
+  `promptRetention: "compacted"`: an adapter's usage reports say only whether
+  the runtime keeps each prompt, and the turn runner journals the compaction,
+  so a runtime's automatic compactions get the same receipt. Provider payloads
+  stop at the adapter.
 - The provider-sdk conformance harness checks that a driver claiming
   `sessionCompaction` implements `compact`, emits `context-compacted` with
   `requested` before it resolves, and leaves the session resumable, and that a
@@ -3005,7 +3028,11 @@ watched has ended.
   timeline divider): "Compacted · 41.2K freed · summary by Codex", "Compacted ·
   freed amount shows after the next reply · summary by Codex", "Compacted ·
   freed amount not reported · summary by Codex", "Compacted · nothing freed ·
-  summary by Codex", or "Couldn't compact: {reason}." A completed line names
+  summary by Codex", or "Couldn't compact: {reason}." A runtime's own
+  compaction reads "Compacted automatically by Codex · 41.2K freed", "Compacted
+  automatically by Codex · nothing freed", or, when the runtime reported no
+  amount, "Compacted automatically by Codex": nothing revisits that receipt, so
+  the line promises no later figure. A completed line names
   who wrote the summary and ends without a full stop; a failure is a sentence
   and ends with one, and one that may have changed the session adds "The
   session may have changed; the next reply shows what it holds." A refused

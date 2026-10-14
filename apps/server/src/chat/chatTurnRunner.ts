@@ -34,6 +34,7 @@ import { answerChatTurnQuestion, transitionChatAttempt } from "@octant/domain/ch
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Cause, Deferred, Effect, Fiber, Option, Schema, Scope, Stream } from "effect";
 import type { ContextHarnessService } from "../context/contextHarnessService";
+import { TurnCompactions } from "../context/automaticCompaction";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
@@ -826,6 +827,7 @@ export class ChatTurnRunner {
         ),
       );
 
+      const compactions = new TurnCompactions();
       const collected = yield* subscribeThenSend({
         connection,
         consume: (runtimeEvents) =>
@@ -844,6 +846,30 @@ export class ChatTurnRunner {
                 yield* idle.touch;
                 timing = observeTurnMetrics(timing, event);
                 input.liveTurn?.observe(event);
+                const sighting = compactions.observe(event);
+                if (sighting !== undefined) {
+                  // The receipt is accounting; failing to write it never
+                  // fails the turn whose session it describes.
+                  yield* Effect.try(() =>
+                    contextHarness.recordAutomaticCompaction({
+                      subject: input.contextSubject,
+                      // Each attempt is its own provider turn: a retry's
+                      // compactions are not the first attempt's.
+                      turnKey: String(input.attempt.id),
+                      sighting,
+                      executor: {
+                        kind: "runtime",
+                        driverKind: input.driver.kind,
+                        providerInstanceId: input.providerInstanceId,
+                        modelId: input.attempt.modelId,
+                      },
+                    }),
+                  ).pipe(
+                    Effect.catchAll(() =>
+                      Effect.logWarning("An automatic compaction could not be journaled."),
+                    ),
+                  );
+                }
                 if (event.kind === "retrying") {
                   const notice = decodeHarnessRetryNotice({
                     attempt: event.attempt,
