@@ -16,7 +16,6 @@ import {
   decodeProviderSessionId,
   type ContextCompactionRefusalReason,
   type ContextSubjectRef,
-  type KnownTokenMeasurement,
   type WindowId,
   type ProjectProviderPolicy,
   type ProviderInstance,
@@ -905,6 +904,37 @@ describe("compacting a session a runtime keeps", () => {
     },
   );
 
+  it("interrupts a compaction that outlives its bound before it stops the session", async () => {
+    // A runtime that runs its compaction as a turn keeps running it after the
+    // session is stopped here; a later turn would queue behind it.
+    const world = createRuntimeWorld({ hang: true, interruptible: true });
+    planSession(world);
+
+    world.service.start(command(), "local-window", windowId);
+    await world.service.settled();
+
+    expect(world.harness.latestCompaction(subject)).toMatchObject({
+      status: "failed",
+      reason: "timed-out",
+      sessionMayHaveChanged: true,
+    });
+    expect(world.runtime.endings[0]).toBe("interrupt");
+    expect(world.runtime.endings).toContain("stop");
+    world.close();
+  });
+
+  it("stops a timed-out compaction whose runtime refuses an interrupt with no turn", async () => {
+    const world = createRuntimeWorld({ hang: true });
+    planSession(world);
+
+    world.service.start(command(), "local-window", windowId);
+    await world.service.settled();
+
+    expect(world.harness.latestCompaction(subject)).toMatchObject({ reason: "timed-out" });
+    expect(world.runtime.endings.slice(0, 2)).toEqual(["interrupt", "stop"]);
+    world.close();
+  });
+
   it("keeps a compaction the runtime finished after the thread's mode was turned off", async () => {
     const world = createRuntimeWorld({
       answer: { kind: "compacted", tokensBefore: 900, tokensAfter: 300 },
@@ -1175,6 +1205,58 @@ describe("compacting a session a runtime keeps", () => {
         queue: [],
       });
       expect(reportedCompactionUsage(world.fixture.connection)).toEqual([]);
+      world.close();
+    });
+
+    it("takes the window a compaction since the latest usage report left as its starting point", async () => {
+      const world = createRuntimeWorld(
+        { answer: { kind: "compacted", tokensAfter: 300 } },
+        "code-thread",
+      );
+      world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
+      world.service.start(command(codeSubject), "local-window", windowId);
+      await world.service.settled();
+
+      const again = decodeContextCompactionId("82000000-0000-4000-8000-0000000000c2");
+      world.service.start(
+        { kind: "compact-session", subject: codeSubject, compactionId: again },
+        "local-window",
+        windowId,
+      );
+      await world.service.settled();
+
+      // The usage report predates the first compaction; the window that
+      // compaction reported is what the second one starts from.
+      expect(world.harness.compaction(codeSubject, again)).toMatchObject({
+        status: "completed",
+        receipt: {
+          tokensBefore: { kind: "known", tokens: 300, accuracy: "provider-reported" },
+          tokensFreed: { kind: "measured", tokens: 0 },
+        },
+      });
+      world.close();
+    });
+
+    it("calls an older usage report only an upper bound once a compaction left no figure", async () => {
+      const world = createRuntimeWorld({ answer: { kind: "compacted" } }, "code-thread");
+      world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
+      world.service.start(command(codeSubject), "local-window", windowId);
+      await world.service.settled();
+
+      const again = decodeContextCompactionId("82000000-0000-4000-8000-0000000000c2");
+      world.service.start(
+        { kind: "compact-session", subject: codeSubject, compactionId: again },
+        "local-window",
+        windowId,
+      );
+      await world.service.settled();
+
+      expect(world.harness.latestCompaction(codeSubject)).toMatchObject({
+        receipt: {
+          compactionId: again,
+          tokensBefore: { kind: "known", tokens: 1_200, accuracy: "conservative-heuristic" },
+        },
+      });
       world.close();
     });
 
@@ -1610,7 +1692,7 @@ interface RuntimeWorldState {
   providerAvailable: boolean;
   support: "supported" | "unsupported" | "unavailable" | undefined;
   hasSession: boolean;
-  occupancy: KnownTokenMeasurement | undefined;
+  occupancy: { readonly tokens: number; readonly observedAt: string } | undefined;
 }
 
 type RuntimeWorld = ReturnType<typeof createRuntimeWorld>;
@@ -1643,7 +1725,8 @@ function createRuntimeWorld(
     providerAvailable: true,
     support: "supported",
     hasSession: true,
-    occupancy: { kind: "known", tokens: 1_200, accuracy: "provider-reported" },
+    // Reported before anything in these tests compacts the session.
+    occupancy: { tokens: 1_200, observedAt: "2026-07-18T20:00:00.000Z" },
   };
   const opened: Array<WindowId | undefined> = [];
   const announced: Array<{ readonly threadId: string; readonly compaction: unknown }> = [];
@@ -1712,6 +1795,11 @@ interface FakeRuntimeOptions {
   readonly answer?: ProviderSessionCompaction;
   /** Takes the request and never answers. */
   readonly hang?: boolean;
+  /**
+   * Ends a running compaction when interrupted, as Codex does with the turn it
+   * runs one as. Otherwise an interrupt with no turn in flight is refused.
+   */
+  readonly interruptible?: boolean;
   readonly resumeFails?: boolean;
   /** The connection fails the request instead of answering it. */
   readonly compactFails?: boolean;
@@ -1728,6 +1816,8 @@ function fakeRuntime(options: FakeRuntimeOptions) {
     resumed: [] as Array<unknown>,
     compactions: [] as Array<string>,
     stops: 0,
+    /** Interrupts and stops, in the order they reached the session. */
+    endings: [] as Array<"interrupt" | "stop">,
   };
   const queue = Effect.runSync(Queue.unbounded<never>());
   const connection = {
@@ -1762,10 +1852,18 @@ function fakeRuntime(options: FakeRuntimeOptions) {
           return options.answer ?? ({ kind: "compacted" } as const);
         });
       }),
-    interrupt: () => Effect.fail({ category: "protocol", message: "No turn is running." }),
+    interrupt: (sessionId: string) =>
+      Effect.suspend(() => {
+        recorded.endings.push("interrupt");
+        if (options.interruptible !== true || recorded.compactions.length === 0) {
+          return Effect.fail({ category: "protocol", message: "No turn is running." });
+        }
+        return Queue.offer(queue, { kind: "interrupted", sessionId } as never);
+      }),
     stop: () =>
       Effect.sync(() => {
         recorded.stops += 1;
+        recorded.endings.push("stop");
       }),
     answerApproval: () => Effect.void,
     answerUserInput: () => Effect.void,
@@ -1784,6 +1882,7 @@ function fakeRuntime(options: FakeRuntimeOptions) {
     acquired: recorded.acquired,
     resumed: recorded.resumed,
     compactions: recorded.compactions,
+    endings: recorded.endings,
     get stops() {
       return recorded.stops;
     },

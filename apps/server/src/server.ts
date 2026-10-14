@@ -7744,6 +7744,13 @@ export function startOctantServer(
             workTurnService.startFirstTurn(windowId, command, admissionOptions),
         },
         code: routeCodeService,
+        compacting: (scope) =>
+          contextHarness.compactionRunning(
+            decodeContextSubjectRef({
+              aggregateType: `${scope.mode}-thread`,
+              aggregateId: scope.threadId,
+            }),
+          ),
         isModeEnabled: (mode) =>
           enabledModes(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -8443,12 +8450,7 @@ export function startOctantServer(
                   codeOperationRuntime?.turnInProgress?.(threadId) === true,
                 runtimeSessions: {
                   exists: codeCompactionSessions.exists,
-                  occupancy: (threadId) => {
-                    const tokens = codeCompactionSessions.occupancy(threadId);
-                    return tokens === undefined
-                      ? undefined
-                      : { kind: "known", tokens, accuracy: "provider-reported" };
-                  },
+                  occupancy: codeCompactionSessions.occupancy,
                   open: codeCompactionSessions.open,
                 },
               },

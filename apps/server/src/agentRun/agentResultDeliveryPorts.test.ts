@@ -6,6 +6,7 @@ import {
   type AgentRun,
   type UtcTimestamp,
 } from "@octant/contracts";
+import { CodeServiceError } from "../code/codeService";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import {
   createCodeAgentResultDeliveryPort,
@@ -217,20 +218,20 @@ describe("agent result delivery to a Work or Code parent", () => {
     expect(await code.port.dispatch([run])).toMatchObject({ kind: "dispatched" });
   });
 
-  it("holds a Code parent's result when its session starts compacting while it is staged", async () => {
-    let compacting = false;
-    const code = codePort(() => compacting);
-    code.stageEvidence.mockImplementationOnce(async () => {
-      compacting = true;
-      return { contentId: "84000000-0000-4000-8000-000000000020", byteLength: 21 } as never;
-    });
+  it("holds a Code parent's result its turn was refused for a compaction, even one already over", async () => {
+    // The compaction started while the result was staged and ended before
+    // the refusal reached the port: only the refusal says why.
+    const code = codePort(() => false);
     code.executeOperation.mockRejectedValueOnce(
-      new Error("This session is being compacted. Send again when it finishes."),
+      new CodeServiceError({
+        category: "waiting",
+        message: "This session is being compacted. Send again when it finishes.",
+      }),
     );
 
     expect(await code.port.dispatch([run])).toEqual({
       kind: "deferred",
-      detail: "The parent Code thread's session is being compacted.",
+      detail: "This session is being compacted. Send again when it finishes.",
     });
   });
 

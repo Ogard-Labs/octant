@@ -288,7 +288,7 @@ describe("CodeOperationEventStore", () => {
         contextTokens: 27_600,
       }),
     });
-    expect(store.latestWindowOccupancy(threadId, first)).toBe(27_600);
+    expect(store.latestWindowOccupancy(threadId, first)).toMatchObject({ tokens: 27_600 });
 
     // A fresh session whose turn reported nothing has no figure of its own;
     // the earlier session's report says nothing about it.

@@ -49,6 +49,7 @@ import { effectiveAgentRunExecutionTarget } from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { ChatServiceExecutionContext } from "../chat/chatService";
 import type { CodeOperationExecuteOptions } from "../code/codeOperationService";
+import { CodeServiceError } from "../code/codeService";
 import type { Journal } from "../persistence/journal";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
@@ -537,8 +538,11 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
             );
       } catch (error) {
         // A compaction that began while the prompt was being staged refuses the
-        // turn; the continuation still waits it out.
-        if (deps.code.compacting?.(threadId) === true) return COMPACTION_DEFERRAL;
+        // turn as `waiting`; the continuation waits it out. The refusal says so
+        // itself: by now the compaction may already have ended.
+        if (error instanceof CodeServiceError && error.failure.category === "waiting") {
+          return { kind: "deferred", detail: error.failure.message };
+        }
         return refused(refusalDetail(error));
       }
     },

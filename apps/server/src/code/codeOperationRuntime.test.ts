@@ -895,7 +895,7 @@ describe("CodeOperationRuntime", () => {
       );
 
       expect(sessions.exists(String(threadId))).toBe(true);
-      expect(sessions.occupancy(String(threadId))).toBe(27_600);
+      expect(sessions.occupancy(String(threadId))).toEqual({ tokens: 27_600, observedAt: now });
       expect(await sessions.open(String(threadId), windowId)).toEqual({
         acquire: {
           instanceId: thread().providerInstanceId,

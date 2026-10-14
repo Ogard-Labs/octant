@@ -115,10 +115,13 @@ export interface RuntimeCompactionSessions {
    */
   readonly exists: (threadId: string) => boolean;
   /**
-   * How full the session's window was at its latest usage report. Absent here,
-   * the host's own plan of the thread stands in.
+   * How full the session's window was at its latest usage report, as the
+   * runtime reported it, and when. Absent here, the host's own plan of the
+   * thread stands in.
    */
-  readonly occupancy?: (threadId: string) => KnownTokenMeasurement | undefined;
+  readonly occupancy?: (
+    threadId: string,
+  ) => { readonly tokens: number; readonly observedAt: string } | undefined;
   /**
    * How to open that session, resolved when the compaction runs. Undefined
    * when the session, or the room it runs in, is gone; the runtime is then
@@ -644,9 +647,12 @@ export class SessionCompactionService {
   /**
    * Opens the session in its own scope, asks for the compaction, and stops the
    * session when the scope closes. A compaction that outlives its bound is
-   * ended by stopping the session: the runtimes' `interrupt` needs a turn in
-   * flight, and stopping settles their pending compaction as one that may
-   * have changed the session.
+   * interrupted first, then the session is stopped. Codex runs a compaction
+   * as a turn of its own in an app-server other sessions share, and keeps
+   * running it after the session is stopped here; only its `interrupt` ends
+   * that turn, and a later turn would otherwise queue behind it and read its
+   * events as its own. Claude and Octant Harness refuse an interrupt with no
+   * turn in flight, and the stop ends their compaction.
    */
   async #compactRuntime(
     driver: ProviderDriver,
@@ -709,6 +715,13 @@ export class SessionCompactionService {
         } as const;
       }
       if (Option.isNone(answered.right)) {
+        const interrupted = yield* connection.interrupt(sessionId).pipe(
+          Effect.timeoutOption(shutdownMs),
+          Effect.map(Option.isSome),
+          Effect.catchAllCause(() => Effect.succeed(false)),
+        );
+        // The interrupted run reports its end before the session goes.
+        if (interrupted) yield* Deferred.await(closed).pipe(Effect.timeoutOption(graceMs));
         yield* stop;
         return { kind: "timed-out" } as const;
       }
@@ -934,23 +947,57 @@ export class SessionCompactionService {
    * report said, or, for a thread the host plans, the occupancy that report
    * reconciled or the plan's own estimate. A session with no figure at all has
    * never reported an exchange, so it has nothing to compact.
+   *
+   * A compaction since that report changed the window it describes. The
+   * figure that compaction reported after stands instead; without one, the
+   * older report is only an upper bound, and says so.
    */
   #occupancy(
     threads: SessionCompactionThreads,
     subject: ContextSubjectRef,
     planned: ContextInspectorSnapshot | undefined,
   ): KnownTokenMeasurement | undefined {
-    const reported = threads.runtimeSessions?.occupancy?.(String(subject.aggregateId));
-    if (reported !== undefined) return reported;
-    if (planned === undefined) return undefined;
-    const contextTokens = planned.latestUsage?.contextTokens;
-    return contextTokens === undefined
-      ? {
-          kind: "known",
-          tokens: planned.next.plan.plannedInputTokens,
-          accuracy: "conservative-heuristic",
-        }
-      : { kind: "known", tokens: contextTokens, accuracy: "provider-reported" };
+    const contextTokens = planned?.latestUsage?.contextTokens;
+    const report =
+      threads.runtimeSessions?.occupancy?.(String(subject.aggregateId)) ??
+      (planned?.latestUsage === undefined || contextTokens === undefined
+        ? undefined
+        : { tokens: contextTokens, observedAt: planned.latestUsage.observedAt });
+    const estimate: KnownTokenMeasurement | undefined =
+      planned === undefined
+        ? undefined
+        : {
+            kind: "known",
+            tokens: planned.next.plan.plannedInputTokens,
+            accuracy: "conservative-heuristic",
+          };
+    const changedSince = this.#compactedSince(subject, report?.observedAt);
+    if (changedSince !== undefined) {
+      if (changedSince.kind === "known") return changedSince;
+      return report === undefined
+        ? estimate
+        : { kind: "known", tokens: report.tokens, accuracy: "conservative-heuristic" };
+    }
+    return report === undefined
+      ? estimate
+      : { kind: "known", tokens: report.tokens, accuracy: "provider-reported" };
+  }
+
+  /**
+   * The occupancy a compaction newer than `since` left behind: its own figure
+   * after, or `pending` when it gave none or may have changed the session
+   * without saying how. Undefined when nothing has compacted the session since.
+   */
+  #compactedSince(
+    subject: ContextSubjectRef,
+    since: string | undefined,
+  ): KnownTokenMeasurement | { readonly kind: "pending" } | undefined {
+    const latest = this.#options.harness.latestCompaction(subject);
+    if (latest === undefined || latest.status === "running") return undefined;
+    if (latest.status === "failed" && !latest.sessionMayHaveChanged) return undefined;
+    const at = latest.status === "completed" ? latest.receipt.completedAt : latest.failedAt;
+    if (since !== undefined && Date.parse(at) <= Date.parse(since)) return undefined;
+    return latest.status === "completed" ? latest.receipt.tokensAfter : { kind: "pending" };
   }
 
   /** The subject's latest plan, or undefined for one the host never planned. */

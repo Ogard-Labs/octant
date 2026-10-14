@@ -318,7 +318,10 @@ export class CodeOperationEventStore {
    * whose turns reported nothing yet), when no turn reported usage, or when a
    * record does not decode.
    */
-  latestWindowOccupancy(threadId: CodeThreadId, sessionId: ProviderSessionId): number | undefined {
+  latestWindowOccupancy(
+    threadId: CodeThreadId,
+    sessionId: ProviderSessionId,
+  ): { readonly tokens: number; readonly observedAt: string } | undefined {
     try {
       const envelope = this.#journal.latestThreadEvents({
         aggregateType: "code-operation",
@@ -349,7 +352,10 @@ export class CodeOperationEventStore {
         String(sessionReady.event.sessionId) !== String(sessionId)
       )
         return undefined;
-      return frame.event.contextTokens ?? frame.event.inputTokens;
+      return {
+        tokens: frame.event.contextTokens ?? frame.event.inputTokens,
+        observedAt: frame.occurredAt,
+      };
     } catch {
       return undefined;
     }
