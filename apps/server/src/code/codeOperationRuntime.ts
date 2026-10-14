@@ -3054,7 +3054,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           .pipe(Effect.catchAll(() => Effect.void)),
       );
     }
-    return turnState("interrupted");
+    return { ...turnState("interrupted"), stoppedOperationId: active.operationId };
   }
 
   async closeAll(): Promise<void> {

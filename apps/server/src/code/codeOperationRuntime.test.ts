@@ -790,7 +790,10 @@ describe("CodeOperationRuntime", () => {
         ).toBe("interrupted");
 
         // A retry answers from the journal rather than preparing the turn again.
-        await restarted.runtime.execute(windowId, start(51));
+        await expect(restarted.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
         expect(credential.resolve).toHaveBeenCalledOnce();
 
         credential.release();
@@ -798,7 +801,10 @@ describe("CodeOperationRuntime", () => {
           kind: "provider-turn-state",
           state: "interrupted",
         });
-        await restarted.runtime.execute(windowId, start(51));
+        await expect(restarted.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
         expect(credential.resolve).toHaveBeenCalledOnce();
         expect(connection.start).not.toHaveBeenCalled();
         expect(connection.resume).not.toHaveBeenCalled();

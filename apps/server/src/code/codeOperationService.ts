@@ -675,7 +675,12 @@ export interface CodeOperationTurnPort {
   readonly cancel: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
-  }) => Promise<CodeOperationTurnResult>;
+  }) => Promise<
+    CodeOperationTurnResult & {
+      /** The operation of the live turn this stopped, when there was one. */
+      readonly stoppedOperationId?: CodeOperationId;
+    }
+  >;
   /** What running turns are waiting on, before any window's authority is applied. */
   readonly pendingRequests?: () => ReadonlyArray<CodeTurnPendingRequest>;
   /**
@@ -984,6 +989,26 @@ export class CodeOperationService {
       } => frame.event.kind === "operation-result",
     );
     if (existing !== undefined) {
+      // A start stopped after its `running` result was journaled (one
+      // recovered after a restart) carries its stop as a later result. That
+      // one answers, not the stale `running` beside it.
+      const stoppedStart =
+        command.kind === "start-provider-turn"
+          ? replay.frames.findLast(
+              (
+                frame,
+              ): frame is CodeOperationEventFrame & {
+                readonly event: {
+                  readonly kind: "operation-result";
+                  readonly result: CodeOperationResult;
+                };
+              } =>
+                frame !== existing &&
+                frame.event.kind === "operation-result" &&
+                isTerminalSettlement(frame.event),
+            )
+          : undefined;
+      if (stoppedStart !== undefined) return deliveredResult(stoppedStart.event.result);
       if (
         command.kind === "start-provider-turn" &&
         isStaleRunningProviderTurn(existing.event.result, replay.frames)
@@ -2493,15 +2518,24 @@ export class CodeOperationService {
           thread,
           checkoutRoot: root.checkoutRoot,
         });
-        // The runtime had no turn to stop, so none of these starts was taken
-        // on, and none will be now. Each is journaled as stopped here: its
-        // preparation may not return for a long time, and until then the
-        // transcript would show it running.
-        if (stoppedStarts.length > 0 && cancelled.state === "failed") {
-          for (const starting of stoppedStarts) this.#journalStoppedStart(starting);
-          return this.#providerResult(command.operationId, { state: "interrupted" });
+        // A start the runtime has not taken on never will be now, so it is
+        // journaled as stopped here: its preparation may not return for a long
+        // time, and until then the transcript would show it running. One the
+        // runtime took on just before this Stop is its live turn, stopped and
+        // settled the way any live turn is.
+        for (const starting of stoppedStarts) {
+          const takenOn =
+            cancelled.state !== "failed" &&
+            (cancelled.stoppedOperationId === undefined ||
+              String(cancelled.stoppedOperationId) === String(starting.operationId));
+          if (!takenOn) this.#journalStoppedStart(starting);
         }
-        return this.#providerResult(command.operationId, cancelled);
+        return this.#providerResult(
+          command.operationId,
+          stoppedStarts.length > 0 && cancelled.state === "failed"
+            ? { state: "interrupted" }
+            : cancelled,
+        );
       }
     }
   }
