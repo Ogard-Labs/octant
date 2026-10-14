@@ -10,12 +10,15 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
-import { Effect, Stream } from "effect";
+import { Effect, Queue, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   runProviderConformance,
+  runSessionCompactionConformance,
   type ProviderConformanceFixture,
   type ProviderConnection,
+  type ProviderSessionCompaction,
+  type ProviderSessionCompactionConformanceFixture,
 } from "./index";
 
 const instanceId = "10000000-0000-4000-8000-000000000001" as ProviderInstanceId;
@@ -466,4 +469,204 @@ describe("runProviderConformance", () => {
       ).rejects.toThrow(new RegExp(`${capability}.*${support}.*${actualFailure}`, "i"));
     },
   );
+});
+
+describe("session compaction conformance", () => {
+  function compactionFixture(options: {
+    readonly claim?: "supported" | "unsupported" | "unavailable";
+    readonly compact?: "compacts" | "compacts-silently" | "refuses-version" | "absent";
+    /** The runtime holds the compaction until released; `accepts` takes a turn meanwhile. */
+    readonly hold?: "refuses-turns" | "accepts-turns";
+  }): ProviderSessionCompactionConformanceFixture {
+    let released = false;
+    let compacting = false;
+    const hold = Promise.withResolvers<void>();
+    let sequence = 0;
+    const base = () => ({ instanceId, sessionId, sequence: ++sequence, correlationId, occurredAt });
+    const capabilities: ProviderCapabilities = {
+      ...supportedCapabilities,
+      ...(options.claim === undefined
+        ? {}
+        : { sessionCompaction: { chat: options.claim, work: options.claim, code: options.claim } }),
+    };
+    const driver = {
+      kind: "opencode" as const,
+      probe: () =>
+        Effect.succeed({
+          instanceId,
+          readiness: "ready" as const,
+          processState: "running" as const,
+          detectedVersion: "1.0.0",
+          models: [],
+          capabilities,
+          observedAt: occurredAt,
+        }),
+      acquire: () =>
+        Effect.acquireRelease(
+          Effect.gen(function* () {
+            const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+            const emit = (event: ProviderRuntimeEvent) => Queue.offer(queue, event);
+            const held = <A>(effect: Effect.Effect<A>): Effect.Effect<A> =>
+              options.hold === undefined
+                ? effect
+                : Effect.acquireUseRelease(
+                    Effect.sync(() => {
+                      compacting = true;
+                    }),
+                    () =>
+                      Effect.zipRight(
+                        Effect.promise(() => hold.promise),
+                        effect,
+                      ),
+                    () =>
+                      Effect.sync(() => {
+                        compacting = false;
+                      }),
+                  );
+            const compact = (): Effect.Effect<ProviderSessionCompaction> => {
+              switch (options.compact) {
+                case "refuses-version":
+                  return Effect.succeed({
+                    kind: "refused",
+                    reason: "runtime-version-unsupported",
+                  });
+                case "compacts-silently":
+                  return Effect.succeed({ kind: "compacted" });
+                default:
+                  return held(
+                    emit({
+                      ...base(),
+                      kind: "context-compacted",
+                      trigger: "requested",
+                      tokensBefore: 900,
+                      tokensAfter: 120,
+                    }).pipe(Effect.as({ kind: "compacted", tokensBefore: 900, tokensAfter: 120 })),
+                  );
+              }
+            };
+            const connection: ProviderConnection = {
+              subscribe: Effect.succeed(Stream.fromQueue(queue)),
+              start: () => Effect.succeed({ sessionId, resumeCursor }),
+              resume: () => Effect.succeed({ sessionId, resumeCursor }),
+              send: () =>
+                compacting && options.hold === "refuses-turns"
+                  ? Effect.fail(failure("unavailable", "The session is compacting."))
+                  : Effect.zipRight(
+                      emit({ ...base(), kind: "text-delta", text: "hello" }),
+                      emit({ ...base(), kind: "completed" }),
+                    ),
+              ...(options.compact === "absent" ? {} : { compact }),
+              interrupt: () => Effect.void,
+              stop: () => Effect.void,
+              answerApproval: () => Effect.fail(failure("protocol", "No approval is pending.")),
+              answerUserInput: () => Effect.fail(failure("protocol", "No question is pending.")),
+              answerTool: () => Effect.fail(failure("unavailable", "No tools.")),
+            };
+            return connection;
+          }),
+          () =>
+            Effect.sync(() => {
+              released = true;
+            }),
+        ),
+    };
+    return {
+      driver,
+      probeInput: { instanceId },
+      acquireInput: { instanceId, projectRoot: "/tmp/octant-provider-conformance", mode: "work" },
+      sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
+      turns: [
+        { sessionId, prompt: "Remember the plan.", attachments: [], tools: [] },
+        { sessionId, prompt: "Carry on.", attachments: [], tools: [] },
+      ],
+      resume: (handle) => ({
+        sessionId: handle.sessionId,
+        resumeCursor: handle.resumeCursor ?? resumeCursor,
+        executionPolicy: "approval-gated",
+      }),
+      compactionId: "40000000-0000-4000-8000-000000000004",
+      ...(options.hold === undefined ? {} : { releaseCompaction: () => hold.resolve() }),
+      isReleased: () => released,
+    };
+  }
+
+  it("accepts a driver that compacts, reports it before answering, and resumes afterwards", async () => {
+    await expect(
+      runSessionCompactionConformance(
+        compactionFixture({ claim: "supported", compact: "compacts" }),
+      ),
+    ).resolves.toEqual({
+      claim: "supported",
+      compacted: true,
+      turnRefusedWhileCompacting: false,
+      released: true,
+    });
+  });
+
+  it("refuses a turn offered while the compaction is still pending", async () => {
+    await expect(
+      runSessionCompactionConformance(
+        compactionFixture({ claim: "supported", compact: "compacts", hold: "refuses-turns" }),
+      ),
+    ).resolves.toMatchObject({ compacted: true, turnRefusedWhileCompacting: true });
+    await expect(
+      runSessionCompactionConformance(
+        compactionFixture({ claim: "supported", compact: "compacts", hold: "accepts-turns" }),
+      ),
+    ).rejects.toThrow(/a turn was accepted while a compaction was pending/);
+  });
+
+  it("accepts a driver that claims nothing and offers no compact", async () => {
+    await expect(
+      runSessionCompactionConformance(compactionFixture({ compact: "absent" })),
+    ).resolves.toEqual({
+      claim: "unsupported",
+      compacted: false,
+      turnRefusedWhileCompacting: false,
+      released: true,
+    });
+  });
+
+  it("accepts an install too old for the request when compact refuses it", async () => {
+    await expect(
+      runSessionCompactionConformance(
+        compactionFixture({ claim: "unavailable", compact: "refuses-version" }),
+      ),
+    ).resolves.toEqual({
+      claim: "unavailable",
+      compacted: false,
+      turnRefusedWhileCompacting: false,
+      released: true,
+    });
+  });
+
+  it("refuses a claim the connection cannot honor", async () => {
+    await expect(
+      runSessionCompactionConformance(compactionFixture({ claim: "supported", compact: "absent" })),
+    ).rejects.toThrow(/claimed as supported but the connection cannot compact/);
+    await expect(
+      runProviderConformance({
+        ...makeFakeFixture({
+          capabilities: {
+            sessionCompaction: { chat: "supported", work: "supported", code: "supported" },
+          },
+        }),
+        acquireInput: { instanceId, projectRoot: "/tmp/octant-provider-conformance", mode: "chat" },
+      }),
+    ).rejects.toThrow(/claimed as supported but the connection cannot compact/);
+  });
+
+  it("refuses a compact offered by a driver that claims it cannot compact", async () => {
+    await expect(
+      runSessionCompactionConformance(compactionFixture({ compact: "compacts" })),
+    ).rejects.toThrow(/claimed as unsupported but the connection offers to compact/);
+  });
+
+  it("refuses a compaction that never reports itself on the session's events", async () => {
+    await expect(
+      runSessionCompactionConformance(
+        compactionFixture({ claim: "supported", compact: "compacts-silently" }),
+      ),
+    ).rejects.toThrow(/without a requested context-compacted event/);
+  }, 10_000);
 });

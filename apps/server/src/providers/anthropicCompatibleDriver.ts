@@ -81,6 +81,9 @@ const initialCapabilities: ProviderCapabilities = {
   // provider-level "supported" offered Octant tools to every model the
   // endpoint routes, including ones that answer a tool call in text. Tools
   // follow a person's per-model Verify tools result (verifiedToolModelIds).
+  // Octant Harness keeps a Code session's transcript and compacts it; Chat and
+  // Work send the host's planned history, which the host compacts itself.
+  sessionCompaction: { chat: "unsupported", work: "unsupported", code: "supported" },
   ...unsupportedChatCapabilities,
 };
 

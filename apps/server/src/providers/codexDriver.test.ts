@@ -133,6 +133,8 @@ function fixture(
     readonly turnStart?: () => Promise<{
       readonly turn: { readonly id: string; readonly status: "inProgress" };
     }>;
+    readonly version?: string;
+    readonly threadCompactStart?: (input: { readonly threadId: string }) => Promise<void>;
   } = {},
 ): Fixture {
   const calls: Array<{ method: string; input?: unknown }> = [];
@@ -202,6 +204,10 @@ function fixture(
     turnInterrupt: async (value) => {
       calls.push({ method: "turn/interrupt", input: value });
     },
+    threadCompactStart: async (value) => {
+      calls.push({ method: "thread/compact/start", input: value });
+      await input.threadCompactStart?.(value);
+    },
     respondApproval: async (value) => {
       calls.push({ method: "approval/respond", input: value });
       await input.respondApproval?.(value);
@@ -228,7 +234,7 @@ function fixture(
             resolveExit = resolve;
           });
           return {
-            version: "0.144.4",
+            version: input.version ?? "0.144.4",
             pid: starts,
             rpc: {} as CodexAppServerConnection["rpc"],
             exited,
@@ -2710,4 +2716,216 @@ describe("Codex execution authority and approvals", () => {
       await acquired.close();
     },
   );
+});
+
+function compactOf(connection: Awaited<ReturnType<typeof acquireConnection>>["connection"]) {
+  const compact = connection.compact;
+  if (compact === undefined) throw new Error("The Codex connection compacts.");
+  return compact;
+}
+
+describe("compacting a Codex session", () => {
+  const compactionId = "c0000000-0000-4000-8000-000000000001";
+  const turnStarted = (turnId: string) =>
+    notification("turn/started", {
+      threadId: "thread-1",
+      turn: { id: turnId, status: "inProgress" },
+    });
+  const compactionItem = (method: "item/started" | "item/completed", turnId: string) =>
+    notification(method, {
+      threadId: "thread-1",
+      turnId,
+      item: { type: "contextCompaction", id: "compaction-item" },
+      ...(method === "item/started" ? { startedAtMs: 10 } : { completedAtMs: 20 }),
+    });
+  const turnCompleted = (turnId: string, status: "completed" | "failed" | "interrupted") =>
+    notification("turn/completed", {
+      threadId: "thread-1",
+      turn: { id: turnId, status },
+    });
+
+  async function compacting(f: Fixture): Promise<{
+    readonly acquired: Awaited<ReturnType<typeof acquireConnection>>;
+    readonly events: Promise<ReadonlyArray<ProviderRuntimeEvent>>;
+    readonly result: Promise<unknown>;
+  }> {
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+    await startSession(acquired.connection);
+    const compact = compactOf(acquired.connection);
+    const events = takeEvents(acquired.connection, 2);
+    const result = Effect.runPromise(compact({ sessionId, compactionId }));
+    return { acquired, events, result };
+  }
+
+  it("claims compaction in every mode only from the release it was read against", async () => {
+    const current = fixture({ version: "0.162.1" });
+    const probed = await Effect.runPromise(
+      Effect.scoped(makeCodexDriver(current.options()).probe({ instanceId })),
+    );
+    expect(probed.capabilities.sessionCompaction).toEqual({
+      chat: "supported",
+      work: "supported",
+      code: "supported",
+    });
+    const older = fixture({ version: "0.162.0" });
+    const olderProbe = await Effect.runPromise(
+      Effect.scoped(makeCodexDriver(older.options()).probe({ instanceId })),
+    );
+    expect(olderProbe.capabilities.sessionCompaction).toEqual({
+      chat: "unavailable",
+      work: "unavailable",
+      code: "unavailable",
+    });
+  });
+
+  it("asks Codex to compact the thread and reports the compaction as requested before answering", async () => {
+    const f = fixture({ version: "0.162.1" });
+    const { acquired, events, result } = await compacting(f);
+    f.emit(turnStarted("turn-c"));
+    f.emit(compactionItem("item/started", "turn-c"));
+    f.emit(compactionItem("item/completed", "turn-c"));
+    f.emit(turnCompleted("turn-c", "completed"));
+
+    await expect(result).resolves.toEqual({ kind: "compacted" });
+    expect(f.calls.find(({ method }) => method === "thread/compact/start")?.input).toEqual({
+      threadId: "thread-1",
+    });
+    expect((await events).map((event) => event.kind)).toEqual(["context-compacted", "completed"]);
+    expect((await events)[0]).toMatchObject({ trigger: "requested", sessionId });
+    await acquired.close();
+  });
+
+  it("says a compaction Codex reported as failed left the thread alone", async () => {
+    const f = fixture({ version: "0.162.1" });
+    const { acquired, result } = await compacting(f);
+    f.emit(turnStarted("turn-c"));
+    f.emit(compactionItem("item/started", "turn-c"));
+    f.emit(turnCompleted("turn-c", "failed"));
+
+    await expect(result).resolves.toEqual({
+      kind: "failed",
+      message: "Codex could not compact the session.",
+      sessionMayHaveChanged: false,
+    });
+    await acquired.close();
+  });
+
+  it("cannot vouch for a compaction that was interrupted before it reported", async () => {
+    const f = fixture({ version: "0.162.1" });
+    const { acquired, result } = await compacting(f);
+    f.emit(turnStarted("turn-c"));
+    f.emit(compactionItem("item/started", "turn-c"));
+    f.emit(turnCompleted("turn-c", "interrupted"));
+
+    await expect(result).resolves.toMatchObject({
+      kind: "failed",
+      sessionMayHaveChanged: true,
+    });
+    await acquired.close();
+  });
+
+  it("counts a compaction whose item completed even when the run then fails", async () => {
+    const f = fixture({ version: "0.162.1" });
+    const { acquired, result } = await compacting(f);
+    f.emit(turnStarted("turn-c"));
+    f.emit(compactionItem("item/started", "turn-c"));
+    f.emit(compactionItem("item/completed", "turn-c"));
+    f.emit(turnCompleted("turn-c", "failed"));
+
+    await expect(result).resolves.toEqual({ kind: "compacted" });
+    await acquired.close();
+  });
+
+  it("refuses as too old when the runtime does not know the request, and touches nothing", async () => {
+    const f = fixture({
+      version: "0.162.1",
+      threadCompactStart: async () => {
+        throw new CodexRpcClientFailure("remote", "Codex request failed.", {
+          remoteCode: -32601,
+          remoteMessage: "Method not found",
+        });
+      },
+    });
+    const { acquired, result } = await compacting(f);
+    await expect(result).resolves.toEqual({
+      kind: "refused",
+      reason: "runtime-version-unsupported",
+    });
+    await acquired.close();
+  });
+
+  it("refuses an install older than the release it was read against without asking it", async () => {
+    const f = fixture({ version: "0.162.0" });
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "chat");
+    await startSession(acquired.connection);
+    await expect(
+      Effect.runPromise(compactOf(acquired.connection)({ sessionId, compactionId })),
+    ).resolves.toEqual({ kind: "refused", reason: "runtime-version-unsupported" });
+    expect(f.calls.some(({ method }) => method === "thread/compact/start")).toBe(false);
+    await acquired.close();
+  });
+
+  it("answers a compaction whose session is stopped or whose connection closes as one that may have changed it", async () => {
+    const stopped = fixture({ version: "0.162.1" });
+    const first = await compacting(stopped);
+    await Effect.runPromise(first.acquired.connection.stop(sessionId));
+    await expect(first.result).resolves.toMatchObject({
+      kind: "failed",
+      sessionMayHaveChanged: true,
+    });
+    await first.acquired.close();
+
+    const closed = fixture({ version: "0.162.1" });
+    const second = await compacting(closed);
+    await second.acquired.close();
+    await expect(second.result).resolves.toMatchObject({
+      kind: "failed",
+      sessionMayHaveChanged: true,
+    });
+  });
+
+  it("refuses a turn while its compaction is pending", async () => {
+    const f = fixture({ version: "0.162.1" });
+    const { acquired, result } = await compacting(f);
+    await expect(
+      Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "too soon", attachments: [], tools: [] }),
+      ),
+    ).rejects.toThrow();
+    expect(f.calls.some(({ method }) => method === "turn/start")).toBe(false);
+    f.emit(turnStarted("turn-c"));
+    f.emit(turnCompleted("turn-c", "failed"));
+    await expect(result).resolves.toMatchObject({ kind: "failed", sessionMayHaveChanged: false });
+    await acquired.close();
+  });
+
+  it("refuses while a turn runs on the session", async () => {
+    const f = fixture({ version: "0.162.1" });
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+    await startSession(acquired.connection);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Keep going.", attachments: [], tools: [] }),
+    );
+    await expect(
+      Effect.runPromise(compactOf(acquired.connection)({ sessionId, compactionId })),
+    ).resolves.toEqual({ kind: "refused", reason: "turn-running" });
+    await acquired.close();
+  });
+
+  it("reports a compaction Codex ran by itself inside a turn as automatic", async () => {
+    const f = fixture({ version: "0.162.1" });
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+    await startSession(acquired.connection);
+    const events = takeEvents(acquired.connection, 2);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "Keep going.", attachments: [], tools: [] }),
+    );
+    f.emit(turnStarted("turn-1"));
+    f.emit(compactionItem("item/started", "turn-1"));
+    f.emit(compactionItem("item/completed", "turn-1"));
+    f.emit(turnCompleted("turn-1", "completed"));
+    expect((await events).map((event) => event.kind)).toEqual(["context-compacted", "completed"]);
+    expect((await events)[0]).toMatchObject({ trigger: "automatic" });
+    await acquired.close();
+  });
 });

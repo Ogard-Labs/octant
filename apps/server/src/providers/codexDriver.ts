@@ -24,6 +24,7 @@ import type {
   ProviderAcquireInput,
   ProviderConnection,
   ProviderDriver,
+  ProviderSessionCompaction,
 } from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
@@ -39,7 +40,11 @@ import {
   type CodexPendingApproval,
 } from "./codexEventMapper";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
-import type { CodexAppServerConnection, CodexProcessPort } from "./codexProcess";
+import {
+  isAtLeastRelease,
+  type CodexAppServerConnection,
+  type CodexProcessPort,
+} from "./codexProcess";
 import { codexProviderCredential, type CodexProviderCredential } from "./codexProviderCredential";
 import {
   decodeAccountRateLimitsReadResult,
@@ -48,6 +53,7 @@ import {
   decodeModelListResult,
   decodeThreadResumeResult,
   decodeThreadStartResult,
+  decodeThreadCompactStartResult,
   decodeTurnInterruptResult,
   decodeTurnStartResult,
   decodeTurnSteerResult,
@@ -221,6 +227,8 @@ export interface CodexClientPort {
     }>;
   }): Promise<CodexTurnSteerResult>;
   turnInterrupt(input: { readonly threadId: string; readonly turnId: string }): Promise<void>;
+  /** Queues a compaction of the thread, which then runs as a turn of its own. */
+  threadCompactStart?(input: { readonly threadId: string }): Promise<void>;
   respondApproval(input: CodexApprovalResponse): Promise<void>;
   respondTool(input: CodexApprovalResponse): Promise<void>;
   subscribe(listener: (message: CodexServerMessage) => void): () => void;
@@ -273,6 +281,25 @@ interface SessionState {
       readonly turnId: string;
     }
   >;
+  /** The compaction `compact` asked for, until the run that carries it ends. */
+  compaction?: CodexPendingCompaction | undefined;
+}
+
+interface CodexPendingCompaction {
+  /** The run completed its compaction item, so the thread's history was replaced. */
+  compacted: boolean;
+  readonly settle: (outcome: ProviderSessionCompaction) => void;
+}
+
+/**
+ * The first release whose `thread/compact/start` request, and the order in
+ * which it replaces history and reports the item, were read at its source tag
+ * (`rust-v0.162.1`). An older install is not claimed and is refused.
+ */
+const CODEX_COMPACTION_RELEASE = [0, 162, 1] as const;
+
+export function codexCompactsSessions(version: string): boolean {
+  return isAtLeastRelease(version, CODEX_COMPACTION_RELEASE);
 }
 
 const capabilities = {
@@ -296,12 +323,20 @@ const capabilities = {
 
 function codexChatCapabilities(
   models: ReadonlyArray<{ readonly inputModalities: ReadonlyArray<"text" | "image"> }>,
+  version: string,
 ): ProviderCapabilities {
+  // Codex keeps every mode's conversation, so it compacts all of them alike.
+  const sessionCompaction = codexCompactsSessions(version) ? "supported" : "unavailable";
   return {
     ...capabilities,
     nativeAttachments: models.some((model) => model.inputModalities.includes("image"))
       ? "supported"
       : "unsupported",
+    sessionCompaction: {
+      chat: sessionCompaction,
+      work: sessionCompaction,
+      code: sessionCompaction,
+    },
   };
 }
 
@@ -624,6 +659,9 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
     turnInterrupt: async (input) => {
       await rpc.request("turn/interrupt", input, decodeTurnInterruptResult);
     },
+    threadCompactStart: async (input) => {
+      await rpc.request("thread/compact/start", input, decodeThreadCompactStartResult);
+    },
     respondApproval: async ({ providerRequestId, result }) => {
       await rpc.respond(providerRequestId, result);
     },
@@ -693,7 +731,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       }
       return Effect.gen(function* () {
         const runtime = yield* acquireRuntime(options, clientFactory);
-        return yield* makeConnection(options, runtime.client, projectRoot, mode, {
+        return yield* makeConnection(options, runtime.client, runtime.version, projectRoot, mode, {
           instanceId: options.instanceId,
           clock,
           makeCorrelation,
@@ -852,7 +890,7 @@ function normalizeProbe(
     processState: "running",
     detectedVersion: version,
     models,
-    capabilities: codexChatCapabilities(models),
+    capabilities: codexChatCapabilities(models, version),
     ...(ready
       ? { lastSuccessfulProbeAt: observedAt as UtcTimestamp }
       : {
@@ -881,6 +919,7 @@ interface ConnectionFactories {
 function makeConnection(
   options: CodexDriverOptions,
   client: CodexClientPort,
+  version: string,
   projectRoot: string,
   mode: ProviderAcquireInput["mode"],
   factories: ConnectionFactories,
@@ -941,6 +980,27 @@ function makeConnection(
       unsubscribe?.();
       unsubscribe = undefined;
     };
+    /**
+     * Ends a pending compaction with the run that carried it. Only Codex's own
+     * report of a failed or bare completed run attests that history was left
+     * alone; an interruption, a lost runtime or a report Octant could not read
+     * may have landed after the replacement.
+     */
+    const settleCompaction = (state: SessionState, attestedUnchanged: boolean) => {
+      const pending = state.compaction;
+      if (pending === undefined) return;
+      pending.settle(
+        pending.compacted
+          ? { kind: "compacted" }
+          : {
+              kind: "failed",
+              message: attestedUnchanged
+                ? "Codex could not compact the session."
+                : "Codex stopped before the compaction finished.",
+              sessionMayHaveChanged: !attestedUnchanged,
+            },
+      );
+    };
     const terminalEvent = (
       state: SessionState,
       value:
@@ -949,6 +1009,7 @@ function makeConnection(
         | { readonly kind: "failed"; readonly failure: ProviderFailure },
     ) => {
       if (state.terminal) return;
+      settleCompaction(state, false);
       state.terminal = true;
       clearPendingApprovals(state);
       clearPendingTools(state);
@@ -1088,8 +1149,12 @@ function makeConnection(
           continue;
         }
         if (!isTerminal(item.event)) state.outputAccepted = true;
+        if (item.event.kind === "context-compacted" && state.compaction !== undefined) {
+          state.compaction.compacted = true;
+        }
         offer(item.event);
         if (isTerminal(item.event)) {
+          settleCompaction(state, item.event.kind === "failed" || item.event.kind === "completed");
           state.terminal = true;
           clearPendingApprovals(state);
           clearPendingTools(state);
@@ -1138,7 +1203,10 @@ function makeConnection(
         removeInvalidation();
         unsubscribe?.();
         unsubscribe = undefined;
-        for (const state of sessions.values()) deactivate(state);
+        for (const state of sessions.values()) {
+          settleCompaction(state, false);
+          deactivate(state);
+        }
         sessions.clear();
         sessionsByThread.clear();
         pendingApprovalOwners.clear();
@@ -1357,6 +1425,11 @@ function makeConnection(
             if (state.terminal) {
               return Effect.fail(failure("protocol", "Codex session is already terminal."));
             }
+            // Codex queues a turn behind a compaction it is still running, so
+            // the compaction's report would be read as this turn's.
+            if (state.compaction !== undefined) {
+              return Effect.fail(failure("unavailable", "Codex is compacting this session."));
+            }
             ensureSubscribed();
             return Effect.tryPromise({
               try: async () => {
@@ -1433,6 +1506,58 @@ function makeConnection(
             );
           }),
         ),
+      compact: ({ sessionId }) =>
+        stateFor(sessionId).pipe(
+          Effect.flatMap((state): Effect.Effect<ProviderSessionCompaction, ProviderFailure> => {
+            if (state.terminal) {
+              return Effect.fail(failure("protocol", "Codex session is already terminal."));
+            }
+            if (state.activeTurnId !== undefined || state.compaction !== undefined) {
+              return Effect.succeed({ kind: "refused", reason: "turn-running" });
+            }
+            const threadCompactStart = client.threadCompactStart;
+            if (!codexCompactsSessions(version) || threadCompactStart === undefined) {
+              return Effect.succeed({ kind: "refused", reason: "runtime-version-unsupported" });
+            }
+            ensureSubscribed();
+            return Effect.async<ProviderSessionCompaction>((resume) => {
+              const pending: CodexPendingCompaction = {
+                compacted: false,
+                settle: (outcome) => {
+                  if (state.compaction !== pending) return;
+                  state.compaction = undefined;
+                  resume(Effect.succeed(outcome));
+                },
+              };
+              state.compaction = pending;
+              threadCompactStart({ threadId: state.threadId }).catch((error: unknown) => {
+                // An error answer means the request was never queued, so the
+                // thread is untouched; a request that timed out or lost its
+                // runtime may still have started.
+                if (error instanceof CodexRpcClientFailure && error.kind === "remote") {
+                  pending.settle(
+                    error.remoteCode === -32601
+                      ? { kind: "refused", reason: "runtime-version-unsupported" }
+                      : {
+                          kind: "failed",
+                          message: "Codex refused to compact the session.",
+                          sessionMayHaveChanged: false,
+                        },
+                  );
+                  return;
+                }
+                pending.settle({
+                  kind: "failed",
+                  message: "Codex did not confirm the compaction request.",
+                  sessionMayHaveChanged: true,
+                });
+              });
+              return Effect.sync(() => {
+                if (state.compaction === pending) state.compaction = undefined;
+              });
+            });
+          }),
+        ),
       interrupt: (sessionId) =>
         stateFor(sessionId).pipe(
           Effect.flatMap((state) =>
@@ -1447,6 +1572,7 @@ function makeConnection(
         stateFor(sessionId).pipe(
           Effect.tap((state) =>
             Effect.sync(() => {
+              settleCompaction(state, false);
               state.terminal = true;
               clearPendingApprovals(state);
               clearPendingTools(state);
@@ -1676,6 +1802,7 @@ function makeEventContext(state: SessionState, factories: ConnectionFactories): 
     turnId: state.activeTurnId!,
     sequence: state.context?.sequence ?? 1,
     terminal: false,
+    ...(state.compaction === undefined ? {} : { compactionRequested: true }),
     requestIds: new Map(),
     agentMessages: new Map(),
     taskIds: new Map(),

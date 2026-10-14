@@ -3,7 +3,10 @@ import {
   decodeProviderSessionId,
   type ProviderModelId,
 } from "@octant/contracts";
-import { runProviderConformance } from "@octant/provider-sdk/conformance";
+import {
+  runProviderConformance,
+  runSessionCompactionConformance,
+} from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
@@ -148,6 +151,133 @@ describe("Codex provider conformance", () => {
       released: true,
     });
   });
+
+  it.each([
+    { version: "0.162.1", claim: "supported", compacted: true },
+    { version: "0.162.0", claim: "unavailable", compacted: false },
+  ] as const)(
+    "holds Codex $version to its session-compaction claim",
+    async ({ version, claim, compacted }) => {
+      const listeners = new Set<(message: CodexServerMessage) => void>();
+      const emit = (message: CodexServerMessage) =>
+        listeners.forEach((listener) => listener(message));
+      let released = false;
+      let turns = 0;
+      const hold = Promise.withResolvers<void>();
+      const client: CodexClientPort = {
+        accountRead: async () => ({ account: { type: "chatgpt" }, requiresOpenaiAuth: true }),
+        rateLimitsRead: async () => ({ rateLimits: { rateLimitReachedType: null } }),
+        modelList: async () => ({ data: [model()], nextCursor: null }),
+        configRead: async () => ({ config: {} }),
+        threadStart: async (input: CodexThreadStartInput) => thread("thread-compact", input.cwd),
+        threadResume: async ({ threadId }) => thread(threadId, projectRoot),
+        turnStart: async ({ threadId }) => {
+          const turnId = `turn-${++turns}`;
+          emit(
+            notification("turn/started", { threadId, turn: { id: turnId, status: "inProgress" } }),
+          );
+          emit(
+            notification("item/agentMessage/delta", {
+              threadId,
+              turnId,
+              itemId: "message-1",
+              delta: "noted",
+            }),
+          );
+          emit(
+            notification("turn/completed", { threadId, turn: { id: turnId, status: "completed" } }),
+          );
+          return { turn: { id: turnId, status: "inProgress" } };
+        },
+        threadCompactStart: async ({ threadId }) => {
+          // The answer comes first; the compaction then runs as its own turn,
+          // held open until the harness has offered a turn meanwhile.
+          void hold.promise.then(() => {
+            const turnId = "turn-compaction";
+            emit(
+              notification("turn/started", {
+                threadId,
+                turn: { id: turnId, status: "inProgress" },
+              }),
+            );
+            for (const method of ["item/started", "item/completed"] as const) {
+              emit(
+                notification(method, {
+                  threadId,
+                  turnId,
+                  item: { type: "contextCompaction", id: "compaction-1" },
+                  ...(method === "item/started" ? { startedAtMs: 1 } : { completedAtMs: 2 }),
+                }),
+              );
+            }
+            emit(
+              notification("turn/completed", {
+                threadId,
+                turn: { id: turnId, status: "completed" },
+              }),
+            );
+          });
+        },
+        turnInterrupt: async () => undefined,
+        respondApproval: async () => undefined,
+        respondTool: async () => undefined,
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      };
+      const driver = makeCodexDriver({
+        instanceId,
+        binaryPath: "/usr/local/bin/codex",
+        process: {
+          start: () =>
+            Effect.acquireRelease(
+              Effect.succeed({
+                version,
+                pid: 214,
+                rpc: {} as CodexAppServerConnection["rpc"],
+                exited: new Promise<void>(() => undefined),
+              }),
+              () =>
+                Effect.sync(() => {
+                  released = true;
+                }),
+            ),
+        },
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        clientFactory: () => client,
+        idleLeaseMs: 0,
+        clock: () => "2026-07-15T00:00:00.000Z",
+        correlationId: () => "80000000-0000-4000-8000-000000000215",
+      });
+
+      await expect(
+        runSessionCompactionConformance({
+          driver,
+          probeInput: { instanceId },
+          acquireInput: { instanceId, projectRoot, mode: "work" },
+          sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
+          turns: [
+            { sessionId, prompt: "Remember the plan.", attachments: [], tools: [] },
+            { sessionId, prompt: "Carry on.", attachments: [], tools: [] },
+          ],
+          resume: (handle) => ({
+            sessionId: handle.sessionId,
+            resumeCursor: handle.resumeCursor ?? { driverKind: "codex", value: "thread-compact" },
+            executionPolicy: "approval-gated",
+          }),
+          compactionId: "80000000-0000-4000-8000-000000000216",
+          releaseCompaction: () => hold.resolve(),
+          isReleased: () => released,
+        }),
+      ).resolves.toEqual({
+        claim,
+        compacted,
+        turnRefusedWhileCompacting: compacted,
+        released: true,
+      });
+    },
+  );
 
   it("passes chat conformance with explicit unsupported native attachments", async () => {
     const fixture = createCodexConformanceFixture();

@@ -113,6 +113,9 @@ const initialCapabilities: ProviderCapabilities = {
   taskProgress: "unsupported",
   nativeChildAgents: "unsupported",
   harnessAutoReview: "unsupported",
+  // Octant Harness keeps a Code session's transcript and compacts it; Chat and
+  // Work send the host's planned history, which the host compacts itself.
+  sessionCompaction: { chat: "unsupported", work: "unsupported", code: "supported" },
   ...unsupportedChatCapabilities,
 };
 

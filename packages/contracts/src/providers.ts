@@ -1161,6 +1161,20 @@ export const ProviderCapabilities = Schema.Struct({
    * one its session was opened with rather than discarding that conversation.
    */
   modelSwitch: Schema.optional(ProviderCapabilitySupport),
+  /**
+   * Whether the runtime compacts a session it holds when asked, per mode,
+   * through the connection's `compact`: `unavailable` when this install is too
+   * old for the request. Absent reads as unsupported in every mode. A host
+   * that plans a mode's conversation itself compacts it without the runtime,
+   * so this answers only for the sessions the runtime keeps.
+   */
+  sessionCompaction: Schema.optional(
+    Schema.Struct({
+      chat: ProviderCapabilitySupport,
+      work: ProviderCapabilitySupport,
+      code: ProviderCapabilitySupport,
+    }).annotations(strict),
+  ),
   citations: ProviderCapabilitySupport,
   harnessAutoReview: ProviderCapabilitySupport,
 }).annotations(strict);
@@ -2254,6 +2268,18 @@ export const ProviderRuntimeEvent = Schema.Union(
   })
     .annotations(strict)
     .pipe(Schema.filter((event) => event.attempt <= event.maxAttempts)),
+  /**
+   * The runtime compacted the session's window: `requested` when the
+   * connection's `compact` asked for it, `automatic` when the runtime did it
+   * by itself. Token figures are present only when the runtime reported them.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("context-compacted"),
+    trigger: Schema.Literal("requested", "automatic"),
+    tokensBefore: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+    tokensAfter: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("task-progress"),

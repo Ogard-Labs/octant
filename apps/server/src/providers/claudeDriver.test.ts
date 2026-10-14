@@ -117,8 +117,11 @@ class FakeQuery implements ClaudeQueryPort {
       },
     ],
     account: { ready: true, apiProvider: "firstParty" },
+    compactAnnounced: true,
   };
   readonly sent: string[] = [];
+  readonly compactionRequests = vi.fn(() => Effect.void);
+  readonly requestCompaction = () => this.compactionRequests();
   readonly interrupt = vi.fn(() => Effect.void);
   readonly setPermissionMode = vi.fn(() => Effect.void);
   readonly supportedModels = vi.fn(() => Effect.succeed(this.initialization.models));
@@ -148,9 +151,11 @@ class FakeQuery implements ClaudeQueryPort {
     announcesSession = true,
     models: ClaudeQueryPort["initialization"]["models"] = [],
     autoCompactThreshold?: number,
+    compactAnnounced = true,
   ) {
     this.initialization = {
       ...this.initialization,
+      compactAnnounced,
       account,
       ...(models.length === 0 ? {} : { models }),
       ...(autoCompactThreshold === undefined ? {} : { autoCompactThreshold }),
@@ -179,6 +184,7 @@ function harness(
   options: {
     readonly models?: ClaudeQueryPort["initialization"]["models"];
     readonly autoCompactThreshold?: number;
+    readonly compactAnnounced?: boolean;
     readonly configDirectory?: string;
     readonly makeEnvironmentScope?: (
       authentication: ClaudeAuthentication,
@@ -203,6 +209,7 @@ function harness(
           true,
           options.models ?? [],
           options.autoCompactThreshold,
+          options.compactAnnounced ?? true,
         );
         queries.push(query);
         sessions.set(query.sdkSessionId, {
@@ -2202,7 +2209,12 @@ describe("Claude execution policy", () => {
       acquired.connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
     );
     await query.emit(request("message-1"));
-    await query.emit({ kind: "compaction", sessionId: "sdk-session-1" });
+    await query.emit({
+      kind: "compaction",
+      sessionId: "sdk-session-1",
+      trigger: "auto",
+      preTokens: 150_000,
+    });
     await query.emit(request("message-2"));
     await query.emit(completed("sdk-session-1"));
     await settle();
@@ -4505,5 +4517,275 @@ describe("Claude account sign-in", () => {
     }
     expect(apiKey.queries).toHaveLength(0);
     expect(apiKey.credentialResolver.resolve).not.toHaveBeenCalled();
+  });
+});
+
+describe("compacting a Claude session", () => {
+  const compactionId = "c0000000-0000-4000-8000-000000000710";
+  const settle = () => new Promise((done) => setTimeout(done, 20));
+
+  async function compactingSession(options: { readonly compactAnnounced?: boolean } = {}) {
+    const f = harness("subscription", "current-session", options);
+    const acquired = await acquire(f.driver, "work");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const events: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          events.push(event);
+        }),
+      ),
+    );
+    await settle();
+    const compact = acquired.connection.compact;
+    if (compact === undefined) throw new Error("The Claude connection compacts.");
+    const query = f.queries.at(-1);
+    if (query === undefined) throw new Error("The session opened a query.");
+    return {
+      f,
+      query,
+      events,
+      compact: () => Effect.runPromise(compact({ sessionId, compactionId })),
+      close: async () => {
+        await Effect.runPromise(Fiber.interrupt(subscription));
+        await acquired.close();
+      },
+      send: (prompt: string) =>
+        Effect.runPromise(
+          acquired.connection.send({ sessionId, prompt, attachments: [], tools: [] }),
+        ),
+    };
+  }
+
+  it("reports compaction in every mode only when the runtime announces its command", async () => {
+    const announced = harness();
+    const probed = await Effect.runPromise(Effect.scoped(announced.driver.probe({ instanceId })));
+    expect(probed.capabilities.sessionCompaction).toEqual({
+      chat: "supported",
+      work: "supported",
+      code: "supported",
+    });
+    const silent = harness("subscription", "current-session", { compactAnnounced: false });
+    const unannounced = await Effect.runPromise(Effect.scoped(silent.driver.probe({ instanceId })));
+    expect(unannounced.capabilities.sessionCompaction).toEqual({
+      chat: "unavailable",
+      work: "unavailable",
+      code: "unavailable",
+    });
+  });
+
+  it("sends the runtime's own command and reports the cut as requested before answering", async () => {
+    const session = await compactingSession();
+    const result = session.compact();
+    await settle();
+    expect(session.query.compactionRequests).toHaveBeenCalledOnce();
+    expect(session.query.sent).toEqual([]);
+    await session.query.emit({ kind: "status", sessionId: "sdk-session-1", status: "compacting" });
+    await session.query.emit({
+      kind: "compaction",
+      sessionId: "sdk-session-1",
+      trigger: "manual",
+      preTokens: 48_000,
+      postTokens: 6_000,
+    });
+    await session.query.emit({
+      kind: "status",
+      sessionId: "sdk-session-1",
+      status: null,
+      compactResult: "success",
+    });
+
+    await expect(result).resolves.toEqual({
+      kind: "compacted",
+      tokensBefore: 48_000,
+      tokensAfter: 6_000,
+    });
+    expect(session.events.filter((event) => event.kind === "context-compacted")).toEqual([
+      expect.objectContaining({ trigger: "requested", tokensBefore: 48_000, tokensAfter: 6_000 }),
+    ]);
+    await session.close();
+  });
+
+  it("compacts right after a finished turn on the same session and still reports the cut", async () => {
+    const session = await compactingSession();
+    await session.send("first");
+    await session.query.emit(completed("sdk-session-1"));
+    await settle();
+    const result = session.compact();
+    await settle();
+    await session.query.emit({
+      kind: "compaction",
+      sessionId: "sdk-session-1",
+      trigger: "manual",
+      preTokens: 12_000,
+      postTokens: 2_000,
+    });
+    await session.query.emit({
+      kind: "status",
+      sessionId: "sdk-session-1",
+      status: null,
+      compactResult: "success",
+    });
+    await expect(result).resolves.toEqual({
+      kind: "compacted",
+      tokensBefore: 12_000,
+      tokensAfter: 2_000,
+    });
+    expect(session.events.map((event) => event.kind).slice(-2)).toEqual([
+      "completed",
+      "context-compacted",
+    ]);
+    await session.close();
+  });
+
+  it("settles when the status says success before the boundary arrives and no result follows", async () => {
+    const session = await compactingSession();
+    const result = session.compact();
+    await settle();
+    await session.query.emit({
+      kind: "status",
+      sessionId: "sdk-session-1",
+      status: null,
+      compactResult: "success",
+    });
+    await session.query.emit({
+      kind: "compaction",
+      sessionId: "sdk-session-1",
+      trigger: "manual",
+      preTokens: 9_000,
+      postTokens: 1_500,
+    });
+    await expect(result).resolves.toEqual({
+      kind: "compacted",
+      tokensBefore: 9_000,
+      tokensAfter: 1_500,
+    });
+    expect(session.events.filter((event) => event.kind === "context-compacted")).toEqual([
+      expect.objectContaining({ trigger: "requested" }),
+    ]);
+    await session.close();
+  });
+
+  it("reports a /compact the person typed into the session as the runtime's own, not a requested one", async () => {
+    const session = await compactingSession();
+    await session.send("/compact");
+    await session.query.emit({
+      kind: "compaction",
+      sessionId: "sdk-session-1",
+      trigger: "manual",
+      preTokens: 20_000,
+    });
+    await session.query.emit(completed("sdk-session-1"));
+    await settle();
+    expect(session.events.filter((event) => event.kind === "context-compacted")).toEqual([
+      expect.objectContaining({ trigger: "automatic" }),
+    ]);
+    await session.close();
+  });
+
+  it("refuses a turn while its compaction is pending", async () => {
+    const session = await compactingSession();
+    const result = session.compact();
+    await settle();
+    await expect(session.send("too soon")).rejects.toThrow(/Claude is compacting this session/);
+    expect(session.query.sent).toEqual([]);
+    await session.query.emit({
+      kind: "status",
+      sessionId: "sdk-session-1",
+      status: null,
+      compactResult: "failed",
+    });
+    await expect(result).resolves.toMatchObject({ kind: "failed" });
+    await session.close();
+  });
+
+  it("counts a compaction the closing result confirms when no status came", async () => {
+    const session = await compactingSession();
+    const result = session.compact();
+    await settle();
+    await session.query.emit({
+      kind: "compaction",
+      sessionId: "sdk-session-1",
+      trigger: "manual",
+      preTokens: 30_000,
+    });
+    await session.query.emit(completed("sdk-session-1"));
+    await expect(result).resolves.toEqual({ kind: "compacted", tokensBefore: 30_000 });
+    await session.close();
+  });
+
+  it("records a compaction Claude reports as failed as one that may have changed the session", async () => {
+    const session = await compactingSession();
+    const result = session.compact();
+    await settle();
+    await session.query.emit({
+      kind: "status",
+      sessionId: "sdk-session-1",
+      status: null,
+      compactResult: "failed",
+    });
+    await expect(result).resolves.toEqual({
+      kind: "failed",
+      message: "Claude did not finish compacting the session.",
+      sessionMayHaveChanged: true,
+    });
+    await session.close();
+  });
+
+  it("answers a compaction the session is stopped in the middle of as one that may have changed it", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "work");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const compact = acquired.connection.compact;
+    if (compact === undefined) throw new Error("The Claude connection compacts.");
+    const result = Effect.runPromise(compact({ sessionId, compactionId }));
+    await settle();
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    await expect(result).resolves.toMatchObject({ kind: "failed", sessionMayHaveChanged: true });
+    await acquired.close();
+  });
+
+  it("refuses an install that does not announce the command, without sending it", async () => {
+    const session = await compactingSession({ compactAnnounced: false });
+    await expect(session.compact()).resolves.toEqual({
+      kind: "refused",
+      reason: "runtime-version-unsupported",
+    });
+    expect(session.query.compactionRequests).not.toHaveBeenCalled();
+    await session.close();
+  });
+
+  it("refuses while a turn runs on the session", async () => {
+    const session = await compactingSession();
+    await session.send("keep going");
+    await expect(session.compact()).resolves.toEqual({ kind: "refused", reason: "turn-running" });
+    expect(session.query.compactionRequests).not.toHaveBeenCalled();
+    await session.close();
+  });
+
+  it("reports a compaction the runtime ran by itself inside a turn as automatic", async () => {
+    const session = await compactingSession();
+    await session.send("keep going");
+    await session.query.emit({
+      kind: "compaction",
+      sessionId: "sdk-session-1",
+      trigger: "auto",
+      preTokens: 150_000,
+      postTokens: 20_000,
+    });
+    await session.query.emit(completed("sdk-session-1"));
+    await settle();
+    expect(session.events.filter((event) => event.kind === "context-compacted")).toEqual([
+      expect.objectContaining({
+        trigger: "automatic",
+        tokensBefore: 150_000,
+        tokensAfter: 20_000,
+      }),
+    ]);
+    await session.close();
   });
 });
