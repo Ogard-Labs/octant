@@ -443,6 +443,8 @@ export interface WorkspaceViewProps {
   readonly draftProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly codeProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly workProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
+  /** Current thread titles, so an open pane follows a rename made anywhere. */
+  readonly liveThreadTitles?: ReadonlyMap<string, string>;
   /** Resolved provider marks for thread-owned pane tabs. */
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
   /** Threads the host projects as executing, read from the same rows the sidebar draws. */
@@ -791,6 +793,9 @@ export function WorkspaceView(props: WorkspaceViewProps) {
               </ComposerSubagentsContext>
             </FollowUpSuggestionContext>
           )}
+          {...(props.liveThreadTitles === undefined
+            ? {}
+            : { liveThreadTitles: props.liveThreadTitles })}
           {...(props.providerByThreadId === undefined
             ? {}
             : { providerByThreadId: props.providerByThreadId })}

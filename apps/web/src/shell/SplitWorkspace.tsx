@@ -74,6 +74,12 @@ export interface SplitWorkspaceProps {
   readonly renderSurface: (surface: WorkspaceTab, paneId: PaneId) => React.ReactNode;
   /** Provider identity for thread-owned surfaces, used by the pane's content tabs. */
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
+  /**
+   * Each thread's current title, from the rows the sidebar draws. A pane's own
+   * surface keeps the title the thread had when it opened, so a rename reads
+   * from here instead.
+   */
+  readonly liveThreadTitles?: ReadonlyMap<string, string>;
   /** The same preference controls provider marks in navigation and pane tabs. */
   readonly showProviderIcons?: boolean;
   /** The Project a thread pane names in its context chip when it has no facts of its own. */
@@ -414,7 +420,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     surface.threadId !== undefined &&
     props.runningThreadIds?.has(String(surface.threadId)) === true;
   const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
-  const title = workspaceSurfaceTitle(surface);
+  const title = workspaceSurfaceTitle(surface, props.liveThreadTitles);
   const activateUnlessClosing = (target: EventTarget | null) => {
     // Activating can open another dock and resize the pane between pointer
     // down and click, moving its close button away from the pointer.
@@ -527,7 +533,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                         <OctantTabsTab
                           className="content-tab__select border-0 bg-transparent text-inherit"
                           value={entry.id}
-                          title={workspaceSurfaceTitle(entry)}
+                          title={workspaceSurfaceTitle(entry, props.liveThreadTitles)}
                         >
                           {props.showProviderIcons === false ||
                           !["chat-thread", "work-thread", "code-overview"].includes(entry.kind) ||
@@ -536,11 +542,11 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                               provider={props.providerByThreadId?.get(String(entry.threadId))}
                             />
                           )}
-                          <span>{workspaceSurfaceTitle(entry)}</span>
+                          <span>{workspaceSurfaceTitle(entry, props.liveThreadTitles)}</span>
                         </OctantTabsTab>
                         <OctantIconButton
                           className="content-tab__close text-muted-foreground"
-                          label={`Close ${workspaceSurfaceTitle(entry)}`}
+                          label={`Close ${workspaceSurfaceTitle(entry, props.liveThreadTitles)}`}
                           onClick={() => props.onCloseContentTab?.(pane.paneId, entry.id)}
                         >
                           <X aria-hidden="true" size={12} />
@@ -594,7 +600,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
               onClose={() => props.onClosePane(pane.paneId)}
               onFocus={() => props.onFocus(pane.paneId)}
               onSplit={(orientation) => props.onSplitPane(pane.paneId, orientation, "after")}
-              surface={surface}
+              title={title}
             />
           </OctantContextMenuRoot>
         ) : null}
@@ -639,13 +645,13 @@ function PaneMenu(props: {
   readonly onClose: () => void;
   readonly onFocus: () => void;
   readonly onSplit: (orientation: "horizontal" | "vertical") => void;
-  readonly surface: WorkspaceTab;
+  readonly title: string;
 }) {
   const focusLabel = props.focused ? "Show all panes" : "Focus this pane";
   return (
     <OctantContextMenuContent>
       <OctantContextMenuGroup>
-        <OctantContextMenuLabel>{workspaceSurfaceTitle(props.surface)}</OctantContextMenuLabel>
+        <OctantContextMenuLabel>{props.title}</OctantContextMenuLabel>
       </OctantContextMenuGroup>
       <OctantContextMenuItem
         label={focusLabel}
