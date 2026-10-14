@@ -29,7 +29,7 @@ or Tailscale address, and the client's forwarder binds loopback only.
 request and refuses it unless all of these hold:
 
 - The principal is a paired device. A local window opens the server directly
-  and is refused with `invalid`.
+  and is refused with `local-principal`.
 - The listener id comes from the host's own listing: the thread's Local
   servers, or a Running services row that names a thread. The host
   re-observes and re-classifies by that id, as Open and Stop do. An id that is
