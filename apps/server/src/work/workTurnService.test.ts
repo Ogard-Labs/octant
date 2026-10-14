@@ -114,6 +114,35 @@ describe("WorkTurnService", () => {
     },
   );
 
+  it("counts a turn as starting while its context loads, so a compaction cannot slip in before it is accepted", async () => {
+    const release = deferred<void>();
+    const entered = deferred<void>();
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: vi.fn<WorkTurnRuntimePort["run"]>().mockResolvedValue({
+          kind: "completed",
+          response: "Done",
+        }),
+      },
+      resolveFileMentionContext: async () => {
+        entered.resolve();
+        await release.promise;
+        return [];
+      },
+    });
+    expect(fixture.service.isTurnStarting(ids.thread)).toBe(false);
+    const pending = fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      fileMentionPaths: ["notes.md"],
+    });
+    await entered.promise;
+    expect(fixture.service.isTurnActive(ids.thread)).toBe(false);
+    expect(fixture.service.isTurnStarting(ids.thread)).toBe(true);
+    release.resolve();
+    await expect(pending).resolves.toMatchObject({ kind: "accepted" });
+    expect(fixture.service.isTurnStarting(ids.thread)).toBe(false);
+  });
+
   it("fails an accepted host turn revoked during the model context probe without starting it", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
     attachmentRoots.push(root);

@@ -2692,11 +2692,13 @@ context answer), and the renderer never decides it.
   The server enforces the last part, not the window: a Chat send, edit, retry
   or delivered subagent result is refused `waiting`, and a Work turn `stale`,
   with "This session is being compacted. Send again when it finishes.", and a
-  subagent result waits the compaction out as it waits out a running turn.
-  The two cannot interleave the other way either: a Chat turn counts as
-  running for compaction from the moment it is queued, because its plan is
-  journaled before its attempt, and a Work turn checks with nothing awaited
-  before it is accepted.
+  subagent result waits the compaction out as it waits out a running turn
+  and is offered again as soon as the compaction ends. The two cannot
+  interleave the other way either: a turn counts as running for compaction
+  from the moment it is queued until it is accepted, because it reads the
+  conversation it plans from while it is prepared (a Chat turn journals its
+  plan before its attempt), so a compaction can neither be planned over nor
+  commit a summary the turn never read.
 - The result line, in the popover and on the timeline divider:
   "Compacted · 41.2k freed · summary by Codex", "Compacted · freed amount shows
   after the next reply", "Compacted · nothing freed", or "Couldn't compact:

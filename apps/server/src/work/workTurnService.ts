@@ -161,6 +161,23 @@ interface WorkUsageFacts {
   readonly providerExecutionDurationMs?: number | undefined;
 }
 
+export interface WorkTurnStartOptions {
+  /**
+   * Run this turn ask-first whatever the thread's access, for a caller
+   * whose own authority is narrower than the thread's (a goal loop round).
+   */
+  readonly holdAskFirst?: boolean;
+  /**
+   * Set by the host's own usage-limit recovery when it dispatches the
+   * authorized continuation: the send is not the person re-engaging, so it
+   * must not wake a snooze or reopen a completion. Host-only: the wire
+   * command cannot carry it.
+   */
+  readonly limitRecovery?: boolean;
+  /** Host-only revocation check; never grants authority or travels on the wire. */
+  readonly admissionCurrent?: () => boolean;
+}
+
 export interface WorkTurnServiceDependencies {
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
   readonly persistence: {
@@ -350,6 +367,8 @@ export class WorkTurnService {
    * edits against this rather than the thread's own access, so a goal-loop
    * round held ask-first stays ask-first for every provider.
    */
+  /** Turns being prepared, per thread, until they are accepted or refused. */
+  readonly #startingTurns = new Map<string, number>();
   readonly #runningAccess = new Map<
     string,
     { readonly requestId: string; readonly access: WorkAccess }
@@ -484,22 +503,7 @@ export class WorkTurnService {
   async startFirstTurn(
     authenticatedWindowId: WindowId,
     input: unknown,
-    options?: {
-      /**
-       * Run this turn ask-first whatever the thread's access, for a caller
-       * whose own authority is narrower than the thread's (a goal loop round).
-       */
-      readonly holdAskFirst?: boolean;
-      /**
-       * Set by the host's own usage-limit recovery when it dispatches the
-       * authorized continuation: the send is not the person re-engaging, so it
-       * must not wake a snooze or reopen a completion. Host-only: the wire
-       * command cannot carry it.
-       */
-      readonly limitRecovery?: boolean;
-      /** Host-only revocation check; never grants authority or travels on the wire. */
-      readonly admissionCurrent?: () => boolean;
-    },
+    options?: WorkTurnStartOptions,
   ): Promise<WorkTurnLookupResult> {
     this.#assertReady();
     const command = decodeStartWorkThreadTurnCommand(input);
@@ -507,7 +511,40 @@ export class WorkTurnService {
     if (existing !== undefined && command.delivery === undefined) {
       return this.#lookupMatching(command, existing);
     }
+    // The turn reads the conversation it plans from while it is prepared, so
+    // no compaction may be under way when it starts, and none may start until
+    // it is accepted: a summary committed in between would be planned over.
+    if (
+      this.#contextHarness?.compactionRunning(
+        decodeContextSubjectRef({
+          aggregateType: "work-thread",
+          aggregateId: String(command.threadId),
+        }),
+      ) === true
+    ) {
+      throw this.#failure("stale", "This session is being compacted. Send again when it finishes.");
+    }
+    const key = String(command.threadId);
+    this.#startingTurns.set(key, (this.#startingTurns.get(key) ?? 0) + 1);
+    try {
+      return await this.#admitTurn(authenticatedWindowId, command, options);
+    } finally {
+      const remaining = (this.#startingTurns.get(key) ?? 1) - 1;
+      if (remaining === 0) this.#startingTurns.delete(key);
+      else this.#startingTurns.set(key, remaining);
+    }
+  }
 
+  /** Whether a turn on this thread is being prepared and not yet accepted. */
+  isTurnStarting(threadId: WorkThreadId): boolean {
+    return this.#startingTurns.has(String(threadId));
+  }
+
+  async #admitTurn(
+    authenticatedWindowId: WindowId,
+    command: StartWorkThreadTurnCommand,
+    options: WorkTurnStartOptions | undefined,
+  ): Promise<WorkTurnLookupResult> {
     if (options?.admissionCurrent?.() === false) {
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
     }
@@ -794,8 +831,9 @@ export class WorkTurnService {
     const afterPreparation = this.#agentResultDelivery(command);
     if (afterPreparation !== undefined) return afterPreparation;
 
-    const closePreparedTools = () =>
-      Effect.runPromise(
+    // Context and attachment reads can outlive the host's queue admission.
+    if (options?.admissionCurrent?.() === false) {
+      await Effect.runPromise(
         Effect.promise(async () => {
           await extensionTools?.close?.();
         }).pipe(
@@ -803,23 +841,6 @@ export class WorkTurnService {
           Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
         ),
       );
-    // Read with nothing awaited before the acceptance below, so a compaction
-    // requested while this turn was prepared is seen here, and one requested
-    // after it finds this turn accepted and is refused as `turn-running`.
-    if (
-      this.#contextHarness?.compactionRunning(
-        decodeContextSubjectRef({
-          aggregateType: "work-thread",
-          aggregateId: String(command.threadId),
-        }),
-      ) === true
-    ) {
-      await closePreparedTools();
-      throw this.#failure("stale", "This session is being compacted. Send again when it finishes.");
-    }
-    // Context and attachment reads can outlive the host's queue admission.
-    if (options?.admissionCurrent?.() === false) {
-      await closePreparedTools();
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
     }
 

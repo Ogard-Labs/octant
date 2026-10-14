@@ -8267,7 +8267,9 @@ export function startOctantServer(
               ...(providerPolicy === undefined ? {} : { providerPolicy }),
             };
           },
-          turnRunning: (threadId) => workTurnService.isTurnActive(decodeWorkThreadId(threadId)),
+          turnRunning: (threadId) =>
+            workTurnService.isTurnActive(decodeWorkThreadId(threadId)) ||
+            workTurnService.isTurnStarting(decodeWorkThreadId(threadId)),
           conversation: (threadId) =>
             workTurnService.sessionCompactionConversation(decodeWorkThreadId(threadId)),
           // The Work stream is fed in process; the Chat stream reads the
