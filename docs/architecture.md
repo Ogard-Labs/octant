@@ -4455,7 +4455,11 @@ prompt, schema, tool, route, model, or capability.
   wait at once across the whole host; the cap is shared by every thread and
   window, not counted per thread. A call past that cap is denied immediately
   with the refusal a declined call already uses, and answering or expiry
-  frees the slot. An MCP
+  frees the slot. An unanswered approval expires after five minutes and the
+  call is denied; the host checks that against the clock whenever approvals
+  are listed, answered, or requested, so a prompt whose timer fired late (a
+  busy host, a machine that slept) cannot still be approved or hold a slot.
+  An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
   carried it.
