@@ -8,6 +8,7 @@ import { InboxHomeScreen } from "../inbox/InboxHomeScreen";
 import { backMobileHomeView, type MobileHomeView } from "../inbox/homeView";
 import { ThreadScreen } from "../inbox/ThreadScreen";
 import { PairingPanel } from "../hosts/PairingPanel";
+import { RemoveHostPanel } from "../hosts/RemoveHostPanel";
 import { createUnavailableNotificationPermissionPort } from "../notifications/notificationPermissionPort";
 import { PushNotificationsPanel } from "../notifications/PushNotificationsPanel";
 import { createUnavailableDeviceIntegrityPort } from "../security/deviceIntegrityPort";
@@ -16,7 +17,7 @@ import { PrivacySecurityPanel } from "../security/PrivacySecurityPanel";
 import { AppearanceBackgroundPanel } from "../appearance/AppearanceBackgroundPanel";
 import { createUnavailableScreenshotPrivacyPort } from "../security/screenshotPrivacyPort";
 import { useMobileSession } from "../session/MobileSessionContext";
-import { removeMobileHost } from "../session/mobileSessionLifecycle";
+import { createMobileHostRemover } from "../session/mobileSessionLifecycle";
 import { mobileRadii, mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { IconButton } from "../ui/IconButton";
@@ -51,14 +52,18 @@ function HostsBody(props: {
     setPlacementHostId,
   } = useMobileSession();
   const [keyNotDeleted, setKeyNotDeleted] = useState(false);
+  const removeMobileHostInTurn = useMemo(
+    () => createMobileHostRemover({ registry, hub, deviceKeyStore }),
+    [deviceKeyStore, hub, registry],
+  );
   const removeHost = useCallback(
     (hostId: string) => {
-      void removeMobileHost({ hostId, registry, hub, deviceKeyStore }).then((result) => {
+      void removeMobileHostInTurn(hostId).then((result) => {
         if (!result.localCredentialRemoved) setKeyNotDeleted(true);
         return refreshHosts();
       });
     },
-    [deviceKeyStore, hub, refreshHosts, registry],
+    [refreshHosts, removeMobileHostInTurn],
   );
   const authenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
   const notificationPermission = useMemo(() => createUnavailableNotificationPermissionPort(), []);
@@ -255,6 +260,13 @@ function HostsBody(props: {
                         onRevoked={() => {
                           removeHost(host.hostId);
                         }}
+                      />
+                    ) : null}
+                    {environment.kind === "live" ? (
+                      <RemoveHostPanel
+                        hostLabel={host.label}
+                        onRemove={() => removeHost(host.hostId)}
+                        testIdSuffix={host.hostId}
                       />
                     ) : null}
                   </View>

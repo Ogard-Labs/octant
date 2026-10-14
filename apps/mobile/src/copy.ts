@@ -49,6 +49,13 @@ export const MOBILE_COPY = {
   toolStatusDone: "Done",
   toolStatusFailed: "Failed",
   hostsEmpty: "No hosts paired yet.",
+  removeHostAction: "Remove from this phone",
+  removeHostHint:
+    "Removing works without a connection. It deletes this phone's key for the host and does not tell the host.",
+  removeHostConfirm:
+    "Remove this host from this phone? The host is not told, so it still lists this device until you revoke it from the desktop.",
+  removeHostConfirmAction: "Remove",
+  removeHostCancel: "Cancel",
   hostKeyNotDeleted:
     "A host was removed, but its device key could not be deleted from this phone's secure storage.",
   hostsHint: "Enter the host HTTPS origin and pairing ticket from the desktop host.",
