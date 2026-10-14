@@ -7,6 +7,7 @@ import {
   NativeHarnessFollowUpPreview,
   NativeHarnessSessionView,
   type ChatNavigationThread,
+  type NativeHarnessApproval,
   NativeHarnessApprovalDecisionResult,
   type SteerNativeHarnessSession,
   type NativeHarnessSteeringNote,
@@ -226,6 +227,18 @@ export async function interruptAgentTurn(
     return { kind: "refused", message: refusalMessage(response, "The turn could not be stopped.") };
   }
   return { kind: "interrupted" };
+}
+
+/**
+ * Whether an approval may be answered "for this session". The host remembers
+ * only a lead's request on a thread that has taken in no outside content, and
+ * turns any other session-wide answer into a single approval, so a surface
+ * that offers it would promise what the host does not give.
+ */
+export function approvalMayBeRemembered(
+  approval: Pick<NativeHarnessApproval, "source" | "singleUse">,
+): boolean {
+  return approval.source === undefined && approval.singleUse !== true;
 }
 
 export async function decideAgentApproval(
