@@ -658,6 +658,160 @@ describe("CodeOperationRuntime", () => {
     });
   });
 
+  describe("a start stopped while its preparation never returns", () => {
+    const credentialReferences = [{ environmentName: "TOKEN", reference: "token" }];
+
+    /** The first credential read waits until released; every later one answers at once. */
+    function stuckFirstCredentialRead() {
+      const entered = Promise.withResolvers<void>();
+      const stuck = Promise.withResolvers<string | undefined>();
+      const resolve = vi.fn(() => {
+        if (resolve.mock.calls.length > 1) return Promise.resolve("secret");
+        entered.resolve();
+        return stuck.promise;
+      });
+      return { entered: entered.promise, release: () => stuck.resolve("secret"), resolve };
+    }
+
+    const start = (id: number) =>
+      ({
+        kind: "start-provider-turn",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: evidence(40),
+      }) as const;
+    const stop = (id: number) =>
+      ({
+        kind: "cancel-provider-turn",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+      }) as const;
+
+    it("reads as stopped in the transcript once Stop returns, and leaves the next turn on the thread alone when it settles", async () => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const credential = stuckFirstCredentialRead();
+      const settle = vi.fn();
+      const admit = vi.fn().mockReturnValue({
+        status: "admitted",
+        reservedTokens: 100,
+        reservations: [{ scopeKind: "thread", scopeId: String(threadId), reservedTokens: 100 }],
+      });
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        credentialReferences,
+        credentialResolver: { resolve: credential.resolve },
+        spendCeiling: { admit, settle },
+      });
+      try {
+        const stopped = fixture.runtime.execute(windowId, start(41));
+        await credential.entered;
+        await expect(fixture.runtime.execute(windowId, stop(42))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
+        // The credential read is still outstanding.
+        expect(
+          fixture.conversation().turns.find((turn) => turn.operationId === operationId(41))?.status,
+        ).toBe("interrupted");
+
+        await expect(fixture.runtime.execute(windowId, start(43))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "running",
+        });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+
+        credential.release();
+        await expect(stopped).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
+        // The late settle gave back the stopped start's reservation, not the
+        // newer turn's, and journaled nothing over what Stop recorded.
+        const [older, newer] = admit.mock.calls.map(([input]) => input.reservationId);
+        expect(settle.mock.calls).toEqual([[{ reservationId: older }]]);
+        expect(
+          fixture.conversation().turns.map((turn) => [String(turn.operationId), turn.status]),
+        ).toEqual([
+          [String(operationId(41)), "interrupted"],
+          [String(operationId(43)), "incomplete"],
+        ]);
+
+        await expect(fixture.runtime.execute(windowId, stop(44))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
+        expect(settle).toHaveBeenLastCalledWith({ reservationId: newer });
+        expect(connection.start).toHaveBeenCalledOnce();
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("does not launch a stopped recovered start again when its operation is retried", async () => {
+      const stalledQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const stalled = {
+        ...providerConnection(stalledQueue),
+        send: vi.fn(() => Effect.never),
+      } as ProviderConnection;
+      const fixture = runtimeFixture({ provider: providerDriver(stalled) });
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const credential = stuckFirstCredentialRead();
+      let restarted: ReturnType<typeof runtimeFixture> | undefined;
+      try {
+        // The host stops after the start answered `running` and before the
+        // provider produced anything, so the next host recovers the start.
+        await expect(fixture.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "running",
+        });
+        await vi.waitFor(() => expect(stalled.send).toHaveBeenCalledOnce());
+        restarted = runtimeFixture({
+          provider: providerDriver(connection),
+          credentialReferences,
+          credentialResolver: { resolve: credential.resolve },
+          restartOf: { directory: fixture.directory, evidenceValues: fixture.evidenceValues },
+        });
+
+        const recovering = restarted.runtime.execute(windowId, start(51));
+        await credential.entered;
+        await expect(restarted.runtime.execute(windowId, stop(52))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
+        expect(
+          restarted.conversation().turns.find((turn) => turn.operationId === operationId(51))
+            ?.status,
+        ).toBe("interrupted");
+
+        // A retry answers from the journal rather than preparing the turn again.
+        await restarted.runtime.execute(windowId, start(51));
+        expect(credential.resolve).toHaveBeenCalledOnce();
+
+        credential.release();
+        await expect(recovering).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
+        await restarted.runtime.execute(windowId, start(51));
+        expect(credential.resolve).toHaveBeenCalledOnce();
+        expect(connection.start).not.toHaveBeenCalled();
+        expect(connection.resume).not.toHaveBeenCalled();
+        expect(connection.send).not.toHaveBeenCalled();
+      } finally {
+        await restarted?.runtime.close();
+        restarted?.close();
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+  });
+
   it("releases the spend reservation when a Code turn fails to start", async () => {
     const settle = vi.fn();
     const admit = vi.fn().mockReturnValue({

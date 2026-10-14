@@ -818,7 +818,13 @@ that is refused or fails while preparing stops counting at once and holds
 nothing back after that. Stopping a turn that is still preparing releases its
 root at once, even if a preparation step never returns, and the turn is
 refused at its next admission check, at the latest just before the runtime
-takes it on, so it never reaches its provider. The other order is serialized
+takes it on, so it never reaches its provider. The stop is journaled as the
+start's result when Stop returns, so the transcript shows the turn stopped and a
+retry of that operation, including a start recovered after a restart, answers
+from the journal instead of launching it. A stopped start whose preparation
+settles later clears and settles only its own runtime bookkeeping (pending
+start, spend reservation), keyed by its operation, never that of a newer turn
+on the same thread. The other order is serialized
 by root too: a turn that starts while a restore that passed this check is still
 overwriting the same root holds the root, so no further restore starts, and
 waits for the overwrite to finish before it captures its checkpoint, so it

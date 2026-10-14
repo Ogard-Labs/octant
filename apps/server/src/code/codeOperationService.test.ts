@@ -1520,7 +1520,8 @@ describe("CodeOperationService", () => {
           start,
           answerInput: vi.fn(),
           answerApproval: vi.fn(),
-          cancel: vi.fn(),
+          // The runtime has no live turn of its own to stop.
+          cancel: vi.fn(async () => ({ state: "failed" as const })),
           threadsWritingIn: (checkoutRoot: string, exceptThreadId: CodeThread["id"]) =>
             live
               .filter((turn) =>
@@ -1632,6 +1633,43 @@ describe("CodeOperationService", () => {
       });
       expect(checkpoint).toHaveBeenCalledOnce();
       expect(restoreCheckpoint).toHaveBeenCalledOnce();
+    });
+
+    it("captures no checkpoint for a turn stopped while it waited for another Project's restore", async () => {
+      const writer = liveTurn({}).thread;
+      const restorer = decodeCodeThread({ ...thread(), projectId: otherProject });
+      const { service, restoreCheckpoint, checkpoint, start } = restoreFixture([], restorer, [
+        writer,
+      ]);
+      const entered = Promise.withResolvers<void>();
+      const overwrite = Promise.withResolvers<void>();
+      restoreCheckpoint.mockImplementationOnce(async () => {
+        entered.resolve();
+        await overwrite.promise;
+        return { status: "applied", undo: { worktree: "e".repeat(40), index: "f".repeat(40) } };
+      });
+
+      const restoring = service.execute(ids.window, restoreCommand);
+      await entered.promise;
+      const starting = service.execute(ids.window, { ...startProviderTurn, threadId: writer.id });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await expect(
+        service.execute(ids.window, {
+          kind: "cancel-provider-turn",
+          operationId: decodeCodeOperationId("55555555-5555-4555-8555-555555555555"),
+          threadId: writer.id,
+          checkoutId: ids.checkout,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+
+      overwrite.resolve();
+      await restoring;
+      await expect(starting).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "interrupted",
+      });
+      expect(checkpoint).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
     });
 
     it("refuses to restore while another thread is writing in the same checkout and names it", async () => {
@@ -2533,6 +2571,7 @@ describe("CodeOperationService", () => {
     expect(fixture.turns.start).toHaveBeenCalledWith({
       windowId: ids.window,
       thread: thread(),
+      operationId: startProviderTurn.operationId,
       sessionId: startProviderTurn.sessionId,
       checkoutRoot: "/private/exact-checkout",
       prompt: "does this still hold?",
