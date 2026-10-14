@@ -301,11 +301,11 @@ guidance instead.
   Standing session grants and remembered Full access do not silently satisfy these classes on a
   tainted thread. Enforcement: the policy engine's thread-elevation step,
   `resolveThreadElevation` in `packages/domain/src/toolCallPolicy.ts`, fed by the taint projection
-  in `apps/server`. It asks afresh, under every posture, for each closed-catalog entry marked
-  `irreversibleUnderTaint`, and a catalog test refuses an entry in any of the four classes without
-  that flag. Today `mcp-tool` (privilege expansion) is the only entry in one of the four classes;
-  the flag also covers `computer-use`, `web-fetch`, and the harness `bash`, `edit`, `write`, and
-  `goal-check`. A Code Git action a person takes from a window (discard, restore, push, create a
+  in `apps/server`. It asks afresh, under every posture that allows the tool at all (Plan refuses
+  most of them outright), for each closed-catalog entry marked `irreversibleUnderTaint`, and a
+  catalog test refuses an entry in any of the four classes without that flag. Today `mcp-tool`
+  (privilege expansion) is the only entry in one of the four classes; the flag also covers
+  `computer-use`, `web-fetch`, and the harness `bash`, `edit`, `write`, and `goal-check`. A Code Git action a person takes from a window (discard, restore, push, create a
   pull request, bring a run home) is that person's own per-action act, and no agent tool issues
   one. Residual gaps: the prompt does not yet name the ingested sources or say that the mark is
   why it asks, and a provider runtime's own tools sit outside this gate (below). In the native
