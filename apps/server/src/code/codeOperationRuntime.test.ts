@@ -2492,6 +2492,33 @@ describe("CodeOperationRuntime", () => {
     // Still owed an answer to the question; the board keeps the thread Waiting.
     expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(true);
 
+    // A harness question settled elsewhere (expired, say) leaves this surface.
+    fixture.runtime.raiseHarnessQuestion?.({
+      threadId: String(threadId),
+      questionId: "harness-question-expired",
+      prompt: "Still there?",
+      options: [],
+    });
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toHaveLength(2);
+    fixture.runtime.withdrawHarnessQuestion?.({
+      threadId: String(threadId),
+      questionId: "harness-question-expired",
+    });
+    expect(
+      (await fixture.runtime.pendingRequests?.(windowId))?.map((request) =>
+        request.mode === "code" && request.kind === "question" ? request.answer.requestId : "",
+      ),
+    ).toEqual(["harness-question-listed"]);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-input",
+        operationId: operationId(904),
+        ...question.answer,
+        requestId: "harness-question-expired",
+        response: fixture.response,
+      }),
+    ).resolves.toMatchObject({ state: "failed" });
+
     await fixture.runtime.execute(windowId, {
       kind: "answer-provider-input",
       operationId: operationId(903),
