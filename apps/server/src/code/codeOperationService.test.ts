@@ -3091,6 +3091,7 @@ describe("CodeOperationService terminal Browser grant", () => {
       abandon: vi.fn(),
       switchOff: vi.fn(),
       terminalClosed: vi.fn(),
+      liveGrant: vi.fn((): unknown => undefined),
     };
     return grants;
   }
@@ -3272,6 +3273,45 @@ describe("CodeOperationService terminal Browser grant", () => {
     await service.execute(ids.window, startWithGrant, { initiator: "user" });
     exit();
     expect(grants.terminalClosed).toHaveBeenCalledWith(ids.terminal);
+  });
+
+  it("tells a window that attaches whether the running shell holds a grant", async () => {
+    const { service, grants, terminals } = fixture({
+      kind: "granted",
+      outcome: granted,
+      credentialReferences: references,
+    });
+    await service.execute(ids.window, startWithGrant, { initiator: "user" });
+    const running = {
+      terminalId: ids.terminal,
+      status: "running" as const,
+      canRerun: false,
+      transcript: { chunks: [], byteLength: 0, truncated: false, characters: 0 },
+    };
+    terminals.attach.mockReturnValue(running);
+    const attach = {
+      kind: "attach-terminal",
+      operationId: "77777777-7777-4777-8777-777777777777",
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      terminalId: ids.terminal,
+    } as const;
+
+    grants.liveGrant.mockReturnValueOnce(granted);
+    await expect(service.execute(ids.window, attach)).resolves.toMatchObject({
+      kind: "terminal-state",
+      state: "running",
+      browserGrant: granted,
+    });
+    expect(grants.liveGrant).toHaveBeenCalledWith(ids.thread, ids.terminal);
+
+    // Once the grant has ended the same attach says nothing about one.
+    const after = await service.execute(ids.window, {
+      ...attach,
+      operationId: "88888888-8888-4888-8888-888888888888",
+    });
+    expect(after).toMatchObject({ kind: "terminal-state", state: "running" });
+    expect(after).not.toHaveProperty("browserGrant");
   });
 
   it("switches a live grant off and reports it revoked", async () => {

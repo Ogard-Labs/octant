@@ -113,6 +113,10 @@ interface LiveGrant {
   readonly browserThreadId: BrowserThreadId;
   readonly terminalId: CodeTerminalId;
   readonly windowId: WindowId;
+  readonly issuedAt: Extract<
+    TerminalBrowserGrantOutcome,
+    { readonly status: "granted" }
+  >["issuedAt"];
   /** Private to this grant, so a context a managed turn approved is asked about again. */
   readonly modelBindings: Map<string, BrowserModelBinding>;
   readonly stop: AbortController;
@@ -214,12 +218,14 @@ export class TerminalBrowserGrantService {
       await endpoint.close().catch(() => undefined);
       return refused("terminal-already-granted");
     }
+    const issuedAt = this.#options.clock();
     const live: LiveGrant = {
       grantId,
       threadId: thread.id,
       browserThreadId,
       terminalId: input.terminalId,
       windowId: input.windowId,
+      issuedAt: decodeTimestamp(issuedAt),
       modelBindings,
       stop: new AbortController(),
       endpoint,
@@ -230,7 +236,6 @@ export class TerminalBrowserGrantService {
       ended: false,
     };
     grant = live;
-    const issuedAt = this.#options.clock();
     try {
       this.#append(grantId, 0, TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, this.#personActor, {
         kind: "terminal-browser-grant-issued",
@@ -256,7 +261,7 @@ export class TerminalBrowserGrantService {
         grantId,
         threadId: thread.id,
         terminalId: input.terminalId,
-        issuedAt: decodeTimestamp(issuedAt),
+        issuedAt: live.issuedAt,
       },
       credentialReferences: [
         {
@@ -311,6 +316,29 @@ export class TerminalBrowserGrantService {
     return grant === undefined
       ? undefined
       : this.#end(grant, "terminal-not-started", this.#hostActor);
+  }
+
+  /**
+   * The grant a running terminal of this thread holds, for a window that
+   * attaches to it. A window shows the switch from this answer rather than from
+   * what it remembers, so a grant it did not see start, or one that ended while
+   * it looked elsewhere, reads as it is.
+   */
+  liveGrant(
+    threadId: CodeThreadId,
+    terminalId: CodeTerminalId,
+  ): Extract<TerminalBrowserGrantOutcome, { readonly status: "granted" }> | undefined {
+    const grant = this.#byTerminal.get(String(terminalId));
+    if (grant === undefined || grant.ended || String(grant.threadId) !== String(threadId)) {
+      return undefined;
+    }
+    return {
+      status: "granted",
+      grantId: grant.grantId,
+      threadId: grant.threadId,
+      terminalId: grant.terminalId,
+      issuedAt: grant.issuedAt,
+    };
   }
 
   /** The person switching a live grant off, without closing the terminal. */

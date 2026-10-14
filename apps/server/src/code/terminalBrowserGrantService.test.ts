@@ -624,7 +624,7 @@ describe("terminal Browser grant", () => {
       expect((await post(url, { authorization: `Bearer ${token}` })).status).toBe(200);
     });
 
-    it("refuses a call after the person switches the grant off, and records who ended it", async (context) => {
+    it("refuses a call after the person switches the grant off, records who ended it, and no longer reports it live", async (context) => {
       const fixture = harness();
       const opening = await open(fixture);
       if (opening.kind === "refused")
@@ -632,6 +632,8 @@ describe("terminal Browser grant", () => {
       const { url, token } = environmentOf(fixture, opening);
       const session = await connect(url, token);
       expect(await session.call({ operation: "help" })).toMatchObject({ isError: false });
+      expect(fixture.service.liveGrant(threadA, terminalA)).toEqual(opening.outcome);
+      expect(fixture.service.liveGrant(threadB, terminalA)).toBeUndefined();
 
       const outcome = await fixture.service.switchOff({
         windowId,
@@ -641,6 +643,7 @@ describe("terminal Browser grant", () => {
       expect(outcome).toMatchObject({ status: "revoked", reason: "switched-off" });
       await expect(session.call({ operation: "help" })).rejects.toThrow();
       await expect(connect(url, token)).rejects.toThrow();
+      expect(fixture.service.liveGrant(threadA, terminalA)).toBeUndefined();
       expect(
         fixture.service.resolveReference(opening.credentialReferences[1]?.reference ?? ""),
       ).toBeUndefined();

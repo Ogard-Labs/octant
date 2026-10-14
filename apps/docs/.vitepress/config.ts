@@ -101,6 +101,7 @@ export default defineConfig({
             { text: "Git and Worktrees", link: "/advanced/git-worktrees" },
             { text: "Code Thread Board", link: "/advanced/code-board" },
             { text: "Browser and Computer Use", link: "/advanced/browser-and-computer-use" },
+            { text: "Browser for a CLI in a terminal", link: "/advanced/terminal-browser" },
             { text: "Apple Workbench", link: "/advanced/apple-workbench" },
             { text: "Android emulator", link: "/advanced/android-emulator" },
           ],

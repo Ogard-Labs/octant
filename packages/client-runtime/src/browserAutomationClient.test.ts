@@ -245,4 +245,20 @@ describe("BrowserAutomationClient", () => {
       },
     ]);
   });
+
+  it("answers false, not a failure, when the host no longer takes the decision", async () => {
+    // The host answers 409 with `{ accepted: false }` when the request expired
+    // or another window answered it first; that is an expected refusal.
+    const client = createBrowserAutomationClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch: vi.fn(async () => Response.json({ accepted: false }, { status: 409 })),
+      windowCapability: capability,
+    });
+    await expect(
+      client.decideApproval?.({
+        approvalId: "60000000-0000-4000-8000-000000000001" as never,
+        decision: "denied",
+      }),
+    ).resolves.toBe(false);
+  });
 });
