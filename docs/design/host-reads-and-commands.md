@@ -89,7 +89,10 @@ route receipts are the page's own; the newest page also carries what belongs to
 no turn yet, an attachment waiting for the next message and a route receipt
 whose turn was never accepted, so a receipt for a turn on an unloaded page is
 never mistaken for an orphan. `through` is the page that ends with the named
-turn. A jump to a turn that is not loaded (a transcript search hit) reads that
+turn. Transcript search indexes only the active conversation: an edit drops the
+revised turn and every turn after it from the index, so a hit always names a
+turn this window can show, and an edited message is found by its current text.
+A jump to a turn that is not loaded (a transcript search hit) reads that
 page and shows it as one detached range in place of the newest turns, which
 keep receiving live updates; **Load later messages** reads `after` its newest
 turn and joins it to the newest turns once the two share a turn, and **Jump to
