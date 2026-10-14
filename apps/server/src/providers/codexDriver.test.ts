@@ -1373,10 +1373,11 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
-  it("switches Codex's shell off for a Work thread on start and again on every resume", async () => {
-    const shellOff = {
+  it("switches Codex's shell and the Project's agent brief off for a Work thread on start and again on every resume", async () => {
+    const workOff = {
       "features.shell_tool": false,
       "features.unified_exec": false,
+      project_doc_max_bytes: 0,
       skills: { config: [] },
     };
     const f = fixture();
@@ -1390,11 +1391,11 @@ describe("Codex thread and turn lifecycle", () => {
       }),
     );
     expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
-      config: shellOff,
+      config: workOff,
     });
     expect(f.calls.find(({ method }) => method === "thread/resume")?.input).toEqual({
       threadId: "thread-existing",
-      config: shellOff,
+      config: workOff,
     });
     await work.close();
 
@@ -1407,6 +1408,10 @@ describe("Codex thread and turn lifecycle", () => {
     expect(code.calls.find(({ method }) => method === "thread/start")?.input).not.toHaveProperty([
       "config",
       "features.shell_tool",
+    ]);
+    expect(code.calls.find(({ method }) => method === "thread/start")?.input).not.toHaveProperty([
+      "config",
+      "project_doc_max_bytes",
     ]);
     await coding.close();
   });
