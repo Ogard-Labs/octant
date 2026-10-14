@@ -162,7 +162,9 @@ device shell parses again, so the address is passed single-quoted, as typed
 text is. `am start` can exit 0 after printing `Error: Activity not started`,
 so such a line makes the action `failed`.
 
-Open URL is an effect, not input. A person (`requestedBy`) must ask for it.
+Open URL is an effect, not input. Only a person (`local-user` or
+`remote-device` in `requestedBy`) may ask for it; an agent or the host is
+refused, as with Repair input.
 Plan refuses it; Full access sends it unasked; on an approval-gated thread
 every address raises its own confirmation, which names the whole address and
 is bound to it, and Allow input never covers it. Evidence and its log keep only

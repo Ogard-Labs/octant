@@ -128,10 +128,11 @@ export function evaluateAppleSimulatorRequest(
   ) {
     return { kind: "denied", reason: "actor-required" };
   }
-  // Repairing input restarts the Simulator's home screen and closes its apps.
-  // Only a person may ask for that; an agent or the host never does it for them.
+  // Repairing input restarts the Simulator's home screen and closes its apps,
+  // and Open URL is offered only in the pane. Only a person may ask for
+  // either; an agent or the host never does it for them.
   if (
-    request.kind === "repair-input" &&
+    (request.kind === "repair-input" || request.kind === "open-url") &&
     request.requestedBy?.kind !== "local-user" &&
     request.requestedBy?.kind !== "remote-device"
   ) {

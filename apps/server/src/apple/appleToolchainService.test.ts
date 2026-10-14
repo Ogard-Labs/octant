@@ -1954,6 +1954,16 @@ describe("AppleToolchainService Open URL", () => {
       { ...context, executionPolicy: "plan" as const },
     );
     expect(planned.outcome).toBe("unauthorized");
+
+    // Only a person asks for an address, never the host, even under Full access.
+    const byHost = await service.execute(
+      openUrlRequest({
+        actionId: "30000000-0000-4000-8000-000000000015" as never,
+        requestedBy: { kind: "system", actorId: actor.actorId },
+      }),
+      context,
+    );
+    expect(byHost.outcome).toBe("unauthorized");
     expect(openedWith()).toEqual([]);
   });
 
@@ -2333,7 +2343,7 @@ describe("AppleToolchainService Simulator input", () => {
       expect.objectContaining({ kind: "repair-input", udid: ids.simulator }),
     ]);
 
-    const byAgent = await service.execute(
+    const byHost = await service.execute(
       simulatorRequest({
         kind: "repair-input",
         actionId: "30000000-0000-4000-8000-000000000031" as never,
@@ -2348,7 +2358,7 @@ describe("AppleToolchainService Simulator input", () => {
       }),
       gated,
     );
-    expect(byAgent.outcome).toBe("unauthorized");
+    expect(byHost.outcome).toBe("unauthorized");
     expect(deliver).toHaveBeenCalledTimes(1);
   });
 

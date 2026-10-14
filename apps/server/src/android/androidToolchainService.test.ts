@@ -573,6 +573,17 @@ describe("AndroidToolchainService", () => {
         { ...context, executionPolicy: "plan" as const },
       );
       expect(planned.outcome).toBe("unauthorized");
+
+      // Only a person asks for an address, never the host, even under Full access.
+      const byHost = await service.execute(
+        action("open-url", {
+          actionId: "30000000-0000-4000-8000-000000000015",
+          requestedBy: { ...actor, kind: "system" },
+          url,
+        }),
+        context,
+      );
+      expect(byHost.outcome).toBe("unauthorized");
       expect(opened()).toEqual([]);
     });
 
