@@ -16,6 +16,7 @@ import { PrivacySecurityPanel } from "../security/PrivacySecurityPanel";
 import { AppearanceBackgroundPanel } from "../appearance/AppearanceBackgroundPanel";
 import { createUnavailableScreenshotPrivacyPort } from "../security/screenshotPrivacyPort";
 import { useMobileSession } from "../session/MobileSessionContext";
+import { removeMobileHost } from "../session/mobileSessionLifecycle";
 import { mobileRadii, mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
 import { IconButton } from "../ui/IconButton";
@@ -226,7 +227,12 @@ function HostsBody(props: {
                           bridge={hub.bridgeForOrigin(host.origin) ?? bridge}
                           transport={transportForHost(host.hostId)}
                           onRevoked={() => {
-                            void registry.remove(host.hostId).then(() => refreshHosts());
+                            void removeMobileHost({
+                              hostId: host.hostId,
+                              registry,
+                              hub,
+                              deviceKeyStore,
+                            }).then(() => refreshHosts());
                           }}
                         />
                       </>
@@ -237,7 +243,12 @@ function HostsBody(props: {
                         bridge={hub.bridgeForOrigin(host.origin) ?? bridge}
                         transport={transportForHost(host.hostId)}
                         onRevoked={() => {
-                          void registry.remove(host.hostId).then(() => refreshHosts());
+                          void removeMobileHost({
+                            hostId: host.hostId,
+                            registry,
+                            hub,
+                            deviceKeyStore,
+                          }).then(() => refreshHosts());
                         }}
                       />
                     ) : null}
