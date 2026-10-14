@@ -1,10 +1,9 @@
 import {
   decodeLinkedThreadPreviewCommand,
-  decodeLinkedThreadPreviewCommandResult,
-  decodeLinkedThreadPreviewFailure,
   type LinkedThreadPreviewCommand,
-  type LinkedThreadPreviewCommandResult,
-  type LinkedThreadPreviewFailure,
+  LinkedThreadPreviewCommandResult,
+  LinkedThreadPreviewFailure,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export interface LinkedThreadClientOptions {
@@ -46,7 +45,7 @@ export function createLinkedThreadClient(options: LinkedThreadClientOptions): Li
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeLinkedThreadPreviewCommandResult,
+        decodeHostAnswer(LinkedThreadPreviewCommandResult),
       );
     },
   };
@@ -72,7 +71,7 @@ async function request<T>(
   }
   if (!response.ok) {
     try {
-      throw new LinkedThreadClientFailure(decodeLinkedThreadPreviewFailure(body));
+      throw new LinkedThreadClientFailure(decodeHostAnswer(LinkedThreadPreviewFailure)(body));
     } catch (error) {
       if (error instanceof LinkedThreadClientFailure) throw error;
       throw malformedResponse();

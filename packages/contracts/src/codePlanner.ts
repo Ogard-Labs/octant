@@ -1,3 +1,4 @@
+import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import {
   CodeCommandResult,
@@ -88,7 +89,7 @@ export const CodePlannerWorkProposal = Schema.Union(
     status: Schema.Literal("declined"),
     resolvedAt: UtcTimestamp,
   }).annotations(strict),
-);
+).annotations(personDecides);
 export type CodePlannerWorkProposal = typeof CodePlannerWorkProposal.Type;
 
 /** What a planner agent submits; identity and timestamps are server-stamped. */

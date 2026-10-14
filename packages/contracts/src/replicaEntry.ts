@@ -15,6 +15,7 @@
  * this host does not know how to read.
  */
 
+import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { ArtifactBundle, decodeArtifactBundle, encodeArtifactBundle } from "./artifactBundle";
 import { CanvasId, CanvasVersionId } from "./canvas";
@@ -790,7 +791,7 @@ export const ReplicaJoinRequestView = Schema.Struct({
    * joining computer confirms, and approving again would only add a record.
    */
   approvedByThisComputer: Schema.Boolean,
-}).annotations(strict);
+}).annotations({ ...strict, ...personDecides });
 export type ReplicaJoinRequestView = typeof ReplicaJoinRequestView.Type;
 
 /**

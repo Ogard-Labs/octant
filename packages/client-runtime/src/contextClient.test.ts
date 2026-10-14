@@ -102,11 +102,20 @@ describe("ContextClient", () => {
     });
   });
 
-  it("strictly decodes successes and closed server failures", async () => {
-    const malformed = createContextClient({
+  it("drops unknown answer fields, refuses wrong types, and decodes closed server failures", async () => {
+    const newer = createContextClient({
       baseUrl: "http://localhost",
       windowCapability: capability,
       fetch: async () => Response.json({ ...snapshot(), rawContent: "secret" }),
+    });
+    const read = await newer.inspect(request);
+    expect(read).toMatchObject({ sequence: snapshot().sequence });
+    expect(JSON.stringify(read)).not.toContain("secret");
+
+    const malformed = createContextClient({
+      baseUrl: "http://localhost",
+      windowCapability: capability,
+      fetch: async () => Response.json({ ...snapshot(), sequence: "eight" }),
     });
     await expect(malformed.inspect(request)).rejects.toMatchObject({ category: "protocol" });
 
@@ -123,7 +132,7 @@ describe("ContextClient", () => {
       windowCapability: capability,
       fetch: async () =>
         Response.json(
-          { category: "unauthorized", message: "No.", credential: "secret" },
+          { category: "unauthorized", message: 401, credential: "secret" },
           { status: 401 },
         ),
     });

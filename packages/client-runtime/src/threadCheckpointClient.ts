@@ -1,9 +1,9 @@
 import {
-  decodeThreadCheckpointCommandResult,
-  decodeThreadCheckpointList,
   type ThreadCheckpoint,
   type ThreadCheckpointCommand,
-  type ThreadCheckpointCommandResult,
+  ThreadCheckpointCommandResult,
+  ThreadCheckpointList,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -64,7 +64,7 @@ export function createThreadCheckpointClient(
         },
         "Checkpoints are unavailable.",
       );
-      return decodeThreadCheckpointList(body).checkpoints;
+      return decodeHostAnswer(ThreadCheckpointList)(body).checkpoints;
     },
 
     async execute(command, signal) {
@@ -83,7 +83,7 @@ export function createThreadCheckpointClient(
         },
         "Checkpoint command failed.",
       );
-      return decodeThreadCheckpointCommandResult(body);
+      return decodeHostAnswer(ThreadCheckpointCommandResult)(body);
     },
   };
 }

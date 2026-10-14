@@ -1,7 +1,7 @@
 import {
-  decodeUsageDashboardResponse,
   type UsageDashboardRequest,
-  type UsageDashboardResponse,
+  UsageDashboardResponse,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -77,7 +77,7 @@ export function createUsageDashboardClient(
         );
       }
       try {
-        return decodeUsageDashboardResponse(body);
+        return decodeHostAnswer(UsageDashboardResponse)(body);
       } catch {
         throw new UsageDashboardClientFailure(
           "The usage dashboard returned a response outside its contract.",

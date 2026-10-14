@@ -1,9 +1,4 @@
-import {
-  decodeShipResult,
-  type ShipCommand,
-  type ShipResult,
-  type ShipTarget,
-} from "@octant/contracts";
+import { type ShipCommand, ShipResult, type ShipTarget, decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ShipClientOptions {
@@ -50,7 +45,7 @@ export function createShipClient(options: ShipClientOptions): ShipClient {
         },
         "Ship targets are unavailable.",
       );
-      const result = decodeShipResult({
+      const result = decodeHostAnswer(ShipResult)({
         kind: "ship-targets",
         targets: (body as { targets?: unknown }).targets ?? [],
       });
@@ -72,7 +67,7 @@ export function createShipClient(options: ShipClientOptions): ShipClient {
         },
         "Ship command failed.",
       );
-      return decodeShipResult(body);
+      return decodeHostAnswer(ShipResult)(body);
     },
   };
 }

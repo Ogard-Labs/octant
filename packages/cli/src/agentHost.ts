@@ -2,27 +2,22 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import {
-  decodeChatThreadView,
-  decodeNativeHarnessFollowUpActivationResult,
-  decodeNativeHarnessFollowUpPreview,
-  decodeNativeHarnessSessionView,
-  type ChatThreadView,
-  type NativeHarnessFollowUpActivationResult,
-  type NativeHarnessFollowUpPreview,
-  type NativeHarnessSessionView,
-  decodeNativeHarnessApprovalDecisionResult,
-  decodeChatNavigation,
-  decodeChatAttachment,
-  decodeProviderRegistrySnapshot,
+  ChatThreadView,
+  NativeHarnessFollowUpActivationResult,
+  NativeHarnessFollowUpPreview,
+  NativeHarnessSessionView,
   type ChatNavigationThread,
-  type NativeHarnessApprovalDecisionResult,
+  NativeHarnessApprovalDecisionResult,
   type SteerNativeHarnessSession,
-  decodeNativeHarnessSteeringTaken,
-  decodeThreadGoal,
-  decodeThreadMentionCommandResult,
   type NativeHarnessSteeringNote,
   type SideChatSidecar,
-  type ThreadGoal,
+  ThreadGoal,
+  ChatNavigation,
+  ChatAttachment,
+  ProviderRegistrySnapshot,
+  NativeHarnessSteeringTaken,
+  ThreadMentionCommandResult,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { isNativeHarnessDriverKind } from "@octant/domain";
 import type { OpenedLocalControlSession } from "./localControl";
@@ -65,7 +60,7 @@ export async function readAgentThread(
     method: "GET",
   });
   if (response.status !== 200) return undefined;
-  return decodeChatThreadView(response.body);
+  return decodeHostAnswer(ChatThreadView)(response.body);
 }
 
 export async function readAgentSession(
@@ -75,7 +70,9 @@ export async function readAgentSession(
   const response = await session.send({ path: sessionsPath(threadId), method: "GET" });
   if (response.status !== 200) return "unavailable";
   const view = (response.body as { view?: unknown }).view;
-  return view === null || view === undefined ? null : decodeNativeHarnessSessionView(view);
+  return view === null || view === undefined
+    ? null
+    : decodeHostAnswer(NativeHarnessSessionView)(view);
 }
 
 export async function sendAgentPrompt(
@@ -170,7 +167,9 @@ export async function previewAgentFollowUp(
   }
   return {
     kind: "previewed",
-    preview: decodeNativeHarnessFollowUpPreview((response.body as { preview?: unknown }).preview),
+    preview: decodeHostAnswer(NativeHarnessFollowUpPreview)(
+      (response.body as { preview?: unknown }).preview,
+    ),
   };
 }
 
@@ -185,7 +184,7 @@ export async function activateAgentFollowUp(
     method: "POST",
     body: { turnId, suggestionId, confirmed: true },
   });
-  return decodeNativeHarnessFollowUpActivationResult(response.body);
+  return decodeHostAnswer(NativeHarnessFollowUpActivationResult)(response.body);
 }
 
 /** The latest assistant reply, from the content the latest attempt references. */
@@ -240,7 +239,7 @@ export async function decideAgentApproval(
     method: "POST",
     body: { approvalId, decision },
   });
-  return decodeNativeHarnessApprovalDecisionResult(response.body);
+  return decodeHostAnswer(NativeHarnessApprovalDecisionResult)(response.body);
 }
 
 export async function steerAgent(
@@ -278,7 +277,10 @@ export async function takeAgentSteering(
   if (response.status !== 200) {
     return { kind: "refused", message: refusalMessage(response, "The notes could not be taken.") };
   }
-  return { kind: "taken", notes: decodeNativeHarnessSteeringTaken(response.body).taken };
+  return {
+    kind: "taken",
+    notes: decodeHostAnswer(NativeHarnessSteeringTaken)(response.body).taken,
+  };
 }
 
 /**
@@ -299,7 +301,7 @@ export async function openAgentSideChat(
   if (response.status !== 200) {
     return { kind: "refused", message: refusalMessage(response, "Side Chat could not open.") };
   }
-  const result = decodeThreadMentionCommandResult(response.body);
+  const result = decodeHostAnswer(ThreadMentionCommandResult)(response.body);
   if (result.kind === "side-chat-opened") return { kind: "opened", sidecar: result.sidecar };
   return {
     kind: "refused",
@@ -326,7 +328,7 @@ export async function readAgentGoal(
   const goal = (response.body as { readonly goal?: unknown } | undefined)?.goal;
   return {
     kind: "goal",
-    goal: goal === null || goal === undefined ? null : decodeThreadGoal(goal),
+    goal: goal === null || goal === undefined ? null : decodeHostAnswer(ThreadGoal)(goal),
   };
 }
 
@@ -369,7 +371,7 @@ export async function listAgentThreads(
 ): Promise<ReadonlyArray<ChatNavigationThread>> {
   const response = await session.send({ path: "/api/chat/navigation", method: "GET" });
   if (response.status !== 200) return [];
-  return [...decodeChatNavigation(response.body).threads].sort((a, b) =>
+  return [...decodeHostAnswer(ChatNavigation)(response.body).threads].sort((a, b) =>
     String(b.updatedAt).localeCompare(String(a.updatedAt)),
   );
 }
@@ -388,7 +390,7 @@ export async function listAgentModels(
 ): Promise<ReadonlyArray<AgentModelChoice>> {
   const response = await session.send({ path: "/api/providers/bootstrap", method: "GET" });
   if (response.status !== 200) return [];
-  const snapshot = decodeProviderRegistrySnapshot(response.body);
+  const snapshot = decodeHostAnswer(ProviderRegistrySnapshot)(response.body);
   const choices: AgentModelChoice[] = [];
   for (const instance of snapshot.instances) {
     if (!instance.enabled || !isNativeHarnessDriverKind(instance.driverKind)) continue;
@@ -494,7 +496,10 @@ export async function uploadAgentAttachment(
       message: refusalMessage(response, `${basename(path)} was not accepted.`),
     };
   }
-  return { kind: "uploaded", attachmentId: String(decodeChatAttachment(response.body).id) };
+  return {
+    kind: "uploaded",
+    attachmentId: String(decodeHostAnswer(ChatAttachment)(response.body).id),
+  };
 }
 
 /** How much of the model's window the last turn used, when the model says how big it is. */

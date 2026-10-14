@@ -1,9 +1,4 @@
-import {
-  decodePendingRequestFailure,
-  decodePendingRequestList,
-  type PendingRequestFailure,
-  type PendingRequestList,
-} from "@octant/contracts";
+import { PendingRequestFailure, PendingRequestList, decodeHostAnswer } from "@octant/contracts";
 
 export interface PendingRequestClientOptions {
   readonly baseUrl: string;
@@ -59,14 +54,14 @@ export function createPendingRequestClient(
       if (!response.ok) {
         let failure: PendingRequestFailure;
         try {
-          failure = decodePendingRequestFailure(body);
+          failure = decodeHostAnswer(PendingRequestFailure)(body);
         } catch {
           throw malformedResponse();
         }
         throw new PendingRequestClientFailure(failure);
       }
       try {
-        return decodePendingRequestList(body);
+        return decodeHostAnswer(PendingRequestList)(body);
       } catch {
         throw malformedResponse();
       }

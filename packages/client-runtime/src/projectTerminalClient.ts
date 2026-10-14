@@ -1,8 +1,8 @@
 import {
-  decodeProjectTerminalResult,
   type ProjectTerminalCommand,
-  type ProjectTerminalResult,
+  ProjectTerminalResult,
 } from "@octant/contracts/project-terminals";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ProjectTerminalClientOptions {
@@ -67,7 +67,7 @@ export function createProjectTerminalClient(
             : "Project terminals are unavailable.";
         throw new ProjectTerminalClientFailure(message, response.status);
       }
-      return decodeProjectTerminalResult(body);
+      return decodeHostAnswer(ProjectTerminalResult)(body);
     },
   };
 }

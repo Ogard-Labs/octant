@@ -1,8 +1,8 @@
 import {
-  decodeAgentRunPolicySettings,
   type AgentRunConcurrency,
-  type AgentRunPolicySettings,
+  AgentRunPolicySettings,
   type AgentRunSelectableCreationPosture,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export interface AgentRunSettingsClientOptions {
@@ -70,7 +70,7 @@ function decodeSettings(body: unknown): AgentRunPolicySettings {
     throw new AgentRunSettingsClientFailure("unavailable", "AgentRun settings are malformed.");
   }
   try {
-    return decodeAgentRunPolicySettings(body.settings);
+    return decodeHostAnswer(AgentRunPolicySettings)(body.settings);
   } catch {
     throw new AgentRunSettingsClientFailure("unavailable", "AgentRun settings are malformed.");
   }

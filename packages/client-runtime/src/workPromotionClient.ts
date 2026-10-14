@@ -1,14 +1,12 @@
 import {
   decodeWorkPromotionCommand,
-  decodeWorkPromotionCommandResult,
-  decodeWorkPromotionFailure,
-  decodeWorkPromotionList,
   decodeProjectId,
   type WorkPromotionCommand,
-  type WorkPromotionCommandResult,
-  type WorkPromotionFailure,
-  type WorkPromotionList,
+  WorkPromotionCommandResult,
+  WorkPromotionFailure,
+  WorkPromotionList,
   type ProjectId,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export interface WorkPromotionClientOptions {
@@ -47,7 +45,7 @@ export function createWorkPromotionClient(
         options.fetch,
         url.toString(),
         { method: "GET", headers },
-        decodeWorkPromotionList,
+        decodeHostAnswer(WorkPromotionList),
       );
     },
     async execute(command) {
@@ -65,7 +63,7 @@ export function createWorkPromotionClient(
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeWorkPromotionCommandResult,
+        decodeHostAnswer(WorkPromotionCommandResult),
       );
     },
   };
@@ -91,7 +89,7 @@ async function request<T>(
   }
   if (!response.ok) {
     try {
-      throw new WorkPromotionClientFailure(decodeWorkPromotionFailure(body));
+      throw new WorkPromotionClientFailure(decodeHostAnswer(WorkPromotionFailure)(body));
     } catch (error) {
       if (error instanceof WorkPromotionClientFailure) throw error;
       throw malformedResponse();

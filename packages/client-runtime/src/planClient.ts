@@ -1,9 +1,9 @@
 import {
-  decodeThreadPlanUpdated,
   type ThreadPlan,
   type ThreadPlanCommand,
   type ThreadPlanHistoryEntry,
-  type ThreadPlanUpdated,
+  ThreadPlanUpdated,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -76,7 +76,7 @@ export function createPlanClient(options: PlanClientOptions): PlanClient {
       // A thread without a Plan is a normal read, not a decode failure, so the
       // strict projection decoder only runs once the host reports a Plan.
       if (plan === null || plan === undefined) return { plan: null, history: [] };
-      return decodeThreadPlanUpdated(body);
+      return decodeHostAnswer(ThreadPlanUpdated)(body);
     },
 
     async execute(command, signal) {
@@ -95,7 +95,7 @@ export function createPlanClient(options: PlanClientOptions): PlanClient {
         },
         "Plan command failed.",
       );
-      return decodeThreadPlanUpdated(body);
+      return decodeHostAnswer(ThreadPlanUpdated)(body);
     },
   };
 }

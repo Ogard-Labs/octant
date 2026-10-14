@@ -1,14 +1,12 @@
 import {
-  decodeCodeFileChangeNotice,
-  decodeCodeFileListingResult,
-  decodeCodeSearchResult,
   type CodeCheckoutId,
-  type CodeFileChangeNotice,
-  type CodeFileListingResult,
-  type CodeSearchResult,
+  CodeFileChangeNotice,
+  CodeFileListingResult,
+  CodeSearchResult,
   type CodeSearchScope,
   type CodeRelativePath,
   type CodeThreadId,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -111,7 +109,7 @@ export function createCodeFileListingClient(
           response.status,
         );
       }
-      return decodeCodeFileListingResult(body);
+      return decodeHostAnswer(CodeFileListingResult)(body);
     },
 
     async search(query, signal) {
@@ -137,7 +135,7 @@ export function createCodeFileListingClient(
           response.status,
         );
       }
-      return decodeCodeSearchResult(body);
+      return decodeHostAnswer(CodeSearchResult)(body);
     },
 
     watch(query, signal) {
@@ -203,7 +201,7 @@ async function* readNoticeStream(
         if (line.trim().length > 0) {
           let notice: CodeFileChangeNotice;
           try {
-            notice = decodeCodeFileChangeNotice(JSON.parse(line));
+            notice = decodeHostAnswer(CodeFileChangeNotice)(JSON.parse(line));
           } catch {
             return;
           }

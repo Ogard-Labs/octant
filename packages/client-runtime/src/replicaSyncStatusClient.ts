@@ -1,7 +1,5 @@
-import {
-  decodeReplicaSyncStatusView,
-  type ReplicaSyncStatusView,
-} from "@octant/contracts/replica-entry";
+import { ReplicaSyncStatusView } from "@octant/contracts/replica-entry";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ReplicaSyncStatusClientOptions {
@@ -48,7 +46,10 @@ export function createReplicaSyncStatusClient(
       if (response.status === 401 || response.status === 403) return { status: "refused" };
       if (!response.ok) return { status: "unavailable" };
       try {
-        return { status: "ready", view: decodeReplicaSyncStatusView(await response.json()) };
+        return {
+          status: "ready",
+          view: decodeHostAnswer(ReplicaSyncStatusView)(await response.json()),
+        };
       } catch {
         return { status: "unavailable" };
       }

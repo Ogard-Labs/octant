@@ -1,13 +1,11 @@
 import {
-  decodeFolderBrowseResult,
-  decodeFolderSelectionResult,
-  decodeFolderBrowseFailure,
-  type FolderBrowseFailure,
+  FolderBrowseFailure,
   type FolderBrowseRequest,
-  type FolderBrowseResult,
+  FolderBrowseResult,
   type FolderSelectionRequest,
-  type FolderSelectionResult,
+  FolderSelectionResult,
 } from "@octant/contracts/folder-browse";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface FolderBrowseClientOptions {
@@ -50,7 +48,7 @@ export function createFolderBrowseClient(options: FolderBrowseClientOptions): Fo
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(request),
         },
-        decodeFolderBrowseResult,
+        decodeHostAnswer(FolderBrowseResult),
         requestTimeoutMs,
       );
     },
@@ -63,7 +61,7 @@ export function createFolderBrowseClient(options: FolderBrowseClientOptions): Fo
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(request),
         },
-        decodeFolderSelectionResult,
+        decodeHostAnswer(FolderSelectionResult),
         requestTimeoutMs,
       );
     },
@@ -102,7 +100,7 @@ async function post<T>(
     }
     if (!response.ok) {
       try {
-        throw new FolderBrowseClientFailure(decodeFolderBrowseFailure(body));
+        throw new FolderBrowseClientFailure(decodeHostAnswer(FolderBrowseFailure)(body));
       } catch (error) {
         if (error instanceof FolderBrowseClientFailure) throw error;
         throw new FolderBrowseClientFailure({

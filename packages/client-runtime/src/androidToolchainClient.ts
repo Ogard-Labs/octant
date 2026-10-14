@@ -1,13 +1,12 @@
 import {
   ANDROID_SCREEN_TRANSPORT_HEADER,
-  decodeAndroidRpcEnvelope,
-  decodeAndroidScreenTransport,
   type AndroidArtifactRequest,
-  type AndroidScreenTransport,
+  AndroidScreenTransport,
   type AndroidScreenStreamRequest,
   type AndroidCancelRequest,
   type AndroidDiscoverySnapshot,
   type AndroidSnapshotRequest,
+  AndroidRpcEnvelope,
 } from "@octant/contracts/android-toolchain-rpc";
 import { bindFetchPort } from "./bindFetchPort";
 import type {
@@ -17,6 +16,7 @@ import type {
   AndroidRuntimeSnapshot,
   AndroidToolchainFailure,
 } from "@octant/contracts/android-toolchain";
+import { decodeHostAnswer } from "@octant/contracts";
 
 export interface AndroidToolchainClientOptions {
   readonly baseUrl: string;
@@ -152,7 +152,7 @@ async function watchScreen(
     await response.body?.cancel().catch(() => undefined);
   } else {
     try {
-      const reply = decodeAndroidRpcEnvelope(await response.json());
+      const reply = decodeHostAnswer(AndroidRpcEnvelope)(await response.json());
       if (reply.kind === "android-failure") {
         return { status: "failed", kind: reply.failure.category, message: reply.failure.message };
       }
@@ -170,7 +170,7 @@ async function watchScreen(
 function transportOf(header: string | null): AndroidScreenTransport | undefined {
   if (header === null) return undefined;
   try {
-    return decodeAndroidScreenTransport(JSON.parse(header));
+    return decodeHostAnswer(AndroidScreenTransport)(JSON.parse(header));
   } catch {
     return undefined;
   }
@@ -244,7 +244,7 @@ async function readPng(
   }
   let reply;
   try {
-    reply = decodeAndroidRpcEnvelope(await response.json());
+    reply = decodeHostAnswer(AndroidRpcEnvelope)(await response.json());
   } catch {
     return {
       status: "failed",
@@ -292,7 +292,7 @@ async function post(options: AndroidToolchainClientOptions, body: unknown, signa
   }
   let reply;
   try {
-    reply = decodeAndroidRpcEnvelope(await response.json());
+    reply = decodeHostAnswer(AndroidRpcEnvelope)(await response.json());
   } catch {
     throw protocol();
   }

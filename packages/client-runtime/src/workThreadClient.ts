@@ -1,16 +1,13 @@
 import {
   decodeWorkBoardQuery,
-  decodeWorkBoardView,
-  decodeWorkThreadBootstrap,
-  decodeWorkThreadNavigation,
   decodeWorkThreadCommand,
-  decodeWorkThreadCommandResult,
   type WorkBoardQuery,
-  type WorkBoardView,
-  type WorkThreadBootstrap,
-  type WorkThreadNavigation,
+  WorkBoardView,
+  WorkThreadBootstrap,
+  WorkThreadNavigation,
   type WorkThreadCommand,
-  type WorkThreadCommandResult,
+  WorkThreadCommandResult,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -62,7 +59,7 @@ export function createWorkThreadClient(options: WorkThreadClientOptions): WorkTh
       }
 
       try {
-        return decodeWorkThreadBootstrap(body);
+        return decodeHostAnswer(WorkThreadBootstrap)(body);
       } catch {
         throw new WorkThreadClientFailure(
           "Work thread service returned an invalid bootstrap response.",
@@ -91,7 +88,7 @@ export function createWorkThreadClient(options: WorkThreadClientOptions): WorkTh
       }
 
       try {
-        return decodeWorkThreadNavigation(body);
+        return decodeHostAnswer(WorkThreadNavigation)(body);
       } catch {
         throw new WorkThreadClientFailure(
           "Work thread service returned an invalid navigation response.",
@@ -131,7 +128,7 @@ export function createWorkThreadClient(options: WorkThreadClientOptions): WorkTh
       }
 
       try {
-        return decodeWorkThreadCommandResult(body);
+        return decodeHostAnswer(WorkThreadCommandResult)(body);
       } catch {
         throw new WorkThreadClientFailure(
           "Work thread service returned an invalid command response.",
@@ -171,7 +168,7 @@ export function createWorkThreadClient(options: WorkThreadClientOptions): WorkTh
       }
 
       try {
-        return decodeWorkBoardView(body);
+        return decodeHostAnswer(WorkBoardView)(body);
       } catch {
         throw new WorkThreadClientFailure(
           "Work thread service returned an invalid board response.",

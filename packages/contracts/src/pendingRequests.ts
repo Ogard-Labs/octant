@@ -1,3 +1,4 @@
+import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { AgentRunId, AgentRunParentThreadId, AgentRunRole } from "./agentRun";
 import { AnswerChatTurnQuestionCommand, ChatAttemptQuestion, ChatThreadId } from "./chat";
@@ -289,7 +290,7 @@ export const PendingRequest = Schema.Union(
   })
     .annotations(strict)
     .pipe(Schema.filter(sameThread, { jsonSchema: {} })),
-);
+).annotations(personDecides);
 export type PendingRequest = typeof PendingRequest.Type;
 
 export const MAX_PENDING_REQUESTS = 128;

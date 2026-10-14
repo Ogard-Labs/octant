@@ -1,3 +1,4 @@
+import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { ProjectId } from "./projects";
 import { AggregateVersion, UtcTimestamp } from "./events";
@@ -176,7 +177,8 @@ export const WorkRequest = Schema.Struct({
       },
       { jsonSchema: {} },
     ),
-  );
+  )
+  .annotations(personDecides);
 export type WorkRequest = typeof WorkRequest.Type;
 
 const RequestTransitionFields = {

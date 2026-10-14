@@ -1,9 +1,9 @@
 import {
-  decodeProductFeedbackCommandResult,
-  decodeProductFeedbackList,
   type ProductFeedbackCommand,
-  type ProductFeedbackCommandResult,
+  ProductFeedbackCommandResult,
   type ProductFeedbackNote,
+  ProductFeedbackList,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -59,7 +59,7 @@ export function createProductFeedbackClient(
         },
         "Pointed-at notes are unavailable.",
       );
-      return decodeProductFeedbackList(body).notes;
+      return decodeHostAnswer(ProductFeedbackList)(body).notes;
     },
 
     async execute(command, signal) {
@@ -78,7 +78,7 @@ export function createProductFeedbackClient(
         },
         "The note could not be sent.",
       );
-      return decodeProductFeedbackCommandResult(body);
+      return decodeHostAnswer(ProductFeedbackCommandResult)(body);
     },
   };
 }

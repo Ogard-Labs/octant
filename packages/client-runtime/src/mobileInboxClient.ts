@@ -1,20 +1,18 @@
 import {
-  decodeChatAttachment,
-  decodeChatBootstrap,
-  decodeChatCommandResult,
-  decodeChatThreadView,
-  decodeCodeBootstrap,
-  decodeCodeBoardView,
-  decodeWorkThreadBootstrap,
-  type ChatAttachment,
+  ChatAttachment,
   type ChatEventFrame,
   type ChatThread,
   type ChatThreadId,
-  type ChatThreadView,
-  type CodeBoardView,
+  ChatThreadView,
+  CodeBoardView,
   type CodeThread,
   type CodeThreadReviewState,
   type WorkThread,
+  ChatBootstrap,
+  ChatCommandResult,
+  CodeBootstrap,
+  WorkThreadBootstrap,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { ParseResult } from "effect";
 import { ChatNdjsonFailure, iterateChatEventNdjson } from "./chatNdjsonStream";
@@ -164,7 +162,7 @@ export async function fetchMobileCodeBoard(
       path: "/api/code/board",
       body: JSON.stringify({ version: 1 }),
     }),
-    decodeCodeBoardView,
+    decodeHostAnswer(CodeBoardView),
     "Code Board state could not be loaded from the host.",
   );
 }
@@ -197,17 +195,17 @@ async function fetchMobileInboxBootstrapRows(
   };
   const chat = await decodeBootstrap(
     settled[0],
-    decodeChatBootstrap,
+    decodeHostAnswer(ChatBootstrap),
     "Chat bootstrap failed over the remote session.",
   );
   const work = await decodeBootstrap(
     settled[1],
-    decodeWorkThreadBootstrap,
+    decodeHostAnswer(WorkThreadBootstrap),
     "Work bootstrap failed over the remote session.",
   );
   const code = await decodeBootstrap(
     settled[2],
-    decodeCodeBootstrap,
+    decodeHostAnswer(CodeBootstrap),
     "Code bootstrap failed over the remote session.",
   );
 
@@ -332,7 +330,7 @@ export async function loadMobileChatThread(
     method: "GET",
     path: `/api/chat/threads/${encodeURIComponent(threadId)}`,
   });
-  return decodeJson(response, decodeChatThreadView, "Chat thread load failed.");
+  return decodeJson(response, decodeHostAnswer(ChatThreadView), "Chat thread load failed.");
 }
 
 function titleFromPrompt(prompt: string): string {
@@ -370,9 +368,9 @@ export async function createMobileChatThread(input: {
       "Could not create a Chat thread on the host.",
     );
   }
-  let result: ReturnType<typeof decodeChatCommandResult>;
+  let result: ChatCommandResult;
   try {
-    result = decodeChatCommandResult(await response.json());
+    result = decodeHostAnswer(ChatCommandResult)(await response.json());
   } catch {
     throw new MobileInboxFailure(
       "unavailable",
@@ -415,9 +413,9 @@ export async function changeMobileChatProvider(input: {
         : "Could not change the Chat model on the host.",
     );
   }
-  let result: ReturnType<typeof decodeChatCommandResult>;
+  let result: ChatCommandResult;
   try {
-    result = decodeChatCommandResult(await response.json());
+    result = decodeHostAnswer(ChatCommandResult)(await response.json());
   } catch {
     throw new MobileInboxFailure(
       "unavailable",
@@ -646,7 +644,7 @@ export async function uploadMobileChatAttachment(input: {
     );
   }
   try {
-    return decodeChatAttachment(await response.json());
+    return decodeHostAnswer(ChatAttachment)(await response.json());
   } catch {
     throw new MobileInboxFailure(
       "unavailable",

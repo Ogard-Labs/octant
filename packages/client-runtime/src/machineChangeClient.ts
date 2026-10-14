@@ -1,7 +1,5 @@
-import {
-  decodeMachineChangeFrame,
-  type MachineChangeFrame,
-} from "@octant/contracts/machine-changes";
+import { MachineChangeFrame } from "@octant/contracts/machine-changes";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface MachineChangeClient {
@@ -61,7 +59,7 @@ async function* parseFrames(
   const decodeLine = (line: string): MachineChangeFrame => {
     let frame: MachineChangeFrame;
     try {
-      frame = decodeMachineChangeFrame(JSON.parse(line));
+      frame = decodeHostAnswer(MachineChangeFrame)(JSON.parse(line));
     } catch {
       throw new Error("Machine change stream frame is invalid.");
     }
