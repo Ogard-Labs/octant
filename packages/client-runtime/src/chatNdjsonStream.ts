@@ -1,8 +1,8 @@
 import {
-  decodeChatEventFrame,
   MAX_CHAT_NDJSON_LINE_BYTES,
-  type ChatEventFrame,
+  ChatEventFrame,
   type ChatThreadId,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 const utf8Encoder = new TextEncoder();
@@ -137,7 +137,7 @@ function decodeReplayLine(
   }
   let frame: ChatEventFrame;
   try {
-    frame = decodeChatEventFrame(JSON.parse(line));
+    frame = decodeHostAnswer(ChatEventFrame)(JSON.parse(line));
   } catch {
     throw malformedNdjson();
   }

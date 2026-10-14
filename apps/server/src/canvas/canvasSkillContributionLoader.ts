@@ -95,8 +95,9 @@ export function createCanvasSkillContributionLookup(
  * In-tree recipes are always offered. A skill contributes its recipes only
  * after the same decode and admission the refresh path uses, so a skill that
  * is not enabled, not trusted, or not effective contributes none. A skill
- * scoped to a thread contributes none here: describe reads no Project, and a
- * scoped recipe must not leak into another thread's catalogue. A malformed
+ * scoped to a thread or a Project contributes none here: describe reads no
+ * Project, and a scoped recipe must not leak into another thread's or
+ * Project's catalogue. A malformed
  * document contributes nothing rather than a partial recipe.
  */
 export function offeredCanvasDocumentRecipes(
@@ -107,7 +108,7 @@ export function offeredCanvasDocumentRecipes(
     readonly facts: CanvasSkillTrustFacts;
   }> = [];
   for (const record of records) {
-    if (record.scope !== undefined) continue;
+    if (record.scope !== undefined || record.projectScope !== undefined) continue;
     const document = record.canvasContribution;
     if (document === undefined) continue;
     let contribution;

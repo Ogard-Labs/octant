@@ -200,5 +200,18 @@ export async function seedCodeForkHarnessSession(
   for (const message of prefix.messages) {
     deps.transcripts.append(input.sessionId, rewriteForFork(message, rewrite));
   }
+  // The fork reads what its source read after the turn it was forked at: the
+  // latest compaction made before that turn ran, if any. One made later was
+  // not part of that conversation yet.
+  const compaction = transcript.compactions.findLast(
+    (candidate) => candidate.afterTurns < prefix.turns,
+  );
+  if (compaction !== undefined) {
+    deps.transcripts.compact(input.sessionId, {
+      summary: rewriteForFork({ role: "user", text: compaction.summary }, rewrite).text,
+      turns: compaction.turns,
+      afterTurns: compaction.afterTurns,
+    });
+  }
   return { driverKind, value: String(input.sessionId) };
 }

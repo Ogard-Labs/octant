@@ -55,6 +55,7 @@ const OCTANT_TOOL_PURPOSE: Readonly<Record<string, string>> = {
   octant_offer_side_task: "offer the user a separate task for work outside this request",
   octant_propose_thread: "propose a new thread on the Project board",
   octant_terminal: "run long-lived processes such as dev servers and read their output",
+  octant_threads: "see this Project's other threads: list them, read one, or wait for one to stop",
   octant_thread_message: "ask a mentioned thread something and wait for its reply",
 };
 

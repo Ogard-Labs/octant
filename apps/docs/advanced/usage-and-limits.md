@@ -189,13 +189,31 @@ its cost at API rates on a Claude plan too.
 Every turn that reached the provider counts, whether it finished, failed, or
 was cancelled. Usage with no price is never counted as free. If any usage in
 the window has no price — a model without a known rate (including local
-models), a provider that reports no cost or no usage at all (such as an ACP
-agent in a Code thread), or usage recorded before Octant recorded costs — the
-money budget cannot be checked, the Usage panel says **money cannot be
+models), a provider that reports no cost, a turn that ended without the usage
+its provider normally reports, or usage recorded before Octant recorded costs —
+the money budget cannot be checked, the Usage panel says **money cannot be
 measured**, and the next turn is refused until that usage leaves a Project's
 calendar window or you clear the ceiling and set it again without a money
 budget. Raising the money budget does not help, because the usage still has no
 price.
+
+### Providers that report no usage
+
+Some providers never report usage at all: every ACP agent, and Oh My Pi.
+Settings shows their **Usage** capability as unsupported. Their turns are not
+measured: they add nothing to a ceiling's token or money figure, and they do
+not refuse later turns for lack of a figure. The thread's Usage panel and the
+Project overview name each such provider under the ceiling with **Not
+measured**, so you do not read the ceiling as covering it. Its turns still
+count toward the turn and hours budgets, and every other provider's spend in
+the same thread or Project is counted and enforced as usual.
+
+This is decided by what the provider can report, not turn by turn. A provider
+that normally reports usage keeps counting: if one of its turns fails or is
+cancelled before the usage arrives, that turn has no figure and the token and
+money budgets refuse as described above. When Octant cannot tell what a
+provider reports — it was removed, turned off, or has not been checked since
+Octant started — its turns count the same way until it is checked again.
 
 ## Restart-safe local history
 

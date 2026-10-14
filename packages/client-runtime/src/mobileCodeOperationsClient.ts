@@ -1,18 +1,17 @@
 import {
-  decodeCodeBootstrap,
-  decodeCodeConversationPage,
-  decodeCodeEvidenceBatchResponse,
-  decodeCodeEvidenceReference,
-  decodeCodeOperationResult,
-  decodeCodeThread,
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   MAX_CODE_OPERATION_TEXT_BYTES,
   type CodeConversationTurn,
   type CodeOperationCommand,
-  type CodeOperationResult,
+  CodeOperationResult,
   type CodePullRequestReview,
-  type CodeThread,
+  CodeThread,
+  CodeBootstrap,
+  CodeConversationPage,
+  CodeEvidenceBatchResponse,
+  CodeEvidenceReference,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
 
@@ -48,14 +47,14 @@ export async function loadMobileCodeThread(
 ): Promise<CodeThread> {
   const bootstrap = await decodeJson(
     await transport.authenticatedFetch({ method: "GET", path: "/api/code/bootstrap" }),
-    decodeCodeBootstrap,
+    decodeHostAnswer(CodeBootstrap),
     "Code bootstrap failed over the remote session.",
   );
   const thread = bootstrap.threads.find((entry) => entry.id === threadId);
   if (thread === undefined) {
     throw new MobileInboxFailure("unavailable", "Code thread is not available on this host.");
   }
-  return decodeCodeThread(thread);
+  return decodeHostAnswer(CodeThread)(thread);
 }
 
 export async function executeMobileCodeOperation(
@@ -69,7 +68,7 @@ export async function executeMobileCodeOperation(
   });
   const result = await decodeJson(
     response,
-    decodeCodeOperationResult,
+    decodeHostAnswer(CodeOperationResult),
     "Code operation failed over the remote session.",
   );
   if (result.operationId !== command.operationId) {
@@ -121,7 +120,7 @@ export async function loadMobileCodeConversation(
       path: `/api/code/threads/${encodeURIComponent(threadId)}/conversation`,
       query: `?afterCursor=0&limit=${MAX_CODE_CONVERSATION_PAGE_SIZE}`,
     }),
-    decodeCodeConversationPage,
+    decodeHostAnswer(CodeConversationPage),
     "Could not load the Code conversation from the host.",
   );
   if (String(page.threadId) !== threadId) {
@@ -144,7 +143,7 @@ export async function loadMobileCodeConversation(
         path: "/api/code/evidence/batch",
         body: JSON.stringify({ threadId, items: wanted }),
       }),
-      decodeCodeEvidenceBatchResponse,
+      decodeHostAnswer(CodeEvidenceBatchResponse),
       "Could not load the Code conversation text from the host.",
     );
     if (String(batch.threadId) !== threadId) {
@@ -197,7 +196,7 @@ export async function sendMobileCodeTurn(input: {
       },
       contentType: "text/plain; charset=utf-8",
     }),
-    decodeCodeEvidenceReference,
+    decodeHostAnswer(CodeEvidenceReference),
     "The prompt could not be staged on the host.",
   );
   const started = await executeMobileCodeOperation(input.transport, {

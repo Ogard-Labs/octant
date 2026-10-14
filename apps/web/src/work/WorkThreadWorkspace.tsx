@@ -18,7 +18,6 @@ import {
   type WorkRequest,
   type WorkThread,
   type WorkThreadId,
-  type WorkThreadTranscript,
   type WorkTurnId,
   type WorkTurnState,
   type WorkTurnStreamFrame,
@@ -28,6 +27,8 @@ import type { ProjectSummary, ProjectId } from "@octant/contracts/projects";
 import type { BrowserToolApproval } from "@octant/contracts/browser-automation-rpc";
 import {
   pickerGroupCarriesAppManagedTools,
+  prependEarlierTurns,
+  refreshNewestTurns,
   startedConversationPickerGroups,
   type PickerGroup,
 } from "@octant/domain";
@@ -109,6 +110,10 @@ import {
   waitUntilDocumentVisible,
 } from "../polling/documentVisibility";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
+import {
+  LoadEarlierMessages,
+  type LoadEarlierMessagesState,
+} from "../transcript/LoadEarlierMessages";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
@@ -165,6 +170,88 @@ type WorkTranscriptRow =
     };
 
 const WORK_TRANSCRIPT_RECONNECTING_MESSAGE = "Work transcript is reconnecting.";
+
+/** How many turns a Work thread opens on, and how many each Load earlier adds. */
+const WORK_TRANSCRIPT_PAGE_TURNS = 30;
+
+/**
+ * The newest page of a Work thread, read through the window route, or through
+ * the whole-transcript route from a host that has no window route. That host
+ * answers with everything it will send, so nothing earlier is offered.
+ */
+interface WorkNewestTurns {
+  readonly turns: ReadonlyArray<WorkTurnState>;
+  readonly liveCursor: number;
+  readonly hasEarlier: boolean;
+}
+
+/**
+ * What this view holds of one thread: one run of turns that ends at the
+ * newest. `offerEarlier` stays set once the thread has offered earlier
+ * messages, so the Load earlier row keeps its place after the last page.
+ */
+interface WorkLoadedTurns {
+  readonly threadKey: string | undefined;
+  readonly turns: ReadonlyArray<WorkTurnState>;
+  readonly hasEarlier: boolean;
+  readonly offerEarlier: boolean;
+}
+
+const NO_LOADED_TURNS: WorkLoadedTurns = {
+  threadKey: undefined,
+  turns: [],
+  hasEarlier: false,
+  offerEarlier: false,
+};
+
+const workTurnKey = (turn: WorkTurnState) => String(turn.requestId);
+
+/** Clients that already answered 404 for the window route; asked once per client. */
+const clientsWithoutWorkWindow = new WeakSet<WorkTurnClient>();
+
+async function readNewestWorkTurns(
+  client: WorkTurnClient,
+  threadId: WorkThreadId,
+  signal: AbortSignal,
+): Promise<WorkNewestTurns> {
+  // A test double or an older client may not carry the window read at all.
+  if (typeof client.transcriptWindow === "function" && !clientsWithoutWorkWindow.has(client)) {
+    try {
+      const window = await client.transcriptWindow(
+        threadId,
+        { limit: WORK_TRANSCRIPT_PAGE_TURNS },
+        signal,
+      );
+      return { turns: window.turns, liveCursor: window.liveCursor, hasEarlier: window.hasEarlier };
+    } catch (error) {
+      if (!(error instanceof WorkTurnClientFailure && error.status === 404)) throw error;
+      clientsWithoutWorkWindow.add(client);
+    }
+  }
+  const transcript = await client.transcript(threadId, signal);
+  return { turns: transcript.turns, liveCursor: transcript.liveCursor, hasEarlier: false };
+}
+
+/** Join a newest read onto what the view holds, keeping earlier pages when they still touch. */
+function withNewestWorkTurns(
+  current: WorkLoadedTurns,
+  threadKey: string,
+  newest: WorkNewestTurns,
+): WorkLoadedTurns {
+  if (current.threadKey !== threadKey) {
+    return {
+      threadKey,
+      turns: newest.turns,
+      hasEarlier: newest.hasEarlier,
+      offerEarlier: newest.hasEarlier,
+    };
+  }
+  const refreshed = refreshNewestTurns(current.turns, newest.turns, workTurnKey);
+  const turns = samePollingData(current.turns, refreshed.turns) ? current.turns : refreshed.turns;
+  const hasEarlier = refreshed.kind === "spliced" ? current.hasEarlier : newest.hasEarlier;
+  if (turns === current.turns && hasEarlier === current.hasEarlier) return current;
+  return { threadKey, turns, hasEarlier, offerEarlier: current.offerEarlier || hasEarlier };
+}
 
 /**
  * The turn header: it opens the turn's first reply, or stands alone when the
@@ -362,7 +449,7 @@ function applyWorkTurnStreamFrame(
   turns: ReadonlyArray<WorkTurnState>,
   frame: WorkTurnStreamFrame,
 ): ReadonlyArray<WorkTurnState> {
-  if (frame.kind === "snapshot-required") return turns;
+  if (frame.kind === "snapshot-required" || frame.kind === "compaction-settled") return turns;
   const index = turns.findIndex(
     (turn) =>
       String(turn.requestId) ===
@@ -405,7 +492,7 @@ async function consumeWorkTurnStream(input: {
   readonly signal: AbortSignal;
   readonly active: () => boolean;
   readonly apply: (frame: WorkTurnStreamFrame) => void;
-  readonly replace: (snapshot: WorkThreadTranscript) => void;
+  readonly replace: (snapshot: WorkNewestTurns) => void;
 }): Promise<void> {
   let cursor = input.afterSequence;
   let retryMs = 250;
@@ -416,7 +503,7 @@ async function consumeWorkTurnStream(input: {
         if (!input.active() || input.signal.aborted) return;
         received = true;
         if (frame.kind === "snapshot-required") {
-          const snapshot = await input.client.transcript(input.threadId, input.signal);
+          const snapshot = await readNewestWorkTurns(input.client, input.threadId, input.signal);
           if (!input.active() || input.signal.aborted) return;
           input.replace(snapshot);
           cursor = snapshot.liveCursor;
@@ -497,7 +584,18 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     onDraftChange: (next, caret) => composerDraft.setDraft(next, caret),
     onResolveExtensionReference: extensionDraft.resolveReference,
   });
-  const [turns, setTurns] = useState<ReadonlyArray<WorkTurnState>>([]);
+  const [loaded, setLoaded] = useState<WorkLoadedTurns>(NO_LOADED_TURNS);
+  const turns = loaded.turns;
+  const setTurns = useCallback(
+    (update: (current: ReadonlyArray<WorkTurnState>) => ReadonlyArray<WorkTurnState>) =>
+      setLoaded((current) => {
+        const next = update(current.turns);
+        return next === current.turns ? current : { ...current, turns: next };
+      }),
+    [],
+  );
+  const [earlierState, setEarlierState] = useState<"idle" | "loading" | "failed">("idle");
+  const earlierAbort = useRef<AbortController | undefined>(undefined);
   const [retries, setRetries] = useState<ReadonlyMap<string, HarnessRetryNotice>>(() => new Map());
   const [pendingRequests, setPendingRequests] = useState<ReadonlyArray<WorkRequest>>([]);
   const [browserApprovals, setBrowserApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
@@ -615,7 +713,82 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     setPendingRequests([]);
     setErrorMessage(undefined);
     setStatus(undefined);
+    setEarlierState("idle");
+    return () => earlierAbort.current?.abort();
   }, [props.threadId]);
+  const loadEarlier = useCallback(async () => {
+    const turnClient = props.turnClient;
+    const oldest = loaded.turns[0];
+    const threadKey = String(props.threadId);
+    if (
+      turnClient === undefined ||
+      oldest === undefined ||
+      !loaded.hasEarlier ||
+      loaded.threadKey !== threadKey ||
+      earlierState === "loading"
+    ) {
+      return;
+    }
+    earlierAbort.current?.abort();
+    const abort = new AbortController();
+    earlierAbort.current = abort;
+    setEarlierState("loading");
+    try {
+      const page = await turnClient.transcriptWindow(
+        props.threadId,
+        { limit: WORK_TRANSCRIPT_PAGE_TURNS, before: oldest.requestId },
+        abort.signal,
+      );
+      if (abort.signal.aborted) return;
+      setLoaded((current) =>
+        // A newest read that could not prove it touched this run replaced it
+        // while the page loaded; the page belongs to a run that is gone.
+        current.threadKey !== threadKey ||
+        current.turns[0] === undefined ||
+        workTurnKey(current.turns[0]) !== workTurnKey(oldest)
+          ? current
+          : {
+              ...current,
+              turns: prependEarlierTurns(current.turns, page.turns, workTurnKey),
+              hasEarlier: page.hasEarlier,
+            },
+      );
+      setEarlierState("idle");
+    } catch (error) {
+      if (abort.signal.aborted) return;
+      if (error instanceof WorkTurnClientFailure && error.status === 409) {
+        // The turn this page was anchored on is no longer in the thread, so
+        // the loaded run cannot be extended: start again from the newest page.
+        try {
+          const newest = await readNewestWorkTurns(turnClient, props.threadId, abort.signal);
+          if (abort.signal.aborted) return;
+          setLoaded((current) =>
+            current.threadKey !== threadKey
+              ? current
+              : {
+                  threadKey,
+                  turns: newest.turns,
+                  hasEarlier: newest.hasEarlier,
+                  offerEarlier: current.offerEarlier || newest.hasEarlier,
+                },
+          );
+          setEarlierState("idle");
+          return;
+        } catch {
+          if (abort.signal.aborted) return;
+        }
+      }
+      setEarlierState("failed");
+    }
+  }, [earlierState, loaded, props.threadId, props.turnClient]);
+  const earlierRow: LoadEarlierMessagesState | undefined =
+    !loaded.offerEarlier || loaded.threadKey !== String(props.threadId)
+      ? undefined
+      : earlierState === "loading" || earlierState === "failed"
+        ? earlierState
+        : loaded.hasEarlier
+          ? "idle"
+          : "none-left";
   const images = useWorkComposerImages();
   const imageSupport = selectedModelReadsImages(props.providerGroups ?? [], {
     ...(thread === undefined ? {} : { providerInstanceId: thread.providerInstanceId }),
@@ -666,10 +839,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const transcriptRows = useMemo<ReadonlyArray<WorkTranscriptRow>>(() => {
     const rows: WorkTranscriptRow[] = [];
     if (turns.length === 0) rows.push({ kind: "empty", key: "empty" });
-    for (const [turnIndex, turn] of turns.entries()) {
+    // A key names the turn, never its position: earlier pages arrive above,
+    // and the list keeps the reader's row in place by its key.
+    for (const turn of turns) {
       const head: WorkTranscriptRow = {
         kind: "head",
-        key: `${String(turn.requestId)}-${String(turnIndex)}-head`,
+        key: `${String(turn.requestId)}-head`,
         turn,
       };
       let headPlaced = false;
@@ -681,7 +856,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         if (opensTurn) headPlaced = true;
         rows.push({
           kind: "message",
-          key: `${String(turn.requestId)}-${String(turnIndex)}-${entry.role}-${String(index)}`,
+          key: `${String(turn.requestId)}-${entry.role}-${String(index)}`,
           entry,
           streaming:
             turn.status === "running" || turn.status === "accepted" || turn.status === "waiting",
@@ -699,7 +874,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       if (turn.tasks !== undefined && turn.tasks.length > 0) {
         rows.push({
           kind: "tasks",
-          key: `${String(turn.requestId)}-${String(turnIndex)}-tasks`,
+          key: `${String(turn.requestId)}-tasks`,
           turn,
           tasks: turn.tasks,
         });
@@ -709,7 +884,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       if (turn.wroteFiles !== undefined) {
         rows.push({
           kind: "files",
-          key: `${String(turn.requestId)}-${String(turnIndex)}-files`,
+          key: `${String(turn.requestId)}-files`,
           wrote: turn.wroteFiles,
         });
       }
@@ -748,10 +923,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
             return;
           }
           let retryMs = 250;
-          let transcript: WorkThreadTranscript;
+          let transcript: WorkNewestTurns;
           for (;;) {
             try {
-              transcript = await turnClient.transcript(props.threadId, streamAbort.signal);
+              transcript = await readNewestWorkTurns(
+                turnClient,
+                props.threadId,
+                streamAbort.signal,
+              );
               break;
             } catch (error) {
               if (cancelled || streamAbort.signal.aborted) return;
@@ -769,9 +948,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           setErrorMessage((current) =>
             current === WORK_TRANSCRIPT_RECONNECTING_MESSAGE ? undefined : current,
           );
-          setTurns((current) =>
-            samePollingData(current, transcript.turns) ? current : transcript.turns,
-          );
+          setLoaded((current) => withNewestWorkTurns(current, String(props.threadId), transcript));
           props.onDisplayReadyChange?.(true);
           if (typeof turnClient.subscribe === "function") {
             void consumeWorkTurnStream({
@@ -785,9 +962,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 setRetries((current) => applyWorkRetryFrame(current, frame));
               },
               replace: (next) => {
-                setTurns((current) =>
-                  samePollingData(current, next.turns) ? current : next.turns,
-                );
+                setLoaded((current) => withNewestWorkTurns(current, String(props.threadId), next));
                 setRetries(new Map());
               },
             });
@@ -855,9 +1030,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       const transcript =
         turnClient === undefined || streamAvailable
           ? Promise.resolve()
-          : turnClient.transcript(props.threadId, pollAbort.signal).then((next) => {
+          : readNewestWorkTurns(turnClient, props.threadId, pollAbort.signal).then((next) => {
               if (cancelled || requestGeneration !== transcriptGeneration.current) return;
-              setTurns((current) => (samePollingData(current, next.turns) ? current : next.turns));
+              setLoaded((current) => withNewestWorkTurns(current, String(props.threadId), next));
             });
       const requests =
         requestClient === undefined || projectId === undefined
@@ -1494,6 +1669,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         gap={20}
         itemKey={(row) => row.key}
         items={transcriptRows}
+        {...(earlierRow === undefined
+          ? {}
+          : {
+              lead: <LoadEarlierMessages onLoad={() => void loadEarlier()} state={earlierRow} />,
+            })}
         listClassName="thread-column"
         {...(canvasClient === undefined
           ? {}

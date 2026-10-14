@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { basename, resolve } from "node:path";
-import { decodeProjectBootstrap, LOCAL_HOST_ID, type ProjectSummary } from "@octant/contracts";
+import {
+  LOCAL_HOST_ID,
+  type ProjectSummary,
+  ProjectBootstrap,
+  decodeHostAnswer,
+} from "@octant/contracts";
 import { failureMessage, type OpenedLocalControlSession } from "./localControl";
 
 export type ProjectCliCommand =
@@ -214,7 +219,7 @@ async function readProjects(
     };
   }
   try {
-    return { kind: "read", active: decodeProjectBootstrap(response.body).active };
+    return { kind: "read", active: decodeHostAnswer(ProjectBootstrap)(response.body).active };
   } catch {
     return { kind: "refuses", reason: "Octant returned an unreadable Project list." };
   }

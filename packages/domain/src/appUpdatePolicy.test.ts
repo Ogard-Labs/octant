@@ -329,7 +329,7 @@ describe("compareAppVersions", () => {
 describe("resolveUpdateInstallReadiness", () => {
   it("applies an update when nothing is running", () => {
     expect(
-      resolveUpdateInstallReadiness({ activeAgentCount: 0, attentionRequired: false }),
+      resolveUpdateInstallReadiness({ activeAgentCount: 0, activityUnconfirmed: false }),
     ).toEqual({ kind: "ready" });
   });
 
@@ -337,19 +337,19 @@ describe("resolveUpdateInstallReadiness", () => {
     // Relaunching under live work loses whatever had not been journaled, so the
     // person lets it finish or checkpoints it.
     expect(
-      resolveUpdateInstallReadiness({ activeAgentCount: 2, attentionRequired: false }),
-    ).toEqual({ kind: "wait", activeAgentCount: 2, attentionRequired: false });
+      resolveUpdateInstallReadiness({ activeAgentCount: 2, activityUnconfirmed: false }),
+    ).toEqual({ kind: "wait", activeAgentCount: 2, activityUnconfirmed: false });
   });
 
-  it("waits on an unanswered approval even when nothing is running", () => {
-    // A question the person has not answered is work in flight; restarting
-    // throws the question away.
-    expect(resolveUpdateInstallReadiness({ activeAgentCount: 0, attentionRequired: true })).toEqual(
-      {
-        kind: "wait",
-        activeAgentCount: 0,
-        attentionRequired: true,
-      },
-    );
+  it("waits when the desktop could not confirm what is running", () => {
+    // A zero the desktop could not check proves nothing; restarting under an
+    // unreachable host may still interrupt live work.
+    expect(
+      resolveUpdateInstallReadiness({ activeAgentCount: 0, activityUnconfirmed: true }),
+    ).toEqual({
+      kind: "wait",
+      activeAgentCount: 0,
+      activityUnconfirmed: true,
+    });
   });
 });

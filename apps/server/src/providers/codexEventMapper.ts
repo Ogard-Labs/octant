@@ -48,6 +48,11 @@ export interface CodexEventContext {
   exhaustedWindowReset?: UtcTimestamp;
   /** Codex compacted the thread's window during this turn. */
   windowCompacted?: boolean;
+  /**
+   * This run is the compaction the connection's `compact` asked for, so the
+   * compaction it carries is `requested` rather than the runtime's own.
+   */
+  readonly compactionRequested?: boolean;
   readonly requestIds: Map<CodexRpcId, string>;
   readonly agentMessages: Map<string, CodexAgentMessageState>;
   readonly taskIds: Map<string, string>;
@@ -474,7 +479,19 @@ function mapLifecycle(
       // survives is Codex's own choice. Usage reports for the rest of the turn
       // say so.
       context.windowCompacted = true;
-      return [{ kind: "ignored" }];
+      // Codex replaces the thread's history before it completes the item, and
+      // every failure returns before that replacement (`compact.rs`,
+      // `compact_remote_v2.rs` and `compact_token_budget.rs` at
+      // `rust-v0.162.1`), so a completed item is the compaction having
+      // happened. A started item has changed nothing yet.
+      return message.method === "item/completed"
+        ? [
+            event(context, {
+              kind: "context-compacted",
+              trigger: context.compactionRequested === true ? "requested" : "automatic",
+            }),
+          ]
+        : [{ kind: "ignored" }];
     case "userMessage":
     case "plan":
     case "reasoning":

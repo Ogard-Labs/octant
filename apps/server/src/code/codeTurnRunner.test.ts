@@ -316,6 +316,35 @@ describe("CodeTurnRunner", () => {
     );
   });
 
+  it("finishes a turn the runtime compacted midway without recording the compaction as a turn event", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "text-delta", text: "Working." }),
+          event({ kind: "context-compacted", trigger: "automatic", tokensBefore: 150_000 }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+    const observed: CodeTurnEvent[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(outcomes).toEqual(["completed"]);
+    expect(observed.map((next) => next.providerKind)).toEqual(["text-delta", "completed"]);
+  });
+
   it("names the tool once in an approval prompt", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(

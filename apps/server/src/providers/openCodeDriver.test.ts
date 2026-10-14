@@ -1354,9 +1354,12 @@ describe("OpenCode driver", () => {
     expect(probe.reason).toBe("runtime-incompatible");
     expect(probe.message).toContain("Git");
     expect(probe.models.length).toBeGreaterThan(0);
-    expect(Object.values(probe.capabilities).every((support) => support === "unsupported")).toBe(
-      true,
-    );
+    const { usage, ...offered } = probe.capabilities;
+    expect(Object.values(offered).every((support) => support === "unsupported")).toBe(true);
+    // Usage stays unproven rather than unsupported: the instance may hold
+    // turns from a runtime that reported usage, and a spend ceiling would
+    // stop counting their unreported turns.
+    expect(usage).toBe("unavailable");
     const marker = fixture.sessionRoots.find((root) => root.includes("octant-opencode-probe-"));
     expect(marker).toBeDefined();
     expect(existsSync(marker!)).toBe(false);

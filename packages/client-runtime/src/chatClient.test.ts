@@ -476,4 +476,40 @@ describe("chat client", () => {
     }
     expect(sequences).toEqual([42, 44]);
   });
+  it("asks for compaction outcomes on the thread's stream and decodes one", async () => {
+    const compaction = {
+      status: "failed",
+      compactionId: "00000000-0000-4000-8000-0000000008c1",
+      executor: {
+        kind: "host",
+        providerInstanceId: "10000000-0000-4000-8000-000000000001",
+        modelId: "model-a",
+      },
+      reason: "summary-failed",
+      sessionMayHaveChanged: false,
+      failedAt: now,
+    } as const;
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(
+        `${JSON.stringify({
+          threadId,
+          sequence: 42,
+          event: { kind: "compaction-settled", threadId, compaction },
+        })}\n`,
+        { status: 200, headers: { "content-type": "application/x-ndjson" } },
+      ),
+    );
+    const client = createChatClient({ baseUrl, fetch, windowCapability: capability });
+    const events = [];
+    for await (const frame of client.subscribe(
+      threadId as never,
+      41,
+      new AbortController().signal,
+    )) {
+      events.push(frame.event);
+    }
+    expect(events).toEqual([{ kind: "compaction-settled", threadId, compaction }]);
+    const requested = new URL(String(fetch.mock.calls[0]?.[0]));
+    expect(requested.searchParams.get("compaction")).toBe("1");
+  });
 });

@@ -1,11 +1,9 @@
 import {
-  decodeShellBootstrap,
-  decodeShellCommandResult,
-  decodeShellFailure,
-  type ShellBootstrap,
+  ShellBootstrap,
   type ShellCommand,
-  type ShellCommandResult,
-  type ShellFailure,
+  ShellCommandResult,
+  ShellFailure,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -52,7 +50,7 @@ export function createShellClient(options: ShellClientOptions): ShellClient {
         fetch,
         url.toString(),
         { method: "POST", headers: capabilityHeaders },
-        decodeShellBootstrap,
+        decodeHostAnswer(ShellBootstrap),
       );
     },
     execute(command) {
@@ -65,7 +63,7 @@ export function createShellClient(options: ShellClientOptions): ShellClient {
           headers: { "content-type": "application/json", ...capabilityHeaders },
           body: JSON.stringify(command),
         },
-        decodeShellCommandResult,
+        decodeHostAnswer(ShellCommandResult),
       );
     },
   };
@@ -94,7 +92,7 @@ async function request<T>(
   if (!response.ok) {
     let failure: ShellFailure;
     try {
-      failure = decodeShellFailure(body);
+      failure = decodeHostAnswer(ShellFailure)(body);
     } catch {
       throw invalidResponse();
     }

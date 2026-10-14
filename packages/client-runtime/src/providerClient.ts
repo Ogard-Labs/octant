@@ -1,15 +1,12 @@
 import {
-  decodeProviderFailure,
-  decodeProviderProbeResult,
   decodeProviderRegistryCommand,
-  decodeProviderRegistryCommandResult,
-  decodeProviderRegistrySnapshot,
-  type ProviderFailure,
+  ProviderFailure,
   type ProviderInstanceId,
-  type ProviderProbeResult,
+  ProviderProbeResult,
   type ProviderRegistryCommand,
-  type ProviderRegistryCommandResult,
-  type ProviderRegistrySnapshot,
+  ProviderRegistryCommandResult,
+  ProviderRegistrySnapshot,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export interface ProviderClientOptions {
@@ -46,7 +43,7 @@ export function createProviderClient(options: ProviderClientOptions): ProviderCl
         options.fetch,
         new URL("/api/providers/bootstrap", options.baseUrl).toString(),
         { method: "GET", headers },
-        decodeProviderRegistrySnapshot,
+        decodeHostAnswer(ProviderRegistrySnapshot),
         "bootstrap",
       );
     },
@@ -65,7 +62,7 @@ export function createProviderClient(options: ProviderClientOptions): ProviderCl
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeProviderRegistryCommandResult,
+        decodeHostAnswer(ProviderRegistryCommandResult),
         "command",
       );
     },
@@ -77,7 +74,7 @@ export function createProviderClient(options: ProviderClientOptions): ProviderCl
           options.baseUrl,
         ).toString(),
         { method: "POST", headers },
-        decodeProviderProbeResult,
+        decodeHostAnswer(ProviderProbeResult),
         "probe",
       );
     },
@@ -107,7 +104,7 @@ async function request<T>(
   if (!response.ok) {
     let failure: ProviderFailure;
     try {
-      failure = decodeProviderFailure(body);
+      failure = decodeHostAnswer(ProviderFailure)(body);
     } catch (error) {
       reportDecodeFailure(operation, response.status, "failure-body", error);
       throw protocol();

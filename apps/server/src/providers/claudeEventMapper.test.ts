@@ -1472,6 +1472,8 @@ describe("mapClaudeMessage", () => {
       mapped(ctx, {
         kind: "compaction",
         sessionId: claudeSessionId,
+        trigger: "auto",
+        preTokens: 160_000,
         ...(postTokens === undefined ? {} : { postTokens }),
       });
       const [settled] = eventValues(

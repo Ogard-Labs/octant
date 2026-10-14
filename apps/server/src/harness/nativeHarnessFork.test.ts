@@ -165,6 +165,60 @@ describe("forking a harness conversation", () => {
     expect(store.load(session("source"))).toEqual(before);
   });
 
+  it.each([
+    // Compacted after its first turn: the fork's second turn already read the summary.
+    { afterTurns: 1, throughOperationId: "op-2", copied: true },
+    // Compacted only after the second turn, so the fork point had not read it.
+    { afterTurns: 2, throughOperationId: "op-2", copied: false },
+  ])(
+    "copies a compaction into the fork only when its source read it by the fork point (after $afterTurns)",
+    async ({ afterTurns, throughOperationId, copied }) => {
+      const store = new MemoryNativeHarnessTranscriptStore();
+      twoTurnSource(store);
+      store.append(session("source"), user("Third."));
+      store.append(session("source"), reply("Thrice."));
+      store.compact(session("source"), {
+        summary: `Read ${sourceRoot}/config.json; it held sk-live-123.`,
+        turns: 1,
+        afterTurns,
+      });
+      const turns = ["op-1", "op-2", "op-3"].map((operationId) => ({
+        operationId,
+        sessionId: "asked",
+        status: "completed",
+      })) as never as ReadonlyArray<CodeConversationTurn>;
+
+      await seedCodeForkHarnessSession(
+        {
+          transcripts: store,
+          harnessDriverKind: () => "anthropic-compatible",
+          sourceTurns: () => turns,
+          sourceConversations: () =>
+            new Map(turns.map((turn) => [String(turn.operationId), String(session("source"))])),
+        },
+        {
+          fork: { providerInstanceId: instanceId, modelId: "m" } as never as CodeThread,
+          origin: { threadId: "source-thread", throughOperationId } as never,
+          sessionId: session("fork"),
+          checkoutRoot: forkRoot,
+          secrets: ["sk-live-123"],
+        },
+      );
+
+      expect(store.load(session("fork"))?.compactions).toEqual(
+        copied
+          ? [
+              {
+                summary: `Read ${forkRoot}/config.json; it held [REDACTED].`,
+                turns: 1,
+                afterTurns: 1,
+              },
+            ]
+          : [],
+      );
+    },
+  );
+
   it("leaves a fork whose model changed before its first message to read the source as text", async () => {
     const store = new MemoryNativeHarnessTranscriptStore();
     twoTurnSource(store);

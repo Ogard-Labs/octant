@@ -17,7 +17,7 @@ import {
   type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
-import type { ProviderConnection } from "@octant/provider-sdk/driver";
+import type { ProviderConnection, ProviderSessionCompaction } from "@octant/provider-sdk/driver";
 import { renderProviderTurnPrompt } from "@octant/provider-sdk/chat-conformance";
 import { Effect, PubSub, Stream, type Scope } from "effect";
 import { isContextOverflowFailure, isEndpointRetriesExhausted } from "../providers/endpointRetry";
@@ -25,6 +25,7 @@ import type { ObservedRateLimitBucket } from "../providers/rateLimitHeaders";
 import { nativeHarnessToolGuide } from "./nativeHarnessInstructions";
 import type {
   NativeHarnessTranscript,
+  NativeHarnessTranscriptCompaction,
   NativeHarnessTranscriptStore,
 } from "./nativeHarnessTranscriptStore";
 import type {
@@ -65,6 +66,21 @@ const NOT_RUN_RESULT_JSON = JSON.stringify({
 });
 const OMITTED_HISTORY_NOTE =
   "Earlier messages of this session were left out to fit the context window. Your task list and the files on disk still reflect that work.";
+
+/**
+ * The compaction request asks for continuation material, not a reply: what a
+ * later request needs to carry on the same work without the turns it replaces.
+ */
+const COMPACTION_INSTRUCTION = [
+  "Summarize the coding session excerpts below so the session can continue",
+  "without them. Preserve the task, decisions, the files and identifiers",
+  "involved, what was changed, what was verified, and what is still open.",
+  "Do not answer anything, do not add commentary, and do not invent detail",
+  "that is not present.",
+].join(" ");
+const COMPACTION_SUMMARY_LEAD = "Summary of the earlier turns of this session:";
+/** How much of one message's text or one tool payload a compaction request carries. */
+const COMPACTION_ITEM_CHARACTERS = 4_000;
 
 /**
  * How many steps in one turn may come back with a malformed tool call before
@@ -147,6 +163,12 @@ interface SessionState {
   usage: NativeHarnessUsage;
   /** When the request now in flight was sent, which dates the usage it reports. */
   requestStartedAt: string | undefined;
+  /**
+   * The compaction the conversation carries, if any: `messages` then begins
+   * with its summary, which stands for the transcript's first `turns` turns
+   * and is not a turn of its own.
+   */
+  compaction: NativeHarnessTranscriptCompaction | undefined;
 }
 
 /**
@@ -240,6 +262,7 @@ export function createNativeHarnessConnection(
       readonly endpoint: NativeHarnessTransportSession;
       readonly messages: NativeHarnessMessage[];
       readonly tools?: ReadonlyArray<ProviderToolDefinition> | undefined;
+      readonly compaction?: NativeHarnessTranscriptCompaction | undefined;
     }): SessionState => ({
       sessionId: input.sessionId,
       transcriptId: input.transcriptId,
@@ -264,6 +287,7 @@ export function createNativeHarnessConnection(
       selfCorrections: 0,
       usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
       requestStartedAt: undefined,
+      compaction: input.compaction,
     });
 
     // A note is acknowledged only after it is durable and its next request
@@ -662,6 +686,111 @@ export function createNativeHarnessConnection(
     const emitBucket = (state: SessionState, bucket: ObservedRateLimitBucket) =>
       emit(state, { kind: "rate-limit-bucket", ...bucket });
 
+    /**
+     * Summarizes the turns before the latest with the session's own endpoint
+     * and journals the summary in their place. As many of the oldest turns are
+     * summarized as fit one request; the rest stay as they were. Nothing is
+     * journaled unless the summary came back, so a failure leaves the session
+     * exactly as it was.
+     */
+    const compactSession = async (state: SessionState): Promise<ProviderSessionCompaction> => {
+      if (state.stopped) throw failure("protocol", "Provider session is not active.");
+      if (state.inFlight !== undefined) return { kind: "refused", reason: "turn-running" };
+      const body = state.compaction === undefined ? state.messages : state.messages.slice(1);
+      const starts = turnStarts(body);
+      if (body.length === 0 && state.compaction === undefined) {
+        return { kind: "refused", reason: "no-session" };
+      }
+      if (starts.length < 2) return { kind: "refused", reason: "nothing-to-compact" };
+      let chosen: { readonly turns: number; readonly request: NativeHarnessRequest } | undefined;
+      for (let turns = starts.length - 1; turns >= 1 && chosen === undefined; turns -= 1) {
+        const request: NativeHarnessRequest = {
+          sessionId: state.sessionId,
+          modelId: state.modelId,
+          system: COMPACTION_INSTRUCTION,
+          history: [
+            {
+              role: "user",
+              text: compactionMaterial(state.compaction, body.slice(0, starts[turns])),
+            },
+          ],
+          tools: [],
+        };
+        if (state.endpoint.fits(request)) chosen = { turns, request };
+      }
+      if (chosen === undefined) {
+        return {
+          kind: "failed",
+          message: "Not even the oldest turn fits one compaction request.",
+          sessionMayHaveChanged: false,
+        };
+      }
+      const controller = new AbortController();
+      state.abortController = controller;
+      const run = (async (): Promise<ProviderSessionCompaction> => {
+        let summary: string;
+        try {
+          // The summary is not a reply: nothing it streams reaches the session's events.
+          const response = await state.endpoint.send(chosen.request, {
+            signal: controller.signal,
+            onEvent: () => undefined,
+          });
+          summary = response.text.trim();
+        } catch {
+          return {
+            kind: "failed",
+            message: controller.signal.aborted
+              ? "The compaction request was cancelled."
+              : "The endpoint could not summarize the session.",
+            sessionMayHaveChanged: false,
+          };
+        }
+        if (summary.length === 0 || state.stopped || controller.signal.aborted) {
+          return {
+            kind: "failed",
+            message: "The endpoint returned no summary.",
+            sessionMayHaveChanged: false,
+          };
+        }
+        const hidden = state.compaction?.turns ?? 0;
+        const compaction = {
+          summary,
+          turns: hidden + chosen.turns,
+          afterTurns: hidden + starts.length,
+        };
+        try {
+          options.transcripts.compact(state.transcriptId, compaction);
+        } catch {
+          // The marker never reached the journal, so the session still reads
+          // the turns it would have replaced.
+          return {
+            kind: "failed",
+            message: "The compaction could not be recorded.",
+            sessionMayHaveChanged: false,
+          };
+        }
+        state.messages.splice(
+          0,
+          state.messages.length,
+          compactionSummaryMessage(summary),
+          ...body.slice(starts[chosen.turns]),
+        );
+        state.compaction = compaction;
+        emit(state, { kind: "context-compacted", trigger: "requested" });
+        return { kind: "compacted" };
+      })();
+      const settled = run.then(() => undefined);
+      state.inFlight = settled;
+      try {
+        return await run;
+      } finally {
+        if (state.inFlight === settled) {
+          state.inFlight = undefined;
+          state.abortController = undefined;
+        }
+      }
+    };
+
     const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>
       fitRequest(state.endpoint, {
         sessionId: state.sessionId,
@@ -742,13 +871,15 @@ export function createNativeHarnessConnection(
               endpoint.release();
               throw error;
             }
+            const compacted = afterCompaction(messages, transcript.compactions.at(-1));
             const state = newState({
               sessionId: input.sessionId,
               transcriptId,
               modelId: transcript.binding.modelId,
               endpoint,
-              messages,
+              messages: compacted.messages,
               tools: input.tools,
+              compaction: compacted.compaction,
             });
             admit(state);
             return { sessionId: input.sessionId, resumeCursor: cursorFor(state) };
@@ -815,6 +946,15 @@ export function createNativeHarnessConnection(
             state.steering.push({ text: message, resolve }),
           );
         }),
+      ...(options.mode === "code"
+        ? {
+            compact: ({ sessionId }) =>
+              Effect.tryPromise({
+                try: () => compactSession(stateFor(sessionId)),
+                catch: sanitizeFailure,
+              }),
+          }
+        : {}),
       interrupt: (sessionId) =>
         Effect.tryPromise({
           try: async () => {
@@ -994,6 +1134,64 @@ function closeOpenStep(
     }),
   });
   return messages;
+}
+
+/** Where each turn of a conversation begins: the plain user message `send` journals for it. */
+function turnStarts(messages: ReadonlyArray<NativeHarnessMessage>): ReadonlyArray<number> {
+  return messages.flatMap((message, index) => (isPlainUserMessage(message) ? [index] : []));
+}
+
+function compactionSummaryMessage(summary: string): NativeHarnessMessage {
+  return { role: "user", text: `${COMPACTION_SUMMARY_LEAD}\n\n${summary}` };
+}
+
+/**
+ * The conversation a request is built from once the transcript was compacted:
+ * the summary in place of the turns it covers, then every later message. A
+ * marker that cannot be placed on this transcript's turns is not applied, so
+ * the conversation is sent whole rather than cut at a guess.
+ */
+function afterCompaction(
+  messages: NativeHarnessMessage[],
+  compaction: NativeHarnessTranscriptCompaction | undefined,
+): {
+  readonly messages: NativeHarnessMessage[];
+  readonly compaction: NativeHarnessTranscriptCompaction | undefined;
+} {
+  if (compaction === undefined) return { messages, compaction };
+  const start = turnStarts(messages)[compaction.turns];
+  if (start === undefined) return { messages, compaction: undefined };
+  return {
+    messages: [compactionSummaryMessage(compaction.summary), ...messages.slice(start)],
+    compaction,
+  };
+}
+
+/** The turns a compaction summarizes, as one text the summary request carries. */
+function compactionMaterial(
+  earlier: NativeHarnessTranscriptCompaction | undefined,
+  messages: ReadonlyArray<NativeHarnessMessage>,
+): string {
+  const clip = (value: string) =>
+    value.length <= COMPACTION_ITEM_CHARACTERS
+      ? value
+      : `${value.slice(0, COMPACTION_ITEM_CHARACTERS)} [truncated]`;
+  const lines: string[] = [];
+  if (earlier !== undefined) lines.push(`Earlier summary: ${clip(earlier.summary)}`);
+  for (const message of messages) {
+    if (message.text.length > 0) {
+      lines.push(`${message.role === "user" ? "User" : "Assistant"}: ${clip(message.text)}`);
+    }
+    for (const call of message.toolCalls ?? []) {
+      lines.push(`Assistant called ${call.toolName}: ${clip(call.argumentsJson)}`);
+    }
+    for (const result of message.toolResults ?? []) {
+      lines.push(
+        `${result.isError ? "Tool error" : "Tool result"} for ${result.toolCallId}: ${clip(result.resultJson)}`,
+      );
+    }
+  }
+  return lines.join("\n\n");
 }
 
 function transcriptIdOf(cursor: ProviderResumeCursor): ProviderSessionId | undefined {

@@ -1,6 +1,7 @@
 import { queueTestHost } from "../messageQueue/queueTestHost.test-fixture";
 import {
   decodeWorkThreadTranscript,
+  decodeWorkThreadTranscriptWindow,
   decodeWorkAttachmentReference,
   type ThreadMessageQueueResult,
 } from "@octant/contracts";
@@ -36,6 +37,16 @@ function queuedWorkClients() {
   const turnClient: WorkTurnClient = {
     transcript: vi.fn(async () =>
       decodeWorkThreadTranscript({ threadId, turns: [workTurn({ status: "running" })] }),
+    ),
+    transcriptWindow: vi.fn(async () =>
+      decodeWorkThreadTranscriptWindow({
+        version: 1,
+        threadId,
+        turns: [workTurn({ status: "running" })],
+        liveCursor: 0,
+        hasEarlier: false,
+        hasLater: false,
+      }),
     ),
     startFirstTurn: vi.fn(),
     lookupFirstTurn: vi.fn(),
@@ -1058,6 +1069,152 @@ describe("WorkThreadWorkspace", () => {
       expect(container.querySelector("[data-transcript-window]")).toBeInTheDocument(),
     );
     expect(container.querySelectorAll("[data-transcript-row]").length).toBeLessThan(200);
+  });
+
+  describe("a thread longer than one page", () => {
+    const pagedTurns = Array.from({ length: 50 }, (_, index) =>
+      workTurn({
+        requestId: `request-${String(index)}`,
+        turnId: `turn-${String(index)}`,
+        prompt: `Prompt ${String(index)}`,
+        transcript: [{ role: "user", text: `Prompt ${String(index)}` }],
+      }),
+    );
+
+    function pagedClient(
+      overrides: {
+        readonly earlier?: (before: string) => Promise<unknown>;
+      } = {},
+    ) {
+      const transcript = vi.fn(async () => ({
+        threadId,
+        turns: pagedTurns.slice(-30),
+        liveCursor: 0,
+      }));
+      const transcriptWindow = vi.fn(
+        async (
+          _threadId: unknown,
+          request: { readonly limit: number; readonly before?: string },
+        ) => {
+          if (request.before === undefined) {
+            return {
+              version: 1,
+              threadId,
+              turns: pagedTurns.slice(20),
+              liveCursor: 0,
+              hasEarlier: true,
+              hasLater: false,
+            };
+          }
+          if (overrides.earlier !== undefined) return overrides.earlier(request.before);
+          const end = pagedTurns.findIndex((turn) => turn.requestId === request.before);
+          return {
+            version: 1,
+            threadId,
+            turns: pagedTurns.slice(Math.max(0, end - request.limit), end),
+            liveCursor: 0,
+            hasEarlier: end - request.limit > 0,
+            hasLater: true,
+          };
+        },
+      );
+      return { transcript, transcriptWindow };
+    }
+
+    function renderPaged(turnClient: object) {
+      return render(
+        <WorkThreadWorkspace
+          initialThread={workThread()}
+          threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
+          threadId={threadId}
+          title="Long brief"
+          turnClient={turnClient as never}
+        />,
+      );
+    }
+
+    it("opens on its newest turns and loads the page before on request", async () => {
+      const client = pagedClient();
+      renderPaged(client);
+
+      const load = await screen.findByRole("button", { name: "Load earlier messages" });
+      expect(client.transcriptWindow).toHaveBeenCalledWith(
+        threadId,
+        { limit: 30 },
+        expect.any(AbortSignal),
+      );
+      expect(client.transcript).not.toHaveBeenCalled();
+
+      fireEvent.click(load);
+
+      expect(await screen.findByText("No earlier messages")).toBeVisible();
+      expect(client.transcriptWindow).toHaveBeenLastCalledWith(
+        threadId,
+        { limit: 30, before: "request-20" },
+        expect.any(AbortSignal),
+      );
+    });
+
+    it("says a page failed and loads it when asked again", async () => {
+      let fail = true;
+      const client = pagedClient({
+        earlier: async () => {
+          if (fail) throw new WorkTurnClientFailure("Work transcript lookup failed.", 503);
+          return {
+            version: 1,
+            threadId,
+            turns: pagedTurns.slice(0, 20),
+            liveCursor: 0,
+            hasEarlier: false,
+            hasLater: true,
+          };
+        },
+      });
+      renderPaged(client);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Load earlier messages" }));
+      expect(await screen.findByText("Earlier messages could not be loaded.")).toBeVisible();
+
+      fail = false;
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      expect(await screen.findByText("No earlier messages")).toBeVisible();
+    });
+
+    it("starts again from the newest page when the page it walked back from is gone", async () => {
+      const client = pagedClient({
+        earlier: async () => {
+          throw new WorkTurnClientFailure("That Work turn is no longer in this thread.", 409);
+        },
+      });
+      renderPaged(client);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Load earlier messages" }));
+
+      await waitFor(() => expect(client.transcriptWindow).toHaveBeenCalledTimes(3));
+      expect(client.transcriptWindow).toHaveBeenLastCalledWith(
+        threadId,
+        { limit: 30 },
+        expect.any(AbortSignal),
+      );
+      expect(await screen.findByRole("button", { name: "Load earlier messages" })).toBeVisible();
+    });
+
+    it("falls back to the whole transcript when the host has no window route", async () => {
+      const client = pagedClient();
+      client.transcriptWindow.mockRejectedValue(
+        new WorkTurnClientFailure("Work transcript lookup failed.", 404),
+      );
+      const { container } = renderPaged(client);
+
+      await waitFor(() => expect(client.transcript).toHaveBeenCalledOnce());
+      await waitFor(() =>
+        expect(container.querySelectorAll("[data-transcript-row]").length).toBeGreaterThan(0),
+      );
+      expect(
+        screen.queryByRole("button", { name: "Load earlier messages" }),
+      ).not.toBeInTheDocument();
+      expect(container.querySelector("[data-load-earlier]")).toBeNull();
+    });
   });
 
   it("starts transcript and pending-request reads together from the navigation thread", async () => {

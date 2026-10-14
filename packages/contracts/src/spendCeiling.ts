@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
+import { ProviderInstanceId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -263,6 +264,17 @@ export const SpendCeilingRefusal = Schema.Struct({
 export type SpendCeilingRefusal = typeof SpendCeilingRefusal.Type;
 
 /**
+ * A provider whose runtime never reports usage. Its unreported turns are left
+ * out of a token or money ceiling rather than refusing every later turn, and
+ * the reading names it so a person does not read the ceiling as covering it.
+ */
+export const SpendCeilingNotMeasuredProvider = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  displayName: Schema.NonEmptyTrimmedString,
+}).annotations(strict);
+export type SpendCeilingNotMeasuredProvider = typeof SpendCeilingNotMeasuredProvider.Type;
+
+/**
  * Remaining capacity per configured dimension. Token fields are absent when the
  * ceiling has no token budget or recent usage cannot be measured.
  */
@@ -280,6 +292,15 @@ export const SpendCeilingRemaining = Schema.Struct({
   ceilingUsdCents: Schema.optional(PositiveUsdCents),
   usedUsdCents: Schema.optional(NonNegativeInt),
   remainingUsdCents: Schema.optional(NonNegativeInt),
+  notMeasuredProviders: Schema.optional(
+    Schema.Array(SpendCeilingNotMeasuredProvider).pipe(
+      Schema.filter(
+        (providers) =>
+          new Set(providers.map(({ providerInstanceId }) => String(providerInstanceId))).size ===
+          providers.length,
+      ),
+    ),
+  ),
   window: SpendCeilingWindow,
   overrun: Schema.optional(SpendCeilingOverrun),
   version: AggregateVersion,

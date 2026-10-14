@@ -31,6 +31,7 @@ export * from "./goalLoop";
 export * from "./shipTarget";
 export * from "./threadPlan";
 export * from "./threadTasks";
+export * from "./threadWindow";
 export * from "./agentMessage";
 export * from "./siblingThreads";
 export * from "./extensions";
@@ -159,3 +160,4 @@ export * from "./gitHistory";
 
 export * from "./threadMessageQueue";
 export * from "./agentObservation";
+export * from "./hostAnswer";

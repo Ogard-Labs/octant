@@ -1,17 +1,17 @@
 import {
   decodeBindingRevisionId,
   decodeStartWorkThreadTurnCommand,
-  decodeWorkThreadBootstrap,
-  decodeWorkThreadCommandResult,
-  decodeWorkThreadTranscript,
-  decodeWorkTurnLookupResult,
-  decodeProjectBootstrap,
   LOCAL_HOST_ID,
   type StartWorkThreadTurnCommand,
   type WorkThread,
-  type WorkThreadTranscript,
+  WorkThreadTranscript,
   type WorkTurnState,
   type ProjectSummary,
+  WorkThreadBootstrap,
+  WorkThreadCommandResult,
+  WorkTurnLookupResult,
+  ProjectBootstrap,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import {
   MobileInboxFailure,
@@ -72,7 +72,7 @@ export async function fetchMobileWorkProjects(
     );
   }
   try {
-    const bootstrap = decodeProjectBootstrap(await response.json());
+    const bootstrap = decodeHostAnswer(ProjectBootstrap)(await response.json());
     return listMobileWorkProjects(bootstrap.active);
   } catch {
     throw new MobileInboxFailure("unavailable", "Host returned an invalid project bootstrap.");
@@ -107,7 +107,7 @@ export async function loadMobileWorkThread(
 ): Promise<WorkThread> {
   const bootstrap = await decodeJson(
     await transport.authenticatedFetch({ method: "GET", path: "/api/work/threads/bootstrap" }),
-    decodeWorkThreadBootstrap,
+    decodeHostAnswer(WorkThreadBootstrap),
     "Could not load Work threads from the host.",
   );
   const thread = bootstrap.threads.find((entry) => String(entry.id) === threadId);
@@ -127,7 +127,7 @@ export async function loadMobileWorkTranscript(
       method: "GET",
       path: `/api/work/turns/transcript/${encodeURIComponent(threadId)}`,
     }),
-    decodeWorkThreadTranscript,
+    decodeHostAnswer(WorkThreadTranscript),
     "Could not load the Work transcript from the host.",
   );
   if (String(transcript.threadId) !== threadId) {
@@ -184,7 +184,7 @@ export async function sendMobileWorkTurn(input: {
       path: "/api/work/turns",
       body: JSON.stringify(command),
     }),
-    decodeWorkTurnLookupResult,
+    decodeHostAnswer(WorkTurnLookupResult),
     "The Work turn could not be started on the host.",
   );
   if (result.kind !== "accepted") {
@@ -245,9 +245,9 @@ async function createWorkThreadOnHost(input: {
       "Could not create a Work thread on the host.",
     );
   }
-  let result: ReturnType<typeof decodeWorkThreadCommandResult>;
+  let result: WorkThreadCommandResult;
   try {
-    result = decodeWorkThreadCommandResult(await response.json());
+    result = decodeHostAnswer(WorkThreadCommandResult)(await response.json());
   } catch {
     throw new MobileInboxFailure(
       "unavailable",

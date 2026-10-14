@@ -1,12 +1,12 @@
 import { createInterface } from "node:readline";
 import { nativeHarnessStatusLabel } from "@octant/domain";
 import {
-  decodeNativeHarnessRoutingSettings,
-  decodeNativeHarnessFollowUpActivationResult,
-  decodeNativeHarnessFollowUpPreview,
-  decodeNativeHarnessSessionView,
-  type NativeHarnessSessionView,
+  NativeHarnessSessionView,
   type OctantMode,
+  NativeHarnessRoutingSettings,
+  NativeHarnessFollowUpActivationResult,
+  NativeHarnessFollowUpPreview,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { listAgentThreads, openAgentSideChat, readAgentGoal, reviseAgentGoal } from "./agentHost";
 import {
@@ -183,7 +183,7 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
       );
       return 1;
     }
-    const settings = decodeNativeHarnessRoutingSettings(
+    const settings = decodeHostAnswer(NativeHarnessRoutingSettings)(
       (response.body as { settings: unknown }).settings,
     );
     if (input.command.json) {
@@ -476,7 +476,7 @@ async function takeFollowUp(
     input.stderr.write(`${failureMessage(previewed, "The follow-up could not be previewed.")}\n`);
     return;
   }
-  const preview = decodeNativeHarnessFollowUpPreview(
+  const preview = decodeHostAnswer(NativeHarnessFollowUpPreview)(
     (previewed.body as { preview?: unknown }).preview,
   );
   const target =
@@ -500,7 +500,7 @@ async function takeFollowUp(
       confirmed: true,
     },
   });
-  const result = decodeNativeHarnessFollowUpActivationResult(activated.body);
+  const result = decodeHostAnswer(NativeHarnessFollowUpActivationResult)(activated.body);
   if (result.kind !== "follow-up-activated") {
     input.stderr.write(`${result.message}\n`);
     return;
@@ -598,7 +598,9 @@ async function readSession(
     return "unavailable";
   }
   const view = (response.body as { view?: unknown }).view;
-  return view === null || view === undefined ? null : decodeNativeHarnessSessionView(view);
+  return view === null || view === undefined
+    ? null
+    : decodeHostAnswer(NativeHarnessSessionView)(view);
 }
 
 async function resolveThread(input: RunAgentCliCommandInput): Promise<string | undefined> {

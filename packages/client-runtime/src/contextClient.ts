@@ -1,23 +1,20 @@
 import {
   decodeContextCommand,
-  decodeContextCommandResult,
-  decodeContextFailure,
   decodeContextInspectorRequest,
-  decodeContextInspectorResult,
   type ContextCommand,
-  type ContextCommandResult,
-  type ContextFailure,
+  ContextCommandResult,
+  ContextFailure,
   type ContextInspectorRequest,
-  type ContextInspectorSnapshot,
+  ContextInspectorResult,
+  ContextInspectorSnapshot,
 } from "@octant/contracts/context-rpc";
 import {
-  decodeThreadExternalContentClearOutcome,
   decodeThreadExternalContentRequest,
-  decodeThreadExternalContentState,
-  type ThreadExternalContentClearOutcome,
+  ThreadExternalContentClearOutcome,
   type ThreadExternalContentRequest,
-  type ThreadExternalContentState,
+  ThreadExternalContentState,
 } from "@octant/contracts/content-provenance";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ContextClientOptions {
@@ -104,7 +101,7 @@ export function createContextClient(options: ContextClientOptions): ContextClien
         "/api/context/inspect",
         request,
         signal,
-        decodeContextInspectorResult,
+        decodeInspectorAnswer,
         headers,
       );
       if (result.kind === "not-planned") {
@@ -135,7 +132,7 @@ export function createContextClient(options: ContextClientOptions): ContextClien
         "/api/context/commands",
         command,
         signal,
-        decodeContextCommandResult,
+        decodeHostAnswer(ContextCommandResult),
         headers,
       );
       // A compaction answers before it has changed anything, so it carries no
@@ -159,7 +156,7 @@ export function createContextClient(options: ContextClientOptions): ContextClien
         "/api/thread-external-content",
         externalContentRequest({ kind: "read", mode: thread.mode, threadId: thread.threadId }),
         signal,
-        decodeThreadExternalContentState,
+        decodeHostAnswer(ThreadExternalContentState),
         headers,
       );
     },
@@ -175,7 +172,7 @@ export function createContextClient(options: ContextClientOptions): ContextClien
           expectedVersion: thread.expectedVersion,
         }),
         signal,
-        decodeThreadExternalContentClearOutcome,
+        decodeHostAnswer(ThreadExternalContentClearOutcome),
         headers,
       );
     },
@@ -244,7 +241,7 @@ async function post<T>(
   }
   if (!response.ok) {
     try {
-      const failure = decodeContextFailure(payload);
+      const failure = decodeHostAnswer(ContextFailure)(payload);
       throw new ContextClientFailure(failure.category, failure.message);
     } catch (error) {
       if (error instanceof ContextClientFailure) throw error;
@@ -273,4 +270,16 @@ function sameSubject(
   right: ContextInspectorRequest["subject"],
 ): boolean {
   return left.aggregateType === right.aggregateType && left.aggregateId === right.aggregateId;
+}
+
+/**
+ * The inspector answer is a result with a `kind`, or a bare snapshot, as the
+ * shared decoder reads it; this reads either one the way a client reads every
+ * host answer.
+ */
+function decodeInspectorAnswer(input: unknown): ContextInspectorResult {
+  if (typeof input === "object" && input !== null && "kind" in input) {
+    return decodeHostAnswer(ContextInspectorResult)(input);
+  }
+  return { kind: "snapshot", snapshot: decodeHostAnswer(ContextInspectorSnapshot)(input) };
 }

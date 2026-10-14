@@ -1,9 +1,9 @@
 import {
   decodeGitHistoryQuery,
-  decodeGitHistoryResult,
   type GitHistoryQuery,
-  type GitHistoryResult,
+  GitHistoryResult,
 } from "@octant/contracts/git-history";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface GitHistoryClient {
@@ -43,7 +43,7 @@ export function createGitHistoryClient(options: {
               ? "Git history access is unavailable. Reconnect and retry."
               : "Git history could not be loaded. Retry the request.",
         };
-      const result = decodeGitHistoryResult(await response.json());
+      const result = decodeHostAnswer(GitHistoryResult)(await response.json());
       if (
         result.status !== "unavailable" &&
         (String(result.threadId) !== String(query.threadId) ||

@@ -1,24 +1,18 @@
 import {
-  decodeChatAttachment,
-  decodeChatBootstrap,
-  decodeChatNavigation,
   decodeChatCommand,
-  decodeChatCommandResult,
-  decodeChatFailure,
-  decodeChatThread,
-  decodeChatThreadView,
-  decodeChatTranscriptSearch,
   MAX_CHAT_NDJSON_LINE_BYTES,
-  type ChatAttachment,
-  type ChatBootstrap,
-  type ChatNavigation,
+  ChatAttachment,
+  ChatBootstrap,
+  ChatNavigation,
   type ChatCommand,
-  type ChatCommandResult,
+  ChatCommandResult,
   type ChatEventFrame,
-  type ChatFailure,
+  ChatFailure,
   type ChatThreadId,
-  type ChatThreadView,
-  type ChatTranscriptSearch,
+  ChatThreadView,
+  ChatTranscriptSearch,
+  ChatThread,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 import { ChatNdjsonFailure, iterateChatEventNdjson } from "./chatNdjsonStream";
@@ -79,7 +73,7 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
         fetch,
         new URL("/api/chat/bootstrap", options.baseUrl).toString(),
         { method: "GET", headers },
-        decodeChatBootstrap,
+        decodeHostAnswer(ChatBootstrap),
       );
     },
     navigation() {
@@ -87,7 +81,7 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
         fetch,
         new URL("/api/chat/navigation", options.baseUrl).toString(),
         { method: "GET", headers },
-        decodeChatNavigation,
+        decodeHostAnswer(ChatNavigation),
       );
     },
     search(query) {
@@ -98,14 +92,19 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
     searchTranscript(query) {
       const url = new URL("/api/chat/transcript-search", options.baseUrl);
       url.searchParams.set("q", query);
-      return request(fetch, url.toString(), { method: "GET", headers }, decodeChatTranscriptSearch);
+      return request(
+        fetch,
+        url.toString(),
+        { method: "GET", headers },
+        decodeHostAnswer(ChatTranscriptSearch),
+      );
     },
     thread(threadId) {
       return request(
         fetch,
         new URL(`/api/chat/threads/${encodeURIComponent(threadId)}`, options.baseUrl).toString(),
         { method: "GET", headers },
-        decodeChatThreadView,
+        decodeHostAnswer(ChatThreadView),
       );
     },
     async execute(command) {
@@ -123,7 +122,7 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeChatCommandResult,
+        decodeHostAnswer(ChatCommandResult),
       );
     },
     upload(input) {
@@ -142,7 +141,7 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
           },
           body: bytes,
         },
-        decodeChatAttachment,
+        decodeHostAnswer(ChatAttachment),
       );
     },
     discard(input) {
@@ -159,7 +158,7 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
             "x-octant-chat-thread-id": String(input.threadId),
           },
         },
-        decodeChatAttachment,
+        decodeHostAnswer(ChatAttachment),
       );
     },
     subscribe(threadId, afterSequence, signal) {
@@ -171,6 +170,8 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
       // Ask for the body behind each streamed delta so the thread view can
       // grow in place instead of re-reading the whole thread per frame.
       url.searchParams.set("contents", "1");
+      // Ask for the receipt or failure of a compaction of the session as it ends.
+      url.searchParams.set("compaction", "1");
       return parseNdjsonFrames(
         requestRaw(fetch, url.toString(), { method: "GET", headers, signal }),
         threadId,
@@ -216,7 +217,7 @@ async function request<T>(
   }
   if (!response.ok) {
     try {
-      throw new ChatClientFailure(decodeChatFailure(body));
+      throw new ChatClientFailure(decodeHostAnswer(ChatFailure)(body));
     } catch (error) {
       if (error instanceof ChatClientFailure) throw error;
       throw malformedResponse();
@@ -245,7 +246,7 @@ async function rejectFailure(response: Response): Promise<never> {
   let body: unknown;
   try {
     body = await response.json();
-    throw new ChatClientFailure(decodeChatFailure(body));
+    throw new ChatClientFailure(decodeHostAnswer(ChatFailure)(body));
   } catch (error) {
     if (error instanceof ChatClientFailure) throw error;
     throw malformedResponse();
@@ -254,7 +255,7 @@ async function rejectFailure(response: Response): Promise<never> {
 
 function decodeThreadArray(value: unknown): ReadonlyArray<ChatBootstrap["threads"][number]> {
   if (!Array.isArray(value)) throw new Error("invalid");
-  return value.map((item) => decodeChatThread(item));
+  return value.map((item) => decodeHostAnswer(ChatThread)(item));
 }
 
 function unavailable(message: string): ChatClientFailure {

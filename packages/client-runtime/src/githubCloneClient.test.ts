@@ -128,13 +128,24 @@ describe("createGithubCloneClient", () => {
     );
   });
 
-  it("fails closed on a response that violates the clone contract", async () => {
+  it("drops a field the clone contract does not know instead of passing it on", async () => {
     const fetch = vi.fn().mockResolvedValue(
       jsonResponse({
         kind: "operation",
         operation: { ...awaitingOperation, token: "ghp_" + "a".repeat(30) },
       }),
     );
+    const answer = await client(fetch).execute({ kind: "cancel-clone", requestId: REQUEST_ID });
+    expect(answer).toMatchObject({ kind: "operation", operation: { requestId: REQUEST_ID } });
+    expect(JSON.stringify(answer)).not.toContain("ghp_");
+  });
+
+  it("fails closed on a response that violates the clone contract", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ kind: "operation", operation: { ...awaitingOperation, state: "stolen" } }),
+      );
     await expect(
       client(fetch).execute({ kind: "cancel-clone", requestId: REQUEST_ID }),
     ).rejects.toBeInstanceOf(GithubCloneClientFailure);

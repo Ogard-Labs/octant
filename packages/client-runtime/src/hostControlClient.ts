@@ -1,26 +1,20 @@
 import {
-  decodeHostBackupOutcome,
-  decodeHostControlStatus,
-  decodeHostLifecycleOutcome,
-  decodeHostRestoreOutcome,
-  type HostBackupOutcome,
-  type HostControlStatus,
+  HostBackupOutcome,
+  HostControlStatus,
   type HostLifecycleAction,
-  type HostLifecycleOutcome,
-  type HostRestoreOutcome,
+  HostLifecycleOutcome,
+  HostRestoreOutcome,
 } from "@octant/contracts/host-control";
-import { decodeHostDataMap, type HostDataMap } from "@octant/contracts/host-data-map";
+import { HostDataMap } from "@octant/contracts/host-data-map";
 import {
-  decodePurgeThreadsOutcome,
-  decodeSetThreadRetentionOutcome,
-  decodeThreadRetentionState,
-  type PurgeThreadsOutcome,
+  PurgeThreadsOutcome,
   type PurgeThreadsRequest,
-  type SetThreadRetentionOutcome,
+  SetThreadRetentionOutcome,
   type SetThreadRetentionRequest,
-  type ThreadRetentionState,
+  ThreadRetentionState,
 } from "@octant/contracts/thread-retention";
 import type { HostExportBundle } from "@octant/contracts/host-export";
+import { decodeHostAnswer } from "@octant/contracts";
 import { assembleHostExportBundle, threadExportContainsForbiddenKey } from "@octant/domain";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -118,11 +112,11 @@ export function createHostControlClient(options: HostControlClientOptions): Host
   return {
     async status() {
       const body = await call({ path: "/api/host-control/status", method: "GET" });
-      return decodeOrThrow(decodeHostControlStatus, body);
+      return decodeOrThrow(decodeHostAnswer(HostControlStatus), body);
     },
     async readDataMap() {
       const body = await call({ path: "/api/host-control/data-map", method: "GET" });
-      return decodeOrThrow(decodeHostDataMap, body);
+      return decodeOrThrow(decodeHostAnswer(HostDataMap), body);
     },
     async lifecycle(action) {
       const body = await call({
@@ -130,7 +124,7 @@ export function createHostControlClient(options: HostControlClientOptions): Host
         method: "POST",
         body: { action },
       });
-      return decodeOrThrow(decodeHostLifecycleOutcome, body);
+      return decodeOrThrow(decodeHostAnswer(HostLifecycleOutcome), body);
     },
     async backup(label) {
       const body = await call({
@@ -139,15 +133,15 @@ export function createHostControlClient(options: HostControlClientOptions): Host
         body: label === undefined ? {} : { label },
         decodableStatuses: [503],
       });
-      return decodeOrThrow(decodeHostBackupOutcome, body);
+      return decodeOrThrow(decodeHostAnswer(HostBackupOutcome), body);
     },
     async restore() {
       const body = await call({ path: "/api/host-control/restore", method: "POST", body: {} });
-      return decodeOrThrow(decodeHostRestoreOutcome, body);
+      return decodeOrThrow(decodeHostAnswer(HostRestoreOutcome), body);
     },
     async readThreadRetention() {
       const body = await call({ path: "/api/host-control/thread-retention", method: "GET" });
-      return decodeOrThrow(decodeThreadRetentionState, body);
+      return decodeOrThrow(decodeHostAnswer(ThreadRetentionState), body);
     },
     async setThreadRetention(request) {
       const body = await call({
@@ -156,7 +150,7 @@ export function createHostControlClient(options: HostControlClientOptions): Host
         body: request,
         decodableStatuses: [403],
       });
-      return decodeOrThrow(decodeSetThreadRetentionOutcome, body);
+      return decodeOrThrow(decodeHostAnswer(SetThreadRetentionOutcome), body);
     },
     async purgeThreads(request) {
       const body = await call({
@@ -165,7 +159,7 @@ export function createHostControlClient(options: HostControlClientOptions): Host
         body: request,
         decodableStatuses: [403],
       });
-      return decodeOrThrow(decodePurgeThreadsOutcome, body);
+      return decodeOrThrow(decodeHostAnswer(PurgeThreadsOutcome), body);
     },
     async exportHost() {
       let response: Response;

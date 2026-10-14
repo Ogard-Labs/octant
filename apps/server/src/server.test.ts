@@ -35,6 +35,7 @@ import {
   deriveExistingWorktreeCheckoutId,
   pathIsProjectConfined,
   plainFolderCheckoutIdentity,
+  sameCanvasSkillScope,
   startOctantServer,
 } from "./server";
 import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
@@ -3178,3 +3179,29 @@ function assertResponse(response: Response | undefined): Response {
   if (response === undefined) throw new Error("route handler was not installed");
   return response;
 }
+
+describe("sameCanvasSkillScope", () => {
+  const alpha = "61000000-0000-4000-8000-000000000001";
+  const beta = "61000000-0000-4000-8000-000000000002";
+  function canvas(mode: "chat" | "work" | "code", projectId: string | null) {
+    return {
+      mode,
+      workspace:
+        projectId === null
+          ? { kind: "chat-virtual" as const, projectId: null }
+          : { kind: "work-root" as const, projectId: projectId as never, rootId: "root" as never },
+      originThreadId: "61000000-0000-4000-8000-000000000011" as never,
+    };
+  }
+
+  it("offers a Project-root skill to its own Project's Canvas and to no other", () => {
+    const record = { projectScope: { mode: "work" as const, projectId: alpha as never } };
+
+    expect(sameCanvasSkillScope(record, undefined, canvas("work", alpha))).toBe(true);
+    expect(sameCanvasSkillScope(record, undefined, canvas("work", beta))).toBe(false);
+    expect(sameCanvasSkillScope(record, undefined, canvas("chat", alpha))).toBe(false);
+    expect(sameCanvasSkillScope(record, undefined, canvas("chat", null))).toBe(false);
+    // A shared skill still reaches every Canvas.
+    expect(sameCanvasSkillScope({}, undefined, canvas("work", beta))).toBe(true);
+  });
+});

@@ -9,6 +9,7 @@ import {
 import {
   decideSpendCeilingCommand,
   evaluateSpendCeilingAdmission,
+  providerUsageIsNotMeasured,
   remainingSpendCeilingTokens,
   settleSpendCeilingReservation,
   spendCeilingWindowStart,
@@ -561,5 +562,16 @@ describe("remainingSpendCeilingTokens", () => {
         reservedTokens: 100,
       }),
     ).toBe(700);
+  });
+});
+
+describe("providerUsageIsNotMeasured", () => {
+  it("leaves out only a provider that declares it never reports usage", () => {
+    expect(providerUsageIsNotMeasured("unsupported")).toBe(true);
+    expect(providerUsageIsNotMeasured("supported")).toBe(false);
+    // Not yet proven, or not known at all, still counts: the ceiling refuses
+    // instead of treating the provider's unreported turns as free.
+    expect(providerUsageIsNotMeasured("unavailable")).toBe(false);
+    expect(providerUsageIsNotMeasured(undefined)).toBe(false);
   });
 });

@@ -624,6 +624,16 @@ extra typed lines and visible notices is intentional (0114). Repository, branch
 and PR actions stay visible below the input. Utility panels keep one resize
 boundary and a compact tab row without a second horizontal divider.
 
+A thread opens on its newest messages. When earlier ones exist, one row above
+the oldest loaded message offers **Load earlier messages** as a ghost button;
+while a page loads it reads "Loading earlier messages" and stays focusable, a
+failed page says "Earlier messages could not be loaded." with **Try again**,
+and once the start is reached it says "No earlier messages" in the meta ink.
+The row is 32px tall in every state, because it sits above what the reader is
+looking at, and an arriving page keeps the reader's row where it was. A thread
+that never had earlier messages shows no row. Only a new last message is
+announced; earlier messages arriving above are not.
+
 A thread's Browser captures are a plain list of rows under a sentence-case
 section label (`oct-section-label`, "Browser captures"), not a card group: each
 row is a hairline-ringed object with a 72 x 48 picture, the page title in the

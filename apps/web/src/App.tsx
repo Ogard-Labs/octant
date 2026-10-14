@@ -88,6 +88,7 @@ import {
   decodeUtcTimestamp,
   type WorkThread,
   type WorkThreadCommand,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
@@ -450,7 +451,7 @@ import { createPullRequestsCard } from "./home/PullRequestsCard";
 import { createCiFailuresCard } from "./home/CiFailuresCard";
 import { createComputersCard } from "./home/ComputersCard";
 import { computerConnection, sameHostOrigin } from "./home/computers";
-import { decodeHostResourceSnapshot } from "@octant/contracts/host-resources";
+import { HostResourceSnapshot } from "@octant/contracts/host-resources";
 import { currentCodeProjectBranches } from "./home/ciFailures";
 import {
   pullRequestCardAvailable,
@@ -1515,13 +1516,6 @@ function LaunchedShell(
     configuration: navigatorConfigurationKey(controller.settings?.navigatorAssistant),
   });
   const chatReadCursorStore = useMemo(() => createChatReadCursorStore(), []);
-  // Skills and plugin MCP servers this host reports as installed and
-  // effective. They become the Skills and Plugins groups of the `/` composer
-  // affordance; an unreachable extension service simply contributes nothing.
-  const commandExtensions = useCommandExtensions(extensionClient, {
-    refreshMs: 0,
-    changeRevision: machineChanges.extensions,
-  });
   // The Chat bootstrap lists only active threads because it feeds the sidebar,
   // so the Thread Search overlay's Archived group is filled from the host's own
   // lifecycle-spanning Chat thread search instead.
@@ -2059,6 +2053,26 @@ function LaunchedShell(
     // active: the mode context remains bound even without an active Project tab.
     controller.workspace?.contextByMode[activeMode].projectId ??
     undefined;
+  // Skills and plugin MCP servers this host reports as installed and
+  // effective. They become the Skills and Plugins groups of the `/` composer
+  // affordance; an unreachable extension service simply contributes nothing.
+  // Skills are offered only where they apply: a Project-root skill in its own
+  // Project, a thread's own skill in that thread.
+  const commandAudienceThreadId =
+    activeMode === "chat"
+      ? activeChatThreadId
+      : activeMode === "work"
+        ? activeWorkThreadId
+        : activeCodeThreadId;
+  const commandExtensions = useCommandExtensions(extensionClient, {
+    refreshMs: 0,
+    changeRevision: machineChanges.extensions,
+    audience: {
+      mode: activeMode,
+      projectId: activeProjectId === undefined ? null : String(activeProjectId),
+      threadId: commandAudienceThreadId === undefined ? null : String(commandAudienceThreadId),
+    },
+  });
   const contextSubject = useMemo(() => {
     if (activeMode === "chat" && activeChatThreadId !== undefined) {
       return decodeContextSubjectRef({
@@ -4427,7 +4441,7 @@ function LaunchedShell(
       if (!response.ok) return { status: "unavailable" as const };
       return {
         status: "ready" as const,
-        snapshot: decodeHostResourceSnapshot(await response.json()),
+        snapshot: decodeHostAnswer(HostResourceSnapshot)(await response.json()),
       };
     } catch {
       return { status: "unavailable" as const };

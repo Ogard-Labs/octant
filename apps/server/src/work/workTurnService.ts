@@ -23,12 +23,14 @@ import {
   decodeCancelWorkTurnCommand,
   decodeContextSubjectRef,
   decodeWorkThreadTranscript,
+  decodeWorkThreadTranscriptWindow,
   decodeWorkTurnCancelResult,
   decodeWorkTurnFailure,
   decodeWorkTurnLookupResult,
   decodeWorkTurnRequestId,
   decodeWorkTurnState,
   decodeStartWorkThreadTurnCommand,
+  type ContextCompactionSettledRecord,
   type ContextInspectorSnapshot,
   type MentionableThreadId,
   type TurnUsage,
@@ -39,6 +41,8 @@ import {
   type WorkThread,
   type WorkThreadId,
   type WorkThreadTranscript,
+  type WorkThreadTranscriptWindow,
+  type WorkThreadTranscriptWindowRequest,
   type WorkTurnCancelResult,
   type WorkTurnFailure,
   type WorkTurnLookupResult,
@@ -146,6 +150,15 @@ function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>):
   return `${standing}\n\nTake stock first: ${why}. Before starting the request, briefly summarize where this work stands from ${WORK_STATUS_FILE_NAME} — current status, open follow-ups, and deadlines with their dates — then ask the person what has happened since and what they need to follow up on. Update ${WORK_STATUS_FILE_NAME} with their answer before continuing with the request.`;
 }
 
+/**
+ * How many bytes of encoded turns one transcript window may carry before it
+ * stops adding turns. A Work turn can hold a 200 000-character prompt, its
+ * reply twice (as `response` and in `transcript`), a task list, and child
+ * observations, so a page of the maximum 64 turns could otherwise pass the
+ * 8 MiB a paired device's response is cut at and fail to decode there.
+ */
+export const WORK_TRANSCRIPT_WINDOW_BYTES = 2 * 1024 * 1024;
+
 export class WorkTurnServiceError extends Error {
   override readonly name = "WorkTurnServiceError";
   constructor(readonly failure: WorkTurnFailure) {
@@ -158,6 +171,23 @@ interface WorkUsageFacts {
   readonly contextTokens?: number | undefined;
   readonly contextWindow?: number | undefined;
   readonly providerExecutionDurationMs?: number | undefined;
+}
+
+export interface WorkTurnStartOptions {
+  /**
+   * Run this turn ask-first whatever the thread's access, for a caller
+   * whose own authority is narrower than the thread's (a goal loop round).
+   */
+  readonly holdAskFirst?: boolean;
+  /**
+   * Set by the host's own usage-limit recovery when it dispatches the
+   * authorized continuation: the send is not the person re-engaging, so it
+   * must not wake a snooze or reopen a completion. Host-only: the wire
+   * command cannot carry it.
+   */
+  readonly limitRecovery?: boolean;
+  /** Host-only revocation check; never grants authority or travels on the wire. */
+  readonly admissionCurrent?: () => boolean;
 }
 
 export interface WorkTurnServiceDependencies {
@@ -344,6 +374,8 @@ export interface WorkTurnServiceDependencies {
 }
 
 export class WorkTurnService {
+  /** Turns being prepared, per thread, until they are accepted or refused. */
+  readonly #startingTurns = new Map<string, number>();
   /**
    * The access each running turn holds, by thread. The native harness checks
    * edits against this rather than the thread's own access, so a goal-loop
@@ -483,22 +515,7 @@ export class WorkTurnService {
   async startFirstTurn(
     authenticatedWindowId: WindowId,
     input: unknown,
-    options?: {
-      /**
-       * Run this turn ask-first whatever the thread's access, for a caller
-       * whose own authority is narrower than the thread's (a goal loop round).
-       */
-      readonly holdAskFirst?: boolean;
-      /**
-       * Set by the host's own usage-limit recovery when it dispatches the
-       * authorized continuation: the send is not the person re-engaging, so it
-       * must not wake a snooze or reopen a completion. Host-only: the wire
-       * command cannot carry it.
-       */
-      readonly limitRecovery?: boolean;
-      /** Host-only revocation check; never grants authority or travels on the wire. */
-      readonly admissionCurrent?: () => boolean;
-    },
+    options?: WorkTurnStartOptions,
   ): Promise<WorkTurnLookupResult> {
     this.#assertReady();
     const command = decodeStartWorkThreadTurnCommand(input);
@@ -506,7 +523,40 @@ export class WorkTurnService {
     if (existing !== undefined && command.delivery === undefined) {
       return this.#lookupMatching(command, existing);
     }
+    // The turn reads the conversation it plans from while it is prepared, so
+    // no compaction may be under way when it starts, and none may start until
+    // it is accepted: a summary committed in between would be planned over.
+    if (
+      this.#contextHarness?.compactionRunning(
+        decodeContextSubjectRef({
+          aggregateType: "work-thread",
+          aggregateId: String(command.threadId),
+        }),
+      ) === true
+    ) {
+      throw this.#failure("stale", "This session is being compacted. Send again when it finishes.");
+    }
+    const key = String(command.threadId);
+    this.#startingTurns.set(key, (this.#startingTurns.get(key) ?? 0) + 1);
+    try {
+      return await this.#admitTurn(authenticatedWindowId, command, options);
+    } finally {
+      const remaining = (this.#startingTurns.get(key) ?? 1) - 1;
+      if (remaining === 0) this.#startingTurns.delete(key);
+      else this.#startingTurns.set(key, remaining);
+    }
+  }
 
+  /** Whether a turn on this thread is being prepared and not yet accepted. */
+  isTurnStarting(threadId: WorkThreadId): boolean {
+    return this.#startingTurns.has(String(threadId));
+  }
+
+  async #admitTurn(
+    authenticatedWindowId: WindowId,
+    command: StartWorkThreadTurnCommand,
+    options: WorkTurnStartOptions | undefined,
+  ): Promise<WorkTurnLookupResult> {
     if (options?.admissionCurrent?.() === false) {
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
     }
@@ -987,6 +1037,56 @@ export class WorkTurnService {
   }
 
   /**
+   * One page of the thread for a client that opens on its newest turns and
+   * loads earlier ones on request. The page walks back from the newest turn,
+   * or from just before `before`, until it holds `limit` turns or its encoded
+   * turns would pass `WORK_TRANSCRIPT_WINDOW_BYTES`; it
+   * always holds at least one turn when the thread has one. A `before` the
+   * thread does not hold is `stale`: the client re-reads the newest page.
+   */
+  async transcriptWindow(
+    authenticatedWindowId: WindowId,
+    threadId: WorkThreadId,
+    request: WorkThreadTranscriptWindowRequest,
+  ): Promise<WorkThreadTranscriptWindow> {
+    this.#assertReady();
+    const thread = await this.#threads.read(authenticatedWindowId, threadId);
+    if (thread === undefined) {
+      throw this.#failure("unauthorized", "Work thread is unavailable for this window.");
+    }
+    const all = this.#projection.listForThread(threadId);
+    let end = all.length;
+    if (request.before !== undefined) {
+      const before = String(request.before);
+      end = all.findIndex((turn) => String(turn.requestId) === before);
+      if (end === -1) {
+        throw this.#failure("stale", "That Work turn is no longer in this thread.");
+      }
+    }
+    const turns: WorkTurnState[] = [];
+    let bytes = 0;
+    let start = end;
+    while (start > 0 && turns.length < request.limit) {
+      const candidate = all[start - 1];
+      if (candidate === undefined) break;
+      const turn = this.#withLive(candidate);
+      const size = Buffer.byteLength(JSON.stringify(turn), "utf8");
+      if (turns.length > 0 && bytes + size > WORK_TRANSCRIPT_WINDOW_BYTES) break;
+      bytes += size;
+      turns.unshift(turn);
+      start -= 1;
+    }
+    return decodeWorkThreadTranscriptWindow({
+      version: 1,
+      threadId,
+      turns,
+      liveCursor: this.#liveUpdates.head(threadId),
+      hasEarlier: start > 0,
+      hasLater: end < all.length,
+    });
+  }
+
+  /**
    * Every turn of the thread, oldest first, for host-side readers such as
    * export and mentions that must not stop at the transcript route's window.
    * It is not a route; it applies the same authority check as `transcript`.
@@ -1019,6 +1119,14 @@ export class WorkTurnService {
 
   closeLiveUpdates(): void {
     this.#liveUpdates.close();
+  }
+
+  /**
+   * A compaction of the thread's session ended. The thread's live feed carries
+   * its receipt, or its failure, so a window waiting on it need not poll.
+   */
+  compactionSettled(threadId: WorkThreadId, compaction: ContextCompactionSettledRecord): void {
+    this.#liveUpdates.settleCompaction(threadId, compaction);
   }
 
   /** The live feed cursor for a thread; subscribe from here to read from now. */

@@ -1,11 +1,9 @@
 import {
-  decodeNativeHarnessFollowUpActivationResult,
-  decodeNativeHarnessFollowUpPreview,
-  decodeThreadFollowUpSuggestions,
   type ActivateNativeHarnessFollowUp,
-  type NativeHarnessFollowUpActivationResult,
-  type NativeHarnessFollowUpPreview,
-  type ThreadFollowUpSuggestions,
+  NativeHarnessFollowUpActivationResult,
+  NativeHarnessFollowUpPreview,
+  ThreadFollowUpSuggestions,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -73,17 +71,17 @@ export function createFollowUpSuggestionClient(
       const suggestions = (body as { suggestions?: unknown }).suggestions;
       return suggestions === null || suggestions === undefined
         ? null
-        : decodeThreadFollowUpSuggestions(suggestions);
+        : decodeHostAnswer(ThreadFollowUpSuggestions)(suggestions);
     },
     async preview(threadId, suggestionId, signal) {
       const body = await post(threadId, "preview", { suggestionId }, signal);
       const preview = (body as { preview?: unknown }).preview;
       return preview === undefined
-        ? decodeNativeHarnessFollowUpActivationResult(body)
-        : decodeNativeHarnessFollowUpPreview(preview);
+        ? decodeHostAnswer(NativeHarnessFollowUpActivationResult)(body)
+        : decodeHostAnswer(NativeHarnessFollowUpPreview)(preview);
     },
     async activate(threadId, activation, signal) {
-      return decodeNativeHarnessFollowUpActivationResult(
+      return decodeHostAnswer(NativeHarnessFollowUpActivationResult)(
         await post(threadId, "activate", activation, signal),
       );
     },

@@ -1,70 +1,48 @@
 import {
-  decodeCanvasActionResult,
-  decodeCanvasDesignAssetsOutcome,
-  decodeCanvasDesignRunOutcome,
-  decodeCanvasGetOutcome,
-  decodeCanvasHistoryOutcome,
-  decodeCanvasCreateResult,
-  decodeCanvasExportDecideResult,
-  decodeCanvasExportOfferList,
-  decodeCanvasExportPrepareResult,
-  decodeCanvasCommentCommandResult,
-  decodeCanvasCommentsOutcome,
-  decodeCanvasDiagramLayoutReviseResult,
-  decodeCanvasInventoryList,
-  decodeCanvasThreadReferenceCardsOutcome,
-  decodeCanvasReviseResult,
-  decodeCanvasRefreshResult,
-  decodeCanvasShareAccessResult,
-  decodeCanvasShareOverview,
-  decodeCanvasShareResult,
   type CanvasActionCancelRequest,
   type CanvasActionRequest,
-  type CanvasActionResult,
-  type CanvasDesignAssetsOutcome,
-  type CanvasGetOutcome,
-  type CanvasHistoryOutcome,
+  CanvasActionResult,
+  CanvasDesignAssetsOutcome,
+  CanvasGetOutcome,
+  CanvasHistoryOutcome,
   type CanvasId,
   type CanvasCreateRequest,
-  type CanvasCreateResult,
+  CanvasCreateResult,
   type CanvasExportDecideRequest,
-  type CanvasExportDecideResult,
-  type CanvasExportOfferList,
+  CanvasExportDecideResult,
+  CanvasExportOfferList,
   type CanvasExportPrepareRequest,
-  type CanvasExportPrepareResult,
+  CanvasExportPrepareResult,
   type CanvasCommentCommand,
-  type CanvasCommentCommandResult,
-  type CanvasCommentsOutcome,
+  CanvasCommentCommandResult,
+  CanvasCommentsOutcome,
   type CanvasDiagramLayoutReviseCommand,
-  type CanvasDiagramLayoutReviseResult,
+  CanvasDiagramLayoutReviseResult,
   type CanvasPlanTaskReviseCommand,
-  type CanvasInventoryList,
+  CanvasInventoryList,
   type CanvasReviseRequest,
-  type CanvasReviseResult,
+  CanvasReviseResult,
   type CanvasRefreshCancelRequest,
   type CanvasRefreshRequest,
-  type CanvasRefreshResult,
+  CanvasRefreshResult,
   type CanvasShareAccessRequest,
-  type CanvasShareAccessResult,
-  type CanvasShareOverview,
-  type CanvasShareResult,
+  CanvasShareAccessResult,
+  CanvasShareOverview,
+  CanvasShareResult,
   type CanvasShareSnapshotRequest,
   type CanvasShareSnapshotRevokeRequest,
-  type CanvasThreadReferenceCardsOutcome,
+  CanvasThreadReferenceCardsOutcome,
   type OctantMode,
   type ProjectId,
+  CanvasDesignRunOutcome,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import {
-  decodeCanvasExportFolderResult,
-  decodeCanvasExportFolderView,
   type CanvasExportFolderCommand,
-  type CanvasExportFolderResult,
-  type CanvasExportFolderView,
+  CanvasExportFolderResult,
+  CanvasExportFolderView,
 } from "@octant/contracts/canvas-export-folder";
-import {
-  decodeCanvasDocumentRecipeCatalog,
-  type CanvasDocumentRecipeCatalog,
-} from "@octant/contracts/canvas-skill";
+import { CanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
 import type { FolderBrowseRequest, FolderBrowseResult } from "@octant/contracts/folder-browse";
 import { createFolderBrowseClient } from "./folderBrowseClient";
 
@@ -195,7 +173,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         options.fetch,
         url.toString(),
         { method: "GET", headers },
-        decodeCanvasInventoryList,
+        decodeHostAnswer(CanvasInventoryList),
       );
     },
     get(canvasId, versionId) {
@@ -206,7 +184,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         options.fetch,
         url.toString(),
         { method: "GET", headers },
-        decodeCanvasGetOutcome,
+        decodeHostAnswer(CanvasGetOutcome),
       );
     },
     designAssets(input) {
@@ -218,7 +196,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         options.fetch,
         url.toString(),
         { method: "GET", headers, cache: "no-store" },
-        decodeCanvasDesignAssetsOutcome,
+        decodeHostAnswer(CanvasDesignAssetsOutcome),
       );
     },
     async runDesign(input) {
@@ -236,7 +214,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
             ...(input.frameId === undefined ? {} : { frameId: input.frameId }),
           }),
         },
-        decodeCanvasDesignRunOutcome,
+        decodeHostAnswer(CanvasDesignRunOutcome),
       );
       return outcome.kind === "ready"
         ? { kind: "ready", url: new URL(outcome.page, options.baseUrl).toString() }
@@ -255,7 +233,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         options.fetch,
         url.toString(),
         { method: "GET", headers },
-        decodeCanvasHistoryOutcome,
+        decodeHostAnswer(CanvasHistoryOutcome),
       );
     },
     revise(body) {
@@ -267,7 +245,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasReviseResult,
+        decodeHostAnswer(CanvasReviseResult),
       );
     },
     comments(canvasId) {
@@ -277,7 +255,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         options.fetch,
         url.toString(),
         { method: "GET", headers },
-        decodeCanvasCommentsOutcome,
+        decodeHostAnswer(CanvasCommentsOutcome),
       );
     },
     comment(body) {
@@ -289,7 +267,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasCommentCommandResult,
+        decodeHostAnswer(CanvasCommentCommandResult),
       );
     },
     reviseDiagramLayout(body) {
@@ -301,7 +279,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasDiagramLayoutReviseResult,
+        decodeHostAnswer(CanvasDiagramLayoutReviseResult),
       );
     },
     revisePlanTask(body) {
@@ -313,7 +291,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasDiagramLayoutReviseResult,
+        decodeHostAnswer(CanvasDiagramLayoutReviseResult),
       );
     },
     refresh(body, signal) {
@@ -326,7 +304,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           body: JSON.stringify(body),
           ...(signal === undefined ? {} : { signal }),
         },
-        decodeCanvasRefreshResult,
+        decodeHostAnswer(CanvasRefreshResult),
       );
     },
     cancelRefresh(body) {
@@ -338,7 +316,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasRefreshResult,
+        decodeHostAnswer(CanvasRefreshResult),
       );
     },
     executeAction(body, signal) {
@@ -351,7 +329,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           body: JSON.stringify(body),
           ...(signal === undefined ? {} : { signal }),
         },
-        decodeCanvasActionResult,
+        decodeHostAnswer(CanvasActionResult),
       );
     },
     cancelAction(body) {
@@ -363,7 +341,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasActionResult,
+        decodeHostAnswer(CanvasActionResult),
       );
     },
     shareOverview(canvasId) {
@@ -373,7 +351,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         options.fetch,
         url.toString(),
         { method: "GET", headers },
-        decodeCanvasShareOverview,
+        decodeHostAnswer(CanvasShareOverview),
       );
     },
     share(body) {
@@ -385,7 +363,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasShareResult,
+        decodeHostAnswer(CanvasShareResult),
       );
     },
     revokeShare(body) {
@@ -397,7 +375,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasShareResult,
+        decodeHostAnswer(CanvasShareResult),
       );
     },
     sharedDesignPageUrl(path) {
@@ -412,7 +390,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasShareAccessResult,
+        decodeHostAnswer(CanvasShareAccessResult),
       );
     },
     exportOffers(canvasId) {
@@ -422,7 +400,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         options.fetch,
         url.toString(),
         { method: "GET", headers },
-        decodeCanvasExportOfferList,
+        decodeHostAnswer(CanvasExportOfferList),
       );
     },
     prepareExport(body) {
@@ -434,7 +412,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasExportPrepareResult,
+        decodeHostAnswer(CanvasExportPrepareResult),
       );
     },
     decideExport(body) {
@@ -446,7 +424,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasExportDecideResult,
+        decodeHostAnswer(CanvasExportDecideResult),
       );
     },
     exportFolder(canvasId) {
@@ -456,7 +434,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         options.fetch,
         url.toString(),
         { method: "GET", headers },
-        decodeCanvasExportFolderView,
+        decodeHostAnswer(CanvasExportFolderView),
       );
     },
     chooseExportFolder(body) {
@@ -468,7 +446,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasExportFolderResult,
+        decodeHostAnswer(CanvasExportFolderResult),
       );
     },
     browseFolders(body) {
@@ -487,7 +465,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeCanvasCreateResult,
+        decodeHostAnswer(CanvasCreateResult),
       );
     },
     recipes() {
@@ -495,7 +473,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         options.fetch,
         new URL("/api/canvas/recipes", options.baseUrl).toString(),
         { method: "GET", headers },
-        decodeCanvasDocumentRecipeCatalog,
+        decodeHostAnswer(CanvasDocumentRecipeCatalog),
       );
     },
     threadReferenceCards(input) {
@@ -510,7 +488,7 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
         options.fetch,
         url.toString(),
         { method: "GET", headers },
-        decodeCanvasThreadReferenceCardsOutcome,
+        decodeHostAnswer(CanvasThreadReferenceCardsOutcome),
       );
     },
   };

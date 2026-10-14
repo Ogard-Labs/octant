@@ -49,6 +49,7 @@ import { effectiveAgentRunExecutionTarget } from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { ChatServiceExecutionContext } from "../chat/chatService";
 import type { CodeOperationExecuteOptions } from "../code/codeOperationService";
+import { CodeServiceError } from "../code/codeService";
 import type { Journal } from "../persistence/journal";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
@@ -97,12 +98,16 @@ export interface UsageResumePortDependencies {
       input: unknown,
       executionContext?: ChatServiceExecutionContext,
     ) => Promise<unknown>;
+    /** Whether the thread's session is being compacted, which holds every new turn. */
+    readonly compacting?: (threadId: ChatThread["id"]) => boolean;
   };
   readonly work: {
     /** Whether Work is enabled in the host's shell settings right now. */
     readonly isEnabled: () => boolean;
     readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
     readonly listTurns: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
+    /** Whether the thread's session is being compacted, which holds every new turn. */
+    readonly compacting?: (threadId: WorkThreadId) => boolean;
     readonly startFirstTurn: (
       windowId: WindowId,
       input: unknown,
@@ -139,6 +144,8 @@ export interface UsageResumePortDependencies {
   };
   readonly code: {
     readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
+    /** Whether the thread's session is being compacted, which holds every new turn. */
+    readonly compacting?: (threadId: CodeThreadId) => boolean;
     readonly readRuntimeWorks: (threadId: CodeThreadId) => ReadonlyArray<ProjectedCodeRuntimeWork>;
     readonly readOperationContents?: (
       windowId: WindowId,
@@ -165,6 +172,14 @@ export interface UsageResumePortDependencies {
 
 const invalid = (detail: string) => ({ kind: "invalid" as const, detail });
 const refused = (detail: string) => ({ kind: "refused" as const, detail });
+/**
+ * A compaction holds the thread's turns only until it ends, so a
+ * continuation it refused is offered again rather than spent.
+ */
+const COMPACTION_DEFERRAL = {
+  kind: "deferred" as const,
+  detail: "The session is being compacted; the continuation runs once it finishes.",
+};
 const refusalDetail = (error: unknown): string =>
   error instanceof Error ? error.message : "The continuation could not be admitted.";
 
@@ -243,6 +258,7 @@ function chatPort(deps: UsageResumePortDependencies): UsageResumeModePort {
         );
         return { kind: "dispatched" };
       } catch (error) {
+        if (deps.chat.compacting?.(threadId) === true) return COMPACTION_DEFERRAL;
         return refused(refusalDetail(error));
       }
     },
@@ -348,6 +364,7 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
           ? { kind: "dispatched" }
           : refused("message" in result ? result.message : "The continuation was not admitted.");
       } catch (error) {
+        if (deps.work.compacting?.(thread.id) === true) return COMPACTION_DEFERRAL;
         return refused(refusalDetail(error));
       }
     },
@@ -484,6 +501,9 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
       ) {
         return refused("The recorded stop's preserved prompt is unavailable.");
       }
+      // Checked before the prompt is staged: a turn the compaction would
+      // refuse must not leave staged evidence behind it.
+      if (deps.code.compacting?.(threadId) === true) return COMPACTION_DEFERRAL;
       try {
         const batch = await deps.code.readOperationContents(scopeId, {
           threadId,
@@ -517,6 +537,12 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
                 : "The continuation was not admitted.",
             );
       } catch (error) {
+        // A compaction that began while the prompt was being staged refuses the
+        // turn as `waiting`; the continuation waits it out. The refusal says so
+        // itself: by now the compaction may already have ended.
+        if (error instanceof CodeServiceError && error.failure.category === "waiting") {
+          return { kind: "deferred", detail: error.failure.message };
+        }
         return refused(refusalDetail(error));
       }
     },

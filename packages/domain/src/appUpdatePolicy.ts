@@ -205,7 +205,7 @@ function comparePrerelease(left: ReadonlyArray<string>, right: ReadonlyArray<str
  */
 export interface UpdateWorkInFlight {
   readonly activeAgentCount: number;
-  readonly attentionRequired: boolean;
+  readonly activityUnconfirmed: boolean;
 }
 
 export type UpdateInstallReadiness =
@@ -213,7 +213,7 @@ export type UpdateInstallReadiness =
   | {
       readonly kind: "wait";
       readonly activeAgentCount: number;
-      readonly attentionRequired: boolean;
+      readonly activityUnconfirmed: boolean;
     };
 
 /**
@@ -221,19 +221,21 @@ export type UpdateInstallReadiness =
  *
  * Running work is work the person has not seen the end of, and relaunching
  * under it loses whatever had not been journaled. A thread waiting on an
- * approval counts too: it is a question the person has not answered, and
- * restarting throws the question away. So install waits and says what it is
- * waiting for — the person lets the work finish or checkpoints it, the same
- * choice restoring already asks them to make.
+ * approval counts in the active agent count too: it is a question the person
+ * has not answered, and restarting throws the question away. Work the desktop
+ * could not confirm waits as well, rather than trusting a zero it could not
+ * check. So install waits and says what it is waiting for — the person lets
+ * the work finish or checkpoints it, the same choice restoring already asks
+ * them to make.
  *
  * This is a refusal to act, not a delay that expires: nothing here ever decides
  * that work has taken long enough and proceeds anyway.
  */
 export function resolveUpdateInstallReadiness(work: UpdateWorkInFlight): UpdateInstallReadiness {
-  if (work.activeAgentCount === 0 && !work.attentionRequired) return { kind: "ready" };
+  if (work.activeAgentCount === 0 && !work.activityUnconfirmed) return { kind: "ready" };
   return {
     kind: "wait",
     activeAgentCount: work.activeAgentCount,
-    attentionRequired: work.attentionRequired,
+    activityUnconfirmed: work.activityUnconfirmed,
   };
 }

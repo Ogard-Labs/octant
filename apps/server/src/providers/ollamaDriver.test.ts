@@ -177,6 +177,63 @@ describe("Ollama provider driver", () => {
     expect(restarted.registry.activeSessionCount(instanceId)).toBe(0);
   });
 
+  it("never declares usage unsupported because one response carried no counts", async () => {
+    const replies = [
+      { prompt_eval_count: 4, eval_count: 2 },
+      // A response without counts says nothing about the next one; reading it
+      // as "never reports" would leave every unreported turn of this endpoint
+      // out of a spend ceiling.
+      {},
+    ];
+    const fetch = vi.fn<OllamaFetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/version")) return json({ version: "0.31.2" });
+      if (url.endsWith("/tags")) return json({ models: [{ model: "qwen3:latest" }] });
+      if (url.endsWith("/show")) return json({ capabilities: ["completion"] });
+      return ndjson([
+        {
+          model: "qwen3:latest",
+          message: { role: "assistant", content: "hello" },
+          done: true,
+          done_reason: "stop",
+          ...replies.shift(),
+        },
+      ]);
+    });
+    const fixture = driver(fetch);
+    await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      fixture.driver
+        .acquire({ instanceId, projectRoot: root, mode: "code" })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    // One session per reply, so each turn reaches its own terminal event.
+    for (const turn of [
+      { id: sessionId, prompt: "counted" },
+      { id: decodeProviderSessionId("90000000-0000-4000-8000-000000000714"), prompt: "uncounted" },
+    ]) {
+      await Effect.runPromise(
+        connection.start({ sessionId: turn.id, modelId, executionPolicy: "approval-gated" }),
+      );
+      const events = Effect.runPromise(
+        Stream.runCollect(
+          Stream.unwrapScoped(connection.subscribe).pipe(
+            Stream.filter((event) => event.sessionId === turn.id),
+            Stream.takeUntil((event) => event.kind === "completed" || event.kind === "failed"),
+          ),
+        ),
+      );
+      await Effect.runPromise(
+        connection.send({ sessionId: turn.id, prompt: turn.prompt, attachments: [], tools: [] }),
+      );
+      await events;
+      await Effect.runPromise(connection.stop(turn.id));
+      expect(fixture.registry.observedState(instanceId)?.capabilities.usage).toBe("supported");
+    }
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
   it("fails the turn after normalizing a tool request that Octant cannot execute yet", async () => {
     const fetch = vi.fn<OllamaFetch>(async () =>
       ndjson([

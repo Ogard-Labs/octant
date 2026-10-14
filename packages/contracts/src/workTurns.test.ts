@@ -3,7 +3,10 @@ import {
   WORK_TURN_CAPABILITIES,
   WORK_TURN_EVENT_NAMES,
   decodeCancelWorkTurnCommand,
+  MAX_WORK_TRANSCRIPT_TURNS,
   decodeWorkThreadTranscript,
+  decodeWorkThreadTranscriptWindow,
+  decodeWorkThreadTranscriptWindowRequest,
   decodeWorkTurnAccepted,
   decodeWorkTurnAuthority,
   decodeWorkTurnLookupResult,
@@ -250,5 +253,50 @@ describe("work turn contracts", () => {
     ).toBe("completed");
 
     expect(WORK_TURN_EVENT_NAMES).toEqual(["work.turn-accepted@1", "work.turn-updated@1"]);
+  });
+
+  it("decodes a transcript window with its bounds and refuses a field it does not name", () => {
+    const window = decodeWorkThreadTranscriptWindow({
+      version: 1,
+      threadId: ids.thread,
+      turns: [],
+      liveCursor: 3,
+      hasEarlier: true,
+      hasLater: false,
+    });
+    expect(window.hasEarlier).toBe(true);
+    expect(window.hasLater).toBe(false);
+    for (const excess of [{ cursor: "next" }, { supersededTurnCount: 0 }]) {
+      expect(() =>
+        decodeWorkThreadTranscriptWindow({
+          version: 1,
+          threadId: ids.thread,
+          turns: [],
+          liveCursor: 0,
+          hasEarlier: false,
+          hasLater: false,
+          ...excess,
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("bounds a transcript window request to one page and at most one anchor", () => {
+    expect(decodeWorkThreadTranscriptWindowRequest({ limit: 30 }).limit).toBe(30);
+    expect(
+      decodeWorkThreadTranscriptWindowRequest({
+        limit: MAX_WORK_TRANSCRIPT_TURNS,
+        before: ids.request,
+      }).before,
+    ).toBe(ids.request);
+    for (const invalid of [
+      { limit: 0 },
+      { limit: MAX_WORK_TRANSCRIPT_TURNS + 1 },
+      { limit: 1.5 },
+      { limit: 30, before: "not-a-turn" },
+      { limit: 30, after: ids.request },
+    ]) {
+      expect(() => decodeWorkThreadTranscriptWindowRequest(invalid)).toThrow();
+    }
   });
 });

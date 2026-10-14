@@ -651,6 +651,7 @@ describe("CodeService commands", () => {
     const access = new CodeProjectAccess({
       readWorkspace: () => undefined,
       hasActiveCodeProject: (id) => String(id) === String(ids.project),
+      isWindowLive: () => true,
     });
     fixture.access.canAccessProject.mockImplementation((scope, project) =>
       access.canAccessProject(scope, project),

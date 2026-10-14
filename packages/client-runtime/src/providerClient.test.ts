@@ -34,11 +34,20 @@ describe("ProviderClient", () => {
     }
   });
 
-  it("strictly decodes successes and typed failures", async () => {
-    const malformed = createProviderClient({
+  it("decodes successes and typed failures, dropping unknown fields and refusing wrong types", async () => {
+    const newer = createProviderClient({
       baseUrl: "http://localhost",
       windowCapability: capability,
       fetch: async () => Response.json({ ...snapshot(), serverUrl: "http://secret" }),
+    });
+    const read = await newer.bootstrap();
+    expect(read).toEqual(snapshot());
+    expect(JSON.stringify(read)).not.toContain("secret");
+
+    const malformed = createProviderClient({
+      baseUrl: "http://localhost",
+      windowCapability: capability,
+      fetch: async () => Response.json({ ...snapshot(), instances: "none" }),
     });
     await expect(malformed.bootstrap()).rejects.toMatchObject({ category: "protocol" });
 
@@ -57,7 +66,7 @@ describe("ProviderClient", () => {
       windowCapability: capability,
       fetch: async () =>
         Response.json(
-          { category: "invalid-configuration", message: "No", token: "secret" },
+          { category: "invalid-configuration", message: ["No"], token: "secret" },
           { status: 400 },
         ),
     });

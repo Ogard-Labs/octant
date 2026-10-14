@@ -1,12 +1,12 @@
 import {
-  decodeFileMentionCommandResult,
   type FileMentionCandidate,
   type FileMentionCommand,
-  type FileMentionCommandResult,
+  FileMentionCommandResult,
   type FileMentionRequestId,
   type FileMentionScope,
   type ResolvedFileMention,
   type UnavailableFileMention,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -87,7 +87,7 @@ export function createFileMentionClient(options: FileMentionClientOptions): File
           : "File mentions are unavailable.";
       throw new FileMentionClientFailure(message, response.status);
     }
-    return decodeFileMentionCommandResult(body);
+    return decodeHostAnswer(FileMentionCommandResult)(body);
   }
 
   return {

@@ -287,7 +287,10 @@ function makeConnection(
           capabilities: {
             ...observed.capabilities,
             streaming: "supported",
-            usage: result.usage === undefined ? "unsupported" : "supported",
+            // One response without counts says nothing about the next, so it
+            // never declares usage unsupported: that would leave every
+            // unreported turn of this endpoint out of a spend ceiling.
+            usage: result.usage === undefined ? observed.capabilities.usage : "supported",
             reasoning: result.reasoning.length > 0 ? "supported" : observed.capabilities.reasoning,
             toolActivity:
               result.toolRequests.length > 0 ? "supported" : observed.capabilities.toolActivity,

@@ -1,17 +1,14 @@
 import {
-  decodeImageGenerationJobsResponse,
-  decodeImageGenerationProfilesResponse,
-  decodeImageGenerationSaveResult,
-  decodeImageJob,
   type ImageArtifactId,
   type ImageGenerationEnqueueRequest,
-  type ImageGenerationJobsResponse,
-  type ImageGenerationProfilesResponse,
-  type ImageGenerationSaveResult,
+  ImageGenerationJobsResponse,
+  ImageGenerationProfilesResponse,
+  ImageGenerationSaveResult,
   type ImageGenerationScopeId,
-  type ImageJob,
+  ImageJob,
   type ImageJobId,
   type ImageJobThreadKind,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export interface ImageGenerationClientOptions {
@@ -57,7 +54,7 @@ export function createImageGenerationClient(
         options,
         "/api/image/profiles",
         { method: "GET", headers },
-        decodeImageGenerationProfilesResponse,
+        decodeHostAnswer(ImageGenerationProfilesResponse),
       );
     },
     list(input) {
@@ -68,7 +65,7 @@ export function createImageGenerationClient(
         options,
         url.pathname + url.search,
         { method: "GET", headers },
-        decodeImageGenerationJobsResponse,
+        decodeHostAnswer(ImageGenerationJobsResponse),
       );
     },
     enqueue(body) {
@@ -80,7 +77,7 @@ export function createImageGenerationClient(
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
         },
-        decodeImageJob,
+        decodeHostAnswer(ImageJob),
       );
     },
     get(jobId) {
@@ -88,7 +85,7 @@ export function createImageGenerationClient(
         options,
         `/api/image/jobs/${encodeURIComponent(jobId)}`,
         { method: "GET", headers },
-        decodeImageJob,
+        decodeHostAnswer(ImageJob),
       );
     },
     cancel(jobId) {
@@ -96,7 +93,7 @@ export function createImageGenerationClient(
         options,
         `/api/image/jobs/${encodeURIComponent(jobId)}/cancel`,
         { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: "{}" },
-        decodeImageJob,
+        decodeHostAnswer(ImageJob),
       );
     },
     async artifact(jobId, attachmentId) {
@@ -129,7 +126,7 @@ export function createImageGenerationClient(
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify({ relativePath: input.relativePath }),
         },
-        decodeImageGenerationSaveResult,
+        decodeHostAnswer(ImageGenerationSaveResult),
       );
     },
   };

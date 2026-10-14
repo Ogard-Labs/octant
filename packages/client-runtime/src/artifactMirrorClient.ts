@@ -1,10 +1,9 @@
 import {
-  decodeArtifactMirrorResult,
-  decodeArtifactMirrorSettings,
   type ArtifactMirrorCommand,
-  type ArtifactMirrorResult,
-  type ArtifactMirrorSettings,
+  ArtifactMirrorResult,
+  ArtifactMirrorSettings,
 } from "@octant/contracts/artifact-mirror";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ArtifactMirrorClientOptions {
@@ -73,7 +72,7 @@ export function createArtifactMirrorClient(
         { method: "GET", ...(signal === undefined ? {} : { signal }) },
         "Artifact mirroring is unavailable.",
       );
-      return decodeArtifactMirrorSettings(readField(body, "settings"));
+      return decodeHostAnswer(ArtifactMirrorSettings)(readField(body, "settings"));
     },
 
     async execute(command, signal) {
@@ -86,7 +85,7 @@ export function createArtifactMirrorClient(
         },
         "The artifact mirror command failed.",
       );
-      return decodeArtifactMirrorResult(body);
+      return decodeHostAnswer(ArtifactMirrorResult)(body);
     },
   };
 }

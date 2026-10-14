@@ -1,10 +1,9 @@
 import {
-  decodeLocalServerCommandResult,
-  decodeRunningServiceCommandResult,
   type LocalServerCommand,
-  type LocalServerCommandResult,
+  LocalServerCommandResult,
   type RunningServiceCommand,
-  type RunningServiceCommandResult,
+  RunningServiceCommandResult,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -74,10 +73,10 @@ export function createLocalServerClient(options: LocalServerClientOptions): Loca
 
   return {
     async execute(command, signal) {
-      return decodeLocalServerCommandResult(await post(command, signal));
+      return decodeHostAnswer(LocalServerCommandResult)(await post(command, signal));
     },
     async executeRunningServices(command, signal) {
-      return decodeRunningServiceCommandResult(await post(command, signal));
+      return decodeHostAnswer(RunningServiceCommandResult)(await post(command, signal));
     },
   };
 }

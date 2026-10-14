@@ -256,6 +256,21 @@ describe("mobile work follow-through", () => {
     ).rejects.toMatchObject({ category: "unavailable" });
   });
 
+  it("reads a Work transcript whose answer carries fields this build does not know", async () => {
+    const port = transport(
+      [
+        {
+          ...acceptedTurn({ prompt: "Earlier ask", threadId, authority: thread.authority }),
+          toolSteps: [{ id: "step-1", name: "read", state: "succeeded" }],
+        },
+      ],
+      [],
+    );
+    const transcript = await loadMobileWorkTranscript(port, threadId);
+    expect(transcript.turns.map((turn) => turn.prompt)).toEqual(["Earlier ask"]);
+    expect(transcript.turns[0]).not.toHaveProperty("toolSteps");
+  });
+
   it("refuses a Work transcript whose threadId does not match the request", async () => {
     const otherThreadId = "00000000-0000-4000-8000-000000000202";
     const fetch = async ({ method, path }: { method: string; path: string }) => {

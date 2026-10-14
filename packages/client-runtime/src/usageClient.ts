@@ -1,15 +1,14 @@
 import {
-  decodeUsagePurgeResult,
-  decodeUsageQueryResponse,
   type UsageExportFormat,
   type UsageExportRequest,
-  type UsagePurgeResult,
+  UsagePurgeResult,
   type UsageQueryFilter,
   type UsageQueryRequest,
-  type UsageQueryResponse,
+  UsageQueryResponse,
   type UsageResetRequest,
   type UsageRetentionRequest,
 } from "@octant/contracts/usage-rpc";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface UsageClientOptions {
@@ -92,7 +91,7 @@ export function createUsageClient(options: UsageClientOptions): UsageClient {
       }
       const body = await readJsonBody(response);
       try {
-        return decodeUsageQueryResponse(body);
+        return decodeHostAnswer(UsageQueryResponse)(body);
       } catch {
         throw new UsageClientError("Usage service returned an invalid response.");
       }
@@ -112,7 +111,7 @@ export function createUsageClient(options: UsageClientOptions): UsageClient {
       }
       const body = await readJsonBody(response);
       try {
-        return decodeUsagePurgeResult(body);
+        return decodeHostAnswer(UsagePurgeResult)(body);
       } catch {
         throw new UsageClientError("Usage service returned an invalid response.");
       }
@@ -124,7 +123,7 @@ export function createUsageClient(options: UsageClientOptions): UsageClient {
       }
       const body = await readJsonBody(response);
       try {
-        return decodeUsagePurgeResult(body);
+        return decodeHostAnswer(UsagePurgeResult)(body);
       } catch {
         throw new UsageClientError("Usage service returned an invalid response.");
       }

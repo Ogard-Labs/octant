@@ -20,6 +20,7 @@ import {
 } from "@octant/contracts";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { CodeServiceError } from "../code/codeService";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import { createUsageResumePorts, type UsageResumePortDependencies } from "./usageResumePorts";
 
@@ -398,6 +399,88 @@ describe("usage-resume ports", () => {
       }),
       { limitRecovery: true },
     );
+  });
+
+  it("defers a Chat or Work continuation a compaction refused, and spends one refused otherwise", async () => {
+    let compacting = true;
+    const ports = createUsageResumePorts(
+      dependencies({
+        chat: {
+          readThread: () => undefined,
+          readThreadView: () => undefined,
+          execute: async () => {
+            throw new Error("This session is being compacted. Send again when it finishes.");
+          },
+          compacting: () => compacting,
+        },
+        work: {
+          readThread: () => workThread(),
+          listTurns: () => [waitingWorkTurn()],
+          startFirstTurn: async () => {
+            throw new Error("This session is being compacted. Send again when it finishes.");
+          },
+          compacting: () => compacting,
+        },
+      }),
+    );
+
+    const deferred = {
+      kind: "deferred",
+      detail: "The session is being compacted; the continuation runs once it finishes.",
+    };
+    await expect(ports.chat.dispatch(record())).resolves.toEqual(deferred);
+    await expect(ports.work.dispatch(record())).resolves.toEqual(deferred);
+    compacting = false;
+    await expect(ports.chat.dispatch(record())).resolves.toMatchObject({ kind: "refused" });
+    await expect(ports.work.dispatch(record())).resolves.toMatchObject({ kind: "refused" });
+  });
+
+  it("defers a Code continuation while the session compacts, before staging its prompt", async () => {
+    let compacting = true;
+    const executeOperation = vi.fn(async () => ({
+      kind: "provider-turn-state" as const,
+      operationId: decodeCodeOperationId(ids.turn),
+      state: "running" as const,
+    }));
+    const code = resumableCode(executeOperation);
+    const stageEvidence = vi.fn(code.stageEvidence);
+    const ports = createUsageResumePorts(
+      dependencies({
+        journal: { replayAggregate: () => [waitingProviderTurnFrame()] },
+        code: { ...code, stageEvidence, compacting: () => compacting },
+      }),
+    );
+
+    await expect(ports.code.dispatch(record())).resolves.toEqual({
+      kind: "deferred",
+      detail: "The session is being compacted; the continuation runs once it finishes.",
+    });
+    expect(stageEvidence).not.toHaveBeenCalled();
+    expect(executeOperation).not.toHaveBeenCalled();
+    compacting = false;
+    await expect(ports.code.dispatch(record())).resolves.toEqual({ kind: "dispatched" });
+  });
+
+  it("defers a Code continuation its turn was refused for a compaction, even one already over", async () => {
+    // The compaction started while the prompt was staged and ended before the
+    // refusal reached the port: only the refusal says why.
+    const executeOperation = vi.fn(async () => {
+      throw new CodeServiceError({
+        category: "waiting",
+        message: "This session is being compacted. Send again when it finishes.",
+      });
+    });
+    const ports = createUsageResumePorts(
+      dependencies({
+        journal: { replayAggregate: () => [waitingProviderTurnFrame()] },
+        code: { ...resumableCode(executeOperation), compacting: () => false },
+      }),
+    );
+
+    await expect(ports.code.dispatch(record())).resolves.toEqual({
+      kind: "deferred",
+      detail: "This session is being compacted. Send again when it finishes.",
+    });
   });
 
   it("marks a Code limit recovery turn as the host's own dispatch", async () => {

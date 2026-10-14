@@ -1,13 +1,13 @@
 import {
-  decodeThreadMentionCommandResult,
   type MentionableThreadId,
   type SideChatSidecar,
   type ThreadMentionCandidate,
   type ThreadMentionCommand,
-  type ThreadMentionCommandResult,
+  ThreadMentionCommandResult,
   type ThreadMentionRequestId,
   type ResolvedThreadMention,
   type UnavailableThreadMention,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -106,7 +106,7 @@ export function createThreadMentionClient(
           : "Thread mentions are unavailable.";
       throw new ThreadMentionClientFailure(message, response.status);
     }
-    return decodeThreadMentionCommandResult(body);
+    return decodeHostAnswer(ThreadMentionCommandResult)(body);
   }
 
   return {

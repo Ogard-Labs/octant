@@ -8,6 +8,7 @@ import type {
   ExtensionEffectiveState,
   ExtensionSource,
   ExtensionSourceReference,
+  StandaloneSkillProjectScope,
   StandaloneSkillRecord,
   StandaloneSkillScope,
 } from "@octant/contracts/extensions";
@@ -25,8 +26,21 @@ export interface SkillDiscoveryRootSet {
   readonly projectRoot: string;
   readonly projectRef: string;
   readonly userGlobalSkillsRoot: string;
+  /** The thread whose working directory this is; skills below the Project root belong to it. */
   readonly scope?: StandaloneSkillScope;
+  /**
+   * The Project whose root this is; skills at the root belong to it. Only the
+   * host's Project-less fallback root leaves it out, and its root skills are
+   * then shared like the user-global directory.
+   */
+  readonly projectScope?: StandaloneSkillProjectScope;
 }
+
+/** Where a discovered record belongs: one thread, one Project, or everywhere. */
+type DiscoveredSkillScope =
+  | { readonly scope: StandaloneSkillScope }
+  | { readonly projectScope: StandaloneSkillProjectScope }
+  | Record<string, never>;
 
 export interface SkillDiscoveryRootProvider {
   resolve(): Promise<ReadonlyArray<SkillDiscoveryRootSet>>;
@@ -156,7 +170,13 @@ export class SkillDiscoveryService {
                 ? `project:${roots.projectRef}:${rootEntry.sourcePrefix}${position}`
                 : `project:${roots.projectRef}:thread:${roots.scope.threadRef}:${rootEntry.sourcePrefix}${position}`,
             boundRoot,
-            current === boundRoot ? undefined : roots.scope,
+            current === boundRoot
+              ? roots.projectScope === undefined
+                ? {}
+                : { projectScope: roots.projectScope }
+              : roots.scope === undefined
+                ? {}
+                : { scope: roots.scope },
           )),
         );
       }
@@ -172,14 +192,14 @@ export class SkillDiscoveryService {
   async #discoverUserGlobal(
     roots: SkillDiscoveryRootSet,
   ): Promise<ReadonlyArray<StandaloneSkillRecord>> {
-    return this.#scanSkillsDirectory(roots.userGlobalSkillsRoot, "user-global");
+    return this.#scanSkillsDirectory(roots.userGlobalSkillsRoot, "user-global", undefined, {});
   }
 
   async #scanSkillsDirectory(
     skillsRoot: string,
     sourceRef: string,
-    allowedRoot?: string,
-    scope?: StandaloneSkillScope,
+    allowedRoot: string | undefined,
+    scope: DiscoveredSkillScope,
   ): Promise<ReadonlyArray<StandaloneSkillRecord>> {
     const root = await canonicalDirectory(skillsRoot);
     if (root === undefined || (allowedRoot !== undefined && !isWithin(allowedRoot, root)))
@@ -216,7 +236,7 @@ export class SkillDiscoveryService {
     name: string,
     source: ExtensionSource,
     root: string,
-    scope?: StandaloneSkillScope,
+    scope: DiscoveredSkillScope,
   ): Promise<StandaloneSkillRecord> {
     const emptyDigest = digest(new Uint8Array());
     const skillPath = join(packagePath, "SKILL.md");
@@ -261,7 +281,7 @@ export class SkillDiscoveryService {
         contentBytes: content.byteLength,
         ...(instructions === undefined ? {} : { instructions }),
         ...(diagnostic === undefined ? {} : { diagnostic }),
-        ...(scope === undefined ? {} : { scope }),
+        ...scope,
       });
     } catch {
       return this.#invalidRecord(name, source, "unreadable-skill", 0, emptyDigest, scope);
@@ -274,7 +294,7 @@ export class SkillDiscoveryService {
     code: ExtensionDiagnostic["code"],
     contentBytes = 0,
     contentDigest = digest(new Uint8Array()),
-    scope?: StandaloneSkillScope,
+    scope: DiscoveredSkillScope = {},
   ): StandaloneSkillRecord {
     return this.#record({
       name: skillNamePattern.test(name) ? name : "invalid-skill",
@@ -282,7 +302,7 @@ export class SkillDiscoveryService {
       digest: contentDigest,
       contentBytes,
       diagnostic: { code, message: "Skill package is unavailable for context." },
-      ...(scope === undefined ? {} : { scope }),
+      ...scope,
     });
   }
 
@@ -294,6 +314,7 @@ export class SkillDiscoveryService {
     readonly instructions?: string;
     readonly diagnostic?: ExtensionDiagnostic;
     readonly scope?: StandaloneSkillScope;
+    readonly projectScope?: StandaloneSkillProjectScope;
   }): StandaloneSkillRecord {
     const skill = {
       qualifiedId: sourceQualifiedSkillId(input.source, input.name, input.digest),
@@ -317,6 +338,7 @@ export class SkillDiscoveryService {
       desiredEnabled: false,
       effectiveState,
       ...(input.scope === undefined ? {} : { scope: input.scope }),
+      ...(input.projectScope === undefined ? {} : { projectScope: input.projectScope }),
       ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
     };
   }

@@ -1,28 +1,20 @@
 import {
-  decodeAgentRunCommandResult,
-  decodeAgentObservedChild,
-  decodeAgentRunResultsResponse,
-  decodeAgentRunReviewResponse,
-  type AgentRunReviewResponse,
-  type AgentObservedChild,
+  AgentRunReviewResponse,
+  AgentObservedChild,
   type AgentRunResultPacket,
-  type AgentRunResultsResponse,
+  AgentRunResultsResponse,
   decodeAgentRunCanvasSnapshotRequest,
-  decodeAgentRunCanvasSnapshotResult,
-  decodeAgentRunCenterResponse,
-  decodeAgentRunConversationResponse,
-  decodeAgentRunConversationStreamFrame,
   MAX_AGENT_RUN_CONVERSATION_NDJSON_LINE_BYTES,
   decodeAgentRunParentThreadId,
   decodeAgentRunResumeRequest,
   decodeAgentRunRetryRequest,
   decodeAgentRunSteerRequest,
-  type AgentRunCanvasSnapshotResult,
+  AgentRunCanvasSnapshotResult,
   type AgentRunCenterQuery,
-  type AgentRunCenterResponse,
-  type AgentRunConversationResponse,
-  type AgentRunConversationStreamFrame,
-  type AgentRunCommandResult,
+  AgentRunCenterResponse,
+  AgentRunConversationResponse,
+  AgentRunConversationStreamFrame,
+  AgentRunCommandResult,
   type AgentRunId,
   type AgentRunParentThreadId,
   type AgentRunResumeRequest,
@@ -30,6 +22,7 @@ import {
   type AgentRunSteerRequest,
   type ProviderUsageLimit,
   type UsageResumeThreadState,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 /**
@@ -201,7 +194,7 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
       if (input.cursor !== undefined) url.searchParams.set("cursor", input.cursor);
       const body = await requestJson(options.fetch, url.toString(), { method: "GET", headers });
       try {
-        return decodeAgentRunCenterResponse(body);
+        return decodeHostAnswer(AgentRunCenterResponse)(body);
       } catch {
         throw new AgentRunClientFailure("unavailable", "AgentRun center response is malformed.");
       }
@@ -212,7 +205,7 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
       url.searchParams.set("generation", String(generation));
       const body = await requestJson(options.fetch, url.toString(), { method: "GET", headers });
       try {
-        const result = decodeAgentRunReviewResponse(body);
+        const result = decodeHostAnswer(AgentRunReviewResponse)(body);
         if (String(result.runId) !== String(runId) || result.generation !== generation)
           throw new Error("Review identity mismatch");
         return result;
@@ -225,7 +218,7 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
       url.searchParams.set("runId", String(runId));
       const body = await requestJson(options.fetch, url.toString(), { method: "GET", headers });
       try {
-        const result = decodeAgentRunResultsResponse(body);
+        const result = decodeHostAnswer(AgentRunResultsResponse)(body);
         if (result.runId !== runId || result.packets.some((packet) => packet.runId !== runId))
           throw new Error("Result identity mismatch");
         return result;
@@ -239,7 +232,7 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
       if (afterSequence !== undefined) url.searchParams.set("afterSequence", String(afterSequence));
       const body = await requestJson(options.fetch, url.toString(), { method: "GET", headers });
       try {
-        return decodeAgentRunConversationResponse(body);
+        return decodeHostAnswer(AgentRunConversationResponse)(body);
       } catch {
         throw new AgentRunClientFailure(
           "unavailable",
@@ -281,7 +274,7 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
         },
       );
       try {
-        return decodeAgentRunCanvasSnapshotResult(body);
+        return decodeHostAnswer(AgentRunCanvasSnapshotResult)(body);
       } catch {
         throw new AgentRunClientFailure(
           "unavailable",
@@ -302,7 +295,7 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
           body.observations === undefined
             ? undefined
             : Array.isArray(body.observations) && body.observations.length <= 64
-              ? body.observations.map((child) => decodeAgentObservedChild(child))
+              ? body.observations.map((child) => decodeHostAnswer(AgentObservedChild)(child))
               : (() => {
                   throw new Error("Invalid observations");
                 })();
@@ -314,7 +307,7 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
           throw new Error("Observation identity mismatch");
         const entries = (body.entries as AgentRunParentSummaryClientEntry[]).map((entry) => {
           if (entry.resultPackets === undefined) return entry;
-          const result = decodeAgentRunResultsResponse({
+          const result = decodeHostAnswer(AgentRunResultsResponse)({
             runId: entry.runId,
             packets: entry.resultPackets,
             truncated: entry.resultsTruncated,
@@ -353,7 +346,7 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
         },
       );
       try {
-        return decodeAgentRunCommandResult(body);
+        return decodeHostAnswer(AgentRunCommandResult)(body);
       } catch {
         throw new AgentRunClientFailure(
           "unavailable",
@@ -527,7 +520,7 @@ async function* parseConversationStream(
     }
     let frame: AgentRunConversationStreamFrame;
     try {
-      frame = decodeAgentRunConversationStreamFrame(JSON.parse(line));
+      frame = decodeHostAnswer(AgentRunConversationStreamFrame)(JSON.parse(line));
     } catch {
       throw new AgentRunClientFailure(
         "unavailable",

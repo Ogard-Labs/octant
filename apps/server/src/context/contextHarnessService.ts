@@ -33,6 +33,7 @@ import {
   type ContextSummaryId,
   type ContextPlanId,
   type ContextPlanInspection,
+  type KnownTokenMeasurement,
   type ModelContextLimits,
   type ProviderInstanceId,
   type ProviderModelId,
@@ -240,6 +241,21 @@ export interface CompactSessionInput {
    */
   readonly subjectAvailability: () => "available" | "mode-disabled" | "deleted" | "context-changed";
 }
+
+/** How a runtime's own compaction of a requested session ended. */
+export type RuntimeCompactionOutcome =
+  | {
+      readonly kind: "compacted";
+      /** The window's occupancy before, with how it is known. */
+      readonly tokensBefore: KnownTokenMeasurement;
+      /** The occupancy the runtime reported after; absent until the next usage report. */
+      readonly tokensAfter?: number;
+    }
+  | {
+      readonly kind: "failed";
+      readonly reason: ContextCompactionFailureReason;
+      readonly sessionMayHaveChanged: boolean;
+    };
 
 export type CompactSessionResult =
   | {
@@ -765,6 +781,15 @@ export class ContextHarnessService {
     return readContextCompactions(this.#persistence.connection, subject).at(-1);
   }
 
+  /**
+   * Whether a requested compaction of this subject is under way. No turn
+   * starts meanwhile: its plan would fail the compaction as `context-changed`
+   * after the summary was already paid for.
+   */
+  compactionRunning(subject: ContextSubjectRef): boolean {
+    return this.latestCompaction(subject)?.status === "running";
+  }
+
   compaction(
     subject: ContextSubjectRef,
     compactionId: ContextCompactionId,
@@ -1012,6 +1037,116 @@ export class ContextHarnessService {
   ): CompactSessionResult {
     this.#assertReady();
     return this.#failCompaction(subject, compactionId, reason);
+  }
+
+  /**
+   * Journals how a runtime's own compaction of a requested session ended. The
+   * runtime keeps the summary, so the receipt holds only what it reported and
+   * what the host already knew of the window. Its usage is priced against the
+   * subject's latest plan where it has one; a subject the host never planned
+   * (a Code thread) carries the figures on the receipt alone, as its turns do.
+   */
+  settleRuntimeCompaction(input: {
+    readonly subject: ContextSubjectRef;
+    readonly compactionId: ContextCompactionId;
+    readonly outcome: RuntimeCompactionOutcome;
+    readonly usage: ReportedCompactionUsage | undefined;
+  }): CompactSessionResult {
+    this.#assertReady();
+    const { subject, compactionId, outcome, usage } = input;
+    const basePlan = this.#restored(subject);
+    // No estimate was made for the runtime's own request, so it reconciles
+    // against what it reported, as a planless child turn does.
+    const spent =
+      basePlan === undefined || usage === undefined
+        ? undefined
+        : { usage, basePlan, materialTokens: usage.inputTokens };
+    const latest = this.compaction(subject, compactionId);
+    if (latest === undefined) {
+      // A purge erased the request; the runtime's spend stays host accounting.
+      if (spent !== undefined) {
+        this.#recordCompactionUsage(subject, spent.basePlan, usage, spent.materialTokens);
+      }
+      return { kind: "discarded" };
+    }
+    if (latest.status !== "running") return { kind: "settled", record: latest };
+    if (outcome.kind === "failed") {
+      return this.#failCompaction(
+        subject,
+        compactionId,
+        outcome.reason,
+        spent,
+        outcome.sessionMayHaveChanged,
+      );
+    }
+    const usageReconciliation =
+      spent === undefined
+        ? undefined
+        : this.#compactionUsage(spent.basePlan, spent.usage, spent.materialTokens);
+    const modelId = latest.executor.modelId;
+    const cost =
+      usage === undefined || modelId === undefined
+        ? undefined
+        : ledgerUsageCost(String(modelId), {
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+          });
+    const before = outcome.tokensBefore;
+    const completedAt = decodeTimestamp(this.#clock());
+    const receipt = decodeContextCompactionReceipt({
+      compactionId,
+      subject,
+      executor: latest.executor,
+      trigger: "requested",
+      tokensBefore: before,
+      ...(outcome.tokensAfter === undefined
+        ? {
+            tokensAfter: { kind: "pending" },
+            tokensFreed: { kind: "unknown", reason: "awaiting-next-report" },
+          }
+        : {
+            tokensAfter: {
+              kind: "known",
+              tokens: outcome.tokensAfter,
+              accuracy: "provider-reported",
+            },
+            // The difference is only as good as the weaker of its two figures,
+            // and the figure after is always the runtime's own.
+            tokensFreed: {
+              kind: before.accuracy === "provider-reported" ? "measured" : "estimated",
+              tokens: Math.max(0, before.tokens - outcome.tokensAfter),
+              accuracy: before.accuracy,
+            },
+          }),
+      summary: { visibility: "runtime-only" },
+      usage:
+        usageReconciliation !== undefined
+          ? compactionUsageOf(usageReconciliation)
+          : usage === undefined
+            ? { kind: "unreported" }
+            : {
+                kind: "reported",
+                inputTokens: usage.inputTokens,
+                outputTokens: usage.outputTokens,
+                ...(cost === undefined ? {} : { cost }),
+              },
+      completedAt,
+    });
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "context-ledger", aggregateId: subject.aggregateId },
+      expectedVersion: this.#aggregateVersion(subject.aggregateId),
+      events: [
+        ...(usageReconciliation === undefined
+          ? []
+          : [this.#pending("context.usage-reconciled@1", { reconciliation: usageReconciliation })]),
+        this.#pending(CONTEXT_COMPACTION_EVENT_NAMES.completed, { receipt }),
+      ],
+    });
+    const completed = this.compaction(subject, compactionId);
+    if (completed === undefined) {
+      throw new ContextHarnessError("unavailable", "Compaction was not recorded.");
+    }
+    return { kind: "settled", record: completed };
   }
 
   /**

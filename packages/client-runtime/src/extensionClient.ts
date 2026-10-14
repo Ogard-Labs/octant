@@ -1,22 +1,19 @@
 import {
   decodeExtensionCommand,
-  decodeExtensionCommandResult,
   decodeExtensionEffectiveStateQuery,
-  decodeExtensionSnapshot,
   decodeExtensionToolApprovalDecision,
-  decodeExtensionToolApprovalList,
-  decodeExtensionToolGrantList,
   decodeExtensionToolGrantRequest,
   type ExtensionCommand,
-  type ExtensionCommandResult,
+  ExtensionCommandResult,
   type ExtensionEffectiveSnapshot,
   type ExtensionEffectiveStateQuery,
-  type ExtensionSnapshot,
+  ExtensionSnapshot,
   type ExtensionToolApprovalDecision,
-  type ExtensionToolApprovalList,
-  type ExtensionToolGrantList,
+  ExtensionToolApprovalList,
+  ExtensionToolGrantList,
   type ExtensionToolGrantRequest,
 } from "@octant/contracts/extension-rpc";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ExtensionClientOptions {
@@ -66,7 +63,7 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
         fetch,
         new URL("/api/extensions/snapshot", options.baseUrl).toString(),
         { method: "POST", headers },
-        decodeExtensionSnapshot,
+        decodeHostAnswer(ExtensionSnapshot),
       );
     },
     async effectiveState(query) {
@@ -88,7 +85,7 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
             ...validated,
           }),
         },
-        decodeExtensionCommandResult,
+        decodeHostAnswer(ExtensionCommandResult),
       );
       if (result.kind !== "extension-effective-state") {
         throw new ExtensionClientFailure(
@@ -114,7 +111,7 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           body: JSON.stringify(validated),
           ...(signal === undefined ? {} : { signal }),
         },
-        decodeExtensionCommandResult,
+        decodeHostAnswer(ExtensionCommandResult),
       );
     },
     listToolApprovals(signal) {
@@ -127,7 +124,7 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           body: JSON.stringify({ kind: "list" }),
           ...(signal === undefined ? {} : { signal }),
         },
-        decodeExtensionToolApprovalList,
+        decodeHostAnswer(ExtensionToolApprovalList),
       );
     },
     async decideToolApproval(decision) {
@@ -169,7 +166,7 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           body: JSON.stringify({ kind: "list" }),
           ...(signal === undefined ? {} : { signal }),
         },
-        decodeExtensionToolGrantList,
+        decodeHostAnswer(ExtensionToolGrantList),
       );
     },
     async revokeToolGrant(grantId) {
@@ -216,7 +213,7 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify({ receiptId }),
         },
-        decodeExtensionCommandResult,
+        decodeHostAnswer(ExtensionCommandResult),
       );
     },
   };

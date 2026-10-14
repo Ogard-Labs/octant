@@ -1,7 +1,7 @@
 import {
-  decodeRemotePushTokenReceiptV1,
   type RemotePushPlatform,
-  type RemotePushTokenReceiptV1,
+  RemotePushTokenReceiptV1,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
 
@@ -22,7 +22,7 @@ export async function registerMobilePushToken(input: {
     );
   }
   try {
-    return decodeRemotePushTokenReceiptV1(await response.json());
+    return decodeHostAnswer(RemotePushTokenReceiptV1)(await response.json());
   } catch {
     throw new MobileInboxFailure(
       "unavailable",
@@ -46,7 +46,7 @@ export async function clearMobilePushToken(
     );
   }
   try {
-    return decodeRemotePushTokenReceiptV1(await response.json());
+    return decodeHostAnswer(RemotePushTokenReceiptV1)(await response.json());
   } catch {
     throw new MobileInboxFailure("unavailable", "Push token clear returned an invalid response.");
   }

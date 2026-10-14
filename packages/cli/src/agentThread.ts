@@ -2,22 +2,22 @@ import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import {
-  decodeChatCommandResult,
-  decodeChatThreadView,
-  decodeCodeBootstrap,
-  decodeCodeCommandResult,
-  decodeCodeConversationPage,
-  decodeCodeEvidenceBatchResponse,
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
-  decodeCodeEvidenceReference,
-  decodeCodeThreadView,
-  decodeProjectBootstrap,
-  decodeWorkThreadBootstrap,
-  decodeWorkThreadCommandResult,
-  decodeWorkThreadTranscript,
-  type ChatThreadView,
+  ChatThreadView,
   type OctantMode,
   type WorkThread,
+  ChatCommandResult,
+  CodeBootstrap,
+  CodeCommandResult,
+  CodeConversationPage,
+  CodeEvidenceBatchResponse,
+  CodeEvidenceReference,
+  CodeThreadView,
+  ProjectBootstrap,
+  WorkThreadBootstrap,
+  WorkThreadCommandResult,
+  WorkThreadTranscript,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import {
   interruptAgentTurn,
@@ -140,7 +140,7 @@ function chatThreadPort(session: OpenedLocalControlSession, threadId: string): A
       path: `/api/chat/threads/${encodeURIComponent(threadId)}`,
       method: "GET",
     });
-    view = response.status === 200 ? decodeChatThreadView(response.body) : undefined;
+    view = response.status === 200 ? decodeHostAnswer(ChatThreadView)(response.body) : undefined;
     return view;
   };
   return {
@@ -171,7 +171,7 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
   const loadThread = async () => {
     const response = await session.send({ path: "/api/work/threads/bootstrap", method: "GET" });
     if (response.status !== 200) return undefined;
-    thread = decodeWorkThreadBootstrap(response.body).threads.find(
+    thread = decodeHostAnswer(WorkThreadBootstrap)(response.body).threads.find(
       (entry) => String(entry.id) === threadId,
     );
     return thread;
@@ -181,7 +181,9 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
       path: `/api/work/turns/transcript/${encodeURIComponent(threadId)}`,
       method: "GET",
     });
-    return response.status === 200 ? decodeWorkThreadTranscript(response.body) : undefined;
+    return response.status === 200
+      ? decodeHostAnswer(WorkThreadTranscript)(response.body)
+      : undefined;
   };
   return {
     mode: "work",
@@ -223,7 +225,7 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
       const projects = await session.send({ path: "/api/projects/bootstrap", method: "GET" });
       const project =
         projects.status === 200
-          ? decodeProjectBootstrap(projects.body).active.find(
+          ? decodeHostAnswer(ProjectBootstrap)(projects.body).active.find(
               (entry) => String(entry.id) === String(current.projectId),
             )
           : undefined;
@@ -285,14 +287,16 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
       path: `/api/code/threads/${encodeURIComponent(threadId)}`,
       method: "GET",
     });
-    return response.status === 200 ? decodeCodeThreadView(response.body) : undefined;
+    return response.status === 200 ? decodeHostAnswer(CodeThreadView)(response.body) : undefined;
   };
   const conversation = async () => {
     const response = await session.send({
       path: `/api/code/threads/${encodeURIComponent(threadId)}/conversation?afterCursor=0&limit=50`,
       method: "GET",
     });
-    return response.status === 200 ? decodeCodeConversationPage(response.body) : undefined;
+    return response.status === 200
+      ? decodeHostAnswer(CodeConversationPage)(response.body)
+      : undefined;
   };
   const texts = new Map<string, string>();
   return {
@@ -321,7 +325,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
           body: { threadId, items: missing.slice(start, start + MAX_CODE_EVIDENCE_BATCH_ITEMS) },
         });
         if (batch.status !== 200) break;
-        for (const item of decodeCodeEvidenceBatchResponse(batch.body).items) {
+        for (const item of decodeHostAnswer(CodeEvidenceBatchResponse)(batch.body).items) {
           texts.set(`${String(item.operationId)}:${String(item.contentId)}`, item.text);
         }
       }
@@ -379,7 +383,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
           threadId,
           checkoutId: String(current.checkout.id),
           sessionId: randomUUID(),
-          prompt: decodeCodeEvidenceReference(staged.body),
+          prompt: decodeHostAnswer(CodeEvidenceReference)(staged.body),
         },
       });
       if (response.status !== 200) {
@@ -453,7 +457,7 @@ export async function createAgentThread(
       message: refusalMessage(projects, "Projects are unavailable on this host."),
     };
   }
-  const active = decodeProjectBootstrap(projects.body).active;
+  const active = decodeHostAnswer(ProjectBootstrap)(projects.body).active;
   const wanted = input.projectName?.trim().toLowerCase();
   let project =
     wanted === undefined
@@ -494,7 +498,7 @@ export async function createAgentThread(
         message: refusalMessage(response, "The host did not create a thread."),
       };
     }
-    const created = decodeChatCommandResult(response.body);
+    const created = decodeHostAnswer(ChatCommandResult)(response.body);
     return created.kind === "thread-created"
       ? {
           kind: "created",
@@ -546,7 +550,7 @@ export async function createAgentThread(
         message: refusalMessage(response, "The host did not create the Work thread."),
       };
     }
-    const created = decodeWorkThreadCommandResult(response.body);
+    const created = decodeHostAnswer(WorkThreadCommandResult)(response.body);
     if (!("kind" in created) || created.kind !== "thread-created") {
       return { kind: "refused", message: "The host did not create the Work thread." };
     }
@@ -571,7 +575,7 @@ export async function createAgentThread(
       message: refusalMessage(prepared, "The Code checkout could not be prepared."),
     };
   }
-  const checkout = decodeCodeCommandResult(prepared.body);
+  const checkout = decodeHostAnswer(CodeCommandResult)(prepared.body);
   if (checkout.kind !== "checkout-prepared") {
     return { kind: "refused", message: "The Code checkout could not be prepared." };
   }
@@ -627,7 +631,7 @@ export async function createAgentThread(
       message: refusalMessage(response, "The host did not create the Code thread."),
     };
   }
-  const created = decodeCodeCommandResult(response.body);
+  const created = decodeHostAnswer(CodeCommandResult)(response.body);
   if (created.kind !== "thread-created") {
     return { kind: "refused", message: "The host did not create the Code thread." };
   }
@@ -674,7 +678,7 @@ export async function attachAgentThread(
       message: refusalMessage(projects, "Projects are unavailable on this host."),
     };
   }
-  const active = decodeProjectBootstrap(projects.body).active.filter(
+  const active = decodeHostAnswer(ProjectBootstrap)(projects.body).active.filter(
     (entry) =>
       (entry.type === "code" || entry.type === "work") &&
       (input.mode === "auto" || input.mode === entry.type),
@@ -731,8 +735,8 @@ async function projectThreads(
   if (response.status !== 200) return [];
   const threads =
     mode === "code"
-      ? decodeCodeBootstrap(response.body).threads
-      : decodeWorkThreadBootstrap(response.body).threads;
+      ? decodeHostAnswer(CodeBootstrap)(response.body).threads
+      : decodeHostAnswer(WorkThreadBootstrap)(response.body).threads;
   return threads
     .filter((thread) => String(thread.projectId) === projectId && thread.lifecycle === "active")
     .toSorted((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))

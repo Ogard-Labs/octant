@@ -11,6 +11,7 @@ import type { SpendCeilingClient } from "@octant/client-runtime/spend-ceiling-cl
 import {
   MONEY_CEILING_NOTE,
   hasMoneyCeiling,
+  notMeasuredProvidersNote,
   spendCeilingLimits,
   spendCeilingRemainingPhrases,
 } from "./spendCeilingLimits";
@@ -203,6 +204,10 @@ function SpendCeilingControls(props: {
 
   const remaining = displayedSpendRemaining(snapshot);
   const refusal = snapshot?.refusal;
+  const notMeasured = notMeasuredProvidersNote([
+    snapshot?.threadRemaining,
+    snapshot?.projectRemaining,
+  ]);
   const threadCeilingSet = snapshot?.thread !== undefined;
   const version = snapshot?.thread?.version ?? 0;
   const scope =
@@ -280,6 +285,11 @@ function SpendCeilingControls(props: {
           </p>
         )}
       </div>
+      {notMeasured === undefined ? null : (
+        <p className="thread-usage__ceiling-note" role="note">
+          {notMeasured}
+        </p>
+      )}
       {refusal === undefined ? null : (
         <OctantAlert className="thread-usage__status" tone="warning">
           {refusal.message}

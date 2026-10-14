@@ -1,3 +1,4 @@
+import { personDecides } from "./hostAnswer";
 import { HarnessRetryNotice } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
@@ -7,7 +8,7 @@ import {
   AgentRunResultDeliveryRunIds,
   AgentRunResultDeliveryGenerations,
 } from "./agentRun";
-import { ContextManifestId } from "./context";
+import { ContextCompactionSettledRecord, ContextManifestId } from "./context";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
@@ -128,7 +129,8 @@ export const ChatAttemptQuestion = Schema.Struct({
       (question) =>
         (question.questionIndex === undefined) === (question.questionCount === undefined),
     ),
-  );
+  )
+  .annotations(personDecides);
 export type ChatAttemptQuestion = typeof ChatAttemptQuestion.Type;
 
 /** A question the person answered, kept on the attempt that asked it. */
@@ -1120,10 +1122,27 @@ export type ChatPublicEvent = typeof ChatPublicEvent.Type;
 export const ChatCommandResult = ChatPublicEvent;
 export type ChatCommandResult = typeof ChatCommandResult.Type;
 
+/**
+ * A compaction of the thread's session ended. It is journaled on the thread's
+ * context ledger, not on the thread, so it is a stream event only and never a
+ * command result.
+ */
+export const ChatCompactionSettled = Schema.Struct({
+  kind: Schema.Literal("compaction-settled"),
+  threadId: ChatThreadId,
+  compaction: ContextCompactionSettledRecord,
+}).annotations(strict);
+export type ChatCompactionSettled = typeof ChatCompactionSettled.Type;
+
 export const ChatEventFrame = Schema.Struct({
   threadId: ChatThreadId,
   sequence: GlobalSequence.pipe(Schema.positive()),
-  event: ChatPublicEvent,
+  /**
+   * `compaction-settled` is sent only to subscribers that asked for it,
+   * because a client decoding frames strictly would refuse an event it does
+   * not know.
+   */
+  event: Schema.Union(ChatPublicEvent, ChatCompactionSettled),
   /**
    * The body of the reference an `attempt-updated` event just appended, so a
    * subscriber can grow the reply it already shows without re-reading the

@@ -162,6 +162,38 @@ describe("mobile Code follow-through", () => {
     ]);
   });
 
+  it("reads a Code conversation whose answer carries fields this build does not know", async () => {
+    const port = transport([]);
+    const conversation = await loadMobileCodeConversation(
+      {
+        hostId: port.hostId,
+        authenticatedFetch: async (input) => {
+          const response = await port.authenticatedFetch(input);
+          if (input.path !== `/api/code/threads/${threadId}/conversation`) return response;
+          const page = (await response.json()) as { turns: Array<Record<string, unknown>> };
+          return jsonResponse({
+            ...page,
+            turns: page.turns.map((turn) => ({
+              ...turn,
+              toolSteps: [{ id: "step-1", name: "edit", state: "succeeded" }],
+            })),
+            pageHint: "newer hosts add this",
+          });
+        },
+      },
+      threadId,
+    );
+    expect(conversation).toEqual([
+      {
+        operationId,
+        status: "completed",
+        prompt: "Fix the test",
+        assistant: ["Done: the test now passes."],
+        updatedAt: now,
+      },
+    ]);
+  });
+
   it("refuses a Code conversation whose threadId does not match the request", async () => {
     const otherThreadId = "84000000-0000-4000-8000-000000000099";
     const fetch = vi.fn(async ({ path }: { path: string }) => {

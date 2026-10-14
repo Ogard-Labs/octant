@@ -577,6 +577,47 @@ describe("AgentResultDeliveryService", () => {
     );
   });
 
+  it("re-fires a deferred delivery when a compaction holding the parent thread ends", async () => {
+    const run = finishedRun();
+    let dispatches = 0;
+    const fixture = deliveryFixture({
+      runs: [run],
+      chat: {
+        dispatch: vi.fn(async () => {
+          dispatches += 1;
+          return dispatches === 1
+            ? { kind: "deferred" as const, detail: "parent compacting" }
+            : { kind: "dispatched" as const, runIds: [run.id] };
+        }),
+      },
+    });
+    fixture.emit(settleStatusEvent(String(run.id)));
+    await fixture.flush();
+    expect(fixture.chat.dispatch).toHaveBeenCalledTimes(1);
+
+    fixture.emit({
+      events: [
+        {
+          eventName: "context.compaction-failed@1",
+          aggregateType: "context-ledger",
+          aggregateId: String(run.parentThreadId),
+          payload: {
+            compactionId: "00000000-0000-4000-8000-0000000000c1",
+            subject: { aggregateType: "chat-thread", aggregateId: String(run.parentThreadId) },
+            reason: "summary-failed",
+            sessionMayHaveChanged: false,
+            failedAt: "2026-07-18T21:00:00.000Z",
+          },
+        } as EventEnvelope,
+      ],
+    } as unknown as CommittedAppend);
+    await fixture.flush();
+    expect(fixture.chat.dispatch).toHaveBeenCalledTimes(2);
+    expect(fixture.applyCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "delivered" }),
+    );
+  });
+
   it("settles a parent that no longer exists as invalidated rather than retrying forever", async () => {
     const run = finishedRun();
     const fixture = deliveryFixture({

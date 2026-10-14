@@ -35,6 +35,7 @@ import {
   type AgentRun,
   type Project,
   type UtcTimestamp,
+  type WorkTurnStreamFrame,
 } from "@octant/contracts";
 import { Effect, Queue, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -112,6 +113,35 @@ describe("WorkTurnService", () => {
       expect(run).not.toHaveBeenCalled();
     },
   );
+
+  it("counts a turn as starting while its context loads, so a compaction cannot slip in before it is accepted", async () => {
+    const release = deferred<void>();
+    const entered = deferred<void>();
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: vi.fn<WorkTurnRuntimePort["run"]>().mockResolvedValue({
+          kind: "completed",
+          response: "Done",
+        }),
+      },
+      resolveFileMentionContext: async () => {
+        entered.resolve();
+        await release.promise;
+        return [];
+      },
+    });
+    expect(fixture.service.isTurnStarting(ids.thread)).toBe(false);
+    const pending = fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      fileMentionPaths: ["notes.md"],
+    });
+    await entered.promise;
+    expect(fixture.service.isTurnActive(ids.thread)).toBe(false);
+    expect(fixture.service.isTurnStarting(ids.thread)).toBe(true);
+    release.resolve();
+    await expect(pending).resolves.toMatchObject({ kind: "accepted" });
+    expect(fixture.service.isTurnStarting(ids.thread)).toBe(false);
+  });
 
   it("fails an accepted host turn revoked during the model context probe without starting it", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
@@ -501,7 +531,7 @@ describe("WorkTurnService", () => {
     }
   });
 
-  it("compacts a Work session on request and sends the summary on the next turn", async () => {
+  it("holds a Work turn while the session compacts, streams the receipt, and sends the summary next turn", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-work-compaction-"));
     attachmentRoots.push(root);
     const connection = openSqlite(join(root, "context.sqlite3"));
@@ -574,6 +604,35 @@ describe("WorkTurnService", () => {
         aggregateType: "work-thread",
         aggregateId: String(ids.thread),
       });
+      // A turn is not accepted while a compaction runs: its plan would fail the
+      // compaction after the summary was paid for.
+      const held = decodeContextCompactionId("83000000-0000-4000-8000-00000000c0d0");
+      contextHarness.requestCompaction({
+        subject,
+        compactionId: held,
+        executor: {
+          kind: "host",
+          providerInstanceId: decodeProviderInstanceId(ids.provider),
+          modelId: decodeProviderModelId("model-a"),
+        },
+      });
+      const sentBeforeHold = sent.length;
+      await expect(
+        fixture.service.startFirstTurn(ids.window, {
+          ...startCommand(),
+          requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-0000000000ff"),
+          turnId: decodeWorkTurnId("bbbbbbbb-bbbb-4bbb-8bbb-0000000000ff"),
+          prompt: "Held while compacting",
+        }),
+      ).rejects.toMatchObject({
+        failure: {
+          category: "stale",
+          message: "This session is being compacted. Send again when it finishes.",
+        },
+      });
+      expect(sent).toHaveLength(sentBeforeHold);
+      expect(fixture.service.isTurnActive(ids.thread)).toBe(false);
+      contextHarness.failCompaction(subject, held, "summary-failed");
       const compaction = new SessionCompactionService({
         harness: contextHarness,
         threads: {
@@ -589,6 +648,8 @@ describe("WorkTurnService", () => {
             conversation: (threadId) =>
               fixture.service.sessionCompactionConversation(decodeWorkThreadId(threadId)),
             scratchRoot: async () => root,
+            settled: (threadId, settled) =>
+              fixture.service.compactionSettled(decodeWorkThreadId(threadId), settled),
           },
         },
         modeEnabled: () => true,
@@ -610,6 +671,18 @@ describe("WorkTurnService", () => {
       expect(compaction.inspect(subject, undefined, "local-window").compaction).toEqual({
         status: "available",
       });
+      const listening = new AbortController();
+      const frames: Array<WorkTurnStreamFrame> = [];
+      const stream = (async () => {
+        for await (const frame of fixture.service.subscribe(
+          ids.window,
+          ids.thread,
+          fixture.service.liveCursor(ids.thread),
+          listening.signal,
+        )) {
+          frames.push(frame);
+        }
+      })();
       compaction.start(
         {
           kind: "compact-session",
@@ -619,10 +692,22 @@ describe("WorkTurnService", () => {
         "local-window",
       );
       await compaction.settled();
-      expect(contextHarness.latestCompaction(subject)).toMatchObject({
+      const completed = contextHarness.latestCompaction(subject);
+      expect(completed).toMatchObject({
         status: "completed",
         receipt: { trigger: "requested", summary: { visibility: "stored" } },
       });
+      // The receipt reaches the thread's live stream as the compaction ends.
+      await vi.waitFor(() => expect(frames).toHaveLength(1));
+      listening.abort();
+      await stream;
+      expect(frames).toEqual([
+        expect.objectContaining({
+          kind: "compaction-settled",
+          threadId: ids.thread,
+          compaction: completed,
+        }),
+      ]);
 
       await runTurn(5);
       const next = sent.at(-1) ?? [];
@@ -1936,6 +2021,117 @@ describe("WorkTurnService", () => {
       await expect(fixture.service.turns(ids.window, ids.thread)).rejects.toMatchObject({
         failure: { category: "unauthorized" },
       });
+    });
+
+    it("opens a long Work thread on its newest turns", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 65);
+
+      const window = await fixture.service.transcriptWindow(ids.window, ids.thread, { limit: 30 });
+
+      expect(window.version).toBe(1);
+      expect(window.turns.map((turn) => turn.prompt)).toEqual(
+        Array.from({ length: 30 }, (_, index) => `Prompt ${index + 36}`),
+      );
+      expect(window.hasEarlier).toBe(true);
+      expect(window.hasLater).toBe(false);
+    });
+
+    it("returns the turns before a named turn and says whether more remain", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 65);
+      const newest = await fixture.service.transcriptWindow(ids.window, ids.thread, { limit: 30 });
+
+      const middle = await fixture.service.transcriptWindow(ids.window, ids.thread, {
+        limit: 30,
+        before: newest.turns[0]!.requestId,
+      });
+      expect(middle.turns.map((turn) => turn.prompt)).toEqual(
+        Array.from({ length: 30 }, (_, index) => `Prompt ${index + 6}`),
+      );
+      expect(middle.hasEarlier).toBe(true);
+      expect(middle.hasLater).toBe(true);
+
+      const oldest = await fixture.service.transcriptWindow(ids.window, ids.thread, {
+        limit: 30,
+        before: middle.turns[0]!.requestId,
+      });
+      expect(oldest.turns.map((turn) => turn.prompt)).toEqual([
+        "Prompt 1",
+        "Prompt 2",
+        "Prompt 3",
+        "Prompt 4",
+        "Prompt 5",
+      ]);
+      expect(oldest.hasEarlier).toBe(false);
+      expect(oldest.hasLater).toBe(true);
+    });
+
+    it("refuses a window anchored on a turn the thread does not hold", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 3);
+
+      await expect(
+        fixture.service.transcriptWindow(ids.window, ids.thread, {
+          limit: 30,
+          before: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-ffffffffffff"),
+        }),
+      ).rejects.toMatchObject({ failure: { category: "stale" } });
+    });
+
+    it("refuses a Work window for a window that cannot read the thread", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 2);
+      fixture.threads.read.mockResolvedValue(undefined as never);
+
+      await expect(
+        fixture.service.transcriptWindow(ids.window, ids.thread, { limit: 30 }),
+      ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    });
+
+    it("stops a window short of its limit once its encoded turns pass the page budget", async () => {
+      const fixture = serviceFixture();
+      // Projected directly: a provider turn this size would not pass the
+      // input budget, but a thread can still hold many large turns.
+      const long = "x".repeat(60_000);
+      const command = startCommand();
+      for (let n = 1; n <= 40; n += 1) {
+        const suffix = n.toString(16).padStart(12, "0");
+        fixture.projection.apply(
+          decodeWorkTurnAccepted({
+            kind: "turn-accepted",
+            requestId: `aaaaaaaa-aaaa-4aaa-8aaa-${suffix}`,
+            threadId: ids.thread,
+            turnId: `bbbbbbbb-bbbb-4bbb-8bbb-${suffix}`,
+            projectId: command.authority.projectId,
+            authority: command.authority,
+            providerSessionId: `cccccccc-cccc-4ccc-8ccc-${suffix}`,
+            prompt: `${String(n)} ${long}`,
+            capabilities: {
+              workspace: "project-backed",
+              confinement: "project-root-confined",
+              shell: "denied",
+              git: "denied",
+              worktree: "denied",
+              pullRequest: "denied",
+              code: "denied",
+            },
+            acceptedAt: "2026-10-14T08:00:00.000Z",
+          }),
+        );
+      }
+
+      const window = await fixture.service.transcriptWindow(ids.window, ids.thread, { limit: 64 });
+
+      expect(window.turns.length).toBeGreaterThan(0);
+      expect(window.turns.length).toBeLessThan(40);
+      expect(window.turns.at(-1)?.prompt.startsWith("40 ")).toBe(true);
+      expect(window.hasEarlier).toBe(true);
+      const bytes = window.turns.reduce(
+        (total, turn) => total + new TextEncoder().encode(JSON.stringify(turn)).byteLength,
+        0,
+      );
+      expect(bytes).toBeLessThanOrEqual(2 * 1024 * 1024);
     });
 
     it("serves a 64-turn thread whole from both reads", async () => {

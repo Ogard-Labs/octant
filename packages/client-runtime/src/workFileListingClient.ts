@@ -1,8 +1,8 @@
 import {
-  decodeWorkFileListingResult,
   type ProjectId,
-  type WorkFileListingResult,
+  WorkFileListingResult,
   type WorkThreadId,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -70,7 +70,7 @@ export function createWorkFileListingClient(
           response.status,
         );
       }
-      return decodeWorkFileListingResult(body);
+      return decodeHostAnswer(WorkFileListingResult)(body);
     },
   };
 }

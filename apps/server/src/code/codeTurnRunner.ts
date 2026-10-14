@@ -386,6 +386,10 @@ export class CodeTurnRunner {
                 if (!isSanitizedEventValid(boundedEvent, sanitizedEvent, input.checkoutRoot)) {
                   return yield* fail("failed", "Provider event sanitization failed closed.");
                 }
+                // A compaction changes what the runtime's session holds, not
+                // the checkout or the turn's step: its receipt belongs on the
+                // thread's context ledger, not among the turn's events.
+                if (sanitizedEvent.kind === "context-compacted") return;
                 // The sanitized copy: the checkout root and the turn's secrets
                 // are already out of it, so the step line starts from what the
                 // journal would be allowed to keep.
@@ -638,7 +642,7 @@ function withToolName(toolNames: Map<string, string>, event: CodeTurnEvent): Cod
 
 function normalizeProviderEvent(
   input: CodeTurnRunnerInput,
-  event: ProviderRuntimeEvent,
+  event: Exclude<ProviderRuntimeEvent, { readonly kind: "context-compacted" }>,
 ): Effect.Effect<CodeTurnEvent, CodeTurnFailure> {
   const base = {
     providerKind: event.kind,

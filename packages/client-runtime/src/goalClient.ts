@@ -1,9 +1,9 @@
 import {
-  decodeThreadGoalUpdated,
   type ThreadGoal,
   type ThreadGoalCommand,
   type ThreadGoalHistoryEntry,
-  type ThreadGoalUpdated,
+  ThreadGoalUpdated,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -76,7 +76,7 @@ export function createGoalClient(options: GoalClientOptions): GoalClient {
       // A thread without a Goal is a normal read, not a decode failure, so the
       // strict projection decoder only runs once the host reports a Goal.
       if (goal === null || goal === undefined) return { goal: null, history: [] };
-      return decodeThreadGoalUpdated(body);
+      return decodeHostAnswer(ThreadGoalUpdated)(body);
     },
 
     async execute(command, signal) {
@@ -95,7 +95,7 @@ export function createGoalClient(options: GoalClientOptions): GoalClient {
         },
         "Goal command failed.",
       );
-      return decodeThreadGoalUpdated(body);
+      return decodeHostAnswer(ThreadGoalUpdated)(body);
     },
   };
 }
