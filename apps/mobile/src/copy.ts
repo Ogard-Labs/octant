@@ -109,6 +109,7 @@ export const MOBILE_COPY = {
   codeBrowseThreads: "Browse Code threads",
   codeFollowUpPlaceholder: "Follow up on this Code thread…",
   transcriptEmpty: "No turns yet.",
+  codeEarlierTurns: "Showing the newest turns. Open the thread on the desktop for earlier ones.",
   turnRunning: "Working on the host…",
   hostsUnavailable: "hosts unavailable",
   approvalDesktopOnly:

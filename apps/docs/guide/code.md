@@ -69,6 +69,11 @@ context figures always cover the whole thread, and a restore's **Undo restore**
 stays offered however far back the restore was. Find in page searches the turns
 loaded so far. Export always covers the whole thread.
 
+The phone app opens a Code thread on its newest 20 turns and says so when
+earlier ones exist; it has no Load earlier, so read those on the desktop.
+`octant agent` shows a Code thread's newest 50 turns, and its footer then
+counts them as **newest 50 turns**.
+
 ## Export
 
 **Export thread** downloads a portable JSON cut of this Code thread: the

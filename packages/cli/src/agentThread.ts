@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import {
+  MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   ChatThreadView,
   type OctantMode,
@@ -10,6 +11,8 @@ import {
   CodeBootstrap,
   CodeCommandResult,
   CodeConversationPage,
+  type CodeConversationTurn,
+  CodeConversationWindow,
   CodeEvidenceBatchResponse,
   CodeEvidenceReference,
   CodeThreadView,
@@ -60,7 +63,10 @@ export interface AgentThreadSnapshot {
   readonly providerInstanceId: string;
   readonly modelId: string;
   readonly version: number;
+  /** The thread's turns, oldest first: all of them, or its newest when `hasEarlier`. */
   readonly turns: ReadonlyArray<AgentThreadTurn>;
+  /** The thread has turns older than the first in `turns`. */
+  readonly hasEarlier?: boolean;
   readonly workItems: ReadonlyArray<{
     readonly title: string;
     readonly status: "pending" | "in-progress" | "blocked" | "completed" | "cancelled";
@@ -281,6 +287,17 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
 
 // ── Code ─────────────────────────────────────────────────────────────────────
 
+/** How many of a Code thread's newest turns the terminal shows. */
+export const CODE_THREAD_TURNS = 50;
+/** The forward walk's page bound, for a host without the window read. */
+const MAX_CODE_FORWARD_PAGES = 100;
+
+interface CodeTurnsShown {
+  /** The thread's newest turns, oldest first. */
+  readonly turns: ReadonlyArray<CodeConversationTurn>;
+  readonly hasEarlier: boolean;
+}
+
 function codeThreadPort(session: OpenedLocalControlSession, threadId: string): AgentThreadPort {
   const view = async () => {
     const response = await session.send({
@@ -289,14 +306,54 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
     });
     return response.status === 200 ? decodeHostAnswer(CodeThreadView)(response.body) : undefined;
   };
-  const conversation = async () => {
-    const response = await session.send({
-      path: `/api/code/threads/${encodeURIComponent(threadId)}/conversation?afterCursor=0&limit=50`,
-      method: "GET",
-    });
-    return response.status === 200
-      ? decodeHostAnswer(CodeConversationPage)(response.body)
-      : undefined;
+  const path = `/api/code/threads/${encodeURIComponent(threadId)}/conversation`;
+  // A host without the window read answers 404 once and is then read forward.
+  // The forward read lists turns oldest first, so only its tail is shown, and
+  // the next read starts at the page that tail began on.
+  const forward = { windowMissing: false, tailFrom: 0 };
+  const forwardTail = async (): Promise<CodeTurnsShown | undefined> => {
+    const pages: Array<{
+      readonly from: number;
+      readonly turns: ReadonlyArray<CodeConversationTurn>;
+    }> = [];
+    let cursor = forward.tailFrom;
+    for (let count = 1; ; count += 1) {
+      const response = await session.send({
+        path: `${path}?afterCursor=${cursor}&limit=${MAX_CODE_CONVERSATION_PAGE_SIZE}`,
+        method: "GET",
+      });
+      if (response.status !== 200) return undefined;
+      const page = decodeHostAnswer(CodeConversationPage)(response.body);
+      pages.push({ from: cursor, turns: page.turns });
+      if (!page.hasMore || page.nextCursor <= cursor || count >= MAX_CODE_FORWARD_PAGES) break;
+      cursor = page.nextCursor;
+    }
+    let first = pages.length;
+    for (let counted = 0; first > 0 && counted < CODE_THREAD_TURNS;) {
+      first -= 1;
+      counted += pages[first]?.turns.length ?? 0;
+    }
+    forward.tailFrom = pages[first]?.from ?? forward.tailFrom;
+    const held = pages.slice(first).flatMap((page) => page.turns);
+    return {
+      turns: held.slice(-CODE_THREAD_TURNS),
+      hasEarlier: forward.tailFrom > 0 || held.length > CODE_THREAD_TURNS,
+    };
+  };
+  const conversation = async (): Promise<CodeTurnsShown | undefined> => {
+    if (!forward.windowMissing) {
+      const response = await session.send({
+        path: `${path}/window?limit=${CODE_THREAD_TURNS}`,
+        method: "GET",
+      });
+      if (response.status === 200) {
+        const window = decodeHostAnswer(CodeConversationWindow)(response.body);
+        return { turns: window.turns, hasEarlier: window.hasEarlier };
+      }
+      if (response.status !== 404) return undefined;
+      forward.windowMissing = true;
+    }
+    return forwardTail();
   };
   const texts = new Map<string, string>();
   return {
@@ -336,6 +393,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
         providerInstanceId: String(current.thread.providerInstanceId),
         modelId: String(current.thread.modelId),
         version: current.thread.version,
+        ...(page?.hasEarlier === true ? { hasEarlier: true } : {}),
         turns: turns.map((turn) => ({
           id: String(turn.operationId),
           at: turn.startedAt,

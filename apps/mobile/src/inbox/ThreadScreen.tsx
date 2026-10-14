@@ -22,7 +22,7 @@ import {
   sendMobileWorkTurn,
   subscribeMobileChatEvents,
   uploadMobileChatAttachment,
-  type MobileCodeConversationTurn,
+  type MobileCodeConversation,
   type MobileInboxRow,
 } from "@octant/client-runtime";
 import { useConnectionStatus } from "@octant/client-runtime/use-connection-status";
@@ -152,9 +152,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
   const [codePolicy, setCodePolicy] = useState<string | undefined>();
   const [workThread, setWorkThread] = useState<WorkThread | undefined>();
   const [workTurns, setWorkTurns] = useState<ReadonlyArray<WorkTurnState> | undefined>();
-  const [codeTurns, setCodeTurns] = useState<
-    ReadonlyArray<MobileCodeConversationTurn> | undefined
-  >();
+  const [codeConversation, setCodeConversation] = useState<MobileCodeConversation | undefined>();
+  const codeTurns = codeConversation?.turns;
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -199,7 +198,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
         setCodePolicy(undefined);
         setWorkThread(undefined);
         setWorkTurns(undefined);
-        setCodeTurns(undefined);
+        setCodeConversation(undefined);
         return;
       }
       // Quiet polling and a later inbox selection can overlap. An older
@@ -217,17 +216,17 @@ export function ThreadScreen(props: ThreadScreenProps) {
           setError(undefined);
         }
         try {
-          const [thread, turns] = await Promise.all([
+          const [thread, conversation] = await Promise.all([
             loadMobileCodeThread(transport, props.selected.threadId),
             loadMobileCodeConversation(transport, props.selected.threadId),
           ]);
           if (!stillSelected()) return;
           setCodePolicy(thread.executionPolicy);
-          setCodeTurns(turns);
+          setCodeConversation(conversation);
         } catch (cause) {
           if (!stillSelected() || options?.quiet === true) return;
           setCodePolicy(undefined);
-          setCodeTurns(undefined);
+          setCodeConversation(undefined);
           setError(
             cause instanceof MobileInboxFailure ? cause.message : "Could not load the Code thread.",
           );
@@ -239,7 +238,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
       if (props.selected.mode === "work") {
         setView(undefined);
         setCodePolicy(undefined);
-        setCodeTurns(undefined);
+        setCodeConversation(undefined);
         if (options?.quiet !== true) {
           setBusy(true);
           setError(undefined);
@@ -269,7 +268,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
       setCodePolicy(undefined);
       setWorkThread(undefined);
       setWorkTurns(undefined);
-      setCodeTurns(undefined);
+      setCodeConversation(undefined);
       try {
         const next = await loadMobileChatThread(transport, props.selected.threadId);
         setView(next);
@@ -293,7 +292,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
   useEffect(() => {
     setWorkThread(undefined);
     setWorkTurns(undefined);
-    setCodeTurns(undefined);
+    setCodeConversation(undefined);
     setCodePolicy(undefined);
   }, [selectedIdentity]);
 
@@ -430,9 +429,9 @@ export function ThreadScreen(props: ThreadScreenProps) {
       } else if (props.selected.mode === "code") {
         const threadId = props.selected.threadId;
         await sendMobileCodeTurn({ transport, threadId, prompt });
-        const turns = await loadMobileCodeConversation(transport, threadId);
+        const conversation = await loadMobileCodeConversation(transport, threadId);
         if (!stillSelected()) return;
-        setCodeTurns(turns);
+        setCodeConversation(conversation);
       } else {
         return;
       }
@@ -864,6 +863,9 @@ export function ThreadScreen(props: ThreadScreenProps) {
             ) : null}
             {codeTurns !== undefined ? (
               <View style={styles.transcript} testID="mobile-code-transcript">
+                {codeConversation?.hasEarlier === true ? (
+                  <Text style={styles.metaText}>{MOBILE_COPY.codeEarlierTurns}</Text>
+                ) : null}
                 {codeTurns.length === 0 ? (
                   <Text style={styles.metaText}>{MOBILE_COPY.transcriptEmpty}</Text>
                 ) : (
