@@ -1,15 +1,12 @@
 import {
-  decodeReplicaJoinReadResult,
-  decodeReplicaMembershipResult,
-  decodeReplicaMembershipView,
-  decodeReplicaRestoreResult,
-  type ReplicaJoinReadResult,
+  ReplicaJoinReadResult,
   type ReplicaMembershipCommand,
-  type ReplicaMembershipResult,
-  type ReplicaMembershipView,
+  ReplicaMembershipResult,
+  ReplicaMembershipView,
   type ReplicaRestoreCommand,
-  type ReplicaRestoreResult,
+  ReplicaRestoreResult,
 } from "@octant/contracts/replica-entry";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ReplicaMembershipClientOptions {
@@ -85,7 +82,7 @@ export function createReplicaMembershipClient(
         headers: { "x-octant-window-capability": options.windowCapability },
         ...(signal === undefined ? {} : { signal }),
       });
-      return decodeReplicaMembershipView(body);
+      return decodeHostAnswer(ReplicaMembershipView)(body);
     },
     async execute(command, signal) {
       const body = await send(commandsUrl, {
@@ -97,7 +94,7 @@ export function createReplicaMembershipClient(
         body: JSON.stringify(command),
         ...(signal === undefined ? {} : { signal }),
       });
-      return decodeReplicaMembershipResult(body);
+      return decodeHostAnswer(ReplicaMembershipResult)(body);
     },
     async restore(command, signal) {
       const body = await send(commandsUrl, {
@@ -109,7 +106,7 @@ export function createReplicaMembershipClient(
         body: JSON.stringify(command),
         ...(signal === undefined ? {} : { signal }),
       });
-      return decodeReplicaRestoreResult(body);
+      return decodeHostAnswer(ReplicaRestoreResult)(body);
     },
     async stopJoinRead(signal) {
       const body = await send(commandsUrl, {
@@ -121,7 +118,7 @@ export function createReplicaMembershipClient(
         body: JSON.stringify({ kind: "stop-join-read" }),
         ...(signal === undefined ? {} : { signal }),
       });
-      return decodeReplicaJoinReadResult(body);
+      return decodeHostAnswer(ReplicaJoinReadResult)(body);
     },
   };
 }

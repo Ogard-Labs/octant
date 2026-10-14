@@ -1,11 +1,9 @@
 import {
-  decodeAgentProfile,
-  decodeAgentProfileCommandResult,
-  decodeExecutionResolutionReceipt,
-  type AgentProfile,
-  type AgentProfileCommandResult,
+  AgentProfile,
+  AgentProfileCommandResult,
   type AgentProfileId,
-  type ExecutionResolutionReceipt,
+  ExecutionResolutionReceipt,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export interface AgentProfileClientOptions {
@@ -59,7 +57,7 @@ export function createAgentProfileClient(options: AgentProfileClientOptions): Ag
         { method: "GET", headers },
         (body) => {
           if (!Array.isArray(body)) throw new Error("Expected array");
-          return body.map((item) => decodeAgentProfile(item));
+          return body.map((item) => decodeHostAnswer(AgentProfile)(item));
         },
         [],
       );
@@ -69,7 +67,7 @@ export function createAgentProfileClient(options: AgentProfileClientOptions): Ag
         options.fetch,
         new URL(`/api/agent-profiles/${encodeURIComponent(profileId)}`, options.baseUrl).toString(),
         { method: "GET", headers },
-        (body) => (body === null ? undefined : decodeAgentProfile(body)),
+        (body) => (body === null ? undefined : decodeHostAnswer(AgentProfile)(body)),
       );
     },
     execute(command) {
@@ -81,7 +79,7 @@ export function createAgentProfileClient(options: AgentProfileClientOptions): Ag
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(command),
         },
-        decodeAgentProfileCommandResult,
+        decodeHostAnswer(AgentProfileCommandResult),
       );
     },
     resolveEffectiveProfile(input) {
@@ -93,7 +91,7 @@ export function createAgentProfileClient(options: AgentProfileClientOptions): Ag
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(input),
         },
-        decodeExecutionResolutionReceipt,
+        decodeHostAnswer(ExecutionResolutionReceipt),
       );
     },
   };

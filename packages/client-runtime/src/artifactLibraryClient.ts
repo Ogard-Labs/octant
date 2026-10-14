@@ -1,11 +1,10 @@
 import {
-  decodeArtifactLibraryListing,
-  decodeArtifactSyncedResult,
-  type ArtifactLibraryListing,
+  ArtifactLibraryListing,
   type ArtifactLibraryQuery,
   type ArtifactSyncedCommand,
-  type ArtifactSyncedResult,
+  ArtifactSyncedResult,
 } from "@octant/contracts/artifact-library";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ArtifactLibraryClientOptions {
@@ -67,7 +66,7 @@ export async function loadArtifactLibrary(
       response.status,
     );
   }
-  return decodeArtifactLibraryListing(body);
+  return decodeHostAnswer(ArtifactLibraryListing)(body);
 }
 
 /**
@@ -109,7 +108,7 @@ export async function executeSyncedArtifactCommand(
       response.status,
     );
   }
-  return decodeArtifactSyncedResult(body);
+  return decodeHostAnswer(ArtifactSyncedResult)(body);
 }
 
 function readString(body: unknown, key: string): string | undefined {

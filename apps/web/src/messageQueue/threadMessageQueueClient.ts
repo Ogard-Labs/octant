@@ -1,10 +1,10 @@
 import {
-  decodeThreadMessageQueueReadResult,
-  decodeThreadMessageQueueResult,
   type ThreadMessageQueueCommand,
-  type ThreadMessageQueueResult,
+  ThreadMessageQueueResult,
   type ThreadMessageQueueScope,
   type ThreadMessageQueueSnapshot,
+  ThreadMessageQueueReadResult,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export interface ThreadMessageQueueClient {
@@ -31,7 +31,7 @@ export function createThreadMessageQueueClient(options: {
   return {
     read: async (scope) => {
       const query = new URLSearchParams({ mode: scope.mode, threadId: String(scope.threadId) });
-      const result = decodeThreadMessageQueueReadResult(
+      const result = decodeHostAnswer(ThreadMessageQueueReadResult)(
         await json(`/api/thread-message-queue?${query}`, { headers, cache: "no-store" }),
       );
       if (result.status === "refused") throw new Error(`Queue unavailable: ${result.reason}.`);
@@ -45,7 +45,7 @@ export function createThreadMessageQueueClient(options: {
       return snapshot;
     },
     execute: async (command) => {
-      const result = decodeThreadMessageQueueResult(
+      const result = decodeHostAnswer(ThreadMessageQueueResult)(
         await json("/api/thread-message-queue/commands", {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },

@@ -1,105 +1,84 @@
 import {
   decodeCodeCheckoutId,
-  decodeCodeCheckoutIdentity,
   decodeCodeBoardQuery,
-  decodeCodeBoardView,
   decodeCodeProjectPullRequestQuery,
   decodeCodeProjectPullRequestRefreshCommand,
-  decodeCodeProjectPullRequestView,
   decodeCodeProjectPullRequestDetailQuery,
   decodeCodeProjectPullRequestDetailRefreshCommand,
-  decodeCodeProjectPullRequestDetailView,
   decodeCodeProjectPullRequestMergeCommand,
-  decodeCodeProjectPullRequestMergeOutcome,
   decodeCodeCommand,
-  decodeCodeCommandResult,
   decodeCodeEvidenceContentId,
-  decodeCodeEvidenceReference,
   decodeCodeEvidenceBatchRequest,
-  decodeCodeEvidenceBatchResponse,
-  decodeCodeEventFrame,
-  decodeCodeFailure,
   decodeCodeFollowUpCommand,
   decodeCodePlannerCommand,
-  decodeCodePlannerCommandOutcome,
   decodeCodePlannerProposalCommand,
-  decodeCodePlannerProposalOutcome,
-  decodeCodePlannerView,
-  decodeCodeThreadFollowUpUpdated,
-  decodeCodeThreadFollowUpView,
   decodeProjectId,
   decodeCodeOperationCommand,
-  decodeCodeConversationPage,
-  decodeCodeOperationStreamFrame,
   decodeCodeOperationId,
-  decodeCodeOperationResult,
-  decodeCodeTerminalInspection,
   decodeCodeTerminalInspectionRequest,
-  decodeCodeFileOpenResultEnvelope,
-  decodeCodeFileSaveResultEnvelope,
   decodeCodeRelativePath,
-  decodeCodeRepositoryTestListing,
-  decodeCodeRepositoryTestStatus,
-  decodeCodeSettings,
-  decodeCodeThread,
-  decodeCodeNavigation,
-  decodeCodeNavigationRuntime,
-  decodeCodeThreadActivity,
   decodeCodeAttachmentId,
   decodeCodeAttachmentMediaType,
-  decodeCodeAttachmentReference,
   decodeCodeThreadId,
   type CodeAttachmentId,
   type CodeAttachmentMediaType,
-  type CodeAttachmentReference,
+  CodeAttachmentReference,
   type CodeBoardQuery,
-  type CodeBoardView,
+  CodeBoardView,
   type CodeProjectPullRequestQuery,
   type CodeProjectPullRequestRefreshCommand,
-  type CodeProjectPullRequestView,
+  CodeProjectPullRequestView,
   type CodeProjectPullRequestDetailQuery,
   type CodeProjectPullRequestDetailRefreshCommand,
-  type CodeProjectPullRequestDetailView,
+  CodeProjectPullRequestDetailView,
   type CodeProjectPullRequestMergeCommand,
-  type CodeProjectPullRequestMergeOutcome,
+  CodeProjectPullRequestMergeOutcome,
   type CodeBootstrap,
-  type CodeNavigation,
+  CodeNavigation,
   type CodeCheckoutId,
   type CodeCommand,
-  type CodeCommandResult,
+  CodeCommandResult,
   type CodeEvidenceContentId,
-  type CodeEvidenceReference,
+  CodeEvidenceReference,
   type CodeEvidenceBatchRequest,
-  type CodeEvidenceBatchResponse,
-  type CodeEventFrame,
-  type CodeFailure,
+  CodeEvidenceBatchResponse,
+  CodeEventFrame,
+  CodeFailure,
   type CodeFollowUpCommand,
   type CodePlannerCommand,
-  type CodePlannerCommandOutcome,
+  CodePlannerCommandOutcome,
   type CodePlannerProposalCommand,
-  type CodePlannerProposalOutcome,
-  type CodePlannerView,
-  type CodeThreadFollowUpUpdated,
-  type CodeThreadFollowUpView,
+  CodePlannerProposalOutcome,
+  CodePlannerView,
+  CodeThreadFollowUpUpdated,
+  CodeThreadFollowUpView,
   type ProjectId,
   type CodeOperationCommand,
-  type CodeConversationPage,
-  type CodeOperationStreamFrame,
+  CodeConversationPage,
+  CodeOperationStreamFrame,
   type CodeOperationId,
-  type CodeOperationResult,
-  type CodeTerminalInspection,
+  CodeOperationResult,
+  CodeTerminalInspection,
   type CodeTerminalInspectionRequest,
   type CodeFileOpenPublicResult,
   type CodeFileSavePublicResult,
   type CodeRelativePath,
-  type CodeRepositoryTestListing,
-  type CodeRepositoryTestStatus,
+  CodeRepositoryTestListing,
+  CodeRepositoryTestStatus,
   type CodeThreadId,
   type CodeThreadView,
   MAX_CODE_OPERATION_EVIDENCE_BYTES,
   MAX_CODE_ATTACHMENT_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
   MAX_CODE_CONVERSATION_PAGE_SIZE,
+  CodeCheckoutIdentity,
+  CodeFileOpenResultEnvelope,
+  CodeFileSaveResultEnvelope,
+  CodeSettings,
+  CodeThread,
+  CodeNavigationRuntime,
+  CodeThreadActivity,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -300,7 +279,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         fetch,
         new URL("/api/code/navigation", options.baseUrl).toString(),
         { method: "GET", headers },
-        decodeCodeNavigation,
+        decodeHostAnswer(CodeNavigation),
       );
     },
     thread(threadId, signal) {
@@ -327,7 +306,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           body: JSON.stringify(validated),
           ...(signal === undefined ? {} : { signal }),
         },
-        decodeCodeCommandResult,
+        decodeHostAnswer(CodeCommandResult),
       );
     },
     async executeOperation(command) {
@@ -346,7 +325,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           body: JSON.stringify(validated),
         },
         (value) => {
-          const result = decodeCodeOperationResult(value);
+          const result = decodeHostAnswer(CodeOperationResult)(value);
           if (result.operationId !== validated.operationId) throw new Error("operation mismatch");
           return result;
         },
@@ -367,7 +346,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeCodeTerminalInspection,
+        decodeHostAnswer(CodeTerminalInspection),
       );
     },
     async queryBoard(query) {
@@ -385,7 +364,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeCodeBoardView,
+        decodeHostAnswer(CodeBoardView),
       );
     },
     async queryProjectPullRequests(query) {
@@ -403,7 +382,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeCodeProjectPullRequestView,
+        decodeHostAnswer(CodeProjectPullRequestView),
       );
     },
     async refreshProjectPullRequests(command) {
@@ -421,7 +400,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeCodeProjectPullRequestView,
+        decodeHostAnswer(CodeProjectPullRequestView),
       );
     },
     async queryProjectPullRequestDetail(query) {
@@ -439,7 +418,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeCodeProjectPullRequestDetailView,
+        decodeHostAnswer(CodeProjectPullRequestDetailView),
       );
     },
     async refreshProjectPullRequestDetail(command) {
@@ -457,7 +436,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeCodeProjectPullRequestDetailView,
+        decodeHostAnswer(CodeProjectPullRequestDetailView),
       );
     },
     async mergeProjectPullRequest(command) {
@@ -475,7 +454,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeCodeProjectPullRequestMergeOutcome,
+        decodeHostAnswer(CodeProjectPullRequestMergeOutcome),
       );
     },
     readFollowUp(threadId) {
@@ -491,7 +470,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           options.baseUrl,
         ).toString(),
         { method: "GET", headers },
-        decodeCodeThreadFollowUpView,
+        decodeHostAnswer(CodeThreadFollowUpView),
       );
     },
     async executeFollowUp(command) {
@@ -512,7 +491,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeCodeThreadFollowUpUpdated,
+        decodeHostAnswer(CodeThreadFollowUpUpdated),
       );
     },
     readPlanner(projectId) {
@@ -529,7 +508,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           options.baseUrl,
         ).toString(),
         { method: "GET", headers },
-        decodeCodePlannerView,
+        decodeHostAnswer(CodePlannerView),
       );
     },
     async executePlanner(command) {
@@ -547,7 +526,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeCodePlannerCommandOutcome,
+        decodeHostAnswer(CodePlannerCommandOutcome),
       );
     },
     async executePlannerProposal(command) {
@@ -565,7 +544,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeCodePlannerProposalOutcome,
+        decodeHostAnswer(CodePlannerProposalOutcome),
       );
     },
     conversation(threadId, afterCursor, limit, signal) {
@@ -593,7 +572,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         fetch,
         url.toString(),
         { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
-        decodeCodeConversationPage,
+        decodeHostAnswer(CodeConversationPage),
       );
     },
     async putEvidence(threadId, text) {
@@ -620,7 +599,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         },
       );
       if (!response.ok) await rejectFailure(response);
-      return decodeCodeEvidenceReference(await response.json());
+      return decodeHostAnswer(CodeEvidenceReference)(await response.json());
     },
     async putAttachment(input) {
       try {
@@ -650,7 +629,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         },
       );
       if (!response.ok) await rejectFailure(response);
-      return decodeCodeAttachmentReference(await response.json());
+      return decodeHostAnswer(CodeAttachmentReference)(await response.json());
     },
     async discardAttachment(threadId, attachmentId) {
       const url = attachmentUrl(options.baseUrl, threadId, attachmentId);
@@ -715,7 +694,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           body: JSON.stringify(validated),
           ...(signal === undefined ? {} : { signal }),
         },
-        decodeCodeEvidenceBatchResponse,
+        decodeHostAnswer(CodeEvidenceBatchResponse),
       );
     },
     async save(input) {
@@ -747,7 +726,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       }
       if (!response.ok) {
         try {
-          throw new CodeClientFailure(decodeCodeFailure(body));
+          throw new CodeClientFailure(decodeHostAnswer(CodeFailure)(body));
         } catch (error) {
           if (error instanceof CodeClientFailure) throw error;
           throw malformedResponse();
@@ -773,7 +752,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         fetch,
         url.toString(),
         { method: "GET", headers },
-        (value) => decodeCodeFileOpenResultEnvelope(value).result,
+        (value) => decodeHostAnswer(CodeFileOpenResultEnvelope)(value).result,
       );
     },
     listTests(threadId, checkoutId) {
@@ -790,7 +769,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         fetch,
         url.toString(),
         { method: "GET", headers },
-        decodeCodeRepositoryTestListing,
+        decodeHostAnswer(CodeRepositoryTestListing),
       );
     },
     readTestStatus(threadId, checkoutId) {
@@ -807,7 +786,7 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         fetch,
         url.toString(),
         { method: "GET", headers },
-        decodeCodeRepositoryTestStatus,
+        decodeHostAnswer(CodeRepositoryTestStatus),
       );
     },
     subscribe(threadId, afterSequence, signal) {
@@ -962,7 +941,7 @@ async function* parseOperationNdjsonFrames(
     if (utf8ByteLength(line) > MAX_CODE_NDJSON_LINE_BYTES) throw malformedResponse();
     let frame: CodeOperationStreamFrame;
     try {
-      frame = decodeCodeOperationStreamFrame(JSON.parse(line));
+      frame = decodeHostAnswer(CodeOperationStreamFrame)(JSON.parse(line));
     } catch {
       throw malformedResponse();
     }
@@ -1022,7 +1001,7 @@ function decodeReplayLine(
   if (utf8ByteLength(line) > MAX_CODE_NDJSON_LINE_BYTES) throw malformedResponse();
   let frame: CodeEventFrame;
   try {
-    frame = decodeCodeEventFrame(JSON.parse(line));
+    frame = decodeHostAnswer(CodeEventFrame)(JSON.parse(line));
   } catch {
     throw malformedResponse();
   }
@@ -1077,7 +1056,7 @@ async function request<T>(
   }
   if (!response.ok) {
     try {
-      throw new CodeClientFailure(decodeCodeFailure(body));
+      throw new CodeClientFailure(decodeHostAnswer(CodeFailure)(body));
     } catch (error) {
       if (error instanceof CodeClientFailure) throw error;
       throw malformedResponse();
@@ -1145,7 +1124,7 @@ async function rejectFailure(response: Response): Promise<never> {
   let body: unknown;
   try {
     body = await response.json();
-    throw new CodeClientFailure(decodeCodeFailure(body));
+    throw new CodeClientFailure(decodeHostAnswer(CodeFailure)(body));
   } catch (error) {
     if (error instanceof CodeClientFailure) throw error;
     throw malformedResponse();
@@ -1176,7 +1155,7 @@ function validSave(input: CodeFileSave): Uint8Array | undefined {
 
 function decodeSaveResponse(value: unknown): CodeFileSaveResult | undefined {
   try {
-    return decodeCodeFileSaveResultEnvelope(value).result;
+    return decodeHostAnswer(CodeFileSaveResultEnvelope)(value).result;
   } catch {
     return undefined;
   }
@@ -1265,17 +1244,17 @@ function decodeBootstrap(value: unknown): CodeBootstrap {
     throw new Error("invalid");
   }
   return {
-    settings: decodeCodeSettings(value.settings),
-    threads: value.threads.map((thread) => decodeCodeThread(thread)),
-    checkouts: value.checkouts.map((checkout) => decodeCodeCheckoutIdentity(checkout)),
+    settings: decodeHostAnswer(CodeSettings)(value.settings),
+    threads: value.threads.map((thread) => decodeHostAnswer(CodeThread)(thread)),
+    checkouts: value.checkouts.map((checkout) => decodeHostAnswer(CodeCheckoutIdentity)(checkout)),
     activity:
       value.activity === undefined
         ? []
-        : value.activity.map((entry) => decodeCodeThreadActivity(entry)),
+        : value.activity.map((entry) => decodeHostAnswer(CodeThreadActivity)(entry)),
     runtime:
       value.runtime === undefined
         ? []
-        : value.runtime.map((entry) => decodeCodeNavigationRuntime(entry)),
+        : value.runtime.map((entry) => decodeHostAnswer(CodeNavigationRuntime)(entry)),
   };
 }
 
@@ -1291,8 +1270,8 @@ function decodeThreadView(value: unknown): CodeThreadView {
     throw new Error("invalid");
   }
   return {
-    thread: decodeCodeThread(value.thread),
-    checkout: decodeCodeCheckoutIdentity(value.checkout),
+    thread: decodeHostAnswer(CodeThread)(value.thread),
+    checkout: decodeHostAnswer(CodeCheckoutIdentity)(value.checkout),
     lastSequence: value.lastSequence as CodeThreadView["lastSequence"],
   };
 }

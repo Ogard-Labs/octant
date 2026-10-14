@@ -1,4 +1,4 @@
-import { decodeProviderRegistrySnapshot, type ProviderRegistrySnapshot } from "@octant/contracts";
+import { ProviderRegistrySnapshot, decodeHostAnswer } from "@octant/contracts";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
 
 export interface MobileModelOption {
@@ -70,7 +70,7 @@ export async function fetchMobileProviderCatalog(
     );
   }
   try {
-    return decodeProviderRegistrySnapshot(await response.json());
+    return decodeHostAnswer(ProviderRegistrySnapshot)(await response.json());
   } catch {
     throw new MobileInboxFailure("unavailable", "Host returned an invalid provider catalog.");
   }

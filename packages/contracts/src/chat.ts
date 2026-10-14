@@ -1,3 +1,4 @@
+import { personDecides } from "./hostAnswer";
 import { HarnessRetryNotice } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
@@ -129,7 +130,8 @@ export const ChatAttemptQuestion = Schema.Struct({
       (question) =>
         (question.questionIndex === undefined) === (question.questionCount === undefined),
     ),
-  );
+  )
+  .annotations(personDecides);
 export type ChatAttemptQuestion = typeof ChatAttemptQuestion.Type;
 
 /** A question the person answered, kept on the attempt that asked it. */

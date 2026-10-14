@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { decodeBrowserToolApprovalList, type OctantMode } from "@octant/contracts";
-import { decodePendingRequest, type PendingRequest } from "@octant/contracts/pending-requests";
+import { type OctantMode, BrowserToolApprovalList, decodeHostAnswer } from "@octant/contracts";
+import { PendingRequest } from "@octant/contracts/pending-requests";
 import { refusalMessage, type HostRefusal } from "./agentHost";
 import type { OpenedLocalControlSession } from "./localControl";
 
@@ -53,7 +53,7 @@ export async function listAgentSiteApprovals(
       body: { kind: "list" },
     });
     if (response.status !== 200) return [];
-    return decodeBrowserToolApprovalList(response.body)
+    return decodeHostAnswer(BrowserToolApprovalList)(response.body)
       .filter((approval) => String(approval.threadId) === threadId)
       .map((approval) => ({
         mode: "work" as const,
@@ -96,7 +96,7 @@ function pendingRequestRows(body: unknown): ReadonlyArray<PendingRequest> {
   if (!Array.isArray(rows)) throw new Error("The host's pending requests were not a list.");
   return rows.flatMap((row: unknown) => {
     try {
-      return [decodePendingRequest(row)];
+      return [decodeHostAnswer(PendingRequest)(row)];
     } catch {
       return [];
     }

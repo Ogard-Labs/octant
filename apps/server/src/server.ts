@@ -725,6 +725,11 @@ import {
   type AgentMessageEndpointResolver,
 } from "./agentMessage/agentMessageService";
 import { createAgentMessageTools } from "./agentMessage/agentMessageTools";
+import { codeSiblingThreadSource } from "./siblingThreads/codeSiblingThreadSource";
+import {
+  SiblingThreadsService,
+  createSiblingThreadTools,
+} from "./siblingThreads/siblingThreadTools";
 import { readThreadExternalContentTaint } from "./context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "./harness/nativeHarnessAuthority";
 import {
@@ -2892,6 +2897,16 @@ export function startOctantServer(
       // scope covers every mode. A remote window's narrower Open scope is a
       // 0013 federation concern and stays out of this seam.
       openModes: ["chat", "work", "code"],
+    });
+    // The sibling-threads tool's host side. It appends only to the reader's
+    // own records: its outside-content mark and its observation stream.
+    const siblingThreadsService = new SiblingThreadsService({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
     });
     const githubReadToolService = new GithubReadToolService({
       catalogue: githubCatalogueService,
@@ -5091,6 +5106,10 @@ export function startOctantServer(
         supportsModelSwitch: (thread) =>
           providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
             .modelSwitch === "supported",
+        compactionRunning: (threadId) =>
+          contextHarness.compactionRunning(
+            decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+          ),
         providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom }) =>
           selectCodeConversation(thread.id, {
             purpose: "provider-switch",
@@ -5360,6 +5379,37 @@ export function startOctantServer(
             toolConstraints: thread.toolConstraints ?? [],
             profileDisplayName: thread.profileDisplayName ?? "the bound profile",
             readPosture,
+          }),
+        // The facts come from the host's own records on every call. The
+        // Code runtime, the decision reader, and the mention directory are
+        // declared later in this startup; a turn runs only after they exist.
+        siblingThreads: ({ windowId, thread }) =>
+          createSiblingThreadTools({
+            service: siblingThreadsService,
+            source: codeSiblingThreadSource(
+              {
+                threads: () => persistence.readCodeThreads(),
+                thread: (threadId) => persistence.readCodeThread(threadId),
+                runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
+                turnAwaitsPerson: (threadId) =>
+                  codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true,
+                decisionPending: (candidate) =>
+                  codeTurnDecisions.forThread(candidate) !== undefined,
+                mentions: {
+                  readTranscript: async (readerWindowId, threadId, options) =>
+                    await codeThreadMentionDirectory.readTranscript(
+                      readerWindowId,
+                      threadId,
+                      options,
+                    ),
+                },
+                standingAuthority: (read) => codeProjectAccess.standingAuthority(read),
+              },
+              windowId,
+            ),
+            callerThreadId: String(thread.id),
+            toolConstraints: thread.toolConstraints ?? [],
+            profileDisplayName: thread.profileDisplayName ?? "the bound profile",
           }),
         carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
         confirmAgentMessagesDelivered: (messageIds) =>
@@ -6794,6 +6844,22 @@ export function startOctantServer(
     });
     const projectMentionLabel = (projectId: string) =>
       persistence.readProject(projectId as ProjectId)?.name;
+    // One Code directory serves both a `#thread` mention and a sibling-threads
+    // `read`, so an agent reads exactly what its window could mention.
+    const codeThreadMentionDirectory = createCodeThreadMentionDirectory({
+      bootstrap: async (windowId) => await routeCodeService.bootstrap(windowId),
+      conversation: async (windowId, threadId, afterCursor, limit) => {
+        const read = routeCodeService.conversation;
+        if (read === undefined) throw new Error("Code conversation is unavailable.");
+        return await read(windowId, threadId, afterCursor, limit);
+      },
+      readEvidence: async (windowId, threadId, operationId, contentId) => {
+        const read = routeCodeService.readOperationContent;
+        if (read === undefined) throw new Error("Code operation evidence is unavailable.");
+        return await read(windowId, threadId, operationId, contentId);
+      },
+      projectLabel: projectMentionLabel,
+    });
     const threadMentionService = new ThreadMentionService({
       // Every mode contributes its own already-authorized listing, because a
       // mention resolves exactly what the principal can Open —
@@ -6817,20 +6883,7 @@ export function startOctantServer(
           }),
           projectLabel: projectMentionLabel,
         }),
-        createCodeThreadMentionDirectory({
-          bootstrap: async (windowId) => await routeCodeService.bootstrap(windowId),
-          conversation: async (windowId, threadId, afterCursor, limit) => {
-            const read = routeCodeService.conversation;
-            if (read === undefined) throw new Error("Code conversation is unavailable.");
-            return await read(windowId, threadId, afterCursor, limit);
-          },
-          readEvidence: async (windowId, threadId, operationId, contentId) => {
-            const read = routeCodeService.readOperationContent;
-            if (read === undefined) throw new Error("Code operation evidence is unavailable.");
-            return await read(windowId, threadId, operationId, contentId);
-          },
-          projectLabel: projectMentionLabel,
-        }),
+        codeThreadMentionDirectory,
       ],
       sidecars: sideChatSidecars,
       sideChatThreads: createChatSideChatThreadFactory({
@@ -7740,6 +7793,13 @@ export function startOctantServer(
             workTurnService.startFirstTurn(windowId, command, admissionOptions),
         },
         code: routeCodeService,
+        compacting: (scope) =>
+          contextHarness.compactionRunning(
+            decodeContextSubjectRef({
+              aggregateType: `${scope.mode}-thread`,
+              aggregateId: scope.threadId,
+            }),
+          ),
         isModeEnabled: (mode) =>
           enabledModes(
             persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -7844,6 +7904,10 @@ export function startOctantServer(
         },
         code: {
           readThread: (threadId) => persistence.readCodeThread(threadId),
+          compacting: (threadId) =>
+            contextHarness.compactionRunning(
+              decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+            ),
           readRuntimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
           ...(routeCodeService.readOperationContents === undefined
             ? {}
@@ -7924,6 +7988,10 @@ export function startOctantServer(
           uuid: randomUUID,
           resultText: (id) => agentRunPersistence.resultText(id),
           readThread: (threadId) => persistence.readCodeThread(threadId),
+          compacting: (threadId) =>
+            contextHarness.compactionRunning(
+              decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+            ),
           ...(routeCodeService.stageEvidence === undefined
             ? {}
             : { stageEvidence: routeCodeService.stageEvidence }),
@@ -8225,6 +8293,55 @@ export function startOctantServer(
       enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
         mode,
       );
+    const modelSwitchSupported = (providerInstanceId: ProviderInstance["id"]) =>
+      providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities.modelSwitch ===
+      "supported";
+    // The native session a Chat or Work thread's next turn would resume, read
+    // as that turn's admission reads it: the thread's provider, its model or one
+    // the provider can carry the session on to, and a cursor to resume from.
+    const chatRuntimeSession = (threadId: string) => {
+      const id = decodeChatThreadId(threadId);
+      const thread = persistence.readChatThread(id);
+      const attempt = persistence.readChatThreadView(id)?.turns.at(-1)?.attempts.at(-1);
+      const resumeCursor = attempt?.resumeCursor;
+      if (
+        thread === undefined ||
+        attempt === undefined ||
+        resumeCursor === undefined ||
+        String(attempt.providerInstanceId) !== String(thread.providerInstanceId) ||
+        (String(attempt.modelId) !== String(thread.modelId) &&
+          !modelSwitchSupported(thread.providerInstanceId))
+      ) {
+        return undefined;
+      }
+      return { thread, sessionId: attempt.providerSessionId, resumeCursor };
+    };
+    const workRuntimeSession = (threadId: string) => {
+      const id = decodeWorkThreadId(threadId);
+      const thread = workThreadProjection.read(id);
+      const latest = workTurnProjection.latestForThread(id);
+      const sessionId = latest?.providerSessionId;
+      const resumeCursor = latest?.resumeCursor;
+      if (
+        thread === undefined ||
+        latest === undefined ||
+        sessionId === undefined ||
+        resumeCursor === undefined ||
+        String(latest.authority.providerInstanceId) !== String(thread.providerInstanceId) ||
+        latest.authority.bindingRevisionId !== thread.bindingRevisionId ||
+        (String(latest.authority.modelId) !== String(thread.modelId) &&
+          !modelSwitchSupported(thread.providerInstanceId))
+      ) {
+        return undefined;
+      }
+      return {
+        thread,
+        workingDirectory: latest.authority.workingDirectory,
+        sessionId,
+        resumeCursor,
+      };
+    };
+    const codeCompactionSessions = codeOperationRuntime?.compactionSessions;
     const sessionCompaction = new SessionCompactionService({
       harness: contextHarness,
       threads: {
@@ -8250,6 +8367,34 @@ export function startOctantServer(
           conversation: (threadId) =>
             chatService.sessionCompactionConversation(decodeChatThreadId(threadId)),
           scratchRoot: (threadId) => chatService.scratchRoot(decodeChatThreadId(threadId)),
+          runtimeSessions: {
+            exists: (threadId) => chatRuntimeSession(threadId) !== undefined,
+            open: async (threadId) => {
+              const session = chatRuntimeSession(threadId);
+              if (session === undefined) return undefined;
+              const { thread } = session;
+              return {
+                acquire: {
+                  instanceId: thread.providerInstanceId,
+                  projectRoot: await chatService.scratchRoot(thread.id),
+                  mode: "chat",
+                },
+                resume: {
+                  sessionId: session.sessionId,
+                  resumeCursor: session.resumeCursor,
+                  // The posture every Chat turn runs under; the compaction
+                  // offers no tool at all.
+                  executionPolicy: "approval-gated",
+                  modelId: thread.modelId,
+                  ...(thread.modelOptionValues === undefined ||
+                  Object.keys(thread.modelOptionValues).length === 0
+                    ? {}
+                    : { modelOptionValues: thread.modelOptionValues }),
+                  tools: [],
+                },
+              };
+            },
+          },
         },
         "work-thread": {
           read: (threadId) => {
@@ -8296,13 +8441,82 @@ export function startOctantServer(
             }
             return project.binding.canonicalRoot;
           },
+          runtimeSessions: {
+            exists: (threadId) => workRuntimeSession(threadId) !== undefined,
+            open: async (threadId) => {
+              const session = workRuntimeSession(threadId);
+              if (session === undefined) return undefined;
+              const { thread } = session;
+              const project = persistence.readProject(thread.projectId);
+              if (project?.type !== "work") return undefined;
+              return {
+                acquire: {
+                  instanceId: thread.providerInstanceId,
+                  // The folder the session's turns ran in, inside the bound root.
+                  projectRoot: await resolveThreadWorkingDirectory(
+                    project.binding.canonicalRoot,
+                    session.workingDirectory,
+                  ),
+                  mode: "work",
+                },
+                resume: {
+                  sessionId: session.sessionId,
+                  resumeCursor: session.resumeCursor,
+                  // Never the thread's auto-accept: the compaction edits nothing.
+                  executionPolicy: "approval-gated",
+                  modelId: thread.modelId,
+                  ...(thread.modelOptionValues === undefined ||
+                  Object.keys(thread.modelOptionValues).length === 0
+                    ? {}
+                    : { modelOptionValues: thread.modelOptionValues }),
+                  tools: [],
+                },
+              };
+            },
+          },
         },
+        ...(codeCompactionSessions === undefined
+          ? {}
+          : {
+              "code-thread": {
+                read: (threadId) => {
+                  const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+                  if (thread === undefined || thread.lifecycle !== "active") return undefined;
+                  // A Code turn passes its Project's provider policy, so the
+                  // compaction passes the same one.
+                  const project = persistence.readProject(thread.projectId);
+                  if (project?.type !== "code") return undefined;
+                  const providerPolicy = project.providerPolicy;
+                  return {
+                    mode: "code",
+                    projectId: String(thread.projectId),
+                    providerInstanceId: thread.providerInstanceId,
+                    modelId: thread.modelId,
+                    ...(providerPolicy === undefined ? {} : { providerPolicy }),
+                  };
+                },
+                turnRunning: (threadId) =>
+                  codeOperationRuntime?.turnInProgress?.(threadId) === true,
+                runtimeSessions: {
+                  exists: codeCompactionSessions.exists,
+                  occupancy: codeCompactionSessions.occupancy,
+                  open: codeCompactionSessions.open,
+                },
+              },
+            }),
       },
       modeEnabled,
       conversationOwner: (providerInstanceId) => {
         const instance = persistence.readProviderInstance(providerInstanceId);
         if (instance === undefined) return undefined;
         return providerKeepsConversation(instance.driverKind) ? "runtime" : "host";
+      },
+      // What the adapter reported for this install; an instance the host has
+      // not observed yet is undefined, so it reads as unavailable, not unable.
+      runtimeCompaction: (providerInstanceId, mode) => {
+        const observed = providerRuntimeRegistry.observedState(providerInstanceId);
+        if (observed === undefined) return undefined;
+        return observed.capabilities.sessionCompaction?.[mode] ?? "unsupported";
       },
       providerFacts: (providerInstanceId, modelId) => {
         const provider = persistence.readProviderInstance(providerInstanceId);
@@ -8337,9 +8551,9 @@ export function startOctantServer(
       service: {
         inspect: (subject, afterSequence, principal) =>
           sessionCompaction.inspect(subject, afterSequence, principal),
-        execute: (command, principal) =>
+        execute: (command, principal, windowId) =>
           command.kind === "compact-session"
-            ? sessionCompaction.start(command, principal)
+            ? sessionCompaction.start(command, principal, windowId)
             : contextHarness.execute(command),
       },
       windowCanOpenThread,

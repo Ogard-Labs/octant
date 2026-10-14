@@ -1,4 +1,5 @@
-import { decodeHostHelloV1, type StableHostId } from "@octant/contracts/remote-access";
+import { type StableHostId, HostHelloV1 } from "@octant/contracts/remote-access";
+import { decodeHostAnswer } from "@octant/contracts";
 import {
   createDefaultDeviceKeyStore,
   type RemoteDeviceKeyPair,
@@ -217,7 +218,7 @@ export function createRemoteSessionBridge(
     if (!helloResponse.ok) {
       throw new RemoteConnectionError("unavailable", "Remote host hello failed.");
     }
-    const hello = decodeHostHelloV1(await helloResponse.json());
+    const hello = decodeHostAnswer(HostHelloV1)(await helloResponse.json());
     if (
       expectedIdentity !== undefined &&
       (hello.hostId !== expectedIdentity.hostId ||

@@ -1,11 +1,10 @@
 import {
-  decodeValidationCompositionFailure,
   decodeValidationEvidenceRequest,
-  decodeValidationEvidenceSnapshot,
-  type ValidationCompositionFailure,
+  ValidationCompositionFailure,
   type ValidationEvidenceRequest,
-  type ValidationEvidenceSnapshot,
+  ValidationEvidenceSnapshot,
 } from "@octant/contracts/validation-rpc";
+import { decodeHostAnswer } from "@octant/contracts";
 
 export interface ValidationEvidenceClientOptions {
   readonly baseUrl: string;
@@ -55,7 +54,7 @@ export function createValidationEvidenceClient(
         "/api/validation/evidence",
         request,
         signal,
-        decodeValidationEvidenceSnapshot,
+        decodeHostAnswer(ValidationEvidenceSnapshot),
         headers,
       );
       return snapshot;
@@ -101,7 +100,7 @@ async function post<T>(
   }
   if (!response.ok) {
     try {
-      const failure = decodeValidationCompositionFailure(payload);
+      const failure = decodeHostAnswer(ValidationCompositionFailure)(payload);
       throw new ValidationEvidenceClientFailure(failure.category, failure.message);
     } catch (error) {
       if (error instanceof ValidationEvidenceClientFailure) throw error;

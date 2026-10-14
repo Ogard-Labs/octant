@@ -11,7 +11,7 @@ import {
   type ProviderExecutionPolicy,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
-import { Effect, Exit, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, Scope, Stream } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   makeCodexProcessLive,
@@ -2792,6 +2792,26 @@ describe("compacting a Codex session", () => {
     });
     expect((await events).map((event) => event.kind)).toEqual(["context-compacted", "completed"]);
     expect((await events)[0]).toMatchObject({ trigger: "requested", sessionId });
+    await acquired.close();
+  });
+
+  it("interrupts in Codex a compaction the host gave up waiting for", async () => {
+    const f = fixture({ version: "0.162.1" });
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+    await startSession(acquired.connection);
+    const waiting = Effect.runFork(compactOf(acquired.connection)({ sessionId, compactionId }));
+    await vi.waitFor(() =>
+      expect(f.calls.some(({ method }) => method === "thread/compact/start")).toBe(true),
+    );
+    f.emit(turnStarted("turn-c"));
+    // The host's bound runs out: it stops waiting, then ends the run.
+    await Effect.runPromise(Fiber.interrupt(waiting));
+    await Effect.runPromise(acquired.connection.interrupt(sessionId));
+
+    expect(f.calls.find(({ method }) => method === "turn/interrupt")?.input).toEqual({
+      threadId: "thread-1",
+      turnId: "turn-c",
+    });
     await acquired.close();
   });
 

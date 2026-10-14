@@ -1,8 +1,6 @@
 import type { AppReleaseRing } from "@octant/contracts/app-updates";
-import {
-  decodeSidebarBackgroundListResult,
-  decodeSidebarBackgroundMetadata,
-} from "@octant/contracts/theme";
+import { SidebarBackgroundListResult, SidebarBackgroundMetadata } from "@octant/contracts/theme";
+import { decodeHostAnswer } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { BackgroundImageLibrary } from "../settings/AppBackgroundSettings";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
@@ -337,7 +335,7 @@ export function useBackgroundImageLibrary(
         // must not follow a hop onto a host the launch parser never judged.
         const response = await fetch(collection, { headers: headers(), redirect: "error" });
         if (!response.ok) throw new Error(`Background list failed: ${response.status}`);
-        return decodeSidebarBackgroundListResult(await response.json()).backgrounds;
+        return decodeHostAnswer(SidebarBackgroundListResult)(await response.json()).backgrounds;
       },
       upload: async (file: File) => {
         const response = await fetch(collection, {
@@ -357,7 +355,7 @@ export function useBackgroundImageLibrary(
               : `The photo could not be uploaded (${response.status}).`;
           throw new Error(message);
         }
-        return decodeSidebarBackgroundMetadata(await response.json());
+        return decodeHostAnswer(SidebarBackgroundMetadata)(await response.json());
       },
     };
   }, [fetcher, serverUrl, windowCapability]);

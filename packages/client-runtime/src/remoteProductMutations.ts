@@ -2,9 +2,10 @@ import { RemoteConnectionError } from "./remoteConnection";
 import type { RemoteSessionBridge } from "./remoteSessionBridge";
 import { canExecuteRemoteProductMutation } from "./remoteShellHealth";
 import {
-  decodeChatBootstrap,
-  decodeCodeBootstrap,
-  decodeWorkThreadBootstrap,
+  ChatBootstrap,
+  CodeBootstrap,
+  WorkThreadBootstrap,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export type RemoteProductSurface = "chat" | "work" | "code" | "preview" | "provider" | "settings";
@@ -105,7 +106,7 @@ export async function exerciseRemoteChatMutation(input: {
       path: "/api/chat/bootstrap",
     }),
     failureMessage: "Chat bootstrap failed over the remote session.",
-    decode: decodeChatBootstrap,
+    decode: decodeHostAnswer(ChatBootstrap),
   });
   const settings = bootstrap.settings;
   const response = await connection.authenticatedFetch({
@@ -158,7 +159,7 @@ export async function exerciseRemoteWorkMutation(input: {
       path: "/api/work/threads/bootstrap",
     }),
     failureMessage: "Work thread inventory failed over the remote session.",
-    decode: decodeWorkThreadBootstrap,
+    decode: decodeHostAnswer(WorkThreadBootstrap),
   });
   const thread = bootstrap.threads.find((candidate) => candidate.lifecycle === "active");
   if (thread === undefined) {
@@ -205,7 +206,7 @@ export async function exerciseRemoteCodeMutation(input: {
       path: "/api/code/bootstrap",
     }),
     failureMessage: "Code bootstrap failed over the remote session.",
-    decode: decodeCodeBootstrap,
+    decode: decodeHostAnswer(CodeBootstrap),
   });
   const settings = bootstrap.settings;
   const response = await connection.authenticatedFetch({

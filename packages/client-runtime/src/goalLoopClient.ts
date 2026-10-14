@@ -1,9 +1,9 @@
 import {
-  decodeGoalLoopResult,
   type GoalLoop,
   type GoalLoopCommand,
-  type GoalLoopResult,
+  GoalLoopResult,
   type GoalLoopRound,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -62,7 +62,7 @@ export function createGoalLoopClient(options: GoalLoopClientOptions): GoalLoopCl
       const loop = (body as { loop?: unknown }).loop;
       // A thread with no loop is an ordinary read rather than a decode failure.
       if (loop === null || loop === undefined) return { loop: null, rounds: [] };
-      const decoded = decodeGoalLoopResult({ kind: "goal-loop", ...(body as object) });
+      const decoded = decodeHostAnswer(GoalLoopResult)({ kind: "goal-loop", ...(body as object) });
       return decoded.kind === "goal-loop"
         ? { loop: decoded.loop, rounds: decoded.rounds }
         : { loop: null, rounds: [] };
@@ -84,7 +84,7 @@ export function createGoalLoopClient(options: GoalLoopClientOptions): GoalLoopCl
         },
         "Goal loop command failed.",
       );
-      return decodeGoalLoopResult(body);
+      return decodeHostAnswer(GoalLoopResult)(body);
     },
   };
 }

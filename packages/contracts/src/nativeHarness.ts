@@ -15,6 +15,7 @@
  * pointer at durable evidence.
  */
 
+import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { AgentRunDependencies, AgentRunId, MAX_AGENT_RUN_DEPENDENCIES } from "./agentRun";
 import { ContextConfidence } from "./context";
@@ -974,7 +975,8 @@ export const NativeHarnessQuestion = Schema.Struct({
         (question.status === "answered") === (question.answer !== undefined) &&
         (question.status === "pending") === (question.settledAt === undefined),
     ),
-  );
+  )
+  .annotations(personDecides);
 export type NativeHarnessQuestion = typeof NativeHarnessQuestion.Type;
 
 // ── Approvals ────────────────────────────────────────────────────────────────
@@ -1019,7 +1021,8 @@ export const NativeHarnessApproval = Schema.Struct({
     Schema.filter(
       (approval) => (approval.status === "pending") === (approval.settledAt === undefined),
     ),
-  );
+  )
+  .annotations(personDecides);
 export type NativeHarnessApproval = typeof NativeHarnessApproval.Type;
 
 export const DecideNativeHarnessApproval = Schema.Struct({

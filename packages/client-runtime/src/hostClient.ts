@@ -1,4 +1,5 @@
-import { decodeHostListResponse, type HostIdentity } from "@octant/contracts/host";
+import { type HostIdentity, HostListResponse } from "@octant/contracts/host";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface HostClientOptions {
@@ -28,7 +29,7 @@ export function createHostClient(options: HostClientOptions): HostClient {
         throw new HostClientFailure(`Host observation failed with status ${response.status}.`);
       }
       try {
-        return decodeHostListResponse(await response.json()).hosts;
+        return decodeHostAnswer(HostListResponse)(await response.json()).hosts;
       } catch (cause) {
         throw new HostClientFailure("Host observation returned an invalid response.", { cause });
       }

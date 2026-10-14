@@ -1,12 +1,11 @@
 import {
-  decodeSpeechFailureResponse,
-  decodeSpeechStatusResponse,
-  decodeSpeechTranscript,
   type SettingsDeepLink,
   type SpeechFailureCategory,
-  type SpeechStatusResponse,
+  SpeechStatusResponse,
   type SpeechSynthesisFormat,
-  type SpeechTranscript,
+  SpeechTranscript,
+  SpeechFailureResponse,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export interface SpeechClientOptions {
@@ -66,7 +65,7 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
   return {
     async status() {
       const response = await send(options, "/api/speech/status", { method: "GET", headers });
-      return decodeOrFail(response, decodeSpeechStatusResponse, undefined);
+      return decodeOrFail(response, decodeHostAnswer(SpeechStatusResponse), undefined);
     },
     async transcribe(input) {
       const form = new FormData();
@@ -78,7 +77,7 @@ export function createSpeechClient(options: SpeechClientOptions): SpeechClient {
         body: form,
         ...(input.signal === undefined ? {} : { signal: input.signal }),
       });
-      return decodeOrFail(response, decodeSpeechTranscript, input.signal);
+      return decodeOrFail(response, decodeHostAnswer(SpeechTranscript), input.signal);
     },
     async synthesize(input) {
       const response = await send(options, "/api/speech/synthesis", {
@@ -185,7 +184,7 @@ async function failureOf(
   signal: AbortSignal | undefined,
 ): Promise<SpeechClientFailure> {
   try {
-    const failure = decodeSpeechFailureResponse(await response.json());
+    const failure = decodeHostAnswer(SpeechFailureResponse)(await response.json());
     return new SpeechClientFailure({
       message: failure.error,
       status: response.status,

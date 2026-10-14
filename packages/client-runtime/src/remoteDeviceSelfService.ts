@@ -1,7 +1,7 @@
 import {
-  decodeRemoteOwnDeviceMetadataV1,
-  decodeRemoteSelfServiceReceiptV1,
-  type RemoteOwnDeviceMetadataV1,
+  RemoteOwnDeviceMetadataV1,
+  RemoteSelfServiceReceiptV1,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { buildRemoteKeyRotationProofPayload } from "@octant/domain";
 import type { RemoteSessionBridge, StagedDeviceKeyRotation } from "./remoteSessionBridge";
@@ -63,7 +63,7 @@ async function decodeSelfServiceResponse(
     );
   }
   try {
-    decodeRemoteSelfServiceReceiptV1(await response.json());
+    decodeHostAnswer(RemoteSelfServiceReceiptV1)(await response.json());
   } catch {
     throw new RemoteDeviceSelfServiceFailure(
       "unavailable",
@@ -88,7 +88,7 @@ export async function fetchRemoteOwnDeviceMetadata(input: {
     );
   }
   try {
-    return decodeRemoteOwnDeviceMetadataV1(await response.json());
+    return decodeHostAnswer(RemoteOwnDeviceMetadataV1)(await response.json());
   } catch {
     throw new RemoteDeviceSelfServiceFailure(
       "unavailable",

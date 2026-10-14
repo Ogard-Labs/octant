@@ -148,7 +148,7 @@ describe("shell client", () => {
 
   it("rejects a malformed success response without exposing its body", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () =>
-      Response.json({ ...commandResult, privatePayload: "do not expose" }),
+      Response.json({ ...commandResult, version: "do not expose" }),
     );
     const client = createShellClient({
       baseUrl: "http://localhost:13773",
@@ -193,7 +193,7 @@ describe("shell client", () => {
   it("rejects a malformed failure response without exposing its body", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () =>
       Response.json(
-        { category: "unavailable", message: "private server detail", raw: "do not expose" },
+        { category: "do not expose", message: "private server detail" },
         { status: 503 },
       ),
     );

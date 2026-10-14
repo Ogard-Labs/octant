@@ -1,3 +1,4 @@
+import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { AggregateVersion, EventVersion, GlobalSequence, UtcTimestamp } from "./events";
 import {
@@ -74,7 +75,7 @@ export const ExtensionToolApproval = Schema.Struct({
    * those are approved one call at a time.
    */
   rememberable: Schema.Boolean,
-}).annotations(strict);
+}).annotations({ ...strict, ...personDecides });
 export type ExtensionToolApproval = typeof ExtensionToolApproval.Type;
 
 export const ExtensionToolApprovalList = Schema.Array(ExtensionToolApproval);
@@ -94,7 +95,7 @@ export type ExtensionToolApprovalDecision = typeof ExtensionToolApprovalDecision
 export const ExtensionToolGrant = Schema.Struct({
   ...ExtensionToolGrantRecorded.fields,
   grantedAt: UtcTimestamp,
-}).annotations(strict);
+}).annotations({ ...strict, ...personDecides });
 export type ExtensionToolGrant = typeof ExtensionToolGrant.Type;
 
 export const ExtensionToolGrantList = Schema.Array(ExtensionToolGrant).pipe(Schema.maxItems(4096));

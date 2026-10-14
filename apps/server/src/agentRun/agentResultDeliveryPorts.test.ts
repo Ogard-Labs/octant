@@ -6,6 +6,7 @@ import {
   type AgentRun,
   type UtcTimestamp,
 } from "@octant/contracts";
+import { CodeServiceError } from "../code/codeService";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
 import {
   createCodeAgentResultDeliveryPort,
@@ -144,7 +145,7 @@ function workPort(isEnabled = true) {
   return { port, startFirstTurn };
 }
 
-function codePort() {
+function codePort(compacting: () => boolean = () => false) {
   const stageEvidence = vi.fn(
     async () => ({ contentId: "84000000-0000-4000-8000-000000000020", byteLength: 21 }) as never,
   );
@@ -155,6 +156,7 @@ function codePort() {
     uuid,
     resultText: () => "Found the regression.",
     readThread: () => codeThread,
+    compacting,
     stageEvidence,
     executeOperation,
   });
@@ -200,6 +202,37 @@ describe("agent result delivery to a Work or Code parent", () => {
       detail: "Work is turned off on this host.",
     });
     expect(work.startFirstTurn).not.toHaveBeenCalled();
+  });
+
+  it("holds a Code parent's result while its session compacts, then delivers it", async () => {
+    let compacting = true;
+    const code = codePort(() => compacting);
+
+    expect(await code.port.dispatch([run])).toEqual({
+      kind: "deferred",
+      detail: "The parent Code thread's session is being compacted.",
+    });
+    expect(code.stageEvidence).not.toHaveBeenCalled();
+    expect(code.executeOperation).not.toHaveBeenCalled();
+    compacting = false;
+    expect(await code.port.dispatch([run])).toMatchObject({ kind: "dispatched" });
+  });
+
+  it("holds a Code parent's result its turn was refused for a compaction, even one already over", async () => {
+    // The compaction started while the result was staged and ended before
+    // the refusal reached the port: only the refusal says why.
+    const code = codePort(() => false);
+    code.executeOperation.mockRejectedValueOnce(
+      new CodeServiceError({
+        category: "waiting",
+        message: "This session is being compacted. Send again when it finishes.",
+      }),
+    );
+
+    expect(await code.port.dispatch([run])).toEqual({
+      kind: "deferred",
+      detail: "This session is being compacted. Send again when it finishes.",
+    });
   });
 
   it("fails a Code delivery its Project access refuses", async () => {

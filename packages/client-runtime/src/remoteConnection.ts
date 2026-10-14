@@ -20,14 +20,12 @@
 
 import {
   REMOTE_SECURITY_FLOOR,
-  decodeHostHelloV1,
-  decodeNegotiatedProtocolV1,
-  decodePairingStatusResultV1,
-  decodeRemoteAuthChallengeV1,
-  decodeRemoteSessionResponseV1,
-  type HostHelloV1,
-  type NegotiatedProtocolV1,
-  type RemoteAuthChallengeV1,
+  HostHelloV1,
+  NegotiatedProtocolV1,
+  RemoteAuthChallengeV1,
+  PairingStatusResultV1,
+  RemoteSessionResponseV1,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import {
   buildRemoteChallengeProofPayload,
@@ -259,7 +257,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
       method: "GET",
     });
     if (!response.ok) throw await protocolStatusError(response);
-    return decodeHostHelloV1(await response.json());
+    return decodeHostAnswer(HostHelloV1)(await response.json());
   };
 
   const verifyHelloIdentity = (hello: HostHelloV1, known: DeviceIdentity | undefined): void => {
@@ -298,7 +296,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
       body: JSON.stringify(body),
     });
     if (!response.ok) throw await protocolStatusError(response);
-    return decodeRemoteAuthChallengeV1(await response.json());
+    return decodeHostAnswer(RemoteAuthChallengeV1)(await response.json());
   };
 
   const negotiate = async (
@@ -323,7 +321,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
       body: JSON.stringify(body),
     });
     if (!response.ok) throw await protocolStatusError(response);
-    return decodeNegotiatedProtocolV1(await response.json());
+    return decodeHostAnswer(NegotiatedProtocolV1)(await response.json());
   };
 
   const issueSession = async (
@@ -356,7 +354,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
       body: JSON.stringify(body),
     });
     if (!response.ok) throw await protocolStatusError(response);
-    const issued = decodeRemoteSessionResponseV1(await response.json());
+    const issued = decodeHostAnswer(RemoteSessionResponseV1)(await response.json());
     return {
       hostId: issued.hostId,
       deviceId: issued.deviceId,
@@ -444,7 +442,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
       body: JSON.stringify(body),
     });
     if (!response.ok) return { status: "failed" };
-    const result = decodePairingStatusResultV1(await response.json());
+    const result = decodeHostAnswer(PairingStatusResultV1)(await response.json());
     if (result.status === "approved") {
       return {
         status: "approved",

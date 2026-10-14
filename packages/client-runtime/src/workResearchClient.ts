@@ -1,14 +1,14 @@
 import {
-  decodeWorkResearchCommandResult,
   decodeProjectId,
   type WorkResearchBrief,
   type WorkResearchClaim,
   type WorkResearchCommand,
-  type WorkResearchCommandResult,
+  WorkResearchCommandResult,
   type WorkResearchEvidence,
   type WorkResearchReport,
   type WorkSourceRecord,
   type ProjectId,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -93,7 +93,7 @@ export function createWorkResearchClient(options: WorkResearchClientOptions): Wo
         },
         "Work research command failed.",
       );
-      return decodeWorkResearchCommandResult(body);
+      return decodeHostAnswer(WorkResearchCommandResult)(body);
     },
   };
 }

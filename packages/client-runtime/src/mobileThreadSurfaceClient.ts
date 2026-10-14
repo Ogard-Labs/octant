@@ -1,10 +1,10 @@
 import {
-  decodeBrowserAutomationSnapshot,
-  decodeBrowserThreadScope,
-  type BrowserAutomationSnapshot,
+  BrowserAutomationSnapshot,
+  BrowserThreadScope,
 } from "@octant/contracts/browser-automation-rpc";
 import type { ToolActionAuthority } from "@octant/contracts";
 import type { BrowserViewportPoint } from "@octant/contracts/browser-automation";
+import { decodeHostAnswer } from "@octant/contracts";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
 
 /**
@@ -49,7 +49,7 @@ async function decodeSnapshot(
   }
   if (!response.ok) throw new MobileInboxFailure("unavailable", message);
   try {
-    return decodeBrowserAutomationSnapshot(await response.json());
+    return decodeHostAnswer(BrowserAutomationSnapshot)(await response.json());
   } catch {
     throw new MobileInboxFailure("unavailable", message);
   }
@@ -120,7 +120,7 @@ export async function loadMobileBrowserSurface(input: {
       return { status: "unavailable", stale: true };
     }
     if (scopeResponse.ok) {
-      authority = decodeBrowserThreadScope(await scopeResponse.json()).authority;
+      authority = decodeHostAnswer(BrowserThreadScope)(await scopeResponse.json()).authority;
     }
   } catch {
     return { status: "unavailable", stale: true };

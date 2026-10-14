@@ -854,14 +854,17 @@ const CodeRuntimeWorkFields = {
   state: CodeRuntimeWorkState,
   updatedAt: UtcTimestamp,
 } as const;
+// The member with evidence comes first: a client ignores unknown fields in a
+// host answer, so the bare member listed first would accept an evidence-bearing
+// value and silently drop its evidence reference.
 export const CodeRuntimeWork = Schema.Union(
-  Schema.Struct(CodeRuntimeWorkFields).annotations(strict),
   Schema.Struct({
     ...CodeRuntimeWorkFields,
     evidenceContentId: CodeEvidenceContentId,
     digest: CodeDigest,
     byteLength: Schema.Int.pipe(Schema.nonNegative()),
   }).annotations(strict),
+  Schema.Struct(CodeRuntimeWorkFields).annotations(strict),
 );
 export type CodeRuntimeWork = typeof CodeRuntimeWork.Type;
 

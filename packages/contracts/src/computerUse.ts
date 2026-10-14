@@ -1,3 +1,4 @@
+import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { CorrelationId, EventActor, UtcTimestamp } from "./events";
 import { ToolActionAuthority, ToolActionId, ToolApprovalId } from "./toolActions";
@@ -179,7 +180,7 @@ export const ComputerUsePendingApproval = Schema.Struct({
   expiresAt: UtcTimestamp,
   summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   scope: Schema.optional(Schema.Literal("application-session")),
-}).annotations(strict);
+}).annotations({ ...strict, ...personDecides });
 export type ComputerUsePendingApproval = typeof ComputerUsePendingApproval.Type;
 
 export const ComputerUseSessionView = Schema.Struct({

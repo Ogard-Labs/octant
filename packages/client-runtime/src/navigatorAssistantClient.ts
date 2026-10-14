@@ -1,10 +1,9 @@
 import {
-  decodeNavigatorAssistantCommandResult,
-  decodeNavigatorAssistantSnapshot,
   type NavigatorAssistantCommand,
-  type NavigatorAssistantCommandResult,
-  type NavigatorAssistantSnapshot,
+  NavigatorAssistantCommandResult,
+  NavigatorAssistantSnapshot,
   type SettingsDeepLink,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -72,7 +71,7 @@ export function createNavigatorAssistantClient(
         },
         "Navigator is unavailable.",
       );
-      return decodeNavigatorAssistantSnapshot(body);
+      return decodeHostAnswer(NavigatorAssistantSnapshot)(body);
     },
 
     async execute(command, signal) {
@@ -90,7 +89,7 @@ export function createNavigatorAssistantClient(
         },
         "Navigator command failed.",
       );
-      return decodeNavigatorAssistantCommandResult(body);
+      return decodeHostAnswer(NavigatorAssistantCommandResult)(body);
     },
   };
 }

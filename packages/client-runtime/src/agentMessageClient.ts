@@ -1,7 +1,4 @@
-import {
-  decodeAgentMessageMessagingFacts,
-  type AgentMessageMessagingFacts,
-} from "@octant/contracts";
+import { AgentMessageMessagingFacts, decodeHostAnswer } from "@octant/contracts";
 
 export interface AgentMessageClientOptions {
   readonly baseUrl: string;
@@ -34,7 +31,7 @@ export function createAgentMessageClient(options: AgentMessageClientOptions): Ag
         new URL("/api/agent-messages", options.baseUrl).toString(),
         { method: "GET", headers },
       );
-      return decodeAgentMessageMessagingFacts(body);
+      return decodeHostAnswer(AgentMessageMessagingFacts)(body);
     },
   };
 }

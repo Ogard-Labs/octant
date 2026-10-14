@@ -1,7 +1,5 @@
-import {
-  decodeHostResourceSnapshot,
-  type HostResourceSnapshot,
-} from "@octant/contracts/host-resources";
+import { HostResourceSnapshot } from "@octant/contracts/host-resources";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 /**
@@ -47,7 +45,10 @@ export function createHostResourceClient(options: HostResourceClientOptions): Ho
       if (response.status === 401 || response.status === 403) return { status: "refused" };
       if (!response.ok) return { status: "unavailable" };
       try {
-        return { status: "ready", snapshot: decodeHostResourceSnapshot(await response.json()) };
+        return {
+          status: "ready",
+          snapshot: decodeHostAnswer(HostResourceSnapshot)(await response.json()),
+        };
       } catch {
         return { status: "unavailable" };
       }

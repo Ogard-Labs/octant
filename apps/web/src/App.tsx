@@ -88,6 +88,7 @@ import {
   decodeUtcTimestamp,
   type WorkThread,
   type WorkThreadCommand,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
 import { markInteraction, markInteractionAfterPaint } from "./polling/interactionTrace";
@@ -450,7 +451,7 @@ import { createPullRequestsCard } from "./home/PullRequestsCard";
 import { createCiFailuresCard } from "./home/CiFailuresCard";
 import { createComputersCard } from "./home/ComputersCard";
 import { computerConnection, sameHostOrigin } from "./home/computers";
-import { decodeHostResourceSnapshot } from "@octant/contracts/host-resources";
+import { HostResourceSnapshot } from "@octant/contracts/host-resources";
 import { currentCodeProjectBranches } from "./home/ciFailures";
 import {
   pullRequestCardAvailable,
@@ -4439,7 +4440,7 @@ function LaunchedShell(
       if (!response.ok) return { status: "unavailable" as const };
       return {
         status: "ready" as const,
-        snapshot: decodeHostResourceSnapshot(await response.json()),
+        snapshot: decodeHostAnswer(HostResourceSnapshot)(await response.json()),
       };
     } catch {
       return { status: "unavailable" as const };

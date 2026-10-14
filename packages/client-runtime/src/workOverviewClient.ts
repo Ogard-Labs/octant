@@ -1,8 +1,8 @@
 import {
-  decodeWorkOverviewProjection,
   decodeProjectId,
-  type WorkOverviewProjection,
+  WorkOverviewProjection,
   type ProjectId,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -53,7 +53,7 @@ export function createWorkOverviewClient(options: WorkOverviewClientOptions): Wo
             : "Work overview request failed.";
         throw new WorkOverviewClientFailure(message, response.status);
       }
-      return decodeWorkOverviewProjection(body);
+      return decodeHostAnswer(WorkOverviewProjection)(body);
     },
   };
 }

@@ -1,45 +1,38 @@
 import {
   decodeBrowserActionCommand,
-  decodeBrowserAutomationSnapshot,
   decodeBrowserContextCancelCommand,
   decodeBrowserContextCreateCommand,
   decodeBrowserContextInspectCommand,
   decodeBrowserContextStopCommand,
-  decodeBrowserThreadScope,
   decodeBrowserThreadContextCommand,
   decodeBrowserThreadInspectCommand,
   decodeBrowserThreadScopeRequest,
   type BrowserActionCommand,
-  type BrowserAutomationSnapshot,
+  BrowserAutomationSnapshot,
   type BrowserContextCancelCommand,
   type BrowserContextCreateCommand,
   type BrowserContextInspectCommand,
   type BrowserContextStopCommand,
-  type BrowserThreadScope,
+  BrowserThreadScope,
   type BrowserThreadContextCommand,
   type BrowserThreadInspectCommand,
   type BrowserThreadScopeRequest,
   decodeBrowserToolApprovalDecision,
-  decodeBrowserToolApprovalList,
   type BrowserToolApprovalDecision,
-  type BrowserToolApprovalList,
+  BrowserToolApprovalList,
 } from "@octant/contracts/browser-automation-rpc";
+import { BrowserAutomationFailure } from "@octant/contracts/browser-automation";
 import {
-  decodeBrowserAutomationFailure,
-  type BrowserAutomationFailure,
-} from "@octant/contracts/browser-automation";
-import {
-  decodeBrowserCaptureImage,
   decodeBrowserCaptureImageCommand,
   decodeBrowserCaptureTakeCommand,
   decodeBrowserCapturesCommand,
-  decodeBrowserCapturesResponse,
-  type BrowserCaptureImage,
+  BrowserCaptureImage,
   type BrowserCaptureImageCommand,
   type BrowserCaptureTakeCommand,
   type BrowserCapturesCommand,
-  type BrowserCapturesResponse,
+  BrowserCapturesResponse,
 } from "@octant/contracts/browser-capture";
+import { decodeHostAnswer } from "@octant/contracts";
 
 export interface BrowserAutomationClientOptions {
   readonly baseUrl: string;
@@ -113,7 +106,7 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/scope",
         decodeBrowserThreadScopeRequest(input),
-        decodeBrowserThreadScope,
+        decodeHostAnswer(BrowserThreadScope),
         signal,
       ),
     create: (input, signal) =>
@@ -121,7 +114,7 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/contexts",
         decodeBrowserContextCreateCommand(input),
-        decodeBrowserAutomationSnapshot,
+        decodeHostAnswer(BrowserAutomationSnapshot),
         signal,
       ),
     inspect: (input, signal) =>
@@ -129,7 +122,7 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/contexts/inspect",
         decodeBrowserContextInspectCommand(input),
-        decodeBrowserAutomationSnapshot,
+        decodeHostAnswer(BrowserAutomationSnapshot),
         signal,
       ),
     inspectThread: (input, signal) =>
@@ -137,7 +130,7 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/contexts/current",
         decodeBrowserThreadInspectCommand(input),
-        decodeBrowserAutomationSnapshot,
+        decodeHostAnswer(BrowserAutomationSnapshot),
         signal,
       ),
     releaseThread: (input, signal) =>
@@ -145,7 +138,7 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/contexts/release",
         decodeBrowserThreadContextCommand(input),
-        decodeBrowserAutomationSnapshot,
+        decodeHostAnswer(BrowserAutomationSnapshot),
         signal,
       ),
     act: (input, signal) =>
@@ -153,7 +146,7 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/actions",
         decodeBrowserActionCommand(input),
-        decodeBrowserAutomationSnapshot,
+        decodeHostAnswer(BrowserAutomationSnapshot),
         signal,
       ),
     cancel: (input, signal) =>
@@ -161,7 +154,7 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/contexts/cancel",
         decodeBrowserContextCancelCommand(input),
-        decodeBrowserAutomationSnapshot,
+        decodeHostAnswer(BrowserAutomationSnapshot),
         signal,
       ),
     stop: (input, signal) =>
@@ -169,7 +162,7 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/contexts/stop",
         decodeBrowserContextStopCommand(input),
-        decodeBrowserAutomationSnapshot,
+        decodeHostAnswer(BrowserAutomationSnapshot),
         signal,
       ),
     listCaptures: (input, signal) =>
@@ -177,7 +170,7 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/captures",
         decodeBrowserCapturesCommand(input),
-        decodeBrowserCapturesResponse,
+        decodeHostAnswer(BrowserCapturesResponse),
         signal,
       ),
     readCapture: (input, signal) =>
@@ -185,7 +178,7 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/captures/image",
         decodeBrowserCaptureImageCommand(input),
-        decodeBrowserCaptureImage,
+        decodeHostAnswer(BrowserCaptureImage),
         signal,
       ),
     takeCapture: (input, signal) =>
@@ -193,7 +186,7 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/captures/take",
         decodeBrowserCaptureTakeCommand(input),
-        decodeBrowserAutomationSnapshot,
+        decodeHostAnswer(BrowserAutomationSnapshot),
         signal,
       ),
     listApprovals: (signal) =>
@@ -201,7 +194,7 @@ export function createBrowserAutomationClient(
         options,
         "/api/browser/approvals",
         { kind: "list" },
-        decodeBrowserToolApprovalList,
+        decodeHostAnswer(BrowserToolApprovalList),
         signal,
       ),
     decideApproval: async (decision) => {
@@ -271,7 +264,7 @@ async function post<T>(
   }
   if (!response.ok && response.status !== refusalStatus) {
     try {
-      const failure = decodeBrowserAutomationFailure(payload);
+      const failure = decodeHostAnswer(BrowserAutomationFailure)(payload);
       throw new BrowserAutomationClientFailure(failure.category, failure.message);
     } catch (error) {
       if (error instanceof BrowserAutomationClientFailure) throw error;

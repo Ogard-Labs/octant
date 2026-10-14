@@ -1,8 +1,8 @@
 import {
-  decodeDiscoveryCommandResult,
   type DiscoveryCommand,
-  type DiscoveryCommandResult,
+  DiscoveryCommandResult,
   type DiscoverySnapshot,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export interface DiscoveryClientOptions {
@@ -42,7 +42,7 @@ export function createDiscoveryClient(options: DiscoveryClientOptions): Discover
         new URL("/api/providers/discovery/scan", options.baseUrl).toString(),
         { method: "POST", headers },
         (body) => {
-          const result = decodeDiscoveryCommandResult(body);
+          const result = decodeHostAnswer(DiscoveryCommandResult)(body);
           if (result.kind !== "scan-completed") {
             throw new DiscoveryClientFailure("protocol", "Expected scan-completed result.");
           }
@@ -60,7 +60,7 @@ export function createDiscoveryClient(options: DiscoveryClientOptions): Discover
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(command),
         },
-        decodeDiscoveryCommandResult,
+        decodeHostAnswer(DiscoveryCommandResult),
         // No client-side limit: the host does not cancel a connect when the
         // request is dropped, so timing out here would report a provider the
         // host goes on to create as failed and invite a duplicate.
@@ -77,7 +77,7 @@ export function createDiscoveryClient(options: DiscoveryClientOptions): Discover
           body: JSON.stringify(command),
         },
         (body) => {
-          const result = decodeDiscoveryCommandResult(body);
+          const result = decodeHostAnswer(DiscoveryCommandResult)(body);
           if (result.kind !== "binary-located") {
             throw new DiscoveryClientFailure("protocol", "Expected binary-located result.");
           }

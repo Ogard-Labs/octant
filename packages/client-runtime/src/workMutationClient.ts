@@ -1,8 +1,8 @@
 import {
-  decodeWorkMutationReply,
   decodeWorkMutationRequest,
-  type WorkMutationReply,
+  WorkMutationReply,
   type WorkMutationRequest,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -65,7 +65,7 @@ export function createWorkMutationClient(options: WorkMutationClientOptions): Wo
       }
 
       try {
-        return decodeWorkMutationReply(body);
+        return decodeHostAnswer(WorkMutationReply)(body);
       } catch {
         throw new WorkMutationClientFailure(
           "Work mutation service returned an invalid response.",

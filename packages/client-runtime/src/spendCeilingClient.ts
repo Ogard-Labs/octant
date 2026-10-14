@@ -1,10 +1,9 @@
 import {
-  decodeSpendCeilingCommandResult,
-  decodeSpendCeilingSnapshot,
   type SpendCeilingCommand,
-  type SpendCeilingCommandResult,
-  type SpendCeilingSnapshot,
+  SpendCeilingCommandResult,
+  SpendCeilingSnapshot,
   type SpendCeilingThreadType,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -51,7 +50,7 @@ export function createSpendCeilingClient(options: SpendCeilingClientOptions): Sp
         },
         "Spend ceilings are unavailable.",
       );
-      return decodeSpendCeilingSnapshot(body);
+      return decodeHostAnswer(SpendCeilingSnapshot)(body);
     },
     async execute(command, signal) {
       const body = await send(
@@ -72,7 +71,7 @@ export function createSpendCeilingClient(options: SpendCeilingClientOptions): Sp
         // Treating it as a failure showed only "Spend ceiling command failed."
         isRefusedCommandResult,
       );
-      return decodeSpendCeilingCommandResult(body);
+      return decodeHostAnswer(SpendCeilingCommandResult)(body);
     },
   };
 }

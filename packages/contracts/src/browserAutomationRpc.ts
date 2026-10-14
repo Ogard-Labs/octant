@@ -1,3 +1,4 @@
+import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import {
   BrowserActionRequest,
@@ -50,7 +51,7 @@ export const BrowserToolApproval = Schema.Struct({
   mode: Schema.Literal("chat", "work", "code"),
   origin: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(2048)),
   requestedAt: UtcTimestamp,
-}).annotations(strict);
+}).annotations({ ...strict, ...personDecides });
 export type BrowserToolApproval = typeof BrowserToolApproval.Type;
 
 export const BrowserToolApprovalList = Schema.Array(BrowserToolApproval);
