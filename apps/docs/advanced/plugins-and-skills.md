@@ -262,6 +262,18 @@ one works:
   `AGENTS.md` and `.github/copilot-instructions.md` stay readable for these
   runtimes. They are text the runtime adds to its context, not code.
 
+Gemini CLI and Qwen Code are the exception. They start the MCP servers and
+hooks declared in a Project's own settings by themselves, and trust every
+folder unless you turned folder trust on in their own settings. Blocking those
+files would stop them from starting a session at all, so Octant refuses to
+start either runtime in a Project that holds `.gemini/settings.json`, a
+`.gemini/agents` or `.gemini/extensions` folder with files in it (Gemini CLI),
+or `.qwen/settings.json`, `.mcp.json`, or a `.qwen/agents` or `.qwen/extensions`
+folder with files in it (Qwen Code). The message names the entry. Remove or
+rename it, or use another provider in that Project. Other Projects, and Chat,
+are not affected, and a file in a parent folder does not count because neither
+runtime reads settings from there.
+
 Because the block covers writing too, an agent's own `git` commands on those
 runtimes warn about tracked files in a blocked folder or file, and a
 `git checkout`, rebase, or pull across commits that touch one fails with a
@@ -279,9 +291,6 @@ refuses to start a Codex thread on them and asks you to update Codex.
 
 Some gaps remain:
 
-- Gemini CLI and Qwen Code still start MCP servers and hooks from
-  `.gemini/settings.json` or `.qwen/settings.json` in a folder they trust.
-  Blocking that file would stop them from starting a session at all.
 - A folder above the Project, when the Project is a subfolder of a repository,
   is not blocked for the runtimes that look upward (GitHub Copilot, Devin,
   Kimi Code, Mistral Vibe). Grok Build's trust rule covers every level.
