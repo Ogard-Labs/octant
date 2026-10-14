@@ -71,6 +71,12 @@ interface TranscriptScrollMemory {
   readonly offset: number;
   readonly measurements: ReadonlyArray<VirtualItem>;
   readonly following: boolean;
+  /**
+   * The key of the first row when the offset was taken. An offset only means
+   * something over the rows it was measured against: a thread that reopens on
+   * its newest page no longer starts with the rows loaded earlier.
+   */
+  readonly firstKey: string | undefined;
 }
 
 const scrollMemory = new Map<string, TranscriptScrollMemory>();
@@ -109,7 +115,9 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const itemKey = props.itemKey;
   const restoreKey = props.restoreKey;
   const revealKey = props.revealKey;
-  const restored = scrollMemory.get(restoreKey);
+  const firstKey = items[0] === undefined ? undefined : itemKey(items[0], 0);
+  const remembered = scrollMemory.get(restoreKey);
+  const restored = remembered?.firstKey === firstKey ? remembered : undefined;
   const followingRef = useRef(
     restored?.following === true || (restored === undefined && align === "end"),
   );
@@ -118,7 +126,8 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const pendingFocusRef = useRef<
     { readonly index: number; readonly edge: "start" | "end" } | undefined
   >(undefined);
-  const prevCountRef = useRef(items.length);
+  const firstKeyRef = useRef(firstKey);
+  const lastKeyRef = useRef(lastKeyOf(items, itemKey));
   // One index map per item list: the reveal target and every pinned key resolve
   // from it instead of an O(items) findIndex each. Streaming transcripts change
   // `items` per delta, so the scans this replaces were the hot path.
@@ -200,9 +209,16 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
         offset,
         measurements: virtualizer.takeSnapshot(),
         following: followingRef.current,
+        firstKey: firstKeyRef.current,
       });
     };
   }, [restoreKey, virtualizer]);
+
+  // Updated after the cleanup above has read it, so leaving a thread records
+  // the first row it was showing rather than the next thread's.
+  useLayoutEffect(() => {
+    firstKeyRef.current = firstKey;
+  }, [firstKey]);
 
   useLayoutEffect(() => {
     followingRef.current =
@@ -210,7 +226,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     appliedRevealKeyRef.current = undefined;
     setStickyIndexes(new Set());
     setLiveMessage("");
-    prevCountRef.current = items.length;
+    lastKeyRef.current = lastKeyOf(items, itemKey);
   }, [restoreKey]);
 
   useLayoutEffect(() => {
@@ -227,10 +243,13 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     appliedRevealKeyRef.current = revealKey;
   }, [itemKey, items, revealKey, virtualizer]);
 
+  // Only a new last row is news. Earlier rows loaded above, or a row that
+  // grows while it streams, change the list without saying anything new.
   useLayoutEffect(() => {
-    const previous = prevCountRef.current;
-    prevCountRef.current = items.length;
-    if (items.length <= previous) return;
+    const previous = lastKeyRef.current;
+    const next = lastKeyOf(items, itemKey);
+    lastKeyRef.current = next;
+    if (next === undefined || previous === undefined || next === previous) return;
     const appended = items[items.length - 1];
     if (appended === undefined) return;
     setLiveMessage(
@@ -238,7 +257,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
         ? "New message"
         : props.announceItem(appended, items.length - 1),
     );
-  }, [items, props.announceItem]);
+  }, [itemKey, items, props.announceItem]);
 
   useLayoutEffect(() => {
     function onFindShortcut(event: KeyboardEvent) {
@@ -470,6 +489,14 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       </div>
     </div>
   );
+}
+
+function lastKeyOf<T>(
+  items: ReadonlyArray<T>,
+  itemKey: (item: T, index: number) => string,
+): string | undefined {
+  const last = items[items.length - 1];
+  return last === undefined ? undefined : itemKey(last, items.length - 1);
 }
 
 function rememberScroll(key: string, memory: TranscriptScrollMemory): void {

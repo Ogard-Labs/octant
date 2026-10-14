@@ -2,6 +2,7 @@ import { decodeWindowId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import { createWorkTurnRouteHandler } from "./workTurnRoutes";
+import { WorkTurnServiceError } from "./work/workTurnService";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
@@ -113,6 +114,83 @@ describe("Work turn live stream route", () => {
 
     expect(response?.status).toBe(400);
     expect(subscribe).not.toHaveBeenCalled();
+  });
+});
+
+describe("Work transcript window route", () => {
+  const before = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const emptyWindow = {
+    version: 1,
+    threadId,
+    turns: [],
+    liveCursor: 7,
+    hasEarlier: true,
+    hasLater: true,
+  };
+
+  it("answers one page of the thread for the authorized window and is never cached", async () => {
+    const transcriptWindow = vi.fn(async () => emptyWindow);
+    const route = routeFixture({ transcriptWindow });
+
+    const response = await route(
+      request(`/api/work/turns/window/${threadId}?limit=30&before=${before}`, { method: "GET" }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("cache-control")).toBe("no-store");
+    expect(await response!.json()).toEqual(emptyWindow);
+    expect(transcriptWindow).toHaveBeenCalledWith(windowId, threadId, { limit: 30, before });
+  });
+
+  it("refuses a window anchored on a turn the thread does not hold", async () => {
+    const transcriptWindow = vi.fn(async () => {
+      throw new WorkTurnServiceError({
+        category: "stale",
+        message: "That Work turn is no longer in this thread.",
+      });
+    });
+    const route = routeFixture({ transcriptWindow });
+
+    const response = await route(
+      request(`/api/work/turns/window/${threadId}?limit=30&before=${before}`, { method: "GET" }),
+    );
+
+    expect(response?.status).toBe(409);
+    expect(await response!.json()).toMatchObject({ category: "stale" });
+  });
+
+  it("refuses a window query it does not define before reading the thread", async () => {
+    const transcriptWindow = vi.fn(async () => emptyWindow);
+    const route = routeFixture({ transcriptWindow });
+
+    for (const query of [
+      "",
+      "?limit=0",
+      "?limit=65",
+      "?limit=3.5",
+      "?limit=30&limit=20",
+      "?limit=30&after=" + before,
+      "?limit=30&before=not-a-turn",
+      "?limit=30&windowId=00000000-0000-4000-8000-000000000901",
+    ]) {
+      const response = await route(
+        request(`/api/work/turns/window/${threadId}${query}`, { method: "GET" }),
+      );
+      expect(response?.status, query).toBe(400);
+    }
+    expect(transcriptWindow).not.toHaveBeenCalled();
+  });
+
+  it("refuses a window read without a window capability", async () => {
+    const transcriptWindow = vi.fn(async () => emptyWindow);
+    const route = routeFixture({ transcriptWindow });
+
+    const response = await route(
+      new Request(`http://127.0.0.1/api/work/turns/window/${threadId}?limit=30`),
+    );
+
+    expect(response?.status).toBe(401);
+    expect(transcriptWindow).not.toHaveBeenCalled();
   });
 });
 

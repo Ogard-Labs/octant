@@ -3,6 +3,7 @@ import {
   compareRemoteForwardListToClassifier,
   defaultRemoteAuthenticatedRouteCount,
 } from "./remoteForwardListClassifierGate";
+import { classifyProductAction } from "./authenticatedProductRoutes";
 import { createRemoteRoutePolicy } from "./remoteRoutePolicy";
 
 const origin = "https://octant.example:8443";
@@ -34,5 +35,21 @@ describe("remote forward list vs route classifier", () => {
       );
       expect(decision.kind).toBe("reject");
     }
+  });
+
+  it("forwards the Work transcript window read as an overview read", () => {
+    const policy = createRemoteRoutePolicy({ origin });
+    const request = new Request(
+      `${origin}/api/work/turns/window/00000000-0000-4000-8000-000000000001?limit=30`,
+      {
+        method: "GET",
+        headers: { host: "octant.example:8443", origin, "sec-fetch-site": "same-origin" },
+      },
+    );
+    expect(policy.inspect(request)).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    expect(classifyProductAction(request)).toBe("project.overview.read");
   });
 });

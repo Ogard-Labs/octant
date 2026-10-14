@@ -1,0 +1,15 @@
+/* One row above the oldest loaded message. Its height never changes with its
+   state: the rows below it are what the reader is looking at. */
+.load-earlier-messages {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oct-space-2);
+  height: var(--oct-space-8);
+  margin-bottom: var(--oct-space-5);
+  overflow: hidden;
+}
+
+.load-earlier-messages__note {
+  white-space: nowrap;
+}

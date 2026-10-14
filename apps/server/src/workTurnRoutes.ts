@@ -6,6 +6,8 @@ import {
   decodeWorkAttachmentReference,
   decodeWorkThreadId,
   decodeWorkThreadTranscript,
+  decodeWorkThreadTranscriptWindow,
+  decodeWorkThreadTranscriptWindowRequest,
   decodeWorkTurnStreamFrame,
   decodeWorkTurnCancelResult,
   decodeWorkTurnLookupResult,
@@ -15,6 +17,8 @@ import {
   type WorkAttachmentReference,
   type WorkThreadId,
   type WorkThreadTranscript,
+  type WorkThreadTranscriptWindow,
+  type WorkThreadTranscriptWindowRequest,
   type WorkTurnCancelResult,
   type WorkTurnFailure,
   type WorkTurnLookupResult,
@@ -44,6 +48,11 @@ export interface WorkTurnRouteService {
     windowId: WindowId,
     threadId: WorkThreadId,
   ) => Promise<WorkThreadTranscript>;
+  readonly transcriptWindow: (
+    windowId: WindowId,
+    threadId: WorkThreadId,
+    request: WorkThreadTranscriptWindowRequest,
+  ) => Promise<WorkThreadTranscriptWindow>;
   readonly subscribe: (
     windowId: WindowId,
     threadId: WorkThreadId,
@@ -152,9 +161,19 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
     const isLookup = lookupMatch !== null && request.method === "GET";
     const transcriptMatch = url.pathname.match(/^\/api\/work\/turns\/transcript\/([^/]+)$/);
     const isTranscript = transcriptMatch !== null && request.method === "GET";
+    const windowMatch = url.pathname.match(/^\/api\/work\/turns\/window\/([^/]+)$/);
+    const isWindow = windowMatch !== null && request.method === "GET";
     const streamMatch = url.pathname.match(/^\/api\/work\/turns\/stream\/([^/]+)$/);
     const isStream = streamMatch !== null && request.method === "GET";
-    if (!isAttachment && !isStart && !isCancel && !isLookup && !isTranscript && !isStream)
+    if (
+      !isAttachment &&
+      !isStart &&
+      !isCancel &&
+      !isLookup &&
+      !isTranscript &&
+      !isWindow &&
+      !isStream
+    )
       return undefined;
 
     let authenticatedWindowId: WindowId;
@@ -210,6 +229,26 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
           ),
           200,
           origin,
+        );
+      }
+      if (isWindow) {
+        const encodedThreadId = windowMatch?.[1];
+        if (encodedThreadId === undefined) {
+          throw new WorkTurnRouteRejected("Work transcript window path is invalid.", 400);
+        }
+        const threadId = decodeWorkThreadId(decodeURIComponent(encodedThreadId));
+        const windowRequest = readTranscriptWindowRequest(url);
+        return jsonResponse(
+          decodeWorkThreadTranscriptWindow(
+            await dependencies.service.transcriptWindow(
+              authenticatedWindowId,
+              threadId,
+              windowRequest,
+            ),
+          ),
+          200,
+          origin,
+          { "cache-control": "no-store" },
         );
       }
       if (isStream) {
@@ -366,14 +405,47 @@ function failureResponse(
   return jsonResponse(decodeWorkTurnFailure(failure), status, origin);
 }
 
-function jsonResponse(body: unknown, status: number, origin: string | null): Response {
+function jsonResponse(
+  body: unknown,
+  status: number,
+  origin: string | null,
+  extraHeaders: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "content-type": "application/json",
       ...corsHeaders(origin),
+      ...extraHeaders,
     },
   });
+}
+
+/**
+ * `limit` once, and `before` at most once; nothing else. A malformed query is
+ * refused here rather than read as the newest page, because a client that
+ * asked for an earlier page must never be handed the newest one in its place.
+ */
+function readTranscriptWindowRequest(url: URL): WorkThreadTranscriptWindowRequest {
+  const keys = [...url.searchParams.keys()];
+  const limit = url.searchParams.getAll("limit");
+  const before = url.searchParams.getAll("before");
+  if (
+    keys.some((key) => key !== "limit" && key !== "before") ||
+    limit.length !== 1 ||
+    before.length > 1 ||
+    !/^[0-9]{1,3}$/.test(limit[0] ?? "")
+  ) {
+    throw new WorkTurnRouteRejected("Work transcript window query is invalid.", 400);
+  }
+  try {
+    return decodeWorkThreadTranscriptWindowRequest({
+      limit: Number(limit[0]),
+      ...(before[0] === undefined ? {} : { before: before[0] }),
+    });
+  } catch {
+    throw new WorkTurnRouteRejected("Work transcript window query is invalid.", 400);
+  }
 }
 
 function corsHeaders(origin: string | null): Record<string, string> {

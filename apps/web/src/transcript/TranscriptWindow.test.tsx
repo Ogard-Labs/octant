@@ -379,4 +379,92 @@ describe("TranscriptWindow", () => {
     });
     expect(scroller().scrollTop).toBeGreaterThanOrEqual(0);
   });
+
+  describe("when earlier rows are added above", () => {
+    function rowsFrom(first: number, count: number): ReadonlyArray<Row> {
+      return Array.from({ length: count }, (_, offset) => ({
+        id: `row-${String(first + offset)}`,
+        label: `Row ${String(first + offset)}`,
+      }));
+    }
+
+    function PrependHarness(props: { readonly onAnnounce?: (item: Row) => string }) {
+      const [items, setItems] = useState(() => rowsFrom(100, 100));
+      return (
+        <div>
+          <button
+            onClick={() => setItems((current) => [...rowsFrom(70, 30), ...current])}
+            type="button"
+          >
+            Load earlier
+          </button>
+          <TranscriptWindow
+            {...(props.onAnnounce === undefined ? {} : { announceItem: props.onAnnounce })}
+            estimateSize={80}
+            itemKey={(item) => item.id}
+            items={items}
+            listLabel="Transcript"
+            renderItem={(item) => <button type="button">{item.label}</button>}
+            restoreKey="prepend"
+          />
+        </div>
+      );
+    }
+
+    function rowTop(label: string): number {
+      const row = screen.getByRole("button", { name: label }).closest("[data-transcript-row]");
+      if (!(row instanceof HTMLElement)) throw new Error(`expected a row for ${label}`);
+      return translateY(row) - scroller().scrollTop;
+    }
+
+    it("keeps the row the reader was on in place", async () => {
+      render(<PrependHarness />);
+      scroller().scrollTop = 800;
+      fireEvent.scroll(scroller());
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Row 110" })).toBeInTheDocument();
+      });
+      const before = rowTop("Row 110");
+
+      fireEvent.click(screen.getByRole("button", { name: "Load earlier" }));
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Row 110" })).toBeInTheDocument();
+      });
+      expect(rowTop("Row 110")).toBe(before);
+      expect(screen.queryByRole("button", { name: "Row 70" })).not.toBeInTheDocument();
+    });
+
+    it("does not announce them as a new message", async () => {
+      render(<PrependHarness onAnnounce={(item) => item.label} />);
+      scroller().scrollTop = 800;
+      fireEvent.scroll(scroller());
+
+      fireEvent.click(screen.getByRole("button", { name: "Load earlier" }));
+
+      await waitFor(() => {
+        expect(list().style.height).toBe(`${String(130 * 80)}px`);
+      });
+      expect(liveRegion()).toBeEmptyDOMElement();
+    });
+  });
+
+  it("opens at the end when the remembered rows are no longer the first rows", async () => {
+    const first = renderWindow(rows(100), { restoreKey: "reopened" });
+    scroller().scrollTop = 640;
+    fireEvent.scroll(scroller());
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Row 8" })).toBeVisible();
+    });
+    first.unmount();
+
+    // The thread reopens on its newest page: the rows the offset was measured
+    // against are gone from the top, so the offset no longer means anything.
+    renderWindow(rows(130).slice(30), { restoreKey: "reopened" });
+
+    // 100 rows of 80px: the end is past 7000px, the remembered offset was 640.
+    await waitFor(() => {
+      expect(scroller().scrollTop).toBeGreaterThan(7000);
+    });
+  });
 });
