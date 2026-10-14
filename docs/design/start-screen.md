@@ -91,8 +91,8 @@ chip's tooltip and description and fills the composer when chosen, nothing more.
 ### Code agent home
 
 Under the Code composer the start screen is an agent home rather than a
-blank prompt: suggested prompts as small hairline cards on the card fill (a
-label and the sentence they fill in), never bare text on the ground; then
+blank prompt: the suggested prompts as one row of label-only outline chips
+(see [Card area](#card-area)); then
 three sections that share one card grid (Continue's rows share one card), two
 across at the composer's width. Each card opens with a badge naming what it
 is (Issue, Pull request, Review requested, Linear, or a thread's delivery
