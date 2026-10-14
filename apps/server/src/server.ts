@@ -953,6 +953,7 @@ import { createPrivateListenerLifecycleController } from "./remote/privateListen
 import { resolvePrivateListenerHostIdentity } from "./remote/privateListenerHostIdentity";
 import { createPrivateListenerAdministrationRouteHandler } from "./remote/privateListenerAdministrationRoutes";
 import { createPrivateListenerSetting } from "./remote/privateListenerSetting";
+import { createSelfMadeListenerCertificateStore } from "./remote/selfMadeListenerCertificate";
 import {
   boundHostRuntimeDiagnostics,
   type HostRuntimeDiagnostics,
@@ -10845,6 +10846,9 @@ export function startOctantServer(
         currentRemoteGateway = gateway;
         return gateway;
       },
+      selfMadeCertificate: createSelfMadeListenerCertificateStore({
+        dataDirectory: providerDataDirectory,
+      }),
     });
     const localDeviceAdministrationRoutes = createLocalDeviceAdministrationRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,

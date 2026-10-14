@@ -1,12 +1,13 @@
 # One-step pairing with a self-made listener certificate
 
-**Status: approved by the maintainer on 2026-10-14, not built.** Nothing here
-is in force. [Architecture](../architecture.md) holds only the rules that are
-true today, and each slice below moves its rules there when it lands. Today the
-private listener serves only a certificate the person brings: Settings →
-Remote access and `octant listener enable` take certificate and private key
-PEMs, and Octant makes none, so a second, always-on computer first needs a
-Tailscale certificate or the person's own certificate authority. This plan lets
+**Status: approved by the maintainer on 2026-10-14; slice 1 is built, the
+rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
+holds only the rules that are true today, and each slice below moves its rules
+there when it lands; the host certificate's key, storage, renewal, pin format,
+and status fields are already there. Today the host can serve a certificate it
+makes itself, but no client pins it, so a client reaches only a listener that
+serves a certificate the person brings, and a second, always-on computer first
+needs a Tailscale certificate or the person's own certificate authority. This plan lets
 the host make its own certificate and has the pairing code carry a fingerprint
 of its key, which Octant's own clients pin, so adding a computer takes one
 command there and one approval. It does not authorize merging or releasing
@@ -32,43 +33,11 @@ anything.
   connections. A self-made certificate without a pin would leave first
   contact unauthenticated, so the self-made path exists only together with
   a pin.
-- **Key and certificate.** When the listener is enabled with no pasted
-  certificate, the host makes an ECDSA P-256 key and a self-signed X.509 v3
-  leaf certificate for it: SHA-256 signature, a random 128-bit serial,
-  basic constraints not a certificate authority, extended key usage server
-  authentication, a subject alternative name for the listener's address (an
-  IP entry for an address, a DNS entry for a name), valid for one year.
-  P-256 is the curve the host identity and device keys already use, and
-  every client TLS stack Octant runs on accepts it. When the host starts or
-  enables the listener within 30 days of expiry, it renews the certificate
-  with the same key, so renewal never changes the pin. The key is its own
-  key, not the host identity key (decision 1).
-- **Storage.** The key is `remote/private-listener-tls-key.pem` and the
-  certificate `remote/private-listener-tls-cert.pem` under the data
-  directory, the boundary that already holds the host identity key. The
-  directory is created `0700` and the files `0600`, each written to a staging
-  file and renamed, as the remembered listener setting is. The host refuses
-  to load a key file that another OS user owns or can read; the listener
-  then reports failed with that reason and serves nothing. The remembered
-  setting records that the certificate is self-made and holds no copy of the
-  key; a pasted certificate and key are remembered as today. The key never
-  appears in a route response, the status projection, a log line, the
-  journal, a diagnostics or data export, or an error message. Only the pin
-  and the certificate's public facts leave the host. Disabling the listener
-  keeps the key, so enabling it again needs no new pairing; replacing the
-  key or removing the host's data deletes it.
-- **A pasted certificate wins.** When certificate and key PEMs are given,
-  the listener serves them exactly as today and the self-made key stays
-  unused on disk. Settings makes the PEM fields optional behind "Use my own
-  certificate". The status projection gains `certificateSource`
-  (`self-made` or `pasted`) and, for a self-made certificate, `tlsPin`. The
-  existing `certificateFingerprint` hashes the PEM text, not the key, so it
-  is not a pin and does not become one.
-- **Pin format.** `sha256-` followed by the unpadded base64url SHA-256 of the
-  certificate's DER-encoded SubjectPublicKeyInfo, 43 characters after the
-  prefix. Pinning the key rather than the certificate lets renewal keep the
-  pin. The prefix names the algorithm: a client refuses a prefix it does not
-  know rather than skipping the check.
+- **Settings.** Settings makes the PEM fields optional behind "Use my own
+  certificate"; enabling with none uses the self-made certificate, as the
+  administration route and `octant listener enable` already do.
+- **Pin prefix.** The pin's `sha256-` prefix names the algorithm: a client
+  refuses a prefix it does not know rather than skipping the check.
 - **Pairing code and QR code.** For a self-made listener the host mints an
   app pairing code, `octant-pair-1.<payload>`, where the payload is the
   unpadded base64url of a JSON object holding the listener origin, ticket
@@ -129,7 +98,7 @@ anything.
     A browser therefore pairs only with a listener that serves a pasted
     certificate (a Tailscale certificate or the person's own), as today. For
     a self-made listener, Settings and `octant pair` offer no browser link
-    and say why. A browser that opens the listener's address anyway shows
+    and say why (Settings already does, with the host certificate). A browser that opens the listener's address anyway shows
     its own certificate warning, before Octant can show anything; the guide
     says to stop there. Once a browser has seen the listener's HSTS header
     over a trusted certificate, it does not let the person continue past
@@ -200,7 +169,8 @@ anything.
   - several addresses: "This computer has more than one <Tailscale or
     private network> address: <list>. Pass --hostname with the one your
     other devices reach.";
-  - key file readable by others: "The listener's certificate key can be
+  - key file readable by others (the host already says the first sentence;
+    the second arrives with `replace-key`): "The listener's certificate key can be
     read by other users on this computer, so Octant won't use it. Run
     `octant listener replace-key` to make a new one.";
   - no claim in time: "No device used the pairing code within five minutes. Run the
@@ -274,7 +244,7 @@ Each slice is one reviewable change with its tests. Each moves the rules it
 makes true into [Architecture](../architecture.md) in the same pull request,
 and the plan shrinks accordingly.
 
-1. _Host certificate._ Generation, storage, renewal, the self-made enable
+1. _Host certificate._ **Built**; its rules are in Architecture. Generation, storage, renewal, the self-made enable
    variant on the administration routes and `octant listener`, and the
    status fields. Tests: the served certificate's key hashes to `tlsPin`
    over a real TLS connection; a pasted certificate wins when both exist;
@@ -282,8 +252,8 @@ and the plan shrinks accordingly.
    log line, journal event, and diagnostics export; a key file another
    user can read is refused; a restart and a renewal keep the pin.
 2. _Pairing code._ Building and parsing the code, Settings and `octant pair`
-   output, QR code, no browser link or human-entry code for a self-made
-   listener. Tests: the code round-trips; a code with a missing or
+   output, QR code, no human-entry code for a self-made listener (Settings
+   already offers it no browser link). Tests: the code round-trips; a code with a missing or
    unknown pin is refused with its copy.
 3. _Client pin rule._ The pin and trust mode in device-key metadata and the
    host registry, and a pinned transport port in the client runtime.

@@ -32,14 +32,27 @@ import { createHash } from "node:crypto";
 import { classifyRemoteListenerAddress } from "@octant/domain";
 import {
   isPrivateListenerFailureCode,
+  validatePrivateListenerConfig,
   type PrivateListenerConfig,
   type PrivateListenerFailureCode,
 } from "../privateListener";
 import type { RemoteGatewayConfig } from "./remoteGateway";
+import type { SelfMadeListenerCertificateStore } from "./selfMadeListenerCertificate";
 
 export type PrivateListenerHostState = "disabled" | "ready" | "failed";
 
 export type PrivateListenerHostExposureClass = "lan-private" | "tailscale";
+
+/** Whether the listener serves the certificate the host made or one the person pasted. */
+export type PrivateListenerCertificateSource = "self-made" | "pasted";
+
+/** A listener the host serves with the certificate it makes and renews itself. */
+export interface SelfMadePrivateListenerConfig extends Omit<PrivateListenerConfig, "tls"> {
+  readonly tls: "self-made";
+}
+
+/** What the host was asked to serve: a pasted certificate and key, or its own. */
+export type RequestedPrivateListenerConfig = PrivateListenerConfig | SelfMadePrivateListenerConfig;
 
 /**
  * The authoritative public status projection returned to the packaged host
@@ -56,6 +69,13 @@ export interface PrivateListenerHostStatus {
   readonly exposureClass: PrivateListenerHostExposureClass | null;
   readonly certificateFingerprint: string | null;
   readonly certificateReady: boolean;
+  readonly certificateSource: PrivateListenerCertificateSource | null;
+  /**
+   * The pin of a self-made certificate's key (`sha256-` and base64url). Null
+   * for a pasted certificate: `certificateFingerprint` hashes the PEM text,
+   * changes when the certificate does, and is not a pin.
+   */
+  readonly tlsPin: string | null;
   readonly errorCode?: PrivateListenerFailureCode;
 }
 
@@ -85,13 +105,18 @@ export interface CreatePrivateListenerLifecycleControllerOptions {
   readonly createGateway: (config: RemoteGatewayConfig) => PrivateListenerGatewayLifecycle;
   /** Override the certificate fingerprint derivation (test seam). */
   readonly fingerprintFromPem?: (certificatePem: string) => string;
+  /**
+   * Makes, loads, and renews the key and certificate for a self-made
+   * listener. Without it a self-made request is refused as `invalid-tls`.
+   */
+  readonly selfMadeCertificate?: SelfMadeListenerCertificateStore;
 }
 
 export interface PrivateListenerLifecycleController {
   readonly status: () => PrivateListenerHostStatus;
-  readonly enable: (config: PrivateListenerConfig) => Promise<PrivateListenerHostStatus>;
+  readonly enable: (config: RequestedPrivateListenerConfig) => Promise<PrivateListenerHostStatus>;
   readonly disable: () => Promise<PrivateListenerHostStatus>;
-  readonly restart: (config: PrivateListenerConfig) => Promise<PrivateListenerHostStatus>;
+  readonly restart: (config: RequestedPrivateListenerConfig) => Promise<PrivateListenerHostStatus>;
 }
 
 export class PrivateListenerLifecycleError extends Error {
@@ -121,6 +146,8 @@ function disabledStatus(): PrivateListenerHostStatus {
     exposureClass: null,
     certificateFingerprint: null,
     certificateReady: false,
+    certificateSource: null,
+    tlsPin: null,
   };
 }
 
@@ -161,6 +188,8 @@ export function createPrivateListenerLifecycleController(
   // generation instead of losing the handle.
   let gateway: PrivateListenerGatewayLifecycle | undefined;
   let activeConfig: PrivateListenerConfig | undefined;
+  let activeSource: PrivateListenerCertificateSource = "pasted";
+  let activePin: string | null = null;
   let state: PrivateListenerHostState = "disabled";
   let errorCode: PrivateListenerFailureCode | undefined;
 
@@ -193,10 +222,17 @@ export function createPrivateListenerLifecycleController(
       exposureClass,
       certificateFingerprint: fingerprint,
       certificateReady: true,
+      certificateSource: activeSource,
+      tlsPin: activeSource === "self-made" ? activePin : null,
     };
   };
 
-  const apply = async (config: PrivateListenerConfig): Promise<PrivateListenerHostStatus> => {
+  const apply = async (
+    requested: RequestedPrivateListenerConfig,
+  ): Promise<PrivateListenerHostStatus> => {
+    const resolved = resolveCertificate(requested);
+    if (resolved.status === "refused") return await refuse(resolved.code);
+    const { config, source, pin } = resolved;
     const gatewayConfig: RemoteGatewayConfig = { listener: config };
     if (gateway !== undefined) {
       // A gateway already exists (enabled or retained after a failed shutdown).
@@ -205,6 +241,8 @@ export function createPrivateListenerLifecycleController(
       try {
         await gateway.restart(gatewayConfig);
         activeConfig = config;
+        activeSource = source;
+        activePin = pin;
         state = "ready";
         errorCode = undefined;
         return status();
@@ -237,6 +275,8 @@ export function createPrivateListenerLifecycleController(
       await created.start();
       gateway = created;
       activeConfig = config;
+      activeSource = source;
+      activePin = pin;
       state = "ready";
       errorCode = undefined;
       return status();
@@ -247,6 +287,58 @@ export function createPrivateListenerLifecycleController(
       errorCode = classifyLifecycleFailure(error, "bind-failed");
       throw new PrivateListenerLifecycleError(errorCode);
     }
+  };
+
+  // A pasted certificate is served exactly as given and never touches the
+  // self-made key on disk. A self-made one is loaded, made, or renewed here on
+  // every enable, restart, and server start.
+  const resolveCertificate = (
+    requested: RequestedPrivateListenerConfig,
+  ):
+    | {
+        readonly status: "ready";
+        readonly config: PrivateListenerConfig;
+        readonly source: PrivateListenerCertificateSource;
+        readonly pin: string | null;
+      }
+    | { readonly status: "refused"; readonly code: PrivateListenerFailureCode } => {
+    if (requested.tls !== "self-made") {
+      return { status: "ready", config: requested, source: "pasted", pin: null };
+    }
+    if (options.selfMadeCertificate === undefined)
+      return { status: "refused", code: "invalid-tls" };
+    // The bind and origin are checked before any key or certificate is made,
+    // so a public or malformed address never writes one.
+    try {
+      validatePrivateListenerConfig(requested);
+    } catch (error) {
+      return { status: "refused", code: classifyLifecycleFailure(error, "invalid-bind") };
+    }
+    const made = options.selfMadeCertificate.ensure(requested.hostname);
+    if (made.status === "refused") return { status: "refused", code: made.code };
+    return {
+      status: "ready",
+      config: { ...requested, tls: made.tls },
+      source: "self-made",
+      pin: made.tlsPin,
+    };
+  };
+
+  // A refused certificate leaves nothing served, as a failed restart does: a
+  // running generation is stopped rather than left serving the old config.
+  const refuse = async (code: PrivateListenerFailureCode): Promise<never> => {
+    if (gateway !== undefined) {
+      try {
+        await gateway.stop();
+        gateway = undefined;
+        activeConfig = undefined;
+      } catch {
+        // Keep the handle so a later disable can retry the unbind.
+      }
+    }
+    state = "failed";
+    errorCode = code;
+    throw new PrivateListenerLifecycleError(code);
   };
 
   const disable = async (): Promise<PrivateListenerHostStatus> => {

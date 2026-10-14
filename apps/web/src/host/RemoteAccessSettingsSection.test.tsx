@@ -20,6 +20,7 @@ const off: PrivateListenerPublicStatus = {
   exposureClass: null,
   certificateFingerprint: null,
   certificateReady: false,
+  certificateSource: null,
 };
 const listening: PrivateListenerPublicStatus = {
   enabled: true,
@@ -30,6 +31,7 @@ const listening: PrivateListenerPublicStatus = {
   exposureClass: "tailscale",
   certificateFingerprint: "f".repeat(64),
   certificateReady: true,
+  certificateSource: "pasted",
 };
 const pending: RemotePendingPairingRequest = {
   kind: "pending",
@@ -356,6 +358,18 @@ describe("RemoteAccessSettingsSection", () => {
     await user.click(within(devices).getByRole("button", { name: "Revoke Living room laptop" }));
     await waitFor(() => expect(host.revokeRemoteDevice).toHaveBeenCalledWith(deviceId));
     expect(host.calls().filter((call) => call === "inventory").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("offers no browser pairing link for a listener serving its own certificate", async () => {
+    const host = bridge({ ...listening, certificateSource: "self-made" });
+    render(<RemoteAccessSettingsSection bridge={host} />);
+    expect(await screen.findByText("Listening")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create pairing link" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Pairing link")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/A browser can't check this computer's own certificate/),
+    ).toBeInTheDocument();
+    expect(host.mintRemotePairingTicket).not.toHaveBeenCalled();
   });
 
   it("does not offer pairing while the listener is off", async () => {

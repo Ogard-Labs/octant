@@ -206,6 +206,7 @@ export type PrivateListenerControlFailureCode =
   | "invalid-bind"
   | "invalid-origin"
   | "invalid-tls"
+  | "tls-key-exposed"
   | "occupied-port"
   | "interface-unavailable"
   | "bind-failed"
@@ -221,6 +222,7 @@ export interface PrivateListenerPublicStatus {
   readonly exposureClass: PrivateListenerExposureClass | null;
   readonly certificateFingerprint: string | null;
   readonly certificateReady: boolean;
+  readonly certificateSource: "self-made" | "pasted" | null;
   readonly errorCode?: PrivateListenerControlFailureCode;
 }
 
@@ -2083,6 +2085,7 @@ function decodePrivateListenerStatus(value: unknown): PrivateListenerPublicStatu
   const allowed = new Set([
     "certificateFingerprint",
     "certificateReady",
+    "certificateSource",
     "enabled",
     "errorCode",
     "exposureClass",
@@ -2113,12 +2116,19 @@ function decodePrivateListenerStatus(value: unknown): PrivateListenerPublicStatu
         /^[a-f0-9]{64}$/.test(value.certificateFingerprint))
     ) ||
     typeof value.certificateReady !== "boolean" ||
+    !(
+      value.certificateSource === undefined ||
+      value.certificateSource === null ||
+      value.certificateSource === "self-made" ||
+      value.certificateSource === "pasted"
+    ) ||
     (value.errorCode !== undefined &&
       ![
         "local-confirmation-required",
         "invalid-bind",
         "invalid-origin",
         "invalid-tls",
+        "tls-key-exposed",
         "occupied-port",
         "interface-unavailable",
         "bind-failed",
@@ -2137,6 +2147,7 @@ function decodePrivateListenerStatus(value: unknown): PrivateListenerPublicStatu
     exposureClass: value.exposureClass,
     certificateFingerprint: value.certificateFingerprint,
     certificateReady: value.certificateReady,
+    certificateSource: value.certificateSource ?? null,
     ...(value.errorCode === undefined
       ? {}
       : { errorCode: value.errorCode as PrivateListenerControlFailureCode }),

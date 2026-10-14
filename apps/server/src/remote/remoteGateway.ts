@@ -787,6 +787,7 @@ function isPrivateListenerFailureCodeString(value: string): boolean {
     value === "invalid-bind" ||
     value === "invalid-origin" ||
     value === "invalid-tls" ||
+    value === "tls-key-exposed" ||
     value === "occupied-port" ||
     value === "interface-unavailable" ||
     value === "cancelled" ||
