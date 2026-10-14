@@ -16,6 +16,7 @@ import { StrictMode, useState, type ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { AgentProfileNamesProvider } from "../agentProfile/AgentProfileNames";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
+import { CompactingThread } from "../context/compactionTestSupport";
 import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
 import type { CodeAttachmentClient } from "./CodeThreadWorkspace";
 import type { CodeController } from "./useCodeController";
@@ -462,6 +463,27 @@ describe("CodeThreadWorkspace", () => {
     await user.type(screen.getByLabelText("Follow-up message"), "check tests too");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], [], [], "approval-gated");
+  });
+
+  it("holds a follow-up while the host compacts the session, from Enter and from the button", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+      { wrapper: CompactingThread },
+    );
+
+    await user.type(screen.getByLabelText("Follow-up message"), "check tests too");
+    const send = screen.getByRole("button", { name: "Send follow-up" });
+    expect(send).toBeDisabled();
+    expect(send).toHaveAccessibleDescription("Compacting session");
+    await user.keyboard("{Enter}");
+    expect(sendFollowUp).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Follow-up message")).toHaveValue("check tests too");
   });
 
   it("does not offer @Browser in a thread whose provider cannot carry the tool", async () => {

@@ -2,7 +2,7 @@ import { ComposerFollowUpSuggestions } from "../followUps/FollowUpSuggestionChip
 import { useComposerNotice } from "./ComposerNotice";
 import { ComposerSubagents } from "./ComposerSubagents";
 import { ComposerOutsideContentNotice } from "./OutsideContentNotice";
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
@@ -131,8 +131,9 @@ export function ThreadComposer(props: ThreadComposerProps) {
   // The host refuses a turn while the session compacts, so send waits too, and
   // says why under the row.
   const compacting = useComposerCompacting();
+  const compactingNoteId = useId();
   const compactingNote = compacting ? (
-    <p className="oct-meta thread-composer__compacting" data-compacting="">
+    <p className="oct-meta thread-composer__compacting" data-compacting="" id={compactingNoteId}>
       Compacting session
     </p>
   ) : null;
@@ -173,7 +174,7 @@ export function ThreadComposer(props: ThreadComposerProps) {
       {props.row.leading}
       <ThreadComposerTrailing
         actions={props.row.actions}
-        compacting={compacting}
+        compactingNoteId={compacting ? compactingNoteId : undefined}
         controls={props.row.trailing}
       />
     </div>
@@ -245,13 +246,16 @@ function ComposerThreadDropCue() {
   );
 }
 
-function sendRefused(send: ThreadComposerSend, compacting: boolean): boolean {
-  return compacting || send.disabled === true || send.disabledReason !== undefined;
+function sendRefused(send: ThreadComposerSend, compactingNoteId: string | undefined): boolean {
+  return (
+    compactingNoteId !== undefined || send.disabled === true || send.disabledReason !== undefined
+  );
 }
 
 function ThreadComposerTrailing(props: {
   readonly actions: ThreadComposerActions;
-  readonly compacting: boolean;
+  /** Set while the session compacts: send is held, and this note says why. */
+  readonly compactingNoteId: string | undefined;
   readonly controls?: ReactNode;
 }) {
   const meter = <ComposerContextMeter />;
@@ -262,8 +266,9 @@ function ThreadComposerTrailing(props: {
         {props.controls}
         {meter}
         <OctantButton
+          aria-describedby={props.compactingNoteId}
           aria-label={send.ariaLabel}
-          disabled={sendRefused(send, props.compacting)}
+          disabled={sendRefused(send, props.compactingNoteId)}
           {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
           size="icon"
           type={send.onSend === undefined ? "submit" : "button"}
@@ -292,8 +297,9 @@ function ThreadComposerTrailing(props: {
         </OctantButton>
       ) : null}
       <OctantButton
+        aria-describedby={props.compactingNoteId}
         aria-label={send.ariaLabel}
-        disabled={sendRefused(send, props.compacting)}
+        disabled={sendRefused(send, props.compactingNoteId)}
         {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
         size="icon"
         type="button"

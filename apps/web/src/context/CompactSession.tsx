@@ -64,6 +64,7 @@ export function compactionStatusText(compaction: ComposerCompaction): string | u
   const { controller, names } = compaction;
   const latest = controller.state?.latestCompaction;
   if (latest?.status === "running") return compactionResultLine(latest, names);
+  if (controller.stateUnknown) return STATE_UNKNOWN;
   if (controller.errorMessage !== undefined) return controller.errorMessage;
   if (controller.refusal !== undefined) return refusalLine(controller.refusal);
   return latest === undefined ? undefined : compactionResultLine(latest, names);
@@ -79,12 +80,17 @@ export function compactionAnnouncement(compaction: ComposerCompaction | undefine
   const { controller, names } = compaction;
   const latest = controller.state?.latestCompaction;
   if (latest?.status === "running") return " Compacting session.";
+  if (controller.stateUnknown) return ` ${STATE_UNKNOWN}`;
   if (controller.errorMessage !== undefined) return ` ${controller.errorMessage}`;
   if (controller.refusal !== undefined) return ` ${refusalLine(controller.refusal)}`;
   if (latest === undefined || controller.settledId === undefined) return "";
   const id = latest.status === "completed" ? latest.receipt.compactionId : latest.compactionId;
   return String(id) === controller.settledId ? ` ${compactionResultLine(latest, names)}` : "";
 }
+
+/** Said once the window stops following a compaction the host no longer reports on. */
+const STATE_UNKNOWN =
+  "Compaction state unknown: the host stopped answering. It may still be compacting, and refuses a send until it ends.";
 
 export function CompactionStatusLine(props: {
   readonly className: string;

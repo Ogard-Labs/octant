@@ -21,6 +21,12 @@ export interface SessionCompactionController {
    * a result that was already there when the thread opened is not.
    */
   readonly settledId?: string;
+  /**
+   * A compaction was running when the host stopped answering, and enough
+   * reads failed that the window no longer holds the thread on its account.
+   * The host may still be compacting; it refuses a turn until it ends.
+   */
+  readonly stateUnknown: boolean;
   readonly compact: () => Promise<void>;
 }
 
@@ -40,6 +46,9 @@ export interface UseSessionCompactionOptions {
 }
 
 const DEFAULT_POLL_MS = 1_500;
+/** Failed reads in a row, while a compaction ran, before the window lets go. */
+const MAX_FAILED_READS = 5;
+const MAX_RETRY_MS = 30_000;
 
 /**
  * The Compact session control's state, read from the host and never derived
@@ -68,6 +77,10 @@ export function useSessionCompaction(
   // Counts answers, so a running compaction is asked about again after each
   // one even when the host's answer is unchanged.
   const [answers, setAnswers] = useState(0);
+  const [retryMs, setRetryMs] = useState<number | undefined>(undefined);
+  const [stateUnknown, setStateUnknown] = useState(false);
+  const failedReads = useRef(0);
+  const stateRef = useRef<ContextCompactionState | undefined>(undefined);
   const requestRef = useRef<AbortController | undefined>(undefined);
   // Compactions this window saw running or asked for, so the end of one is
   // told apart from a result that was already there.
@@ -100,25 +113,48 @@ export function useSessionCompaction(
         }
       }
       if (next.compaction.status === "available") setRefusal(undefined);
+      failedReads.current = 0;
+      stateRef.current = next;
       setState(next);
+      setRetryMs(undefined);
+      setStateUnknown(false);
       setAnswers((count) => count + 1);
-    } catch (error) {
+    } catch {
+      // Only this window's own abort means a newer read replaced this one; a
+      // read the transport interrupted is a failed read like any other.
       if (controller.signal.aborted) return;
-      if (error instanceof ContextClientFailure && error.category === "interrupted") return;
-      // A host that cannot say is not offering anything. A compaction it last
-      // reported running still holds the thread, so that answer stands and is
-      // asked about again rather than releasing the composer on a missed read.
-      setState((current) =>
-        current?.latestCompaction?.status === "running" ? current : undefined,
-      );
+      if (stateRef.current?.latestCompaction?.status !== "running") {
+        // A host that cannot say is not offering anything.
+        stateRef.current = undefined;
+        setState(undefined);
+        return;
+      }
+      // A compaction it last reported running still holds the thread, so that
+      // answer stands and is asked about again, more slowly each time. After
+      // a bound (a host gone, or this window refused the thread) the window
+      // lets go and says it no longer knows, rather than hold send for ever.
+      failedReads.current += 1;
+      if (failedReads.current >= MAX_FAILED_READS) {
+        failedReads.current = 0;
+        stateRef.current = undefined;
+        setState(undefined);
+        setRetryMs(undefined);
+        setStateUnknown(true);
+        return;
+      }
+      setRetryMs(Math.min(pollMs * 2 ** failedReads.current, MAX_RETRY_MS));
       setAnswers((count) => count + 1);
     }
-  }, [client, subject]);
+  }, [client, pollMs, subject]);
 
   useEffect(() => {
     watched.current.clear();
     asked.current = undefined;
+    failedReads.current = 0;
+    stateRef.current = undefined;
     setState(undefined);
+    setRetryMs(undefined);
+    setStateUnknown(false);
     setStarting(false);
     setRefusal(undefined);
     setErrorMessage(undefined);
@@ -137,9 +173,9 @@ export function useSessionCompaction(
   const running = state?.latestCompaction?.status === "running";
   useEffect(() => {
     if (!running) return;
-    const timer = setTimeout(() => void load(), pollMs);
+    const timer = setTimeout(() => void load(), retryMs ?? pollMs);
     return () => clearTimeout(timer);
-  }, [answers, load, pollMs, running]);
+  }, [answers, load, pollMs, retryMs, running]);
 
   const startingRef = useRef(false);
   const compact = useCallback(async () => {
@@ -174,6 +210,7 @@ export function useSessionCompaction(
 
   return {
     starting,
+    stateUnknown,
     compact,
     ...(state === undefined ? {} : { state }),
     ...(refusal === undefined ? {} : { refusal }),

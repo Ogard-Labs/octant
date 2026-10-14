@@ -16,6 +16,7 @@ import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { Profiler } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkThreadWorkspace } from "./WorkThreadWorkspace";
+import { CompactingThread } from "../context/compactionTestSupport";
 import {
   COMPOSER_STAGED_DROPPED_NOTE,
   createComposerThreadDraftStore,
@@ -1862,6 +1863,37 @@ describe("WorkThreadWorkspace", () => {
     await waitFor(() => expect(screen.getByText("Done")).toBeVisible());
     started.resolve({ kind: "accepted", turn: { ...settledTurn, status: "accepted" } });
     await waitFor(() => expect(screen.getAllByText("Quick turn")).toHaveLength(1));
+  });
+
+  it("holds a follow-up while the host compacts the session, from Enter and from the button", async () => {
+    const user = userEvent.setup();
+    const startFirstTurn = vi.fn();
+    render(
+      <WorkThreadWorkspace
+        changeRevision={0}
+        hostId={"local" as never}
+        initialThread={workThread()}
+        threadClient={{ execute: vi.fn() } as unknown as WorkThreadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={
+          {
+            transcript: vi.fn(async () => ({ threadId, turns: [], liveCursor: 0 })),
+            subscribe: vi.fn(async function* () {}),
+            startFirstTurn,
+          } as never
+        }
+      />,
+      { wrapper: CompactingThread },
+    );
+
+    await user.type(screen.getByLabelText("Work prompt"), "Quick turn");
+    const send = screen.getByRole("button", { name: "Send follow-up" });
+    expect(send).toBeDisabled();
+    expect(send).toHaveAccessibleDescription("Compacting session");
+    await user.keyboard("{Enter}");
+    expect(startFirstTurn).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Work prompt")).toHaveValue("Quick turn");
   });
 
   it("shows the host's reason when it refuses to start a Work turn", async () => {

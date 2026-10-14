@@ -155,6 +155,35 @@ describe("useSessionCompaction", () => {
     expect(result.current.settledId).toBe(compactionId);
   });
 
+  it("keeps asking after a read the transport interrupted while a compaction runs", async () => {
+    const readCompaction = vi
+      .fn<ContextClient["readCompaction"]>()
+      .mockResolvedValueOnce(running)
+      .mockRejectedValueOnce(new ContextClientFailure("interrupted", "Cut off."))
+      .mockResolvedValue(failed);
+    const client = fakeClient({ readCompaction });
+    const { result } = renderHook(() => useSessionCompaction({ client, pollMs: 5, subject }));
+
+    await waitFor(() => expect(result.current.state?.latestCompaction?.status).toBe("failed"));
+    expect(readCompaction).toHaveBeenCalledTimes(3);
+  });
+
+  it("lets go of a running compaction, and says its state is unknown, when the host stops answering", async () => {
+    const readCompaction = vi
+      .fn<ContextClient["readCompaction"]>()
+      .mockResolvedValueOnce(running)
+      .mockRejectedValue(new ContextClientFailure("unauthorized", "No longer yours."));
+    const client = fakeClient({ readCompaction });
+    const { result } = renderHook(() => useSessionCompaction({ client, pollMs: 1, subject }));
+
+    await waitFor(() => expect(result.current.stateUnknown).toBe(true), { timeout: 3_000 });
+    // Five failed reads after the running answer, each later than the last.
+    expect(readCompaction).toHaveBeenCalledTimes(6);
+    expect(result.current.state).toBeUndefined();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(readCompaction).toHaveBeenCalledTimes(6);
+  });
+
   it("takes the host's record over a request whose answer was lost", async () => {
     const answers: Array<ContextCompactionState> = [available, running, failed];
     const readCompaction = vi.fn<ContextClient["readCompaction"]>(

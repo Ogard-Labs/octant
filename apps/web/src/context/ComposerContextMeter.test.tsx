@@ -1007,6 +1007,7 @@ describe("Compact session", () => {
     return {
       state: compactionStateFixture(subject, state),
       starting: false,
+      stateUnknown: false,
       compact: vi.fn(async () => undefined),
       ...overrides,
     };
@@ -1225,6 +1226,33 @@ describe("Compact session", () => {
     expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
       "Couldn't compact: a reply is running.",
     );
+  });
+
+  it("says the state is unknown once the window stops following a compaction", async () => {
+    const user = userEvent.setup();
+    const controller: SessionCompactionController = {
+      starting: false,
+      stateUnknown: true,
+      compact: vi.fn(async () => undefined),
+    };
+    render(
+      <CompactionHarness controller={controller} meter={false}>
+        <ThreadComposer
+          presentation="follow-up"
+          input={<textarea aria-label="Message" className="composer-input" />}
+          row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+        />
+      </CompactionHarness>,
+    );
+
+    // Send is no longer held on the window's account; the host still refuses
+    // a turn while it compacts.
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+    await openPopover(user);
+    expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
+      "Compaction state unknown: the host stopped answering.",
+    );
+    expect(screen.queryByRole("button", { name: "Compact session" })).not.toBeInTheDocument();
   });
 
   it("offers compaction on a thread the host never plans, beside View usage", async () => {
