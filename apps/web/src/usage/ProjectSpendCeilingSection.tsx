@@ -8,6 +8,7 @@ import { OctantSelectField } from "../ui/base/OctantSelect";
 import {
   MONEY_CEILING_NOTE,
   hasMoneyCeiling,
+  notMeasuredProvidersNote,
   spendCeilingLimits,
   spendCeilingRemainingPhrases,
 } from "./spendCeilingLimits";
@@ -61,6 +62,7 @@ export function ProjectSpendCeilingSection(props: {
   const windowPeriod = window?.kind === "calendar" ? window.period : period;
   const phrases = remaining === undefined ? [] : spendCeilingRemainingPhrases([remaining]);
   const refusal = snapshot?.refusal;
+  const notMeasured = notMeasuredProvidersNote([remaining]);
 
   async function submit(kind: "set" | "raise" | "clear"): Promise<void> {
     const reading =
@@ -114,6 +116,7 @@ export function ProjectSpendCeilingSection(props: {
       ) : phrases.length === 0 ? null : (
         <p role="status">{phrases.map((phrase) => `${phrase} this ${windowPeriod}`).join(" · ")}</p>
       )}
+      {notMeasured === undefined ? null : <p role="note">{notMeasured}</p>}
       {refusal === undefined ? null : <OctantAlert tone="warning">{refusal.message}</OctantAlert>}
       {hasMoneyCeiling([snapshot?.project]) ? <p role="note">{MONEY_CEILING_NOTE}</p> : null}
       <form

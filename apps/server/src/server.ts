@@ -579,7 +579,7 @@ import { createZenBackgroundRouteHandler } from "./zenBackgroundRoutes";
 import { createUsageRouteHandler } from "./usageRoutes";
 import { toTurnMetricsRecord, type TurnEndSummary } from "./metrics/turnEnd";
 import { TurnMetricsStore } from "./metrics/turnMetricsStore";
-import { SpendCeilingService } from "./spendCeilingService";
+import { SpendCeilingService, notMeasuredProvider } from "./spendCeilingService";
 import { createSpendCeilingRouteHandler } from "./spendCeilingRoutes";
 import { CacheStatsProjection } from "./cacheStatsProjection";
 import { createUsageDashboardRouteHandler } from "./usageDashboardRoutes";
@@ -3254,6 +3254,14 @@ export function startOctantServer(
         return workThreadProjection.read(input.threadId as never) !== undefined;
       },
       projectExists: (projectId) => persistence.readProject(projectId as never) !== undefined,
+      notMeasuredProvider: (providerInstanceId) =>
+        notMeasuredProvider(
+          {
+            readProviderInstances: () => persistence.readProviderInstances(),
+            observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
+          },
+          providerInstanceId,
+        ),
     });
     spendCeilingHolder.service = spendCeilingService;
     requireJournalHydration(

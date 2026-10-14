@@ -8,8 +8,12 @@ import {
   SPEND_TURN_AGGREGATE_TYPE,
   decodeSpendCeilingReservationId,
   decodeUtcTimestamp,
+  type ProviderInstance,
+  type ProviderInstanceId,
+  type ProviderObservedState,
   type SpendCeilingCommand,
   type SpendCeilingCommandResult,
+  type SpendCeilingNotMeasuredProvider,
   type SpendCeilingRefusal,
   type SpendCeilingRemaining,
   type SpendCeilingReservationId,
@@ -22,6 +26,7 @@ import {
   authorizeSpendCeilingRead,
   decideSpendCeilingCommand,
   evaluateSpendCeilingAdmission,
+  providerUsageIsNotMeasured,
   remainingSpendCeilingTokens,
   settleSpendCeilingReservation,
   spendCeilingWindowStart,
@@ -92,6 +97,40 @@ export interface SpendCeilingServiceOptions {
     readonly threadId: string;
   }) => boolean;
   readonly projectExists?: (projectId: string) => boolean;
+  /**
+   * The provider a ledger row names, when its unreported turns are not
+   * measured: the instance if it exists and its runtime declares it never
+   * reports usage, otherwise undefined and its unreported turns keep refusing
+   * as unknown spend. Absent, every provider counts.
+   */
+  readonly notMeasuredProvider?: (
+    providerInstanceId: string,
+  ) => SpendCeilingNotMeasuredProvider | undefined;
+}
+
+/**
+ * Whether a ledger row's provider is left out of token and money ceilings,
+ * decided by provider, not by row: by the instance's runtime usage capability
+ * as the host observes it now, for old rows too. A removed or disabled
+ * instance, or one with no observation yet, counts, so its unreported turns
+ * keep refusing. Disabling a provider with a live session leaves its last
+ * observation in place, so the enabled flag is checked here rather than
+ * trusted to have cleared it.
+ */
+export function notMeasuredProvider(
+  host: {
+    readonly readProviderInstances: () => ReadonlyArray<ProviderInstance>;
+    readonly observedState: (instanceId: ProviderInstanceId) => ProviderObservedState | undefined;
+  },
+  providerInstanceId: string,
+): SpendCeilingNotMeasuredProvider | undefined {
+  const instance = host
+    .readProviderInstances()
+    .find((candidate) => String(candidate.id) === providerInstanceId);
+  if (instance === undefined || !instance.enabled) return undefined;
+  return providerUsageIsNotMeasured(host.observedState(instance.id)?.capabilities.usage)
+    ? { providerInstanceId: instance.id, displayName: instance.displayName }
+    : undefined;
 }
 
 /**
@@ -109,6 +148,9 @@ export class SpendCeilingService {
   readonly #agentRuns: Pick<AgentRunProjection, "parentSummary"> | undefined;
   readonly #threadExists: SpendCeilingServiceOptions["threadExists"];
   readonly #projectExists: SpendCeilingServiceOptions["projectExists"];
+  readonly #notMeasuredProvider: (
+    providerInstanceId: string,
+  ) => SpendCeilingNotMeasuredProvider | undefined;
   readonly #reservations = new Map<string, LiveReservation>();
   readonly #turns = new Map<string, InFlightTurn>();
 
@@ -120,6 +162,7 @@ export class SpendCeilingService {
     this.#agentRuns = options.agentRuns;
     this.#threadExists = options.threadExists;
     this.#projectExists = options.projectExists;
+    this.#notMeasuredProvider = options.notMeasuredProvider ?? (() => undefined);
   }
 
   snapshot(input: {
@@ -160,11 +203,11 @@ export class SpendCeilingService {
     const threadRemaining =
       thread === undefined || threadFacts === undefined
         ? undefined
-        : this.#remaining(thread, threadFacts);
+        : this.#remaining(thread, threadFacts, childIds);
     const projectRemaining =
       project === undefined || projectFacts === undefined
         ? undefined
-        : this.#remaining(project, projectFacts);
+        : this.#remaining(project, projectFacts, childIds);
     const preview = evaluateSpendCeilingAdmission({
       ...(threadFacts === undefined ? {} : { thread: threadFacts }),
       ...(projectFacts === undefined ? {} : { project: projectFacts }),
@@ -310,7 +353,11 @@ export class SpendCeilingService {
     return admission;
   }
 
-  #remaining(ceiling: SpendCeilingState, facts: SpendCeilingScopeFacts): SpendCeilingRemaining {
+  #remaining(
+    ceiling: SpendCeilingState,
+    facts: SpendCeilingScopeFacts,
+    childIds: ReadonlyArray<string>,
+  ): SpendCeilingRemaining {
     const { tokenBudget, turnBudget, runTimeBudgetSeconds, costBudgetUsdCents } = ceiling.policy;
     const tokens =
       tokenBudget === undefined || facts.committed.status !== "known"
@@ -356,11 +403,16 @@ export class SpendCeilingService {
               usedUsdCents: facts.usedCostUsdCents,
               remainingUsdCents: Math.max(0, costBudgetUsdCents - facts.usedCostUsdCents),
             };
+    const notMeasured =
+      tokenBudget === undefined && costBudgetUsdCents === undefined
+        ? []
+        : this.#notMeasuredProviders(ceiling, childIds);
     return {
       ...tokens,
       ...turns,
       ...runTime,
       ...money,
+      ...(notMeasured.length === 0 ? {} : { notMeasuredProviders: notMeasured }),
       window: ceiling.window,
       ...(ceiling.overrun === undefined ? {} : { overrun: ceiling.overrun }),
       version: ceiling.version,
@@ -406,44 +458,44 @@ export class SpendCeilingService {
     childIds: ReadonlyArray<string>,
     from: string | undefined,
   ): number | undefined {
-    const subjects = ledgerSubjects(scope, childIds);
-    if (subjects.length === 0 && scope.kind !== "project") return undefined;
-    const conditions: Array<string> = [];
-    const params: Array<string | number> = [];
-    if (subjects.length > 0) {
-      const subjectTerms = subjects.map(() => "(subject_type = ? AND subject_id = ?)");
-      conditions.push(`(${subjectTerms.join(" OR ")})`);
-      for (const subject of subjects) params.push(subject.type, subject.id);
-    }
-    if (scope.kind === "project") {
-      conditions.push(usageProjectConditionSql(1));
-      params.push(...usageProjectConditionParams([String(scope.projectId)]));
-    }
-    if (conditions.length === 0) return undefined;
-    const clauses = [`(${conditions.join(" OR ")})`];
-    if (from !== undefined) {
-      clauses.push("observed_at >= ?");
-      params.push(from);
-    }
-    let row: { readonly unpriced: number; readonly micros: number } | undefined;
+    const where = ledgerWhere({
+      subjects: ledgerSubjects(scope, childIds),
+      ...(scope.kind === "project" ? { projectId: String(scope.projectId) } : {}),
+      ...(from === undefined ? {} : { from }),
+    });
+    if (where === undefined) return undefined;
+    let rows: ReadonlyArray<CostByProvider>;
     try {
-      row = this.#connection
+      // Per provider, so the unreported turns of a provider that never
+      // reports usage can be left out while a reported row with no price,
+      // from any provider, still makes the money ceiling refuse.
+      rows = this.#connection
         .prepare(
           `SELECT
-            COALESCE(SUM(CASE WHEN cost_usd_micros IS NULL THEN 1 ELSE 0 END), 0) AS unpriced,
+            provider_instance_id,
+            COALESCE(SUM(CASE WHEN cost_usd_micros IS NULL AND quality = 'unavailable' THEN 1 ELSE 0 END), 0) AS unreported,
+            COALESCE(SUM(CASE WHEN cost_usd_micros IS NULL AND quality <> 'unavailable' THEN 1 ELSE 0 END), 0) AS unpriced,
             COALESCE(SUM(cost_usd_micros), 0) AS micros
           FROM usage_record_projection
-          WHERE ${clauses.join(" AND ")}`,
+          WHERE ${where.sql}
+          GROUP BY provider_instance_id`,
         )
-        .get(...params) as { readonly unpriced: number; readonly micros: number } | undefined;
+        .all(...where.params) as ReadonlyArray<CostByProvider>;
     } catch {
       return undefined;
     }
-    if (row === undefined || row.unpriced > 0) return undefined;
-    if (!Number.isSafeInteger(row.micros) || row.micros < 0) return undefined;
+    let micros = 0;
+    for (const row of rows) {
+      if (row.unpriced > 0) return undefined;
+      if (row.unreported > 0 && this.#notMeasuredProvider(row.provider_instance_id) === undefined) {
+        return undefined;
+      }
+      micros += row.micros;
+    }
+    if (!Number.isSafeInteger(micros) || micros < 0) return undefined;
     // Whole cents: a partial cent of estimated spend still counts against the
     // ceiling once it reaches one cent.
-    return Math.floor(row.micros / 10_000);
+    return Math.floor(micros / 10_000);
   }
 
   /**
@@ -510,11 +562,47 @@ export class SpendCeilingService {
     from: string | undefined,
   ): SpendTokenTotal {
     const subjects = ledgerSubjects(scope, childIds);
-    return sumUsageTokens(this.#connection, {
-      subjects,
-      ...(scope.kind === "project" ? { projectId: String(scope.projectId) } : {}),
+    return sumUsageTokens(
+      this.#connection,
+      {
+        subjects,
+        ...(scope.kind === "project" ? { projectId: String(scope.projectId) } : {}),
+        ...(from === undefined ? {} : { from }),
+      },
+      (providerInstanceId) => this.#notMeasuredProvider(providerInstanceId) !== undefined,
+    );
+  }
+
+  /**
+   * The providers whose unreported turns this reading leaves out, named so a
+   * surface can say the ceiling does not cover them. A provider whose usage
+   * counts is never listed, even when it has unreported turns: those refuse.
+   */
+  #notMeasuredProviders(
+    ceiling: SpendCeilingState,
+    childIds: ReadonlyArray<string>,
+  ): ReadonlyArray<SpendCeilingNotMeasuredProvider> {
+    const from = spendCeilingWindowStart(ceiling.window, decodeUtcTimestamp(this.#clock()));
+    const where = ledgerWhere({
+      subjects: ledgerSubjects(ceiling.scope, childIds),
+      ...(ceiling.scope.kind === "project" ? { projectId: String(ceiling.scope.projectId) } : {}),
       ...(from === undefined ? {} : { from }),
     });
+    if (where === undefined) return [];
+    let rows: ReadonlyArray<{ readonly provider_instance_id: string }>;
+    try {
+      rows = this.#connection
+        .prepare(
+          `SELECT DISTINCT provider_instance_id
+          FROM usage_record_projection
+          WHERE ${where.sql} AND quality = 'unavailable'
+          ORDER BY provider_instance_id`,
+        )
+        .all(...where.params) as ReadonlyArray<{ readonly provider_instance_id: string }>;
+    } catch {
+      return [];
+    }
+    return rows.flatMap((row) => this.#notMeasuredProvider(row.provider_instance_id) ?? []);
   }
 
   #childSubjectIds(parentThreadId: string): ReadonlyArray<string> {
@@ -655,14 +743,22 @@ function ledgerSubjects(
   ];
 }
 
-function sumUsageTokens(
-  connection: SqliteConnection,
-  input: {
-    readonly subjects: ReadonlyArray<{ readonly type: string; readonly id: string }>;
-    readonly projectId?: string;
-    readonly from?: string;
-  },
-): SpendTokenTotal {
+interface CostByProvider {
+  readonly provider_instance_id: string;
+  readonly unreported: number;
+  readonly unpriced: number;
+  readonly micros: number;
+}
+
+/**
+ * The ledger rows a ceiling counts: its subjects by identity, or the
+ * Project's rows by the Project predicate, inside the window.
+ */
+function ledgerWhere(input: {
+  readonly subjects: ReadonlyArray<{ readonly type: string; readonly id: string }>;
+  readonly projectId?: string;
+  readonly from?: string;
+}): { readonly sql: string; readonly params: ReadonlyArray<string | number> } | undefined {
   const conditions: Array<string> = [];
   const params: Array<string | number> = [];
   if (input.subjects.length > 0) {
@@ -676,27 +772,52 @@ function sumUsageTokens(
     conditions.push(usageProjectConditionSql(1));
     params.push(...usageProjectConditionParams([input.projectId]));
   }
-  if (conditions.length === 0) return { status: "known", tokens: 0 };
-  const scopeWhere = conditions.join(" OR ");
-  const clauses = [`(${scopeWhere})`];
+  if (conditions.length === 0) return undefined;
+  const clauses = [`(${conditions.join(" OR ")})`];
   if (input.from !== undefined) {
     clauses.push("observed_at >= ?");
     params.push(input.from);
   }
-  const where = clauses.join(" AND ");
-  const row = connection
+  return { sql: clauses.join(" AND "), params };
+}
+
+function sumUsageTokens(
+  connection: SqliteConnection,
+  input: {
+    readonly subjects: ReadonlyArray<{ readonly type: string; readonly id: string }>;
+    readonly projectId?: string;
+    readonly from?: string;
+  },
+  notMeasured: (providerInstanceId: string) => boolean,
+): SpendTokenTotal {
+  const where = ledgerWhere(input);
+  if (where === undefined) return { status: "known", tokens: 0 };
+  // Per provider: an unreported turn refuses as unknown spend unless its
+  // provider never reports usage, whose turns the ceiling does not measure.
+  const rows = connection
     .prepare(
       `SELECT
+        provider_instance_id,
         COALESCE(SUM(CASE WHEN quality = 'unavailable' THEN 1 ELSE 0 END), 0) AS unavailable_count,
         COALESCE(SUM(input_tokens + output_tokens + COALESCE(reasoning_tokens, 0)), 0) AS tokens
       FROM usage_record_projection
-      WHERE ${where}`,
+      WHERE ${where.sql}
+      GROUP BY provider_instance_id`,
     )
-    .get(...params) as { readonly unavailable_count: number; readonly tokens: number } | undefined;
-  if (row === undefined) return { status: "known", tokens: 0 };
-  if (row.unavailable_count > 0) return { status: "unavailable" };
-  if (!Number.isSafeInteger(row.tokens) || row.tokens < 0) return { status: "unknowable" };
-  return { status: "known", tokens: row.tokens };
+    .all(...where.params) as ReadonlyArray<{
+    readonly provider_instance_id: string;
+    readonly unavailable_count: number;
+    readonly tokens: number;
+  }>;
+  let tokens = 0;
+  for (const row of rows) {
+    if (row.unavailable_count > 0 && !notMeasured(row.provider_instance_id)) {
+      return { status: "unavailable" };
+    }
+    tokens += row.tokens;
+  }
+  if (!Number.isSafeInteger(tokens) || tokens < 0) return { status: "unknowable" };
+  return { status: "known", tokens };
 }
 
 export function formatSpendCeilingRefusal(refusal: SpendCeilingRefusal): string {

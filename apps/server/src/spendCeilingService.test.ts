@@ -2,14 +2,24 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { decodeAgentRunId, decodeAggregateVersion, decodeProjectId } from "@octant/contracts";
+import {
+  decodeAgentRunId,
+  decodeAggregateVersion,
+  decodeProjectId,
+  decodeProviderInstance,
+  decodeProviderInstanceId,
+  type ProviderCapabilitySupport,
+} from "@octant/contracts";
 import { recordAgentRunTurnUsage } from "./agentRun/agentRunUsageLedger";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite } from "./persistence/sqlitePort";
+import { readProviderInstances } from "./providers/providerProjection";
+import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
 import {
   decodeSpendCeilingReservationId,
+  notMeasuredProvider,
   SpendCeilingService,
   type SpendCeilingServiceOptions,
 } from "./spendCeilingService";
@@ -21,6 +31,7 @@ const ids = {
   project: "73000000-0000-4000-8000-000000000002",
   child: "73000000-0000-4000-8000-000000000003",
   provider: "73000000-0000-4000-8000-000000000004",
+  silentProvider: "73000000-0000-4000-8000-000000000005",
   reservationA: decodeSpendCeilingReservationId("73000000-0000-4000-8000-0000000000aa"),
   reservationB: decodeSpendCeilingReservationId("73000000-0000-4000-8000-0000000000bb"),
 } as const;
@@ -34,6 +45,7 @@ afterEach(() => {
 function openService(options?: {
   readonly clock?: () => string;
   readonly agentRuns?: SpendCeilingServiceOptions["agentRuns"];
+  readonly notMeasuredProvider?: SpendCeilingServiceOptions["notMeasuredProvider"];
 }) {
   const directory = mkdtempSync(join(tmpdir(), "octant-spend-ceiling-"));
   directories.push(directory);
@@ -54,6 +66,9 @@ function openService(options?: {
     threadExists: () => true,
     projectExists: () => true,
     ...(options?.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
+    ...(options?.notMeasuredProvider === undefined
+      ? {}
+      : { notMeasuredProvider: options.notMeasuredProvider }),
   });
   return { connection, journal, service, path: join(directory, "octant.sqlite3") };
 }
@@ -78,6 +93,7 @@ function insertUsage(
     readonly observedAt?: string;
     readonly costUsdMicros?: number;
     readonly costKind?: "provider-recorded" | "api-estimate";
+    readonly providerInstanceId?: string;
   },
 ): void {
   connection
@@ -95,7 +111,7 @@ function insertUsage(
       input.id,
       input.subjectType,
       input.subjectId,
-      ids.provider,
+      input.providerInstanceId ?? ids.provider,
       "gpt-4o",
       "chat-turn",
       input.quality ?? "exact",
@@ -304,6 +320,197 @@ describe("SpendCeilingService", () => {
     expect(admission.status).toBe("refused");
     if (admission.status !== "refused") return;
     expect(admission.refusal.kind).toBe("unknown-spend");
+  });
+
+  describe("a provider whose runtime never reports usage", () => {
+    const silent = {
+      providerInstanceId: decodeProviderInstanceId(ids.silentProvider),
+      displayName: "Agent CLI",
+    };
+    // As the host reads it: only the instance whose runtime declares usage
+    // unsupported is named; every other provider counts.
+    const notMeasuredProvider = (providerInstanceId: string) =>
+      providerInstanceId === ids.silentProvider ? silent : undefined;
+
+    function unreportedTurn(
+      connection: ReturnType<typeof openSqlite>,
+      input: {
+        readonly id: string;
+        readonly providerInstanceId: string;
+        readonly sequence: number;
+      },
+    ): void {
+      insertUsage(connection, {
+        id: input.id,
+        subjectType: "chat-thread",
+        subjectId: ids.thread,
+        tokens: { input: 0, output: 0 },
+        quality: "unavailable",
+        sequence: input.sequence,
+        providerInstanceId: input.providerInstanceId,
+      });
+    }
+
+    it("admits a turn under token and money ceilings and names the provider as not measured", () => {
+      const { connection, service } = openService({ notMeasuredProvider });
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { tokenBudget: 1_000, costBudgetUsdCents: 25_00 },
+        window: { kind: "lifetime" },
+      });
+      // Rows already in the ledger are read by the provider's capability
+      // too, so a thread with unreported turns from before is not stuck.
+      unreportedTurn(connection, {
+        id: "73000000-0000-4000-8000-000000000401",
+        providerInstanceId: ids.silentProvider,
+        sequence: 1,
+      });
+      unreportedTurn(connection, {
+        id: "73000000-0000-4000-8000-000000000402",
+        providerInstanceId: ids.silentProvider,
+        sequence: 2,
+      });
+
+      expect(
+        service.admit({
+          reservationId: ids.reservationA,
+          threadId: ids.thread,
+          threadType: "chat-thread",
+          turnUpperBoundTokens: 100,
+        }).status,
+      ).toBe("admitted");
+      const snapshot = service.snapshot({
+        principalKind: "local-window",
+        threadId: ids.thread,
+        threadType: "chat-thread",
+      });
+      expect(remainingOf(snapshot, "thread")).toMatchObject({
+        committedTokens: 0,
+        usedUsdCents: 0,
+        notMeasuredProviders: [silent],
+      });
+      expect(snapshot).not.toHaveProperty("refusal");
+    });
+
+    it("still refuses an unreported turn from a provider that can report usage", () => {
+      const { connection, service } = openService({ notMeasuredProvider });
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { tokenBudget: 1_000, costBudgetUsdCents: 25_00 },
+        window: { kind: "lifetime" },
+      });
+      unreportedTurn(connection, {
+        id: "73000000-0000-4000-8000-000000000411",
+        providerInstanceId: ids.silentProvider,
+        sequence: 1,
+      });
+      // A failed turn on a provider that reports usage is never free.
+      unreportedTurn(connection, {
+        id: "73000000-0000-4000-8000-000000000412",
+        providerInstanceId: ids.provider,
+        sequence: 2,
+      });
+
+      const admission = service.admit({
+        reservationId: ids.reservationA,
+        threadId: ids.thread,
+        threadType: "chat-thread",
+        turnUpperBoundTokens: 100,
+      });
+      expect(admission).toMatchObject({
+        status: "refused",
+        refusal: { kind: "unknown-spend", dimension: "monetary" },
+      });
+      // The reading names only the provider it leaves out.
+      expect(
+        remainingOf(
+          service.snapshot({
+            principalKind: "local-window",
+            threadId: ids.thread,
+            threadType: "chat-thread",
+          }),
+          "thread",
+        )?.notMeasuredProviders,
+      ).toEqual([silent]);
+    });
+
+    it("counts another provider's spend in the same Project and refuses on it", () => {
+      const { connection, service } = openService({ notMeasuredProvider });
+      seedChatThread(connection, ids.thread, ids.project);
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { tokenBudget: 1_000 },
+        window: { kind: "calendar", period: "day", timeZone: "UTC" },
+      });
+      unreportedTurn(connection, {
+        id: "73000000-0000-4000-8000-000000000421",
+        providerInstanceId: ids.silentProvider,
+        sequence: 1,
+      });
+      insertUsage(connection, {
+        id: "73000000-0000-4000-8000-000000000422",
+        subjectType: "chat-thread",
+        subjectId: ids.thread,
+        tokens: { input: 800, output: 100 },
+        sequence: 2,
+      });
+
+      expect(
+        remainingOf(
+          service.snapshot({ principalKind: "local-window", projectId: ids.project }),
+          "project",
+        ),
+      ).toMatchObject({ committedTokens: 900, notMeasuredProviders: [silent] });
+      const admission = service.admit({
+        reservationId: ids.reservationA,
+        threadId: ids.thread,
+        threadType: "chat-thread",
+        projectId: ids.project,
+        turnUpperBoundTokens: 200,
+      });
+      expect(admission).toMatchObject({
+        status: "refused",
+        refusal: { kind: "exhausted", scopeKind: "project" },
+      });
+    });
+
+    it("still refuses a money ceiling over reported usage that has no price", () => {
+      const { connection, service } = openService({ notMeasuredProvider });
+      service.execute("local-window", {
+        kind: "set-spend-ceiling",
+        scope: { kind: "thread", threadType: "chat-thread", threadId: ids.thread },
+        expectedVersion: decodeAggregateVersion(0),
+        policy: { costBudgetUsdCents: 25_00 },
+        window: { kind: "lifetime" },
+      });
+      // Tokens with no cost and no rate are unpriced, not unreported, even
+      // from a provider whose unreported turns are left out.
+      insertUsage(connection, {
+        id: "73000000-0000-4000-8000-000000000431",
+        subjectType: "chat-thread",
+        subjectId: ids.thread,
+        tokens: { input: 100, output: 0 },
+        sequence: 1,
+        providerInstanceId: ids.silentProvider,
+      });
+
+      const admission = service.admit({
+        reservationId: ids.reservationA,
+        threadId: ids.thread,
+        threadType: "chat-thread",
+        turnUpperBoundTokens: 100,
+      });
+      expect(admission).toMatchObject({
+        status: "refused",
+        refusal: { kind: "unknown-spend", dimension: "monetary" },
+      });
+    });
   });
 
   it("refuses a hard-ceiling turn with no per-turn upper bound", () => {
@@ -845,5 +1052,126 @@ describe("SpendCeilingService", () => {
     expect(refused.status).toBe("refused");
     if (refused.status !== "refused") return;
     expect(refused.refusal).toMatchObject({ dimension: "turns", ceilingTurns: 2 });
+  });
+});
+
+describe("notMeasuredProvider", () => {
+  const providerIds = {
+    measuredOut: "73000000-0000-4000-8000-000000000501",
+    disabled: "73000000-0000-4000-8000-000000000502",
+    deleted: "73000000-0000-4000-8000-000000000503",
+    unprobed: "73000000-0000-4000-8000-000000000504",
+    unproven: "73000000-0000-4000-8000-000000000505",
+  } as const;
+
+  function append(
+    journal: ReturnType<typeof openService>["journal"],
+    instanceId: string,
+    expectedVersion: number,
+    eventName: string,
+    payload: unknown,
+  ): void {
+    journal.append({
+      aggregate: { aggregateType: "provider-instance", aggregateId: instanceId },
+      expectedVersion,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName,
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor: { kind: "local-user", actorId: ids.provider },
+          occurredAt: now,
+          payload,
+        },
+      ],
+    });
+  }
+
+  function instance(id: string, overrides: Record<string, unknown> = {}) {
+    return decodeProviderInstance({
+      id,
+      displayName: `Agent ${id.slice(-3)}`,
+      driverKind: "opencode",
+      configuration: { kind: "opencode-cli", binaryPath: "/opt/homebrew/bin/opencode" },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      ...overrides,
+    });
+  }
+
+  function observe(
+    registry: ProviderRuntimeRegistry,
+    id: string,
+    usage: ProviderCapabilitySupport,
+  ): void {
+    registry.setObservedState({
+      instanceId: id,
+      readiness: "ready",
+      processState: "stopped",
+      models: [],
+      capabilities: {
+        streaming: "supported",
+        resume: "unsupported",
+        interruption: "unsupported",
+        approvals: "unsupported",
+        userQuestions: "unsupported",
+        reasoning: "unsupported",
+        usage,
+        toolActivity: "unsupported",
+        fileChanges: "unsupported",
+        diffs: "unsupported",
+        taskProgress: "unsupported",
+        nativeChildAgents: "unsupported",
+        nativeAttachments: "unsupported",
+        nativeWebResearch: "unsupported",
+        appManagedTools: "unsupported",
+        citations: "unsupported",
+        harnessAutoReview: "unsupported",
+      },
+      observedAt: now,
+    });
+  }
+
+  it("leaves out only an enabled instance whose runtime declares usage unsupported", () => {
+    const { connection, journal } = openService();
+    const registry = new ProviderRuntimeRegistry();
+    for (const id of Object.values(providerIds)) {
+      append(journal, id, 0, "provider.instance-created@1", { instance: instance(id) });
+    }
+    observe(registry, providerIds.measuredOut, "unsupported");
+    // Disabled while a session was live: its observation was never cleared.
+    observe(registry, providerIds.disabled, "unsupported");
+    append(journal, providerIds.disabled, 1, "provider.instance-enabled-changed@1", {
+      instance: instance(providerIds.disabled, { enabled: false, version: 2 }),
+    });
+    // Removed, with its last observation still held.
+    observe(registry, providerIds.deleted, "unsupported");
+    append(journal, providerIds.deleted, 1, "provider.instance-removed@1", {
+      instanceId: providerIds.deleted,
+      version: 2,
+    });
+    // Not proven either way.
+    observe(registry, providerIds.unproven, "unavailable");
+    const host = {
+      readProviderInstances: () => readProviderInstances(connection),
+      observedState: registry.observedState.bind(registry),
+    };
+
+    expect(notMeasuredProvider(host, providerIds.measuredOut)).toEqual({
+      providerInstanceId: decodeProviderInstanceId(providerIds.measuredOut),
+      displayName: "Agent 501",
+    });
+    for (const counted of [
+      providerIds.disabled,
+      providerIds.deleted,
+      providerIds.unprobed,
+      providerIds.unproven,
+    ]) {
+      expect(notMeasuredProvider(host, counted)).toBeUndefined();
+    }
   });
 });

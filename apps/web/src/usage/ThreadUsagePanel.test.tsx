@@ -329,6 +329,44 @@ describe("ThreadUsagePanel", () => {
     expect(screen.getByText(/API-rate equivalents, not your bill/)).toBeVisible();
   });
 
+  it("names a provider that reports no usage as not measured instead of refusing over it", async () => {
+    const load = vi.fn().mockResolvedValue(dashboard(4));
+    const snapshot = vi.fn().mockResolvedValue({
+      thread: { version: 1, policy: { tokenBudget: 1_000 } },
+      threadRemaining: {
+        ceilingTokens: 1_000,
+        committedTokens: 0,
+        reservedTokens: 0,
+        remainingTokens: 1_000,
+        notMeasuredProviders: [
+          {
+            providerInstanceId: "73000000-0000-4000-8000-000000000005",
+            displayName: "Agent CLI",
+          },
+        ],
+        window: { kind: "lifetime" },
+        version: 1,
+      },
+    });
+    await renderOpen(
+      <ThreadUsagePanel
+        client={{ load } as UsageDashboardClient}
+        spendCeilingClient={{ snapshot, execute: vi.fn() } as never}
+        subjectId="73000000-0000-4000-8000-000000000001"
+        subjectType="chat-thread"
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("1,000 of 1,000 tokens remaining"),
+    );
+    expect(
+      screen.getByText(
+        "Not measured: Agent CLI reports no usage, so its turns do not count toward the token or money budget. Turns and run time still count.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("reports a host failure instead of an empty total", async () => {
     const load = vi.fn().mockRejectedValue(new UsageDashboardClientFailure("Host is down.", 0));
     await renderOpen(

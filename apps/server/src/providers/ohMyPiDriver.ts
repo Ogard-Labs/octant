@@ -33,7 +33,9 @@ const capabilities = {
   approvals: "unsupported",
   userQuestions: "unsupported",
   reasoning: "supported",
-  usage: "unavailable",
+  // The RPC mapper never emits usage, so a spend ceiling leaves its turns out
+  // and says they are not measured.
+  usage: "unsupported",
   toolActivity: "unsupported",
   fileChanges: "unavailable",
   diffs: "unavailable",
