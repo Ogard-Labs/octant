@@ -75,10 +75,17 @@ or the validation-evidence dump — those stay on the Apple workbench command.
   show a device. Beside it are the OS and the state in words (**Running**,
   **Booting**, **Live view lost**, and so on). On the right are **Home** and
   **Screenshot**, **Lock** when the pane is wide, and **More**: **Type
-  text…**, **Lock**, **Switch device…**, **Diagnostics** (what is running,
-  recent evidence, and where the live view comes from), **Stop live view**,
-  and **Shut down**. Only actions the host supports today appear. The arrow
-  keys move along the toolbar.
+  text…**, **Open URL…**, **Lock**, **Switch device…**, **Diagnostics** (what
+  is running, recent evidence, and where the live view comes from), **Stop
+  live view**, and **Shut down**. Only actions the host supports today
+  appear. The arrow keys move along the toolbar.
+- **Open URL.** Opens an `http` or `https` address on the Simulator, the way
+  tapping a link would; a bare `example.com` is read as
+  `https://example.com/`. Other kinds of address, including app links and
+  `file:` or `javascript:` ones, are refused. On an approval-gated thread
+  every address asks first, and the confirmation shows the whole address;
+  **Allow input** does not cover it. Evidence records only the address's
+  origin (`https://example.com`), never its path or query.
 - **The line.** An error is one sentence with one fix, such as **Try again**
   or **Reconnect**; the raw outcome is in **Diagnostics**. On an
   approval-gated thread the line asks **Allow input on iPhone 17?**. **Allow**

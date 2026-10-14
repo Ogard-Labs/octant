@@ -121,19 +121,25 @@ export function evaluateAppleSimulatorRequest(
   );
   if (scoped.kind === "denied") return scoped;
   if (
-    (isAppleSimulatorInputKind(request.kind) || isAppleSimulatorOpenInputKind(request.kind)) &&
+    (isAppleSimulatorInputKind(request.kind) ||
+      isAppleSimulatorOpenInputKind(request.kind) ||
+      request.kind === "open-url") &&
     request.requestedBy === undefined
   ) {
     return { kind: "denied", reason: "actor-required" };
   }
-  // Repairing input restarts the Simulator's home screen and closes its apps.
-  // Only a person may ask for that; an agent or the host never does it for them.
+  // Repairing input restarts the Simulator's home screen and closes its apps,
+  // and Open URL is offered only in the pane. Only a person may ask for
+  // either; an agent or the host never does it for them.
   if (
-    request.kind === "repair-input" &&
+    (request.kind === "repair-input" || request.kind === "open-url") &&
     request.requestedBy?.kind !== "local-user" &&
     request.requestedBy?.kind !== "remote-device"
   ) {
     return { kind: "denied", reason: "person-required" };
+  }
+  if (request.kind === "open-url" && request.url === undefined) {
+    return { kind: "denied", reason: "url-required" };
   }
   const simulator = simulators.find((candidate) => candidate.simulatorId === request.simulatorId);
   if (simulator === undefined) return { kind: "denied", reason: "invalid-destination" };
@@ -148,6 +154,7 @@ export function evaluateAppleSimulatorRequest(
       request.kind === "terminate" ||
       request.kind === "logs" ||
       request.kind === "screenshot" ||
+      request.kind === "open-url" ||
       isAppleSimulatorInputKind(request.kind) ||
       isAppleSimulatorOpenInputKind(request.kind)) &&
     simulator.state !== "booted"
@@ -274,6 +281,27 @@ export function redactedAppleInputDiagnostic(
     };
   }
   return { severity: "note", message: `${request.kind} completed` };
+}
+
+/**
+ * Evidence for Open URL keeps the address's origin only. Its path and query
+ * can carry tokens or personal data, so, like typed text, they are shown in
+ * the confirmation and never recorded.
+ */
+export function deviceOpenUrlDiagnostic(
+  url: string | undefined,
+  outcome: string,
+): { readonly severity: "note"; readonly message: string } {
+  let origin = "unknown origin";
+  try {
+    if (url !== undefined) origin = new URL(url).origin;
+  } catch {
+    // The contract only admits parseable addresses; nothing else to keep.
+  }
+  return {
+    severity: "note",
+    message: `open-url ${outcome} (${origin}; path and query not recorded)`,
+  };
 }
 
 export function redactedAppleOpenInputDiagnostic(): {

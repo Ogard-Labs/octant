@@ -1706,8 +1706,16 @@ function approvalPrompt(
     const input =
       isAppleSimulatorInputKind(effect.request.kind) ||
       isAppleSimulatorOpenInputKind(effect.request.kind);
-    message = input ? "Allow input to this Simulator?" : `Allow Apple ${effect.request.kind}?`;
+    const url = "url" in effect.request ? effect.request.url : undefined;
+    message = input
+      ? "Allow input to this Simulator?"
+      : url !== undefined
+        ? "Open this URL on the Simulator?"
+        : `Allow Apple ${effect.request.kind}?`;
     effectDetail = [
+      // The whole address, exactly as the device receives it: the approval
+      // binds to it, and the evidence later keeps only its origin.
+      ...(url === undefined ? [] : [`URL: ${url}`]),
       ...(input
         ? [
             "Covers taps, swipes, typing and keys on this Simulator for 15 minutes after each input.",
@@ -1727,8 +1735,14 @@ function approvalPrompt(
     const input =
       isAndroidEmulatorInputKind(effect.request.kind) ||
       isAndroidEmulatorOpenInputKind(effect.request.kind);
-    message = input ? "Allow input to this emulator?" : `Allow Android ${effect.request.kind}?`;
+    const url = effect.request.url;
+    message = input
+      ? "Allow input to this emulator?"
+      : url !== undefined
+        ? "Open this URL on the emulator?"
+        : `Allow Android ${effect.request.kind}?`;
     effectDetail = [
+      ...(url === undefined ? [] : [`URL: ${url}`]),
       ...(input
         ? ["Covers taps, swipes, typing and keys on this emulator for 15 minutes after each input."]
         : []),

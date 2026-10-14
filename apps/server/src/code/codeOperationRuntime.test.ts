@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -264,6 +264,58 @@ describe("CodeOperationRuntime", () => {
     });
     expect(challenge?.message).toBe("Allow input to this emulator?");
     expect(challenge?.detail).toContain("for 15 minutes after each input");
+    fixture.close();
+  });
+
+  it("shows the whole address in an Open URL confirmation and approves only that address", async () => {
+    const fixture = runtimeFixture({ approvalValidator: false });
+    const url = "https://example.com/reset?token=abc&next=%2Fhome";
+    const request = {
+      actionId: operationId(830) as never,
+      correlationId: operationId(831) as never,
+      authority: {
+        hostId: "90000000-0000-4000-8000-000000000010" as never,
+        mode: "code" as const,
+        projectId: thread().projectId,
+        providerInstanceId: thread().providerInstanceId,
+        extension: { kind: "core" as const },
+      },
+      threadId,
+      checkoutId,
+      kind: "open-url" as const,
+      simulatorId: "90000000-0000-4000-8000-000000000011" as never,
+      requestedBy: { kind: "local-user" as const, actorId: operationId(832) as never },
+      url,
+      timeoutMs: 30_000,
+      approval: { kind: "pending" as const },
+    };
+    const challenge = await fixture.runtime.prepareApproval(windowId, {
+      effect: { kind: "apple-action", request },
+    });
+    expect(challenge?.message).toBe("Open this URL on the Simulator?");
+    expect(challenge?.detail).toContain(`URL: ${url}`);
+    expect(challenge?.detail).not.toContain("15 minutes");
+
+    const receipt = await fixture.runtime.confirmApproval(windowId, {
+      challengeId: challenge!.challengeId,
+    });
+    const validate = (
+      fixture.runtime as unknown as {
+        validateAppleApproval: (windowId: WindowId, request: unknown) => Promise<boolean>;
+      }
+    ).validateAppleApproval;
+    const approval = { kind: "approved" as const, approvalId: receipt!.approvalId };
+    // The approval is for that address; another one under it is refused.
+    await expect(
+      validate.call(fixture.runtime, windowId, {
+        ...request,
+        url: "https://example.com/elsewhere",
+        approval,
+      }),
+    ).resolves.toBe(false);
+    await expect(validate.call(fixture.runtime, windowId, { ...request, approval })).resolves.toBe(
+      true,
+    );
     fixture.close();
   });
 
@@ -5680,6 +5732,11 @@ function runtimeFixture(options: {
   supportsAppManagedTools?: boolean;
   /** Whether the provider natively serves ACP client capabilities. */
   supportsAcpClientCapabilities?: boolean;
+  /** The checkout root a turn resolves (default a path that does not exist). */
+  checkoutRoot?: string;
+  acpTerminalConfinement?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["acpTerminalConfinement"];
   /** Whether the provider can carry a session on to another of its models. */
   supportsModelSwitch?: boolean;
   terminalExit?: { readonly exitCode: number };
@@ -5946,8 +6003,11 @@ function runtimeFixture(options: {
       standingAuthority: (run) =>
         hostAccess === undefined ? run() : hostAccess.standingAuthority(run),
     },
+    ...(options.acpTerminalConfinement === undefined
+      ? {}
+      : { acpTerminalConfinement: options.acpTerminalConfinement }),
     resolveCheckoutRoot: async () => ({
-      checkoutRoot: "/private/exact",
+      checkoutRoot: options.checkoutRoot ?? "/private/exact",
       shell: "/bin/zsh",
       credentialReferences: options.credentialReferences ?? [],
       environment: {},
@@ -7700,6 +7760,205 @@ describe("Project access inside a Code turn's tool calls", () => {
       await fixture.runtime.close();
       fixture.close();
     }
+  });
+
+  describe("a turn keeps the checkout it was started on", () => {
+    const acp = {
+      write: (path: string) => ({
+        name: "octant_acp_fs_write_text_file",
+        input: { path, content: "written" },
+      }),
+      read: (path: string) => ({ name: "octant_acp_fs_read_text_file", input: { path } }),
+      run: (command: string) => ({ name: "octant_acp_terminal_create", input: { command } }),
+    };
+    const otherProject = decodeProjectId("90000000-0000-4000-8000-0000000000c1");
+    const scratch: Array<string> = [];
+    afterEach(() => {
+      for (const directory of scratch.splice(0))
+        rmSync(directory, { recursive: true, force: true });
+    });
+
+    /** The turn's checkout, and the root a rebound window would use instead. */
+    function roots() {
+      const checkoutRoot = mkdtempSync(join(tmpdir(), "octant-turn-checkout-"));
+      const reboundRoot = mkdtempSync(join(tmpdir(), "octant-turn-rebound-"));
+      scratch.push(checkoutRoot, reboundRoot);
+      return { checkoutRoot, reboundRoot };
+    }
+
+    const confinement = {
+      environment: { PATH: "/usr/bin:/bin", TMPDIR: tmpdir() },
+      prepare: ({
+        executable,
+        args,
+      }: {
+        readonly executable: string;
+        readonly args: ReadonlyArray<string>;
+      }) => ({ command: executable, args }),
+    };
+
+    async function startTurn(
+      fixture: ReturnType<typeof runtimeFixture>,
+      access: CodeProjectAccess,
+      operation: ReturnType<typeof operationId>,
+    ) {
+      await access.run(localWindow, () =>
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operation,
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      );
+    }
+
+    it("keeps a rebound window's running turn on its checkout, and refuses the next turn", async () => {
+      const { checkoutRoot, reboundRoot } = roots();
+      const binding = { current: thread().projectId as CodeThread["projectId"] | undefined };
+      const access = windowBoundTo(binding);
+      // The person moves the window to another Project after the first answer.
+      const endpoint = await functionCallingEndpoint(
+        [
+          acp.write(join(checkoutRoot, "before.txt")),
+          acp.write(join(checkoutRoot, "after.txt")),
+          acp.run("echo ran > terminal.txt"),
+          acp.write(join(reboundRoot, "elsewhere.txt")),
+          read,
+        ],
+        (requestNumber) => {
+          if (requestNumber === 2) binding.current = otherProject;
+        },
+      );
+      const fixture = runtimeFixture({
+        provider: endpoint.driver,
+        supportsAppManagedTools: true,
+        supportsAcpClientCapabilities: true,
+        codeProjectAccess: access,
+        checkoutRoot,
+        acpTerminalConfinement: confinement,
+        terminalExit: { exitCode: 0 },
+      });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+      try {
+        await access.run(localWindow, () =>
+          fixture.runtime.execute(windowId, {
+            kind: "start-terminal",
+            operationId: operationId(1351),
+            threadId,
+            checkoutId,
+            terminalId,
+            columns: 100,
+            rows: 30,
+            credentialRefs: [],
+          }),
+        );
+        await startTurn(fixture, access, operationId(1352));
+        await vi.waitFor(() => expect(endpoint.bodies).toHaveLength(6));
+        expect(endpoint.answers().map(terminalOutcome)).toEqual([
+          "none",
+          "none",
+          "none",
+          "path-outside-checkout",
+          // The window-held terminal follows the binding the window has now.
+          "terminal-unavailable",
+        ]);
+        expect(readFileSync(join(checkoutRoot, "before.txt"), "utf8")).toBe("written");
+        expect(readFileSync(join(checkoutRoot, "after.txt"), "utf8")).toBe("written");
+        await vi.waitFor(() => expect(existsSync(join(checkoutRoot, "terminal.txt"))).toBe(true));
+        expect(existsSync(join(reboundRoot, "elsewhere.txt"))).toBe(false);
+        expect(existsSync(join(reboundRoot, "terminal.txt"))).toBe(false);
+        // The next turn checks the binding again.
+        await expect(startTurn(fixture, access, operationId(1353))).rejects.toMatchObject({
+          failure: { category: "unauthorized" },
+        });
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("keeps a closed window's running turn on its checkout", async () => {
+      const { checkoutRoot } = roots();
+      const presence = { live: true };
+      const access = windowBoundTo({ current: thread().projectId }, presence);
+      const endpoint = await functionCallingEndpoint(
+        [
+          acp.write(join(checkoutRoot, "before.txt")),
+          acp.write(join(checkoutRoot, "after.txt")),
+          acp.run("echo ran > terminal.txt"),
+        ],
+        (requestNumber) => {
+          if (requestNumber === 2) presence.live = false;
+        },
+      );
+      const fixture = runtimeFixture({
+        provider: endpoint.driver,
+        supportsAppManagedTools: false,
+        supportsAcpClientCapabilities: true,
+        codeProjectAccess: access,
+        checkoutRoot,
+        acpTerminalConfinement: confinement,
+      });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+      try {
+        await startTurn(fixture, access, operationId(1361));
+        await vi.waitFor(() => expect(endpoint.bodies).toHaveLength(4));
+        expect(endpoint.answers().map(terminalOutcome)).toEqual(["none", "none", "none"]);
+        expect(readFileSync(join(checkoutRoot, "after.txt"), "utf8")).toBe("written");
+        await vi.waitFor(() => expect(existsSync(join(checkoutRoot, "terminal.txt"))).toBe(true));
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("keeps a Plan turn read-only on its checkout after the window is rebound", async () => {
+      const { checkoutRoot } = roots();
+      writeFileSync(join(checkoutRoot, "note.txt"), "plan note");
+      const binding = { current: thread().projectId as CodeThread["projectId"] | undefined };
+      const access = windowBoundTo(binding);
+      const endpoint = await functionCallingEndpoint(
+        [
+          acp.read(join(checkoutRoot, "note.txt")),
+          acp.read(join(checkoutRoot, "note.txt")),
+          acp.write(join(checkoutRoot, "blocked.txt")),
+          acp.run("echo ran > blocked-terminal.txt"),
+        ],
+        (requestNumber) => {
+          if (requestNumber === 2) binding.current = otherProject;
+        },
+      );
+      const fixture = runtimeFixture({
+        provider: endpoint.driver,
+        supportsAppManagedTools: false,
+        supportsAcpClientCapabilities: true,
+        codeProjectAccess: access,
+        checkoutRoot,
+        acpTerminalConfinement: confinement,
+      });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+      try {
+        await startTurn(fixture, access, operationId(1371));
+        await vi.waitFor(() => expect(endpoint.bodies).toHaveLength(5));
+        const answers = endpoint.answers();
+        expect(answers.slice(0, 2).map((answer) => JSON.parse(answer ?? "{}"))).toEqual([
+          { content: "plan note" },
+          { content: "plan note" },
+        ]);
+        // A Plan turn is offered no write or process tool at all.
+        expect(answers.slice(2).map(terminalOutcome)).toEqual([
+          expect.stringContaining("was offered"),
+          expect.stringContaining("was offered"),
+        ]);
+        expect(existsSync(join(checkoutRoot, "blocked.txt"))).toBe(false);
+        expect(existsSync(join(checkoutRoot, "blocked-terminal.txt"))).toBe(false);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
   });
 });
 

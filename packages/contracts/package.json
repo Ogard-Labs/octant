@@ -108,6 +108,7 @@
     "./apple-toolchain-rpc": "./src/appleToolchainRpc.ts",
     "./android-toolchain": "./src/androidToolchain.ts",
     "./android-toolchain-rpc": "./src/androidToolchainRpc.ts",
+    "./device-host": "./src/deviceHost.ts",
     "./thread-checkpoints": "./src/threadCheckpoints.ts",
     "./thread-creation": "./src/threadCreation.ts",
     "./thread-retention": "./src/threadRetention.ts",

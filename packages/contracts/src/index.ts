@@ -108,6 +108,7 @@ export * from "./appleToolchain";
 export * from "./appleToolchainRpc";
 export * from "./androidToolchain";
 export * from "./androidToolchainRpc";
+export * from "./deviceHost";
 export * from "./artifactLibrary";
 export * from "./artifactMirror";
 export * from "./artifactBundle";

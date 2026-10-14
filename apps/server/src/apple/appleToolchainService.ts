@@ -26,6 +26,7 @@ import {
 } from "@octant/contracts";
 import {
   APPLE_HOST_RESTART_RECONCILIATION_NOTE,
+  deviceOpenUrlDiagnostic,
   evaluateAppleBuildRequest,
   evaluateAppleSimulatorRequest,
   isAppleSimulatorInputKind,
@@ -570,6 +571,9 @@ export class AppleToolchainService {
       snapshotAt: this.#options.now(),
       toolchain: this.#lastToolchain,
       simulators: this.#lastSimulators,
+      // What this host can do beyond the original actions; the pane offers
+      // an item only once it is listed here.
+      capabilities: { openUrl: true },
       active: [...this.#active.values()]
         .filter((active) => contextMatches(active.context, context))
         .map(({ progress }) => progress),
@@ -911,6 +915,34 @@ export class AppleToolchainService {
           context,
           request.timeoutMs,
           signal,
+        );
+      } else if (request.kind === "open-url") {
+        const url = request.url;
+        if (url === undefined) throw new Error("open-url reached the host without an address.");
+        this.#advance(active, "launching");
+        // The address is one argv entry handed to simctl, never a shell word.
+        terminal = await this.#command(
+          ["xcrun", "simctl", "openurl", request.simulatorId, url],
+          context,
+          request.timeoutMs,
+          signal,
+        );
+        // simctl's own output can quote the address, so the log and the
+        // evidence keep only the note, which names the origin.
+        const outcome = outcomeFor(terminal);
+        const note = deviceOpenUrlDiagnostic(url, outcome === "succeeded" ? "completed" : outcome);
+        cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
+        const logReference = `apple-log-${request.actionId}`;
+        await this.#writeArtifact(logReference, [new TextEncoder().encode(`${note.message}\n`)]);
+        this.#advance(active, "completed", "completed");
+        return evidence(
+          request,
+          outcome,
+          startedAt,
+          this.#options.now(),
+          [note],
+          [{ kind: "log", reference: logReference }],
+          cleanup,
         );
       } else if (!isBuildRequest(request) && isAppleSimulatorInputKind(request.kind)) {
         this.#advance(active, "injecting-input");
@@ -1713,6 +1745,8 @@ function unrecordedActionNote(
   context: AppleExecutionContext,
 ): string {
   if (request.kind === "type-text") return "type-text did not record evidence (detail redacted)";
+  // A launch error can quote its argv, and with it the whole address.
+  if (request.kind === "open-url") return "open-url did not record evidence (detail redacted)";
   // A filesystem error names absolute host paths; they leave the host the same
   // way command output does, with the checkout and artifact roots replaced.
   const reason = (error instanceof Error ? error.message : String(error))

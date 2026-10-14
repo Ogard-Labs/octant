@@ -137,6 +137,41 @@ reconnects it. It rides the same Allow input grant as a tap, never runs
 automatically, and is refused unless a person (`local-user` or
 `remote-device`) requested it; `octant_apple` does not offer it.
 
+## Open URL
+
+The device pane's More menu offers **Open URL…** only when the host's runtime
+snapshot lists `capabilities.openUrl`; a host that predates the flag omits it
+and the item is left out, never shown disabled. Unknown capability flags are
+ignored rather than refused, so a host can report the next item without
+breaking an older pane. Both the Simulator and emulator hosts report it.
+
+The address is a credential-free `http` or `https` URL of at most 2,048
+characters, in exactly the form the URL parser writes it back
+(`DeviceOpenUrl`). The pane reads a bare host as `https://` and sends the
+parsed form. `javascript:`, `file:`, `data:`, `content:`, `intent:`, and app
+deep-link schemes are refused at the contract, before authority is resolved.
+Requiring the parsed form means the address the confirmation shows is the
+address the device receives, byte for byte. Custom app schemes are
+deliberately out until a rule says which ones may be opened; universal links
+over `https` still reach an app that claims them.
+
+On the Simulator the host runs `xcrun simctl openurl <udid> <url>` with the
+address as one argv entry. On the emulator it runs `adb shell am start -a
+android.intent.action.VIEW -d <url>`; `adb` joins its argv into one line the
+device shell parses again, so the address is passed single-quoted, as typed
+text is. `am start` can exit 0 after printing `Error: Activity not started`,
+so such a line makes the action `failed`.
+
+Open URL is an effect, not input. Only a person (`local-user` or
+`remote-device` in `requestedBy`) may ask for it; an agent or the host is
+refused, as with Repair input.
+Plan refuses it; Full access sends it unasked; on an approval-gated thread
+every address raises its own confirmation, which names the whole address and
+is bound to it, and Allow input never covers it. Evidence and its log keep only
+`open-url completed (<origin>; path and query not recorded)`: the tool's own
+output can quote the address, so none of it is kept, for the same reason typed
+text is redacted. The agent tools do not offer Open URL.
+
 ## Managed device tools
 
 The iOS Simulator and Android emulator panes ride
