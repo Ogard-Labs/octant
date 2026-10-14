@@ -6,6 +6,7 @@ import {
   type ContextCompactionAvailability,
   type ContextCompactionRecord,
   type ContextCompactionRefusalReason,
+  type ContextCompactionSettledRecord,
   type ContextInspectorSnapshot,
   type ContextSubjectRef,
   type ProjectProviderPolicy,
@@ -75,6 +76,11 @@ export interface SessionCompactionThreads {
   readonly conversation: (threadId: string) => ReadonlyArray<SessionConversationMessage>;
   /** The thread's own scratch folder, where its provider sessions start. */
   readonly scratchRoot: (threadId: string) => Promise<string>;
+  /**
+   * Carries a compaction that ended onto the thread's live stream. Absent
+   * where that stream already reads the journaled outcome itself.
+   */
+  readonly settled?: (threadId: string, compaction: ContextCompactionSettledRecord) => void;
 }
 
 export interface SessionCompactionOptions {
@@ -380,7 +386,22 @@ export class SessionCompactionService {
       }
     } finally {
       release(usage);
+      this.#announceSettled(command, threads);
     }
+  }
+
+  #announceSettled(command: CompactSessionCommand, threads: SessionCompactionThreads): void {
+    if (threads.settled === undefined) return;
+    let record: ContextCompactionRecord | undefined;
+    try {
+      record = this.#options.harness.compaction(command.subject, command.compactionId);
+    } catch {
+      // Storage is unavailable; the window reads the outcome on its next inspection.
+      return;
+    }
+    // A purge erased it, or the next start closes it as interrupted.
+    if (record === undefined || record.status === "running") return;
+    threads.settled(String(command.subject.aggregateId), record);
   }
 
   /**

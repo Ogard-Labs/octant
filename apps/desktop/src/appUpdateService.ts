@@ -454,7 +454,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
       | {
           readonly kind: "wait";
           readonly activeAgentCount: number;
-          readonly attentionRequired: boolean;
+          readonly activityUnconfirmed: boolean;
         }
       | { readonly kind: "not-ready" }
     > {

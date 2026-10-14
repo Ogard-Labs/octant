@@ -200,7 +200,7 @@ describe("desktop host lifecycle", () => {
     expect(resolveUpdateInstallReadiness(workInFlight(running))).toEqual({
       kind: "wait",
       activeAgentCount: 1,
-      attentionRequired: false,
+      activityUnconfirmed: false,
     });
     expect(shouldConfirmQuit(running)).toBe(true);
   });
@@ -213,10 +213,81 @@ describe("desktop host lifecycle", () => {
       attentionRequired: true,
       activityUnconfirmed: true,
     };
-    expect(resolveUpdateInstallReadiness(workInFlight(unconfirmed))).toMatchObject({
+    expect(resolveUpdateInstallReadiness(workInFlight(unconfirmed))).toEqual({
       kind: "wait",
+      activeAgentCount: 0,
+      activityUnconfirmed: true,
     });
     expect(shouldConfirmQuit(unconfirmed)).toBe(true);
+  });
+
+  it("refreshes activity before deciding whether an update install may proceed or must wait", async () => {
+    let current: LocalHostSnapshot = {
+      state: "running",
+      ownership: "desktop-owned",
+      activeAgentCount: 1,
+      attentionRequired: false,
+    };
+
+    // Cached snapshot says busy, fresh reading says idle: install proceeds.
+    await expect(
+      workInFlight({
+        refreshActivity: async () => {
+          current = { ...current, activeAgentCount: 0 };
+        },
+        snapshot: () => current,
+      }).then(resolveUpdateInstallReadiness),
+    ).resolves.toEqual({ kind: "ready" });
+
+    // Cached snapshot says idle, fresh reading says busy: install waits.
+    await expect(
+      workInFlight({
+        refreshActivity: async () => {
+          current = { ...current, activeAgentCount: 2 };
+        },
+        snapshot: () => current,
+      }).then(resolveUpdateInstallReadiness),
+    ).resolves.toEqual({
+      kind: "wait",
+      activeAgentCount: 2,
+      activityUnconfirmed: false,
+    });
+
+    // Cached snapshot says idle, refresh fails: install waits on unconfirmed activity.
+    current = { ...current, activeAgentCount: 0 };
+    await expect(
+      workInFlight({
+        refreshActivity: async () => {
+          throw new Error("probe failed");
+        },
+        snapshot: () => current,
+      }).then(resolveUpdateInstallReadiness),
+    ).resolves.toEqual({
+      kind: "wait",
+      activeAgentCount: 0,
+      activityUnconfirmed: true,
+    });
+  });
+
+  it("waits on unconfirmed activity when the fresh reading never finishes, instead of hanging", async () => {
+    const idle: LocalHostSnapshot = {
+      state: "running",
+      ownership: "desktop-owned",
+      activeAgentCount: 0,
+      attentionRequired: false,
+    };
+
+    await expect(
+      workInFlight({
+        refreshActivity: () => new Promise<void>(() => undefined),
+        snapshot: () => idle,
+        boundMs: 10,
+      }).then(resolveUpdateInstallReadiness),
+    ).resolves.toEqual({
+      kind: "wait",
+      activeAgentCount: 0,
+      activityUnconfirmed: true,
+    });
   });
 
   it("treats a managed host that cannot be re-attached as unconfirmed work", async () => {

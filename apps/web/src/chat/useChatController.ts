@@ -520,6 +520,12 @@ export function useChatController(options: ChatControllerOptions) {
                   endedCleanly = false;
                   break;
                 }
+                // A compaction changes what the model sees next, not the
+                // thread: there is nothing to re-read and nothing unread.
+                if (frame.event.kind === "compaction-settled") {
+                  cursor = frame.sequence;
+                  continue;
+                }
                 recordSequence(threadId, frame.sequence);
                 if (frame.event.kind === "follow-up-updated") {
                   recordFollowUp(threadId, frame.event.followUp.state === "open");

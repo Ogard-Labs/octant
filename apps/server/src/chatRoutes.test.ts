@@ -276,6 +276,7 @@ describe("Chat routes", () => {
     expect(frames).toEqual([frame42, frame43]);
     expect(subscribe).toHaveBeenCalledWith(threadId, 41, expect.any(AbortSignal), {
       contents: false,
+      compaction: false,
     });
   });
 
@@ -289,12 +290,36 @@ describe("Chat routes", () => {
     );
     expect(subscribe).toHaveBeenCalledWith(threadId, 41, expect.any(AbortSignal), {
       contents: true,
+      compaction: false,
     });
 
     const refused = await route(
       request(`/api/chat/threads/${threadId}/events?afterSequence=41&contents=yes`),
     );
     expect(refused?.status).toBe(400);
+  });
+
+  it("passes on a subscriber's request for compaction outcomes and refuses any other value", async () => {
+    const subscribe = vi.fn(async function* () {
+      yield frame42;
+    });
+    const route = routeFixture({ subscribe });
+    await collectFrames(
+      route(
+        request(`/api/chat/threads/${threadId}/events?afterSequence=41&contents=1&compaction=1`),
+      ),
+    );
+    expect(subscribe).toHaveBeenCalledWith(threadId, 41, expect.any(AbortSignal), {
+      contents: true,
+      compaction: true,
+    });
+
+    for (const query of ["compaction=yes", "compaction=1&compaction=1", "compaction=1&other=1"]) {
+      const refused = await route(
+        request(`/api/chat/threads/${threadId}/events?afterSequence=41&${query}`),
+      );
+      expect(refused?.status).toBe(400);
+    }
   });
 
   it("holds an idle events stream open and continues from its cursor after the next commit", async () => {

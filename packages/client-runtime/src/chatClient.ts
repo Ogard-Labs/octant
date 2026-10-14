@@ -170,6 +170,8 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
       // Ask for the body behind each streamed delta so the thread view can
       // grow in place instead of re-reading the whole thread per frame.
       url.searchParams.set("contents", "1");
+      // Ask for the receipt or failure of a compaction of the session as it ends.
+      url.searchParams.set("compaction", "1");
       return parseNdjsonFrames(
         requestRaw(fetch, url.toString(), { method: "GET", headers, signal }),
         threadId,

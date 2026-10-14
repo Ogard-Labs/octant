@@ -97,22 +97,17 @@ nothing essential sits under 12px at the default. The roles live in
 `styles/surface.css`; the size tokens are listed under
 [Typography](#typography).
 
-| Role          | Size | Weight | Leading | Colour      | Where                                                               |
-| ------------- | ---- | ------ | ------- | ----------- | ------------------------------------------------------------------- |
-| Hero          | 36   | 700    | 1.1     | primary     | Welcome greeting only (`oct-title--hero`, `--oct-text-3xl`)         |
-| Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens) |
-| Section label | 14   | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`)                 |
-| Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option, and a Settings section's label      |
-| Body          | 13   | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)      |
-| Subtitle      | 14   | 400    | 1.45    | secondary   | The one line under a page title (`oct-subtitle`)                    |
-| Detail        | 13   | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                     |
-| Meta          | 12   | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                              |
-| Identifier    | 12   | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                             |
-
-Not built yet: a Settings section's label takes the Section label role above
-(600, secondary ink), the same as a section label anywhere else, instead of
-the Row label role it has now (500, primary ink). Until it is built, the
-Settings section label stays 500 in primary ink.
+| Role          | Size | Weight | Leading | Colour      | Where                                                                               |
+| ------------- | ---- | ------ | ------- | ----------- | ----------------------------------------------------------------------------------- |
+| Hero          | 36   | 700    | 1.1     | primary     | Welcome greeting only (`oct-title--hero`, `--oct-text-3xl`)                         |
+| Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens)                 |
+| Section label | 14   | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label |
+| Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option                                                      |
+| Body          | 13   | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                      |
+| Subtitle      | 14   | 400    | 1.45    | secondary   | The one line under a page title (`oct-subtitle`)                                    |
+| Detail        | 13   | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                     |
+| Meta          | 12   | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                                              |
+| Identifier    | 12   | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                             |
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
@@ -628,6 +623,16 @@ diff values stay blank, and unavailable checkout actions are not shown. Input gr
 extra typed lines and visible notices is intentional (0114). Repository, branch
 and PR actions stay visible below the input. Utility panels keep one resize
 boundary and a compact tab row without a second horizontal divider.
+
+A thread opens on its newest messages. When earlier ones exist, one row above
+the oldest loaded message offers **Load earlier messages** as a ghost button;
+while a page loads it reads "Loading earlier messages" and stays focusable, a
+failed page says "Earlier messages could not be loaded." with **Try again**,
+and once the start is reached it says "No earlier messages" in the meta ink.
+The row is 32px tall in every state, because it sits above what the reader is
+looking at, and an arriving page keeps the reader's row where it was. A thread
+that never had earlier messages shows no row. Only a new last message is
+announced; earlier messages arriving above are not.
 
 A thread's Browser captures are a plain list of rows under a sentence-case
 section label (`oct-section-label`, "Browser captures"), not a card group: each

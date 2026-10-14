@@ -245,6 +245,19 @@ describe("authenticated product route dispatch", () => {
     }
   });
 
+  it("answers a paired device's Work transcript window read under the overview read grant", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+    const path =
+      "/api/work/turns/window/00000000-0000-4000-8000-000000000001?limit=30&before=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+    expect(classifyProductAction(new Request(`https://octant.example${path}`))).toBe(
+      "project.overview.read",
+    );
+    expect((await product(handoff(path)))?.status).toBe(200);
+    expect(dispatch).toHaveBeenCalledOnce();
+  });
+
   it("dispatches a Canvas share read for a paired device but not a share mutation", async () => {
     const dispatch = vi.fn(async () => Response.json({ ok: true }));
     const product = createAuthenticatedProductDispatch({ dispatch });

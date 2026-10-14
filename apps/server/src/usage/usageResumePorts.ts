@@ -97,12 +97,16 @@ export interface UsageResumePortDependencies {
       input: unknown,
       executionContext?: ChatServiceExecutionContext,
     ) => Promise<unknown>;
+    /** Whether the thread's session is being compacted, which holds every new turn. */
+    readonly compacting?: (threadId: ChatThread["id"]) => boolean;
   };
   readonly work: {
     /** Whether Work is enabled in the host's shell settings right now. */
     readonly isEnabled: () => boolean;
     readonly readThread: (threadId: WorkThreadId) => WorkThread | undefined;
     readonly listTurns: (threadId: WorkThreadId) => ReadonlyArray<WorkTurnState>;
+    /** Whether the thread's session is being compacted, which holds every new turn. */
+    readonly compacting?: (threadId: WorkThreadId) => boolean;
     readonly startFirstTurn: (
       windowId: WindowId,
       input: unknown,
@@ -165,6 +169,14 @@ export interface UsageResumePortDependencies {
 
 const invalid = (detail: string) => ({ kind: "invalid" as const, detail });
 const refused = (detail: string) => ({ kind: "refused" as const, detail });
+/**
+ * A compaction holds the thread's turns only until it ends, so a
+ * continuation it refused is offered again rather than spent.
+ */
+const COMPACTION_DEFERRAL = {
+  kind: "deferred" as const,
+  detail: "The session is being compacted; the continuation runs once it finishes.",
+};
 const refusalDetail = (error: unknown): string =>
   error instanceof Error ? error.message : "The continuation could not be admitted.";
 
@@ -243,6 +255,7 @@ function chatPort(deps: UsageResumePortDependencies): UsageResumeModePort {
         );
         return { kind: "dispatched" };
       } catch (error) {
+        if (deps.chat.compacting?.(threadId) === true) return COMPACTION_DEFERRAL;
         return refused(refusalDetail(error));
       }
     },
@@ -348,6 +361,7 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
           ? { kind: "dispatched" }
           : refused("message" in result ? result.message : "The continuation was not admitted.");
       } catch (error) {
+        if (deps.work.compacting?.(thread.id) === true) return COMPACTION_DEFERRAL;
         return refused(refusalDetail(error));
       }
     },

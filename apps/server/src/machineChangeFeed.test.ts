@@ -30,6 +30,57 @@ describe("MachineChangeFeed", () => {
     await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 
+  it("wakes held Chat streams when a Chat session's compaction ends, and for nothing else on the ledger", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+    const chat = { aggregateType: "chat-thread", aggregateId: "thread-1" };
+    const work = { aggregateType: "work-thread", aggregateId: "thread-2" };
+
+    feed.publishCommitted({
+      events: [
+        { aggregateType: "context-ledger", eventName: "context.plan-created@1", payload: {} },
+        {
+          aggregateType: "context-ledger",
+          eventName: "context.compaction-requested@1",
+          payload: { subject: chat },
+        },
+        {
+          aggregateType: "context-ledger",
+          eventName: "context.compaction-failed@1",
+          payload: { subject: work },
+        },
+      ],
+    });
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: "context-ledger",
+          eventName: "context.compaction-completed@1",
+          payload: { receipt: { subject: chat } },
+        },
+      ],
+    });
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: "context-ledger",
+          eventName: "context.compaction-failed@1",
+          payload: { subject: chat },
+        },
+      ],
+    });
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "changed", topics: ["chat-navigation"] },
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "changed", topics: ["chat-navigation"] },
+    });
+    controller.abort();
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+  });
+
   it("invalidates the Work and Code navigation reads only for a subagent's approval or question, asked and settled", async () => {
     const feed = new MachineChangeFeed();
     const controller = new AbortController();

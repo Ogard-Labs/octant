@@ -168,6 +168,27 @@ describe("compacting a session on request", () => {
     restarted.connection.close();
   });
 
+  it("tells the thread's live stream how each compaction ended", async () => {
+    const world = createWorld();
+    planSession(world);
+    world.service.start(command(), "local-window");
+    await world.service.settled();
+    const completed = world.harness.latestCompaction(subject);
+    expect(completed?.status).toBe("completed");
+
+    const failing = createWorld({ outputTokens: 400 });
+    planSession(failing);
+    failing.service.start(command(), "local-window");
+    await failing.service.settled();
+    const failed = failing.harness.latestCompaction(subject);
+    expect(failed?.status).toBe("failed");
+
+    expect(world.announced).toEqual([{ threadId, compaction: completed }]);
+    expect(failing.announced).toEqual([{ threadId, compaction: failed }]);
+    world.close();
+    failing.close();
+  });
+
   it("fails a summary that is not smaller than what it replaces and leaves the plan alone", async () => {
     const world = createWorld({ outputTokens: 400 });
     planSession(world);
@@ -812,6 +833,7 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
     readThrows: false,
   };
   const reads = { drivers: 0, conversations: 0, spendAdmissions: 0, spendSnapshots: 0 };
+  const announced: Array<{ readonly threadId: string; readonly compaction: unknown }> = [];
   const capacity = makeProviderCapacityScheduler({
     now: () => Date.parse(now),
     random: () => 0,
@@ -837,6 +859,9 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
       return state.conversation;
     },
     scratchRoot: async () => "/tmp/octant-session-compaction/thread",
+    settled: (threadId: string, compaction: unknown) => {
+      announced.push({ threadId, compaction });
+    },
   });
   const service = new SessionCompactionService({
     harness: fixture.harness,
@@ -875,6 +900,7 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
     provider,
     state,
     reads,
+    announced,
     capacity,
     spend,
     service,
