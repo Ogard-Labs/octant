@@ -209,10 +209,12 @@ export class ThreadRetentionService {
       })),
       alreadyPurged,
       retained: [...THREAD_PURGE_RETAINED_SCOPES],
-      delinked: [...THREAD_PURGE_DELINKED_SCOPES],
+      // A purge that erased no thread reports no thread scope as changed,
+      // whether it found nothing past its window or passed over a collision.
+      delinked: selected.length === 0 ? [] : [...THREAD_PURGE_DELINKED_SCOPES],
       deleted:
-        selected.length === 0 && alreadyPurged.length > 0
-          ? []
+        selected.length === 0
+          ? [...projectScopeDeleted]
           : [...THREAD_PURGE_DELETED_SCOPES, ...projectScopeDeleted],
       occurredAt,
     };

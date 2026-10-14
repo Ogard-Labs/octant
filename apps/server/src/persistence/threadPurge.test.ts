@@ -231,6 +231,11 @@ describe("thread purge sweep", () => {
     expect(
       readThreadExternalContentTaint(harness.connection, sharedId).externalContentIngested,
     ).toBe(true);
+
+    // A sweep that passes over every candidate reports nothing as changed.
+    expect(
+      await harness.service.purge({ scope: { kind: "host" }, confirm: true }, "local-window"),
+    ).toMatchObject({ purged: [], delinked: [], deleted: [] });
   });
 
   it("de-links a purged thread's child-run usage and keeps it de-linked through a usage rebuild", async () => {
