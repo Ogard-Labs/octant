@@ -835,7 +835,12 @@ person clears the reader. The sibling-thread `read` marks its caller on every
 call, whatever the target, because an agent chose to read; a mention or a
 Side Chat is the person's own choice of thread, so an unmarked or cleared
 source passes on nothing, as for a fork. Chat, Work, and Code mentions share
-one resolver, and a thread that mentions itself is not marked again.
+one resolver, and a thread that mentions itself is not marked again. A Side
+Chat's state section also carries finished subagents' replies, and a reply
+marks its parent only when it is delivered, which waits while the parent's
+turn runs, so each reply in that section marks the sidecar itself (label
+`subagent-result`, content reference `subagent-result-<run>`) by the same
+order; a reply that cannot mark it refuses the turn.
 
 An in-place restore (`restore-git-checkpoint`, sent by both Restore files to
 this point and Undo restore) overwrites a checkout other threads may share, so

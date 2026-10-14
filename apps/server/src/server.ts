@@ -42,6 +42,7 @@ import {
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceContentId,
+  decodeCodeFailure,
   decodeCodeFileId,
   decodeCodeRelativePath,
   decodeCodeRepositoryId,
@@ -235,6 +236,7 @@ import { resolveConnectedGitHubRepository } from "./code/connectedRepository";
 import { RepositoryTestDiscoveryService } from "./code/repositoryTestDiscoveryService";
 import {
   CodeService,
+  CodeServiceError,
   type CodeCheckoutObservationPort,
   type CodeFileRootAuthorityPort,
   type CodeWorktreeRefsPort,
@@ -247,7 +249,8 @@ import {
 } from "./completedThreadArchiveSweep";
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
 import { LiveTurnRegistry } from "./liveTurn/liveTurnRegistry";
-import { CodePlannerService, type CodePlannerServiceOptions } from "./code/codePlannerService";
+import { CodePlannerService } from "./code/codePlannerService";
+import { INHERITED_MARK_REFUSAL } from "./context/inheritedExternalContentMark";
 import {
   createCodeProfileSkillResolver,
   createStoredCodeProfileSkillTextLoader,
@@ -5524,21 +5527,27 @@ export function startOctantServer(
     // The Project planner: one designated Code thread per Code Project that
     // may read the Project's board and propose work. A confirmed proposal
     // creates its thread through the ordinary creation command path below;
-    // the planner has no creation authority of its own. The Code service is
-    // called directly, as the follow-up creator does, because only it takes
-    // the host-only mark a thread confirmed from a marked planner starts with.
-    const markingCodeService: {
-      readonly execute: (
-        ...input: Parameters<CodePlannerServiceOptions["createThread"]>
-      ) => ReturnType<CodeRouteService["execute"]>;
-    } = codeService;
+    // the planner has no creation authority of its own. Only the host's own
+    // CodeService takes the host-only mark a thread confirmed from a marked
+    // planner starts with; a route service a host was given instead has no
+    // such input, so a confirm that needs the mark is refused there rather
+    // than creating the thread unmarked.
     const codePlannerService = new CodePlannerService({
       persistence,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       canAccessProject: canAccessCodeProject,
-      createThread: async (windowId, creation, signal, executionContext) =>
-        markingCodeService.execute(windowId, creation, signal, executionContext),
+      createThread: async (windowId, creation, signal, executionContext) => {
+        if (codeService instanceof CodeService) {
+          return codeService.execute(windowId, creation, signal, executionContext);
+        }
+        if (executionContext.inheritedMark !== undefined) {
+          throw new CodeServiceError(
+            decodeCodeFailure({ category: "unavailable", message: INHERITED_MARK_REFUSAL }),
+          );
+        }
+        return codeService.execute(windowId, creation, signal);
+      },
       isMarkedWithOutsideContent: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     });

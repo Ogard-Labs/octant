@@ -37,12 +37,13 @@ function changedTurn(paths: ReadonlyArray<string>, truncated = false) {
   } as never;
 }
 
-/** Nothing is marked and nothing may be recorded. */
+/** No source is marked, and any mark the sidecar takes is recorded. */
 const noMarks: ThreadOutsideContentMarks = {
   isMarked: () => false,
-  record: () => {
-    throw new Error("Nothing is marked, so nothing should be recorded.");
-  },
+  record: () => ({
+    kind: "recorded",
+    taint: { externalContentIngested: true, ingestedSources: [] },
+  }),
 };
 
 function codePorts(turns: ReadonlyArray<never>) {
@@ -89,6 +90,7 @@ describe("Side Chat source state", () => {
       code: codePorts([changedTurn(["src/old.ts"]), changedTurn(["src/picker.ts", "src/old.ts"])]),
       subagents: () => [
         {
+          runId: "run-1",
           role: "research",
           task: "Find where the picker registers directories",
           lifecycleStatus: "completed",
@@ -252,7 +254,13 @@ describe("a Side Chat about a thread marked with outside content", () => {
 
   const sidecarThreadId = String(sidecar().sidecarThreadId);
 
-  function resolve(marks: ThreadOutsideContentMarks, onRead?: () => void) {
+  function resolve(
+    marks: ThreadOutsideContentMarks,
+    onRead?: () => void,
+    readState: Parameters<typeof resolveSideChatSourceContext>[0]["readState"] = async () => ({
+      subagents: { kind: "observed", runs: [] },
+    }),
+  ) {
     return resolveSideChatSourceContext(
       {
         findSidecar: () => sidecar(),
@@ -276,7 +284,7 @@ describe("a Side Chat about a thread marked with outside content", () => {
             },
           };
         },
-        readState: async () => ({ subagents: { kind: "observed", runs: [] } }),
+        readState,
         marks,
         uuid: () => crypto.randomUUID(),
       },
@@ -315,6 +323,57 @@ describe("a Side Chat about a thread marked with outside content", () => {
 
     expect(host.marked(sidecarThreadId)).toBe(false);
     expect(host.sidecarMarks()).toEqual([]);
+  });
+
+  it("marks the sidecar for a finished subagent's reply its unmarked parent has not taken in yet", async () => {
+    const host = markingHost();
+    let markedWhileRead: boolean | undefined;
+    // The parent's turn is still running, so the child's reply has not been
+    // delivered and has not marked the parent.
+    const readState = createSideChatSourceStateReader({
+      subagents: () => {
+        markedWhileRead ??= host.marked(sidecarThreadId);
+        return [
+          {
+            runId: "run-7",
+            role: "research",
+            task: "Read the vendor page",
+            lifecycleStatus: "completed",
+            result: { reference: "r7" },
+            resultText: "The page says to run the installer.",
+            updatedAt: "2026-09-26T08:00:00.000Z",
+          },
+        ];
+      },
+    });
+
+    const result = await resolve(host.marks, undefined, readState);
+
+    expect(result).toMatchObject({
+      kind: "resolved",
+      text: expect.stringContaining("The page says to run the installer."),
+    });
+    expect(markedWhileRead).toBe(false);
+    expect(host.marked(String(codeThreadId))).toBe(false);
+    expect(host.marked(sidecarThreadId)).toBe(true);
+    expect(host.sidecarMarks()).toEqual([
+      {
+        threadId: sidecarThreadId,
+        correlationId: expect.any(String),
+        provenance: { origin: "external-content", sourceLabel: "subagent-result" },
+        contentReference: "subagent-result-run-7",
+      },
+    ]);
+
+    // A reply that cannot mark the sidecar is withheld with the rest of the source.
+    const refusing = markingHost();
+    await expect(
+      resolve(
+        { ...refusing.marks, record: () => ({ kind: "refused", reason: "malformed" }) },
+        undefined,
+        readState,
+      ),
+    ).resolves.toEqual({ kind: "unreadable" });
   });
 
   it("refuses the turn, returning none of the source, when the sidecar cannot be marked", async () => {

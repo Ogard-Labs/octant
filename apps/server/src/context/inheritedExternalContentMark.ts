@@ -116,10 +116,36 @@ export function markReaderOfMarkedThread(input: {
   if (input.readerThreadId === input.sourceThreadId) return { status: "nothing-to-mark" };
   try {
     if (!input.marks.isMarked(input.sourceThreadId)) return { status: "nothing-to-mark" };
+  } catch {
+    return { status: "refused" };
+  }
+  return recordReaderMark({
+    marks: input.marks,
+    readerThreadId: input.readerThreadId,
+    sourceLabel: input.sourceLabel,
+    contentReference: `${input.sourceLabel}-${input.sourceThreadId}`,
+    correlationId: input.correlationId,
+  });
+}
+
+/**
+ * Marks a thread whose model is about to read outside text that marked no
+ * thread yet, such as a subagent's reply its parent has not taken in. Like
+ * `markReaderOfMarkedThread`, it runs before the text is handed on, and a
+ * `refused` mark means the caller withholds the text.
+ */
+export function recordReaderMark(input: {
+  readonly marks: ThreadOutsideContentMarks;
+  readonly readerThreadId: string;
+  readonly sourceLabel: string;
+  readonly contentReference: string;
+  readonly correlationId: () => string;
+}): ReaderMarking {
+  try {
     const recorded = input.marks.record({
       threadId: input.readerThreadId,
       provenance: { origin: "external-content", sourceLabel: input.sourceLabel },
-      contentReference: `${input.sourceLabel}-${input.sourceThreadId}`,
+      contentReference: input.contentReference,
       correlationId: input.correlationId(),
       authorized: true,
     });
