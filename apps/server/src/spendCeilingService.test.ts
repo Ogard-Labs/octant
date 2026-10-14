@@ -6,15 +6,20 @@ import {
   decodeAgentRunId,
   decodeAggregateVersion,
   decodeProjectId,
+  decodeProviderInstance,
   decodeProviderInstanceId,
+  type ProviderCapabilitySupport,
 } from "@octant/contracts";
 import { recordAgentRunTurnUsage } from "./agentRun/agentRunUsageLedger";
 import { Journal } from "./persistence/journal";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { openSqlite } from "./persistence/sqlitePort";
+import { readProviderInstances } from "./providers/providerProjection";
+import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
 import {
   decodeSpendCeilingReservationId,
+  notMeasuredProvider,
   SpendCeilingService,
   type SpendCeilingServiceOptions,
 } from "./spendCeilingService";
@@ -1047,5 +1052,126 @@ describe("SpendCeilingService", () => {
     expect(refused.status).toBe("refused");
     if (refused.status !== "refused") return;
     expect(refused.refusal).toMatchObject({ dimension: "turns", ceilingTurns: 2 });
+  });
+});
+
+describe("notMeasuredProvider", () => {
+  const providerIds = {
+    measuredOut: "73000000-0000-4000-8000-000000000501",
+    disabled: "73000000-0000-4000-8000-000000000502",
+    deleted: "73000000-0000-4000-8000-000000000503",
+    unprobed: "73000000-0000-4000-8000-000000000504",
+    unproven: "73000000-0000-4000-8000-000000000505",
+  } as const;
+
+  function append(
+    journal: ReturnType<typeof openService>["journal"],
+    instanceId: string,
+    expectedVersion: number,
+    eventName: string,
+    payload: unknown,
+  ): void {
+    journal.append({
+      aggregate: { aggregateType: "provider-instance", aggregateId: instanceId },
+      expectedVersion,
+      events: [
+        {
+          eventId: crypto.randomUUID(),
+          eventName,
+          eventVersion: 1,
+          correlationId: crypto.randomUUID(),
+          actor: { kind: "local-user", actorId: ids.provider },
+          occurredAt: now,
+          payload,
+        },
+      ],
+    });
+  }
+
+  function instance(id: string, overrides: Record<string, unknown> = {}) {
+    return decodeProviderInstance({
+      id,
+      displayName: `Agent ${id.slice(-3)}`,
+      driverKind: "opencode",
+      configuration: { kind: "opencode-cli", binaryPath: "/opt/homebrew/bin/opencode" },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      ...overrides,
+    });
+  }
+
+  function observe(
+    registry: ProviderRuntimeRegistry,
+    id: string,
+    usage: ProviderCapabilitySupport,
+  ): void {
+    registry.setObservedState({
+      instanceId: id,
+      readiness: "ready",
+      processState: "stopped",
+      models: [],
+      capabilities: {
+        streaming: "supported",
+        resume: "unsupported",
+        interruption: "unsupported",
+        approvals: "unsupported",
+        userQuestions: "unsupported",
+        reasoning: "unsupported",
+        usage,
+        toolActivity: "unsupported",
+        fileChanges: "unsupported",
+        diffs: "unsupported",
+        taskProgress: "unsupported",
+        nativeChildAgents: "unsupported",
+        nativeAttachments: "unsupported",
+        nativeWebResearch: "unsupported",
+        appManagedTools: "unsupported",
+        citations: "unsupported",
+        harnessAutoReview: "unsupported",
+      },
+      observedAt: now,
+    });
+  }
+
+  it("leaves out only an enabled instance whose runtime declares usage unsupported", () => {
+    const { connection, journal } = openService();
+    const registry = new ProviderRuntimeRegistry();
+    for (const id of Object.values(providerIds)) {
+      append(journal, id, 0, "provider.instance-created@1", { instance: instance(id) });
+    }
+    observe(registry, providerIds.measuredOut, "unsupported");
+    // Disabled while a session was live: its observation was never cleared.
+    observe(registry, providerIds.disabled, "unsupported");
+    append(journal, providerIds.disabled, 1, "provider.instance-enabled-changed@1", {
+      instance: instance(providerIds.disabled, { enabled: false, version: 2 }),
+    });
+    // Removed, with its last observation still held.
+    observe(registry, providerIds.deleted, "unsupported");
+    append(journal, providerIds.deleted, 1, "provider.instance-removed@1", {
+      instanceId: providerIds.deleted,
+      version: 2,
+    });
+    // Not proven either way.
+    observe(registry, providerIds.unproven, "unavailable");
+    const host = {
+      readProviderInstances: () => readProviderInstances(connection),
+      observedState: registry.observedState.bind(registry),
+    };
+
+    expect(notMeasuredProvider(host, providerIds.measuredOut)).toEqual({
+      providerInstanceId: decodeProviderInstanceId(providerIds.measuredOut),
+      displayName: "Agent 501",
+    });
+    for (const counted of [
+      providerIds.disabled,
+      providerIds.deleted,
+      providerIds.unprobed,
+      providerIds.unproven,
+    ]) {
+      expect(notMeasuredProvider(host, counted)).toBeUndefined();
+    }
   });
 });

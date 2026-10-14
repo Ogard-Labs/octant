@@ -8,6 +8,9 @@ import {
   SPEND_TURN_AGGREGATE_TYPE,
   decodeSpendCeilingReservationId,
   decodeUtcTimestamp,
+  type ProviderInstance,
+  type ProviderInstanceId,
+  type ProviderObservedState,
   type SpendCeilingCommand,
   type SpendCeilingCommandResult,
   type SpendCeilingNotMeasuredProvider,
@@ -23,6 +26,7 @@ import {
   authorizeSpendCeilingRead,
   decideSpendCeilingCommand,
   evaluateSpendCeilingAdmission,
+  providerUsageIsNotMeasured,
   remainingSpendCeilingTokens,
   settleSpendCeilingReservation,
   spendCeilingWindowStart,
@@ -102,6 +106,31 @@ export interface SpendCeilingServiceOptions {
   readonly notMeasuredProvider?: (
     providerInstanceId: string,
   ) => SpendCeilingNotMeasuredProvider | undefined;
+}
+
+/**
+ * Whether a ledger row's provider is left out of token and money ceilings,
+ * decided by provider, not by row: by the instance's runtime usage capability
+ * as the host observes it now, for old rows too. A removed or disabled
+ * instance, or one with no observation yet, counts, so its unreported turns
+ * keep refusing. Disabling a provider with a live session leaves its last
+ * observation in place, so the enabled flag is checked here rather than
+ * trusted to have cleared it.
+ */
+export function notMeasuredProvider(
+  host: {
+    readonly readProviderInstances: () => ReadonlyArray<ProviderInstance>;
+    readonly observedState: (instanceId: ProviderInstanceId) => ProviderObservedState | undefined;
+  },
+  providerInstanceId: string,
+): SpendCeilingNotMeasuredProvider | undefined {
+  const instance = host
+    .readProviderInstances()
+    .find((candidate) => String(candidate.id) === providerInstanceId);
+  if (instance === undefined || !instance.enabled) return undefined;
+  return providerUsageIsNotMeasured(host.observedState(instance.id)?.capabilities.usage)
+    ? { providerInstanceId: instance.id, displayName: instance.displayName }
+    : undefined;
 }
 
 /**

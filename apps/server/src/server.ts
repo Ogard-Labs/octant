@@ -578,7 +578,7 @@ import { createZenBackgroundRouteHandler } from "./zenBackgroundRoutes";
 import { createUsageRouteHandler } from "./usageRoutes";
 import { toTurnMetricsRecord, type TurnEndSummary } from "./metrics/turnEnd";
 import { TurnMetricsStore } from "./metrics/turnMetricsStore";
-import { SpendCeilingService } from "./spendCeilingService";
+import { SpendCeilingService, notMeasuredProvider } from "./spendCeilingService";
 import { createSpendCeilingRouteHandler } from "./spendCeilingRoutes";
 import { CacheStatsProjection } from "./cacheStatsProjection";
 import { createUsageDashboardRouteHandler } from "./usageDashboardRoutes";
@@ -854,7 +854,6 @@ import {
   isNativeHarnessDriverKind,
   isProviderAllowedByProjectPolicy,
   providerKeepsConversation,
-  providerUsageIsNotMeasured,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
   type PreviewPosture,
@@ -3239,22 +3238,14 @@ export function startOctantServer(
         return workThreadProjection.read(input.threadId as never) !== undefined;
       },
       projectExists: (projectId) => persistence.readProject(projectId as never) !== undefined,
-      // Decided by the instance's runtime capability as the host observes it
-      // now, for old rows too. A removed or disabled instance, or one with no
-      // observation yet, counts, so its unreported turns keep refusing.
-      // Disabling a provider with a live session leaves its last observation
-      // in place, so the enabled flag is checked here rather than trusted to
-      // have cleared it.
-      notMeasuredProvider: (providerInstanceId) => {
-        const instance = persistence
-          .readProviderInstances()
-          .find((candidate) => String(candidate.id) === providerInstanceId);
-        if (instance === undefined || !instance.enabled) return undefined;
-        const observed = providerRuntimeRegistry.observedState(instance.id);
-        return providerUsageIsNotMeasured(observed?.capabilities.usage)
-          ? { providerInstanceId: instance.id, displayName: instance.displayName }
-          : undefined;
-      },
+      notMeasuredProvider: (providerInstanceId) =>
+        notMeasuredProvider(
+          {
+            readProviderInstances: () => persistence.readProviderInstances(),
+            observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
+          },
+          providerInstanceId,
+        ),
     });
     spendCeilingHolder.service = spendCeilingService;
     requireJournalHydration(
