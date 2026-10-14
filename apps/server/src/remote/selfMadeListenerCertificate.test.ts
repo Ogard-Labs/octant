@@ -361,7 +361,7 @@ describe("self-made listener certificate", () => {
     expect(readFileSync(keyPath, "utf8")).toBe("not a key");
   });
 
-  it("completes a TLS handshake with a client that pins its key, and with no other client", async () => {
+  it("completes a TLS handshake with a client that pins its key and refuses one holding another pin", async () => {
     const made = ready(
       createSelfMadeListenerCertificateStore({ dataDirectory: dataDirectory() }).ensure(
         "127.0.0.1",
@@ -376,7 +376,7 @@ describe("self-made listener certificate", () => {
     });
     try {
       const port = Number(server.url.port);
-      expect(await pinnedRequest(port, made.tlsPin)).toEqual({
+      expect(await pinnedRequest(port, made.tlsPin, String(made.tls.cert))).toEqual({
         status: "served",
         pin: made.tlsPin,
       });
@@ -391,7 +391,7 @@ describe("self-made listener certificate", () => {
           }),
         ),
       );
-      expect(await pinnedRequest(port, otherPin)).toEqual({
+      expect(await pinnedRequest(port, otherPin, String(made.tls.cert))).toEqual({
         status: "refused-before-sending",
         pin: made.tlsPin,
       });
@@ -404,26 +404,30 @@ describe("self-made listener certificate", () => {
 });
 
 /**
- * A minimal pinning client: it takes the served key's pin before writing a
- * byte and closes on a mismatch, so only a matching key ever sees a request.
+ * A minimal pinning client. Chain validation stays on, anchored at the
+ * certificate under test, and the identity check is the pin: a key whose pin
+ * differs fails the handshake, so it never sees a request.
  */
 function pinnedRequest(
   port: number,
   pin: string,
+  anchor: string,
 ): Promise<{ readonly status: "served" | "refused-before-sending"; readonly pin: string }> {
   return new Promise((resolve, reject) => {
-    const socket: TLSSocket = connect({ host: "127.0.0.1", port, rejectUnauthorized: false });
-    let received = "";
     let servedPin = "";
+    let sent = false;
+    const socket: TLSSocket = connect({
+      host: "127.0.0.1",
+      port,
+      ca: anchor,
+      checkServerIdentity: (_host, certificate) => {
+        servedPin = listenerTlsPin(certificate.raw);
+        return servedPin === pin ? undefined : new Error("The served key does not match the pin.");
+      },
+    });
+    let received = "";
     socket.once("secureConnect", () => {
-      const peer = socket.getPeerX509Certificate();
-      if (peer === undefined) return reject(new Error("no peer certificate"));
-      servedPin = listenerTlsPin(peer);
-      if (servedPin !== pin) {
-        socket.destroy();
-        resolve({ status: "refused-before-sending", pin: servedPin });
-        return;
-      }
+      sent = true;
       socket.write(`GET / HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`);
     });
     socket.on("data", (chunk: Buffer) => {
@@ -435,7 +439,13 @@ function pinnedRequest(
         pin: servedPin,
       }),
     );
-    socket.once("error", reject);
+    socket.once("error", (error) => {
+      if (!sent && servedPin !== "" && servedPin !== pin) {
+        resolve({ status: "refused-before-sending", pin: servedPin });
+      } else {
+        reject(error);
+      }
+    });
   });
 }
 
