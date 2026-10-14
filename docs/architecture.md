@@ -5504,6 +5504,9 @@ mechanisms are:
   and keys can still follow a link or submit a form within the context's
   approved origins; the host's navigation guards refuse any page outside them,
   so a paired client cannot take the host browser to a new origin.
+- **Adding a computer in one step.** Planned, not built: the host makes its own
+  listener certificate and the pairing code carries its pin, in
+  [the plan](plans/one-step-pairing.md).
 - **Provider keys on a host without the desktop app.** _Designed, not yet
   built._ The desktop saves an endpoint's API key or bearer token over
   native IPC from its own renderer, so a browser client — local or paired —
