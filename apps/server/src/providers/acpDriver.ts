@@ -1360,6 +1360,18 @@ function makeConnection(
               }
             }
             const modeValue = profile.sessionMode(mode, input.executionPolicy);
+            if (
+              profile.acceptsUnknownModeIds === true &&
+              !configOptions.some(
+                (option) =>
+                  option.id === "mode" &&
+                  option.options.some((choice) => choice.value === modeValue),
+              )
+            )
+              throw failure(
+                "incompatible",
+                `${name} does not offer the ${modeValue} mode this thread needs.`,
+              );
             const setModeCall = profile.setModeCall?.(source.sessionId, modeValue);
             if (setModeCall === undefined) {
               const result = await client.setConfigOption(source.sessionId, "mode", modeValue);

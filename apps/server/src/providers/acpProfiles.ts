@@ -146,6 +146,13 @@ export interface AcpProviderProfile {
   /** ACP `mode` config value for a product mode and execution policy. */
   readonly sessionMode: (mode: AcpSessionMode, policy: ProviderExecutionPolicy) => string;
   /**
+   * The agent answers a mode it does not offer with success and keeps its
+   * previous mode, so a renamed or dropped mode would leave a turn running
+   * under whatever mode the session already had. Octant then refuses a mode
+   * the session's `mode` option does not list before selecting it.
+   */
+  readonly acceptsUnknownModeIds?: true;
+  /**
    * Product modes and execution policies this agent refuses before a session
    * process starts, with the sentence the refusal shows. An agent that always
    * advertises runtime tools cannot be offered a read-only mode: fx reports
@@ -1089,10 +1096,10 @@ const FX_WORKSPACE_DENIED_ENTRIES = [
  * and skills all resolve through `$HOME/.fx`. Octant therefore gives it an
  * isolated managed home rather than pointing it at the interactive profile,
  * and authenticates it with a Vercel AI Gateway key from the host credential
- * broker. Live probing of `fx acp` 0.0.10 confirmed the relocation (sessions
- * written under the managed home, the real `~/.fx` untouched) and confirmed
- * that fx still negotiates when its workspace instruction, project config,
- * skill, and project MCP surfaces are unreadable.
+ * broker. Live probing of `fx acp` 0.0.10 and 0.0.13 confirmed the relocation
+ * (sessions written under the managed home, the real `~/.fx` untouched) and
+ * confirmed that fx still negotiates when its workspace instruction, project
+ * config, skill, and project MCP surfaces are unreadable.
  */
 const fxProfile: AcpProviderProfile = {
   kind: "fx",
@@ -1105,6 +1112,8 @@ const fxProfile: AcpProviderProfile = {
     return undefined;
   },
   sessionMode: (_mode, policy) => (policy === "full-access" ? "code" : "ask"),
+  // fx 0.0.13 answered `session/set_mode` with an unknown mode id with success.
+  acceptsUnknownModeIds: true,
   chatSessionRoot: "managed-home",
   userQuestions: "unsupported",
   resumeMethod: "session/resume",

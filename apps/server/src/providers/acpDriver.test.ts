@@ -120,7 +120,18 @@ class FakeClient implements AcpClientPort {
         id: "mode",
         name: "Mode",
         currentValue: "default",
-        options: [{ value: "default", name: "Default" }],
+        // Offer every mode the profile can select, as a real agent does.
+        options: [
+          ...new Set(
+            ["default"].concat(
+              (["chat", "work", "code"] as const).flatMap((mode) =>
+                (["approval-gated", "plan", "full-access"] as const).map((policy) =>
+                  profile.sessionMode(mode, policy),
+                ),
+              ),
+            ),
+          ),
+        ].map((value) => ({ value, name: value })),
       },
     ];
   }
@@ -1630,6 +1641,43 @@ describe("ACP provider driver profile quirks", () => {
     // fx's own `code` mode maps to `permissionMode: "auto"`, so only an
     // explicit Full access turn may select it.
     expect(fx.sessionMode("code", "approval-gated")).toBe("ask");
+  });
+
+  it("refuses an fx session that does not offer the mode the thread needs, before selecting it", async () => {
+    // fx accepts an unknown mode id and keeps its previous mode, so a release
+    // that renamed `ask` would otherwise run an approval-gated turn under
+    // whatever mode the session already had.
+    const { driver, client } = fixture(fx);
+    const index = client.configOptions.findIndex((option) => option.id === "mode");
+    client.configOptions[index] = {
+      type: "select",
+      id: "mode",
+      name: "Mode",
+      currentValue: "code",
+      options: [{ value: "code", name: "Code" }],
+    };
+
+    const failure = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          return yield* Effect.flip(
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+          );
+        }),
+      ),
+    );
+
+    expect(failure).toMatchObject({
+      category: "incompatible",
+      message: "fx does not offer the ask mode this thread needs.",
+    });
+    expect(client.setConfigOption).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "mode",
+      expect.anything(),
+    );
+    expect(client.prompt).not.toHaveBeenCalled();
   });
 
   it("keeps fx in a managed home and denies its workspace instruction and extension surfaces", () => {
