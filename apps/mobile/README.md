@@ -16,6 +16,8 @@ creates and follow-ups go to the host over authenticated remote-access routes an
 in the host’s SQLite journal (`octant.sqlite3` under `OCTANT_DATA_DIR` /
 Application Support). The phone does not keep a separate IndexedDB/SQLite thread
 database — only device keys, host registry, and session material locally.
+A Code thread opens on its newest 20 turns through the host's conversation
+window read; the phone has no Load earlier.
 
 Removing a host from the phone's list stops that host's session and deletes its
 device key from secure storage. Other hosts' keys stay. If the key cannot be
