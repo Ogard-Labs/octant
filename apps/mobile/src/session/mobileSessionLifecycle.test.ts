@@ -10,6 +10,7 @@ import {
 } from "../hosts/HostRegistry";
 import {
   disconnectLiveMobileSession,
+  createMobileHostRemover,
   removeMobileHost,
   refreshLiveMobileSession,
   finishLiveMobilePairing,
@@ -191,6 +192,16 @@ describe("live mobile session lifecycle", () => {
       } finally {
         vi.unstubAllGlobals();
       }
+    });
+
+    it("keeps both hosts removed when two removals are started back to back", async () => {
+      const { storage, deviceKeyStore, registry, hub } = await pairTwoHosts();
+      const remove = createMobileHostRemover({ registry, hub, deviceKeyStore });
+
+      await Promise.all([remove(firstHostId), remove(secondHostId)]);
+
+      expect(await registry.list()).toEqual([]);
+      expect(await storage.getItem("octant.remote.device-keys.v1")).toBeNull();
     });
 
     it("stops the removed host's session before its key is deleted", async () => {
