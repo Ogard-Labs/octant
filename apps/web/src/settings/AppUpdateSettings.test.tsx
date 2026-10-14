@@ -135,12 +135,12 @@ describe("AppUpdateSettings", () => {
     await waitFor(() => expect(host.installAppUpdate).toHaveBeenCalledOnce());
   });
 
-  it("says what it is waiting for rather than relaunching under live work", async () => {
+  it("says how many agents are working rather than relaunching under live work", async () => {
     const { host } = view({
       installAppUpdate: vi.fn(async () => ({
         kind: "wait",
         activeAgentCount: 2,
-        attentionRequired: true,
+        activityUnconfirmed: false,
       })),
     } as Partial<OctantHostBridge>);
 
@@ -148,7 +148,29 @@ describe("AppUpdateSettings", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveAttribute("data-tone", "warning");
-    expect(alert).toHaveTextContent(/2 agents are still working and a thread is waiting on you/);
+    expect(alert).toHaveTextContent(
+      "Octant will not relaunch while 2 agents are still working. Let the work finish or checkpoint it, then relaunch.",
+    );
+    expect(host.installAppUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("says when Octant could not check what is running instead of blaming a waiting thread", async () => {
+    const { host } = view({
+      installAppUpdate: vi.fn(async () => ({
+        kind: "wait",
+        activeAgentCount: 0,
+        activityUnconfirmed: true,
+      })),
+    } as Partial<OctantHostBridge>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Relaunch to update" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveAttribute("data-tone", "warning");
+    expect(alert).toHaveTextContent(
+      "Octant could not check what is running, so it did not relaunch. Try again in a moment.",
+    );
+    expect(alert).not.toHaveTextContent(/thread is waiting on you/i);
     expect(host.installAppUpdate).toHaveBeenCalledOnce();
   });
 

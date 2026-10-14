@@ -636,7 +636,7 @@ describe("applying an update", () => {
   it("applies only when the person asks and nothing is running", async () => {
     const { port, updates } = await staged();
 
-    expect(await updates.install({ activeAgentCount: 0, attentionRequired: false })).toEqual({
+    expect(await updates.install({ activeAgentCount: 0, activityUnconfirmed: false })).toEqual({
       kind: "installing",
     });
     expect(port.calls.quitAndInstall).toBe(1);
@@ -645,10 +645,10 @@ describe("applying an update", () => {
   it("refuses to replace the app under work in flight", async () => {
     const { port, updates } = await staged();
 
-    expect(await updates.install({ activeAgentCount: 1, attentionRequired: false })).toEqual({
+    expect(await updates.install({ activeAgentCount: 1, activityUnconfirmed: false })).toEqual({
       kind: "wait",
       activeAgentCount: 1,
-      attentionRequired: false,
+      activityUnconfirmed: false,
     });
     expect(port.calls.quitAndInstall).toBe(0);
   });
@@ -657,7 +657,7 @@ describe("applying an update", () => {
     const { port, updates } = service();
     await updates.check();
 
-    expect(await updates.install({ activeAgentCount: 0, attentionRequired: false })).toEqual({
+    expect(await updates.install({ activeAgentCount: 0, activityUnconfirmed: false })).toEqual({
       kind: "not-ready",
     });
     expect(port.calls.quitAndInstall).toBe(0);
@@ -821,14 +821,14 @@ describe("portable image updates", () => {
     await updates.check();
     await updates.download();
 
-    expect(await updates.install({ activeAgentCount: 1, attentionRequired: false })).toEqual({
+    expect(await updates.install({ activeAgentCount: 1, activityUnconfirmed: false })).toEqual({
       kind: "wait",
       activeAgentCount: 1,
-      attentionRequired: false,
+      activityUnconfirmed: false,
     });
     expect(image.calls).toHaveLength(0);
 
-    expect(await updates.install({ activeAgentCount: 0, attentionRequired: false })).toEqual({
+    expect(await updates.install({ activeAgentCount: 0, activityUnconfirmed: false })).toEqual({
       kind: "installing",
     });
     expect(image.calls).toHaveLength(1);
@@ -842,7 +842,7 @@ describe("portable image updates", () => {
     await updates.check();
     await updates.download();
 
-    expect(await updates.install({ activeAgentCount: 0, attentionRequired: false })).toEqual({
+    expect(await updates.install({ activeAgentCount: 0, activityUnconfirmed: false })).toEqual({
       kind: "not-ready",
     });
     expect(updates.state()).toMatchObject({

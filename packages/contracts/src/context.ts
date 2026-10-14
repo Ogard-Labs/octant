@@ -768,14 +768,8 @@ export const ContextCompactionAvailability = Schema.Union(
 );
 export type ContextCompactionAvailability = typeof ContextCompactionAvailability.Type;
 
-/** The thread's most recent compaction, folded from its journaled events. */
-export const ContextCompactionRecord = Schema.Union(
-  Schema.Struct({
-    status: Schema.Literal("running"),
-    compactionId: ContextCompactionId,
-    executor: ContextCompactionExecutor,
-    requestedAt: UtcTimestamp,
-  }).annotations(strict),
+/** A compaction that has ended: completed with its receipt, or failed. */
+export const ContextCompactionSettledRecord = Schema.Union(
   Schema.Struct({
     status: Schema.Literal("completed"),
     receipt: ContextCompactionReceipt,
@@ -788,6 +782,18 @@ export const ContextCompactionRecord = Schema.Union(
     sessionMayHaveChanged: Schema.Boolean,
     failedAt: UtcTimestamp,
   }).annotations(strict),
+);
+export type ContextCompactionSettledRecord = typeof ContextCompactionSettledRecord.Type;
+
+/** The thread's most recent compaction, folded from its journaled events. */
+export const ContextCompactionRecord = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("running"),
+    compactionId: ContextCompactionId,
+    executor: ContextCompactionExecutor,
+    requestedAt: UtcTimestamp,
+  }).annotations(strict),
+  ...ContextCompactionSettledRecord.members,
 );
 export type ContextCompactionRecord = typeof ContextCompactionRecord.Type;
 

@@ -798,7 +798,10 @@ const TerminalStateFields = {
   operationId: CodeOperationId,
   terminalId: CodeTerminalId,
   transcript: Schema.optional(CodeEvidenceReference),
-  /** Present when the command asked for, or switched off, the terminal's Browser grant. */
+  /**
+   * Present when the command asked for, or switched off, the terminal's Browser
+   * grant, and on an attach to a running terminal that holds a live one.
+   */
   browserGrant: Schema.optional(TerminalBrowserGrantOutcome),
 } as const;
 const TerminalStateResult = Schema.Union(

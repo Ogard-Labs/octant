@@ -1163,7 +1163,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-medium);
+  font-weight: var(--oct-weight-strong);
   letter-spacing: -0.01em;
   line-height: 1.35;
   text-transform: none;
@@ -1817,7 +1817,7 @@ textarea.settings-view__text-input {
   color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-display);
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
   line-height: 1.3;
 }
@@ -3031,9 +3031,9 @@ html[data-octant-increased-contrast="true"]
 .settings-view .settings-card-section.settings-card-section--open > h2,
 .settings-view .settings-card-section.settings-card-section--open > .settings-section-head > h2 {
   padding: 0;
-  color: var(--octant-text-primary);
+  color: var(--octant-text-secondary);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
   line-height: 1.35;
 }
@@ -3148,9 +3148,9 @@ html[data-octant-increased-contrast="true"]
 
 .settings-view .settings-card-section.settings-card-section--open > :is(legend, summary) {
   padding: 0 0 var(--oct-space-3);
-  color: var(--octant-text-primary);
+  color: var(--octant-text-secondary);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
   line-height: 1.35;
 }
@@ -3485,9 +3485,9 @@ html[data-octant-increased-contrast="true"]
 .settings-view .provider-limits > .oct-section-label,
 .settings-view .provider-limits > .surface-section__head > .oct-section-label {
   margin: 0;
-  color: var(--octant-text-primary);
+  color: var(--octant-text-secondary);
   font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
+  font-weight: var(--oct-weight-strong);
   letter-spacing: var(--oct-tracking-snug);
 }
 

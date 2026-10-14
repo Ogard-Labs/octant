@@ -125,6 +125,7 @@ export * from "./scaffoldPolicy";
 export * from "./threadCheckpointPolicy";
 export * from "./threadWorkPolicy";
 export * from "./threadDraftPresentation";
+export * from "./threadWindow";
 export * from "./threadMentionPolicy";
 export * from "./sideChatPolicy";
 export * from "./fileMentionPolicy";

@@ -1,4 +1,4 @@
-import { shouldConfirmQuit, type LocalHostSnapshot } from "./hostLifecycle";
+import { shouldConfirmQuit, workInFlight, type LocalHostSnapshot } from "./hostLifecycle";
 
 export interface QuitConfirmationCopy {
   readonly title: "Quit Octant?";
@@ -31,14 +31,8 @@ export async function evaluateQuitRequest(options: {
   readonly snapshot: () => LocalHostSnapshot;
   readonly confirm: (snapshot: LocalHostSnapshot) => Promise<boolean>;
 }): Promise<boolean> {
-  let refreshFailed = false;
-  try {
-    await options.refreshActivity();
-  } catch {
-    refreshFailed = true;
-  }
+  const work = await workInFlight(options);
   const snapshot = options.snapshot();
-  const activeOwnedHost = snapshot.state !== "stopped" && snapshot.ownership === "desktop-owned";
-  if (!shouldConfirmQuit(snapshot) && !(refreshFailed && activeOwnedHost)) return true;
+  if (!shouldConfirmQuit(snapshot, work)) return true;
   return options.confirm(snapshot);
 }

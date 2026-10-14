@@ -2,6 +2,7 @@ import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark } from "./agentRun";
+import { ContextCompactionSettledRecord } from "./context";
 import { ExtensionSelection } from "./extensions";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
@@ -17,6 +18,7 @@ import { ThreadWorkingDirectory } from "./workingDirectory";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadTaskProgressList } from "./threadTasks";
+import { ThreadWindowBoundsFields } from "./threadWindow";
 import { WorkThreadId } from "./workThreads";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -323,6 +325,30 @@ export const WorkThreadTranscript = Schema.Struct({
 }).annotations(strict);
 export type WorkThreadTranscript = typeof WorkThreadTranscript.Type;
 
+/**
+ * One page of a Work thread: a contiguous run of at most
+ * `MAX_WORK_TRANSCRIPT_TURNS` turns, oldest first, that may stop short of the
+ * limit to keep the answer's text bounded. Without an anchor it is the newest
+ * turns; with `before` it is the turns just before the named one, so a client
+ * walks back by naming its oldest loaded turn. `liveCursor` is the stream
+ * position this page was read at.
+ */
+export const WorkThreadTranscriptWindow = Schema.Struct({
+  version: Schema.Literal(1),
+  threadId: WorkThreadId,
+  turns: Schema.Array(WorkTurnState).pipe(Schema.maxItems(MAX_WORK_TRANSCRIPT_TURNS)),
+  liveCursor: Schema.Int.pipe(Schema.nonNegative()),
+  ...ThreadWindowBoundsFields,
+}).annotations(strict);
+export type WorkThreadTranscriptWindow = typeof WorkThreadTranscriptWindow.Type;
+
+/** What a window read asks for: a page size and at most one anchor turn. */
+export const WorkThreadTranscriptWindowRequest = Schema.Struct({
+  limit: Schema.Int.pipe(Schema.between(1, MAX_WORK_TRANSCRIPT_TURNS)),
+  before: Schema.optional(WorkTurnRequestId),
+}).annotations(strict);
+export type WorkThreadTranscriptWindowRequest = typeof WorkThreadTranscriptWindowRequest.Type;
+
 /** Process-local Work response updates after a durable transcript snapshot. */
 export const WorkTurnStreamFrame = Schema.Union(
   Schema.Struct({
@@ -362,6 +388,13 @@ export const WorkTurnStreamFrame = Schema.Union(
     sequence: Schema.Int.pipe(Schema.positive()),
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
+  }).annotations(strict),
+  /** A compaction of the thread's session ended, with its receipt or its failure. */
+  Schema.Struct({
+    kind: Schema.Literal("compaction-settled"),
+    sequence: Schema.Int.pipe(Schema.positive()),
+    threadId: WorkThreadId,
+    compaction: ContextCompactionSettledRecord,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("snapshot-required"),
@@ -443,6 +476,12 @@ export const decodeCancelWorkTurnCommand = Schema.decodeUnknownSync(CancelWorkTu
 export const decodeWorkTurnLookupResult = Schema.decodeUnknownSync(WorkTurnLookupResult);
 export const decodeWorkTurnCancelResult = Schema.decodeUnknownSync(WorkTurnCancelResult);
 export const decodeWorkThreadTranscript = Schema.decodeUnknownSync(WorkThreadTranscript);
+export const decodeWorkThreadTranscriptWindow = Schema.decodeUnknownSync(
+  WorkThreadTranscriptWindow,
+);
+export const decodeWorkThreadTranscriptWindowRequest = Schema.decodeUnknownSync(
+  WorkThreadTranscriptWindowRequest,
+);
 export const decodeWorkTurnStreamFrame = Schema.decodeUnknownSync(WorkTurnStreamFrame);
 export const decodeWorkTurnAccepted = Schema.decodeUnknownSync(WorkTurnAccepted);
 export const decodeWorkTurnUpdated = Schema.decodeUnknownSync(WorkTurnUpdated);

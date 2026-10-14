@@ -3,6 +3,10 @@ import { CodeClientFailure } from "@octant/client-runtime/code-client";
 import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
 import type { CodeOperationId, CodeOperationResult } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import type {
+  TerminalBrowserGrantOutcome,
+  TerminalBrowserGrantRefusalReason,
+} from "@octant/contracts/terminal-browser-grants";
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
@@ -10,6 +14,8 @@ import { OctantMenu } from "../ui/base/OctantMenu";
 import { XtermTerminalAdapter, type XtermAdapterRuntime } from "./XtermTerminalAdapter";
 import { ShellState } from "../shell/ShellState";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { OctantButton } from "../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 
 type TerminalResult = Extract<CodeOperationResult, { readonly kind: "terminal-state" }>;
 
@@ -24,6 +30,12 @@ export interface CodeTerminalPaneProps {
    * offering a button that would drop what the user selected.
    */
   readonly onAddSelectionToChat?: (selection: string) => void;
+  /**
+   * Offers to restart this Code thread terminal with its Browser grant on.
+   * Only a thread terminal this window can restart offers it; the host still
+   * decides, and refuses anyone but the person at a local window.
+   */
+  readonly offerBrowserGrant?: boolean;
   /** Opens a second terminal for this thread. Absent when tabs cannot open. */
   readonly onOpenAnotherTerminal?: () => void;
   /**
@@ -51,6 +63,9 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   );
   const [failure, setFailure] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [confirmingBrowser, setConfirmingBrowser] = useState(false);
+  const [browserPending, setBrowserPending] = useState(false);
+  const [browserRefusal, setBrowserRefusal] = useState<string>();
   const readSelection = useRef<(() => string) | undefined>(undefined);
   const operationQueue = useRef(Promise.resolve());
   const pendingWrite = useRef<{ terminalId: CodeTerminalId; data: string } | undefined>(undefined);
@@ -59,6 +74,15 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   const wakeReplay = useRef<(() => void) | undefined>(undefined);
   const interactive = props.executionPolicy !== "plan" && result.state === "running";
   const replayReady = loadedReplayKey === replayKey;
+  // Read from the host's last answer about this shell, never from having asked:
+  // an attach reports a live grant, and a shell that stopped took its grant
+  // with it.
+  const browserOn = result.state === "running" && result.browserGrant?.status === "granted";
+  const canOfferBrowser =
+    props.offerBrowserGrant === true &&
+    props.restart !== undefined &&
+    props.executionPolicy !== "plan" &&
+    !browserOn;
 
   useEffect(() => setResult(props.result), [props.result]);
 
@@ -298,11 +322,93 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
       // The person at the window restarting their own terminal is the
       // approval; the host authorizes it as a user-initiated operation.
       setFailure(undefined);
+      setBrowserRefusal(undefined);
       const next = await props.client.executeOperation(command);
       if (next.kind === "terminal-state") setResult(next);
       if (next.kind === "operation-failed") setFailure(next.failure.message);
     } catch {
       setFailure(`Terminal ${action} failed. Reconnect and retry.`);
+    }
+  };
+
+  const switchBrowserOn = async () => {
+    const restart = props.restart;
+    if (restart === undefined || props.executionPolicy === "plan") return;
+    setBrowserPending(true);
+    setBrowserRefusal(undefined);
+    setFailure(undefined);
+    setNotice(undefined);
+    try {
+      // A running shell cannot be handed the grant's variables, so the grant
+      // comes with a fresh shell. The person agreed to the restart first.
+      if (result.state === "running") {
+        const stopped = await props.client.executeOperation({
+          kind: "stop-terminal",
+          operationId: props.createOperationId(),
+          terminalId: result.terminalId,
+          ...props.scope,
+        });
+        if (stopped.kind === "operation-failed") {
+          setFailure(stopped.failure.message);
+          return;
+        }
+      }
+      const next = await props.client.executeOperation({
+        kind: "start-terminal",
+        operationId: props.createOperationId(),
+        terminalId: restart.createTerminalId(),
+        columns: restart.columns,
+        rows: restart.rows,
+        credentialRefs: restart.credentialRefs,
+        browserGrant: "on",
+        ...props.scope,
+      });
+      if (next.kind === "terminal-state") {
+        setResult(next);
+        const refusal = browserGrantRefusal(next.browserGrant);
+        if (refusal !== undefined) setBrowserRefusal(refusal);
+      } else if (next.kind === "operation-failed") {
+        setFailure(next.failure.message);
+      }
+    } catch {
+      setFailure("Octant could not restart the terminal with the Browser. Reconnect and retry.");
+    } finally {
+      setBrowserPending(false);
+      setConfirmingBrowser(false);
+    }
+  };
+
+  const switchBrowserOff = async () => {
+    setBrowserPending(true);
+    setBrowserRefusal(undefined);
+    setFailure(undefined);
+    try {
+      const next = await props.client.executeOperation({
+        kind: "revoke-terminal-browser-grant",
+        operationId: props.createOperationId(),
+        terminalId: result.terminalId,
+        ...props.scope,
+      });
+      if (next.kind === "operation-failed") {
+        setFailure(next.failure.message);
+        return;
+      }
+      if (next.kind !== "terminal-state") return;
+      const grant = next.browserGrant;
+      if (grant?.status === "refused" && grant.reason !== "no-live-grant") {
+        setBrowserRefusal(REFUSALS[grant.reason]);
+        return;
+      }
+      // Only the grant changes: the shell keeps running, and its output stays
+      // on the operation that started it.
+      setResult(withoutBrowserGrant);
+      setNotice(
+        "Browser off for this terminal. A CLI that used it stops at its next Browser call; to use it again, switch it back on and start the CLI again.",
+      );
+    } catch {
+      setFailure("Octant could not switch the Browser off. Reconnect and retry.");
+    } finally {
+      setBrowserPending(false);
     }
   };
 
@@ -322,6 +428,10 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
       : [{ value: "add-selection", label: "Add selection to chat" }]),
     ...(props.onPinTerminal === undefined ? [] : [{ value: "pin", label: "Pin to focus zone" }]),
     ...(props.onOpenAnotherTerminal === undefined ? [] : [{ value: "new", label: "New terminal" }]),
+    ...(canOfferBrowser
+      ? [{ value: "browser-on", label: "Let this terminal use the Browser…" }]
+      : []),
+    ...(browserOn ? [{ value: "browser-off", label: "Switch the Browser off" }] : []),
     ...(props.executionPolicy === "plan"
       ? []
       : result.state === "running"
@@ -334,6 +444,8 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     if (value === "add-selection") addSelectionToChat();
     else if (value === "pin") props.onPinTerminal?.();
     else if (value === "new") props.onOpenAnotherTerminal?.();
+    else if (value === "browser-on") setConfirmingBrowser(true);
+    else if (value === "browser-off") void switchBrowserOff();
     else if (value === "stop" || value === "restart") void control(value);
   };
 
@@ -366,6 +478,31 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           Terminal output is truncated. Earlier output is no longer available.
         </OctantAlert>
       ) : null}
+      {browserOn ? (
+        <OctantAlert
+          action={
+            <OctantButton
+              disabled={browserPending}
+              onClick={() => void switchBrowserOff()}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Switch off
+            </OctantButton>
+          }
+          className="code-terminal-pane__browser"
+          title="Browser on"
+        >
+          A CLI started here with octant mcp can use this thread's Browser. If this window changes
+          Project, start the CLI again.
+        </OctantAlert>
+      ) : null}
+      {browserRefusal === undefined ? null : (
+        <OctantAlert className="code-terminal-pane__browser" tone="warning">
+          {browserRefusal}
+        </OctantAlert>
+      )}
       {failure === undefined ? null : <OctantAlert tone="warning">{failure}</OctantAlert>}
       {notice === undefined ? null : <p role="status">{notice}</p>}
       {props.executionPolicy === "plan" ? (
@@ -389,15 +526,63 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     </section>
   );
   return (
-    <OctantContextMenu
-      items={actions}
-      onValueChange={selectAction}
-      triggerClassName="code-terminal-pane__context-menu"
-    >
-      {pane}
-    </OctantContextMenu>
+    <>
+      <OctantContextMenu
+        items={actions}
+        onValueChange={selectAction}
+        triggerClassName="code-terminal-pane__context-menu"
+      >
+        {pane}
+      </OctantContextMenu>
+      {confirmingBrowser ? (
+        <OctantConfirmDialog
+          confirmLabel="Restart with the Browser"
+          details={
+            <p>
+              The CLI reaches it through the octant command, which must be on this terminal's PATH.
+              A headless install has it; the desktop app does not include it yet.
+            </p>
+          }
+          onCancel={() => setConfirmingBrowser(false)}
+          onConfirm={() => void switchBrowserOn()}
+          pending={browserPending}
+          title="Let this terminal use the Browser?"
+        >
+          The terminal restarts, so anything running in it stops. A CLI you then start in it can use
+          this thread's Browser, and the first visit to each new site asks you in the thread.
+        </OctantConfirmDialog>
+      ) : null}
+    </>
   );
 }
+
+function withoutBrowserGrant(result: TerminalResult): TerminalResult {
+  const { browserGrant: _ended, ...rest } = result;
+  return rest;
+}
+
+/** What the person reads when the host would not let this terminal use the Browser. */
+function browserGrantRefusal(grant: TerminalBrowserGrantOutcome | undefined): string | undefined {
+  if (grant === undefined || grant.status === "granted") return undefined;
+  if (grant.status === "revoked") {
+    return grant.reason === "terminal-not-started"
+      ? "The terminal stopped before it could use the Browser. Restart it from its menu."
+      : undefined;
+  }
+  return `${REFUSALS[grant.reason]} Restart the terminal from its menu to go on without it.`;
+}
+
+const REFUSALS: Readonly<Record<TerminalBrowserGrantRefusalReason, string>> = {
+  "not-local-window": "Only the person at a window on the host can let a terminal use the Browser.",
+  "not-a-code-thread": "Only a Code thread's terminal can use the Browser.",
+  "thread-not-active":
+    "This thread is archived or completed, so its terminal cannot use the Browser.",
+  "window-cannot-open-thread": "This window cannot open this thread's Project.",
+  "browser-unavailable": "This thread has no Browser to lend.",
+  "terminal-already-granted": "This terminal can already use the Browser.",
+  "no-live-grant": "This terminal was not using the Browser.",
+  "grant-unavailable": "Octant could not set up the Browser for this terminal.",
+};
 
 async function waitForTerminalReplay(
   signal: AbortSignal,

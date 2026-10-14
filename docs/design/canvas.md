@@ -700,7 +700,7 @@ script can still connect to another computer, under the
 
 On desktop a running prototype is never drawn in a frame. A page policy does
 not cover WebRTC, and the renderer's WebRTC policy stops only UDP: on Electron
-43.1.0 a peer connection naming a TURN server over TCP still reached a local
+43.5.0 a peer connection naming a TURN server over TCP still reached a local
 listener from a sandboxed frame. So the prototype is a `<webview>` whose guest
 lives in a session of its own with no route out, the same boundary the preview
 browser has:

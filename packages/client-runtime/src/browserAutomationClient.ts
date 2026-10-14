@@ -211,17 +211,17 @@ export function createBrowserAutomationClient(
         "/api/browser/approvals",
         { kind: "decide", ...validated },
         (value) => {
-          if (
-            typeof value !== "object" ||
-            value === null ||
-            Object.keys(value).length !== 1 ||
-            (value as { accepted?: unknown }).accepted !== true
-          ) {
-            throw new Error("invalid");
-          }
-          return true;
+          const accepted =
+            typeof value === "object" && value !== null && Object.keys(value).length === 1
+              ? (value as { accepted?: unknown }).accepted
+              : undefined;
+          if (typeof accepted !== "boolean") throw new Error("invalid");
+          return accepted;
         },
         undefined,
+        // The host answers 409 `{ accepted: false }` for a request that expired
+        // or that another window already answered: a refusal, not a failure.
+        409,
       );
       return response;
     },
@@ -234,6 +234,7 @@ async function post<T>(
   body: unknown,
   decode: (input: unknown) => T,
   signal: AbortSignal | undefined,
+  refusalStatus?: number,
 ): Promise<T> {
   let response: Response;
   try {
@@ -268,7 +269,7 @@ async function post<T>(
       "Browser automation returned an invalid response.",
     );
   }
-  if (!response.ok) {
+  if (!response.ok && response.status !== refusalStatus) {
     try {
       const failure = decodeBrowserAutomationFailure(payload);
       throw new BrowserAutomationClientFailure(failure.category, failure.message);

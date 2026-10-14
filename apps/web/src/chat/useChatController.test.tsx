@@ -781,6 +781,56 @@ describe("useChatController", () => {
     expect(result.current.activeView?.turns).toEqual([]);
   });
 
+  it("moves past a compaction outcome without re-reading the thread", async () => {
+    const subscribe = vi
+      .fn()
+      .mockImplementationOnce(async function* () {
+        yield decodeChatEventFrame({
+          threadId,
+          sequence: 4,
+          event: {
+            kind: "compaction-settled",
+            threadId,
+            compaction: {
+              status: "failed",
+              compactionId: "00000000-0000-4000-8000-0000000008c1",
+              executor: {
+                kind: "host",
+                providerInstanceId: bootstrap().threads[0]!.providerInstanceId,
+                modelId: bootstrap().threads[0]!.modelId,
+              },
+              reason: "summary-failed",
+              sessionMayHaveChanged: false,
+              failedAt: now,
+            },
+          },
+        });
+      })
+      .mockImplementation(async function* (_threadId, _cursor, signal: AbortSignal) {
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+      });
+    const thread = vi.fn(async () => threadView(1));
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread,
+      subscribe,
+    });
+    const { unmount } = renderHook(() =>
+      useChatController({
+        activeThreadId: threadId,
+        client,
+        reconnectDelayMs: 0,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+
+    await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(2));
+    expect(subscribe).toHaveBeenLastCalledWith(threadId, 4, expect.any(AbortSignal));
+    expect(thread).toHaveBeenCalledOnce();
+    unmount();
+  });
+
   it("reconnects after a finite clean replay so later frames are observed", async () => {
     let snapshotSequence = 1;
     const subscribe = vi

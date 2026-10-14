@@ -303,15 +303,15 @@ Each mode offers only its admitted tools, so every runtime receives the same
 definitions without a separate global tool installation or prompt catalogue,
 through the transport its adapter verified:
 
-| Runtime                             | App-managed tool transport                                                                                                                  |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code                         | The Agent SDK's in-process MCP server `octant`, owned by the provider connection                                                            |
-| Codex                               | App-server `thread/start.dynamicTools`                                                                                                      |
-| OpenCode                            | A connection-private loopback MCP endpoint, registered through OpenCode's own server API                                                    |
-| ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate                       |
-| Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                                                    |
-| Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                                           |
-| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant, reached through `octant mcp`; partly built ([detail](design/terminal-browser-grant.md)) |
+| Runtime                             | App-managed tool transport                                                                                                                                                                                                                                 |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code                         | The Agent SDK's in-process MCP server `octant`, owned by the provider connection                                                                                                                                                                           |
+| Codex                               | App-server `thread/start.dynamicTools`                                                                                                                                                                                                                     |
+| OpenCode                            | A connection-private loopback MCP endpoint, registered through OpenCode's own server API                                                                                                                                                                   |
+| ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate                                                                                                                                      |
+| Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                                                                                                                                                                   |
+| Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                                                                                                                                                          |
+| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant, reached through `octant mcp`; the person adds that command to their CLI, and Octant writes no provider configuration. Not yet packaged in the desktop app ([detail](design/terminal-browser-grant.md)) |
 
 No transport edits a person's provider MCP, hook, or global configuration;
 OpenCode's per-launch posture stays in its connection-private configuration.
@@ -1378,32 +1378,44 @@ or stops a thread.
   is the id messaging addresses. It grants nothing; `read` and `wait` re-decide
   the set at the call, so a reference refuses once its thread is completed,
   archived, deleted, or in another Project than the one it was listed in, and
-  it never resolves to a different thread. The thread's working state is not
-  part of it, since `wait` exists to see that state change. Every reference
-  outside the set, malformed text included, refuses `unauthorized` with one
-  sentence, so a refusal confirms nothing outside the caller's Project. A call
+  it never resolves to a different thread. `read` decides again after its
+  transcript read, and `wait` on every look, so a thread that closes or moves
+  meanwhile refuses too, as does one the `#thread` mention read cannot serve.
+  A reference does not carry the thread's working state, since `wait` exists
+  to see that state change. Every reference outside the set, malformed text
+  included, refuses `unauthorized` with one sentence, so a refusal confirms
+  nothing outside the caller's Project. A call
   whose input fails the tool's schema (an unknown action, an extra field, a
-  timeout out of range, a reference over 128 characters) or whose turn was
-  cancelled refuses `policy`; neither depends on any thread. Inside
+  timeout out of range, a reference over 128 characters), whose turn was
+  cancelled, whose profile leaves the tool out, or whose caller is unknown,
+  completed, or archived refuses `policy`; none depends on another thread.
+  The caller and the turn are re-checked wherever the target is. Inside
   it, `list` makes the set visible on purpose; a `sent` answer from messaging
   already confirmed it.
-- **Taint and framing.** `read` text joins the turn inside the shared
-  external-data frame, like a delivered agent message. `read` and `list` (a
-  title is text a person or an agent wrote) mark the caller with
+- **Taint and framing.** A `read` or `list` answer joins the turn inside the
+  shared external-data frame, like a delivered agent message. `read` and
+  `list` (a title is text a person or an agent wrote) mark the caller with
   `thread.external-content-ingested@1` before the result returns, every time;
-  a call that cannot be marked returns `unavailable` and nothing else. `wait`
-  returns a closed set of states and does not mark. A thread that lists its
-  siblings therefore asks for single-use confirmation on risky actions
-  afterwards, and that mark clears only by a person.
+  a call that cannot be marked returns `unavailable` and nothing else. Each
+  call journals its own mark, under the source label `sibling-thread`,
+  whether or not the caller was already marked. `wait` returns a closed set
+  of states and does not mark. A thread that lists its siblings therefore
+  asks for single-use confirmation on risky actions afterwards, and that mark
+  clears only by a person.
 - **Offer and bounds.** The tool is offered in Plan, since no action changes
   anything outside the caller's own context, and omitted from a turn whose
   profile allowlist leaves it out. A turn may make 8 `read` and 4 `wait`
-  calls; the next refuses `rate-limited`. `list` is not counted. Each `read`
-  and `wait` is journaled on the reader's thread with reader, target, action,
-  time, and the size returned, never the text.
-- **Not built.** The contract and the pure rules exist; the host actions, the
-  journal record, and the registration on Code turns do not, so no turn is
-  offered the tool yet.
+  calls; the next refuses `rate-limited`. Every `read` and `wait` whose input
+  decodes counts, refused or not, so probing references spends the same
+  budget as reading them. `list` is not counted. Each answered `read` and
+  `wait` is journaled as `thread.sibling-observed@1` on the reader's own
+  `sibling-thread-observation` stream with reader, target, action, time, and
+  the bytes returned, never the text; purging the reader purges it. A call
+  the host cannot journal returns `unavailable` and nothing else. A refused
+  call is not journaled, and `list` is recorded only by its mark.
+- **Not built.** The contract, the pure rules, and the host's three actions
+  exist; the registration on Code turns does not, so no turn is offered the
+  tool yet.
 
 ## Agent task display
 
@@ -1574,9 +1586,13 @@ flowchart LR
   conversation evidence is read in bounded batches and page results paint as
   they arrive; live Code operation frames carry bounded display text beside
   their durable evidence references. Work uses a bounded delta feed over its
-  durable transcript. The Work transcript route answers with the newest 64
-  turns of a longer thread, oldest first; export and `#thread` mentions read the
-  whole thread on the host. One post-commit Machine change feed invalidates mode
+  durable transcript. A Work thread opens on its newest turns through a
+  windowed read and loads earlier pages on request; each page is one
+  contiguous run of whole turns, bounded by count and by text, and the
+  journal and projection stay complete ([thread windows](design/host-reads-and-commands.md#thread-windows)).
+  The older whole-transcript route answers with the newest 64 turns of a longer
+  thread, oldest first; export and `#thread` mentions read the whole thread on
+  the host. One post-commit Machine change feed invalidates mode
   navigation and Project/extension projections instead of independent polling
   timers. A running turn's start time and latest step (a tool name and one
   redacted, truncated argument, or a wait on approval or an answer) ride on the
@@ -2433,14 +2449,14 @@ journal the frame; the harness additionally keeps its own record.
 **Compacting a session on request.** Built so far: the host path for Chat and
 Work on a direct endpoint — the `compact-session` command, its receipt,
 refusals and journal events, the per-thread `compaction` answer on the
-inspector snapshot, and the host summary — and the provider seam with the
+inspector snapshot, the host summary, the outcome on the thread's live stream,
+the server's send block while a compaction runs, and the provider seam with the
 Codex, Claude Code and Octant Harness adapters. Not built yet: the server's use
 of that seam, so a runtime-owned conversation and every Code thread is still
-refused `runtime-cannot-compact`, a runtime's automatic compactions are not
-journaled, and the `windowCompacted` flags still drive `promptRetention`; the
-receipt on the live stream; the send block while a compaction runs, so until
-then a turn that starts mid-compaction fails it as `context-changed`; and the
-UI, so `compact-range` stays a listed remedy with no action behind it. **Compact session** replaces what the model sees from
+refused `runtime-cannot-compact`; journaling a runtime's automatic
+compactions; replacing the `windowCompacted` flags, which still drive
+`promptRetention`; and the UI, so `compact-range` stays a listed remedy with no
+action behind it. **Compact session** replaces what the model sees from
 the next turn on with a summary of the earlier conversation and a recent tail,
 when the person asks, outside a turn. It never deletes or rewrites the journal:
 the thread keeps every message, tool call and result, and the compaction is
@@ -2575,9 +2591,19 @@ _Command and receipt._ One new `ContextCommand` kind in
 
 The command answers as soon as the request is journaled, with
 `{ kind: "compaction-started", compactionId, executor }`, because a runtime's
-compaction is a model call that can outlast an HTTP request. The receipt arrives
-on the thread's live stream as `context.compaction-completed@1` and is also on
-the inspector snapshot as `latestCompaction`:
+compaction is a model call that can outlast an HTTP request. When it ends, the
+outcome arrives on the thread's live stream as a `compaction-settled` event
+carrying the compaction's record: the receipt that
+`context.compaction-completed@1` journaled, or the failure that
+`context.compaction-failed@1` journaled, with the executor its request named. A
+failure rides the stream too, because a
+window that disabled send while the compaction ran must learn that it ended
+either way. A Chat thread's events stream reads the outcome back from the
+journal and sends it only to a subscriber that asks with `compaction=1`, as
+`contents=1` is asked for, because a client that decodes frames strictly would
+refuse an event it does not know; a Work thread's turn stream carries it as a
+frame of its own. The receipt is also on the inspector snapshot as
+`latestCompaction`:
 
 - `executor`: `{ kind: "host", providerInstanceId, modelId }`, or
   `{ kind: "runtime", driverKind, providerInstanceId, modelId? }`.
@@ -2723,6 +2749,17 @@ context answer), and the renderer never decides it.
   can't show it." Actions: **Compact** and Cancel.
 - While it runs, the popover reads "Compacting…", the composer's send is
   disabled with "Compacting session" as the reason, and no new turn starts.
+  The server enforces the last part, not the window: a Chat send, edit, retry,
+  resume or delivered subagent result is refused `waiting`, and a Work turn
+  `stale`, with "This session is being compacted. Send again when it
+  finishes." A subagent result, and a usage-limit continuation the person
+  opted into, wait the compaction out instead of being spent: each is offered
+  again as soon as the compaction ends. The two cannot interleave the other
+  way either: a turn or a resumed attempt counts as running for compaction
+  from the moment it is queued until it is accepted, because it reads the
+  conversation it plans from while it is prepared (a Chat turn journals its
+  plan before its attempt), so a compaction can neither be planned over nor
+  commit a summary the turn never read.
 - The result line, in the popover and on the timeline divider:
   "Compacted · 41.2k freed · summary by Codex", "Compacted · freed amount shows
   after the next reply", "Compacted · nothing freed", or "Couldn't compact:
@@ -4456,7 +4493,7 @@ mechanisms are:
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
-- **Terminal Browser grant (partly built).** A person may start a Code thread
+- **Terminal Browser grant (built except desktop packaging).** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per
   terminal, and honored only from a local window: a paired device, a routine, or
@@ -4472,10 +4509,11 @@ mechanisms are:
   The grant ends when the terminal closes, the person switches it off, the
   thread is completed, archived, or purged, its window loses authority, or the
   host stops; a revoked or unknown grant answers every call `unauthorized`. Issue
-  and end are journaled without the token or address. Built: the grant, its
-  endpoint, its lifecycle, its refusals, and the `octant mcp` command a CLI is
-  pointed at. Not built: the window switch and approval wording, the user guide,
-  and desktop packaging. Detail is in
+  and end are journaled without the token or address. The window switches a
+  terminal on with a restart the person confirms, shows the state the host
+  reports, and shows the first effect on an origin as a request from the
+  terminal, not from the thread's agent. Not built: desktop packaging of the
+  `octant` command. Detail is in
   [Terminal Browser grant](design/terminal-browser-grant.md).
 - **Terminal shell configuration.** On macOS a thread or Project terminal is
   the person's login shell (`-l`), and its read roots add, read-only and only

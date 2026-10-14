@@ -1,5 +1,6 @@
 import {
   decodeWorkTurnStreamFrame,
+  type ContextCompactionSettledRecord,
   type ThreadTaskProgressList,
   type WorkThreadId,
   type WorkTurnRequestId,
@@ -143,6 +144,21 @@ export class WorkTurnLiveStore {
         sequence: state.nextSequence,
         threadId,
         turn,
+      }),
+    );
+  }
+
+  /** A compaction of the thread's session ended; its receipt or failure rides the feed. */
+  settleCompaction(threadId: WorkThreadId, compaction: ContextCompactionSettledRecord): void {
+    if (this.#closed) return;
+    const state = this.#state(threadId);
+    this.#publish(
+      threadId,
+      decodeWorkTurnStreamFrame({
+        kind: "compaction-settled",
+        sequence: state.nextSequence,
+        threadId,
+        compaction,
       }),
     );
   }

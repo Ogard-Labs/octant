@@ -776,7 +776,7 @@ export interface CodeOperationServiceOptions {
    */
   readonly terminalBrowserGrants?: Pick<
     TerminalBrowserGrantService,
-    "open" | "abandon" | "switchOff" | "terminalClosed"
+    "open" | "abandon" | "switchOff" | "terminalClosed" | "liveGrant"
   >;
   readonly repositoryTests: CodeOperationRepositoryTestPort;
   readonly scaffolds?: CodeOperationScaffoldPort;
@@ -1952,7 +1952,13 @@ export class CodeOperationService {
         const settledOwner = this.#terminalOwners.get(command.terminalId);
         if (settledOwner !== undefined)
           settledOwner.outputBaseline = snapshot.transcript.characters;
-        return this.#terminal(command.operationId, snapshot);
+        // A window that attaches learns whether this shell holds a Browser
+        // grant from the host, never from its own memory of having asked.
+        const liveGrant =
+          snapshot.status === "running"
+            ? this.#options.terminalBrowserGrants?.liveGrant(thread.id, command.terminalId)
+            : undefined;
+        return this.#terminal(command.operationId, snapshot, true, liveGrant);
       }
       case "write-terminal":
       case "resize-terminal":

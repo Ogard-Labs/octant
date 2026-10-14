@@ -3318,15 +3318,20 @@ function installIpcHandlers(): void {
     ownedTopLevelWindowContext(event);
     return await appUpdates().download();
   });
-  ipcMain.handle(IPC_CHANNELS.appUpdateInstall, (event) => {
+  ipcMain.handle(IPC_CHANNELS.appUpdateInstall, async (event) => {
     ownedTopLevelWindowContext(event);
-    // Read here rather than taken from the renderer: this is the same activity
-    // the quit guard already trusts to decide whether stopping would interrupt
-    // something, and a second notion of "busy" would disagree with it exactly
-    // when it mattered. `workInFlight` is that shared reading; the host's
-    // `attentionRequired` is not, because a provider that only needs sign-in
-    // sets it with nothing running.
-    return appUpdates().install(workInFlight(hostLifecycle.snapshot()));
+    // Read freshly here rather than taken from the renderer or a cached poll:
+    // this is the same activity the quit guard trusts to decide whether
+    // stopping would interrupt something, and a second notion of "busy" would
+    // disagree with it exactly when it mattered. `workInFlight` is that shared
+    // reading; the host's `attentionRequired` is not, because a provider that
+    // only needs sign-in sets it with nothing running.
+    return appUpdates().install(
+      await workInFlight({
+        refreshActivity: refreshHostActivity,
+        snapshot: hostLifecycle.snapshot,
+      }),
+    );
   });
   ipcMain.handle(IPC_CHANNELS.appUpdateAutomatic, (event, value: unknown) => {
     ownedTopLevelWindowContext(event);

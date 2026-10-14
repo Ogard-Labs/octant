@@ -880,6 +880,38 @@ describe("chat contracts", () => {
     ).toThrow();
   });
 
+  it("streams an ended compaction, never a running one, and never as a command result", () => {
+    const failed = {
+      status: "failed",
+      compactionId: "00000000-0000-4000-8000-0000000008c1",
+      executor: { kind: "host", providerInstanceId: ids.provider, modelId: "model-a" },
+      reason: "summary-failed",
+      sessionMayHaveChanged: false,
+      failedAt: "2026-07-19T12:00:00.000Z",
+    } as const;
+    const frame = {
+      threadId: ids.thread,
+      sequence: 2,
+      event: { kind: "compaction-settled", threadId: ids.thread, compaction: failed },
+    } as const;
+    expect(decodeChatEventFrame(frame)).toEqual(frame);
+    expect(() =>
+      decodeChatEventFrame({
+        ...frame,
+        event: {
+          ...frame.event,
+          compaction: {
+            status: "running",
+            compactionId: failed.compactionId,
+            executor: failed.executor,
+            requestedAt: failed.failedAt,
+          },
+        },
+      }),
+    ).toThrow();
+    expect(() => decodeChatCommandResult(frame.event)).toThrow();
+  });
+
   it("decodes ChatCommandResult and ChatFailure with strict categories", () => {
     const result = {
       kind: "thread-created",

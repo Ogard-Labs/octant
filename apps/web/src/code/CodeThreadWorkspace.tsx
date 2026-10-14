@@ -98,6 +98,7 @@ import {
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
+import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
@@ -1727,6 +1728,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             ),
           )}
         </div>
+      )}
+      {props.browserAutomationClient === undefined ? null : (
+        <TerminalBrowserApprovalPrompt
+          className="thread-column"
+          client={props.browserAutomationClient}
+          threadId={String(thread.id)}
+          threadTitle={thread.title}
+        />
       )}
       <ExtensionToolApprovalPrompt
         className="thread-column"
