@@ -113,7 +113,11 @@ import {
 } from "@octant/domain/thread-completion-policy";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
-import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  ThreadIdInUse,
+} from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
@@ -1476,6 +1480,7 @@ export class CodeService {
             );
           }
           if (bindingError instanceof CodeServiceError) throw bindingError;
+          if (bindingError instanceof ThreadIdInUse) throw this.#mapFailure(bindingError);
           throw this.#failure(
             "interrupted",
             "Managed Code worktree creation was rolled back after a binding failure.",
@@ -3240,6 +3245,9 @@ export class CodeService {
 
   #mapFailure(error: unknown): CodeServiceError {
     if (error instanceof CodeServiceError) return error;
+    if (error instanceof ThreadIdInUse) {
+      return this.#failure("conflict", "That thread ID is already in use.");
+    }
     if (error instanceof ConcurrencyConflict) {
       return this.#failure("stale", "Code state changed; reload and retry.");
     }

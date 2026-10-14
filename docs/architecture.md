@@ -1544,6 +1544,10 @@ flowchart LR
     route sits on the loopback chain only. No tool, command, model output,
     structured reference, agent message, or host-run turn (routine, goal
     loop, usage-limit resume, child-run delivery) can clear.
+  - The mark is keyed by the bare thread id, and Chat, Work, and Code
+    threads share one id space: the journal refuses to start a thread under an
+    id another mode's thread already holds, so a client-chosen id cannot share
+    another mode's mark or, by being purged, erase it.
   - One clear covers that thread and only it. A child run and a fork keep
     their own taint; a Code fork starts with its source's mark when it is
     made (see the Code fork rule under Modes).
@@ -1685,7 +1689,10 @@ flowchart LR
   erases the named thread; a Project- or host-scoped purge erases only threads
   whose last update is older than their effective window; purging an
   already-purged thread succeeds idempotently. A remote principal can neither
-  set a window nor purge. See
+  set a window nor purge. A purge erases by the bare thread id, so a thread
+  whose id another mode's thread also holds (history from before the journal
+  refused that, below) is never purged: a thread-scoped purge refuses it as
+  `invalid`, and a Project- or host-scoped purge passes over it. See
   `docs/decisions/0035`. The one self-applying
   exception is startup journal compaction, which removes a
   `code.checkout-observed@1` event only when the next event of the same

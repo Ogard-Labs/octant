@@ -189,7 +189,12 @@ import {
 import { makeContextSummaryGenerator } from "../context/contextSummaryGenerator";
 import { deriveCatalogEpoch, type CapabilityCatalogEntry } from "../context/capabilityCatalog";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
-import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  ThreadIdInUse,
+} from "../persistence/journalErrors";
+import { readThreadIdModes } from "../persistence/threadIdentity";
 import type { PersistenceService } from "../persistence/persistenceService";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import { ProjectionApplicationFailed } from "../persistence/projection";
@@ -231,6 +236,7 @@ import { MultiModelRouteService } from "./multiModelRouteService";
 
 const RESEARCH_TOOL_NAME = "octant_web_research";
 const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
+const THREAD_ID_IN_USE_MESSAGE = "That thread ID is already in use.";
 /**
  * What a turn is planned against when neither the provider nor the reviewed
  * catalog named the model's window. It is an estimate, journaled as the
@@ -1694,6 +1700,7 @@ export class ChatService {
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "create-chat-thread" }>,
   ): Promise<ChatCommandResult> {
     this.#assertReady();
+    if (command.threadId !== undefined) this.#assertThreadIdFree(command.threadId);
     if (command.projectId !== undefined) {
       this.#assertActiveChatProject(command.projectId);
     }
@@ -2686,15 +2693,7 @@ export class ChatService {
       });
     }
     const branchThreadId = command.branchThreadId ?? decodeChatThreadId(this.#uuid());
-    if (
-      String(branchThreadId) === String(source.id) ||
-      this.#persistence.readChatThread(branchThreadId) !== undefined
-    ) {
-      throw new ChatServiceError({
-        category: "invalid",
-        message: "Chat branch thread ID is already in use.",
-      });
-    }
+    this.#assertThreadIdFree(branchThreadId);
 
     const contentById = new Map(
       view.contents.map((content) => [String(content.contentId), content]),
@@ -5904,6 +5903,17 @@ export class ChatService {
     };
   }
 
+  /**
+   * Refuses a client-chosen id that any mode's thread already holds, before
+   * the scratch directory is reset for it. The journal refuses the same
+   * append; this check only keeps the refusal ahead of every side effect.
+   */
+  #assertThreadIdFree(threadId: ChatThreadId): void {
+    if (readThreadIdModes(this.#persistence.connection, String(threadId)).length > 0) {
+      throw new ChatServiceError({ category: "invalid", message: THREAD_ID_IN_USE_MESSAGE });
+    }
+  }
+
   #mapFailure(error: unknown): ChatServiceError {
     if (error instanceof ThreadWorkServiceError) {
       return new ChatServiceError(error.failure);
@@ -5930,6 +5940,11 @@ export class ChatService {
           category: error.code === "stale-version" ? "stale" : "invalid",
           message: error.message,
         }),
+      );
+    }
+    if (error instanceof ThreadIdInUse) {
+      return new ChatServiceError(
+        decodeChatFailure({ category: "invalid", message: THREAD_ID_IN_USE_MESSAGE }),
       );
     }
     if (error instanceof ConcurrencyConflict) {

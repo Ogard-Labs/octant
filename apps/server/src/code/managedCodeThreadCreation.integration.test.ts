@@ -1037,6 +1037,45 @@ describe("a thread made from a thread marked with outside content", () => {
     }
   });
 
+  it("refuses a fork under the id a marked Chat thread holds and leaves that thread's mark as it was", async () => {
+    const host = markingHost();
+    host.markSource();
+    host.connection
+      .prepare(
+        `INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version, event_name, event_version,
+          correlation_id, actor_kind, actor_id, occurred_at, payload_json, host_id
+        ) VALUES (?, 'chat-thread', ?, 1, 'chat.thread-created@1', 1, ?, 'system', ?, ?, ?, 'local')`,
+      )
+      .run(
+        host.uuid(),
+        String(threadId),
+        host.uuid(),
+        host.uuid(),
+        now,
+        JSON.stringify({ kind: "thread-created", thread: { id: threadId } }),
+      );
+    host.ingestions.record({
+      threadId,
+      provenance: { origin: "external-content", sourceLabel: "web" },
+      contentReference: "chat-page-1",
+      correlationId: host.uuid(),
+      authorized: true,
+    });
+    const chatMark = host.marks(String(threadId)).map((event) => event.payload);
+    expect(chatMark).toHaveLength(1);
+    const { codeService, git } = forkingHarness(host);
+
+    await expect(codeService.execute(windowId, forkCommand)).rejects.toMatchObject({
+      failure: { category: "conflict", message: "That thread ID is already in use." },
+    });
+    expect(git.removeWorktree).toHaveBeenCalled();
+    expect(host.eventOrder().some((event) => event.startsWith("code.thread-created@1"))).toBe(
+      false,
+    );
+    expect(host.marks(String(threadId)).map((event) => event.payload)).toEqual(chatMark);
+  });
+
   it("leaves no mark on a thread whose creation fails after the mark", async () => {
     const host = markingHost();
     host.markSource();

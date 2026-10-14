@@ -30,6 +30,7 @@ import { readProject } from "./persistence/projectProjection";
 import { readAggregateVersion } from "./persistence/chatProjection";
 import type { Journal } from "./persistence/journal";
 import type { SqliteConnection } from "./persistence/sqlitePort";
+import { threadIdHeldByAnotherMode } from "./persistence/threadIdentity";
 import {
   erasePurgedProjectData,
   erasePurgedThread,
@@ -132,16 +133,30 @@ export class ThreadRetentionService {
       confirm: request.confirm,
       scope: request.scope,
       ...existence,
+      ...(request.scope.kind === "thread"
+        ? {
+            threadIdHeldByAnotherMode: threadIdHeldByAnotherMode(
+              this.#connection,
+              request.scope.mode,
+              String(request.scope.threadId),
+            ),
+          }
+        : {}),
     });
     if (decision.kind === "refused") return decision;
     const occurredAt = decodeTimestamp(this.#clock());
     const state = this.readState();
+    // A Project or host purge passes over a thread whose id another mode's
+    // thread also holds, for the reason a purge of that thread alone refuses.
     const selected = selectThreadsForPurge({
       scope: request.scope,
       subjects: this.#subjects(),
       windows: state.windows,
       now: occurredAt,
-    });
+    }).filter(
+      (subject) =>
+        !threadIdHeldByAnotherMode(this.#connection, subject.mode, String(subject.threadId)),
+    );
     const alreadyPurged =
       request.scope.kind === "thread" && existence.threadAlreadyPurged === true
         ? [
