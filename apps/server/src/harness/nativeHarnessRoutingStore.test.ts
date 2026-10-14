@@ -405,7 +405,15 @@ describe("native harness session store", () => {
     const clock = () => new Date(at).toISOString();
     const journal = journalFor(openConnection());
     const sessions = new NativeHarnessSessionStore({ journal, uuid, actor, clock });
-    const questions = new NativeHarnessQuestionStore({ sessions, uuid, clock, timeoutMs: 1_000 });
+    // Code's inline copy of a question is withdrawn through this.
+    const settledIds: string[] = [];
+    const questions = new NativeHarnessQuestionStore({
+      sessions,
+      uuid,
+      clock,
+      timeoutMs: 1_000,
+      onSettled: ({ questionId }) => settledIds.push(questionId),
+    });
     const ask = () =>
       questions.ask({
         threadId,
@@ -420,6 +428,7 @@ describe("native harness session store", () => {
     at += 1_000;
     expect(questions.waiting()).toEqual([]);
     await expect(stale).resolves.toMatchObject({ status: "expired" });
+    expect(settledIds).toEqual([idAt(0)]);
     expect(questions.answer(threadId, idAt(0), "sqlite")).toBe("already-settled");
 
     const answeredLate = ask();

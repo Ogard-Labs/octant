@@ -656,6 +656,12 @@ export interface CodeOperationRuntime {
     readonly options: ReadonlyArray<string>;
   }): boolean;
   /**
+   * Takes a native-harness question off the thread's inline surface once the
+   * harness has settled it some other way (an answer from another surface,
+   * expiry, or cancellation), so it is no longer listed or answerable here.
+   */
+  withdrawHarnessQuestion?(input: { readonly threadId: string; readonly questionId: string }): void;
+  /**
    * Every approval and question a running turn is waiting on that this window
    * could answer through `execute`, under the same scope those answers pass.
    */
@@ -1396,6 +1402,7 @@ export function createCodeOperationRuntime(
       return { terminalId: input.terminalId, state: snapshot.status };
     },
     raiseHarnessQuestion: (input) => turns.raiseHarnessQuestion(input),
+    withdrawHarnessQuestion: (input) => turns.withdrawHarnessQuestion(input),
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
     admitsTurn: (windowId, thread) => service.admitsTurn(windowId, thread),
     turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
@@ -2749,6 +2756,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
     active.cursor = frame.cursor;
     return true;
+  }
+
+  /**
+   * Forgets a native-harness question the harness has already settled. Only
+   * a question this turn raised for the harness is removed; a provider's own
+   * question with the same id is left alone.
+   */
+  withdrawHarnessQuestion(input: { readonly threadId: string; readonly questionId: string }): void {
+    const active = this.#active.get(input.threadId);
+    if (active === undefined || !active.harnessQuestions.has(input.questionId)) return;
+    active.harnessQuestions.delete(input.questionId);
+    active.questions.delete(input.questionId);
   }
 
   /** Whether this thread's running turn has an approval or a question still unanswered. */

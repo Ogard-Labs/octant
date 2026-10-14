@@ -3803,8 +3803,10 @@ native harness in `apps/server/src/harness`:
   clock whenever a question or approval is asked, answered, or listed
   (including a read of the session view), so one whose timer fired late (a
   busy host, a machine that slept) is never still shown as pending,
-  answerable, or holding a slot. At most 32 questions and 32 approvals wait at
-  once across the whole host, the cap MCP and browser tool approvals use; one
+  answerable, or holding a slot. A Code thread's inline copy of a question is
+  withdrawn whenever the question settles, however it settled. At most 32
+  questions and 32 approvals wait at once across the whole host, the cap MCP
+  and browser tool approvals use; one
   past it is refused at once as `question-too-many-waiting` or
   `approval-too-many-waiting`, journals nothing, and tells the lead nobody
   was asked. `NativeHarnessTurnObserver` puts the stable

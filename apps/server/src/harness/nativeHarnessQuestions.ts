@@ -55,6 +55,11 @@ export interface NativeHarnessQuestionStoreOptions {
     readonly mode: OctantMode;
     readonly question: NativeHarnessQuestion;
   }) => void;
+  /**
+   * Told when an asked question settles however it settled, so a surface
+   * that showed it (Code's inline question) stops listing it.
+   */
+  readonly onSettled?: (input: { readonly threadId: string; readonly questionId: string }) => void;
 }
 
 /**
@@ -120,6 +125,11 @@ export class NativeHarnessQuestionStore {
         clearTimeout(waiter.timer);
         waiter.signal?.removeEventListener("abort", waiter.onAbort);
         this.#options.sessions.settleQuestion(input.threadId, questionId, outcome);
+        try {
+          this.#options.onSettled?.({ threadId: input.threadId, questionId: String(questionId) });
+        } catch {
+          // A surface that cannot withdraw its copy does not stop the settlement.
+        }
         resolve({ ...outcome, questionId });
       };
       const waiter: Waiter = {
