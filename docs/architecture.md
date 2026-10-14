@@ -2234,7 +2234,23 @@ composition inspector for pin, exclude, and rebuild. Each of those commands
 is refused `unauthorized`, before it is journaled, unless the subject is the
 context subject of a chat, work, or code thread the calling local window can
 open (the rule that lets it read the thread's kept images and Browser captures);
-a paired device never reaches the route. Inspecting a thread that has no context plan yet is a successful empty answer, not a failed request. New context plans retain
+a paired device never reaches the route. Inspect (`POST /api/context/inspect`)
+follows open in the same way: it answers a local window only for the context
+subject of a chat, work, or code thread that window can open, or for a
+`project` subject naming a Project it can open. A window can open a Project by
+the rule that decides which of its threads it can open: a Chat Project only
+while it is the window's Chat context, any active Work Project, and a Code
+Project the Code Project access rule admits (the window's own bound Project).
+A paired device is admitted to inspect as a `project.overview.read` and judged
+by the same rules under its own device scope, so it reaches only what its
+overview reads already cover: threads in active Work and Code Projects and
+those Projects themselves. It holds no Chat context, so it inspects no Chat
+thread or Chat Project. Every other subject, including one that does not exist
+or names no thread or Project, is refused `unauthorized` (403, "Context subject
+is not available to this window.") before the harness is read, in the same
+words whether or not the subject exists. Inspecting a subject the caller may
+read that has no context plan yet is a successful empty answer, not a failed
+request. New context plans retain
 model and service limit provenance and inspection metadata in the journal-backed
 plan projection. Inspection restores those saved facts after a host restart
 without querying the provider; saved observation timestamps remain unchanged.

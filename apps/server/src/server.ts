@@ -436,6 +436,7 @@ import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
 import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { CodeProjectAccess } from "./codeProjectAccess";
+import { windowCanOpenProject } from "./projectOpenAuthority";
 import { isRoutineHostScope } from "./routineHostScope";
 import { ProjectRootPort } from "./projectRootPort";
 import { ProjectTerminalService } from "./code/projectTerminalService";
@@ -8294,6 +8295,21 @@ export function startOctantServer(
         return false;
       }
     };
+    // Which Projects a window can open, by the rule its threads are opened by.
+    const windowCanOpenProjectById = async (
+      windowId: WindowId,
+      projectId: string,
+    ): Promise<boolean> => {
+      try {
+        return windowCanOpenProject({
+          project: persistence.readProject(decodeProjectId(projectId)),
+          chatContext: persistence.readWindowWorkspace(windowId)?.workspace.contextByMode.chat,
+          canAccessCodeProject: (id) => canAccessCodeProject(windowId, id),
+        });
+      } catch {
+        return false;
+      }
+    };
     // No route serves yet, so any compaction still running belongs to a host
     // process that has gone. A journal it cannot read must not keep the host
     // from starting: the compaction stays running, which refuses another one
@@ -8610,6 +8626,7 @@ export function startOctantServer(
         compactionState: (subject, principal) => sessionCompaction.state(subject, principal),
       },
       windowCanOpenThread,
+      windowCanOpenProject: windowCanOpenProjectById,
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
