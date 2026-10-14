@@ -116,7 +116,7 @@ import {
   type WorkAttachmentStore,
 } from "./workAttachmentStore";
 import type { FramedExternalContent } from "../context/externalContentFraming";
-import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
+import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 import type { WorkTurnProjection } from "./workTurnProjection";
 import {
   WorkTurnRuntime,
@@ -270,10 +270,11 @@ export interface WorkTurnServiceDependencies {
   }) => boolean;
   readonly turnRuntime?: WorkTurnRuntimePort;
   /**
-   * Records that the runtime's own web search or page fetch put outside
-   * content in front of the model. Without it such a call stops the turn.
+   * Records that the runtime's own web search, page fetch, or hosted tool put
+   * outside content in front of the model. Without it such a call stops the
+   * turn.
    */
-  readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
+  readonly outsideContentMarks?: RuntimeOutsideContentMarking;
   readonly onRequestSettled?: (
     input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
     release: () => void,
@@ -409,7 +410,7 @@ export class WorkTurnService {
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
   readonly #supportsModelSwitch: WorkTurnServiceDependencies["supportsModelSwitch"];
   readonly #turnRuntime: WorkTurnRuntimePort;
-  readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
+  readonly #outsideContentMarks: RuntimeOutsideContentMarking | undefined;
   readonly #onRequestSettled: WorkTurnServiceDependencies["onRequestSettled"];
   readonly #resolveAppManagedTools: WorkTurnServiceDependencies["resolveAppManagedTools"];
   readonly #nativeHarness: WorkTurnServiceDependencies["nativeHarness"];
@@ -454,7 +455,7 @@ export class WorkTurnService {
     this.#supportsAttachments = dependencies.supportsAttachments;
     this.#supportsModelSwitch = dependencies.supportsModelSwitch;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
-    this.#recordExternalContentIngestion = dependencies.recordExternalContentIngestion;
+    this.#outsideContentMarks = dependencies.outsideContentMarks;
     this.#onRequestSettled = dependencies.onRequestSettled;
     this.#resolveAppManagedTools = dependencies.resolveAppManagedTools;
     this.#nativeHarness = dependencies.nativeHarness;
@@ -1360,9 +1361,9 @@ export class WorkTurnService {
       const outcome = await this.#turnRuntime.run({
         command: input.command,
         providerSessionId: input.providerSessionId,
-        ...(this.#recordExternalContentIngestion === undefined
+        ...(this.#outsideContentMarks === undefined
           ? {}
-          : { recordExternalContentIngestion: this.#recordExternalContentIngestion }),
+          : { outsideContentMarks: this.#outsideContentMarks }),
         ...(input.access === undefined ? {} : { access: input.access }),
         ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
         ...(input.driver.conversationOwnership !== "provider"

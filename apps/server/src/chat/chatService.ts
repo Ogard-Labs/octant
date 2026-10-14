@@ -242,6 +242,7 @@ import {
   type InheritedExternalContentMark,
   type RecordExternalContentIngestion,
 } from "../context/inheritedExternalContentMark";
+import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 
 const RESEARCH_TOOL_NAME = "octant_web_research";
 const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
@@ -512,6 +513,8 @@ export interface ChatServiceOptions {
    * needs nothing.
    */
   readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
+  /** Marks a thread whose runtime read outside content with its own tools. */
+  readonly outsideContentMarks?: RuntimeOutsideContentMarking;
   readonly dataDirectory: string;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -777,6 +780,7 @@ export interface ChatSubscribeOptions {
 export class ChatService {
   readonly #persistence: PersistenceService;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
+  readonly #outsideContentMarks: RuntimeOutsideContentMarking | undefined;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #driver: ChatServiceOptions["driver"];
@@ -832,6 +836,7 @@ export class ChatService {
   constructor(options: ChatServiceOptions) {
     this.#persistence = options.persistence;
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
+    this.#outsideContentMarks = options.outsideContentMarks;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#driver = options.driver;
@@ -5213,9 +5218,9 @@ export class ChatService {
               thread: input.thread,
               attempt: input.attempt,
               prompt: input.prompt,
-              ...(this.#recordExternalContentIngestion === undefined
+              ...(this.#outsideContentMarks === undefined
                 ? {}
-                : { recordExternalContentIngestion: this.#recordExternalContentIngestion }),
+                : { outsideContentMarks: this.#outsideContentMarks }),
               context: [
                 ...(this.#nativeHarness?.contextFor(harnessScope) ?? []),
                 ...input.prepared.context.providerContext,

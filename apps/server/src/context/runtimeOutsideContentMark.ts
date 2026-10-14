@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import type { ProviderRuntimeEvent } from "@octant/contracts";
-import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
+import type { RecordExternalContentIngestionInput } from "./externalContentIngestionStore";
 import type { RecordExternalContentIngestion } from "./inheritedExternalContentMark";
 
 export type RuntimeOutsideContentRead = Extract<
@@ -7,76 +8,122 @@ export type RuntimeOutsideContentRead = Extract<
   { readonly kind: "outside-content-read" }
 >;
 
-/** The labels a runtime's own web tools are recorded under. */
+/** The labels a runtime's own outside-content tools are recorded under. */
 export const RUNTIME_OUTSIDE_CONTENT_SOURCE_LABELS = {
   "web-search": "runtime-web-search",
   "web-fetch": "runtime-web-fetch",
+  "hosted-tool": "runtime-hosted-tool",
 } as const satisfies Record<RuntimeOutsideContentRead["source"], string>;
-
-// A whole ingestion payload may be 2,048 bytes. At four bytes a character at
-// most, this leaves room for the thread, the turn and the label.
-const REFERENCE_MAX_CHARACTERS = 256;
 
 export const RUNTIME_OUTSIDE_CONTENT_REFUSAL =
   "The model read outside content and this thread could not be marked with it, so the turn was stopped. Try again.";
 
 /**
- * Marks a thread whose provider runtime ran its own web search or page fetch.
+ * What a turn told the person when it stopped because the runtime read
+ * outside content while the runtime's own reviewer was answering approvals.
+ */
+export const RUNTIME_OUTSIDE_CONTENT_AUTO_REVIEW_STOP =
+  "The model read outside content, so this turn was stopped: the provider's own reviewer no longer answers approvals on this thread. Send a message to continue, and you will be asked yourself.";
+
+// A tool name kept in the reference only when it is a plain identifier, such
+// as `webSearch` or `webfetch`. An agent-written title may hold an address.
+const PLAIN_TOOL_NAME = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+
+/** How a runner records, and before its next turn re-records, a runtime's read. */
+export interface RuntimeOutsideContentMarking {
+  readonly mark: (
+    threadId: string,
+    event: RuntimeOutsideContentRead,
+  ) => { readonly status: "marked" } | { readonly status: "refused" };
+  /**
+   * Records whatever an earlier turn of the thread could not, before the
+   * thread's next turn may resume a provider session that holds that read.
+   */
+  readonly settleOwed: (threadId: string) => { readonly status: "clear" | "refused" };
+}
+
+/**
+ * Marks a thread whose provider runtime ran its own web search or page fetch,
+ * or a tool its provider hosts.
  *
  * The runtime hands the result straight to its model, so nothing can be
  * withheld: the mark is what lets Octant's own gates treat the thread as
- * having read outside content from here on. `refused` means the mark could
- * not be recorded, and the caller stops the turn rather than let it continue
- * unmarked. A caller with no way to record a mark is refused too.
+ * having read outside content from here on. A refused mark stops the turn,
+ * and the read stays owed: the thread's next turn records it before it starts
+ * or is refused too, so "Try again" cannot resume the provider session that
+ * read it while the thread is unmarked. What is owed lives in this process; a
+ * host restart forgets it.
  *
- * The reference names the runtime's tool, the turn and the call, then the
- * query or address, redacted as a live step's argument is. It is opaque and
- * path-free like every reference, so the separators of an address are
- * replaced, and it never holds page content.
+ * The reference is opaque: the runtime's tool name when it is a plain
+ * identifier, then a hash of the tool, the turn, the call and the query or
+ * address. No query, address, or page content is journaled.
  */
-export function markThreadReadByRuntime(input: {
-  readonly record: RecordExternalContentIngestion | undefined;
-  readonly threadId: string;
-  readonly event: RuntimeOutsideContentRead;
-}): { readonly status: "marked" } | { readonly status: "refused" } {
-  const { record, event } = input;
-  if (record === undefined) return { status: "refused" };
-  // Every part but the turn's id is provider-authored, and an agent may put
-  // an address with credentials or a local path in its tool's name, so each
-  // is redacted on its own; one redaction can swallow the rest of its run.
-  const redacted = (part: string | undefined) =>
-    part === undefined ? undefined : summarizeStepArgument(part, REFERENCE_MAX_CHARACTERS);
-  const reference = Array.from(
-    [
-      redacted(event.toolName),
-      event.correlationId,
-      redacted(event.toolCallId),
-      redacted(event.target),
-    ]
-      .filter((part) => part !== undefined)
-      .join(":")
-      .replace(/[/\\\p{Cc}]+/gu, " ")
-      .replace(/\s+/g, " ")
-      .trim(),
-  )
-    .slice(0, REFERENCE_MAX_CHARACTERS)
-    .join("")
-    .trim();
-  try {
-    const recorded = record({
-      threadId: input.threadId,
-      provenance: {
-        origin: "tool-result",
-        sourceLabel: RUNTIME_OUTSIDE_CONTENT_SOURCE_LABELS[event.source],
-      },
-      contentReference: reference,
-      correlationId: event.correlationId,
-      authorized: true,
-    });
-    return recorded.kind === "recorded" || recorded.kind === "already-recorded"
-      ? { status: "marked" }
-      : { status: "refused" };
-  } catch {
+export class RuntimeOutsideContentMarks implements RuntimeOutsideContentMarking {
+  readonly #record: RecordExternalContentIngestion;
+  readonly #owed = new Map<string, Map<string, RecordExternalContentIngestionInput>>();
+
+  constructor(record: RecordExternalContentIngestion) {
+    this.#record = record;
+  }
+
+  mark(
+    threadId: string,
+    event: RuntimeOutsideContentRead,
+  ): { readonly status: "marked" } | { readonly status: "refused" } {
+    const input = runtimeOutsideContentIngestion(threadId, event);
+    if (this.#recorded(input)) return { status: "marked" };
+    const owed = this.#owed.get(threadId) ?? new Map<string, RecordExternalContentIngestionInput>();
+    owed.set(String(input.contentReference), input);
+    this.#owed.set(threadId, owed);
     return { status: "refused" };
   }
+
+  settleOwed(threadId: string): { readonly status: "clear" | "refused" } {
+    const owed = this.#owed.get(threadId);
+    if (owed === undefined) return { status: "clear" };
+    for (const [reference, input] of owed) {
+      if (this.#recorded(input)) owed.delete(reference);
+    }
+    if (owed.size > 0) return { status: "refused" };
+    this.#owed.delete(threadId);
+    return { status: "clear" };
+  }
+
+  #recorded(input: RecordExternalContentIngestionInput): boolean {
+    try {
+      const recorded = this.#record(input);
+      return recorded.kind === "recorded" || recorded.kind === "already-recorded";
+    } catch {
+      return false;
+    }
+  }
 }
+
+/** The ingestion a runtime's read records, with an opaque reference. */
+export function runtimeOutsideContentIngestion(
+  threadId: string,
+  event: RuntimeOutsideContentRead,
+): RecordExternalContentIngestionInput {
+  const digest = createHash("sha256")
+    .update(
+      JSON.stringify([event.toolName, event.correlationId, event.toolCallId, event.target ?? null]),
+    )
+    .digest("hex");
+  const tool = PLAIN_TOOL_NAME.test(event.toolName) ? `${event.toolName}-` : "";
+  return {
+    threadId,
+    provenance: {
+      origin: "tool-result",
+      sourceLabel: RUNTIME_OUTSIDE_CONTENT_SOURCE_LABELS[event.source],
+    },
+    contentReference: `runtime-web-${tool}${digest}`,
+    correlationId: event.correlationId,
+    authorized: true,
+  };
+}
+
+/** Records nothing and settles nothing, for a caller with no journal. */
+export const NO_RUNTIME_OUTSIDE_CONTENT_MARKS: RuntimeOutsideContentMarking = {
+  mark: () => ({ status: "refused" }),
+  settleOwed: () => ({ status: "clear" }),
+};

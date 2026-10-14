@@ -20,6 +20,8 @@ import { ContextHarnessService } from "../context/contextHarnessService";
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import { ResearchRouter, type ResearchRouteDecision } from "./research/researchRouter";
 import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
+import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { ChatTurnRunner } from "./chatTurnRunner";
 
 const now = "2026-07-19T22:00:00.000Z";
@@ -1353,9 +1355,7 @@ describe("ChatTurnRunner", () => {
   });
 
   it("marks the thread when the runtime runs its own web search, and stops the turn when it cannot", async () => {
-    const run = async (
-      record: Parameters<ChatTurnRunner["run"]>[0]["recordExternalContentIngestion"],
-    ) => {
+    const run = async (record: RecordExternalContentIngestion | undefined) => {
       const updates: ChatAttempt[] = [];
       const interrupted: unknown[] = [];
       const correlationId = "82000000-0000-4000-8000-000000000099";
@@ -1413,7 +1413,9 @@ describe("ChatTurnRunner", () => {
             researchEnabled: false,
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
-            ...(record === undefined ? {} : { recordExternalContentIngestion: record }),
+            ...(record === undefined
+              ? {}
+              : { outsideContentMarks: new RuntimeOutsideContentMarks(record) }),
             persistAttempt: (next) => Effect.sync(() => updates.push(next)),
             persistResponse: () =>
               Effect.succeed({

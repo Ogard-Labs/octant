@@ -26,6 +26,8 @@ interface FakeMaintenanceProvider {
 function fakeProvider(options?: {
   readonly wedge?: "acquire" | "start" | "send";
   readonly wedgeStop?: boolean;
+  /** The runtime searches the web with its own tool before it answers. */
+  readonly searchesWeb?: boolean;
 }): FakeMaintenanceProvider {
   const starts: string[] = [];
   const sends: string[] = [];
@@ -47,6 +49,15 @@ function fakeProvider(options?: {
         return options?.wedge === "send"
           ? Effect.never
           : Effect.gen(function* () {
+              if (options?.searchesWeb === true) {
+                yield* Queue.offer(queue, {
+                  kind: "outside-content-read",
+                  sessionId: input.sessionId,
+                  toolCallId: "tool-1",
+                  toolName: "webSearch",
+                  source: "web-search",
+                } as never);
+              }
               yield* Queue.offer(queue, {
                 kind: "text-delta",
                 sessionId: input.sessionId,
@@ -124,6 +135,15 @@ describe("makeContextSummaryGenerator", () => {
       accuracy: "provider-reported",
     });
     expect(observed).toEqual([{ inputTokens: 40, outputTokens: 12 }]);
+    expect(provider.stops).toEqual([sessionId]);
+  });
+
+  it("does not use a summary the maintenance runtime wrote after reading the web itself", async () => {
+    const provider = fakeProvider({ searchesWeb: true });
+
+    await expect(
+      generateSummary(provider, 2_000)(request, new AbortController().signal),
+    ).rejects.toThrow(/read outside content/);
     expect(provider.stops).toEqual([sessionId]);
   });
 

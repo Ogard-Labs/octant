@@ -39,6 +39,7 @@ import {
   MANAGED_AGENT_RUN_TURN_DEADLINE_MS,
   type AgentRunSessionRuntimeOptions,
 } from "./agentRunSessionRuntime";
+import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 
 const testDirectories: string[] = [];
 afterEach(() => {
@@ -978,13 +979,13 @@ describe("createAgentRunSessionRuntime", () => {
     const provider = fakeProvider({ onSend: childTurn });
     const runtime = createAgentRunSessionRuntime(
       runtimeOptions(provider, {
-        recordExternalContentIngestion: (mark) => {
+        outsideContentMarks: new RuntimeOutsideContentMarks((mark) => {
           marks.push(mark);
           return {
             kind: "recorded",
             taint: { externalContentIngested: true, ingestedSources: ["runtime-web-search"] },
           };
-        },
+        }),
       }),
     );
 
@@ -999,7 +1000,10 @@ describe("createAgentRunSessionRuntime", () => {
     const unmarked = fakeProvider({ onSend: childTurn });
     const refusing = createAgentRunSessionRuntime(
       runtimeOptions(unmarked, {
-        recordExternalContentIngestion: () => ({ kind: "refused", reason: "contended" }),
+        outsideContentMarks: new RuntimeOutsideContentMarks(() => ({
+          kind: "refused",
+          reason: "contended",
+        })),
       }),
     );
     expect(await settled(refusing.start(agentRun()))).toMatchObject({

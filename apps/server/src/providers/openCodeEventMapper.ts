@@ -7,9 +7,9 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
-import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import type { Event } from "@opencode-ai/sdk/v2/types";
 import { outputStopReason } from "./outputStopReason";
+import { outsideContentTarget } from "./outsideContentRead";
 
 export interface OpenCodeEventContext {
   readonly instanceId: ProviderInstanceId;
@@ -40,16 +40,16 @@ export interface OpenCodeShutdownInterruption {
 /** Every event the mapper reads: the SDK's, plus the 2.0.22 one it lacks. */
 export type OpenCodeEvent = Event | OpenCodeShutdownInterruption;
 
-const OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS = 1_024;
-
 /**
  * OpenCode's own tools that fetch from outside the machine and hand the model
  * what came back, with the input naming what. `codesearch` queries a hosted
  * code-documentation search, so it reads outside content like a web search.
+ * A tool the model's provider runs on its own servers is marked as well (see
+ * `providerExecuted`).
  */
 const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
   string,
-  { readonly source: "web-search" | "web-fetch"; readonly targetKey: string }
+  { readonly source: "web-search" | "web-fetch" | "hosted-tool"; readonly targetKey: string }
 > = new Map([
   ["webfetch", { source: "web-fetch", targetKey: "url" }],
   ["websearch", { source: "web-search", targetKey: "query" }],
@@ -211,6 +211,25 @@ function mapQuestion(
   });
 }
 
+/**
+ * Whether the model's provider ran the tool itself, such as a hosted web
+ * search, so its result reached the model without passing through OpenCode.
+ * The SDK reports it as `provider.executed`; the 2.0.22 stream sends a bare
+ * `executed`. Octant does not configure hosted tools, but a person's own
+ * OpenCode configuration can, so the call is marked rather than assumed away.
+ */
+function providerExecuted(properties: object): boolean {
+  if ("executed" in properties && properties.executed === true) return true;
+  if (!("provider" in properties)) return false;
+  const provider = properties.provider;
+  return (
+    typeof provider === "object" &&
+    provider !== null &&
+    "executed" in provider &&
+    provider.executed === true
+  );
+}
+
 function assertNever(value: never): never {
   void value;
   throw new Error("Unsupported provider event.");
@@ -242,13 +261,14 @@ export function mapOpenCodeEvent(
       const toolName = normalizeText(event.properties.tool);
       if (toolCallId === undefined || toolName === undefined) return [];
       const start = mappedEvent(context, { kind: "tool-start", toolCallId, toolName });
-      const outsideContent = OUTSIDE_CONTENT_TOOLS.get(toolName);
+      const outsideContent =
+        OUTSIDE_CONTENT_TOOLS.get(toolName) ??
+        (providerExecuted(event.properties)
+          ? { source: "hosted-tool" as const, targetKey: "query" }
+          : undefined);
       if (outsideContent === undefined) return [start];
       const requested = event.properties.input[outsideContent.targetKey];
-      const target = summarizeStepArgument(
-        typeof requested === "string" ? requested : "",
-        OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS,
-      );
+      const target = outsideContentTarget(typeof requested === "string" ? requested : undefined);
       return [
         start,
         mappedEvent(

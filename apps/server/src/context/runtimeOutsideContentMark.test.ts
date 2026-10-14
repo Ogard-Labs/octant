@@ -17,7 +17,8 @@ import {
   readThreadExternalContentTaint,
 } from "./externalContentTaintProjection";
 import {
-  markThreadReadByRuntime,
+  NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
+  RuntimeOutsideContentMarks,
   type RuntimeOutsideContentRead,
 } from "./runtimeOutsideContentMark";
 
@@ -89,73 +90,46 @@ function ingestionRows(host: ReturnType<typeof openHost>) {
 }
 
 describe("marking a thread whose runtime ran its own web tool", () => {
-  it("marks the thread under the tool's label with a path-free reference and no page content", () => {
+  it("marks the thread under the tool's label with an opaque reference that holds no query or address", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-runtime-web-"));
     directories.push(directory);
     const host = openHost(join(directory, "octant.sqlite3"));
-    const record = (input: Parameters<typeof host.ingestions.record>[0]) =>
-      host.ingestions.record(input);
+    const marks = new RuntimeOutsideContentMarks((input) => host.ingestions.record(input));
 
-    expect(markThreadReadByRuntime({ record, threadId, event: read() })).toEqual({
-      status: "marked",
-    });
+    expect(marks.mark(threadId, read())).toEqual({ status: "marked" });
     expect(
-      markThreadReadByRuntime({
-        record,
+      marks.mark(
         threadId,
-        event: read({
+        read({
           toolCallId: "tool-2",
-          toolName: "WebFetch",
+          toolName: "Fetch https://user:hunter2@example.invalid/private/notes",
           source: "web-fetch",
-          target: `https://example.invalid/a\\b/${"x".repeat(2_000)}`,
+          target: "https://example.invalid/private/notes",
         }),
-      }),
+      ),
+    ).toEqual({ status: "marked" });
+    expect(
+      marks.mark(
+        threadId,
+        read({ toolCallId: "tool-3", toolName: "web_search", source: "hosted-tool" }),
+      ),
     ).toEqual({ status: "marked" });
 
     expect(readThreadExternalContentTaint(host.connection, threadId)).toEqual({
       externalContentIngested: true,
-      ingestedSources: ["runtime-web-search", "runtime-web-fetch"],
+      ingestedSources: ["runtime-web-search", "runtime-web-fetch", "runtime-hosted-tool"],
     });
-    const rows = ingestionRows(host) as ReadonlyArray<{ readonly content_reference: string }>;
-    expect(rows).toEqual([
-      {
-        content_reference:
-          "webSearch:eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee:tool-1:Stavanger weather tomorrow",
-        source_label: "runtime-web-search",
-        origin: "tool-result",
-      },
-      expect.objectContaining({ source_label: "runtime-web-fetch", origin: "tool-result" }),
+    const rows = ingestionRows(host) as ReadonlyArray<{
+      readonly content_reference: string;
+      readonly source_label: string;
+    }>;
+    expect(rows.map((row) => row.content_reference)).toEqual([
+      expect.stringMatching(/^runtime-web-webSearch-[0-9a-f]{64}$/),
+      // An agent-written title is not a plain name, so only the hash is kept.
+      expect.stringMatching(/^runtime-web-[0-9a-f]{64}$/),
+      expect.stringMatching(/^runtime-web-web_search-[0-9a-f]{64}$/),
     ]);
-    const fetched = rows[1]?.content_reference ?? "";
-    expect(fetched.startsWith("WebFetch:eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee:tool-2:https: ")).toBe(
-      true,
-    );
-    expect(fetched).not.toMatch(/[/\\]/);
-    expect(Array.from(fetched).length).toBeLessThanOrEqual(256);
-    host.connection.close();
-  });
-
-  it("redacts credentials and local paths a provider put in the tool's name or call id", () => {
-    const directory = mkdtempSync(join(tmpdir(), "octant-runtime-web-redact-"));
-    directories.push(directory);
-    const host = openHost(join(directory, "octant.sqlite3"));
-    expect(
-      markThreadReadByRuntime({
-        record: (input) => host.ingestions.record(input),
-        threadId,
-        event: read({
-          toolName:
-            "Fetch https://user:hunter2@example.invalid/docs?api_key=sk-12345678901234567890",
-          toolCallId: "call\n/Users/someone/private/notes.txt",
-          target: undefined,
-        }),
-      }),
-    ).toEqual({ status: "marked" });
-
-    const [row] = ingestionRows(host) as ReadonlyArray<{ readonly content_reference: string }>;
-    expect(row?.content_reference).toContain("example.invalid");
-    expect(row?.content_reference).toContain("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
-    expect(row?.content_reference).not.toMatch(/hunter2|sk-1234|someone|private|[/\\]/);
+    expect(JSON.stringify(rows)).not.toMatch(/Stavanger|hunter2|example|notes/);
     host.connection.close();
   });
 
@@ -164,11 +138,10 @@ describe("marking a thread whose runtime ran its own web tool", () => {
     directories.push(directory);
     const path = join(directory, "octant.sqlite3");
     const first = openHost(path);
-    markThreadReadByRuntime({
-      record: (input) => first.ingestions.record(input),
+    new RuntimeOutsideContentMarks((input) => first.ingestions.record(input)).mark(
       threadId,
-      event: read(),
-    });
+      read(),
+    );
     const marked = readThreadExternalContentTaint(first.connection, threadId);
     rebuildProjection({
       connection: first.connection,
@@ -199,9 +172,8 @@ describe("marking a thread whose runtime ran its own web tool", () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-runtime-web-clear-"));
     directories.push(directory);
     const host = openHost(join(directory, "octant.sqlite3"));
-    const record = (input: Parameters<typeof host.ingestions.record>[0]) =>
-      host.ingestions.record(input);
-    markThreadReadByRuntime({ record, threadId, event: read() });
+    const marks = new RuntimeOutsideContentMarks((input) => host.ingestions.record(input));
+    marks.mark(threadId, read());
     expect(readThreadExternalContentState(host.connection, threadId)).toMatchObject({
       sources: [{ sourceLabel: "runtime-web-search", ingestionCount: 1 }],
     });
@@ -220,9 +192,7 @@ describe("marking a thread whose runtime ran its own web tool", () => {
     );
 
     // The same call recorded again after the clear marks the thread again.
-    expect(markThreadReadByRuntime({ record, threadId, event: read() })).toEqual({
-      status: "marked",
-    });
+    expect(marks.mark(threadId, read())).toEqual({ status: "marked" });
     expect(readThreadExternalContentTaint(host.connection, threadId)).toEqual({
       externalContentIngested: true,
       ingestedSources: ["runtime-web-search"],
@@ -230,26 +200,37 @@ describe("marking a thread whose runtime ran its own web tool", () => {
     host.connection.close();
   });
 
-  it("refuses when the mark has nowhere to go or cannot be recorded", () => {
-    const event = read();
-    expect(markThreadReadByRuntime({ record: undefined, threadId, event })).toEqual({
-      status: "refused",
+  it("owes a read it could not record until the thread's next turn records it", () => {
+    let refuse = true;
+    const recorded: unknown[] = [];
+    const marks = new RuntimeOutsideContentMarks((input) => {
+      if (refuse) throw new Error("journal unavailable");
+      recorded.push(input);
+      return {
+        kind: "recorded",
+        taint: { externalContentIngested: true, ingestedSources: ["runtime-web-search"] },
+      };
     });
+
+    expect(marks.mark(threadId, read())).toEqual({ status: "refused" });
+    expect(marks.settleOwed(threadId)).toEqual({ status: "refused" });
+    // Another thread owes nothing.
+    expect(marks.settleOwed("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")).toEqual({ status: "clear" });
+
+    refuse = false;
+    expect(marks.settleOwed(threadId)).toEqual({ status: "clear" });
+    expect(recorded).toEqual([expect.objectContaining({ threadId })]);
+    expect(marks.settleOwed(threadId)).toEqual({ status: "clear" });
+    expect(recorded).toHaveLength(1);
+  });
+
+  it("refuses a read when there is nowhere to record it", () => {
+    expect(NO_RUNTIME_OUTSIDE_CONTENT_MARKS.mark(threadId, read())).toEqual({ status: "refused" });
     expect(
-      markThreadReadByRuntime({
-        record: () => ({ kind: "refused", reason: "contended" }),
+      new RuntimeOutsideContentMarks(() => ({ kind: "refused", reason: "contended" })).mark(
         threadId,
-        event,
-      }),
-    ).toEqual({ status: "refused" });
-    expect(
-      markThreadReadByRuntime({
-        record: () => {
-          throw new Error("journal unavailable");
-        },
-        threadId,
-        event,
-      }),
+        read(),
+      ),
     ).toEqual({ status: "refused" });
   });
 });

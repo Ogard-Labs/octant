@@ -16,6 +16,8 @@ import { Effect, Queue, Schema, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
+import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { WorkTurnRuntime } from "./workTurnRuntime";
 
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -401,9 +403,7 @@ describe("WorkTurnRuntime", () => {
         modelId: "gpt-5",
       }),
     });
-    const run = (
-      record: Parameters<WorkTurnRuntime["run"]>[0]["recordExternalContentIngestion"],
-    ) => {
+    const run = (record: RecordExternalContentIngestion | undefined) => {
       const interrupt = vi.fn(() => Effect.void);
       const driver: ProviderDriver = {
         kind: "openai-compatible",
@@ -428,7 +428,9 @@ describe("WorkTurnRuntime", () => {
         driver,
         signal: new AbortController().signal,
         modelOptionValues: {},
-        ...(record === undefined ? {} : { recordExternalContentIngestion: record }),
+        ...(record === undefined
+          ? {}
+          : { outsideContentMarks: new RuntimeOutsideContentMarks(record) }),
       });
       return { outcome, interrupt };
     };

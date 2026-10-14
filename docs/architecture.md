@@ -1683,28 +1683,46 @@ flowchart LR
   without that flag. A Code Git action a person takes from a window is that
   person's own per-action act, and no agent tool issues one.
 - **Provider runtimes' own web tools.** A runtime's built-in web search or page
-  fetch hands its result to the model without Octant seeing it, so the adapter
-  reports the call as a normalized `outside-content-read` event when it first
-  sees it: `web-search` or `web-fetch`, the runtime's tool name, and the query
-  or address as one redacted, bounded line when the runtime gave one. A call
-  that later fails may already have returned a page, so the start marks.
+  fetch, or a tool the model's provider runs on its own servers, hands its
+  result to the model without Octant seeing it. The adapter reports the call
+  as a normalized `outside-content-read` event when it first sees it:
+  `web-search`, `web-fetch`, or `hosted-tool`, the runtime's tool name, and the
+  query or address as one redacted line bounded in UTF-16 units, when the
+  runtime gave one. A call that later fails, is denied, or is cancelled may
+  already have returned a page, so the start marks. A driver may report it
+  whether or not it reports tool activity.
   - Chat, Work, and Code turn runners mark the thread. A child run's runner
     marks the run's own id, which is where its harness tools read the mark.
-  - The label is `runtime-web-search` or `runtime-web-fetch`, with origin
-    `tool-result`. The reference names the runtime tool, the turn, the call,
-    and the query or address. Each provider-authored part is redacted as a
-    live step's argument is, separators are replaced, and the whole is cut to
-    256 characters. It never holds page content.
+    Each runner marks before it looks at its event budget or a Stop, since
+    the read reached the model either way.
+  - The label is `runtime-web-search`, `runtime-web-fetch`, or
+    `runtime-hosted-tool`, with origin `tool-result`. The reference is
+    opaque: `runtime-web-`, the tool's name when it is a plain identifier, and
+    a SHA-256 of the tool, the turn, the call, and the query or address. No
+    query, address, or page content is journaled.
   - A mark that cannot be recorded stops the turn, because the content has
-    already reached the model.
-  - Marking is all this does. The mark gates computer-use, MCP, and the native
-    harness; it does not gate a tool the runtime executes itself.
+    already reached the model. The read stays owed in the host process: the
+    thread's next turn records it before it starts, or is refused with the
+    same reason, so retrying cannot resume the provider session that read it
+    while the thread is unmarked. A host restart forgets what is owed.
+  - Marking does not gate a tool the runtime executes itself. A Code turn
+    whose approvals the runtime's own reviewer answers (harness auto-review)
+    is stopped at the mark and tells the person why, because the reviewer was
+    chosen for the session while the thread was unmarked. The next turn
+    starts without it, as auto-review is off on a marked thread.
+  - A single-shot request (a context summary, a hand-off document, a commit or
+    pull-request draft, a harness single shot) has no thread of its own to
+    mark, so an answer written after such a read is not used.
   - Codex: its `webSearch` item, on `item/started`. A start may carry an empty
-    query.
-  - OpenCode: `webfetch`, `websearch`, and `codesearch` on `tool.called`.
-  - ACP agents: a tool call whose kind is `fetch`, the first time the agent
-    names that kind. ACP's `search` kind also covers local file searches, so a
-    web search an agent reports under it is not marked. That is a residual gap.
+    query. Octant does not switch Codex's web search off.
+  - OpenCode: `webfetch`, `websearch`, and `codesearch`, and any call its
+    provider executed (`provider.executed`, or `executed` on the 2.0.22
+    stream), on `tool.called`. A call a person then denies has already marked.
+  - ACP agents: a tool call whose kind is `fetch`, or whose kind is `search`
+    with a `rawInput.query` and no path, pattern, glob, or other place to
+    look, the first time the agent reports it. A web search an agent reports
+    under `search` with a path-like input, or with no `query`, is not marked;
+    `search` also covers local file searches, so that residual stays.
   - Claude: `WebSearch` and `WebFetch`. The driver offers Claude neither tool
     and refuses a session that reports either, so this marks the thread only
     if one is ever offered.

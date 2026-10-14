@@ -141,7 +141,7 @@ describe("ACP event normalization", () => {
     ]);
   });
 
-  it("marks the thread once for a fetch-kind tool, whenever the agent names the kind", () => {
+  it("marks the thread once for a fetch-kind tool or a query-only search, whenever the agent names the kind", () => {
     const update = (value: Record<string, unknown>) =>
       mapAcpNotification(ctx, {
         kind: "notification",
@@ -153,13 +153,42 @@ describe("ACP event normalization", () => {
       });
     const ctx = context();
 
-    // A local read, and a search kind shared with file searches, mark nothing.
+    // A local read, and searches that name where to look, mark nothing.
     expect(
       update({ sessionUpdate: "tool_call", toolCallId: "p-1", title: "Read file", kind: "read" }),
-    ).toMatchObject([{ kind: "tool-start" }]);
+    ).toHaveLength(1);
     expect(
       update({ sessionUpdate: "tool_call", toolCallId: "p-2", title: "Grep", kind: "search" }),
-    ).toMatchObject([{ kind: "tool-start" }]);
+    ).toHaveLength(1);
+    for (const [id, rawInput] of [
+      ["p-grep", { query: "TODO", path: "src" }],
+      ["p-glob", { query: "*.ts", glob: "**/*.ts" }],
+      ["p-pattern", { pattern: "fetchUser", query: "fetchUser" }],
+      ["p-noquery", { text: "release notes" }],
+    ] as const) {
+      expect(
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: id,
+          title: "Search",
+          kind: "search",
+          rawInput,
+        }),
+      ).toHaveLength(1);
+    }
+    // A search that names only a query has nowhere local to look.
+    expect(
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "p-web",
+        title: "Searching the web",
+        kind: "search",
+        rawInput: { query: "release notes" },
+      }),
+    ).toMatchObject([
+      { kind: "tool-start" },
+      { kind: "outside-content-read", source: "web-search", target: "release notes" },
+    ]);
 
     expect(
       update({
@@ -170,10 +199,10 @@ describe("ACP event normalization", () => {
         rawInput: { url: "https://example.invalid/page" },
       }),
     ).toMatchObject([
-      { kind: "tool-start", toolCallId: "tool-3" },
+      { kind: "tool-start", toolCallId: "tool-8" },
       {
         kind: "outside-content-read",
-        toolCallId: "tool-3",
+        toolCallId: "tool-8",
         toolName: "Fetch page",
         source: "web-fetch",
         target: "https://example.invalid/page",
@@ -181,12 +210,12 @@ describe("ACP event normalization", () => {
     ]);
     expect(
       update({ sessionUpdate: "tool_call_update", toolCallId: "p-3", status: "completed" }),
-    ).toMatchObject([{ kind: "tool-success", toolCallId: "tool-3" }]);
+    ).toMatchObject([{ kind: "tool-success", toolCallId: "tool-8" }]);
 
     // An agent that names the kind only once the call runs still marks, once.
     expect(
       update({ sessionUpdate: "tool_call", toolCallId: "p-4", title: "web_fetch" }),
-    ).toMatchObject([{ kind: "tool-start", toolCallId: "tool-4" }]);
+    ).toMatchObject([{ kind: "tool-start", toolCallId: "tool-9" }]);
     expect(
       update({
         sessionUpdate: "tool_call_update",
@@ -195,12 +224,12 @@ describe("ACP event normalization", () => {
         status: "in_progress",
       }),
     ).toMatchObject([
-      { kind: "outside-content-read", toolCallId: "tool-4", target: "web_fetch" },
-      { kind: "tool-progress", toolCallId: "tool-4" },
+      { kind: "outside-content-read", toolCallId: "tool-9", target: "web_fetch" },
+      { kind: "tool-progress", toolCallId: "tool-9" },
     ]);
     expect(
       update({ sessionUpdate: "tool_call_update", toolCallId: "p-4", status: "failed" }),
-    ).toMatchObject([{ kind: "tool-failure", toolCallId: "tool-4" }]);
+    ).toMatchObject([{ kind: "tool-failure", toolCallId: "tool-9" }]);
 
     // A title first given on an update is bounded for a summary; the event
     // still names the tool within its label bound, without the credential.

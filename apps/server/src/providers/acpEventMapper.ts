@@ -7,13 +7,12 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
-import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import type { AcpServerNotification, AcpServerRequest } from "./acpProtocol";
+import { outsideContentTarget, outsideContentToolName } from "./outsideContentRead";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const LABEL_MAX_CHARACTERS = 256;
 const SUMMARY_MAX_CHARACTERS = 1_024;
-const OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS = 1_024;
 
 interface AcpToolState {
   readonly toolCallId: string;
@@ -227,20 +226,31 @@ function mapTool(
 /**
  * ACP's `fetch` kind is a tool "retrieving external data", which the agent
  * runs itself and hands to the model, so the thread is marked the first time
- * a call is seen with it. Its `search` kind is shared with local file
- * searches, so a web search reported under it cannot be told apart and is not
- * marked.
+ * a call is seen with it. Its `search` kind covers local file searches too, so
+ * only a search that names a query and no place to look is taken for a web
+ * search; one that names a path, pattern, or glob is a file search.
  */
 function outsideContentRead(
   context: AcpEventContext,
   state: AcpToolState,
   update: Readonly<Record<string, unknown>>,
 ): ReadonlyArray<AcpMappedNotification> {
-  if (state.kind !== "fetch" || state.outsideContentReported === true) return [];
+  if (state.outsideContentReported === true) return [];
+  const input = record(update.rawInput);
+  const query = string(input?.query);
+  const source =
+    state.kind === "fetch"
+      ? ("web-fetch" as const)
+      : state.kind === "search" &&
+          query !== undefined &&
+          input !== undefined &&
+          !Object.keys(input).some((key) => FILE_SEARCH_INPUT_KEYS.has(key))
+        ? ("web-search" as const)
+        : undefined;
+  if (source === undefined) return [];
   state.outsideContentReported = true;
-  const target = summarizeStepArgument(
-    string(record(update.rawInput)?.url) ?? state.title ?? "",
-    OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS,
+  const target = outsideContentTarget(
+    source === "web-fetch" ? (string(input?.url) ?? state.title) : query,
   );
   return [
     event(context, {
@@ -248,12 +258,32 @@ function outsideContentRead(
       toolCallId: state.toolCallId,
       // A late title is bounded for a summary, not a label, and an agent may
       // name the address it fetches in it.
-      toolName: summarizeStepArgument(state.title ?? "", LABEL_MAX_CHARACTERS) ?? "Tool",
-      source: "web-fetch",
+      toolName: outsideContentToolName(state.title),
+      source,
       ...(target === undefined ? {} : { target }),
     }),
   ];
 }
+
+// Inputs a file search names where to look with. A search carrying any of
+// them is never taken for a web search.
+const FILE_SEARCH_INPUT_KEYS: ReadonlySet<string> = new Set([
+  "path",
+  "paths",
+  "pattern",
+  "patterns",
+  "glob",
+  "include",
+  "exclude",
+  "file",
+  "files",
+  "file_path",
+  "filePath",
+  "dir",
+  "directory",
+  "cwd",
+  "root",
+]);
 
 export function mapAcpNotification(
   context: AcpEventContext,

@@ -2427,6 +2427,12 @@ describe("provider runtime contracts", () => {
       toolName: "WebFetch",
       source: "web-fetch",
     },
+    {
+      kind: "outside-content-read",
+      toolCallId: "tool-4",
+      toolName: "web_search",
+      source: "hosted-tool",
+    },
     { kind: "tool-progress", toolCallId: "tool-1", message: "Reading" },
     { kind: "tool-success", toolCallId: "tool-1", summary: "Read file" },
     { kind: "tool-failure", toolCallId: "tool-1", message: "Denied" },

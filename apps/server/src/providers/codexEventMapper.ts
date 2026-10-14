@@ -18,6 +18,7 @@ import {
   type RateLimitSnapshot,
   type UnmodeledThreadItem,
 } from "./codexProtocol";
+import { outsideContentTarget } from "./outsideContentRead";
 import { rateLimitWindowId } from "./rateLimitWindowIdentity";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
@@ -25,7 +26,6 @@ const DIFF_MAX_CHARACTERS = 65_536;
 const LABEL_MAX_CHARACTERS = 256;
 const SUMMARY_MAX_CHARACTERS = 1_024;
 const PATH_MAX_CHARACTERS = 4_096;
-const OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS = 1_024;
 
 export interface CodexEventContext {
   readonly instanceId: ProviderInstanceId;
@@ -451,7 +451,7 @@ function mapLifecycle(
         // the start is the last point at which the thread can be marked
         // before the results can steer anything. A start may carry an empty
         // query; the completion carries the one Codex ran.
-        const target = summarizeStepArgument(item.query, OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS);
+        const target = outsideContentTarget(item.query);
         return [
           event(context, { kind: "tool-start", toolCallId: id, toolName: "Web search" }),
           event(context, {
