@@ -87,7 +87,11 @@ type LinearIssueContextPort = Pick<
   | "consumeFramedForFirstTurn"
   | "takeFramedForFirstTurn"
 >;
-import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  ThreadIdInUse,
+} from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { WorkThreadProjection } from "./workThreadProjection";
@@ -1145,6 +1149,9 @@ export class WorkThreadService {
 
   #mapFailure(error: unknown): WorkThreadServiceError {
     if (error instanceof WorkThreadServiceError) return error;
+    if (error instanceof ThreadIdInUse) {
+      return this.#failure("invalid", "That thread ID is already in use.");
+    }
     if (error instanceof ConcurrencyConflict) {
       return this.#failure("stale", "Work thread changed; reload and retry.");
     }

@@ -15,6 +15,7 @@ import {
   decodeChatThread,
   decodeChatThreadId,
   decodeCodeThreadId,
+  decodeEventActor,
   decodeImageGenerationScopeId,
   decodeProjectId,
   decodeWorkThreadId,
@@ -24,6 +25,8 @@ import { decodeThreadRetentionThreadId } from "@octant/contracts/thread-retentio
 import { afterEach, describe, expect, it } from "vitest";
 import { BrowserCaptureStore } from "../browser/browserCaptureStore";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
+import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { CodeAttachmentStore } from "../code/codeAttachmentStore";
 import { GeneratedImageStore } from "../image/generatedImageStore";
 import { WorkAttachmentStore } from "../work/workAttachmentStore";
@@ -155,6 +158,84 @@ describe("thread purge sweep", () => {
     // its provenance no longer names the purged thread.
     expect(projectMemoryEntriesRemain(harness.connection)).toBeGreaterThan(0);
     expect(projectMemoryNamesThread(harness.connection, threads.code.id)).toBe(false);
+  });
+
+  it("never erases another mode's thread that shares the purged thread's id", async () => {
+    const harness = openHarness();
+    const sharedId = threads.code.id;
+    // History from before the journal refused a second mode's thread under a
+    // held id: a Chat thread and a marked Code thread answer to one id.
+    seedChatProjection(harness, sharedId, "marker-shared-chat-ledger");
+    insertEvent(
+      harness.connection,
+      "code-thread",
+      sharedId,
+      { kind: "thread-created", thread: { id: sharedId } },
+      "code.thread-created@1",
+    );
+    seedThreadTraces(harness, threads.code);
+    const marked = new ExternalContentIngestionStore({
+      journal: harness.journal,
+      connection: harness.connection,
+      uuid: randomUUID,
+      clock: () => now,
+      actor: decodeEventActor({ kind: "system", actorId }),
+    }).record({
+      threadId: sharedId,
+      provenance: { origin: "external-content", sourceLabel: "web" },
+      contentReference: "page-1",
+      correlationId: randomUUID(),
+      authorized: true,
+    });
+    expect(marked.kind).toBe("recorded");
+    seedControlThread(harness);
+    const needles = [sharedId, threads.code.marker, "marker-shared-chat-ledger"];
+    const before = scanHost(harness.connection, harness.directory, needles).map(formatHit);
+
+    for (const mode of ["chat", "code"] as const) {
+      expect(
+        await harness.service.purge(
+          {
+            scope: { kind: "thread", mode, threadId: decodeThreadRetentionThreadId(sharedId) },
+            confirm: true,
+          },
+          "local-window",
+        ),
+      ).toMatchObject({ kind: "refused", reason: "invalid" });
+    }
+
+    // A host purge takes every thread past its window except the two that
+    // share an id.
+    for (const table of ["chat_thread_projection", "code_thread_projection"]) {
+      harness.connection
+        .prepare(`UPDATE ${table} SET updated_at = ?`)
+        .run("2026-01-01T00:00:00.000Z");
+    }
+    expect(
+      harness.service.setWindow(
+        { scope: { kind: "host" }, window: { kind: "duration-days", days: 1 } },
+        "local-window",
+      ),
+    ).not.toMatchObject({ kind: "refused" });
+    const outcome = await harness.service.purge(
+      { scope: { kind: "host" }, confirm: true },
+      "local-window",
+    );
+    expect(outcome).toMatchObject({
+      operation: "purge-threads",
+      purged: [{ mode: "chat", threadId: controlThreadId }],
+    });
+
+    expect(readControl(harness.connection)).toBeUndefined();
+    expect(scanHost(harness.connection, harness.directory, needles).map(formatHit)).toEqual(before);
+    expect(
+      readThreadExternalContentTaint(harness.connection, sharedId).externalContentIngested,
+    ).toBe(true);
+
+    // A sweep that passes over every candidate reports nothing as changed.
+    expect(
+      await harness.service.purge({ scope: { kind: "host" }, confirm: true }, "local-window"),
+    ).toMatchObject({ purged: [], delinked: [], deleted: [] });
   });
 
   it("de-links a purged thread's child-run usage and keeps it de-linked through a usage rebuild", async () => {

@@ -13,12 +13,7 @@ import { THREAD_RETENTION_AGGREGATE } from "./threadRetentionProjection";
 import { REPLICA_ARTIFACT_EVENT_NAMES } from "../replica/replicaArtifactEvents";
 import { REPLICA_MEMBERSHIP_AGGREGATE_TYPE } from "../replica/replicaMembershipProjection";
 import type { SqliteConnection } from "./sqlitePort";
-
-const THREAD_AGGREGATE_BY_MODE: Readonly<Record<OctantMode, string>> = {
-  chat: "chat-thread",
-  work: "work-thread",
-  code: "code-thread",
-};
+import { THREAD_AGGREGATE_TYPE_BY_MODE } from "./threadIdentity";
 
 interface AggregateKey {
   readonly aggregateType: string;
@@ -348,7 +343,7 @@ function collectOwnedAggregates(
     if (RETAINED_AGGREGATE_TYPES.has(aggregateType) || aggregateId.length === 0) return;
     keys.set(`${aggregateType}:${aggregateId}`, { aggregateType, aggregateId });
   };
-  add(THREAD_AGGREGATE_BY_MODE[mode], threadId);
+  add(THREAD_AGGREGATE_TYPE_BY_MODE[mode], threadId);
   add("native-harness-session", threadId);
   add(TURN_METRICS_AGGREGATE_TYPE, threadId);
   for (const match of aggregatesMatching(connection, THREAD_OWNERSHIP_PATHS, threadId)) {
@@ -450,7 +445,7 @@ function delinkUsageRecords(
        SET subject_id = NULL
        WHERE subject_id = ? AND subject_type = ?`,
     )
-    .run(threadId, THREAD_AGGREGATE_BY_MODE[mode]);
+    .run(threadId, THREAD_AGGREGATE_TYPE_BY_MODE[mode]);
   const delinkRun = connection.prepare(
     `UPDATE usage_record_projection
      SET subject_id = NULL
@@ -514,7 +509,7 @@ function purgeDerivedContent(
     }
   }
   const subject = decodeContextSubjectRef({
-    aggregateType: THREAD_AGGREGATE_BY_MODE[mode],
+    aggregateType: THREAD_AGGREGATE_TYPE_BY_MODE[mode],
     aggregateId: threadId,
   });
   purgeContextSubjectContent(connection, subject);

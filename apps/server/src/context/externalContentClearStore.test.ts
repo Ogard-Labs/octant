@@ -280,4 +280,33 @@ describe("clearing a thread's outside-content mark", () => {
     });
     host.connection.close();
   });
+
+  it("refuses to clear a mark whose id threads of two modes share, and journals nothing", () => {
+    const host = openHost();
+    // History from before the journal refused a second mode's thread under a
+    // held id: one mark answers for a Chat and a Code thread.
+    for (const aggregateType of ["chat-thread", "code-thread"]) {
+      host.connection
+        .prepare(
+          `INSERT INTO event_journal (
+            event_id, aggregate_type, aggregate_id, aggregate_version, event_name, event_version,
+            correlation_id, actor_kind, actor_id, occurred_at, payload_json, host_id
+          ) VALUES (?, ?, ?, 1, 'fixture.planted@1', 1, ?, 'system', ?, ?, '{}', 'local')`,
+        )
+        .run(
+          `${aggregateType === "chat-thread" ? "1" : "2"}1111111-1111-4111-8111-111111111111`,
+          aggregateType,
+          ids.thread,
+          ids.correlation,
+          ids.system,
+          "2026-10-12T10:00:00.000Z",
+        );
+    }
+    host.ingest(mcpResult, "mcp-tool");
+
+    expect(host.clear()).toEqual({ kind: "refused", reason: "thread-unavailable" });
+    expect(host.tainted()).toBe(true);
+    expect(host.events()).toHaveLength(1);
+    host.connection.close();
+  });
 });

@@ -156,11 +156,19 @@ export function decideExternalContentClear(input: {
   /** The aggregate version the person was shown, and the thread's own now. */
   readonly shownVersion: number;
   readonly currentVersion: number;
+  /**
+   * Threads of more than one mode answer to this id. The mark is keyed by the
+   * bare id, so it cannot be told apart, and clearing it would clear another
+   * thread's mark that nobody reviewed.
+   */
+  readonly threadIdShared?: boolean;
 }): ExternalContentClearDecision {
   // Only a person at this machine reviews. Decided first, so a refused
   // caller learns nothing about the thread.
   if (input.principal !== "local-window") return { kind: "refuse", reason: "unauthorized" };
-  if (input.turn === "unknown") return { kind: "refuse", reason: "thread-unavailable" };
+  if (input.turn === "unknown" || input.threadIdShared === true) {
+    return { kind: "refuse", reason: "thread-unavailable" };
+  }
   // A turn in flight may be reading more while the person looks, and the
   // gates it is waiting on must not open under it.
   if (input.turn === "active") return { kind: "refuse", reason: "turn-active" };

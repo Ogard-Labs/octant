@@ -28,7 +28,8 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { rebuildProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
-import { openSqlite } from "../persistence/sqlitePort";
+import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { readThreadIdModes } from "../persistence/threadIdentity";
 import { erasePurgedThread } from "../persistence/threadPurge";
 import {
   CodeService,
@@ -152,6 +153,8 @@ function harness(
     readonly applySourceFiles?: ManagedCodeThreadCreationDeps["applySourceFiles"];
     /** A real journal, for what a creation leaves behind; defaults to a mock. */
     readonly journal?: CodePersistencePort["journal"];
+    /** The host store the real journal writes to, for which mode holds an id. */
+    readonly connection?: SqliteConnection;
     readonly uuid?: () => string;
     readonly recordExternalContentIngestion?: CodeServiceOptions["recordExternalContentIngestion"];
   } = {},
@@ -215,6 +218,10 @@ function harness(
     journal: options.journal ?? journal,
     readCodeSettings: () => undefined,
     readCodeThread: (id) => options.threads?.find((entry) => String(entry.id) === String(id)),
+    readThreadIdModes: (id) => {
+      if (options.connection !== undefined) return readThreadIdModes(options.connection, id);
+      return options.threads?.some((entry) => String(entry.id) === id) === true ? ["code"] : [];
+    },
     readCodeThreads: () => [],
     readCodeThreadActivity: () => [],
     readCodeRuntimeWorks: () => [],
@@ -887,6 +894,7 @@ function forkingHarness(
     },
     applySourceFiles: vi.fn(async () => "applied" as const),
     journal: options.journal ?? host.journal,
+    connection: host.connection,
     uuid: host.uuid,
     forkConversation: forkConversationMarkedBy(host.marked),
     recordExternalContentIngestion:
@@ -1035,6 +1043,51 @@ describe("a thread made from a thread marked with outside content", () => {
       );
       expect(host.marked(String(threadId))).toBe(false);
     }
+  });
+
+  it("refuses a fork under the id a marked Chat thread holds before making a worktree, and leaves that thread's mark as it was", async () => {
+    const host = markingHost();
+    host.markSource();
+    host.connection
+      .prepare(
+        `INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version, event_name, event_version,
+          correlation_id, actor_kind, actor_id, occurred_at, payload_json, host_id
+        ) VALUES (?, 'chat-thread', ?, 1, 'chat.thread-created@1', 1, ?, 'system', ?, ?, ?, 'local')`,
+      )
+      .run(
+        host.uuid(),
+        String(threadId),
+        host.uuid(),
+        host.uuid(),
+        now,
+        JSON.stringify({ kind: "thread-created", thread: { id: threadId } }),
+      );
+    host.ingestions.record({
+      threadId,
+      provenance: { origin: "external-content", sourceLabel: "web" },
+      contentReference: "chat-page-1",
+      correlationId: host.uuid(),
+      authorized: true,
+    });
+    const chatMark = host.marks(String(threadId)).map((event) => event.payload);
+    expect(chatMark).toHaveLength(1);
+    const { codeService, git } = forkingHarness(host);
+
+    await expect(codeService.execute(windowId, forkCommand)).rejects.toMatchObject({
+      failure: { category: "conflict", message: "That thread ID is already in use." },
+    });
+    expect(git.addWorktree).not.toHaveBeenCalled();
+    expect(
+      host
+        .eventOrder()
+        .some(
+          (event) =>
+            event.startsWith("code.thread-created@1") ||
+            event.startsWith("code.checkout-observed@1"),
+        ),
+    ).toBe(false);
+    expect(host.marks(String(threadId)).map((event) => event.payload)).toEqual(chatMark);
   });
 
   it("leaves no mark on a thread whose creation fails after the mark", async () => {

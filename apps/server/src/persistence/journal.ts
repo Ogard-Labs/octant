@@ -20,11 +20,13 @@ import {
   JournalWriteFailed,
   isSqliteStorageFailure,
   ReplayEventInvalid,
+  ThreadIdInUse,
   UnknownEventName,
   UnsupportedEventVersion,
 } from "./journalErrors";
 import { ProjectionApplicationFailed, ProjectionRegistry } from "./projection";
 import type { SqliteConnection, SqliteStatement } from "./sqlitePort";
+import { threadIdHeldByAnotherMode, threadModeOfAggregateType } from "./threadIdentity";
 
 export interface JournalAppendOptions {
   readonly beforeEvents?: (connection: SqliteConnection) => void | ReadonlyArray<unknown>;
@@ -331,6 +333,21 @@ export class Journal {
           throw new DuplicateEventIdentity({ eventId: existingEvent.pending.eventId });
         }
 
+        // Checked here, inside the append's transaction, so every path that
+        // starts a thread is covered and two creations racing on one id
+        // cannot both pass.
+        const threadMode = threadModeOfAggregateType(request.aggregate.aggregateType);
+        if (
+          head === undefined &&
+          threadMode !== undefined &&
+          threadIdHeldByAnotherMode(this.#connection, threadMode, request.aggregate.aggregateId)
+        ) {
+          throw new ThreadIdInUse({
+            aggregateType: request.aggregate.aggregateType,
+            aggregateId: request.aggregate.aggregateId,
+          });
+        }
+
         const actualVersion = head?.aggregate_version ?? 0;
         const assignment = assignAggregateVersions(
           request.expectedVersion,
@@ -441,7 +458,8 @@ export class Journal {
       if (
         error instanceof ConcurrencyConflict ||
         error instanceof DuplicateEventIdentity ||
-        error instanceof ProjectionApplicationFailed
+        error instanceof ProjectionApplicationFailed ||
+        error instanceof ThreadIdInUse
       ) {
         throw error;
       }
