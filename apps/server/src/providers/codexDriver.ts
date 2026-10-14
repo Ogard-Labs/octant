@@ -1425,6 +1425,11 @@ function makeConnection(
             if (state.terminal) {
               return Effect.fail(failure("protocol", "Codex session is already terminal."));
             }
+            // Codex queues a turn behind a compaction it is still running, so
+            // the compaction's report would be read as this turn's.
+            if (state.compaction !== undefined) {
+              return Effect.fail(failure("unavailable", "Codex is compacting this session."));
+            }
             ensureSubscribed();
             return Effect.tryPromise({
               try: async () => {

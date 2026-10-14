@@ -475,8 +475,12 @@ describe("session compaction conformance", () => {
   function compactionFixture(options: {
     readonly claim?: "supported" | "unsupported" | "unavailable";
     readonly compact?: "compacts" | "compacts-silently" | "refuses-version" | "absent";
+    /** The runtime holds the compaction until released; `accepts` takes a turn meanwhile. */
+    readonly hold?: "refuses-turns" | "accepts-turns";
   }): ProviderSessionCompactionConformanceFixture {
     let released = false;
+    let compacting = false;
+    const hold = Promise.withResolvers<void>();
     let sequence = 0;
     const base = () => ({ instanceId, sessionId, sequence: ++sequence, correlationId, occurredAt });
     const capabilities: ProviderCapabilities = {
@@ -502,6 +506,23 @@ describe("session compaction conformance", () => {
           Effect.gen(function* () {
             const queue = yield* Queue.unbounded<ProviderRuntimeEvent>();
             const emit = (event: ProviderRuntimeEvent) => Queue.offer(queue, event);
+            const held = <A>(effect: Effect.Effect<A>): Effect.Effect<A> =>
+              options.hold === undefined
+                ? effect
+                : Effect.acquireUseRelease(
+                    Effect.sync(() => {
+                      compacting = true;
+                    }),
+                    () =>
+                      Effect.zipRight(
+                        Effect.promise(() => hold.promise),
+                        effect,
+                      ),
+                    () =>
+                      Effect.sync(() => {
+                        compacting = false;
+                      }),
+                  );
             const compact = (): Effect.Effect<ProviderSessionCompaction> => {
               switch (options.compact) {
                 case "refuses-version":
@@ -512,13 +533,15 @@ describe("session compaction conformance", () => {
                 case "compacts-silently":
                   return Effect.succeed({ kind: "compacted" });
                 default:
-                  return emit({
-                    ...base(),
-                    kind: "context-compacted",
-                    trigger: "requested",
-                    tokensBefore: 900,
-                    tokensAfter: 120,
-                  }).pipe(Effect.as({ kind: "compacted", tokensBefore: 900, tokensAfter: 120 }));
+                  return held(
+                    emit({
+                      ...base(),
+                      kind: "context-compacted",
+                      trigger: "requested",
+                      tokensBefore: 900,
+                      tokensAfter: 120,
+                    }).pipe(Effect.as({ kind: "compacted", tokensBefore: 900, tokensAfter: 120 })),
+                  );
               }
             };
             const connection: ProviderConnection = {
@@ -526,10 +549,12 @@ describe("session compaction conformance", () => {
               start: () => Effect.succeed({ sessionId, resumeCursor }),
               resume: () => Effect.succeed({ sessionId, resumeCursor }),
               send: () =>
-                Effect.zipRight(
-                  emit({ ...base(), kind: "text-delta", text: "hello" }),
-                  emit({ ...base(), kind: "completed" }),
-                ),
+                compacting && options.hold === "refuses-turns"
+                  ? Effect.fail(failure("unavailable", "The session is compacting."))
+                  : Effect.zipRight(
+                      emit({ ...base(), kind: "text-delta", text: "hello" }),
+                      emit({ ...base(), kind: "completed" }),
+                    ),
               ...(options.compact === "absent" ? {} : { compact }),
               interrupt: () => Effect.void,
               stop: () => Effect.void,
@@ -560,6 +585,7 @@ describe("session compaction conformance", () => {
         executionPolicy: "approval-gated",
       }),
       compactionId: "40000000-0000-4000-8000-000000000004",
+      ...(options.hold === undefined ? {} : { releaseCompaction: () => hold.resolve() }),
       isReleased: () => released,
     };
   }
@@ -569,13 +595,36 @@ describe("session compaction conformance", () => {
       runSessionCompactionConformance(
         compactionFixture({ claim: "supported", compact: "compacts" }),
       ),
-    ).resolves.toEqual({ claim: "supported", compacted: true, released: true });
+    ).resolves.toEqual({
+      claim: "supported",
+      compacted: true,
+      turnRefusedWhileCompacting: false,
+      released: true,
+    });
+  });
+
+  it("refuses a turn offered while the compaction is still pending", async () => {
+    await expect(
+      runSessionCompactionConformance(
+        compactionFixture({ claim: "supported", compact: "compacts", hold: "refuses-turns" }),
+      ),
+    ).resolves.toMatchObject({ compacted: true, turnRefusedWhileCompacting: true });
+    await expect(
+      runSessionCompactionConformance(
+        compactionFixture({ claim: "supported", compact: "compacts", hold: "accepts-turns" }),
+      ),
+    ).rejects.toThrow(/a turn was accepted while a compaction was pending/);
   });
 
   it("accepts a driver that claims nothing and offers no compact", async () => {
     await expect(
       runSessionCompactionConformance(compactionFixture({ compact: "absent" })),
-    ).resolves.toEqual({ claim: "unsupported", compacted: false, released: true });
+    ).resolves.toEqual({
+      claim: "unsupported",
+      compacted: false,
+      turnRefusedWhileCompacting: false,
+      released: true,
+    });
   });
 
   it("accepts an install too old for the request when compact refuses it", async () => {
@@ -583,7 +632,12 @@ describe("session compaction conformance", () => {
       runSessionCompactionConformance(
         compactionFixture({ claim: "unavailable", compact: "refuses-version" }),
       ),
-    ).resolves.toEqual({ claim: "unavailable", compacted: false, released: true });
+    ).resolves.toEqual({
+      claim: "unavailable",
+      compacted: false,
+      turnRefusedWhileCompacting: false,
+      released: true,
+    });
   });
 
   it("refuses a claim the connection cannot honor", async () => {

@@ -2456,21 +2456,24 @@ cannot. The host never starts a replacement provider session seeded with its
 own summary behind the person's back; that is the existing fork handoff, which
 stays a separate, explicit action.
 
-| Thread                                                   | Who compacts             | How                                                                                                                                                                                                                                                         | Refuses with                                                  |
-| -------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Chat or Work on a direct endpoint (host-planned history) | Host                     | `ContextHarnessService` summarizes the planned conversation before the tail through the existing summary generator (`makeContextSummaryGenerator`, a one-shot session on the thread's provider and model), then commits it as `maintainContext` does today. | `nothing-to-compact`                                          |
-| Code on Octant Harness (journaled transcript)            | Octant Harness           | The harness connection's `compact` summarizes the transcript turns before the tail with the same endpoint and journals a `compacted` transcript event; later requests are built from the summary and the tail.                                              | `nothing-to-compact`, `no-session`                            |
-| Codex app-server, any mode                               | Codex                    | `thread/compact/start` with the thread id (codex-cli 0.159.3 and 0.162.1 app-server schemas); the run is observed as a turn carrying the `contextCompaction` item.                                                                                          | `runtime-version-unsupported` when the method is not found    |
-| Claude Code, any mode                                    | Claude Code              | The runtime's own `/compact`, sent by the port as a control input rather than a user turn; observed as `system`/`compact_boundary` (`compact_metadata.trigger: "manual"`, `pre_tokens`) and the `status` message's `compact_result`.                        | `runtime-version-unsupported` when `compact` is not announced |
-| OpenCode, any mode                                       | OpenCode                 | `/api/session/:sessionID/compact` (served by OpenCode 2.0.26); observed as `session.compaction.ended`, `session.next.compaction.ended` or `session.compacted`.                                                                                              | `runtime-version-unsupported` on a server without the route   |
-| Pi and Oh My Pi, any mode                                | Pi                       | Pi's RPC `compact` command (`packages/coding-agent/docs/rpc.md`); observed as `compaction_end`, which changed nothing when it carries no `result`.                                                                                                          | `runtime-version-unsupported` when the command is refused     |
-| ACP agents                                               | Nobody                   | The protocol has no compaction request.                                                                                                                                                                                                                     | `runtime-cannot-compact`                                      |
-| Any other adapter                                        | Nobody, unless it claims | An adapter compacts only by reporting the capability and implementing the seam below.                                                                                                                                                                       | `runtime-cannot-compact`                                      |
+| Thread                                                   | Who compacts             | How                                                                                                                                                                                                                                                               | Refuses with                                                  |
+| -------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Chat or Work on a direct endpoint (host-planned history) | Host                     | `ContextHarnessService` summarizes the planned conversation before the tail through the existing summary generator (`makeContextSummaryGenerator`, a one-shot session on the thread's provider and model), then commits it as `maintainContext` does today.       | `nothing-to-compact`                                          |
+| Code on Octant Harness (journaled transcript)            | Octant Harness           | The harness connection's `compact` summarizes the transcript turns before the tail with the same endpoint and journals a `compacted` transcript event; later requests are built from the summary and the tail.                                                    | `nothing-to-compact`, `no-session`                            |
+| Codex app-server, any mode                               | Codex                    | `thread/compact/start` with the thread id (codex-cli 0.159.3 and 0.162.1 app-server schemas); the run is observed as a turn carrying the `contextCompaction` item.                                                                                                | `runtime-version-unsupported` when the method is not found    |
+| Claude Code, any mode                                    | Claude Code              | The runtime's own `/compact`, sent by the port as a user-role input that carries no tools and is not counted as a turn; observed as `system`/`compact_boundary` (`compact_metadata.trigger: "manual"`, `pre_tokens`) and the `status` message's `compact_result`. | `runtime-version-unsupported` when `compact` is not announced |
+| OpenCode, any mode                                       | OpenCode                 | `/api/session/:sessionID/compact` (served by OpenCode 2.0.26); observed as `session.compaction.ended`, `session.next.compaction.ended` or `session.compacted`.                                                                                                    | `runtime-version-unsupported` on a server without the route   |
+| Pi and Oh My Pi, any mode                                | Pi                       | Pi's RPC `compact` command (`packages/coding-agent/docs/rpc.md`); observed as `compaction_end`, which changed nothing when it carries no `result`.                                                                                                                | `runtime-version-unsupported` when the command is refused     |
+| ACP agents                                               | Nobody                   | The protocol has no compaction request.                                                                                                                                                                                                                           | `runtime-cannot-compact`                                      |
+| Any other adapter                                        | Nobody, unless it claims | An adapter compacts only by reporting the capability and implementing the seam below.                                                                                                                                                                             | `runtime-cannot-compact`                                      |
 
 The Codex and Claude rows cite the schema and message shapes they were read
 from. The Codex adapter claims compaction from codex-cli 0.162.1, the release
 whose schema and source (`rust-v0.162.1`) it was read against; an older install
-reports `unavailable`. At that tag every compaction path replaces the thread's
+reports `unavailable`. The claim is a floor: a later release is claimed too,
+although only 0.162.1 was read, so a later one that drops the request is
+refused as too old when asked, but one that changes the order below would go
+unnoticed until a smoke run against it. At that tag every compaction path replaces the thread's
 history before it completes the `contextCompaction` item and returns every
 failure before that replacement, so a completed item is a compaction that
 happened, and a run Codex itself reports as failed without one changed nothing;
@@ -2674,7 +2677,9 @@ Codex RPC itself.
 - One normalized runtime event, `context-compacted`
   (`trigger: "requested" | "automatic"`, optional token figures), is emitted by
   each adapter that observes a compaction: the Codex item when it completes,
-  Claude's `compact_boundary` (`manual` is the requested one), Octant Harness
+  Claude's `compact_boundary` (`requested` only while the connection's
+  `compact` waits on it; a `/compact` the person typed into the session is the
+  runtime's own, `automatic`), Octant Harness
   once its marker is journaled, and, once their rows are probed, the OpenCode
   events and Pi's `compaction_end` with a `result`. A Code turn leaves the
   event out of the turn's own events. It
@@ -2688,7 +2693,11 @@ Codex RPC itself.
   driver without `compact` does not claim the capability
   (`runSessionCompactionConformance`, per mode; the lifecycle harness also
   refuses a claim the acquired connection cannot honor). A claim of
-  `unavailable` must refuse as `runtime-version-unsupported`.
+  `unavailable` must refuse as `runtime-version-unsupported`. A connection
+  refuses a turn while its compaction is pending: Codex would queue the turn
+  behind the compaction and read the compaction's report as the turn's, and
+  Claude would take the `/compact` result as the turn's reply. A fixture that
+  can hold its runtime's compaction open has the harness check it.
 
 The host path for Chat and Work on a direct endpoint does not use the
 connection's `compact`: their history is the host's, so `ContextHarnessService`

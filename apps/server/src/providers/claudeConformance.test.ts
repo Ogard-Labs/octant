@@ -124,8 +124,9 @@ function conformanceDriver(
 
 describe("Claude provider conformance", () => {
   it("holds Claude to its session-compaction claim", async () => {
+    const hold = Promise.withResolvers<void>();
     const { driver, opened } = conformanceDriver(
-      (input, sdkSessionId) => new CompletingQuery(input, sdkSessionId),
+      (input, sdkSessionId) => new CompletingQuery(input, sdkSessionId, hold.promise),
     );
     await expect(
       runSessionCompactionConformance({
@@ -143,9 +144,15 @@ describe("Claude provider conformance", () => {
           executionPolicy: "approval-gated",
         }),
         compactionId: "80000000-0000-4000-8000-000000000725",
+        releaseCompaction: () => hold.resolve(),
         isReleased: () => opened.length > 0 && opened.every((query) => query.closed),
       }),
-    ).resolves.toEqual({ claim: "supported", compacted: true, released: true });
+    ).resolves.toEqual({
+      claim: "supported",
+      compacted: true,
+      turnRefusedWhileCompacting: true,
+      released: true,
+    });
   });
 
   it("passes the real driver lifecycle, capabilities, resume, failure, and cleanup harness", async () => {
@@ -251,29 +258,32 @@ class ConformanceQuery implements ClaudeQueryPort {
     compactAnnounced: true,
   };
   readonly supportedModels = () => Effect.succeed(this.initialization.models);
-  /** `/compact` as the runtime answers it: the cut, its status, and the closing result. */
+  /** Released before `/compact` is answered; a subclass holds it open. */
+  protected compactionHold: Promise<void> = Promise.resolve();
+  /** `/compact` as the runtime answers it: the cut and its status. */
   readonly requestCompaction: ClaudeQueryPort["requestCompaction"] = () =>
-    Effect.promise(async () => {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      await this.emit({
-        kind: "status",
-        sessionId: this.sdkSessionId,
-        status: "compacting",
-      });
-      await this.emit({
-        kind: "compaction",
-        sessionId: this.sdkSessionId,
-        trigger: "manual",
-        preTokens: 48_000,
-        postTokens: 6_000,
-      });
-      await this.emit({
-        kind: "status",
-        sessionId: this.sdkSessionId,
-        status: null,
-        compactResult: "success",
-      });
+    Effect.sync(() => {
+      void this.answerCompaction();
     });
+
+  private async answerCompaction(): Promise<void> {
+    await this.compactionHold;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await this.emit({ kind: "status", sessionId: this.sdkSessionId, status: "compacting" });
+    await this.emit({
+      kind: "compaction",
+      sessionId: this.sdkSessionId,
+      trigger: "manual",
+      preTokens: 48_000,
+      postTokens: 6_000,
+    });
+    await this.emit({
+      kind: "status",
+      sessionId: this.sdkSessionId,
+      status: null,
+      compactResult: "success",
+    });
+  }
   readonly accountInfo = () => Effect.succeed(this.initialization.account);
   readonly readPlanUsage = () => Effect.succeed(undefined);
   readonly setPermissionMode = () => Effect.void;
@@ -456,8 +466,16 @@ function usage() {
   };
 }
 
-/** A runtime whose turns finish with a reply, so there is a session to compact. */
+/**
+ * A runtime whose turns finish with a reply, so there is a session to compact,
+ * and whose compaction is held open until the harness releases it.
+ */
 class CompletingQuery extends ConformanceQuery {
+  constructor(input: ClaudeOpenQueryInput, sdkSessionId: string, hold: Promise<void>) {
+    super(input, sdkSessionId);
+    this.compactionHold = hold;
+  }
+
   override readonly send: ClaudeQueryPort["send"] = () =>
     Effect.promise(async () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));

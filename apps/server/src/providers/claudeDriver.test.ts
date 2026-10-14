@@ -4640,6 +4640,67 @@ describe("compacting a Claude session", () => {
     await session.close();
   });
 
+  it("settles when the status says success before the boundary arrives and no result follows", async () => {
+    const session = await compactingSession();
+    const result = session.compact();
+    await settle();
+    await session.query.emit({
+      kind: "status",
+      sessionId: "sdk-session-1",
+      status: null,
+      compactResult: "success",
+    });
+    await session.query.emit({
+      kind: "compaction",
+      sessionId: "sdk-session-1",
+      trigger: "manual",
+      preTokens: 9_000,
+      postTokens: 1_500,
+    });
+    await expect(result).resolves.toEqual({
+      kind: "compacted",
+      tokensBefore: 9_000,
+      tokensAfter: 1_500,
+    });
+    expect(session.events.filter((event) => event.kind === "context-compacted")).toEqual([
+      expect.objectContaining({ trigger: "requested" }),
+    ]);
+    await session.close();
+  });
+
+  it("reports a /compact the person typed into the session as the runtime's own, not a requested one", async () => {
+    const session = await compactingSession();
+    await session.send("/compact");
+    await session.query.emit({
+      kind: "compaction",
+      sessionId: "sdk-session-1",
+      trigger: "manual",
+      preTokens: 20_000,
+    });
+    await session.query.emit(completed("sdk-session-1"));
+    await settle();
+    expect(session.events.filter((event) => event.kind === "context-compacted")).toEqual([
+      expect.objectContaining({ trigger: "automatic" }),
+    ]);
+    await session.close();
+  });
+
+  it("refuses a turn while its compaction is pending", async () => {
+    const session = await compactingSession();
+    const result = session.compact();
+    await settle();
+    await expect(session.send("too soon")).rejects.toThrow(/Claude is compacting this session/);
+    expect(session.query.sent).toEqual([]);
+    await session.query.emit({
+      kind: "status",
+      sessionId: "sdk-session-1",
+      status: null,
+      compactResult: "failed",
+    });
+    await expect(result).resolves.toMatchObject({ kind: "failed" });
+    await session.close();
+  });
+
   it("counts a compaction the closing result confirms when no status came", async () => {
     const session = await compactingSession();
     const result = session.compact();

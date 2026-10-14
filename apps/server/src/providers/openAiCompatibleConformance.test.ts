@@ -157,12 +157,21 @@ describe("OpenAI-compatible session compaction conformance", () => {
     "holds Octant Harness to its %s-mode compaction claim",
     async (mode) => {
       let released = false;
+      let requests = 0;
+      // The third request is the summary; it is held open so the harness can
+      // offer a turn while the compaction is pending.
+      const hold = Promise.withResolvers<void>();
       const driver = makeOpenAiCompatibleDriver({
         instanceId,
         configuration: configuration("chat-completions"),
         runtimeRegistry: new ProviderRuntimeRegistry(),
         credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
-        fetch: async (url) => (String(url).endsWith("/models") ? models() : chatStream("noted")),
+        fetch: async (url) => {
+          if (String(url).endsWith("/models")) return models();
+          requests += 1;
+          if (requests === 3) await hold.promise;
+          return chatStream("noted");
+        },
         onConnectionReleased: () => {
           released = true;
         },
@@ -192,13 +201,15 @@ describe("OpenAI-compatible session compaction conformance", () => {
             executionPolicy: "approval-gated",
           }),
           compactionId: "80000000-0000-4000-8000-000000000516",
+          releaseCompaction: () => hold.resolve(),
           isReleased: () => released,
         }),
-      ).resolves.toEqual(
-        mode === "code"
-          ? { claim: "supported", compacted: true, released: true }
-          : { claim: "unsupported", compacted: false, released: true },
-      );
+      ).resolves.toEqual({
+        claim: mode === "code" ? "supported" : "unsupported",
+        compacted: mode === "code",
+        turnRefusedWhileCompacting: mode === "code",
+        released: true,
+      });
     },
   );
 });

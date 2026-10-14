@@ -2884,6 +2884,21 @@ describe("compacting a Codex session", () => {
     });
   });
 
+  it("refuses a turn while its compaction is pending", async () => {
+    const f = fixture({ version: "0.162.1" });
+    const { acquired, result } = await compacting(f);
+    await expect(
+      Effect.runPromise(
+        acquired.connection.send({ sessionId, prompt: "too soon", attachments: [], tools: [] }),
+      ),
+    ).rejects.toThrow();
+    expect(f.calls.some(({ method }) => method === "turn/start")).toBe(false);
+    f.emit(turnStarted("turn-c"));
+    f.emit(turnCompleted("turn-c", "failed"));
+    await expect(result).resolves.toMatchObject({ kind: "failed", sessionMayHaveChanged: false });
+    await acquired.close();
+  });
+
   it("refuses while a turn runs on the session", async () => {
     const f = fixture({ version: "0.162.1" });
     const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");

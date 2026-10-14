@@ -112,6 +112,12 @@ export interface ClaudeEventContext {
   /** Claude compacted the session's window during this turn. */
   windowCompacted?: boolean;
   /**
+   * The connection's `compact` sent `/compact` and is waiting on it, so the
+   * `manual` boundary that answers it is the requested one; a `/compact` the
+   * person typed into the session is not.
+   */
+  compactionRequested?: boolean;
+  /**
    * Each model call's usage this turn, by Claude message id. An assistant
    * message reports only its own call, so the turn's usage so far is their
    * sum; a call split across several messages repeats its id and counts once.
@@ -1052,12 +1058,13 @@ export function mapClaudeMessage(
       // or an unknown amount; a stale pre-compaction figure would show it full.
       if (message.postTokens === undefined) delete context.contextTokens;
       else context.contextTokens = message.postTokens;
-      // `manual` is the runtime's name for a compaction `/compact` asked for,
-      // and only the connection's `compact` sends that command.
       return [
         event(context, {
           kind: "context-compacted",
-          trigger: message.trigger === "manual" ? "requested" : "automatic",
+          trigger:
+            message.trigger === "manual" && context.compactionRequested === true
+              ? "requested"
+              : "automatic",
           tokensBefore: message.preTokens,
           ...(message.postTokens === undefined ? {} : { tokensAfter: message.postTokens }),
         }),

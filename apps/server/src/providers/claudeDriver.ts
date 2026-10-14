@@ -1116,6 +1116,7 @@ function makeConnection(
       const pending = state.compaction;
       if (pending === undefined) return;
       state.compaction = undefined;
+      if (state.context !== undefined) state.context.compactionRequested = false;
       pending.settle(
         pending.boundary !== undefined
           ? { kind: "compacted", ...pending.boundary }
@@ -1174,6 +1175,7 @@ function makeConnection(
       claudeSessionId,
       sequence,
       terminal: false,
+      ...(state.compaction === undefined ? {} : { compactionRequested: true }),
       ...(state.query.initialization.autoCompactThreshold === undefined
         ? {}
         : { autoCompactThreshold: state.query.initialization.autoCompactThreshold }),
@@ -1298,6 +1300,17 @@ function makeConnection(
           return;
         }
         state.outputAccepted = true;
+      }
+      // The boundary's event is out now; a status that already said the
+      // compaction succeeded was only waiting for it.
+      if (
+        message.kind === "compaction" &&
+        pendingCompaction !== undefined &&
+        state.compaction === pendingCompaction &&
+        pendingCompaction.succeeded &&
+        pendingCompaction.boundary !== undefined
+      ) {
+        settleCompaction(state);
       }
     };
     const collectorFinished = (state: SessionState, exit: Exit.Exit<void, ProviderFailure>) => {
@@ -1972,6 +1985,11 @@ function makeConnection(
         if (state === undefined || state.terminal || state.released) {
           return Effect.fail(failure("protocol", "Claude session is not active."));
         }
+        // The runtime answers `/compact` with a result of its own, which a
+        // turn sent meanwhile would take as its reply.
+        if (state.compaction !== undefined) {
+          return Effect.fail(failure("unavailable", "Claude is compacting this session."));
+        }
         const observed = options.runtimeRegistry.observedState(options.instanceId);
         const model = observed?.models.find((candidate) => candidate.id === state.modelId);
         const rejected = validateChatTurnInput(
@@ -2088,12 +2106,14 @@ function makeConnection(
             succeeded: false,
             settle: (outcome) => resume(Effect.succeed(outcome)),
           };
+          state.compaction = pending;
           // A finished turn closed its event context; the compaction's own
           // events are numbered on from it, as the next turn's would be.
           if (state.context?.terminal === true && state.claudeSessionId !== undefined) {
             state.context = makeEventContext(state, state.claudeSessionId, state.context.sequence);
+          } else if (state.context !== undefined) {
+            state.context.compactionRequested = true;
           }
-          state.compaction = pending;
           Effect.runFork(
             state.query.requestCompaction().pipe(
               // The command never reached the runtime's input, so nothing ran.

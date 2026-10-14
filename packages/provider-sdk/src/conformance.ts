@@ -445,6 +445,11 @@ export interface ProviderSessionCompactionConformanceFixture {
   /** Resumes the session the start opened, from the handle it returned. */
   readonly resume: (handle: ProviderSessionHandle) => ProviderSessionResume;
   readonly compactionId: string;
+  /**
+   * Present when the fixture's runtime holds a compaction open until this is
+   * called, so the harness can offer a turn while it is still pending.
+   */
+  readonly releaseCompaction?: () => void;
   readonly isReleased: () => boolean;
 }
 
@@ -452,6 +457,8 @@ export interface ProviderSessionCompactionConformanceEvidence {
   readonly claim: ProviderCapabilitySupport;
   /** True when the driver claims compaction and compacted a session. */
   readonly compacted: boolean;
+  /** True when a turn offered while the compaction was pending was refused. */
+  readonly turnRefusedWhileCompacting: boolean;
   readonly released: boolean;
 }
 
@@ -484,7 +491,7 @@ export async function runSessionCompactionConformance(
             compact === undefined,
             "session compaction is claimed as unsupported but the connection offers to compact",
           );
-          return { claim, compacted: false };
+          return { claim, compacted: false, turnRefusedWhileCompacting: false };
         }
         assertConformance(
           claim === "unavailable" || compact !== undefined,
@@ -507,7 +514,9 @@ export async function runSessionCompactionConformance(
           yield* connection.resume(fixture.resume(handle));
         }
 
-        if (compact === undefined) return { claim, compacted: false };
+        if (compact === undefined) {
+          return { claim, compacted: false, turnRefusedWhileCompacting: false };
+        }
         const compactionEvents = yield* connection.subscribe;
         const requested = yield* Effect.fork(
           Stream.runCollect(
@@ -519,14 +528,36 @@ export async function runSessionCompactionConformance(
             ),
           ),
         );
-        const result = yield* compact({ sessionId, compactionId: fixture.compactionId });
+        const compacting = yield* Effect.fork(
+          compact({ sessionId, compactionId: fixture.compactionId }),
+        );
+        // A turn sent while the compaction is pending would be planned over
+        // it, or would take the compaction's report as its own reply.
+        let turnRefusedWhileCompacting = false;
+        if (claim === "supported" && fixture.releaseCompaction !== undefined) {
+          for (
+            let spins = 0;
+            spins < 1_000 && (yield* Fiber.status(compacting))._tag === "Running";
+            spins += 1
+          ) {
+            yield* Effect.yieldNow();
+          }
+          const sent = yield* Effect.exit(connection.send(fixture.turns[0]));
+          assertConformance(
+            Exit.isFailure(sent),
+            "a turn was accepted while a compaction was pending",
+          );
+          turnRefusedWhileCompacting = true;
+        }
+        fixture.releaseCompaction?.();
+        const result = yield* Fiber.join(compacting);
         if (claim === "unavailable") {
           assertConformance(
             result.kind === "refused" && result.reason === "runtime-version-unsupported",
             `session compaction is claimed as unavailable but compact answered ${result.kind}`,
           );
           yield* Fiber.interrupt(requested);
-          return { claim, compacted: false };
+          return { claim, compacted: false, turnRefusedWhileCompacting };
         }
         assertConformance(
           result.kind === "compacted",
@@ -557,7 +588,7 @@ export async function runSessionCompactionConformance(
           "the compacted session resumed as a different session",
         );
         yield* connection.stop(sessionId);
-        return { claim, compacted: true };
+        return { claim, compacted: true, turnRefusedWhileCompacting };
       }),
     ),
   );

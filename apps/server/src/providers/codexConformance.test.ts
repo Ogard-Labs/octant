@@ -163,6 +163,7 @@ describe("Codex provider conformance", () => {
         listeners.forEach((listener) => listener(message));
       let released = false;
       let turns = 0;
+      const hold = Promise.withResolvers<void>();
       const client: CodexClientPort = {
         accountRead: async () => ({ account: { type: "chatgpt" }, requiresOpenaiAuth: true }),
         rateLimitsRead: async () => ({ rateLimits: { rateLimitReachedType: null } }),
@@ -189,8 +190,9 @@ describe("Codex provider conformance", () => {
           return { turn: { id: turnId, status: "inProgress" } };
         },
         threadCompactStart: async ({ threadId }) => {
-          // The answer comes first; the compaction then runs as its own turn.
-          queueMicrotask(() => {
+          // The answer comes first; the compaction then runs as its own turn,
+          // held open until the harness has offered a turn meanwhile.
+          void hold.promise.then(() => {
             const turnId = "turn-compaction";
             emit(
               notification("turn/started", {
@@ -265,9 +267,15 @@ describe("Codex provider conformance", () => {
             executionPolicy: "approval-gated",
           }),
           compactionId: "80000000-0000-4000-8000-000000000216",
+          releaseCompaction: () => hold.resolve(),
           isReleased: () => released,
         }),
-      ).resolves.toEqual({ claim, compacted, released: true });
+      ).resolves.toEqual({
+        claim,
+        compacted,
+        turnRefusedWhileCompacting: compacted,
+        released: true,
+      });
     },
   );
 
