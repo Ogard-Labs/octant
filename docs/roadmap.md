@@ -31,7 +31,8 @@ here is merged or being hardened for it.
   Workbench (Xcode discovery, Simulator, validation evidence).
 - **Extensions marketplace** — hostile package inspection, install/trust/enable
   as separate steps, quarantined executables, skill discovery from
-  `.agents/skills/`, structured `@plugin` and `$skill` addressing.
+  `.agents/skills/` and `.claude/skills/`, structured `@plugin` and `$skill`
+  addressing.
 - **Unified subagents** — managed children run as in-process provider sessions
   with clamped authority, isolated worktrees, hierarchy panel, and durable
   results.

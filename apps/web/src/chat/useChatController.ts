@@ -16,6 +16,8 @@ import type {
   ChatThread,
   ChatThreadId,
   ChatThreadView,
+  ChatThreadWindow,
+  ChatTurnId,
 } from "@octant/contracts/chat";
 import { decodeChatSubmissionId } from "@octant/contracts/chat";
 import { decodeUtcTimestamp } from "@octant/contracts";
@@ -26,6 +28,16 @@ import type { MentionableThreadId } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import { applyChatAttemptFrame } from "./chatStreamFrames";
+import {
+  appendChatPage,
+  CHAT_WINDOW_PAGE_TURNS,
+  holdsTurn,
+  joinDetachedRange,
+  prependChatPage,
+  refreshChatTail,
+  wholeThreadWindowState,
+  type ChatTranscriptWindowState,
+} from "./chatTranscriptWindow";
 import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { failureMessage } from "../lib/failureMessage";
 import { waitForReconnect } from "../lib/waitForReconnect";
@@ -147,6 +159,30 @@ export function createChatReadCursorStore(
   });
 }
 
+/** Clients that already answered 404 for the window route; asked once per client. */
+const clientsWithoutChatWindow = new WeakSet<ChatClient>();
+
+/** A read of the newest turns: a window, or the whole thread from a host without one. */
+type ChatTailRead =
+  | { readonly kind: "window"; readonly window: ChatThreadWindow }
+  | { readonly kind: "whole"; readonly view: ChatThreadView };
+
+async function readChatTail(client: ChatClient, threadId: ChatThreadId): Promise<ChatTailRead> {
+  // A test double or an older client may not carry the window read at all.
+  if (typeof client.threadWindow === "function" && !clientsWithoutChatWindow.has(client)) {
+    try {
+      return {
+        kind: "window",
+        window: await client.threadWindow(threadId, { limit: CHAT_WINDOW_PAGE_TURNS }),
+      };
+    } catch (error) {
+      if (!(error instanceof ChatClientFailure && error.status === 404)) throw error;
+      clientsWithoutChatWindow.add(client);
+    }
+  }
+  return { kind: "whole", view: await client.thread(threadId) };
+}
+
 function sameSnooze(
   left: ChatThread["snooze"] | undefined,
   right: ChatThread["snooze"] | undefined,
@@ -194,6 +230,18 @@ export function useChatController(options: ChatControllerOptions) {
   // re-renders, so it reads the latest view here rather than from state: two
   // frames applied to the same rendered view would lose the first one's text.
   const activeViewRef = useRef<ChatThreadView | undefined>(undefined);
+  // `activeView` holds the newest turns; this says what else is loaded or
+  // offered. The ref serves async page reads the way `activeViewRef` does.
+  const [transcriptWindow, setTranscriptWindow] = useState<ChatTranscriptWindowState | undefined>(
+    undefined,
+  );
+  const transcriptWindowRef = useRef<ChatTranscriptWindowState | undefined>(undefined);
+  // Set when the open thread changes: the next newest read replaces what is
+  // loaded, so leaving a thread releases its earlier pages.
+  const releaseLoadedPages = useRef(true);
+  // Counts jump requests, so a page read for an earlier jump that answers
+  // after a later one cannot replace the later jump's range.
+  const revealGeneration = useRef(0);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
   const [settingsMessage, setSettingsMessage] = useState<string | undefined>(undefined);
   const composerDraft = useComposerThreadDraft({
@@ -404,6 +452,105 @@ export function useChatController(options: ChatControllerOptions) {
     [readCursorStore, recordFollowUp, recordSequence, recordUpdatedAt],
   );
 
+  const applyWindowState = useCallback((next: ChatTranscriptWindowState | undefined) => {
+    transcriptWindowRef.current = next;
+    setTranscriptWindow(next);
+  }, []);
+
+  /**
+   * Publish a new run of newest turns. A detached range that now shares a
+   * turn with it joins it, so the client never holds two runs that touch.
+   */
+  const applyTail = useCallback(
+    (view: ChatThreadView, state: ChatTranscriptWindowState, markRead: boolean) => {
+      let tail = view;
+      let next = state;
+      if (next.detached !== undefined) {
+        const joined = joinDetachedRange(tail, next.hasEarlier, next.detached);
+        if (joined !== undefined) {
+          const { detached: _joined, ...rest } = next;
+          tail = joined.view;
+          next = { ...rest, hasEarlier: joined.hasEarlier };
+        }
+      }
+      applyAuthoritativeView(tail, markRead);
+      applyWindowState({ ...next, offerEarlier: next.offerEarlier || next.hasEarlier });
+    },
+    [applyAuthoritativeView, applyWindowState],
+  );
+
+  /**
+   * Read the newest turns of the open thread and join them onto what is
+   * loaded. Every read that refreshes the thread on screen goes through here,
+   * so a reconnect, a frame the view cannot apply, or a command's answer
+   * keeps the earlier pages the reader loaded while the two runs still touch.
+   */
+  const refreshTail = useCallback(
+    async (
+      threadId: ChatThreadId,
+      isCurrent: () => boolean,
+    ): Promise<ChatThreadView | undefined> => {
+      const read = await readChatTail(client, threadId);
+      if (!isCurrent()) return undefined;
+      const threadKey = String(threadId);
+      if (read.kind === "whole") {
+        applyAuthoritativeView(read.view, true);
+        applyWindowState(wholeThreadWindowState(read.view));
+        releaseLoadedPages.current = false;
+        return read.view;
+      }
+      const current = activeViewRef.current;
+      const state = transcriptWindowRef.current;
+      const release = releaseLoadedPages.current;
+      releaseLoadedPages.current = false;
+      const newest = read.window;
+      if (
+        release ||
+        current === undefined ||
+        state === undefined ||
+        !state.windowed ||
+        state.threadKey !== threadKey ||
+        String(current.thread.id) !== threadKey
+      ) {
+        applyTail(
+          newest.view,
+          {
+            threadKey,
+            windowed: true,
+            hasEarlier: newest.hasEarlier,
+            offerEarlier: newest.hasEarlier,
+            supersededTurnCount: newest.supersededTurnCount,
+            earlier: "idle",
+            shownRun: (state?.shownRun ?? 0) + 1,
+          },
+          true,
+        );
+        return activeViewRef.current;
+      }
+      const refreshed = refreshChatTail(current, state.hasEarlier, newest);
+      // An edit since the detached run was last known whole may have
+      // superseded part of it, so it is let go and the newest turns show. The
+      // run's own record decides: page reads update the shared count too, so
+      // comparing against that could miss an edit inside the run.
+      const { detached, ...rest } = state;
+      const keepDetached =
+        detached !== undefined && newest.supersededTurnCount === detached.verifiedAtSupersededCount;
+      applyTail(
+        refreshed.view,
+        {
+          ...rest,
+          hasEarlier: refreshed.hasEarlier,
+          supersededTurnCount: newest.supersededTurnCount,
+          ...(keepDetached ? { detached } : {}),
+          shownRun: detached !== undefined && !keepDetached ? state.shownRun + 1 : state.shownRun,
+        },
+        true,
+      );
+      return activeViewRef.current;
+    },
+    [applyAuthoritativeView, applyTail, applyWindowState, client],
+  );
+
   /**
    * Record a thread as read at the newest sequence this window has heard of,
    * and spend any explicit unread mark, because the user asked — the row
@@ -445,10 +592,10 @@ export function useChatController(options: ChatControllerOptions) {
       streamAbort.current?.abort();
       streamAbort.current = undefined;
       setErrorMessage(undefined);
+      const isCurrent = () => mounted.current && request === threadGeneration.current;
       try {
-        const view = await client.thread(threadId);
-        if (!mounted.current || request !== threadGeneration.current) return;
-        applyAuthoritativeView(view, true);
+        const view = await refreshTail(threadId, isCurrent);
+        if (view === undefined) return;
         setStatus("ready");
 
         const controller = new AbortController();
@@ -473,9 +620,8 @@ export function useChatController(options: ChatControllerOptions) {
         const resume = async (): Promise<"stop" | "again"> => {
           for (;;) {
             try {
-              const recovered = await client.thread(threadId);
-              if (!mounted.current || request !== threadGeneration.current) return "stop";
-              applyAuthoritativeView(recovered, true);
+              const recovered = await refreshTail(threadId, isCurrent);
+              if (recovered === undefined) return "stop";
               cursor = recovered.lastSequence;
               reconnectBackoffMs = MIN_RECONNECT_BACKOFF_MS;
               if (reconnectFailed) {
@@ -541,11 +687,8 @@ export function useChatController(options: ChatControllerOptions) {
                   cursor = frame.sequence;
                   continue;
                 }
-                const refreshed = await client.thread(threadId);
-                if (!mounted.current || request !== threadGeneration.current || signal.aborted) {
-                  return;
-                }
-                applyAuthoritativeView(refreshed, true);
+                const refreshed = await refreshTail(threadId, () => isCurrent() && !signal.aborted);
+                if (refreshed === undefined) return;
                 cursor = refreshed.lastSequence;
               }
             } finally {
@@ -569,14 +712,7 @@ export function useChatController(options: ChatControllerOptions) {
         setErrorMessage(failureMessage(error, CHAT_UNAVAILABLE));
       }
     },
-    [
-      applyAuthoritativeView,
-      client,
-      readCursorStore,
-      reconnectDelayMs,
-      recordFollowUp,
-      recordSequence,
-    ],
+    [client, readCursorStore, reconnectDelayMs, recordFollowUp, recordSequence, refreshTail],
   );
 
   useEffect(() => {
@@ -645,6 +781,10 @@ export function useChatController(options: ChatControllerOptions) {
 
   useEffect(() => {
     activeThreadIdRef.current = options.activeThreadId;
+    releaseLoadedPages.current = true;
+    // A jump requested while the previous thread's pages were still held must
+    // wait for this thread's newest read, not act on the old run.
+    applyWindowState(undefined);
     threadGeneration.current += 1;
     streamAbort.current?.abort();
     streamAbort.current = undefined;
@@ -652,7 +792,7 @@ export function useChatController(options: ChatControllerOptions) {
       return;
     }
     void activateThread(options.activeThreadId);
-  }, [activateThread, options.activeThreadId]);
+  }, [activateThread, applyWindowState, options.activeThreadId]);
 
   const navigation = useMemo((): ReadonlyArray<ChatThreadNavigationItem> => {
     if (bootstrap === undefined) return [];
@@ -821,6 +961,9 @@ export function useChatController(options: ChatControllerOptions) {
       return false;
     }
     const sendingThreadId = String(activeView.thread.id);
+    // The reply arrives after the newest turn, so a reader looking at an
+    // earlier run is brought back to the newest turns first.
+    jumpToLatest();
     const submissionKey = submissionIntentKey(
       sendingThreadId,
       prompt,
@@ -891,13 +1034,11 @@ export function useChatController(options: ChatControllerOptions) {
       if (!mounted.current) return attachment;
       const currentThreadId = activeThreadIdRef.current;
       if (currentThreadId !== undefined && String(currentThreadId) === String(input.threadId)) {
-        const refreshed = await client.thread(currentThreadId);
-        if (
-          mounted.current &&
-          String(activeThreadIdRef.current ?? "") === String(currentThreadId)
-        ) {
-          applyAuthoritativeView(refreshed, true);
-        }
+        await refreshTail(
+          currentThreadId,
+          () =>
+            mounted.current && String(activeThreadIdRef.current ?? "") === String(currentThreadId),
+        );
       }
       return attachment;
     } catch (error) {
@@ -915,13 +1056,11 @@ export function useChatController(options: ChatControllerOptions) {
       if (!mounted.current) return attachment;
       const currentThreadId = activeThreadIdRef.current;
       if (currentThreadId !== undefined && String(currentThreadId) === String(input.threadId)) {
-        const refreshed = await client.thread(currentThreadId);
-        if (
-          mounted.current &&
-          String(activeThreadIdRef.current ?? "") === String(currentThreadId)
-        ) {
-          applyAuthoritativeView(refreshed, true);
-        }
+        await refreshTail(
+          currentThreadId,
+          () =>
+            mounted.current && String(activeThreadIdRef.current ?? "") === String(currentThreadId),
+        );
       }
       return attachment;
     } catch (error) {
@@ -931,6 +1070,240 @@ export function useChatController(options: ChatControllerOptions) {
       throw error;
     }
   }
+
+  /**
+   * The page before the oldest loaded turn, of the newest turns or of the
+   * detached range. A page anchored on a turn an edit has since superseded
+   * answers `stale`: the newest turns are read again and the earlier pages
+   * and any detached range are let go.
+   */
+  const loadEarlier = useCallback(async () => {
+    const threadId = activeThreadIdRef.current;
+    const state = transcriptWindowRef.current;
+    const tail = activeViewRef.current;
+    if (threadId === undefined || state === undefined || !state.windowed) return;
+    const threadKey = String(threadId);
+    if (state.threadKey !== threadKey || tail === undefined) return;
+    const detached = state.detached;
+    const run = detached?.view ?? tail;
+    const oldest = run.turns[0];
+    const hasEarlier = detached?.hasEarlier ?? state.hasEarlier;
+    const pending = detached?.earlier ?? state.earlier;
+    if (oldest === undefined || !hasEarlier || pending === "loading") return;
+    const isCurrent = () =>
+      mounted.current &&
+      String(activeThreadIdRef.current ?? "") === threadKey &&
+      transcriptWindowRef.current?.threadKey === threadKey;
+    const mark = (earlier: ChatTranscriptWindowState["earlier"]) => {
+      const current = transcriptWindowRef.current;
+      if (current === undefined || current.threadKey !== threadKey) return;
+      if (detached === undefined) applyWindowState({ ...current, earlier });
+      else if (current.detached !== undefined) {
+        applyWindowState({ ...current, detached: { ...current.detached, earlier } });
+      }
+    };
+    mark("loading");
+    try {
+      const page = await client.threadWindow(threadId, {
+        limit: CHAT_WINDOW_PAGE_TURNS,
+        before: oldest.id,
+      });
+      if (!isCurrent()) return;
+      const current = transcriptWindowRef.current;
+      const currentTail = activeViewRef.current;
+      if (current === undefined || currentTail === undefined) return;
+      if (detached === undefined) {
+        // A newest read that could not prove it touched this run replaced
+        // it while the page loaded; the page belongs to a run that is gone.
+        if (String(currentTail.turns[0]?.id ?? "") !== String(oldest.id)) {
+          applyWindowState({ ...current, earlier: "idle" });
+          return;
+        }
+        applyTail(
+          prependChatPage(currentTail, page.view),
+          {
+            ...current,
+            hasEarlier: page.hasEarlier,
+            supersededTurnCount: page.supersededTurnCount,
+            earlier: "idle",
+          },
+          false,
+        );
+        return;
+      }
+      if (
+        current.detached === undefined ||
+        String(current.detached.view.turns[0]?.id ?? "") !== String(oldest.id)
+      ) {
+        return;
+      }
+      applyTail(
+        currentTail,
+        {
+          ...current,
+          supersededTurnCount: page.supersededTurnCount,
+          detached: {
+            ...current.detached,
+            view: prependChatPage(current.detached.view, page.view),
+            hasEarlier: page.hasEarlier,
+            earlier: "idle",
+          },
+        },
+        false,
+      );
+    } catch (error) {
+      if (!isCurrent()) return;
+      if (failureCategory(error) === "stale") {
+        releaseLoadedPages.current = true;
+        try {
+          await refreshTail(threadId, isCurrent);
+          return;
+        } catch {
+          if (!isCurrent()) return;
+        }
+      }
+      mark("failed");
+    }
+  }, [applyTail, applyWindowState, client, refreshTail]);
+
+  /** The page after the newest turn of the detached range; it joins the newest turns once they meet. */
+  const loadLater = useCallback(async () => {
+    const threadId = activeThreadIdRef.current;
+    const state = transcriptWindowRef.current;
+    const detached = state?.detached;
+    if (threadId === undefined || state === undefined || detached === undefined) return;
+    const threadKey = String(threadId);
+    const newest = detached.view.turns.at(-1);
+    if (state.threadKey !== threadKey || newest === undefined || detached.later === "loading") {
+      return;
+    }
+    const isCurrent = () =>
+      mounted.current &&
+      String(activeThreadIdRef.current ?? "") === threadKey &&
+      String(transcriptWindowRef.current?.detached?.view.turns.at(-1)?.id ?? "") ===
+        String(newest.id);
+    applyWindowState({ ...state, detached: { ...detached, later: "loading" } });
+    try {
+      const page = await client.threadWindow(threadId, {
+        limit: CHAT_WINDOW_PAGE_TURNS,
+        after: newest.id,
+      });
+      if (!isCurrent()) return;
+      const current = transcriptWindowRef.current;
+      const tail = activeViewRef.current;
+      if (current?.detached === undefined || tail === undefined) return;
+      applyTail(
+        tail,
+        {
+          ...current,
+          supersededTurnCount: page.supersededTurnCount,
+          detached: {
+            ...current.detached,
+            view: appendChatPage(current.detached.view, page.view),
+            hasLater: page.hasLater,
+            later: "idle",
+            // The page was anchored on the run's last turn, so the whole run
+            // was still active when it answered.
+            verifiedAtSupersededCount: page.supersededTurnCount,
+          },
+        },
+        false,
+      );
+    } catch (error) {
+      if (!isCurrent()) return;
+      const current = transcriptWindowRef.current;
+      if (current?.detached === undefined) return;
+      if (failureCategory(error) === "stale") {
+        // The run this page continued is no longer the conversation.
+        const { detached: _gone, ...rest } = current;
+        applyWindowState({ ...rest, shownRun: current.shownRun + 1 });
+        return;
+      }
+      applyWindowState({ ...current, detached: { ...current.detached, later: "failed" } });
+    }
+  }, [applyTail, applyWindowState, client]);
+
+  /** Leave the detached range and show the newest turns again. */
+  const jumpToLatest = useCallback(() => {
+    revealGeneration.current += 1;
+    const current = transcriptWindowRef.current;
+    if (current?.detached === undefined) return;
+    const { detached: _left, ...rest } = current;
+    applyWindowState({ ...rest, shownRun: current.shownRun + 1 });
+  }, [applyWindowState]);
+
+  /**
+   * Bring a turn on screen for a jump such as a search hit. A turn already
+   * loaded needs nothing read; otherwise the page that ends with it becomes
+   * the detached range, or joins the newest turns when it touches them. A
+   * turn the conversation no longer holds (an edit superseded it) is left
+   * alone, as it was before transcripts loaded in pages.
+   */
+  const revealTurn = useCallback(
+    async (turnId: ChatTurnId) => {
+      const threadId = activeThreadIdRef.current;
+      const state = transcriptWindowRef.current;
+      const tail = activeViewRef.current;
+      if (threadId === undefined || state === undefined || tail === undefined) return;
+      const threadKey = String(threadId);
+      if (state.threadKey !== threadKey || String(tail.thread.id) !== threadKey) return;
+      const key = String(turnId);
+      if (holdsTurn(tail, key)) {
+        jumpToLatest();
+        return;
+      }
+      if (!state.windowed) return;
+      // A newer jump, even one that needs no read, outdates any page still
+      // being read for an earlier one.
+      const generation = ++revealGeneration.current;
+      if (holdsTurn(state.detached?.view, key)) return;
+      try {
+        const page = await client.threadWindow(threadId, {
+          limit: CHAT_WINDOW_PAGE_TURNS,
+          through: turnId,
+        });
+        if (
+          !mounted.current ||
+          String(activeThreadIdRef.current ?? "") !== threadKey ||
+          generation !== revealGeneration.current
+        ) {
+          return;
+        }
+        const current = transcriptWindowRef.current;
+        const currentTail = activeViewRef.current;
+        if (current === undefined || currentTail === undefined) return;
+        applyTail(
+          currentTail,
+          {
+            ...current,
+            supersededTurnCount: page.supersededTurnCount,
+            shownRun: current.shownRun + 1,
+            detached: {
+              view: page.view,
+              hasEarlier: page.hasEarlier,
+              hasLater: page.hasLater,
+              earlier: "idle",
+              later: "idle",
+              verifiedAtSupersededCount: page.supersededTurnCount,
+            },
+          },
+          false,
+        );
+      } catch {
+        // A superseded or unreachable target stays where the reader is.
+      }
+    },
+    [applyTail, client, jumpToLatest],
+  );
+
+  /**
+   * The whole thread as the host holds it, for readers that must not stop at
+   * the loaded pages: the Markdown export, and the thread's totals.
+   */
+  const readWholeThread = useCallback(
+    (threadId: ChatThreadId) => client.thread(threadId),
+    [client],
+  );
 
   const visibleActiveView =
     activeView !== undefined &&
@@ -1025,8 +1398,21 @@ export function useChatController(options: ChatControllerOptions) {
     [restCommand],
   );
 
+  const visibleTranscriptWindow =
+    visibleActiveView !== undefined &&
+    transcriptWindow?.threadKey === String(visibleActiveView.thread.id)
+      ? transcriptWindow
+      : undefined;
+
   return {
     activeView: visibleActiveView,
+    /** What else of the open thread is loaded or offered beside `activeView`'s newest turns. */
+    transcriptWindow: visibleTranscriptWindow,
+    loadEarlier,
+    loadLater,
+    jumpToLatest,
+    revealTurn,
+    readWholeThread,
     bootstrap,
     completeThread,
     reopenThread,

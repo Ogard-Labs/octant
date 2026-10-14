@@ -419,6 +419,27 @@ describe("ACP process lifecycle", () => {
     );
   });
 
+  it("switches off every Project skill source Devin's own config can turn off", () => {
+    const managedHome = "/private/tmp/octant-devin-home";
+    const content = devin.process
+      .managedFiles({ managedHome, executionPolicy: "approval-gated" })
+      .find((file) => file.path === join(managedHome, ".config/devin/config.json"))?.content;
+    const configuration = JSON.parse(content ?? "{}") as {
+      readonly read_config_from?: Readonly<Record<string, boolean>>;
+    };
+    // `copilot` is the source behind <project>/.github/skills: Devin 3000.10.27
+    // and 3000.11.3 list a package there until it is false.
+    expect(configuration.read_config_from).toEqual({
+      cursor: false,
+      windsurf: false,
+      claude: false,
+      opencode: false,
+      zed: false,
+      copilot: false,
+      agents_standard: false,
+    });
+  });
+
   it("does not send the unsupported session close method to Devin", () => {
     expect(devin.closesSessions).toBe(false);
   });
@@ -1188,6 +1209,11 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(profileText).toContain(
       `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
     );
+    // Kimi loads Project skills from .agents/skills and .kimi-code/skills,
+    // never .claude/skills, so that folder stays readable like any file.
+    expect(profileText).not.toContain(
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
+    );
   });
 
   it("still denies reused MCP, skills, plugins, and hooks under Full access", async () => {
@@ -1249,7 +1275,7 @@ describe("Kimi Code host-profile extension surfaces", () => {
     const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
     directories.push(hostHome);
     const hostAuthenticationPath = join(hostHome, ".kimi-code");
-    mkdirSync(hostAuthenticationPath, { recursive: true });
+    mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
     writeFileSync(join(hostAuthenticationPath, "mcp.json"), "{}\n");
     const canonicalHostPath = realpathSync(hostAuthenticationPath);
     const launch = await Effect.runPromise(
@@ -1283,6 +1309,9 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(launch.args).toContainEqual("--tmpfs");
     expect(launch.args).toContain(join(canonicalHostPath, "skills"));
     expect(launch.args).toContain(join(canonicalHostPath, "mcp.json"));
+    // A denied entry the Project does not have is not created in it.
+    expect(launch.args).not.toContain(join(target.canonicalRoot, ".agents"));
+    expect(existsSync(join(target.canonicalRoot, ".agents"))).toBe(false);
   });
 
   it("uses native sandbox-exec so a Full access child cannot read planted MCP config", async () => {
@@ -1330,6 +1359,150 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(allowed.status).toBe(0);
     expect(allowed.stdout).toContain("telemetry = false");
   });
+});
+
+// Each row lists the Project skill folders a runtime loads by itself, from its
+// installed bundle, source, or documentation, and the folders around them that
+// stay readable because they hold the runtime's own settings or other content.
+describe.each([
+  { profile: fx, denied: [".agents", ".claude/skills"], readable: [".claude"] },
+  {
+    profile: copilot,
+    denied: [".agents/skills", ".claude/skills", ".github/skills"],
+    readable: [".agents", ".claude", ".github"],
+  },
+  {
+    profile: grok,
+    denied: [
+      ".agents/commands",
+      ".agents/skills",
+      ".claude/commands",
+      ".claude/skills",
+      ".cursor/skills",
+      ".grok/commands",
+      ".grok/skills",
+    ],
+    readable: [".agents", ".claude", ".cursor", ".grok"],
+  },
+  {
+    profile: goose,
+    denied: [".agents/skills", ".claude/skills", ".goose/skills"],
+    readable: [".agents", ".claude", ".goose"],
+  },
+  {
+    profile: cline,
+    denied: [".agents/skills", ".claude/skills", ".cline/skills", ".clinerules/skills"],
+    readable: [".agents", ".claude", ".cline", ".clinerules"],
+  },
+  {
+    profile: gemini,
+    denied: [".agents/skills", ".gemini/skills"],
+    readable: [".agents", ".gemini"],
+  },
+  {
+    profile: qwen,
+    denied: [".agents/skills", ".qwen/skills"],
+    readable: [".agents", ".qwen"],
+  },
+  { profile: glm, denied: [".claude/skills"], readable: [".claude"] },
+  {
+    profile: devin,
+    denied: [".agents/skills", ".cognition/skills", ".devin/skills"],
+    readable: [".agents", ".cognition", ".devin"],
+  },
+])(
+  "Project skill folders a runtime loads by itself ($profile.displayName)",
+  ({ profile, denied, readable }) => {
+    it("denies each such folder and leaves the folders around it readable", async () => {
+      const target = fixture(profile);
+      const managedHome = join(target.canonicalRoot, "managed-home");
+      const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+      mkdirSync(hostAuthenticationPath, { recursive: true });
+      for (const entry of denied) {
+        mkdirSync(join(target.canonicalRoot, entry), { recursive: true });
+      }
+      const launch = await Effect.runPromise(
+        makeAcpConfinementLive({
+          platform: "darwin",
+          sandboxPath: target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath,
+        }).prepare({
+          profile,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome,
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: sanitizeAcpEnvironment(
+            profile,
+            { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+            { managedHome, executionPolicy: "approval-gated" },
+          ),
+        }),
+      );
+      const profileText = seatbeltProfile(launch);
+      for (const entry of denied) {
+        expect(profileText).toContain(
+          `(deny file-read* (subpath "${join(target.canonicalRoot, entry)}"))`,
+        );
+        expect(profileText).toContain(
+          `(deny file-write* (subpath "${join(target.canonicalRoot, entry)}"))`,
+        );
+      }
+      for (const entry of readable) {
+        expect(profileText).not.toContain(
+          `(deny file-read* (subpath "${join(target.canonicalRoot, entry)}"))`,
+        );
+      }
+    });
+  },
+);
+
+describe("Linux deny paths below Full access", () => {
+  it.each([
+    ["approval-gated", "a writable"],
+    ["plan", "a read-only"],
+  ] as const)(
+    "masks an existing denied folder and leaves a missing one alone (%s, %s Project root)",
+    async (executionPolicy, _root) => {
+      const target = fixture(copilot);
+      const managedHome = join(target.canonicalRoot, "managed-home");
+      const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+      mkdirSync(hostAuthenticationPath, { recursive: true });
+      const prepare = () =>
+        Effect.runPromise(
+          makeAcpConfinementLive({
+            platform: "linux",
+            sandboxPath: target.bwrapPath,
+            temporaryDirectory: join(target.canonicalRoot, "tmp"),
+            hostAuthenticationPath,
+          }).prepare({
+            profile: copilot,
+            binaryPath: target.binaryPath,
+            root: target.canonicalRoot,
+            managedHome,
+            mode: "code",
+            executionPolicy,
+            environment: {},
+          }),
+        );
+      const denied = join(target.canonicalRoot, ".claude", "skills");
+
+      // Mounting over a missing path makes Bubblewrap create it: an empty
+      // folder in the person's Project, or a failed start on a read-only root.
+      const missing = await prepare();
+      expect(missing.args).toContain(target.binaryPath);
+      expect(missing.args).not.toContain(denied);
+      expect(existsSync(join(target.canonicalRoot, ".claude"))).toBe(false);
+
+      mkdirSync(denied, { recursive: true });
+      const present = await prepare();
+      const mounted = present.args.indexOf(denied);
+      expect(mounted).toBeGreaterThan(0);
+      expect(present.args[mounted - 1]).toBe("--tmpfs");
+    },
+  );
 });
 
 describe("ACP probe confinement", () => {

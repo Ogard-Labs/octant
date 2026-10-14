@@ -1,5 +1,6 @@
 import {
   decodeChatCommand,
+  decodeChatThreadWindowRequest,
   MAX_CHAT_NDJSON_LINE_BYTES,
   ChatAttachment,
   ChatBootstrap,
@@ -10,6 +11,8 @@ import {
   ChatFailure,
   type ChatThreadId,
   ChatThreadView,
+  ChatThreadWindow,
+  type ChatThreadWindowRequest,
   ChatTranscriptSearch,
   ChatThread,
   decodeHostAnswer,
@@ -44,6 +47,17 @@ export interface ChatClient {
   search(query: string): Promise<ReadonlyArray<ChatBootstrap["threads"][number]>>;
   searchTranscript(query: string): Promise<ChatTranscriptSearch>;
   thread(threadId: ChatThreadId): Promise<ChatThreadView>;
+  /**
+   * One page of the thread's active turns: the newest, or the page before,
+   * after, or ending with one turn. A host without the route answers 404,
+   * which arrives as a failure whose `status` is 404; the caller then reads
+   * `thread`.
+   */
+  threadWindow(
+    threadId: ChatThreadId,
+    request: ChatThreadWindowRequest,
+    signal?: AbortSignal,
+  ): Promise<ChatThreadWindow>;
   execute(command: ChatCommand): Promise<ChatCommandResult>;
   upload(input: ChatAttachmentUpload): Promise<ChatAttachment>;
   discard(input: ChatAttachmentDiscard): Promise<ChatAttachment>;
@@ -56,11 +70,14 @@ export interface ChatClient {
 
 export class ChatClientFailure extends Error {
   readonly category: ChatFailure["category"];
+  /** The HTTP status when the host answered with one the client could not read as a failure. */
+  readonly status: number | undefined;
 
-  constructor(failure: ChatFailure) {
+  constructor(failure: ChatFailure, status?: number) {
     super(failure.message);
     this.name = "ChatClientFailure";
     this.category = failure.category;
+    this.status = status;
   }
 }
 
@@ -106,6 +123,39 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
         { method: "GET", headers },
         decodeHostAnswer(ChatThreadView),
       );
+    },
+    async threadWindow(threadId, windowRequest, signal) {
+      let validated: ChatThreadWindowRequest;
+      try {
+        validated = decodeChatThreadWindowRequest(windowRequest);
+      } catch {
+        throw new ChatClientFailure({
+          category: "invalid",
+          message: "Chat window request is invalid.",
+        });
+      }
+      const url = new URL(
+        `/api/chat/threads/${encodeURIComponent(threadId)}/window`,
+        options.baseUrl,
+      );
+      url.searchParams.set("limit", String(validated.limit));
+      for (const anchor of ["before", "after", "through"] as const) {
+        const turnId = validated[anchor];
+        if (turnId !== undefined) url.searchParams.set(anchor, turnId);
+      }
+      const response = await requestRaw(fetch, url.toString(), {
+        method: "GET",
+        headers,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      // An older host has no window route and answers its plain 404 page.
+      if (response.status === 404) {
+        throw new ChatClientFailure(
+          { category: "unsupported", message: "This host has no Chat window read." },
+          404,
+        );
+      }
+      return readResponse(response, decodeHostAnswer(ChatThreadWindow));
     },
     async execute(command) {
       let validated: ChatCommand;
@@ -208,7 +258,10 @@ async function request<T>(
   init: RequestInit,
   decode: (value: unknown) => T,
 ): Promise<T> {
-  const response = await requestRaw(fetch, url, init);
+  return readResponse(await requestRaw(fetch, url, init), decode);
+}
+
+async function readResponse<T>(response: Response, decode: (value: unknown) => T): Promise<T> {
   let body: unknown;
   try {
     body = await response.json();

@@ -1205,6 +1205,60 @@ describe("CodeService commands", () => {
     });
   });
 
+  describe("a thread a host caller makes from a marked thread", () => {
+    const inheritedMark = {
+      sourceLabel: "follow-up",
+      contentReference: "follow-up-source-thread-new-thread",
+    };
+
+    it("is marked with the caller's mark before it is journaled", async () => {
+      const record = vi.fn<NonNullable<CodeServiceOptions["recordExternalContentIngestion"]>>(
+        () => ({
+          kind: "recorded",
+          taint: { externalContentIngested: true, ingestedSources: ["follow-up"] },
+        }),
+      );
+      const fixture = serviceFixture({ recordExternalContentIngestion: record, threads: [] });
+
+      await expect(
+        fixture.service.execute(
+          ids.window,
+          { kind: "create-code-thread", thread: thread({ executionPolicy: "approval-gated" }) },
+          undefined,
+          { inheritedMark },
+        ),
+      ).resolves.toMatchObject({ kind: "thread-created" });
+
+      expect(record).toHaveBeenCalledWith({
+        threadId: ids.thread,
+        provenance: { origin: "external-content", sourceLabel: "follow-up" },
+        contentReference: inheritedMark.contentReference,
+        correlationId: expect.any(String),
+        authorized: true,
+      });
+      expect(record.mock.invocationCallOrder[0]).toBeLessThan(
+        fixture.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
+      );
+    });
+
+    it("is refused, and nothing is journaled, when the caller's mark is refused", async () => {
+      const fixture = serviceFixture({
+        recordExternalContentIngestion: () => ({ kind: "refused", reason: "malformed" }),
+        threads: [],
+      });
+
+      await expect(
+        fixture.service.execute(
+          ids.window,
+          { kind: "create-code-thread", thread: thread({ executionPolicy: "approval-gated" }) },
+          undefined,
+          { inheritedMark },
+        ),
+      ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+      expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    });
+  });
+
   it("leaves a thread that asks for less than its profile allows alone", async () => {
     const created = thread({
       executionPolicy: "plan",

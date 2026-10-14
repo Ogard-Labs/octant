@@ -13,6 +13,7 @@ import type {
 } from "@octant/contracts/extensions";
 import type { StandaloneSkillActivationState } from "@octant/contracts/shell";
 import { sourceQualifiedSkillId, bundledSkillRecords } from "@octant/plugin-host";
+import { skillReachesAudience, type SkillAudience } from "@octant/plugin-host/skills";
 import type { ExtensionLifecycleService } from "./extensionLifecycleService";
 import {
   inspectExtensionPackage,
@@ -99,7 +100,38 @@ export class StandaloneSkillService {
     await this.#discovery.reconcile();
     await this.#discovery.startWatching?.();
     this.#activations = await this.#activationStore.read();
+    await this.#turnOffConflictingSkills();
     return this.snapshot(this.#lifecycle.snapshot());
+  }
+
+  /**
+   * An activation file written before one-at-a-time held can leave two
+   * same-named skills on where one thread would see both. Neither wins on its
+   * own: both are turned off, the collision is listed, and the person chooses.
+   */
+  async #turnOffConflictingSkills(): Promise<void> {
+    const candidates = this.#candidates().map((record) => this.#applyActivation(record));
+    const updated: Record<string, StandaloneSkillActivationState> = {};
+    for (const record of candidates) {
+      if (
+        isActive(record) &&
+        candidates.some(
+          (other) =>
+            other !== record &&
+            other.skill.name === record.skill.name &&
+            isActive(other) &&
+            skillsShareAnAudience(record, other),
+        )
+      ) {
+        updated[String(record.skill.qualifiedId)] = {
+          ...this.#activationOf(record),
+          desiredEnabled: false,
+        };
+      }
+    }
+    if (Object.keys(updated).length === 0) return;
+    this.#activations = { ...this.#activations, ...updated };
+    await this.#activationStore.write(this.#activations);
   }
 
   snapshot(base: ExtensionSnapshot): ExtensionSnapshot {
@@ -170,7 +202,7 @@ export class StandaloneSkillService {
       case "trust-skill-source":
       case "set-skill-desired":
       case "select-skill-collision":
-        return { kind: "extension-state-updated", snapshot: await this.#mutateActivation(command) };
+        return this.#mutateActivation(command);
     }
   }
 
@@ -182,13 +214,35 @@ export class StandaloneSkillService {
       | { readonly kind: "set-skill-desired" }
       | { readonly kind: "select-skill-collision" }
     >,
-  ): Promise<ExtensionSnapshot> {
+  ): Promise<ExtensionCommandResult> {
     const key = command.qualifiedId;
-    const existing = this.#activations[key] ?? {
-      reviewed: false,
-      trusted: false,
-      desiredEnabled: false,
-    };
+    const target = this.#candidates().find(
+      (candidate) => String(candidate.skill.qualifiedId) === key,
+    );
+    if (target === undefined && this.#isInstalledSkill(key)) {
+      // An installed skill's switches belong to its package; an entry here
+      // would never be read, so the switch would silently do nothing.
+      return {
+        kind: "extension-command-failed",
+        failure: {
+          category: "blocked",
+          message:
+            "An installed skill is switched on and off with its package in Extension packages.",
+        },
+      };
+    }
+    if (
+      target === undefined ||
+      (command.kind === "select-skill-collision"
+        ? target.skill.name !== command.name
+        : String(target.skill.digest) !== String(command.digest))
+    ) {
+      return {
+        kind: "extension-command-failed",
+        failure: { category: "stale", message: "Skill state is out of date." },
+      };
+    }
+    const existing = this.#activationOf(target);
     switch (command.kind) {
       case "review-skill":
         this.#activations = { ...this.#activations, [key]: { ...existing, reviewed: true } };
@@ -199,35 +253,91 @@ export class StandaloneSkillService {
           [key]: { ...existing, reviewed: true, trusted: command.trusted },
         };
         break;
-      case "set-skill-desired":
-        this.#activations = {
-          ...this.#activations,
-          [key]: { ...existing, desiredEnabled: command.desired },
-        };
-        break;
-      case "select-skill-collision": {
-        const selectedKey = command.qualifiedId;
-        const selected = this.#activations[selectedKey] ?? {
-          reviewed: false,
-          trusted: false,
-          desiredEnabled: false,
-        };
-        const updated: Record<string, StandaloneSkillActivationState> = {};
-        for (const [candidateKey, candidate] of Object.entries(this.#activations)) {
-          if (candidateKey !== selectedKey && candidateKey.startsWith(`${command.name}:`)) {
-            updated[candidateKey] = { ...candidate, desiredEnabled: false };
-          }
-        }
+      case "set-skill-desired": {
+        const updated = command.desired ? this.#turnOffOthersMeeting(target) : {};
         this.#activations = {
           ...this.#activations,
           ...updated,
-          [selectedKey]: { ...selected, reviewed: true, trusted: true, desiredEnabled: true },
+          [key]: { ...existing, desiredEnabled: command.desired },
+        };
+        break;
+      }
+      case "select-skill-collision": {
+        const updated = this.#turnOffOthersMeeting(target);
+        this.#activations = {
+          ...this.#activations,
+          ...updated,
+          [key]: { ...existing, reviewed: true, trusted: true, desiredEnabled: true },
         };
         break;
       }
     }
     await this.#activationStore.write(this.#activations);
-    return this.snapshot(this.#lifecycle.snapshot());
+    return {
+      kind: "extension-state-updated",
+      snapshot: this.snapshot(this.#lifecycle.snapshot()),
+    };
+  }
+
+  /** The skills whose activation this service owns: discovered and built-in. */
+  #candidates(): ReadonlyArray<StandaloneSkillRecord> {
+    const discovered = this.#discovery.snapshot().skills;
+    return [
+      ...discovered,
+      ...bundledSkillRecords().filter(
+        (bundled) =>
+          !discovered.some(
+            (record) => String(record.skill.qualifiedId) === String(bundled.skill.qualifiedId),
+          ),
+      ),
+    ];
+  }
+
+  #isInstalledSkill(qualifiedId: string): boolean {
+    return this.#lifecycle
+      .snapshot()
+      .packages.some((pkg) =>
+        pkg.components.some(
+          ({ component }) =>
+            component.kind === "skill-instructions" &&
+            String(sourceQualifiedSkillId(pkg.source, component.id, pkg.digest)) === qualifiedId,
+        ),
+      );
+  }
+
+  /** The stored decision for a skill, or the one it was found with. */
+  #activationOf(record: StandaloneSkillRecord): StandaloneSkillActivationState {
+    return (
+      this.#activations[String(record.skill.qualifiedId)] ?? {
+        reviewed: record.reviewed,
+        trusted: record.provenance.reviewed,
+        desiredEnabled: record.desiredEnabled,
+      }
+    );
+  }
+
+  /**
+   * Only one same-named skill is on where a thread can see it. Turning one on
+   * turns off every other same-named skill that shares a thread with it,
+   * built-in ones included, and leaves another Project's skill alone.
+   */
+  #turnOffOthersMeeting(
+    target: StandaloneSkillRecord,
+  ): Readonly<Record<string, StandaloneSkillActivationState>> {
+    const updated: Record<string, StandaloneSkillActivationState> = {};
+    for (const candidate of this.#candidates()) {
+      if (
+        String(candidate.skill.qualifiedId) !== String(target.skill.qualifiedId) &&
+        candidate.skill.name === target.skill.name &&
+        skillsShareAnAudience(candidate, target)
+      ) {
+        updated[String(candidate.skill.qualifiedId)] = {
+          ...this.#activationOf(candidate),
+          desiredEnabled: false,
+        };
+      }
+    }
+    return updated;
   }
 
   #applyActivation(record: StandaloneSkillRecord): StandaloneSkillRecord {
@@ -383,6 +493,52 @@ function standaloneEffectiveState(
   return { kind: "effective" };
 }
 
+function isActive(record: StandaloneSkillRecord): boolean {
+  return (
+    record.skill.available && record.reviewed && record.desiredEnabled && record.provenance.reviewed
+  );
+}
+
+/** The narrowest set of threads a skill reaches: its thread, its Project, or every thread. */
+function audienceOf(record: Pick<StandaloneSkillRecord, "scope" | "projectScope">): SkillAudience {
+  if (record.scope !== undefined) {
+    return {
+      mode: record.scope.mode,
+      projectId: String(record.scope.projectId),
+      threadRef: String(record.scope.threadRef),
+    };
+  }
+  if (record.projectScope !== undefined) {
+    return {
+      mode: record.projectScope.mode,
+      projectId: String(record.projectScope.projectId),
+      threadRef: null,
+    };
+  }
+  return { mode: "chat", projectId: null, threadRef: null };
+}
+
+/**
+ * Could one thread see both skills? A shared skill meets every skill; two
+ * Project skills meet only inside the same Project; a thread's own skill
+ * meets its Project's and its thread's.
+ */
+function skillsShareAnAudience(
+  left: Pick<StandaloneSkillRecord, "scope" | "projectScope">,
+  right: Pick<StandaloneSkillRecord, "scope" | "projectScope">,
+): boolean {
+  return (
+    skillReachesAudience(left, audienceOf(right)) || skillReachesAudience(right, audienceOf(left))
+  );
+}
+
+/**
+ * Decide each skill's state per audience. A skill gives way when an active
+ * same-named skill shares a thread with it. Two active same-named skills that
+ * share a thread both fail closed until one is chosen. A collision is listed
+ * only where one thread would see several sources without exactly one in use,
+ * so two Projects that each use their own skill do not collide.
+ */
 function resolveStandaloneSkillCatalog(records: ReadonlyArray<StandaloneSkillRecord>): {
   readonly skills: ReadonlyArray<StandaloneSkillRecord>;
   readonly collisions: ReadonlyArray<ExtensionSkillCollision>;
@@ -399,20 +555,26 @@ function resolveStandaloneSkillCatalog(records: ReadonlyArray<StandaloneSkillRec
 
   for (const [name, candidates] of byName) {
     const available = candidates.filter((candidate) => candidate.skill.available);
-    const active = available.filter(
-      (candidate) =>
-        candidate.reviewed && candidate.desiredEnabled && candidate.provenance.reviewed,
-    );
-    const selected = active.length === 1 ? active[0] : undefined;
-    if (available.length > 1 && selected === undefined) {
+    const colliding = new Set<StandaloneSkillRecord>();
+    for (const audience of available.map(audienceOf)) {
+      const reached = available.filter((candidate) => skillReachesAudience(candidate, audience));
+      if (reached.length > 1 && reached.filter(isActive).length !== 1) {
+        for (const candidate of reached) colliding.add(candidate);
+      }
+    }
+    if (colliding.size > 0) {
       collisions.push({
         name,
-        candidates: available.map((candidate) => candidate.skill.qualifiedId),
+        candidates: available
+          .filter((candidate) => colliding.has(candidate))
+          .map((candidate) => candidate.skill.qualifiedId),
       });
     }
     for (const candidate of candidates) {
-      const superseded =
-        selected !== undefined && candidate.skill.qualifiedId !== selected.skill.qualifiedId;
+      const superseded = available.some(
+        (other) =>
+          other !== candidate && isActive(other) && skillsShareAnAudience(candidate, other),
+      );
       skills.push({
         ...candidate,
         effectiveState: standaloneEffectiveState(candidate, superseded),

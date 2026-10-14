@@ -37,6 +37,10 @@ const PRODUCT_PROBES = [
     path: "/api/work/turns/window/00000000-0000-4000-8000-000000000001?limit=30",
     method: "GET",
   },
+  {
+    path: "/api/chat/threads/00000000-0000-4000-8000-000000000001/window?limit=30",
+    method: "GET",
+  },
   { path: "/api/code/evidence", method: "PUT" },
   { path: "/api/code/local-servers/commands", method: "POST" },
   { path: "/api/providers/bootstrap", method: "GET" },

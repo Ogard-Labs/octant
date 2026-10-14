@@ -165,8 +165,8 @@ contents. Turn marketplace fetches off in
 **Settings → Skills & Extensions → Marketplace**; off means no request is made and
 catalog search stays with the in-memory curated entries.
 
-Local disk imports and `.agents/skills/` discovery do not contact a
-catalog. Details live under
+Local disk imports and `.agents/skills/` or `.claude/skills/` discovery do not
+contact a catalog. Details live under
 [Plugins and skills](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 
 ### Gravatar, only if you press the button

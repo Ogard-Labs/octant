@@ -230,6 +230,54 @@ describe("WorkThreadService", () => {
     );
   });
 
+  it("marks a thread a host caller makes from a marked thread before journaling it, or refuses it", async () => {
+    const command = {
+      kind: "create-work-thread",
+      threadId: ids.thread,
+      projectId: ids.project,
+      title: "Draft brief",
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      hostId: "local",
+      bindingRevisionId: ids.binding,
+    };
+    const inheritedMark = {
+      sourceLabel: "follow-up",
+      contentReference: "follow-up-source-thread-new-thread",
+    };
+    const record = vi.fn<
+      NonNullable<WorkThreadServiceDependencies["recordExternalContentIngestion"]>
+    >(() => ({
+      kind: "recorded",
+      taint: { externalContentIngested: true, ingestedSources: ["follow-up"] },
+    }));
+    const marked = serviceFixture({ threads: [], recordExternalContentIngestion: record });
+
+    await expect(
+      marked.service.execute(ids.window, command, { inheritedMark }),
+    ).resolves.toMatchObject({ kind: "thread-created" });
+    expect(record).toHaveBeenCalledWith({
+      threadId: ids.thread,
+      provenance: { origin: "external-content", sourceLabel: "follow-up" },
+      contentReference: inheritedMark.contentReference,
+      correlationId: expect.any(String),
+      authorized: true,
+    });
+    expect(record.mock.invocationCallOrder[0]).toBeLessThan(
+      marked.persistence.journal.append.mock.invocationCallOrder[0] ?? 0,
+    );
+
+    const refused = serviceFixture({
+      threads: [],
+      recordExternalContentIngestion: () => ({ kind: "refused", reason: "malformed" }),
+    });
+    await expect(
+      refused.service.execute(ids.window, command, { inheritedMark }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    expect(refused.persistence.journal.append).not.toHaveBeenCalled();
+    expect(refused.projection.read(ids.thread)).toBeUndefined();
+  });
+
   it("attributes a routine's thread to the routine, not to an open window", async () => {
     const fixture = serviceFixture({ threads: [] });
 
@@ -1082,6 +1130,7 @@ function serviceFixture(
     readonly observeRuntime?: WorkThreadServiceDependencies["observeRuntime"];
     readonly projectDueReminder?: WorkThreadServiceDependencies["projectDueReminder"];
     readonly turns?: ReadonlyArray<WorkTurnState>;
+    readonly recordExternalContentIngestion?: WorkThreadServiceDependencies["recordExternalContentIngestion"];
   } = {},
 ) {
   const projection = new WorkThreadProjection();
@@ -1131,6 +1180,7 @@ function serviceFixture(
     journal: {
       append: vi.fn(),
       replay: vi.fn(() => options.events ?? []),
+      transaction: vi.fn(<A>(body: () => A): A => body()),
     },
   };
   const projects = {
@@ -1173,6 +1223,9 @@ function serviceFixture(
     ...(options.projectDueReminder === undefined
       ? {}
       : { projectDueReminder: options.projectDueReminder }),
+    ...(options.recordExternalContentIngestion === undefined
+      ? {}
+      : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
   });
   return {
     service,

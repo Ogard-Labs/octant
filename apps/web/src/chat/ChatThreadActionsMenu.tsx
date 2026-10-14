@@ -15,6 +15,12 @@ import { buildChatMarkdownExport } from "./chatMarkdownExport";
 
 export interface ChatThreadActionsMenuProps {
   readonly view: ChatThreadView;
+  /**
+   * Reads the whole thread from the host. Present when `view` may hold only
+   * the newest messages, so Copy and Save always carry the whole conversation
+   * rather than the pages that happen to be loaded.
+   */
+  readonly readWholeView?: () => Promise<ChatThreadView>;
   readonly connectionStatus?: "connected" | "disconnected";
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -68,20 +74,35 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
     [props.exportClient, props.serverUrl, props.windowCapability],
   );
 
-  function build() {
+  /** The export of the whole conversation, or undefined when it could not be read. */
+  async function build() {
+    let view = props.view;
+    if (props.readWholeView !== undefined) {
+      try {
+        view = await props.readWholeView();
+      } catch {
+        return undefined;
+      }
+    }
     return buildChatMarkdownExport({
-      view: props.view,
+      view,
       ...(props.connectionStatus === undefined ? {} : { connectionStatus: props.connectionStatus }),
     });
   }
+
+  const unreadable = "The conversation could not be read from the host, so nothing was exported.";
 
   function completenessSuffix(complete: boolean): string {
     return complete ? "" : " Some of the conversation could not be included; see the export notes.";
   }
 
   function copyConversation() {
-    const exported = build();
     void (async () => {
+      const exported = await build();
+      if (exported === undefined) {
+        setStatus(unreadable);
+        return;
+      }
       try {
         // A window without the Clipboard API must not be told the copy
         // succeeded: optional chaining would resolve to `undefined` and
@@ -100,13 +121,19 @@ export function ChatThreadActionsMenu(props: ChatThreadActionsMenuProps) {
   }
 
   function saveConversation() {
-    const exported = build();
-    const saved = saveMarkdown(exported.markdown, exported.fileName);
-    setStatus(
-      saved
-        ? `Saved ${exported.fileName}.${completenessSuffix(exported.complete)}`
-        : "The conversation could not be saved from this window.",
-    );
+    void (async () => {
+      const exported = await build();
+      if (exported === undefined) {
+        setStatus(unreadable);
+        return;
+      }
+      const saved = saveMarkdown(exported.markdown, exported.fileName);
+      setStatus(
+        saved
+          ? `Saved ${exported.fileName}.${completenessSuffix(exported.complete)}`
+          : "The conversation could not be saved from this window.",
+      );
+    })();
   }
 
   function exportThread() {

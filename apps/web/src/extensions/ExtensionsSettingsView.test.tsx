@@ -419,6 +419,124 @@ describe("ExtensionsSettingsView", () => {
     expect(c.calls).toContainEqual({ kind: "reconcile-skills" });
   });
 
+  it("shows the .claude/skills source on the row and in expanded details alongside .agents/skills", async () => {
+    const agentsRootId =
+      "agents-skills-directory:project:project-123:root:review:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as never;
+    const claudeRootId =
+      "agents-skills-directory:project:project-123:claude:root:review:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as never;
+    const claudeWorkingId =
+      "agents-skills-directory:project:project-123:thread:thread-1:claude:working:triage:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" as never;
+    const claudeParentId =
+      "agents-skills-directory:project:project-123:claude:parent-1:audit:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" as never;
+    const snapshot = {
+      ...installedSnapshot({ activation: baseActivation({ installed: false }) }),
+      skills: [
+        {
+          skill: {
+            qualifiedId: agentsRootId,
+            name: "review",
+            sourceKind: "agents-skills-directory",
+            digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            available: true,
+          },
+          source: {
+            kind: "agents-skills-directory",
+            sourceRef: "project:project-123:root",
+          },
+          displayName: "Agents root review",
+          provenance: { reviewed: false },
+          contentBytes: 128,
+          reviewed: false,
+          desiredEnabled: false,
+          effectiveState: { kind: "blocked", reason: "untrusted" },
+        },
+        {
+          skill: {
+            qualifiedId: claudeRootId,
+            name: "review",
+            sourceKind: "agents-skills-directory",
+            digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            available: true,
+          },
+          source: {
+            kind: "agents-skills-directory",
+            sourceRef: "project:project-123:claude:root",
+          },
+          displayName: "Claude root review",
+          provenance: { reviewed: false },
+          contentBytes: 256,
+          reviewed: false,
+          desiredEnabled: false,
+          effectiveState: { kind: "blocked", reason: "untrusted" },
+        },
+        {
+          skill: {
+            qualifiedId: claudeWorkingId,
+            name: "triage",
+            sourceKind: "agents-skills-directory",
+            digest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            available: true,
+          },
+          source: {
+            kind: "agents-skills-directory",
+            sourceRef: "project:project-123:thread:thread-1:claude:working",
+          },
+          displayName: "Claude working triage",
+          provenance: { reviewed: true },
+          contentBytes: 192,
+          reviewed: true,
+          desiredEnabled: true,
+          effectiveState: { kind: "effective" },
+        },
+        {
+          skill: {
+            qualifiedId: claudeParentId,
+            name: "audit",
+            sourceKind: "agents-skills-directory",
+            digest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            available: true,
+          },
+          source: {
+            kind: "agents-skills-directory",
+            sourceRef: "project:project-123:claude:parent-1",
+          },
+          displayName: "Claude parent audit",
+          provenance: { reviewed: true },
+          contentBytes: 160,
+          reviewed: true,
+          desiredEnabled: false,
+          effectiveState: { kind: "blocked", reason: "disabled-by-user" },
+        },
+      ],
+      collisions: [
+        {
+          name: "review",
+          candidates: [agentsRootId, claudeRootId],
+        },
+      ],
+    } as unknown as ExtensionSnapshot;
+    const c = client({ snapshot });
+
+    render(<ExtensionsSettingsView client={c} scope={scope} />);
+
+    await waitFor(() => expect(screen.getByText("Claude root review")).toBeInTheDocument());
+    expect(screen.getByText("Project skill · Needs review")).toBeInTheDocument();
+    expect(screen.getByText("Project skill · .claude/skills · Needs review")).toBeInTheDocument();
+    expect(screen.getAllByText("Project skill · .claude/skills")).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Show details for Agents root review" }));
+    expect(screen.getByText("Project skills · .agents/skills")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show details for Claude root review" }));
+    expect(screen.getByText("Project skills · .claude/skills")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show details for Claude working triage" }));
+    expect(screen.getByText("Project skills · .claude/skills · working directory")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show details for Claude parent audit" }));
+    expect(screen.getByText("Project skills · .claude/skills · parent 1")).toBeVisible();
+  });
+
   it("bounds a long installed skill list and filters it locally", async () => {
     const user = userEvent.setup();
     const base = installedSnapshot({ activation: baseActivation({ installed: false }) });

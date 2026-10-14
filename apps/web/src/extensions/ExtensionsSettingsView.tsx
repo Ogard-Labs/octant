@@ -102,15 +102,32 @@ function standaloneSkillSourceLabel(skill: StandaloneSkillRecord): string {
   if (skill.source.kind !== "agents-skills-directory") return sourceLabel(skill.source);
   const sourceRef = String(skill.source.sourceRef);
   if (sourceRef === "user-global") return "User-global · ~/.agents/skills";
-  const projectSource = /^project:[^:]+:(working|parent-(\d+))$/.exec(sourceRef);
-  if (projectSource?.[1] === "working") return "Project skills · working directory";
-  if (projectSource?.[2] !== undefined) return `Project skills · parent ${projectSource[2]}`;
+  const projectSource =
+    /^project:.+?:(?:thread:[^:]+:)?(claude:)?(root|working|parent-(\d+))$/.exec(sourceRef);
+  if (projectSource !== null) {
+    const isClaudeRoot = projectSource[1] === "claude:";
+    const rootSegment = isClaudeRoot ? " · .claude/skills" : "";
+    if (projectSource[2] === "root") {
+      return isClaudeRoot ? "Project skills · .claude/skills" : "Project skills · .agents/skills";
+    }
+    if (projectSource[2] === "working") {
+      return `Project skills${rootSegment} · working directory`;
+    }
+    if (projectSource[3] !== undefined) {
+      return `Project skills${rootSegment} · parent ${projectSource[3]}`;
+    }
+  }
   return "Agents skills directory";
 }
 
 function standaloneSkillSummarySourceLabel(skill: StandaloneSkillRecord): string {
   if (skill.source.kind !== "agents-skills-directory") return sourceLabel(skill.source);
-  return String(skill.source.sourceRef) === "user-global" ? "User skill" : "Project skill";
+  const sourceRef = String(skill.source.sourceRef);
+  if (sourceRef === "user-global") return "User skill";
+  if (/:claude:(?:root|working|parent-\d+)$/.test(sourceRef)) {
+    return "Project skill · .claude/skills";
+  }
+  return "Project skill";
 }
 
 function licenseLabel(license: ExtensionPackagePreview["review"]["license"]): string {

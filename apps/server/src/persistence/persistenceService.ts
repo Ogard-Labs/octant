@@ -90,7 +90,10 @@ import {
   readChatThreads,
   readChatNavigation,
   readChatThreadView,
+  readChatThreadWindow,
   readPendingChatPurges,
+  type ChatThreadWindowAnchor,
+  type ChatThreadWindowRead,
   searchChatThreads,
   searchChatTranscript,
   type ChatTranscriptSearchRows,
@@ -203,6 +206,11 @@ export interface PersistenceService {
   readonly readChatThreads: () => ReadonlyArray<ChatThread>;
   readonly readChatNavigation: () => ReadonlyArray<ChatNavigationThread>;
   readonly readChatThreadView: (threadId: ChatThreadId) => ChatThreadView | undefined;
+  /** One page of a thread's active turns; see `readChatThreadWindow`. */
+  readonly readChatThreadWindow: (
+    threadId: ChatThreadId,
+    request: { readonly limit: number; readonly anchor: ChatThreadWindowAnchor },
+  ) => ChatThreadWindowRead;
   readonly readChatContent: (contentId: string) => ProjectedChatContent | undefined;
   readonly searchChatThreads: (query: string) => ReadonlyArray<ChatThread>;
   readonly searchChatTranscript: (
@@ -443,6 +451,8 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readChatThreads: () => readChatThreads(connection),
       readChatNavigation: () => readChatNavigation(connection),
       readChatThreadView: (threadId) => readChatThreadView(connection, threadId),
+      readChatThreadWindow: (threadId, request) =>
+        readChatThreadWindow(connection, threadId, request),
       readChatContent: (contentId) => readChatContent(connection, contentId),
       searchChatThreads: (query) => searchChatThreads(connection, query),
       searchChatTranscript: (query, excludeThreadIds) =>

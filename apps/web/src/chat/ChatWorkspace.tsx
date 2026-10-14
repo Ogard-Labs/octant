@@ -50,6 +50,7 @@ import {
 } from "./ChatComposer";
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ChatTranscript } from "./ChatTranscript";
+import { canvasCardsForShownRun } from "./chatTranscriptWindow";
 import { formatOutgoingMessageWithQuotes, type TranscriptQuoteChip } from "./quoteSelection";
 import {
   unattachedCapabilityMentionCopy,
@@ -131,6 +132,8 @@ export interface ChatWorkspaceProps {
   readonly onThreadBranched?: (thread: ChatThread) => void;
   /** Scroll the transcript to this turn when the thread view is ready. */
   readonly revealTurnId?: ChatTurnId;
+  /** Called once `revealTurnId` is on screen, so the shell can spend the jump. */
+  readonly onTurnRevealed?: () => void;
 }
 
 /**
@@ -227,6 +230,17 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // open Chat thread kept two requests a second going for as long as it was
   // on screen.
   const turnActive = view !== undefined && latestActiveAttempt(view) !== undefined;
+  const transcriptWindow = props.controller.transcriptWindow;
+  const revealTurn = props.controller.revealTurn;
+  // A jump target on a page that is not loaded asks the controller for that
+  // page; one already loaded is revealed by the transcript without a read.
+  useEffect(() => {
+    const target = props.revealTurnId;
+    if (target === undefined || transcriptWindow?.windowed !== true) return;
+    void revealTurn(target);
+    // Keyed on the thread and the target, not the window object: a page
+    // arriving must not ask for the same target again.
+  }, [props.revealTurnId, revealTurn, transcriptWindow?.threadKey, transcriptWindow?.windowed]);
   const pendingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
   // Attachments captured by a queue submission stay visible in the composer,
   // but their cleanup ownership moves here until that message is accepted or
@@ -449,13 +463,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const thread = view.thread;
   const connectionLost = props.controller.status === "disconnected";
   const canvasClient = props.canvasClient;
+  // A Canvas sits inline after the turn that wrote it, in whichever run the
+  // transcript shows: the newest turns, or a run the reader jumped to.
+  const shownRun = transcriptWindow?.detached;
   const canvasPlacement = placeThreadCanvases(
     threadTurnSpans(
-      activeChatTurns(view.turns),
+      activeChatTurns((shownRun?.view ?? view).turns),
       (turn) => String(turn.id),
       (turn) => turn.createdAt,
     ),
-    threadCanvases.cards,
+    shownRun === undefined
+      ? threadCanvases.cards
+      : canvasCardsForShownRun(threadCanvases.cards, shownRun.view, shownRun.hasLater),
   );
   const canvasPanelId = `chat-canvas-panel-${thread.id}`;
   const pendingExtensionSelections = props.pendingExtensionSelections ?? extensionDraft.receipts;
@@ -861,6 +880,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                       props.onThreadHandedOff?.(String(view.thread.id), outcome),
                   })}
               view={view}
+              {...(transcriptWindow === undefined
+                ? {}
+                : { readWholeView: () => props.controller.readWholeThread(view.thread.id) })}
               {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
               {...(props.windowCapability === undefined
                 ? {}
@@ -1023,6 +1045,19 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 })}
             busy={isSending || branchPending}
             {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
+            {...(props.onTurnRevealed === undefined
+              ? {}
+              : { onTurnRevealed: props.onTurnRevealed })}
+            {...(transcriptWindow === undefined
+              ? {}
+              : {
+                  transcriptWindow: {
+                    state: transcriptWindow,
+                    onLoadEarlier: () => void props.controller.loadEarlier(),
+                    onLoadLater: () => void props.controller.loadLater(),
+                    onJumpToLatest: props.controller.jumpToLatest,
+                  },
+                })}
             {...(checkpoints.available
               ? {
                   checkpoints: {

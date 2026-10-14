@@ -473,6 +473,16 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             : input.loopbackPorts.map(
                 (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
               );
+        // Bubblewrap mounts a tmpfs over each deny path and creates a missing
+        // one as its mount point: an empty `.claude/skills` in a writable
+        // Project, or a failed start on a read-only one. A missing path holds
+        // nothing to load at start, so it is skipped here; a folder created
+        // mid-session is masked from the next launch. Seatbelt denies a
+        // missing path without creating it, so macOS keeps every entry. This
+        // stays here rather than in the shared Linux confinement, whose other
+        // callers deny paths that must stay hidden even if created later.
+        const confinedDenyPaths =
+          platform === "linux" ? denyPaths.filter((path) => pathExists(path)) : denyPaths;
         const extraRules = [
           ...loopbackRules,
           ...(platform === "darwin"
@@ -504,8 +514,8 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
                 !(input.executionPolicy === "plan" || input.mode !== "code") ||
                 profile.process.requiresChildServer === true,
               additionalWriteRoots: [managedHome, ...hostAuthentication.writePaths],
-              additionalDenyReadPaths: denyPaths,
-              additionalDenyWritePaths: denyPaths,
+              additionalDenyReadPaths: confinedDenyPaths,
+              additionalDenyWritePaths: confinedDenyPaths,
               allowFileReadStar: true,
               readRoots: [
                 root,
@@ -1178,4 +1188,13 @@ export function makeAcpProcessLive(options: AcpProcessOptions = {}): AcpProcessP
         return managed.connection;
       }),
   };
+}
+
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
 }

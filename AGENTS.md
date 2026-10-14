@@ -146,10 +146,10 @@ test count.
   remain quarantined and subject to ordinary sandbox and approval policy.
 - Structured extension or plugin references cannot install, trust, enable,
   elevate, or bypass policy. Discover skills only from valid `.agents/skills/`
-  packages in the permitted repository ancestry and user-global directory.
-  Not built yet: an allow-listed set of extra skill roots (for example
-  `.claude/skills`) joins them under the same activation ladder; until then
-  only `.agents/skills/` is read.
+  and `.claude/skills/` packages in the permitted repository ancestry (the
+  closed `PROJECT_SKILL_ROOTS` allow-list) and from the user-global
+  `~/.agents/skills/` directory under the same activation ladder, never from
+  the home folder's own `.claude`.
 - Use the unified real-thread hierarchy and server-authoritative Work/Code
   boards. Chat has no board.
 - A Code thread is Done only when its user-confirmed delivery target is

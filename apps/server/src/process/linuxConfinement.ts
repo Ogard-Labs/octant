@@ -75,6 +75,11 @@ export function buildLinuxAllowDefaultDenyLaunch(
       );
     }
     const normalized = normalize(path);
+    // The host root is bound writable here, so Bubblewrap would create a
+    // missing mount point in the person's real folder and leave an empty
+    // `.claude/skills` or `.agents` behind in their Project. A path that does
+    // not exist holds nothing for a runtime to load when it starts.
+    if (!pathExists(path)) continue;
     if (isDirectoryForDeny(path)) {
       args.push("--tmpfs", normalized, "--remount-ro", normalized);
       continue;
@@ -476,6 +481,15 @@ function safeRealpathSync(path: string): string | undefined {
     return realpathSync(path);
   } catch {
     return undefined;
+  }
+}
+
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
   }
 }
 

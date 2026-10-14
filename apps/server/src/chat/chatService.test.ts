@@ -1,4 +1,9 @@
-import { MAX_PROVIDER_TOOLS } from "@octant/contracts";
+import {
+  EventActor,
+  MAX_PROVIDER_TOOLS,
+  THREAD_EXTERNAL_CONTENT_AGGREGATE,
+  decodeThreadRetentionThreadId,
+} from "@octant/contracts";
 import {
   mkdtempSync,
   rmSync,
@@ -61,7 +66,7 @@ import type {
   MultiModelRoutingVendorId,
 } from "@octant/contracts/multi-model-pool";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
-import { Effect, Queue, Stream } from "effect";
+import { Effect, Queue, Schema, Stream } from "effect";
 import {
   activeChatTurns,
   defaultShellSettings,
@@ -87,6 +92,7 @@ import {
   readChatContent,
   readChatSettings,
   readChatThreadView,
+  readChatThreadWindow,
   readPendingChatPurges,
   searchChatThreads,
   searchChatTranscript,
@@ -108,6 +114,17 @@ import { ThreadWorkService } from "./threadWorkService";
 import { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { createChatAgentResultDeliveryPort } from "./chatAgentResultDeliveryPort";
 import { ChatService, ChatServiceError } from "./chatService";
+import { createCheckpointChatPort } from "../checkpoint/threadCheckpointPorts";
+import { ExternalContentClearStore } from "../context/externalContentClearStore";
+import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import {
+  ExternalContentTaintProjection,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
+import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
+import { createFollowUp } from "../followUps/followUpSuggestionCreation";
+import { rebuildProjection } from "../persistence/projection";
+import { erasePurgedThread } from "../persistence/threadPurge";
 import { ChatAttachmentStore } from "./chatAttachmentStore";
 
 const directories: Array<string> = [];
@@ -293,9 +310,12 @@ function openFixture(options?: {
   readonly contextMaintenanceShutdownTimeoutMs?: number;
   readonly issueContext?: ConstructorParameters<typeof ChatService>[0]["issueContext"];
   readonly linearIssueContext?: ConstructorParameters<typeof ChatService>[0]["linearIssueContext"];
+  /** How a new thread's inherited mark is recorded; defaults to the host's ingestion store. */
+  readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
 }): {
   readonly dataDirectory: string;
   readonly persistence: PersistenceService;
+  readonly ingestions: ExternalContentIngestionStore;
   readonly service: ChatService;
   readonly attachmentStore: ChatAttachmentStore;
   readonly contextHarness: ContextHarnessService;
@@ -423,6 +443,10 @@ function openFixture(options?: {
     },
     readChatNavigation: () => readChatNavigation(connection),
     readChatThreadView: (threadId: ChatThreadId) => readChatThreadView(connection, threadId),
+    readChatThreadWindow: (
+      threadId: ChatThreadId,
+      request: Parameters<PersistenceService["readChatThreadWindow"]>[1],
+    ) => readChatThreadWindow(connection, threadId, request),
     readChatContent: (contentId: string) => readChatContent(connection, contentId),
     searchChatThreads: (query: string) => searchChatThreads(connection, query),
     searchChatTranscript: (query: string, excludeThreadIds?: ReadonlySet<string>) =>
@@ -595,7 +619,16 @@ function openFixture(options?: {
   });
 
   const attachmentStore = new ChatAttachmentStore(dataDirectory);
+  const ingestions = new ExternalContentIngestionStore({
+    journal,
+    connection,
+    uuid: () => crypto.randomUUID(),
+    clock: () => now,
+    actor: Schema.decodeUnknownSync(EventActor)({ kind: "system", actorId: ids.actor }),
+  });
   const service = new ChatService({
+    recordExternalContentIngestion:
+      options?.recordExternalContentIngestion ?? ((input) => ingestions.record(input)),
     ...(options?.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
     ...(options?.beforeAttachmentPurge === undefined
       ? {}
@@ -650,6 +683,7 @@ function openFixture(options?: {
   return {
     dataDirectory,
     persistence,
+    ingestions,
     service,
     attachmentStore,
     contextHarness,
@@ -5574,6 +5608,12 @@ describe("ChatService", () => {
     } catch (error) {
       expect(error).toMatchObject({ failure: { category: "invalid" } });
     }
+    try {
+      service.readWindow(threadId, { limit: 30 });
+      expect.unreachable("Deleted thread must not be readable through a window.");
+    } catch (error) {
+      expect(error).toMatchObject({ failure: { category: "invalid" } });
+    }
 
     await expect(
       service.execute({
@@ -8016,6 +8056,47 @@ describe("ChatService", () => {
       expect(activeChatTurns(afterEdit.turns).map((turn) => turn.id)).toEqual([edited.turn.id]);
     });
 
+    it("pages a window over the conversation as it stands and refuses one anchored on a superseded turn", async () => {
+      const { service } = openFixture();
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Windowed edit",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      const threadId = created.thread.id;
+      const first = await service.execute({
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        prompt: "First question",
+      });
+      if (first.kind !== "turn-created") throw new Error("Expected turn-created result.");
+      await service.execute({
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        prompt: "Second question",
+      });
+      const edited = await service.execute({
+        kind: "edit-chat-turn",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        turnId: first.turn.id,
+        prompt: "First question, revised",
+      });
+      if (edited.kind !== "turn-created") throw new Error("Expected turn-created result.");
+
+      const window = service.readWindow(threadId, { limit: 30 });
+      expect(window.view.turns.map((turn) => turn.id)).toEqual([edited.turn.id]);
+      expect(window).toMatchObject({ hasEarlier: false, hasLater: false, supersededTurnCount: 2 });
+      // The window carries the same thread version a command must present.
+      expect(window.view.thread.version).toBe(service.read(threadId).thread.version);
+      expect(() => service.readWindow(threadId, { limit: 30, before: first.turn.id })).toThrow(
+        expect.objectContaining({ failure: expect.objectContaining({ category: "stale" }) }),
+      );
+    });
+
     it("refuses a stale edit and an edit of an already superseded turn", async () => {
       const { service } = openFixture();
       const created = await service.execute({
@@ -9506,5 +9587,330 @@ describe("agent result delivery", () => {
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
     expect(withRuns.service.read(second.thread.id).turns).toHaveLength(0);
+  });
+});
+
+describe("a Chat thread made from a thread marked with outside content", () => {
+  const windowId = "84000000-0000-4000-8000-0000000000f0" as WindowId;
+
+  /** A source thread with one answered turn, ready to branch from. */
+  async function sourceWithTurn(fixture: ReturnType<typeof openFixture>) {
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Source",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await fixture.service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: fixture.service.read(created.thread.id).thread.version,
+      prompt: "Read this page",
+    });
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    return { sourceId: created.thread.id, turnId: sent.turn.id };
+  }
+
+  function markThread(fixture: ReturnType<typeof openFixture>, threadId: ChatThreadId) {
+    return fixture.ingestions.record({
+      threadId,
+      provenance: { origin: "tool-result", sourceLabel: "web-fetch" },
+      contentReference: "web-fetch-page-1",
+      correlationId: crypto.randomUUID(),
+      authorized: true,
+    });
+  }
+
+  const marked = (fixture: ReturnType<typeof openFixture>, threadId: string) =>
+    readThreadExternalContentTaint(fixture.persistence.connection, threadId)
+      .externalContentIngested;
+
+  const marks = (fixture: ReturnType<typeof openFixture>, threadId: string) =>
+    fixture.persistence.journal.replayAggregate({
+      aggregateType: THREAD_EXTERNAL_CONTENT_AGGREGATE,
+      aggregateId: threadId,
+      afterVersion: 0,
+      limit: 100,
+    });
+
+  const eventOrder = (fixture: ReturnType<typeof openFixture>) =>
+    (
+      fixture.persistence.connection
+        .prepare("SELECT event_name, aggregate_id FROM event_journal ORDER BY global_sequence")
+        .all() as ReadonlyArray<{ readonly event_name: string; readonly aggregate_id: string }>
+    ).map((row) => `${row.event_name} ${row.aggregate_id}`);
+
+  async function branch(
+    fixture: ReturnType<typeof openFixture>,
+    source: Awaited<ReturnType<typeof sourceWithTurn>>,
+    branchThreadId: ChatThreadId,
+  ) {
+    return fixture.service.execute({
+      kind: "branch-chat-thread",
+      threadId: source.sourceId,
+      expectedVersion: fixture.service.read(source.sourceId).thread.version,
+      turnId: source.turnId,
+      title: "Second direction",
+      branchThreadId,
+    });
+  }
+
+  const branchThreadId = "84000000-0000-4000-8000-0000000000c1" as ChatThreadId;
+
+  it("marks a branch before the branch exists, naming the thread and turn it came from", async () => {
+    const fixture = openFixture();
+    const source = await sourceWithTurn(fixture);
+    expect(markThread(fixture, source.sourceId)).toMatchObject({ kind: "recorded" });
+
+    await expect(branch(fixture, source, branchThreadId)).resolves.toMatchObject({
+      kind: "thread-created",
+    });
+
+    expect(marked(fixture, String(branchThreadId))).toBe(true);
+    expect(marks(fixture, String(branchThreadId)).map((event) => event.payload)).toEqual([
+      {
+        threadId: branchThreadId,
+        correlationId: expect.any(String),
+        provenance: { origin: "external-content", sourceLabel: "chat-branch" },
+        contentReference: `chat-branch-${source.sourceId}-${source.turnId}`,
+      },
+    ]);
+    // There is no moment at which the branch is journaled and its mark is not.
+    const order = eventOrder(fixture);
+    expect(order.indexOf(`thread.external-content-ingested@1 ${branchThreadId}`)).toBeLessThan(
+      order.indexOf(`chat.thread-created@1 ${branchThreadId}`),
+    );
+    expect(order.indexOf(`chat.thread-created@1 ${branchThreadId}`)).toBeGreaterThan(-1);
+  });
+
+  it("marks a thread restored from a marked thread's turn", async () => {
+    const fixture = openFixture();
+    const source = await sourceWithTurn(fixture);
+    markThread(fixture, source.sourceId);
+    const restore = createCheckpointChatPort({
+      readChatThread: (id) => fixture.service.read(id).thread,
+      readChatThreadView: (id) => fixture.service.read(id),
+      readProject: () => undefined,
+      execute: (command) => fixture.service.execute(command),
+    });
+
+    const restored = await restore.branch({
+      authenticatedWindowId: windowId,
+      threadId: source.sourceId,
+      turnId: source.turnId,
+      title: "Source (restored)",
+    });
+    if (restored.status !== "created") throw new Error("Expected a restored thread.");
+
+    expect(marked(fixture, String(restored.threadId))).toBe(true);
+    expect(marks(fixture, String(restored.threadId))[0]?.payload).toMatchObject({
+      provenance: { origin: "external-content", sourceLabel: "chat-branch" },
+      contentReference: `chat-branch-${source.sourceId}-${source.turnId}`,
+    });
+  });
+
+  it("leaves a branch of an unmarked thread unmarked", async () => {
+    const fixture = openFixture();
+    const source = await sourceWithTurn(fixture);
+
+    await branch(fixture, source, branchThreadId);
+
+    expect(marked(fixture, String(branchThreadId))).toBe(false);
+    expect(marks(fixture, String(branchThreadId))).toEqual([]);
+  });
+
+  it("leaves a branch unmarked when a person cleared the source before branching it", async () => {
+    const fixture = openFixture();
+    const source = await sourceWithTurn(fixture);
+    markThread(fixture, source.sourceId);
+    const clears = new ExternalContentClearStore({
+      journal: fixture.persistence.journal,
+      connection: fixture.persistence.connection,
+      uuid: () => crypto.randomUUID(),
+      clock: () => now,
+      actor: Schema.decodeUnknownSync(EventActor)({ kind: "local-user", actorId: ids.actor }),
+    });
+    expect(
+      clears.clear({
+        threadId: source.sourceId,
+        windowId,
+        expectedVersion: clears.read(String(source.sourceId)).version,
+        principal: "local-window",
+        turn: "idle",
+      }),
+    ).toMatchObject({ kind: "cleared" });
+
+    await branch(fixture, source, branchThreadId);
+
+    expect(marked(fixture, String(branchThreadId))).toBe(false);
+  });
+
+  it("keeps the branch's mark through a replay and erases it with the branch's purge", async () => {
+    const fixture = openFixture();
+    const source = await sourceWithTurn(fixture);
+    markThread(fixture, source.sourceId);
+    await branch(fixture, source, branchThreadId);
+
+    rebuildProjection({
+      connection: fixture.persistence.connection,
+      journal: fixture.persistence.journal,
+      projection: new ExternalContentTaintProjection(),
+      clock: () => now,
+    });
+    expect(marked(fixture, String(branchThreadId))).toBe(true);
+
+    erasePurgedThread({
+      connection: fixture.persistence.connection,
+      mode: "chat",
+      threadId: decodeThreadRetentionThreadId(String(branchThreadId)),
+    });
+    expect(marked(fixture, String(branchThreadId))).toBe(false);
+    expect(marks(fixture, String(branchThreadId))).toEqual([]);
+    // The source keeps its own mark.
+    expect(marked(fixture, String(source.sourceId))).toBe(true);
+  });
+
+  it("refuses the branch, and creates nothing, when its mark cannot be journaled", async () => {
+    for (const record of [
+      () => ({ kind: "refused", reason: "malformed" }) as const,
+      () => {
+        throw new Error("journal unavailable");
+      },
+    ]) {
+      const fixture = openFixture({ recordExternalContentIngestion: record });
+      const source = await sourceWithTurn(fixture);
+      markThread(fixture, source.sourceId);
+
+      await expect(branch(fixture, source, branchThreadId)).rejects.toMatchObject({
+        failure: { category: "unavailable", message: expect.stringContaining("outside content") },
+      });
+      expect(() => fixture.service.read(branchThreadId)).toThrow(ChatServiceError);
+      expect(eventOrder(fixture).some((event) => event.endsWith(String(branchThreadId)))).toBe(
+        false,
+      );
+    }
+  });
+
+  it("leaves no mark on a branch whose creation fails after the mark", async () => {
+    const fixture = openFixture();
+    const source = await sourceWithTurn(fixture);
+    markThread(fixture, source.sourceId);
+    const journal = fixture.persistence.journal;
+    const append = journal.append.bind(journal);
+    vi.spyOn(journal, "append").mockImplementation((request, options) => {
+      const appended = JSON.stringify(request);
+      if (
+        appended.includes('"eventName":"chat.thread-created@1"') &&
+        appended.includes(`"aggregateId":"${branchThreadId}"`)
+      ) {
+        throw new Error("disk full");
+      }
+      return append(request, options);
+    });
+
+    await expect(branch(fixture, source, branchThreadId)).rejects.toThrow();
+    vi.mocked(journal.append).mockRestore();
+
+    expect(marked(fixture, String(branchThreadId))).toBe(false);
+    expect(marks(fixture, String(branchThreadId))).toEqual([]);
+    expect(marked(fixture, String(source.sourceId))).toBe(true);
+  });
+
+  describe("a follow-up suggested on a marked thread", () => {
+    const followUpThreadId = "84000000-0000-4000-8000-0000000000c2";
+
+    function followUp(fixture: ReturnType<typeof openFixture>, sourceId: ChatThreadId) {
+      return createFollowUp(
+        {
+          chat: fixture.service,
+          work: {
+            execute: () => {
+              throw new Error("Work is not part of this test.");
+            },
+          },
+          code: undefined,
+          readCodeThread: () => undefined,
+          readProject: () => undefined,
+          isMarkedWithOutsideContent: (threadId) => marked(fixture, threadId),
+          hostId: "local" as HostId,
+          uuid: () => followUpThreadId,
+          clock: () => now,
+        },
+        {
+          windowId: String(windowId),
+          view: {
+            threadId: String(sourceId),
+            mode: "chat",
+            suggestedBy: { providerInstanceId: ids.provider, modelId: "model-a" },
+          } as never,
+          creation: { kind: "new-thread", mode: "chat", title: "Next step" },
+        },
+      );
+    }
+
+    it("starts marked, its mark before the thread, and keeps it through a replay until its purge", async () => {
+      const fixture = openFixture();
+      const source = await sourceWithTurn(fixture);
+      markThread(fixture, source.sourceId);
+
+      await expect(followUp(fixture, source.sourceId)).resolves.toMatchObject({
+        kind: "created",
+      });
+
+      expect(marks(fixture, followUpThreadId).map((event) => event.payload)).toEqual([
+        {
+          threadId: followUpThreadId,
+          correlationId: expect.any(String),
+          provenance: { origin: "external-content", sourceLabel: "follow-up" },
+          contentReference: `follow-up-${source.sourceId}-${followUpThreadId}`,
+        },
+      ]);
+      const order = eventOrder(fixture);
+      expect(order.indexOf(`thread.external-content-ingested@1 ${followUpThreadId}`)).toBeLessThan(
+        order.indexOf(`chat.thread-created@1 ${followUpThreadId}`),
+      );
+
+      rebuildProjection({
+        connection: fixture.persistence.connection,
+        journal: fixture.persistence.journal,
+        projection: new ExternalContentTaintProjection(),
+        clock: () => now,
+      });
+      expect(marked(fixture, followUpThreadId)).toBe(true);
+
+      erasePurgedThread({
+        connection: fixture.persistence.connection,
+        mode: "chat",
+        threadId: decodeThreadRetentionThreadId(followUpThreadId),
+      });
+      expect(marked(fixture, followUpThreadId)).toBe(false);
+      expect(marked(fixture, String(source.sourceId))).toBe(true);
+    });
+
+    it("starts unmarked when the thread that suggested it is unmarked", async () => {
+      const fixture = openFixture();
+      const source = await sourceWithTurn(fixture);
+
+      await expect(followUp(fixture, source.sourceId)).resolves.toMatchObject({
+        kind: "created",
+      });
+
+      expect(marked(fixture, followUpThreadId)).toBe(false);
+      expect(marks(fixture, followUpThreadId)).toEqual([]);
+    });
+
+    it("is refused, and creates nothing, when its mark cannot be journaled", async () => {
+      const fixture = openFixture({
+        recordExternalContentIngestion: () => ({ kind: "refused", reason: "malformed" }),
+      });
+      const source = await sourceWithTurn(fixture);
+      markThread(fixture, source.sourceId);
+
+      await expect(followUp(fixture, source.sourceId)).resolves.toEqual({
+        kind: "refused",
+        message: expect.stringContaining("outside content"),
+      });
+      expect(eventOrder(fixture).some((event) => event.endsWith(followUpThreadId))).toBe(false);
+    });
   });
 });

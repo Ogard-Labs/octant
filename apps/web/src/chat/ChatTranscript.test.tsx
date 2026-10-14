@@ -1538,6 +1538,180 @@ describe("ChatTranscript", () => {
 
     expect(await screen.findByText("User turn 500")).toBeVisible();
   });
+
+  describe("a thread opened on its newest messages", () => {
+    const windowState = {
+      threadKey: ids.thread,
+      windowed: true,
+      hasEarlier: true,
+      offerEarlier: true,
+      supersededTurnCount: 0,
+      earlier: "idle" as const,
+      shownRun: 0,
+    };
+    const controls = (state: Record<string, unknown> = {}) => ({
+      state: { ...windowState, ...state },
+      onLoadEarlier: vi.fn(),
+      onLoadLater: vi.fn(),
+      onJumpToLatest: vi.fn(),
+    });
+    /** Turns `from` up to, not including, `to` of a 20-turn thread. */
+    const run = (from: number, to: number) => {
+      const whole = longView(20);
+      return decodeChatThreadView({ ...whole, turns: whole.turns.slice(from, to) });
+    };
+
+    describe("a search hit", () => {
+      const whole = longView(300);
+      const slice = (from: number, to: number) =>
+        decodeChatThreadView({ ...whole, turns: whole.turns.slice(from, to) });
+      const hit = whole.turns[250]!.id;
+      const jumpedTo = controls({
+        shownRun: 1,
+        detached: {
+          view: slice(221, 251),
+          hasEarlier: true,
+          hasLater: true,
+          earlier: "idle",
+          later: "idle",
+        },
+      });
+
+      /** Renders the hit the way the shell does: passed on until it has been shown. */
+      function shellTarget() {
+        let target: typeof hit | undefined = hit;
+        const spend = vi.fn(() => {
+          target = undefined;
+        });
+        return {
+          spend,
+          props: () => ({
+            onTurnRevealed: spend,
+            ...(target === undefined ? {} : { revealTurnId: target }),
+          }),
+        };
+      }
+
+      it("keeps the same list when the jumped-to run joins the newest messages", async () => {
+        const shell = shellTarget();
+        const { rerender } = render(
+          <ChatTranscript {...shell.props()} transcriptWindow={jumpedTo} view={slice(271, 300)} />,
+        );
+        expect(await screen.findByText("User turn 250")).toBeVisible();
+        await waitFor(() => expect(shell.spend).toHaveBeenCalledOnce());
+        const list = document.querySelector("[data-transcript-window]");
+
+        // Load later reached the newest messages: one run, still the same run.
+        rerender(
+          <ChatTranscript
+            {...shell.props()}
+            transcriptWindow={controls({ shownRun: 1 })}
+            view={slice(221, 300)}
+          />,
+        );
+
+        // The list is not mounted again, so the reader's place carries over
+        // (the rendered check measures it) and no jump target is applied anew.
+        expect(document.querySelector("[data-transcript-window]")).toBe(list);
+      });
+
+      it("does not jump back to it when an earlier page after Jump to latest holds it", async () => {
+        const shell = shellTarget();
+        const { rerender } = render(
+          <ChatTranscript {...shell.props()} transcriptWindow={jumpedTo} view={slice(271, 300)} />,
+        );
+        expect(await screen.findByText("User turn 250")).toBeVisible();
+        await waitFor(() => expect(shell.spend).toHaveBeenCalledOnce());
+
+        // Jump to latest shows a different run; then Load earlier brings 241 on.
+        rerender(
+          <ChatTranscript
+            {...shell.props()}
+            transcriptWindow={controls({ shownRun: 2 })}
+            view={slice(271, 300)}
+          />,
+        );
+        rerender(
+          <ChatTranscript
+            {...shell.props()}
+            transcriptWindow={controls({ shownRun: 2 })}
+            view={slice(241, 300)}
+          />,
+        );
+
+        // The reader stays on the newest messages they were reading.
+        await waitFor(() => expect(screen.getByText("User turn 271")).toBeInTheDocument());
+        expect(screen.queryByText("User turn 250")).not.toBeInTheDocument();
+      });
+    });
+
+    it("counts revised messages from the host when earlier turns are not loaded", () => {
+      render(
+        <ChatTranscript
+          transcriptWindow={controls({ supersededTurnCount: 4 })}
+          view={run(17, 20)}
+        />,
+      );
+
+      expect(screen.getByText(/^4 earlier messages were revised\./)).toBeVisible();
+    });
+
+    it("offers the messages before the oldest loaded one", () => {
+      const window = controls();
+      render(<ChatTranscript transcriptWindow={window} view={run(17, 20)} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+
+      expect(window.onLoadEarlier).toHaveBeenCalledOnce();
+    });
+
+    it("does not show a route receipt as orphaned while its turn is on an unloaded page", () => {
+      // The window carries a receipt only with its turn's page, so the newest
+      // page holds none for turn 2; a receipt it holds names a loaded turn.
+      const view = decodeChatThreadView({
+        ...run(17, 20),
+        routeDecisions: [
+          {
+            threadId: ids.thread,
+            turnId: run(17, 18).turns[0]!.id,
+            decision: waitingReceipt(),
+            decidedAt: now,
+          },
+        ],
+      });
+      render(<ChatTranscript transcriptWindow={controls()} view={view} />);
+
+      expect(
+        within(screen.getByRole("region")).getAllByLabelText("Turn route receipt"),
+      ).toHaveLength(1);
+      expect(
+        document.querySelector("[data-transcript-trail] [aria-label='Turn route receipt']"),
+      ).toBeNull();
+    });
+
+    it("shows a run jumped to in place of the newest messages, with the way back", () => {
+      const window = controls({
+        detached: {
+          view: run(2, 5),
+          hasEarlier: true,
+          hasLater: true,
+          earlier: "idle",
+          later: "idle",
+        },
+      });
+      render(<ChatTranscript transcriptWindow={window} view={run(17, 20)} />);
+
+      expect(screen.getByText("User turn 2")).toBeVisible();
+      expect(screen.queryByText("User turn 19")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Load later messages" }));
+      fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
+      fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+
+      expect(window.onLoadLater).toHaveBeenCalledOnce();
+      expect(window.onJumpToLatest).toHaveBeenCalledOnce();
+      expect(window.onLoadEarlier).toHaveBeenCalledOnce();
+    });
+  });
 });
 
 async function chooseTurnAction(name: string) {

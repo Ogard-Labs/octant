@@ -366,6 +366,9 @@ const DEVIN_CONFIGURATION = {
     claude: false,
     opencode: false,
     zed: false,
+    // `copilot` is the source behind <project>/.github/skills. With it unset,
+    // `devin skills list` on 3000.10.27 and 3000.11.3 listed a package there.
+    copilot: false,
     agents_standard: false,
   },
   plugin_dirs: [],
@@ -460,6 +463,11 @@ const devinProfile: AcpProviderProfile = {
       defaultPath: join(homedir(), ".local/share/devin/credentials.toml"),
       managedRelativePath: ".local/share/devin/credentials.toml",
     },
+    // Devin loads these Project skill folders by itself, and no
+    // `read_config_from` source turns them off: `devin skills list` on
+    // 3000.10.27 and 3000.11.3 listed packages from all three with every
+    // source false, and none with the folders unreadable.
+    forbiddenRootEntries: [".agents/skills", ".cognition/skills", ".devin/skills"],
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
@@ -644,6 +652,21 @@ const grokProfile: AcpProviderProfile = {
     }),
     args: () => ["agent", "stdio"],
     managedFiles: () => [],
+    // In a trusted folder Grok loads all of these as Project skills by itself;
+    // `grok inspect --json` on 1.0.50 lists a package or command file from
+    // each. Its switches are not relied on: with GROK_CLAUDE_SKILLS_ENABLED and
+    // GROK_CURSOR_SKILLS_ENABLED false it still listed those folders'
+    // packages, and nothing turns off .agents or .grok. With these
+    // folders unreadable it listed the rest and carried on.
+    forbiddenRootEntries: [
+      ".agents/commands",
+      ".agents/skills",
+      ".claude/commands",
+      ".claude/skills",
+      ".cursor/skills",
+      ".grok/commands",
+      ".grok/skills",
+    ],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".grok"),
@@ -691,6 +714,10 @@ const gooseProfile: AcpProviderProfile = {
     }),
     args: () => ["acp"],
     managedFiles: () => [],
+    // Goose's documentation lists <project>/.agents/skills, .goose/skills and
+    // .claude/skills as folders it loads skills from at session start, with no
+    // setting that turns that off.
+    forbiddenRootEntries: [".agents/skills", ".claude/skills", ".goose/skills"],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".config/goose"),
@@ -747,6 +774,9 @@ const glmProfile: AcpProviderProfile = {
     }),
     args: () => [],
     managedFiles: () => [],
+    // GLM Agent advertises the packages in <cwd>/.claude/skills as commands and
+    // puts one's body into the message when its `/name` is typed (its README).
+    forbiddenRootEntries: [".claude/skills"],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".config/glm-acp-agent"),
@@ -796,6 +826,10 @@ const geminiProfile: AcpProviderProfile = {
     }),
     args: () => ["--acp"],
     managedFiles: () => [],
+    // Gemini CLI loads workspace skills from these folders by itself once the
+    // folder is trusted (its documentation and skill manager source); no
+    // variable or flag turns that off.
+    forbiddenRootEntries: [".agents/skills", ".gemini/skills"],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".gemini"),
@@ -832,6 +866,12 @@ const copilotProfile: AcpProviderProfile = {
     }),
     args: () => ["--acp"],
     managedFiles: () => [],
+    // The ACP session is created without enableConfigDiscovery, which
+    // defaults to on (CLI 1.0.90), so Copilot loads these Project skill
+    // folders on its own; `copilot skill list` on 1.0.90 lists a package from
+    // each. No flag or variable turns that discovery off in ACP. With them
+    // unreadable it lists the rest and carries on.
+    forbiddenRootEntries: [".agents/skills", ".claude/skills", ".github/skills"],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".copilot"),
@@ -874,6 +914,15 @@ const clineProfile: AcpProviderProfile = {
     }),
     args: () => ["--acp"],
     managedFiles: () => [],
+    // Cline's workspace skill folders, enabled when found, with only a
+    // per-skill toggle to turn one off (its documentation, and the skill
+    // search paths in its source).
+    forbiddenRootEntries: [
+      ".agents/skills",
+      ".claude/skills",
+      ".cline/skills",
+      ".clinerules/skills",
+    ],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".cline", "data"),
@@ -921,6 +970,9 @@ const qwenProfile: AcpProviderProfile = {
     }),
     args: () => ["--acp"],
     managedFiles: () => [],
+    // Qwen Code loads Project skills from these folders by itself (its skill
+    // provider folders in source); only bare mode skips them.
+    forbiddenRootEntries: [".agents/skills", ".qwen/skills"],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".qwen"),
@@ -931,7 +983,13 @@ const qwenProfile: AcpProviderProfile = {
   },
 };
 
-const FX_WORKSPACE_DENIED_ENTRIES = [".fx.json", ".mcp.json", "AGENTS.md", ".agents"] as const;
+const FX_WORKSPACE_DENIED_ENTRIES = [
+  ".fx.json",
+  ".mcp.json",
+  "AGENTS.md",
+  ".agents",
+  ".claude/skills",
+] as const;
 
 /**
  * fx has no profile-path variable: its settings, sessions, permission rules,
@@ -1060,6 +1118,8 @@ const kimiProfile: AcpProviderProfile = {
     // AGENTS.md. Deny those surfaces in the OS profile so reused login cannot
     // start extra executables; config.toml and credentials stay readable.
     hostDeniedEntries: ["AGENTS.md", "mcp.json", "skills", "plugins", "hooks"],
+    // Kimi loads Project skills from .agents/skills and .kimi-code/skills
+    // only; it never reads .claude/skills on its own, so that stays readable.
     forbiddenRootEntries: [".kimi-code", ".agents"],
     // Authentication lives in the provider-owned Kimi data root. The process
     // still runs inside Octant's project/managed-home Seatbelt boundary and

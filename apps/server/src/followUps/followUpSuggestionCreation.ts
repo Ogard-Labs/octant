@@ -18,6 +18,7 @@ import {
 } from "@octant/contracts";
 import { defaultDeliveryBranchIntent } from "@octant/domain/code-worktree-source-policy";
 import type { ChatService } from "../chat/chatService";
+import type { InheritedExternalContentMark } from "../context/inheritedExternalContentMark";
 
 export type FollowUpCreationOutcome =
   | {
@@ -44,6 +45,7 @@ export interface FollowUpCreationDependencies {
     readonly execute: (
       windowId: WindowId,
       input: unknown,
+      executionContext?: { readonly inheritedMark?: InheritedExternalContentMark },
     ) => Promise<WorkThreadCommandResult> | WorkThreadCommandResult;
   };
   readonly code:
@@ -52,9 +54,12 @@ export interface FollowUpCreationDependencies {
           windowId: WindowId,
           command: CodeCommand,
           signal?: AbortSignal,
+          executionContext?: { readonly inheritedMark?: InheritedExternalContentMark },
         ) => Promise<CodeCommandResult> | CodeCommandResult;
       }
     | undefined;
+  /** Whether a thread is marked as having taken in outside content, as its mark reads now. */
+  readonly isMarkedWithOutsideContent: (threadId: string) => boolean;
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly readProject: (projectId: ProjectId) => Project | undefined;
   readonly hostId: HostId;
@@ -72,6 +77,10 @@ export interface FollowUpCreationDependencies {
  * on the harness and a Claude or Codex thread's stays on that runtime; a Code
  * thread starts approval-gated, because Full access is remembered per thread
  * and nobody remembered it for this one.
+ *
+ * The follow-up's title and prompt were written by an agent on the thread it
+ * came from, so a thread made from a marked thread starts marked
+ * (`inheritedMarkFor`), journaled with its creation.
  */
 export async function createFollowUp(
   dependencies: FollowUpCreationDependencies,
@@ -114,29 +123,36 @@ export async function createFollowUp(
           : undefined;
       if (binding === undefined) return refused("The Work Project is unavailable.");
       const threadId = dependencies.uuid();
-      const result = await dependencies.work.execute(windowId, {
-        kind: "create-work-thread",
-        threadId,
-        projectId: creation.projectId,
-        title: creation.title,
-        providerInstanceId: lead.providerInstanceId,
-        modelId: lead.modelId,
-        hostId: "local",
-        bindingRevisionId: binding.revisionId,
-      });
+      const result = await dependencies.work.execute(
+        windowId,
+        {
+          kind: "create-work-thread",
+          threadId,
+          projectId: creation.projectId,
+          title: creation.title,
+          providerInstanceId: lead.providerInstanceId,
+          modelId: lead.modelId,
+          hostId: "local",
+          bindingRevisionId: binding.revisionId,
+        },
+        inheritedMarkFor(dependencies, view, threadId),
+      );
       if (!("kind" in result) || result.kind !== "thread-created") {
         return refused("The host did not create the Work thread.");
       }
       return { kind: "created", created: { ...creation, threadId }, onSuggestingModel: true };
     }
     const threadId = dependencies.uuid();
-    const result = await dependencies.chat.execute({
-      kind: "create-chat-thread",
-      hostId: dependencies.hostId,
-      threadId,
-      title: creation.title,
-      ...(creation.projectId === undefined ? {} : { projectId: creation.projectId }),
-    });
+    const result = await dependencies.chat.execute(
+      {
+        kind: "create-chat-thread",
+        hostId: dependencies.hostId,
+        threadId,
+        title: creation.title,
+        ...(creation.projectId === undefined ? {} : { projectId: creation.projectId }),
+      },
+      inheritedMarkFor(dependencies, view, threadId),
+    );
     if (result.kind !== "thread-created")
       return refused("The host did not create the Chat thread.");
     // The suggesting model carries over. A provider the new thread cannot
@@ -221,6 +237,8 @@ async function createCodeThread(
         startFromOrigin: false,
         remoteName: deliveryTarget.remoteName,
       }),
+      undefined,
+      inheritedMarkFor(dependencies, input.view, threadId),
     );
     if (result.kind !== "managed-thread-created")
       return refused("The host did not create the worktree thread.");
@@ -260,9 +278,31 @@ async function createCodeThread(
   const result = await dependencies.code.execute(
     input.windowId,
     decodeCodeCommand({ kind: "create-code-thread", thread }),
+    undefined,
+    inheritedMarkFor(dependencies, input.view, threadId),
   );
   if (result.kind !== "thread-created") return refused("The host did not create the Code thread.");
   return { kind: "created", created: { ...input.creation, threadId }, onSuggestingModel: true };
+}
+
+/**
+ * The mark a thread made from a follow-up starts with: the agent that wrote
+ * the follow-up had read what marked its thread, so the text can carry it.
+ * Read when the thread is made, like a fork's: a thread a person cleared
+ * passes on nothing.
+ */
+function inheritedMarkFor(
+  dependencies: Pick<FollowUpCreationDependencies, "isMarkedWithOutsideContent">,
+  view: FollowUpOrigin,
+  threadId: string,
+): { readonly inheritedMark?: InheritedExternalContentMark } {
+  if (!dependencies.isMarkedWithOutsideContent(String(view.threadId))) return {};
+  return {
+    inheritedMark: {
+      sourceLabel: "follow-up",
+      contentReference: `follow-up-${String(view.threadId)}-${threadId}`,
+    },
+  };
 }
 
 function refused(message: string): FollowUpCreationOutcome {

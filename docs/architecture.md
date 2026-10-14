@@ -778,6 +778,27 @@ after its clear marks its fork. The new thread's mark is its own. It
 survives replay, a purge of the new thread erases it, and a person clears it
 there like any other.
 
+A Chat branch (`branch-chat-thread`, which Chat's Restore from here also
+sends) copies its source's messages and completed replies, so a branch of a
+marked source starts marked by the same rule: the mark (`external-content`,
+label `chat-branch`, content reference
+`chat-branch-<source thread>-<branch turn>`) and the branch commit as one
+journal unit with the mark first, and a mark that cannot be journaled refuses
+the branch with nothing created. The source's mark is read from its
+outside-content projection when the branch is made; the cleared-source,
+replay, purge, and clear rules above hold unchanged.
+
+A follow-up or side task a model suggested on a marked thread starts marked
+too, in every mode, by the same rule (label `follow-up`, content reference
+`follow-up-<source thread>-<new thread>`). It copies no transcript, but its
+title and prompt are text an agent wrote after reading what marked the source,
+nothing bounds what that text can carry, and a side task sends its prompt as
+the new thread's first message. Starting one is not a review the way a clear
+is. The host's follow-up creator reads the source's mark when it creates the
+thread and hands the mark to the Chat, Work, or Code creation as a host-only
+input no wire command can carry; a source a person cleared passes on nothing.
+Fork, branch, and follow-up journal their marks through one shared step.
+
 An in-place restore (`restore-git-checkpoint`, sent by both Restore files to
 this point and Undo restore) overwrites a checkout other threads may share, so
 the host refuses it, as a `conflict` before Git is touched and before any undo
@@ -1551,8 +1572,9 @@ flowchart LR
     two modes already share (history from before that check) cannot be told
     apart, so a clear of it is refused as `thread-unavailable`.
   - One clear covers that thread and only it. A child run and a fork keep
-    their own taint; a Code fork starts with its source's mark when it is
-    made (see the Code fork rule under Modes).
+    their own taint; a Code fork, a Chat branch or restore, and a follow-up
+    or side task start with their source's mark when they are made (see the
+    Code fork rule under Modes).
   - A clear removes the mark only. Nothing leaves the model's context and the
     provider session is not restarted, so what the thread read can still steer
     the model.
@@ -1624,10 +1646,13 @@ flowchart LR
   conversation evidence is read in bounded batches and page results paint as
   they arrive; live Code operation frames carry bounded display text beside
   their durable evidence references. Work uses a bounded delta feed over its
-  durable transcript. A Work thread opens on its newest turns through a
-  windowed read and loads earlier pages on request; each page is one
+  durable transcript. Work and Chat threads open on their newest turns through
+  a windowed read and load earlier pages on request; each page is one
   contiguous run of whole turns, bounded by count and by text, and the
   journal and projection stay complete ([thread windows](design/host-reads-and-commands.md#thread-windows)).
+  Chat pages over the active conversation only and counts the turns edits
+  superseded, so nothing derived from the whole thread goes partial; the
+  Markdown copy and the thread's totals read the whole thread first.
   The older whole-transcript route answers with the newest 64 turns of a longer
   thread, oldest first; export and `#thread` mentions read the whole thread on
   the host. One post-commit Machine change feed invalidates mode
@@ -2062,7 +2087,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and Plan before any process starts, runs its `ask` mode below Full access
   and `code` only on Full access, authenticates only with a broker-held AI
   Gateway API key, and cannot read or write the Project root's `AGENTS.md`,
-  `.mcp.json`, `.fx.json`, or `.agents`. Image profiles are
+  `.mcp.json`, `.fx.json`, `.agents`, or `.claude/skills`. Image profiles are
   recorded in [decisions/0055-image-generation-provider-profiles.md](decisions/0055-image-generation-provider-profiles.md).
   Generation itself is a journaled job with adapters for the dedicated image
   kinds `openai-image`, `gemini-native-image`, `bfl-image` (Black Forest Labs),
@@ -3964,9 +3989,82 @@ prompt, schema, tool, route, model, or capability.
   `/` and metadata of every parent folder of those roots, because a runtime
   such as node will not start without them. Metadata names a folder; it does
   not read its contents.
-- Skills are discovered only from valid `.agents/skills/` packages between the
-  working directory and the Project or repository root, plus the user-global
-  `~/.agents/skills/`.
+- Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
+  packages between the working directory and the Project or repository root
+  (the closed `PROJECT_SKILL_ROOTS` allow-list), plus the user-global
+  `~/.agents/skills/`. The home folder's own `.claude` is never read, even when
+  the host's Project-less fallback root is the home folder. A symlinked skills
+  folder, or one that resolves outside the bound root, is ignored. Every root
+  enters the same activation ladder (indexed disabled, then reviewed, then
+  enabled; a discovered skill is never trusted or active because of where it
+  was found) with its own `sourceRef`, so same-named skills across roots are
+  two skills and neither wins silently.
+  Only one same-named skill is on where a thread can see it. Turning one on
+  turns off every same-named skill that shares a thread with it: built-in and
+  user-global skills, the same Project's root skills, and a thread's own. It
+  never changes another Project's skill, and another Project's skill is never
+  shown as given way. Every reconcile of the skill service (start-up, a
+  thread's working-directory change, each resolution of a turn's selected
+  extensions, Settings' reconcile) turns off both of any two same-named skills
+  that are on and share a thread, and lists the collision for the person to
+  choose. That normalises an activation file written before this rule. It also
+  fires when a skill whose stored "on" was briefly not discovered (an archived
+  worktree, a branch switch, a missing root) comes back after another
+  same-named skill was turned on: both stay off, a user-global or built-in one
+  for every Project, until the person chooses again. The rule fails safe;
+  between reconciles the catalog shows neither as effective. A collision is
+  listed only where one thread would see several sources without exactly one
+  in use. Installed marketplace skills are switched with their package, not
+  here.
+  A runtime that loads Project skill folders by itself is denied each such
+  folder in the OS profile (`forbiddenRootEntries`, read and write, in every
+  posture including Full access) unless a switch of its own is proven to turn
+  that loading off. Codex is the exception: it has no Octant OS profile, so
+  its `.agents/skills` loading is not handled yet. Only the skill folder is
+  denied; the folder around it (`.claude`, `.github`, `.grok`, and so on)
+  stays readable, because it holds the runtime's own settings or the
+  Project's other content. fx and Kimi Code deny all of `.agents`. Because the
+  deny covers writing as well as reading, a Code agent's own `git` commands on
+  these runtimes warn about tracked files in a denied folder, and a
+  `git checkout`, rebase, or pull across commits that touch such a folder
+  fails with a misleading "local changes would be overwritten" error. No data
+  is lost, and Octant's own server-side Git is unaffected. That is the
+  accepted cost of keeping unreviewed skills out of the runtime; fx and Kimi
+  Code have had it for `.agents` all along. The deny covers the Project root
+  only. Copilot, Grok, and Devin also walk upward from the
+  session folder (the Project root) to the repository root, Copilot to the
+  home folder when there is none, so when a Project is a subfolder of a
+  repository a skill folder above the Project root is not covered. No switch
+  closes that: Copilot's `enableConfigDiscovery` is a session option its ACP
+  server never sets and no flag or variable reaches, and neither Grok nor
+  Devin has one. Below Full access the profile hides such a folder only when
+  it lies inside the home folder. On Linux a deny path the Project does not
+  have is skipped in every posture, because Bubblewrap would create it as a
+  mount point (an empty folder, or a failed start on a read-only root); a
+  denied folder that appears mid-session is therefore not masked until the
+  runtime restarts, while macOS Seatbelt `subpath` denies cover a missing
+  path.
+
+  | Runtime                       | Project skill folders it loads by itself                                                                                                                                            | How                                                                                                                                                             |
+  | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | GitHub Copilot (ACP)          | `.agents/skills`, `.claude/skills`, `.github/skills`: the ACP session never sets `enableConfigDiscovery`, which defaults on (`copilot skill list`, CLI 1.0.90)                      | Denied (`forbiddenRootEntries`); no flag or variable turns discovery off in ACP                                                                                 |
+  | Grok Build (ACP)              | In a trusted folder: `.agents/skills`, `.agents/commands`, `.claude/skills`, `.claude/commands`, `.cursor/skills`, `.grok/skills`, `.grok/commands` (`grok inspect --json`, 1.0.50) | Denied. `GROK_CLAUDE_SKILLS_ENABLED=false` and `GROK_CURSOR_SKILLS_ENABLED=false` are not relied on: inspect still listed those folders' packages with them set |
+  | Devin (ACP)                   | `.agents/skills`, `.cognition/skills`, `.devin/skills`, and `.github/skills` unless switched off (`devin skills list`, 3000.10.27 and 3000.11.3)                                    | `read_config_from` sets every source false, `copilot` included, which removes `.github/skills`; the other three are denied, since no source turns them off      |
+  | fx (ACP)                      | Merges workspace skill roots by itself                                                                                                                                              | Denied: `.agents` and `.claude/skills`, with `AGENTS.md`, `.mcp.json`, `.fx.json`                                                                               |
+  | Goose (ACP)                   | `.agents/skills`, `.claude/skills`, `.goose/skills`, per its documentation (not installed here)                                                                                     | Denied; no documented switch                                                                                                                                    |
+  | Cline (ACP)                   | `.agents/skills`, `.claude/skills`, `.cline/skills`, `.clinerules/skills`, per its documentation and source (not installed here)                                                    | Denied; only a per-skill toggle is documented                                                                                                                   |
+  | Gemini CLI (ACP)              | `.agents/skills`, `.gemini/skills` once the folder is trusted, per its documentation and source (not installed here)                                                                | Denied; no documented variable or flag                                                                                                                          |
+  | Qwen Code (ACP)               | `.agents/skills`, `.qwen/skills`, per its source (not installed here)                                                                                                               | Denied; only bare mode skips them                                                                                                                               |
+  | GLM Agent (ACP)               | `.claude/skills`, advertised as commands and put into the message when `/name` is typed, per its README (not installed here)                                                        | Denied                                                                                                                                                          |
+  | Kimi Code (ACP)               | `.agents/skills`, `.kimi-code/skills` (0.38 bundle)                                                                                                                                 | Denied: `.agents` and `.kimi-code`                                                                                                                              |
+  | Claude (Agent SDK)            | None: switched off                                                                                                                                                                  | `settingSources: []`, `skills: []`                                                                                                                              |
+  | OpenCode (server and ACP)     | None: switched off                                                                                                                                                                  | `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1`, `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`, project config off, `skill` permission denied                                    |
+  | Kilo (ACP)                    | None: switched off                                                                                                                                                                  | `KILO_DISABLE_EXTERNAL_SKILLS=1`, `KILO_DISABLE_PROJECT_CONFIG=1`, `KILO_PURE=1`                                                                                |
+  | Mistral Vibe (ACP)            | None: switched off                                                                                                                                                                  | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`                                                                 |
+  | Pi, Oh My Pi                  | None: switched off                                                                                                                                                                  | `--no-skills`                                                                                                                                                   |
+  | Codex                         | `.agents/skills`, in the Project and up to the repository root (app-server `skills/list`, 0.162.1); not `.claude/skills`                                                            | Not handled yet: Codex runs without an Octant OS profile, so a root deny does not apply                                                                         |
+  | Direct HTTP and image drivers | None: no runtime of their own                                                                                                                                                       | n/a                                                                                                                                                             |
+
   Where a skill is found decides who sees it, in the catalog, the palette, the
   turn resolver, presets, Code profile admission, and Canvas refresh. A skill
   below the Project root belongs to the one thread whose working directory
@@ -3977,11 +4075,7 @@ prompt, schema, tool, route, model, or capability.
   neither and reach every thread. A Project scope is its own field, not a
   `scope` without a thread, so a client that predates it drops the field
   rather than refusing the snapshot; the host still filters every turn.
-  Not built yet: discovery also reads an allow-listed set of extra skill roots
-  (for example `.claude/skills`), each entering the same activation ladder as
-  `.agents/skills/` (indexed disabled, then reviewed, then enabled; a
-  discovered skill is never trusted or active because of where it was found).
-  Until this is built, only `.agents/skills/` is read.
+
 - Marketplace network is on user action: curated catalog search is in-memory;
   inspect/install fetches the pinned GitHub tree; standalone skill search
   queries skills.sh and npm with the typed text; Agent Plugins search queries
@@ -4475,7 +4569,9 @@ mechanisms are:
   extension or host-auth paths to deny (Kimi, for example) launches Full access
   under an allow-default `sandbox-exec` profile or a Bubblewrap host-root bind
   that denies only those paths (`makeAcpConfinementLive`). That wrapper
-  confines nothing else.
+  confines nothing else. On Linux a deny path that does not exist is skipped,
+  because Bubblewrap would create it in the person's own Project (see
+  [Extensions and skills](#extensions-and-skills)).
 
   | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                         |
   | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------ |
