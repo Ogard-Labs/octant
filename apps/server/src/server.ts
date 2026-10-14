@@ -3240,13 +3240,16 @@ export function startOctantServer(
       },
       projectExists: (projectId) => persistence.readProject(projectId as never) !== undefined,
       // Decided by the instance's runtime capability as the host observes it
-      // now, for old rows too. A removed instance or one with no observation
-      // yet counts, so its unreported turns keep refusing.
+      // now, for old rows too. A removed or disabled instance, or one with no
+      // observation yet, counts, so its unreported turns keep refusing.
+      // Disabling a provider with a live session leaves its last observation
+      // in place, so the enabled flag is checked here rather than trusted to
+      // have cleared it.
       notMeasuredProvider: (providerInstanceId) => {
         const instance = persistence
           .readProviderInstances()
           .find((candidate) => String(candidate.id) === providerInstanceId);
-        if (instance === undefined) return undefined;
+        if (instance === undefined || !instance.enabled) return undefined;
         const observed = providerRuntimeRegistry.observedState(instance.id);
         return providerUsageIsNotMeasured(observed?.capabilities.usage)
           ? { providerInstanceId: instance.id, displayName: instance.displayName }
