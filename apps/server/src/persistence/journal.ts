@@ -130,6 +130,8 @@ export class Journal {
   readonly #selectHeadSequence: SqliteStatement;
   readonly #replayRows: SqliteStatement;
   readonly #replayAggregateTypeRows: SqliteStatement;
+  readonly #replayNarrowedAggregateTypeRows: SqliteStatement;
+  readonly #aggregateVersionRows: SqliteStatement;
   readonly #replayAggregateTypeThreadRows: SqliteStatement;
   readonly #replayThreadAnchoredRows: SqliteStatement;
   readonly #replayAggregateRows: SqliteStatement;
@@ -200,6 +202,31 @@ export class Journal {
       WHERE aggregate_type = ? AND global_sequence > ?
       ORDER BY global_sequence ASC
       LIMIT ?
+    `);
+    // The same read with rows a caller has no use for left out in SQL, so
+    // they are never parsed or decoded: a startup that needs a few kinds of
+    // record from an aggregate type no longer decodes every row of it. Each
+    // narrowing is skipped when its parameter is NULL.
+    this.#replayNarrowedAggregateTypeRows = options.connection.prepare(`
+      SELECT
+        global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
+        actor_id, ${actorJsonSelect}, occurred_at, payload_json
+      FROM event_journal
+      WHERE aggregate_type = ? AND global_sequence > ?
+        AND (? IS NULL OR event_name = ?)
+        AND (? IS NULL OR event_name <> ?)
+        AND (? IS NULL OR substr(json_extract(payload_json, ?), 1, length(?)) = ?)
+      ORDER BY global_sequence ASC
+      LIMIT ?
+    `);
+    // Every aggregate of a type with the version of its newest event, read
+    // from the unique (type, id, version) index without touching a payload.
+    this.#aggregateVersionRows = options.connection.prepare(`
+      SELECT aggregate_id, max(aggregate_version) AS aggregate_version
+      FROM event_journal
+      WHERE aggregate_type = ?
+      GROUP BY aggregate_id
     `);
     // Filters on the payload's `threadId` in SQL so a per-thread read never
     // decodes other threads' rows: a dogfooding host whose journal was 94%
@@ -654,10 +681,21 @@ export class Journal {
     ).map((row) => this.#decodeRow(row));
   }
 
+  /**
+   * An aggregate type's events in journal order. The optional narrowings
+   * leave rows out before they are read: only one event name, every event
+   * name but one, or only rows whose payload value at `path` (dotted keys),
+   * read as text, starts with `prefix`. The prefix test may let through a row
+   * whose value is not a string, so a caller checks what it reads; every row
+   * returned still decodes through the registered schema.
+   */
   replayAggregateType(cursor: {
     readonly aggregateType: string;
     readonly afterSequence: number;
     readonly limit: number;
+    readonly eventName?: string;
+    readonly exceptEventName?: string;
+    readonly payloadPrefix?: { readonly path: string; readonly prefix: string };
   }): ReadonlyArray<EventEnvelope> {
     if (
       cursor.aggregateType.trim().length === 0 ||
@@ -665,17 +703,64 @@ export class Journal {
       cursor.afterSequence < 0 ||
       !Number.isSafeInteger(cursor.limit) ||
       cursor.limit < 1 ||
-      cursor.limit > 1_000
+      cursor.limit > 1_000 ||
+      cursor.eventName?.trim().length === 0 ||
+      cursor.exceptEventName?.trim().length === 0 ||
+      (cursor.payloadPrefix !== undefined &&
+        (!PAYLOAD_PATH_PATTERN.test(cursor.payloadPrefix.path) ||
+          cursor.payloadPrefix.prefix.length === 0))
     ) {
       throw new JournalInputInvalid({ operation: "replay" });
     }
+    if (
+      cursor.eventName === undefined &&
+      cursor.exceptEventName === undefined &&
+      cursor.payloadPrefix === undefined
+    ) {
+      return (
+        this.#replayAggregateTypeRows.all(
+          cursor.aggregateType,
+          cursor.afterSequence,
+          cursor.limit,
+        ) as Array<JournalRow>
+      ).map((row) => this.#decodeRow(row));
+    }
+    const eventName = cursor.eventName ?? null;
+    const exceptEventName = cursor.exceptEventName ?? null;
+    const path = cursor.payloadPrefix === undefined ? null : `$.${cursor.payloadPrefix.path}`;
+    const prefix = cursor.payloadPrefix?.prefix ?? null;
     return (
-      this.#replayAggregateTypeRows.all(
+      this.#replayNarrowedAggregateTypeRows.all(
         cursor.aggregateType,
         cursor.afterSequence,
+        eventName,
+        eventName,
+        exceptEventName,
+        exceptEventName,
+        path,
+        path,
+        prefix,
+        prefix,
         cursor.limit,
       ) as Array<JournalRow>
     ).map((row) => this.#decodeRow(row));
+  }
+
+  /**
+   * Every aggregate of a type and the version of its newest event: what a
+   * replay of every row of the type would leave as each aggregate's version,
+   * without decoding any of them.
+   */
+  aggregateVersions(
+    aggregateType: string,
+  ): ReadonlyArray<{ readonly aggregateId: string; readonly aggregateVersion: number }> {
+    if (aggregateType.trim().length === 0) throw new JournalInputInvalid({ operation: "replay" });
+    return (
+      this.#aggregateVersionRows.all(aggregateType) as Array<{
+        readonly aggregate_id: string;
+        readonly aggregate_version: number;
+      }>
+    ).map((row) => ({ aggregateId: row.aggregate_id, aggregateVersion: row.aggregate_version }));
   }
 
   replayAggregateTypeForThread(cursor: {
@@ -1057,6 +1142,9 @@ function findDuplicate(values: ReadonlyArray<string>): string | undefined {
   }
   return undefined;
 }
+
+/** Dotted payload keys a narrowed replay may read, so a caller cannot write its own JSON path. */
+const PAYLOAD_PATH_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/;
 
 /** An optional exclusive sequence bound: absent, or a positive safe integer. */
 function validBound(sequence: number | undefined): boolean {
