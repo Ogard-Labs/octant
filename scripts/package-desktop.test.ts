@@ -943,7 +943,7 @@ describe("the terminal launcher the desktop app ships", () => {
       const repository = resolve(root, "repository");
       await mkdir(resolve(repository, "packages/cli/dist"), { recursive: true });
       await writeFile(
-        resolve(repository, "packages/cli/dist/terminal-launcher.mjs"),
+        resolve(repository, "packages/cli/dist/terminalLauncherMain.mjs"),
         "// bundle\n",
       );
       // An app moved to a path with a space, as a person's Applications folder can be.

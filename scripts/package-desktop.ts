@@ -288,7 +288,7 @@ export async function installTerminalLauncher(
   directory: string,
   productName: string = DESKTOP_PACKAGE_IDENTITY.productName,
 ): Promise<void> {
-  const bundle = "packages/cli/dist/terminal-launcher.mjs";
+  const bundle = "packages/cli/dist/terminalLauncherMain.mjs";
   if (!existsSync(resolve(repositoryRoot, bundle))) {
     throw new Error(`Required built output is missing: ${bundle}. Run bun run build first.`);
   }

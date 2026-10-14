@@ -24,7 +24,7 @@ export default defineConfig([
       alwaysBundle: [/./],
       onlyBundle: false,
     },
-    entry: { "terminal-launcher": "src/terminalLauncherMain.ts" },
+    entry: ["src/terminalLauncherMain.ts"],
     format: ["esm"],
     platform: "node",
     target: "es2024",
