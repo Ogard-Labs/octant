@@ -63,12 +63,17 @@ function fixture(mode = "ready"): {
     `#!/bin/sh\nFAKE_CLAUDE_MODE='${mode}' FAKE_CLAUDE_ROOT='${root}' exec '${fakeCliPath}' "$@"\n`,
   );
   chmodSync(binaryPath, 0o755);
+  // A Plan launch creates its runtime folders in the account directory, so
+  // every fixture names one of its own rather than the person's `~/.claude`.
+  const configDirectory = mkdtempSync(join(tmpdir(), "octant-claude-config-"));
+  directories.push(configDirectory);
   return {
     binaryPath,
     root,
     environment: {
       PATH: process.env.PATH,
       HOME: process.env.HOME,
+      CLAUDE_CONFIG_DIR: configDirectory,
     },
   };
 }
@@ -731,11 +736,11 @@ describe("Claude runtime confinement", () => {
     expect(pids(target.root)).toEqual([]);
   });
 
-  it("grants a Plan turn its account folder as a write root", () => {
+  it("lets a Plan turn write only the runtime's session and transcript folders of its account", () => {
     const target = fixture();
     // A folder of the test's own. This used to be made inside the person's
     // real `~/.claude-accounts`, which a test has no business touching.
-    const configDirectory = mkdtempSync(join(tmpdir(), "octant-claude-account-"));
+    const configDirectory = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-account-")));
     directories.push(configDirectory);
     const confinement = recordingConfinement();
 
@@ -746,14 +751,69 @@ describe("Claude runtime confinement", () => {
       command: target.binaryPath,
       args: ["sdk-test"],
       cwd: target.root,
-      env: { ...target.environment, CLAUDE_CONFIG_DIR: configDirectory },
+      env: {
+        ...target.environment,
+        CLAUDE_CONFIG_DIR: configDirectory,
+        ANTHROPIC_API_KEY: "sk-test-not-a-real-key",
+      },
       signal: new AbortController().signal,
     });
     child.kill("SIGTERM");
 
     const launch = confinement.prepared[0];
     if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
-    expect(launch.additionalWriteRoots).toContain(realpathSync(configDirectory));
+    // The folder is read whole, and written only where the runtime keeps a
+    // session: never its settings, hooks, skills, plugins or `.claude.json`.
+    expect(launch.readRoots).toContain(configDirectory);
+    expect(launch.additionalWriteRoots).toEqual([
+      join(configDirectory, "sessions"),
+      join(configDirectory, "projects"),
+    ]);
+    // Made before the launch, because the launch cannot create them itself.
+    expect(readdirSync(configDirectory).sort()).toEqual(["projects", "sessions"]);
+  });
+
+  it("lets a subscription Plan turn rewrite its login file only where the login is a file", () => {
+    const target = fixture();
+    const configDirectory = realpathSync(target.environment.CLAUDE_CONFIG_DIR ?? "");
+    const secureStorage = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-secure-")));
+    directories.push(secureStorage);
+    const confinement = recordingConfinement();
+
+    for (const environment of [
+      target.environment,
+      { ...target.environment, CLAUDE_SECURESTORAGE_CONFIG_DIR: secureStorage },
+      { ...target.environment, ANTHROPIC_API_KEY: "sk-test-not-a-real-key" },
+    ]) {
+      const child = makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: environment,
+        signal: new AbortController().signal,
+      });
+      child.kill("SIGTERM");
+    }
+
+    const [subscription, named, apiKey] = confinement.prepared.map(
+      (launch) => launch.additionalWriteRoots ?? [],
+    );
+    if (process.platform === "darwin") {
+      // The login lives in the Keychain, which the launch may read but never write.
+      expect(subscription).not.toContainEqual(expect.stringContaining(".credentials.json"));
+      expect(named).not.toContainEqual(expect.stringContaining(".credentials.json"));
+    } else {
+      expect(subscription).toContain(join(configDirectory, ".credentials.json"));
+      expect(named).toContain(join(secureStorage, ".credentials.json"));
+      expect(named).not.toContain(join(configDirectory, ".credentials.json"));
+    }
+    // A secure-storage folder is read for the login, and never a write root itself.
+    expect(confinement.prepared[1]?.readRoots).toContain(secureStorage);
+    expect(named).not.toContain(secureStorage);
+    expect(apiKey).not.toContainEqual(expect.stringContaining(".credentials.json"));
   });
 
   it("refuses a Plan turn whose temporary directory is inside the checkout", () => {
@@ -838,6 +898,17 @@ describe("Claude runtime confinement", () => {
       const probe = join(target.root, "confinedPlanProbe.sh");
       copyFileSync(planProbePath, probe);
       chmodSync(probe, 0o755);
+      // The account directory: the runtime's session folders are writable, and
+      // what a later session loads is not.
+      const stateRoot = realpathSync(target.environment.CLAUDE_CONFIG_DIR ?? "");
+      mkdirSync(join(stateRoot, "skills"));
+      const stateWrites = [
+        "settings.json",
+        ".claude.json",
+        "skills/SKILL.md",
+        "sessions/probe.json",
+        "projects/probe.jsonl",
+      ];
 
       // The limit only bounds a failed cleanup. Half a second was too short on
       // a loaded machine: the group outlived it and the test failed with
@@ -854,6 +925,8 @@ describe("Claude runtime confinement", () => {
           ...(apiKey === undefined ? {} : { ANTHROPIC_API_KEY: apiKey }),
           OCTANT_PROBE_TARGET: escapeTarget,
           OCTANT_PROBE_READABLE: readable,
+          OCTANT_PROBE_STATE_ROOT: stateRoot,
+          OCTANT_PROBE_STATE_WRITES: stateWrites.map((path) => join(stateRoot, path)).join(":"),
         },
         signal: new AbortController().signal,
       });
@@ -867,6 +940,14 @@ describe("Claude runtime confinement", () => {
       expect(existsSync(escapeTarget)).toBe(false);
       // The checkout is readable; only writing and running something is not.
       expect(output).toContain("read=in-the-checkout");
+      // A settings hook, a skill or an MCP server planted here would run on a
+      // later turn outside this sandbox.
+      expect(output).toContain("state:settings.json=refused");
+      expect(output).toContain("state:.claude.json=refused");
+      expect(output).toContain("state:skills/SKILL.md=refused");
+      expect(existsSync(join(stateRoot, "settings.json"))).toBe(false);
+      expect(output).toContain("state:sessions/probe.json=allowed");
+      expect(output).toContain("state:projects/probe.jsonl=allowed");
       // The probe asks for a child process last, and no launch may run one.
       expect(output).not.toContain("exec=allowed");
       if (forks) {

@@ -249,8 +249,8 @@ export function listThreadFileAnchors(
 
 /**
  * Aggregate types that belong to a Canvas and nothing else: the Canvas, its
- * comments, share and access history, refresh and action receipts, and
- * artifact-mirror receipts.
+ * comments, share and access history, refresh and action receipts,
+ * artifact-mirror receipts, and its record of outside content.
  */
 const CANVAS_FAMILY_AGGREGATE_TYPES = new Set<string>([
   "canvas",
@@ -260,6 +260,7 @@ const CANVAS_FAMILY_AGGREGATE_TYPES = new Set<string>([
   "canvas-refresh",
   "canvas-action",
   "artifact-mirror",
+  "canvas-outside-content",
 ]);
 
 /**
@@ -282,6 +283,7 @@ export function collectCanvasFamilyAggregates(
   followLinkedAggregates(connection, keys, add, "canvas", CANVAS_LINK_PATHS);
   add("canvas-comments", canvasId);
   add("artifact-mirror", canvasId);
+  add("canvas-outside-content", canvasId);
   return [...keys.values()];
 }
 
@@ -374,6 +376,7 @@ function collectOwnedAggregates(
   for (const canvasId of idsOf(keys, "canvas")) {
     add("canvas-comments", canvasId);
     add("artifact-mirror", canvasId);
+    add("canvas-outside-content", canvasId);
   }
   followLinkedAggregates(connection, keys, add, "agent-run", RUN_LINK_PATHS);
   for (const sessionId of harnessSessionIds(connection, threadId)) {

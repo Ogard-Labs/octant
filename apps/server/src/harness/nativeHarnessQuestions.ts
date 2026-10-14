@@ -13,14 +13,29 @@ import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
 const DEFAULT_QUESTION_TIMEOUT_MS = 10 * 60_000;
 
-export type NativeHarnessQuestionOutcome =
+/**
+ * At most this many harness questions wait for a person at once across the
+ * whole host, the same cap harness, MCP, and browser tool approvals use. A
+ * lead or child that keeps asking would otherwise stack questions without
+ * bound; past the cap a question is refused at once and nothing is journaled.
+ */
+export const MAX_WAITING_NATIVE_HARNESS_QUESTIONS = 32;
+
+/** How an asked, journaled question settles. */
+type SettledQuestionOutcome =
   | { readonly status: "answered"; readonly answer: string }
   | { readonly status: "expired" }
   | { readonly status: "cancelled" };
 
+/** A question refused before it was asked; nothing was journaled for it. */
+type RefusedQuestionOutcome = { readonly status: "too-many-waiting" };
+
+export type NativeHarnessQuestionOutcome = SettledQuestionOutcome | RefusedQuestionOutcome;
+
 interface Waiter {
   readonly threadId: string;
-  readonly resolve: (outcome: NativeHarnessQuestionOutcome) => void;
+  readonly expiresAt: number;
+  readonly resolve: (outcome: SettledQuestionOutcome) => void;
   readonly timer: ReturnType<typeof setTimeout>;
   readonly onAbort: () => void;
   readonly signal: AbortSignal | undefined;
@@ -40,6 +55,11 @@ export interface NativeHarnessQuestionStoreOptions {
     readonly mode: OctantMode;
     readonly question: NativeHarnessQuestion;
   }) => void;
+  /**
+   * Told when an asked question settles however it settled, so a surface
+   * that showed it (Code's inline question) stops listing it.
+   */
+  readonly onSettled?: (input: { readonly threadId: string; readonly questionId: string }) => void;
 }
 
 /**
@@ -65,7 +85,14 @@ export class NativeHarnessQuestionStore {
     readonly prompt: string;
     readonly options: ReadonlyArray<string>;
     readonly signal?: AbortSignal | undefined;
-  }): Promise<NativeHarnessQuestionOutcome & { readonly questionId: NativeHarnessQuestionId }> {
+  }): Promise<
+    | (SettledQuestionOutcome & { readonly questionId: NativeHarnessQuestionId })
+    | RefusedQuestionOutcome
+  > {
+    this.#expire();
+    if (this.#waiters.size >= MAX_WAITING_NATIVE_HARNESS_QUESTIONS) {
+      return Promise.resolve({ status: "too-many-waiting" });
+    }
     this.#options.sessions.ensure({
       threadId: input.threadId,
       mode: input.mode,
@@ -74,13 +101,15 @@ export class NativeHarnessQuestionStore {
       lead: input.lead,
     });
     const questionId = decodeNativeHarnessQuestionId(this.#options.uuid());
+    const askedAt = decodeUtcTimestamp(this.#options.clock());
+    const timeoutMs = this.#options.timeoutMs ?? DEFAULT_QUESTION_TIMEOUT_MS;
     const question = decodeNativeHarnessQuestion({
       id: questionId,
       ...(input.source === undefined ? {} : { source: input.source }),
       prompt: input.prompt,
       options: input.options,
       status: "pending",
-      askedAt: decodeUtcTimestamp(this.#options.clock()),
+      askedAt,
     });
     this.#options.sessions.askQuestion(input.threadId, question);
     try {
@@ -89,22 +118,25 @@ export class NativeHarnessQuestionStore {
       // A surface that cannot show the question does not stop it being asked.
     }
     return new Promise((resolve) => {
-      const settle = (outcome: NativeHarnessQuestionOutcome) => {
+      const settle = (outcome: SettledQuestionOutcome) => {
         const waiter = this.#waiters.get(String(questionId));
         if (waiter === undefined) return;
         this.#waiters.delete(String(questionId));
         clearTimeout(waiter.timer);
         waiter.signal?.removeEventListener("abort", waiter.onAbort);
         this.#options.sessions.settleQuestion(input.threadId, questionId, outcome);
+        try {
+          this.#options.onSettled?.({ threadId: input.threadId, questionId: String(questionId) });
+        } catch {
+          // A surface that cannot withdraw its copy does not stop the settlement.
+        }
         resolve({ ...outcome, questionId });
       };
       const waiter: Waiter = {
         threadId: input.threadId,
+        expiresAt: Date.parse(askedAt) + timeoutMs,
         resolve: settle,
-        timer: setTimeout(
-          () => settle({ status: "expired" }),
-          this.#options.timeoutMs ?? DEFAULT_QUESTION_TIMEOUT_MS,
-        ),
+        timer: setTimeout(() => settle({ status: "expired" }), timeoutMs),
         onAbort: () => settle({ status: "cancelled" }),
         signal: input.signal,
       };
@@ -122,6 +154,7 @@ export class NativeHarnessQuestionStore {
    * question, or one lost to a restart, has no waiter and is not here.
    */
   waiting(): ReadonlyArray<{ readonly threadId: string; readonly questionId: string }> {
+    this.#expire();
     return [...this.#waiters].map(([questionId, waiter]) => ({
       threadId: waiter.threadId,
       questionId,
@@ -130,6 +163,7 @@ export class NativeHarnessQuestionStore {
 
   /** Whether a pending question with this id belongs to the thread. */
   owns(threadId: string, questionId: string): boolean {
+    this.#expire();
     return this.#waiters.get(questionId)?.threadId === threadId;
   }
 
@@ -138,6 +172,7 @@ export class NativeHarnessQuestionStore {
     questionId: string,
     answer: string,
   ): "answered" | "question-not-found" | "already-settled" {
+    this.#expire();
     const waiter = this.#waiters.get(questionId);
     if (waiter === undefined || waiter.threadId !== threadId) {
       // No turn is waiting (a restart, say); the journaled question can still
@@ -150,5 +185,28 @@ export class NativeHarnessQuestionStore {
     }
     waiter.resolve({ status: "answered", answer });
     return "answered";
+  }
+
+  /**
+   * Settles every question whose time is up by the clock as expired, journaled
+   * exactly as a timer expiry is. A reader of the session view calls this
+   * first so the person is never shown an overdue question as pending.
+   */
+  expireOverdue(): void {
+    this.#expire();
+  }
+
+  /**
+   * The timer alone is not enough: it fires late behind a busy event loop or
+   * across a machine's sleep, and until it fires an overdue question would
+   * still be listed, could still be answered, and would hold a waiting slot.
+   * So asking, listing, and answering all check the clock first, as the
+   * harness approvals do.
+   */
+  #expire(): void {
+    const now = Date.parse(this.#options.clock());
+    for (const waiter of [...this.#waiters.values()]) {
+      if (waiter.expiresAt <= now) waiter.resolve({ status: "expired" });
+    }
   }
 }

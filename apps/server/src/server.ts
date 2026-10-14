@@ -477,6 +477,7 @@ import { createAutomationNotificationRouteHandler } from "./automation/automatio
 import { createUnavailablePushDeliveryTransport } from "./automation/pushDeliveryTransport";
 import { createPushNotificationTokenStore } from "./remote/pushNotificationTokenStore";
 import { CanvasEventStore } from "./canvas/canvasEventStore";
+import { markCanvasReader } from "./canvas/canvasOutsideContentMark";
 import { CanvasService, type CanvasServiceDependencies } from "./canvas/canvasService";
 import { CanvasCommentService } from "./canvas/canvasCommentService";
 import { CanvasShareEventStore } from "./canvas/canvasShareEventStore";
@@ -6308,6 +6309,9 @@ export function startOctantServer(
           options: question.options,
         });
       },
+      // Settled anywhere (another surface, expiry, cancellation): the inline
+      // copy goes too, so Code never lists or accepts an answer to it.
+      onSettled: (input) => codeOperationRuntime?.withdrawHarnessQuestion?.(input),
     });
     const nativeHarnessQuestionsLive = nativeHarnessQuestions;
     const nativeHarnessApprovals = new NativeHarnessApprovalStore({
@@ -6408,6 +6412,7 @@ export function startOctantServer(
       store: {
         read: (threadId) => {
           nativeHarnessApprovals.expireOverdue();
+          nativeHarnessQuestionsLive.expireOverdue();
           const view = nativeHarnessSessionsLive.read(threadId);
           const suggestions = threadFollowUpSuggestions.read(threadId);
           return view === undefined || suggestions === undefined
@@ -9053,10 +9058,14 @@ export function startOctantServer(
         });
       },
     });
+    // A version written while its thread, or the child writing it, is marked
+    // with outside content makes the Canvas carry that mark, whoever reads it
+    // later and whatever a person clears on the writer afterwards.
     const canvasEventStore = new CanvasEventStore({
       journal: persistence.journal,
       uuid: randomUUID,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      writerMarked: threadOutsideContentMarks.isMarked,
     });
     // One server-owned Canvas authority, shared by every Canvas mutation
     // including sharing, so a share can never be admitted under weaker checks
@@ -9673,6 +9682,18 @@ export function startOctantServer(
           : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
       },
       canvas: canvasService,
+      markReader: ({ readerId, canvasId }) => {
+        const entry = persistence.canvasProjection.getById(canvasId);
+        if (entry === undefined) return { status: "refused" };
+        return markCanvasReader({
+          journal: persistence.journal,
+          marks: threadOutsideContentMarks,
+          readerId,
+          canvasId: String(canvasId),
+          canvasThreadId: String(entry.currentVersion.definition.provenance.threadId),
+          correlationId: randomUUID,
+        });
+      },
       preview: createCanvasPreviewService({
         canvas: canvasService,
         resolveDesignAssets,
