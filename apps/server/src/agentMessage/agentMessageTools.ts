@@ -61,7 +61,7 @@ const PLAN_REFUSAL = "Plan mode is read-only; this thread cannot send an agent m
  * runs. A refused call never reaches the delivery service.
  */
 export function createAgentMessageTools(input: {
-  readonly service: Pick<AgentMessageService, "send">;
+  readonly service: Pick<AgentMessageService, "send" | "recordRefusedSend">;
   readonly senderThreadId: string;
   readonly senderRunId?: string;
   /** The sender thread's snapshotted profile allowlist; empty permits every tool. */
@@ -82,6 +82,25 @@ export function createAgentMessageTools(input: {
     if (profile.status === "refused") return profile.reason;
     return input.readPosture() === "plan" ? PLAN_REFUSAL : undefined;
   };
+  const journalRefusedCall = async (inputJson: string): Promise<void> => {
+    try {
+      const parsed = JSON.parse(inputJson) as {
+        recipients?: ReadonlyArray<{ threadId?: unknown }>;
+      };
+      const recipients = (parsed.recipients ?? []).flatMap((candidate) => {
+        try {
+          return [{ threadId: decodeAgentMessageEndpointId(String(candidate.threadId)) }];
+        } catch {
+          return [];
+        }
+      });
+      if (recipients.length === 0) return;
+      await input.service.recordRefusedSend({ senderThreadId, recipients, reason: "policy" });
+    } catch {
+      // A call too malformed to name a recipient, or a journal that is not
+      // available, leaves the sender's answer as it was.
+    }
+  };
   return {
     // A tool this turn could only be refused is omitted, not advertised.
     definitions: refusal() === undefined ? [definition] : [],
@@ -94,6 +113,9 @@ export function createAgentMessageTools(input: {
       }
       const refused = refusal();
       if (refused !== undefined) {
+        // The refusal is the sender's to see here and the person's to see in
+        // the Agents center, so it is journaled when the call names anyone.
+        await journalRefusedCall(inputJson);
         return { result: { status: "refused", reason: "policy", message: refused }, isError: true };
       }
       let recipients: ReadonlyArray<{ threadId: string }>;

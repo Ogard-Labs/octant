@@ -34,6 +34,46 @@ describe("AgentMessagingFactsRow", () => {
     expect(screen.getByText(/Latest refusal: recipient closed/)).toBeVisible();
   });
 
+  it("lists each refused message with its sender, the thread it named, and the reason", () => {
+    const refused = (id: string, reason: "unauthorized" | "policy") => ({
+      messageId: `10000000-0000-4000-8000-0000000000${id}` as never,
+      senderThreadId: "code-0000-0000-4000-8000-00000000000a" as never,
+      recipientThreadId: `code-0000-0000-4000-8000-0000000000${id}` as never,
+      state: "refused" as const,
+      refuseReason: reason,
+      occurredAt: new Date(Date.now() - 5 * 60_000).toISOString() as never,
+    });
+    render(
+      <AgentMessagingFactsRow
+        client={undefined}
+        facts={{
+          ...facts,
+          refused: 2,
+          recent: [refused("c1", "unauthorized"), refused("c2", "policy")],
+        }}
+      />,
+    );
+    const rows = screen.getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.textContent).toContain("code-000…");
+    expect(rows[0]?.textContent).toContain("not reachable");
+    expect(rows[0]?.textContent).toContain("5m ago");
+    expect(rows[1]?.textContent).toContain("refused by policy");
+    expect(rows[0]?.querySelector("span[title]")?.getAttribute("title")).toBe(
+      "code-0000-0000-4000-8000-00000000000a",
+    );
+  });
+
+  it("shows no refusal list while nothing was refused", () => {
+    render(
+      <AgentMessagingFactsRow
+        client={undefined}
+        facts={{ ...facts, refused: 0, recent: [{ ...facts.recent[0]!, state: "delivered" }] }}
+      />,
+    );
+    expect(screen.queryByLabelText("Refused agent messages")).toBeNull();
+  });
+
   it("says nothing while it has no facts and no client to read them from", () => {
     const { container } = render(<AgentMessagingFactsRow client={undefined} />);
     expect(container).toBeEmptyDOMElement();

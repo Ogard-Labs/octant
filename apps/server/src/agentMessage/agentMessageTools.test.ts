@@ -25,8 +25,9 @@ function fixture(
       message: "Admitted.",
     })),
   );
+  const recordRefusedSend = vi.fn<AgentMessageService["recordRefusedSend"]>(async () => undefined);
   const tools = createAgentMessageTools({
-    service: { send },
+    service: { send, recordRefusedSend },
     senderThreadId,
     toolConstraints: options.toolConstraints ?? [],
     profileDisplayName: "Reviewer",
@@ -35,6 +36,7 @@ function fixture(
   return {
     tools,
     send,
+    recordRefusedSend,
     setPosture: (next: ProviderExecutionPolicy) => {
       posture = next;
     },
@@ -75,7 +77,7 @@ describe("the agent message tool", () => {
   });
 
   it("refuses to send once the thread dropped to Plan while its turn was running", async () => {
-    const { tools, send, setPosture } = fixture();
+    const { tools, send, recordRefusedSend, setPosture } = fixture();
     expect(tools.definitions).toHaveLength(1);
     setPosture("plan");
 
@@ -84,6 +86,26 @@ describe("the agent message tool", () => {
       result: { status: "refused", reason: "policy" },
     });
     expect(send).not.toHaveBeenCalled();
+    // The refusal is journaled so the Agents center can show it.
+    expect(recordRefusedSend).toHaveBeenCalledExactlyOnceWith({
+      senderThreadId,
+      recipients: [{ threadId: recipientThreadId }],
+      reason: "policy",
+    });
+  });
+
+  it("answers a refused call the same when the refusal cannot be journaled or names nobody", async () => {
+    const { tools, recordRefusedSend } = fixture({ posture: "plan" });
+    recordRefusedSend.mockRejectedValueOnce(new Error("journal unavailable"));
+
+    expect(await tools.execute(call)).toMatchObject({
+      isError: true,
+      result: { status: "refused", reason: "policy" },
+    });
+    expect(
+      await tools.execute({ name: AGENT_MESSAGE_TOOL_NAME, inputJson: "not json" }),
+    ).toMatchObject({ isError: true, result: { status: "refused" } });
+    expect(recordRefusedSend).toHaveBeenCalledTimes(1);
   });
 
   it("is withheld from a profile whose tool allowlist leaves it out, and offered to one that names it", async () => {

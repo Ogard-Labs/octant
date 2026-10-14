@@ -251,6 +251,21 @@ describe("the agent message delivery service", () => {
     // Nothing waits for the thread in the other Project, and its next turn
     // carries nothing and marks nothing.
     expect(projection.inFlight()).toEqual([]);
+    // Each refusal reaches the sender's facts with the reason and the thread
+    // it was addressed to, though no message was ever admitted.
+    const facts = projection.messagingFacts(MAX_OPEN_AGENT_MESSAGES_PER_SENDER);
+    expect(facts.refused).toBe(3);
+    expect(facts.recent).toHaveLength(3);
+    expect(facts.recent).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: "refused",
+          refuseReason: "unauthorized",
+          senderThreadId: String(senderThreadId),
+          recipientThreadId: String(otherProjectThreadId),
+        }),
+      ]),
+    );
     expect(await service.carryIntoTurn(String(otherProjectThreadId))).toEqual([]);
     expect(ingested).toHaveLength(0);
   });
@@ -486,6 +501,26 @@ describe("the agent message delivery service", () => {
     expect(outcomes[0]).toMatchObject({ status: "refused", reason: "oversize" });
     expect(names()).toEqual(["agent.message-refused@1"]);
     expect(ingested).toHaveLength(0);
+  });
+
+  it("journals a refusal the tool made before admission, one per named recipient, with no body", async () => {
+    const { service, names, projection, root } = fixture();
+    await service.recordRefusedSend({
+      senderThreadId,
+      recipients: [{ threadId: recipientThreadId }, { threadId: otherProjectThreadId }],
+      reason: "policy",
+    });
+
+    expect(names()).toEqual(["agent.message-refused@1", "agent.message-refused@1"]);
+    const facts = projection.messagingFacts(MAX_OPEN_AGENT_MESSAGES_PER_SENDER);
+    expect(facts.refused).toBe(2);
+    expect(facts.recent.map((entry) => entry.recipientThreadId).sort()).toEqual(
+      [String(recipientThreadId), String(otherProjectThreadId)].sort(),
+    );
+    expect(facts.recent.every((entry) => entry.refuseReason === "policy")).toBe(true);
+    // Nothing was stored for a message that was never admitted.
+    expect(projection.inFlight()).toEqual([]);
+    expect(await new AgentMessageBodyStore(root).read("am-none")).toBeUndefined();
   });
 
   it("refuses a petition that names no recipient", async () => {

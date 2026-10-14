@@ -301,6 +301,28 @@ export class AgentMessageService {
     }
   }
 
+  /**
+   * Journals the refusal of a send the tool refused before it reached
+   * admission (a turn in Plan, a profile that leaves the tool out). One
+   * message per named recipient, as a send makes, so the sender's refusals
+   * read the same wherever they were decided. No body is stored.
+   */
+  async recordRefusedSend(request: {
+    readonly senderThreadId: AgentMessageEndpointId;
+    readonly recipients: ReadonlyArray<AgentMessageRecipient>;
+    readonly reason: AgentMessageRefuseReason;
+  }): Promise<void> {
+    const correlationId = decodeCorrelationId(this.#uuid());
+    for (const recipient of request.recipients.slice(0, MAX_RECIPIENTS_PER_SEND)) {
+      await this.#journalRefused(
+        Schema.decodeUnknownSync(AgentMessageId)(this.#uuid()),
+        correlationId,
+        request.reason,
+        { senderThreadId: request.senderThreadId, recipientThreadId: recipient.threadId },
+      );
+    }
+  }
+
   async #admit(
     request: AgentMessageSendRequest,
     messageId: AgentMessageId,
@@ -309,7 +331,10 @@ export class AgentMessageService {
   ): Promise<AgentMessageSendOutcome> {
     const refusal = this.#decide(request, recipient.threadId);
     if (refusal !== undefined) {
-      await this.#journalRefused(messageId, correlationId, refusal.reason);
+      await this.#journalRefused(messageId, correlationId, refusal.reason, {
+        senderThreadId: request.senderThreadId,
+        recipientThreadId: recipient.threadId,
+      });
       return {
         status: "refused",
         messageId,
@@ -323,7 +348,10 @@ export class AgentMessageService {
     if (stored.status === "refused") {
       // The policy bounds were already checked; the store refuses only when
       // its own disk budget is exhausted, and that is the same honest refusal.
-      await this.#journalRefused(messageId, correlationId, "oversize");
+      await this.#journalRefused(messageId, correlationId, "oversize", {
+        senderThreadId: request.senderThreadId,
+        recipientThreadId: recipient.threadId,
+      });
       return {
         status: "refused",
         messageId,
@@ -367,7 +395,10 @@ export class AgentMessageService {
 
   /** Journals the refusal of an admitted message and drops the body it held. */
   async #refuse(record: AgentMessageRecord, reason: AgentMessageRefuseReason): Promise<void> {
-    await this.#journalRefused(record.messageId, record.correlationId, reason);
+    await this.#journalRefused(record.messageId, record.correlationId, reason, {
+      senderThreadId: record.senderThreadId,
+      recipientThreadId: record.recipientThreadId,
+    });
     await this.#bodyStore.forget(record.bodyReference.contentReference);
   }
 
@@ -445,7 +476,11 @@ export class AgentMessageService {
   async #journalRefused(
     messageId: AgentMessageId,
     correlationId: string,
-    reason: "unauthorized" | "depth-exceeded" | "recipient-terminal" | "oversize" | "policy",
+    reason: AgentMessageRefuseReason,
+    endpoints: {
+      readonly senderThreadId: AgentMessageEndpointId;
+      readonly recipientThreadId: AgentMessageEndpointId;
+    },
   ): Promise<void> {
     await this.#appendJournaled(
       AGENT_MESSAGE_EVENT_NAMES.refused,
@@ -454,6 +489,8 @@ export class AgentMessageService {
         messageId,
         correlationId,
         refuseReason: reason,
+        senderThreadId: endpoints.senderThreadId,
+        recipientThreadId: endpoints.recipientThreadId,
         occurredAt: this.#clock(),
       },
       String(messageId),

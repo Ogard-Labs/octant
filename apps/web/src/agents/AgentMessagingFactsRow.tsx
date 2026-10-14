@@ -1,6 +1,7 @@
 import type { AgentMessageMessagingFacts } from "@octant/contracts";
 import type { AgentMessageClient } from "@octant/client-runtime/agent-message-client";
 import { useEffect, useState } from "react";
+import { relativeTimeLabel } from "../lib/relativeTime";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 
 export interface AgentMessagingFactsRowProps {
@@ -10,9 +11,15 @@ export interface AgentMessagingFactsRowProps {
 }
 
 const REFRESH_MS = 15_000;
+/** The facts carry the twenty newest; the list states the few a person reads. */
+const SHOWN_REFUSALS = 5;
+
+function threadLabel(threadId: string): string {
+  return threadId.length > 8 ? `${threadId.slice(0, 8)}…` : threadId;
+}
 
 const REFUSE_LABELS: Record<string, string> = {
-  unauthorized: "unauthorized",
+  unauthorized: "not reachable",
   "depth-exceeded": "too deep",
   "recipient-terminal": "recipient closed",
   oversize: "too large",
@@ -22,8 +29,9 @@ const REFUSE_LABELS: Record<string, string> = {
 /**
  * The host's messaging facts in the bounds the policy admits, under the run
  * list it governs: how many messages sit open in flight against the per-sender
- * cap and what the host last refused. A stranded message states its refuse
- * reason instead of vanishing; bodies are never shown here.
+ * cap and what the host refused. A refused message states its reason, the
+ * thread that sent it, and the thread it named instead of vanishing, whether
+ * the host refused it at the send or at delivery; bodies are never shown here.
  */
 export function AgentMessagingFactsRow(props: AgentMessagingFactsRowProps) {
   const [loaded, setLoaded] = useState<AgentMessageMessagingFacts | undefined>(props.facts);
@@ -55,24 +63,49 @@ export function AgentMessagingFactsRow(props: AgentMessagingFactsRowProps) {
 
   const facts = props.facts ?? loaded;
   if (facts === undefined) return null;
-  const latestRefusal = facts.recent.find((entry) => entry.state === "refused");
+  const refusals = facts.recent.filter((entry) => entry.state === "refused");
+  const latestRefusal = refusals[0];
   return (
-    <p
-      aria-label="Agent messaging bounds"
-      className="agents-center__messaging"
-      data-testid="agent-messaging-facts"
-    >
-      <span>
-        {facts.openInFlight} of {facts.maxOpenInFlightPerSender} open messages per sender
-      </span>
-      <span>
-        {facts.delivered} delivered · {facts.refused} refused
-      </span>
-      {latestRefusal === undefined ? null : (
+    <>
+      <p
+        aria-label="Agent messaging bounds"
+        className="agents-center__messaging"
+        data-testid="agent-messaging-facts"
+      >
         <span>
-          Latest refusal: {REFUSE_LABELS[latestRefusal.refuseReason ?? "policy"] ?? "refused"}
+          {facts.openInFlight} of {facts.maxOpenInFlightPerSender} open messages per sender
         </span>
+        <span>
+          {facts.delivered} delivered · {facts.refused} refused
+        </span>
+        {latestRefusal === undefined ? null : (
+          <span>
+            Latest refusal: {REFUSE_LABELS[latestRefusal.refuseReason ?? "policy"] ?? "refused"}
+          </span>
+        )}
+      </p>
+      {refusals.length === 0 ? null : (
+        <ul aria-label="Refused agent messages" className="agents-center__refusals">
+          {refusals.slice(0, SHOWN_REFUSALS).map((entry) => (
+            <li key={String(entry.messageId)}>
+              <span title={String(entry.senderThreadId)}>
+                {threadLabel(String(entry.senderThreadId))}
+              </span>
+              {" → "}
+              <span title={String(entry.recipientThreadId)}>
+                {threadLabel(String(entry.recipientThreadId))}
+              </span>
+              <span>{REFUSE_LABELS[entry.refuseReason ?? "policy"] ?? "refused"}</span>
+              <time dateTime={String(entry.occurredAt)}>
+                {relativeTimeLabel(String(entry.occurredAt))}
+              </time>
+            </li>
+          ))}
+          {refusals.length > SHOWN_REFUSALS ? (
+            <li>{refusals.length - SHOWN_REFUSALS} more recent refusals</li>
+          ) : null}
+        </ul>
       )}
-    </p>
+    </>
   );
 }

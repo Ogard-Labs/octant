@@ -1456,7 +1456,9 @@ record; this section is the effective rule, and it is narrower than the record.
   neither send nor receive.
 - **Sending.** The tool is omitted from a turn in Plan and from a profile whose
   tool allowlist leaves it out, and a call made anyway, or after the thread
-  dropped to Plan mid-turn, is refused before anything is stored. An admitted
+  dropped to Plan mid-turn, is refused before anything is stored. A refusal made
+  there, for a call that names a recipient, is journaled as
+  `agent.message-refused@1` without a body. An admitted
   send journals `agent.message-sent@1` on the `agent-message` aggregate, one
   message per recipient, and keeps the body in the host's store under an
   opaque reference; bodies never enter the journal. The sender is told `sent`
@@ -1488,8 +1490,20 @@ record; this section is the effective rule, and it is narrower than the record.
   host journaled as delivered without a turn carrying it stays as journaled
   and is never offered.
 - **Not built.** Nothing journals `agent.message-acknowledged@1`, and a sender
-  has no tool to read what became of a message; the Agents center shows the
-  host's counts and latest refusal. 0049 remains the Chat mention path.
+  has no tool to read what became of a message. 0049 remains the Chat mention
+  path.
+- **Refusals in the Agents center.** Every refusal is journaled: at the send,
+  at the tool, and at delivery. The refusal event names its sender and
+  recipient threads, because a message refused before admission has no
+  `agent.message-sent@1` to say who sent it. The projection keeps those beside
+  the messages that were refused later, and the Agents center lists the newest
+  with the sender, the thread named, the reason, and its age. The
+  `/api/agent-messages` read is scoped by the sender thread: a window sees the
+  counts and refusals only of messages sent by a thread it may open, so a
+  refusal never reveals a thread to a window that could not already see its
+  sender. The recipient id shown is the one the sender's own transcript holds.
+  A refusal journaled before the event named its endpoints, and a call too
+  malformed to name a recipient, are not shown.
 
 Seeing sibling threads is the read-only companion to messaging, approved by
 the maintainer on 2026-10-13. The `octant_threads` tool lets a Code turn see
