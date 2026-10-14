@@ -28,9 +28,14 @@ export interface ContextRouteService {
     afterSequence: number | undefined,
     principal: ContextRoutePrincipal,
   ) => ContextInspectorSnapshot;
+  /**
+   * `windowId` is the window that sent the command, already shown to be able
+   * to open its subject's thread.
+   */
   readonly execute: (
     command: ContextCommand,
     principal: ContextRoutePrincipal,
+    windowId: WindowId,
   ) => ContextCommandResult | ContextCompactionRefusal;
 }
 
@@ -141,7 +146,7 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
           origin,
         );
       }
-      const result = dependencies.service.execute(command, principal);
+      const result = dependencies.service.execute(command, principal, windowId);
       if (result.kind === "compaction-refused") {
         return response(
           {

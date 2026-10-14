@@ -18,6 +18,7 @@ import {
   decodeCodeOperationId,
   decodeCodeThread,
   decodeCodeThreadId,
+  decodeProviderInstanceId,
   decodeProviderSessionId,
   decodeBrowserAutomationSnapshot,
   decodeToolActionAuthority,
@@ -780,6 +781,149 @@ describe("CodeOperationRuntime", () => {
     ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
     expect(admit).not.toHaveBeenCalled();
     fixture.close();
+  });
+
+  it("refuses a turn while the thread's session is being compacted, and starts nothing", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const admit = vi.fn();
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      spendCeiling: { admit, settle: vi.fn() },
+      compactionRunning: (id) => String(id) === String(threadId),
+    });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(13),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).rejects.toMatchObject({
+      failure: {
+        category: "waiting",
+        message: "This session is being compacted. Send again when it finishes.",
+      },
+    });
+    expect(admit).not.toHaveBeenCalled();
+    expect(connection.start).not.toHaveBeenCalled();
+    expect(connection.resume).not.toHaveBeenCalled();
+    expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false);
+    fixture.close();
+  });
+
+  it("counts a turn as in progress for a compaction from its check until it is refused", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const release = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      // The first thing a turn with saved model options waits on, before it
+      // is noted as starting anywhere else.
+      probeProvider: async () => {
+        entered.resolve();
+        await release.promise;
+        return { readiness: "ready", models: [] };
+      },
+    });
+    fixture.setThread({ ...thread(), modelOptionValues: { effort: "high" } });
+    try {
+      expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false);
+      const pending = fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(13),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await entered.promise;
+      // The turn is reading what it will resume; a compaction now would be
+      // planned over it.
+      expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(true);
+      release.resolve();
+      await expect(pending).rejects.toMatchObject({ failure: { category: "unsupported" } });
+      expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("opens, for a compaction, the session the thread's next turn would resume and no more", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    let accessible = true;
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      projectAccess: () => accessible,
+    });
+    const sessions = fixture.runtime.compactionSessions;
+    if (sessions === undefined) throw new Error("The runtime offers compaction sessions");
+    try {
+      expect(sessions.exists(String(threadId))).toBe(false);
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(31),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(true);
+      await Effect.runPromise(
+        Queue.offer(
+          queue,
+          providerEvent({
+            kind: "usage",
+            inputTokens: 40_000,
+            outputTokens: 300,
+            contextTokens: 27_600,
+          }),
+        ),
+      );
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+      await vi.waitFor(() => expect(fixture.boardActivity()).toMatchObject({ executing: false }));
+      await vi.waitFor(() =>
+        expect(fixture.runtime.turnInProgress?.(String(threadId))).toBe(false),
+      );
+
+      expect(sessions.exists(String(threadId))).toBe(true);
+      expect(sessions.occupancy(String(threadId))).toBe(27_600);
+      expect(await sessions.open(String(threadId), windowId)).toEqual({
+        acquire: {
+          instanceId: thread().providerInstanceId,
+          mode: "code",
+          projectRoot: "/private/exact",
+          permissionPersistence: "current-session",
+        },
+        resume: {
+          sessionId,
+          resumeCursor: { driverKind: "codex", value: "native-code-session" },
+          executionPolicy: "approval-gated",
+          modelId: thread().modelId,
+          tools: [],
+        },
+      });
+      // Only a window that may open the thread's checkout opens its session.
+      expect(await sessions.open(String(threadId), undefined)).toBeUndefined();
+      accessible = false;
+      expect(await sessions.open(String(threadId), windowId)).toBeUndefined();
+      // A session on another provider is not the one the next turn resumes.
+      fixture.setThread({
+        ...thread(),
+        providerInstanceId: decodeProviderInstanceId("90000000-0000-4000-8000-0000000000f8"),
+      });
+      expect(sessions.exists(String(threadId))).toBe(false);
+    } finally {
+      fixture.close();
+    }
   });
 
   it("refuses to start a turn when the thread cannot be brought back, and records no work for it", async () => {
@@ -5030,6 +5174,7 @@ function runtimeFixture(options: {
     typeof createCodeOperationRuntime
   >[0]["resolveProviderDriver"];
   isProviderModelAllowed?: (thread: CodeThread) => boolean;
+  compactionRunning?: (threadId: CodeThreadId) => boolean;
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
   nativeHarness?: Parameters<typeof createCodeOperationRuntime>[0]["nativeHarness"];
   onPendingRequestWithdrawn?: () => void;
@@ -5338,6 +5483,9 @@ function runtimeFixture(options: {
     ...(options.isProviderModelAllowed === undefined
       ? {}
       : { isProviderModelAllowed: options.isProviderModelAllowed }),
+    ...(options.compactionRunning === undefined
+      ? {}
+      : { compactionRunning: options.compactionRunning }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     ...(options.nativeHarness === undefined ? {} : { nativeHarness: options.nativeHarness }),
     ...(options.onPendingRequestWithdrawn === undefined

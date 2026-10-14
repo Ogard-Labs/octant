@@ -434,6 +434,32 @@ describe("usage-resume ports", () => {
     await expect(ports.work.dispatch(record())).resolves.toMatchObject({ kind: "refused" });
   });
 
+  it("defers a Code continuation while the session compacts, before staging its prompt", async () => {
+    let compacting = true;
+    const executeOperation = vi.fn(async () => ({
+      kind: "provider-turn-state" as const,
+      operationId: decodeCodeOperationId(ids.turn),
+      state: "running" as const,
+    }));
+    const code = resumableCode(executeOperation);
+    const stageEvidence = vi.fn(code.stageEvidence);
+    const ports = createUsageResumePorts(
+      dependencies({
+        journal: { replayAggregate: () => [waitingProviderTurnFrame()] },
+        code: { ...code, stageEvidence, compacting: () => compacting },
+      }),
+    );
+
+    await expect(ports.code.dispatch(record())).resolves.toEqual({
+      kind: "deferred",
+      detail: "The session is being compacted; the continuation runs once it finishes.",
+    });
+    expect(stageEvidence).not.toHaveBeenCalled();
+    expect(executeOperation).not.toHaveBeenCalled();
+    compacting = false;
+    await expect(ports.code.dispatch(record())).resolves.toEqual({ kind: "dispatched" });
+  });
+
   it("marks a Code limit recovery turn as the host's own dispatch", async () => {
     const executeOperation = vi.fn(async () => ({
       kind: "provider-turn-state" as const,

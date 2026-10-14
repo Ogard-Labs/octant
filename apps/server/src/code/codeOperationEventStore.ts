@@ -310,6 +310,35 @@ export class CodeOperationEventStore {
   }
 
   /**
+   * How full the provider session's window was at the thread's latest usage
+   * report: the occupancy the provider reported, or else the input its last
+   * request carried, which is what the window held then. Undefined when no
+   * turn reported usage or the record does not decode.
+   */
+  latestWindowOccupancy(threadId: CodeThreadId): number | undefined {
+    try {
+      const envelope = this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "usage",
+        limit: 1,
+      })[0];
+      if (
+        envelope === undefined ||
+        envelope.eventName !== CODE_OPERATION_EVENT_RECORDED ||
+        envelope.eventVersion !== 1
+      )
+        return undefined;
+      const frame = decodeCodeOperationEventFrame(envelope.payload);
+      if (String(frame.threadId) !== String(threadId) || frame.event.kind !== "usage")
+        return undefined;
+      return frame.event.contextTokens ?? frame.event.inputTokens;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * The newest fork conversations merged back into a thread, oldest first, and
    * the merge its turns last carried. Merges are carried in the order they were
    * made, so every merge after that one is still waiting for a turn. The read

@@ -143,6 +143,8 @@ export interface UsageResumePortDependencies {
   };
   readonly code: {
     readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
+    /** Whether the thread's session is being compacted, which holds every new turn. */
+    readonly compacting?: (threadId: CodeThreadId) => boolean;
     readonly readRuntimeWorks: (threadId: CodeThreadId) => ReadonlyArray<ProjectedCodeRuntimeWork>;
     readonly readOperationContents?: (
       windowId: WindowId,
@@ -498,6 +500,9 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
       ) {
         return refused("The recorded stop's preserved prompt is unavailable.");
       }
+      // Checked before the prompt is staged: a turn the compaction would
+      // refuse must not leave staged evidence behind it.
+      if (deps.code.compacting?.(threadId) === true) return COMPACTION_DEFERRAL;
       try {
         const batch = await deps.code.readOperationContents(scopeId, {
           threadId,

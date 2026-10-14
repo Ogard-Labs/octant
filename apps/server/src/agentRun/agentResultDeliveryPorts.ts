@@ -123,6 +123,8 @@ export function createWorkAgentResultDeliveryPort(
 export function createCodeAgentResultDeliveryPort(
   input: AgentResultDeliveryPortDependencies & {
     readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
+    /** Whether the thread's session is being compacted, which holds every new turn. */
+    readonly compacting?: (threadId: CodeThreadId) => boolean;
     readonly stageEvidence?: (
       windowId: WindowId,
       threadId: CodeThreadId,
@@ -150,6 +152,11 @@ export function createCodeAgentResultDeliveryPort(
         input.executeOperation === undefined
       ) {
         return { kind: "refused", detail: "The parent Code thread is gone." };
+      }
+      // The result waits the compaction out rather than being spent on a
+      // refused turn; it is offered again when the compaction ends.
+      if (input.compacting?.(thread.id) === true) {
+        return { kind: "deferred", detail: "The parent Code thread's session is being compacted." };
       }
       try {
         const prompt = await input.stageEvidence(
