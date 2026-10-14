@@ -373,6 +373,9 @@ agent asks for your theme.
   which is its own screens and any image it shows. Octant says so under every
   prototype. If it stops responding, or tries to open another page, Octant
   stops it and offers **Run again**. Script errors appear as text under it.
+- A running prototype is part of the Tab order, right after **Stop**, whether
+  it started when you opened it or when you pressed **Run**. Octant does not
+  move the keyboard into it by itself; press **Tab** from **Stop** to enter it.
 - If a prototype holds on to the keyboard, press **Command-Escape**
   (**Control-Escape** outside macOS) in the Octant app to move focus to its
   **Stop** button. A prototype that keeps grabbing the keyboard back is
