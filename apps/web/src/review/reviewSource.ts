@@ -131,35 +131,67 @@ function workReviewFacts(card: WorkBoardCard): ReviewFacts {
 }
 
 /**
- * Clients whose host answered 404 for the conversation window: an older host
- * that only has the forward read. Asked once per client.
+ * Whether each client's host has the conversation window read, once the first
+ * read has found out. The page reads many threads at once, so the answer is
+ * shared as a promise: the first read is the probe, and the others wait for
+ * it rather than each asking an older host for a route it does not have.
  */
-const clientsWithoutConversationWindow = new WeakSet<CodeClient>();
+const conversationWindowSupport = new WeakMap<CodeClient, Promise<boolean>>();
+
+/** The newest turn from a one-turn window, or `unsupported` on a host with no window route. */
+async function readNewestWindowTurn(
+  client: CodeClient & Required<Pick<CodeClient, "conversationWindow">>,
+  threadId: ReturnType<typeof decodeCodeThreadId>,
+  signal: AbortSignal,
+): Promise<{ readonly turn: CodeConversationTurn | undefined } | "unsupported"> {
+  const known = conversationWindowSupport.get(client);
+  if (known !== undefined && !(await known)) return "unsupported";
+  let settle: ((supported: boolean) => void) | undefined;
+  if (known === undefined) {
+    conversationWindowSupport.set(
+      client,
+      new Promise<boolean>((resolve) => {
+        settle = resolve;
+      }),
+    );
+  }
+  try {
+    const window = await client.conversationWindow(threadId, { limit: 1 }, signal);
+    settle?.(true);
+    return { turn: window.turns.at(-1) };
+  } catch (error) {
+    if (error instanceof CodeClientFailure && error.status === 404) {
+      conversationWindowSupport.set(client, Promise.resolve(false));
+      settle?.(false);
+      return "unsupported";
+    }
+    // Neither answered nor refused: the next read asks again.
+    if (settle !== undefined) conversationWindowSupport.delete(client);
+    settle?.(true);
+    throw error;
+  }
+}
 
 /**
  * The newest turn of a Code thread, read the way the thread's own transcript
  * reads it, without activating the thread: opening a thread to see its last
  * answer would spend its unread mark.
  *
- * One newest-first window of one turn, so the cost does not grow with the
- * thread. A host without the window read is walked page by page instead.
+ * One newest-first window of one turn, so the cost does not walk the thread's
+ * pages. A host without the window read is walked page by page instead.
  */
 async function readLastCodeTurn(
   client: CodeClient,
   threadId: ReturnType<typeof decodeCodeThreadId>,
   signal: AbortSignal,
 ): Promise<CodeConversationTurn | undefined> {
-  if (
-    typeof client.conversationWindow === "function" &&
-    !clientsWithoutConversationWindow.has(client)
-  ) {
-    try {
-      const window = await client.conversationWindow(threadId, { limit: 1 }, signal);
-      return window.turns.at(-1);
-    } catch (error) {
-      if (!(error instanceof CodeClientFailure && error.status === 404)) throw error;
-      clientsWithoutConversationWindow.add(client);
-    }
+  if (typeof client.conversationWindow === "function") {
+    const read = await readNewestWindowTurn(
+      client as CodeClient & Required<Pick<CodeClient, "conversationWindow">>,
+      threadId,
+      signal,
+    );
+    if (read !== "unsupported") return read.turn;
   }
   let cursor = 0;
   let last: CodeConversationTurn | undefined;

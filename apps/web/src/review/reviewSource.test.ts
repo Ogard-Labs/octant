@@ -175,27 +175,31 @@ describe("review source", () => {
     expect(walked.conversation).toHaveBeenCalledTimes(3);
   });
 
-  it("walks the forward pages once for a host that has no window read", async () => {
+  it("asks an older host for the window once however many threads it reads, then walks the forward pages", async () => {
     const thread = longThread(MAX_CODE_CONVERSATION_PAGE_SIZE + 1);
     thread.conversationWindow.mockRejectedValue(
       new CodeClientFailure({ category: "unsupported", message: "No window." }, 404),
     );
     const source = createReviewSource(clients({ code: thread as never }));
     const signal = new AbortController().signal;
-    const second: ReviewEntry = {
+    const others: ReadonlyArray<ReviewEntry> = [2, 3, 4].map((suffix) => ({
       ...codeEntry,
-      threadId: "00000000-0000-4000-8000-000000000003",
-    };
+      threadId: `00000000-0000-4000-8000-00000000000${suffix}`,
+    }));
 
-    const first = await source.loadFacts([codeEntry], signal);
-    await source.loadFacts([second], signal);
+    // Several uncached threads at once, as the Review page asks.
+    const first = await source.loadFacts([codeEntry, ...others], signal);
+    await source.loadFacts(
+      [{ ...codeEntry, threadId: "00000000-0000-4000-8000-000000000005" }],
+      signal,
+    );
 
     expect(first.get(`code:${codeEntry.threadId}`)?.finishedAt).toBe(
       new Date(Date.UTC(2026, 9, 6, 0, 0, MAX_CODE_CONVERSATION_PAGE_SIZE)).toISOString(),
     );
     // The refusal is asked once per client, not once per thread.
     expect(thread.conversationWindow).toHaveBeenCalledOnce();
-    expect(thread.conversation).toHaveBeenCalledTimes(4);
+    expect(thread.conversation).toHaveBeenCalledTimes(10);
   });
 
   it("keeps the other mode's facts when one board cannot be read", async () => {
