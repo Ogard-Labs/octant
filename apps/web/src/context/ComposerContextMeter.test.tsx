@@ -1182,6 +1182,45 @@ describe("Compact session", () => {
     );
   });
 
+  it.each([
+    [
+      "the amount it reported",
+      {
+        tokensAfter: { kind: "known", tokens: 1_000, accuracy: "provider-reported" },
+        tokensFreed: { kind: "measured", tokens: 41_200, accuracy: "provider-reported" },
+      },
+      "Compacted automatically by Codex · 41.2K freed",
+    ],
+    [
+      "no amount it never reported",
+      {
+        tokensAfter: { kind: "pending" },
+        tokensFreed: { kind: "unknown", reason: "awaiting-next-report" },
+      },
+      "Compacted automatically by Codex",
+    ],
+  ] as const)("says the runtime compacted by itself, with %s", async (_, figures, line) => {
+    const user = userEvent.setup();
+    render(
+      <CompactionHarness
+        controller={controllerFor({
+          compaction: { status: "available" },
+          executor: runtimeExecutor,
+          latestCompaction: {
+            status: "completed",
+            receipt: { ...receipt(41_200), trigger: "automatic", ...figures },
+          },
+        })}
+      />,
+    );
+    await openPopover(user);
+
+    const popover = screen.getByRole("dialog", { name: "Context window" });
+    expect(popover).toHaveTextContent(line);
+    expect(popover).not.toHaveTextContent("after the next reply");
+    expect(popover).not.toHaveTextContent("summary by");
+  });
+
   it("says a failure may have changed the session when the runtime cannot vouch for it", async () => {
     const user = userEvent.setup();
     render(

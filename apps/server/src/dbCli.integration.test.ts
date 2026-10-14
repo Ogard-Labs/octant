@@ -449,7 +449,7 @@ describe("database CLI runtime composition", () => {
     );
     expect(settings).toEqual({
       ...decodePersistedShellSettings(legacySettings),
-      defaultFolder: "/Users/ada/Documents/Octant",
+      defaultFolder: "/Users/ada/Octant",
     });
   });
 });

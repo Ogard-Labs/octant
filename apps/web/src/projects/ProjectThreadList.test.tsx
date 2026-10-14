@@ -613,6 +613,22 @@ describe("ProjectThreadRows", () => {
     );
   });
 
+  it("names a thread on the shelf Put away in its info card", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectThreadRows
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, completedAt: "2026-09-01T10:00:00.000Z", shelf: "completed" }]}
+      />,
+    );
+
+    await user.hover(screen.getByRole("button", { name: /Controller foundation/ }));
+
+    const card = await screen.findByRole("group", { name: "Thread details" });
+    expect(card).toHaveTextContent("Put away");
+    expect(card).not.toHaveTextContent("Completed");
+  });
+
   it("lets keyboard users reach and activate the pin action", async () => {
     const onPinThread = vi.fn();
     render(
@@ -1025,7 +1041,7 @@ describe("ProjectThreadRows", () => {
 });
 
 describe("completing and snoozing from a thread row", () => {
-  it("completes a thread from its right-click menu and offers Reopen once it is completed", async () => {
+  it("puts a thread away from its right-click menu and offers Reopen once it is put away", async () => {
     const onCompleteThread = vi.fn();
     const onReopenThread = vi.fn();
     const { rerender } = render(
@@ -1041,7 +1057,7 @@ describe("completing and snoozing from a thread row", () => {
       keys: "[MouseRight]",
     });
     expect(screen.queryByRole("menuitem", { name: "Reopen" })).toBeNull();
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Complete" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Put away" }));
     expect(onCompleteThread).toHaveBeenCalledWith("thread-one");
 
     rerender(
@@ -1055,7 +1071,7 @@ describe("completing and snoozing from a thread row", () => {
       target: screen.getByRole("button", { name: /Controller foundation/ }),
       keys: "[MouseRight]",
     });
-    expect(screen.queryByRole("menuitem", { name: "Complete" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Put away" })).toBeNull();
     await userEvent.click(await screen.findByRole("menuitem", { name: "Reopen" }));
     expect(onReopenThread).toHaveBeenCalledWith("thread-one");
   });
@@ -1132,7 +1148,7 @@ describe("completing and snoozing from a thread row", () => {
     expect(screen.getByRole("button", { name: /Controller foundation/ })).toContainElement(woke);
   });
 
-  it("reaches Complete and each wake time from the overflow menu too", async () => {
+  it("reaches Put away and each wake time from the overflow menu too", async () => {
     const onCompleteThread = vi.fn();
     const onSnoozeThread = vi.fn();
     render(
@@ -1145,7 +1161,7 @@ describe("completing and snoozing from a thread row", () => {
 
     const overflow = screen.getByRole("button", { name: "Thread actions" });
     await userEvent.click(overflow);
-    await userEvent.click(await screen.findByRole("menuitem", { name: "Complete thread" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Put thread away" }));
     expect(onCompleteThread).toHaveBeenCalledWith("thread-one");
 
     await userEvent.click(overflow);

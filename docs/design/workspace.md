@@ -95,9 +95,10 @@ modes, Work and Code, each with its own set of saved views.
 ## Thread visibility and completion
 
 A Chat, Work, or Code thread has two resting states beside archive, both fields
-on the thread aggregate rather than lifecycle values: **completed**
-(`completedAt`, manual only, refused by each mode's service while a turn runs
-or the thread waits on the person) and **snoozed** (`snooze.until`, an overlay
+on the thread aggregate rather than lifecycle values: **completed**, which
+every client and the user guide call **Put away** (`completedAt`, manual only,
+refused by each mode's service while a turn runs or the thread waits on the
+person) and **snoozed** (`snooze.until`, an overlay
 that hides the row until the wake time and wakes it early when the agent needs
 the person or a turn that was running at snooze time ends). The sidebar files
 both in collapsed shelves below the Project groups and derives snooze
@@ -110,12 +111,14 @@ for never), re-deciding against each mode's authoritative record and
 journaling the ordinary thread update as the `system` actor. It archives only;
 see [decisions/0088-completed-and-snoozed-threads.md](../decisions/0088-completed-and-snoozed-threads.md).
 
-Not built yet: the state people see as **Completed**, beside Done, is renamed
-**Put away**. It is a name change only; the stored `completedAt` field and the
-rules above do not change, and it is a different state from a Work thread
-marked Done. Until the rename is built, every client, and the user guide, still
-say Completed. How the **Done today** tile and the **Complete** action are
-worded once the state is Put away is settled when the rename is built.
+**Put away** is the only name people see for this state, beside the board's
+Done: the sidebar shelf, the row-menu action, the Review page action, the
+Settings rows and the host's refusal sentences all use it. It is a name only.
+The stored `completedAt` field, the `complete-*-thread` commands, the
+`completedThreadArchiveAfterDays` setting and the `thread-completed` end reason
+keep their names, and it is a different state from a Work thread marked Done.
+The sidebar's **Done today** tile keeps its name and opens the Put away shelf;
+the shelf's `data-shelf` value stays `completed`, separate from its label.
 
 The **Review page** lists the threads the sidebar's To review count counts, by
 the same predicate (`isWaitingForReview`: unread, not working, not on a shelf),
@@ -130,7 +133,7 @@ ask and its options (the Needs you row, embedded) above the full reply; its
 number keys pick an option while the row has focus, and the option is sent as
 the thread's next turn. Work navigation projects no unread flag, so Work threads
 never count toward To review and never list here; the page's Work wiring
-(send-back refuses and points at the thread's composer) waits for that flag. Complete, Snooze and send-back go through each
+(send-back refuses and points at the thread's composer) waits for that flag. Put away, Snooze and send-back go through each
 mode's existing commands and show the host's refusal in one line; mark-seen
 moves the read cursor. Its single-key commands are page-scoped keybindings: they
 may be a bare key because only the focused page dispatches them, and the
@@ -434,8 +437,10 @@ ordinary Review views.
 
 Work and Code have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
-Chat has no board. Not built yet: a person may mark a Work thread Done; a Code
-thread reaches Done only by its objectively satisfied delivery target
+Chat has no board. A person marks a Work thread Done with **Mark done** in the
+task's Task actions menu, after a confirmation, and the card moves to Done and
+stays there; a Code thread reaches Done only by its objectively satisfied
+delivery target
 ([Architecture: modes](../architecture.md#modes-chat-work-and-code)). Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
 Projects. The same cached read backs the right dock's Pull requests tool and

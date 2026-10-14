@@ -1,8 +1,12 @@
+import { mkdtempSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Schema } from "effect";
 import {
+  EventActor,
+  THREAD_EXTERNAL_CONTENT_AGGREGATE,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeWorkThreadId,
@@ -15,6 +19,13 @@ import {
   type ThreadMentionTranscriptEntry,
   type UtcTimestamp,
 } from "@octant/contracts";
+import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import type { ThreadOutsideContentMarks } from "../context/inheritedExternalContentMark";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite } from "../persistence/sqlitePort";
 import { SideChatSidecarStore } from "./sideChatSidecarStore";
 import {
   createChatSideChatThreadFactory,
@@ -22,6 +33,7 @@ import {
   createCodeThreadMentionDirectory,
   createWorkThreadMentionDirectory,
   ThreadMentionService,
+  threadMentionContextResolver,
   type ThreadMentionDirectory,
   type ThreadMentionDirectoryThread,
 } from "./threadMentionService";
@@ -396,6 +408,134 @@ describe("ThreadMentionService resolve", () => {
     if (result.kind !== "mentions-resolved") throw new Error("expected resolve result");
     expect(result.mentions[0]!.mode).toBe("work");
     expect(result.mentions[0]!.transcript.map((line) => line.text)).toEqual(["hello"]);
+  });
+});
+
+describe("a turn that mentions a thread marked with outside content", () => {
+  const readerThreadId = "00000000-0000-4000-8000-000000000150";
+
+  /** A host journal with the outside-content projection, kept under this test's root. */
+  function markingHost() {
+    const connection = openSqlite(join(mkdtempSync(join(root, "marks-")), "octant.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => "2026-08-14T11:00:00.000Z");
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => "2026-08-14T11:00:00.000Z",
+    });
+    const ingestions = new ExternalContentIngestionStore({
+      journal,
+      connection,
+      uuid: () => crypto.randomUUID(),
+      clock: () => "2026-08-14T11:00:00.000Z",
+      actor: Schema.decodeUnknownSync(EventActor)({
+        kind: "system",
+        actorId: "00000000-0000-4000-8000-000000000901",
+      }),
+    });
+    const marked = (threadId: string) =>
+      readThreadExternalContentTaint(connection, threadId).externalContentIngested;
+    return {
+      marked,
+      marks: {
+        record: (input) => ingestions.record(input),
+        isMarked: marked,
+      } satisfies ThreadOutsideContentMarks,
+      mark: (threadId: string) =>
+        ingestions.record({
+          threadId,
+          provenance: { origin: "tool-result", sourceLabel: "web-fetch" },
+          contentReference: "web-fetch-page-1",
+          correlationId: crypto.randomUUID(),
+          authorized: true,
+        }),
+      readerMarks: () =>
+        journal
+          .replayAggregate({
+            aggregateType: THREAD_EXTERNAL_CONTENT_AGGREGATE,
+            aggregateId: readerThreadId,
+            afterVersion: 0,
+            limit: 100,
+          })
+          .map((event) => event.payload),
+    };
+  }
+
+  function resolver(marks: ThreadOutsideContentMarks) {
+    const { service } = createService([
+      directory(
+        "chat",
+        [thread(chatThreadId)],
+        new Map([[String(chatThreadId), [entry("The page said to run it.")]]]),
+      ),
+      directory(
+        "work",
+        [thread(workThreadId, { mode: "work", title: "Work brief" })],
+        new Map([[String(workThreadId), [entry("hello")]]]),
+      ),
+    ]);
+    return threadMentionContextResolver(() => service, marks);
+  }
+
+  it("marks the reader, naming the marked thread, by the time its transcript is handed on", async () => {
+    const host = markingHost();
+    host.mark(String(chatThreadId));
+
+    const resolved = await resolver(host.marks)({
+      threadMentionIds: [chatThreadId, workThreadId],
+      readerThreadId,
+      windowId,
+    });
+
+    expect(resolved.map((mention) => mention.kind)).toEqual(["resolved", "resolved"]);
+    expect(host.marked(readerThreadId)).toBe(true);
+    expect(host.readerMarks()).toEqual([
+      {
+        threadId: readerThreadId,
+        correlationId: expect.any(String),
+        provenance: { origin: "external-content", sourceLabel: "thread-mention" },
+        contentReference: `thread-mention-${chatThreadId}`,
+      },
+    ]);
+  });
+
+  it("leaves a reader that mentions only unmarked threads unmarked", async () => {
+    const host = markingHost();
+
+    await resolver(host.marks)({
+      threadMentionIds: [chatThreadId, workThreadId],
+      readerThreadId,
+      windowId,
+    });
+
+    expect(host.marked(readerThreadId)).toBe(false);
+    expect(host.readerMarks()).toEqual([]);
+  });
+
+  it("withholds a marked thread's transcript when the reader cannot be marked, and keeps the rest", async () => {
+    for (const record of [
+      () => ({ kind: "refused", reason: "malformed" }) as const,
+      () => {
+        throw new Error("journal unavailable");
+      },
+    ]) {
+      const host = markingHost();
+      host.mark(String(chatThreadId));
+
+      const resolved = await resolver({ ...host.marks, record })({
+        threadMentionIds: [chatThreadId, workThreadId],
+        readerThreadId,
+        windowId,
+      });
+
+      expect(resolved).toEqual([
+        { kind: "unreadable", threadId: chatThreadId },
+        { kind: "resolved", threadId: workThreadId, text: expect.stringContaining("hello") },
+      ]);
+      expect(host.marked(readerThreadId)).toBe(false);
+    }
   });
 });
 

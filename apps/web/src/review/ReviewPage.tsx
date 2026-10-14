@@ -423,7 +423,7 @@ export function ReviewPage(props: ReviewPageProps) {
   const legend: ReadonlyArray<{ readonly keys: ReadonlyArray<string>; readonly label: string }> = [
     { keys: [chord("review-next"), chord("review-previous")], label: "move" },
     { keys: [chord("review-open")], label: "open" },
-    { keys: [chord("review-complete")], label: "complete" },
+    { keys: [chord("review-complete")], label: "put away" },
     { keys: [chord("review-send-back")], label: "send back" },
     { keys: [chord("review-snooze")], label: "snooze" },
     { keys: [chord("review-mark-seen")], label: "seen" },
@@ -533,7 +533,7 @@ export function ReviewPage(props: ReviewPageProps) {
                     variant="outline"
                   >
                     <Check aria-hidden="true" size={14} strokeWidth={1.8} />
-                    Complete <kbd>{chord("review-complete")}</kbd>
+                    Put away <kbd>{chord("review-complete")}</kbd>
                   </OctantButton>
                   <OctantButton
                     aria-expanded={composing}

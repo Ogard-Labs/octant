@@ -30,6 +30,7 @@ import {
   type CodeConversationWindowRequest,
   type CodeForkMergeBackOutcome,
   type ProviderSessionId,
+  type ContextCompactionExecutor,
   type CodeEvidenceBatchRequest,
   type CodeEvidenceBatchResponse,
   type CodeOperationApprovalReceipt,
@@ -130,6 +131,7 @@ import type {
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { decodeAgentRunAdmittedContext, type ProviderContextBlock } from "@octant/contracts";
 import type {
@@ -360,6 +362,23 @@ export interface CodeOperationRuntimeOptions {
    * meanwhile: it would resume the session the runtime is rewriting.
    */
   readonly compactionRunning?: (threadId: CodeThreadId) => boolean;
+  /**
+   * The thread's context ledger, for compactions a turn's runtime makes by
+   * itself: each one is journaled there, and any compaction journaled since
+   * the previous turn's usage report leaves Octant's earlier per-turn context
+   * uncounted in the next turn's window breakdown.
+   */
+  readonly sessionCompactions?: {
+    readonly record: (input: {
+      readonly threadId: CodeThreadId;
+      readonly turnKey: string;
+      readonly sighting: AutomaticCompactionSighting;
+      readonly executor: Extract<ContextCompactionExecutor, { readonly kind: "runtime" }>;
+      readonly priorOccupancy?: { readonly tokens: number; readonly observedAt: string };
+    }) => void;
+    /** Whether the ledger records a compaction after this journal position. */
+    readonly compactedAfter: (threadId: CodeThreadId, globalSequence: number) => boolean;
+  };
   /**
    * Reads the thread's own earlier conversation for a provider-switch handoff,
    * through the bounded selector a child's parent context uses. Absent means
@@ -689,6 +708,7 @@ export interface CodeOperationRuntime {
 export function createCodeOperationRuntime(
   options: CodeOperationRuntimeOptions,
 ): CodeOperationRuntime {
+  /** Each start's spend reservation, under the start's own operation. */
   const spendReservations = new Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>();
   const events = new CodeOperationEventStore({
     journal: options.persistence.journal,
@@ -1197,6 +1217,8 @@ export function createCodeOperationRuntime(
       // compaction check until it is launched or refused, because it reads the
       // session it resumes while it is prepared.
       let heldStart: string | undefined;
+      /** Whether this call took the operation's spend reservation, and so gives it back. */
+      let ownsReservation = false;
       try {
         const command = decodeCodeOperationCommand(rawCommand);
         if (command.kind === "start-provider-turn") {
@@ -1285,7 +1307,15 @@ export function createCodeOperationRuntime(
               }),
             );
           }
-          if (thread !== undefined && options.spendCeiling !== undefined) {
+          // A retry of an operation that still holds its reservation (its first
+          // call still preparing, or its turn still live) reserves nothing more;
+          // a second reservation under the same operation would replace the
+          // first, which then was never given back.
+          if (
+            thread !== undefined &&
+            options.spendCeiling !== undefined &&
+            !spendReservations.has(String(command.operationId))
+          ) {
             const spendReservationId = decodeSpendCeilingReservationId(options.uuid());
             const spendAdmission = options.spendCeiling.admit({
               reservationId: spendReservationId,
@@ -1302,7 +1332,8 @@ export function createCodeOperationRuntime(
                 }),
               );
             }
-            spendReservations.set(String(thread.id), spendReservationId);
+            spendReservations.set(String(command.operationId), spendReservationId);
+            ownsReservation = true;
           }
           turns.noteStart(command);
         }
@@ -1315,8 +1346,12 @@ export function createCodeOperationRuntime(
           if (command.kind === "start-provider-turn") {
             if (result.kind === "provider-turn-state" && result.state === "running") {
               turns.launch(command.threadId);
-            } else {
-              turns.settleSpendReservation(command.threadId);
+              // A `running` answered from the journal, for a turn that already
+              // ended, leaves no live turn to give back what this call reserved.
+              if (ownsReservation && !turns.runsOperation(command.operationId))
+                turns.settleSpendReservation(command.operationId);
+            } else if (ownsReservation) {
+              turns.settleSpendReservation(command.operationId);
             }
           }
           if (observed !== undefined) {
@@ -1336,8 +1371,8 @@ export function createCodeOperationRuntime(
           // A throw is the service refusing or breaking, not the work finishing.
           // The record closes rather than staying open for a unit that will never
           // report again.
-          if (command.kind === "start-provider-turn") {
-            turns.settleSpendReservation(command.threadId);
+          if (command.kind === "start-provider-turn" && ownsReservation) {
+            turns.settleSpendReservation(command.operationId);
           }
           if (observed !== undefined)
             observeRuntimeWorkOutcome(
@@ -1350,7 +1385,7 @@ export function createCodeOperationRuntime(
             );
           throw error;
         } finally {
-          if (command.kind === "start-provider-turn") turns.clearStart(command.threadId);
+          if (command.kind === "start-provider-turn") turns.clearStart(command);
         }
       } finally {
         if (heldStart !== undefined) releaseStartingTurn(heldStart);
@@ -1988,6 +2023,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   readonly #observeRuntimeWorkOutcome: (outcome: CodeRuntimeWorkRecordOutcome) => void;
   #service: CodeOperationService | undefined;
   readonly #runner = new CodeTurnRunner();
+  /**
+   * Starts noted before the service prepares them, under each start's own
+   * operation. A stopped start can still be preparing when the next one on
+   * its thread is sent, and when it finally settles it clears only its own.
+   */
   readonly #pending = new Map<
     string,
     Extract<CodeOperationCommand, { kind: "start-provider-turn" }>
@@ -2025,15 +2065,27 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   /** Whether a turn on the thread was noted, runs, or waits on the person. */
   holdsTurn(threadId: string): boolean {
-    return this.#pending.has(threadId) || this.#active.has(threadId);
+    if (this.#active.has(threadId)) return true;
+    for (const command of this.#pending.values())
+      if (String(command.threadId) === threadId) return true;
+    return false;
   }
 
   noteStart(command: Extract<CodeOperationCommand, { kind: "start-provider-turn" }>): void {
-    this.#pending.set(String(command.threadId), command);
+    this.#pending.set(String(command.operationId), command);
   }
 
-  clearStart(threadId: CodeThreadId): void {
-    this.#pending.delete(String(threadId));
+  clearStart(command: Extract<CodeOperationCommand, { kind: "start-provider-turn" }>): void {
+    // A retry of the same operation noted its own command meanwhile.
+    if (this.#pending.get(String(command.operationId)) === command)
+      this.#pending.delete(String(command.operationId));
+  }
+
+  /** Whether a live turn runs under this operation. */
+  runsOperation(operationId: CodeOperationId): boolean {
+    for (const active of this.#active.values())
+      if (String(active.operationId) === String(operationId)) return true;
+    return false;
   }
 
   launch(threadId: CodeThreadId): void {
@@ -2043,10 +2095,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     launch?.();
   }
 
-  settleSpendReservation(threadId: string): void {
-    const reservationId = this.#spendReservations.get(String(threadId));
+  settleSpendReservation(operationId: CodeOperationId): void {
+    const reservationId = this.#spendReservations.get(String(operationId));
     if (reservationId === undefined) return;
-    this.#spendReservations.delete(String(threadId));
+    this.#spendReservations.delete(String(operationId));
     this.#options.spendCeiling?.settle({ reservationId });
   }
 
@@ -2068,16 +2120,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
      * root that moved, a turn already active).
      */
     const failStart = (reason?: string) => {
-      this.settleSpendReservation(key);
+      this.settleSpendReservation(input.operationId);
       return turnState(
         "failed",
         reason === undefined ? undefined : { category: "failed", message: reason },
       );
     };
-    const command = this.#pending.get(key);
+    const command = this.#pending.get(String(input.operationId));
     const root = this.#roots.get(key);
     if (
       command === undefined ||
+      String(command.threadId) !== key ||
       root === undefined ||
       root === null ||
       root.checkoutRoot !== input.checkoutRoot ||
@@ -2192,7 +2245,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         : undefined;
     let forkSeeded = false;
     const refuseRevokedAdmission = async () => {
-      this.settleSpendReservation(key);
+      this.settleSpendReservation(input.operationId);
       await input.extensionTools?.close?.().catch(() => undefined);
       return {
         state: "failed" as const,
@@ -2341,6 +2394,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         forkSeeded,
         priorTurn,
         previousBreakdown: recovered.priorTurnBreakdown,
+        compactedSinceReport:
+          recovered.priorTurnReportSequence !== undefined &&
+          this.#options.sessionCompactions?.compactedAfter(
+            input.thread.id,
+            recovered.priorTurnReportSequence,
+          ) === true,
       }),
       ...(input.sentContext === undefined ? {} : { sentContext: input.sentContext }),
       ...(input.onContextDelivered === undefined
@@ -3070,7 +3129,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           .pipe(Effect.catchAll(() => Effect.void)),
       );
     }
-    return turnState("interrupted");
+    return { ...turnState("interrupted"), stoppedOperationId: active.operationId };
   }
 
   async closeAll(): Promise<void> {
@@ -3363,6 +3422,29 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           prompt,
           ...(fullContext.length === 0 ? {} : { context: fullContext }),
           contextAccount,
+          ...(this.#options.sessionCompactions === undefined
+            ? {}
+            : {
+                onAutomaticCompaction: (sighting: AutomaticCompactionSighting) => {
+                  const occupancy = this.#events.latestWindowOccupancy(
+                    active.thread.id,
+                    decodeProviderSessionId(active.sessionId),
+                  );
+                  this.#options.sessionCompactions?.record({
+                    threadId: active.thread.id,
+                    // A Code turn is one operation; its id is the turn's.
+                    turnKey: String(active.operationId),
+                    sighting,
+                    executor: {
+                      kind: "runtime",
+                      driverKind: active.driver.kind,
+                      providerInstanceId: active.thread.providerInstanceId,
+                      modelId: active.thread.modelId,
+                    },
+                    ...(occupancy === undefined ? {} : { priorOccupancy: occupancy }),
+                  });
+                },
+              }),
           onTurnEnded: (ended) => {
             endedTurn = ended;
           },
@@ -3378,7 +3460,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             ? {}
             : {
                 onTurnCompleted: (completed) => {
-                  this.settleSpendReservation(String(active.thread.id));
+                  this.settleSpendReservation(active.operationId);
                   return this.#options.nativeHarness!.turnCompleted({
                     ...harnessScope,
                     ...completed,
@@ -3718,7 +3800,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * forever.
    */
   #persistRuntimeWork(active: ActiveTurn, state: CodeTurnOutcome): void {
-    this.settleSpendReservation(String(active.thread.id));
+    this.settleSpendReservation(active.operationId);
     this.#observeRuntimeWorkOutcome(
       this.#runtimeWork.settle({
         id: active.operationId,

@@ -45,9 +45,9 @@ export interface ThreadRowActions {
   /** Absent when the host cannot archive this thread. */
   readonly onArchiveThread?: (threadId: string) => void;
   /**
-   * Puts a finished thread away in the Completed shelf without archiving it.
+   * Puts a finished thread away in the Put away shelf without archiving it.
    * Paired with {@link onReopenThread}: the menu offers whichever of the two
-   * would change the thread. Absent when the host cannot complete threads.
+   * would change the thread. Absent when the host cannot put threads away.
    */
   readonly onCompleteThread?: (threadId: string) => void;
   readonly onReopenThread?: (threadId: string) => void;
@@ -260,10 +260,10 @@ export function ThreadRowMenu(props: {
             ) : props.actions.onCompleteThread === undefined ? null : (
               <OctantContextMenuItem
                 className="thread-row-context-menu__item"
-                label="Complete"
+                label="Put away"
                 onClick={() => props.actions.onCompleteThread?.(threadId)}
               >
-                <MenuContent icon={Check}>Complete</MenuContent>
+                <MenuContent icon={Check}>Put away</MenuContent>
               </OctantContextMenuItem>
             )}
             {props.thread.snooze !== undefined ? (

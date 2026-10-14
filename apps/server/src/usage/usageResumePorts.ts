@@ -296,6 +296,12 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
       if (thread === undefined || thread.lifecycle !== "active") {
         return invalid("The Work thread is no longer active.");
       }
+      // The opt-in was to continue at the reset. Held until the person
+      // reactivates the thread, it would run at a time they never chose, so
+      // it ends here with a note they see on the thread.
+      if (thread.completionConfirmed === true) {
+        return invalid("The Work thread was marked Done.");
+      }
       if (String(thread.providerInstanceId) !== String(record.providerInstanceId)) {
         return invalid("The thread's provider changed.");
       }
@@ -365,6 +371,11 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
           : refused("message" in result ? result.message : "The continuation was not admitted.");
       } catch (error) {
         if (deps.work.compacting?.(thread.id) === true) return COMPACTION_DEFERRAL;
+        // Marked Done after inspection passed: defer, so the next inspection
+        // ends the opt-in as invalidated with its note rather than as failed.
+        if (deps.work.readThread(thread.id)?.completionConfirmed === true) {
+          return { kind: "deferred", detail: "The Work thread was marked Done." };
+        }
         return refused(refusalDetail(error));
       }
     },

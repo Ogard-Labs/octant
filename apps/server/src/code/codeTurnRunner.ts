@@ -21,6 +21,7 @@ import type {
 } from "@octant/provider-sdk/driver";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import { octantWindowBreakdown, type CodeTurnContextAccount } from "./codeTurnContext";
+import { TurnCompactions, type AutomaticCompactionSighting } from "../context/automaticCompaction";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
@@ -150,6 +151,12 @@ export interface CodeTurnRunnerInput {
    * counted for the window of a runtime that reports no categories.
    */
   readonly contextAccount?: CodeTurnContextAccount;
+  /**
+   * Told of each compaction the runtime made by itself during this turn, so
+   * the thread's context ledger can record it. A requested compaction never
+   * runs inside a turn and is journaled by the command that asked for it.
+   */
+  readonly onAutomaticCompaction?: (sighting: AutomaticCompactionSighting) => void;
   /**
    * Whether the harness's native reviewer may answer approval prompts for
    * this turn. The caller computes this from the thread's `autoApprove` flag,
@@ -348,6 +355,7 @@ export class CodeTurnRunner {
       }
 
       const idle = yield* makeIdleTimeout(timeoutMs);
+      const compactions = new TurnCompactions();
       const collected = yield* subscribeThenSend({
         connection,
         consume: (runtimeEvents) =>
@@ -386,6 +394,17 @@ export class CodeTurnRunner {
                 if (!isSanitizedEventValid(boundedEvent, sanitizedEvent, input.checkoutRoot)) {
                   return yield* fail("failed", "Provider event sanitization failed closed.");
                 }
+                const sighting = compactions.observe(sanitizedEvent);
+                if (sighting !== undefined && input.onAutomaticCompaction !== undefined) {
+                  const record = input.onAutomaticCompaction;
+                  // The receipt is accounting; failing to write it never
+                  // fails the turn whose session it describes.
+                  yield* Effect.try(() => record(sighting)).pipe(
+                    Effect.catchAll(() =>
+                      Effect.logWarning("An automatic compaction could not be journaled."),
+                    ),
+                  );
+                }
                 // A compaction changes what the runtime's session holds, not
                 // the checkout or the turn's step: its receipt belongs on the
                 // thread's context ledger, not among the turn's events.
@@ -396,7 +415,7 @@ export class CodeTurnRunner {
                 input.liveTurn?.observe(sanitizedEvent);
                 const normalized = withToolName(
                   toolNames,
-                  yield* normalizeProviderEvent(input, sanitizedEvent),
+                  yield* normalizeProviderEvent(input, sanitizedEvent, compactions.compacted),
                 );
                 if (serializedBytes(normalized) > MAX_CODE_TURN_EVENT_BYTES) {
                   return yield* fail("failed", "Normalized Code event exceeded its byte budget.");
@@ -643,6 +662,8 @@ function withToolName(toolNames: Map<string, string>, event: CodeTurnEvent): Cod
 function normalizeProviderEvent(
   input: CodeTurnRunnerInput,
   event: Exclude<ProviderRuntimeEvent, { readonly kind: "context-compacted" }>,
+  /** Whether the runtime compacted the session earlier in this turn. */
+  compacted: boolean,
 ): Effect.Effect<CodeTurnEvent, CodeTurnFailure> {
   const base = {
     providerKind: event.kind,
@@ -780,7 +801,9 @@ function normalizeProviderEvent(
         octantWindowBreakdown({
           tools: input.appManagedTools?.definitions ?? [],
           account: input.contextAccount,
-          promptRetention: event.promptRetention,
+          // The compaction the turn saw, not a flag the adapter keeps, says
+          // the window no longer holds every prompt Octant sent.
+          promptRetention: compacted ? "compacted" : event.promptRetention,
         });
       // Priced here, once, and journaled with the report. A ledger that priced
       // the turn on rebuild would re-price Code history after any revision of

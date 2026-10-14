@@ -2115,6 +2115,30 @@ ALTER TABLE code_runtime_projection
       DELETE FROM projection_checkpoints WHERE projection_name = 'extensions';
     `,
   },
+  {
+    version: 77,
+    name: "drop_superseded_chat_turns_from_transcript_search",
+    // Search used to index every turn, so an edited message stayed findable by
+    // its old text and the hit could never be revealed. An edit supersedes the
+    // revised turn and every turn after it, up to the edit itself. The chat
+    // service only edits an active turn, so that range is exactly the turns
+    // the thread no longer shows. New edits drop their rows as they are projected.
+    sql: `
+      DELETE FROM chat_transcript_search_projection
+      WHERE EXISTS (
+        SELECT 1
+        FROM chat_turn_projection AS indexed
+        INNER JOIN chat_turn_projection AS edit
+          ON edit.thread_id = indexed.thread_id
+        INNER JOIN chat_turn_projection AS revised
+          ON revised.thread_id = edit.thread_id
+          AND revised.turn_id = json_extract(edit.turn_json, '$.supersedes')
+        WHERE indexed.turn_id = chat_transcript_search_projection.turn_id
+          AND revised.sequence <= indexed.sequence
+          AND indexed.sequence < edit.sequence
+      );
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

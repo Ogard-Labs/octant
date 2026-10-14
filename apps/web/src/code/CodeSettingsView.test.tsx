@@ -57,6 +57,30 @@ describe("CodeSettingsView", () => {
     });
   });
 
+  it("lets one Git requirement switch decide plain folders and threads without a Project", async () => {
+    const update = vi.fn(async () => true);
+    render(
+      <CodeSettingsView
+        onUpdate={update}
+        settings={{ ...settings, requireGitRepository: true } as never}
+      />,
+    );
+
+    const requirement = screen.getByRole("switch", { name: "Code needs a Git repository" });
+    expect(requirement).toBeChecked();
+    expect(screen.getByText(/the default folder included/)).toBeVisible();
+    expect(screen.queryByRole("switch", { name: "Threads without a Project" })).toBeNull();
+
+    await userEvent.setup().click(requirement);
+
+    expect(update).toHaveBeenCalledWith({
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      requireGitRepository: false,
+      defaultDiffLayout: "unified",
+    });
+  });
+
   it("keeps an external editor path once the field is finished, not mid-keystroke", async () => {
     const update = vi.fn(async () => true);
     render(<CodeSettingsView onUpdate={update} settings={settings as never} />);

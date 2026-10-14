@@ -19,7 +19,7 @@ describe("threadRest", () => {
   const now = new Date("2026-09-07T10:00:00.000Z");
   const snooze = { until: "2026-09-08T09:00:00.000Z", at: "2026-09-07T09:00:00.000Z" };
 
-  it("files a snoozed row with its wake countdown and a completed row under Completed", () => {
+  it("files a snoozed row with its wake countdown and a put-away row under the completed shelf", () => {
     expect(threadRest({ snooze }, { now, awaitingInput: false })).toEqual({
       shelf: "snoozed",
       wakeLabel: "23h",

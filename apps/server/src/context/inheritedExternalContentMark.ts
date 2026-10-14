@@ -76,3 +76,83 @@ export function journalWithInheritedMark<A>(input: {
     throw error;
   }
 }
+
+/** Where the host reads a thread's mark now and records a new one. */
+export interface ThreadOutsideContentMarks {
+  readonly record: RecordExternalContentIngestion;
+  readonly isMarked: (threadId: string) => boolean;
+}
+
+/** What marking a thread that reads another thread's transcript came to. */
+export type ReaderMarking =
+  | { readonly status: "nothing-to-mark" }
+  | { readonly status: "marked" }
+  | { readonly status: "refused" };
+
+/**
+ * Marks a thread whose model is about to read another thread's transcript
+ * (a `#thread` mention or a Side Chat source), when that thread is marked.
+ *
+ * The transcript carries what the marked thread read, so the reader is marked
+ * as a fork or a branch would be, under the channel's own label. Call it after
+ * the transcript is read and before its text is handed on, so the reader is
+ * marked before its provider sees anything; anything that marked the source
+ * was recorded before it could reach the source's transcript. A source a
+ * person cleared passes on nothing, as for a fork.
+ *
+ * The reference names the source, so marking the same reader from the same
+ * source again records nothing new until a person clears the reader, whose
+ * clear forgets the reference. A mark that cannot be recorded, or a source
+ * whose mark cannot be read, is `refused`: the caller withholds the text.
+ */
+export function markReaderOfMarkedThread(input: {
+  readonly marks: ThreadOutsideContentMarks;
+  readonly readerThreadId: string;
+  readonly sourceThreadId: string;
+  readonly sourceLabel: string;
+  readonly correlationId: () => string;
+}): ReaderMarking {
+  // A thread reading itself already carries whatever mark it has.
+  if (input.readerThreadId === input.sourceThreadId) return { status: "nothing-to-mark" };
+  try {
+    if (!input.marks.isMarked(input.sourceThreadId)) return { status: "nothing-to-mark" };
+  } catch {
+    return { status: "refused" };
+  }
+  return recordReaderMark({
+    marks: input.marks,
+    readerThreadId: input.readerThreadId,
+    sourceLabel: input.sourceLabel,
+    contentReference: `${input.sourceLabel}-${input.sourceThreadId}`,
+    correlationId: input.correlationId,
+  });
+}
+
+/**
+ * Marks a thread whose model is about to read outside text that marked no
+ * thread yet, such as a subagent's reply its parent has not taken in. Like
+ * `markReaderOfMarkedThread`, it runs before the text is handed on, and a
+ * `refused` mark means the caller withholds the text.
+ */
+export function recordReaderMark(input: {
+  readonly marks: ThreadOutsideContentMarks;
+  readonly readerThreadId: string;
+  readonly sourceLabel: string;
+  readonly contentReference: string;
+  readonly correlationId: () => string;
+}): ReaderMarking {
+  try {
+    const recorded = input.marks.record({
+      threadId: input.readerThreadId,
+      provenance: { origin: "external-content", sourceLabel: input.sourceLabel },
+      contentReference: input.contentReference,
+      correlationId: input.correlationId(),
+      authorized: true,
+    });
+    return recorded.kind === "recorded" || recorded.kind === "already-recorded"
+      ? { status: "marked" }
+      : { status: "refused" };
+  } catch {
+    return { status: "refused" };
+  }
+}

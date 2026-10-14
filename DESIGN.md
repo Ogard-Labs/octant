@@ -1120,10 +1120,10 @@ The sidebar header carries the mode switcher, Search, and New thread (New
 chat in Chat, New task in Work and Code); no New thread row repeats it. Under the header sit four count tiles in a 2×2 grid: Inbox (the
 threads that need the person), Running (threads the host projects as
 executing), To review (finished turns not opened since), and Done today
-(threads completed since local midnight). Each tile is one button whose name
+(threads put away since local midnight). Each tile is one button whose name
 carries its count ("Running, 2"); Inbox opens the Inbox, Running opens the
 Board (the Activity feed in Chat, which has no board), To review opens the
-Review page, and Done today opens the Completed shelf (renamed Put away, not built yet; see [Workspace](docs/design/workspace.md#thread-visibility-and-completion)). With the tiles on,
+Review page, and Done today opens the Put away shelf (see [Workspace](docs/design/workspace.md#thread-visibility-and-completion)). With the tiles on,
 the Inbox and Board rows are left out because their tiles go to the same
 place. Settings › Sidebar › Count tiles turns them off and brings the rows
 back. Tiles are neutral faces in the Default style; under Vivid each takes a

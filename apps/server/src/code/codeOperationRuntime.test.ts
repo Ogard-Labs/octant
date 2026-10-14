@@ -493,6 +493,401 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  describe("an in-place restore beside a turn that is still preparing to start", () => {
+    const restoringThreadId = decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1");
+
+    /**
+     * A writing turn on the thread under test, held in credential resolution:
+     * its checkpoint is captured and the runtime has not yet taken it on.
+     */
+    async function preparingTurn(restoringProjectId?: string) {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const entered = Promise.withResolvers<void>();
+      const credential = Promise.withResolvers<string | undefined>();
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        gitObservation: readyGitObservation([]),
+        gitTreeChanges: [],
+        credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
+        credentialResolver: {
+          resolve: () => {
+            entered.resolve();
+            return credential.promise;
+          },
+        },
+      });
+      fixture.setOtherThread(
+        decodeCodeThread({
+          ...thread(),
+          id: restoringThreadId,
+          title: "Restoring thread",
+          ...(restoringProjectId === undefined ? {} : { projectId: restoringProjectId }),
+        }),
+      );
+      const starting = fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(31),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await entered.promise;
+      const restore = (id: number) =>
+        fixture.runtime.execute(windowId, {
+          kind: "restore-git-checkpoint",
+          operationId: operationId(id),
+          gitOperationId: operationId(id + 1) as never,
+          threadId: restoringThreadId,
+          checkoutId,
+          checkpoint: { worktree: "c".repeat(40), index: "d".repeat(40) } as never,
+        });
+      return { fixture, connection, starting, credential, restore };
+    }
+
+    it.each([
+      {
+        from: "the same Project",
+        projectId: undefined,
+        message:
+          'Another thread is writing in this checkout: "Runtime". Wait for its turn to finish or stop it, then restore.',
+      },
+      {
+        from: "another Project on the same folder",
+        projectId: "abababab-abab-4bab-8bab-abababababab",
+        message:
+          "A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then restore.",
+      },
+    ])(
+      "refuses a restore from $from and leaves the files alone until the turn has run",
+      async ({ projectId, message }) => {
+        const { fixture, starting, credential, restore } = await preparingTurn(projectId);
+
+        await expect(restore(32)).resolves.toMatchObject({
+          kind: "operation-failed",
+          failure: { category: "conflict", message },
+        });
+        expect(fixture.restoredTrees()).toBe(0);
+
+        credential.resolve("secret");
+        await expect(starting).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "running",
+        });
+        await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(34),
+          threadId,
+          checkoutId,
+        });
+
+        // The fixture's Git fails every overwrite; what matters is that the
+        // restore reached it once the turn no longer held the checkout.
+        await expect(restore(35)).resolves.toMatchObject({
+          kind: "git-mutation-state",
+          mutation: "restore-checkpoint",
+        });
+        expect(fixture.restoredTrees()).toBe(1);
+        fixture.close();
+      },
+    );
+
+    it("releases the checkout when a turn is stopped while its preparation never returns", async () => {
+      const { fixture, connection, starting, credential, restore } = await preparingTurn();
+      await expect(restore(32)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "conflict" },
+      });
+
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(34),
+          threadId,
+          checkoutId,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+      // The credential read is still outstanding; the restore no longer waits on it.
+      await expect(restore(35)).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        mutation: "restore-checkpoint",
+      });
+      expect(fixture.restoredTrees()).toBe(1);
+
+      // When the read finally returns, the stopped turn never reaches its provider.
+      credential.resolve("secret");
+      await expect(starting).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "interrupted",
+      });
+      expect(connection.start).not.toHaveBeenCalled();
+      expect(connection.send).not.toHaveBeenCalled();
+      fixture.close();
+    });
+
+    it.each([
+      {
+        exit: "is refused",
+        settle: (credential: PromiseWithResolvers<string | undefined>) =>
+          credential.resolve(undefined),
+        outcome: { kind: "provider-turn-state", state: "failed" },
+      },
+      {
+        exit: "fails",
+        settle: (credential: PromiseWithResolvers<string | undefined>) =>
+          credential.reject(new Error("Keychain read failed.")),
+        outcome: { kind: "operation-failed", failure: { category: "failed" } },
+      },
+    ])("lets a restore through once a preparing turn $exit", async ({ settle, outcome }) => {
+      const { fixture, starting, credential, restore } = await preparingTurn();
+      await expect(restore(32)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "conflict" },
+      });
+
+      settle(credential);
+      await expect(starting).resolves.toMatchObject(outcome);
+
+      await expect(restore(35)).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        mutation: "restore-checkpoint",
+      });
+      expect(fixture.restoredTrees()).toBe(1);
+      fixture.close();
+    });
+  });
+
+  describe("a start stopped while its preparation never returns", () => {
+    const credentialReferences = [{ environmentName: "TOKEN", reference: "token" }];
+
+    /** The first credential read waits until released; every later one answers at once. */
+    function stuckFirstCredentialRead() {
+      const entered = Promise.withResolvers<void>();
+      const stuck = Promise.withResolvers<string | undefined>();
+      const resolve = vi.fn(() => {
+        if (resolve.mock.calls.length > 1) return Promise.resolve("secret");
+        entered.resolve();
+        return stuck.promise;
+      });
+      return {
+        entered: entered.promise,
+        release: (value: string | undefined) => stuck.resolve(value),
+        resolve,
+      };
+    }
+
+    /** A spend ceiling that admits every turn and records what it gave and got back. */
+    function recordingSpendCeiling() {
+      const admit = vi.fn((_input: { readonly reservationId: string }) => ({
+        status: "admitted" as const,
+        reservedTokens: 100,
+        reservations: [
+          { scopeKind: "thread" as const, scopeId: String(threadId), reservedTokens: 100 },
+        ],
+      }));
+      const settle = vi.fn((_input: { readonly reservationId: string }) => undefined);
+      return {
+        spendCeiling: { admit, settle },
+        admitted: () => admit.mock.calls.map(([input]) => String(input.reservationId)),
+        settled: () => settle.mock.calls.map(([input]) => String(input.reservationId)),
+      };
+    }
+
+    const start = (id: number) =>
+      ({
+        kind: "start-provider-turn",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: evidence(40),
+      }) as const;
+    const stop = (id: number) =>
+      ({
+        kind: "cancel-provider-turn",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+      }) as const;
+
+    it("reads as stopped in the transcript once Stop returns, and leaves the next turn on the thread alone when it settles", async () => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const credential = stuckFirstCredentialRead();
+      const settle = vi.fn();
+      const admit = vi.fn().mockReturnValue({
+        status: "admitted",
+        reservedTokens: 100,
+        reservations: [{ scopeKind: "thread", scopeId: String(threadId), reservedTokens: 100 }],
+      });
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        credentialReferences,
+        credentialResolver: { resolve: credential.resolve },
+        spendCeiling: { admit, settle },
+      });
+      try {
+        const stopped = fixture.runtime.execute(windowId, start(41));
+        await credential.entered;
+        await expect(fixture.runtime.execute(windowId, stop(42))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
+        // The credential read is still outstanding.
+        expect(
+          fixture.conversation().turns.find((turn) => turn.operationId === operationId(41))?.status,
+        ).toBe("interrupted");
+
+        await expect(fixture.runtime.execute(windowId, start(43))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "running",
+        });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+
+        credential.release("secret");
+        await expect(stopped).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
+        // The late settle gave back the stopped start's reservation, not the
+        // newer turn's, and journaled nothing over what Stop recorded.
+        const [older, newer] = admit.mock.calls.map(([input]) => input.reservationId);
+        expect(settle.mock.calls).toEqual([[{ reservationId: older }]]);
+        expect(
+          fixture.conversation().turns.map((turn) => [String(turn.operationId), turn.status]),
+        ).toEqual([
+          [String(operationId(41)), "interrupted"],
+          [String(operationId(43)), "incomplete"],
+        ]);
+
+        await expect(fixture.runtime.execute(windowId, stop(44))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
+        expect(settle).toHaveBeenLastCalledWith({ reservationId: newer });
+        expect(connection.start).toHaveBeenCalledOnce();
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it.each([
+      { ending: "is refused at its admission check", read: "secret" },
+      { ending: "then fails on its own", read: undefined },
+    ])(
+      "does not launch a stopped recovered start again when its operation is retried, and its preparation $ending",
+      async ({ read }) => {
+        const stalledQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+        const stalled = {
+          ...providerConnection(stalledQueue),
+          send: vi.fn(() => Effect.never),
+        } as ProviderConnection;
+        const fixture = runtimeFixture({ provider: providerDriver(stalled) });
+        const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+        const connection = providerConnection(queue);
+        const credential = stuckFirstCredentialRead();
+        let restarted: ReturnType<typeof runtimeFixture> | undefined;
+        try {
+          // The host stops after the start answered `running` and before the
+          // provider produced anything, so the next host recovers the start.
+          await expect(fixture.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "running",
+          });
+          await vi.waitFor(() => expect(stalled.send).toHaveBeenCalledOnce());
+          const spend = recordingSpendCeiling();
+          restarted = runtimeFixture({
+            provider: providerDriver(connection),
+            credentialReferences,
+            credentialResolver: { resolve: credential.resolve },
+            spendCeiling: spend.spendCeiling,
+            restartOf: { directory: fixture.directory, evidenceValues: fixture.evidenceValues },
+          });
+
+          const recovering = restarted.runtime.execute(windowId, start(51));
+          await credential.entered;
+          await expect(restarted.runtime.execute(windowId, stop(52))).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "interrupted",
+          });
+          expect(
+            restarted.conversation().turns.find((turn) => turn.operationId === operationId(51))
+              ?.status,
+          ).toBe("interrupted");
+
+          // A retry answers from the journal rather than preparing the turn again.
+          await expect(restarted.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "interrupted",
+          });
+          expect(credential.resolve).toHaveBeenCalledOnce();
+
+          // The retry reused the operation's reservation rather than replacing it.
+          expect(spend.admitted()).toHaveLength(1);
+
+          // Whatever the preparation answers once it returns, the start reads as
+          // the stop Stop journaled.
+          credential.release(read);
+          await expect(recovering).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "interrupted",
+          });
+          await expect(restarted.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "interrupted",
+          });
+          expect(credential.resolve).toHaveBeenCalledOnce();
+          expect(connection.start).not.toHaveBeenCalled();
+          expect(connection.resume).not.toHaveBeenCalled();
+          expect(connection.send).not.toHaveBeenCalled();
+          // Every reservation taken was given back exactly once.
+          expect(spend.admitted()).toHaveLength(2);
+          expect(spend.settled().toSorted()).toEqual(spend.admitted().toSorted());
+        } finally {
+          await restarted?.runtime.close();
+          restarted?.close();
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      },
+    );
+
+    it("gives back the reservation of a retry answered from the journal for a turn that already ended", async () => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const spend = recordingSpendCeiling();
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        spendCeiling: spend.spendCeiling,
+      });
+      try {
+        await expect(fixture.runtime.execute(windowId, start(61))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "running",
+        });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+        await Effect.runPromise(
+          Queue.offer(queue, providerEvent({ kind: "text-delta", text: "Done." })),
+        );
+        await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+        await vi.waitFor(() => expect(spend.settled()).toHaveLength(1));
+
+        await expect(fixture.runtime.execute(windowId, start(61))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "running",
+        });
+        expect(spend.admitted()).toHaveLength(2);
+        expect(spend.settled().toSorted()).toEqual(spend.admitted().toSorted());
+        expect(connection.send).toHaveBeenCalledOnce();
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+  });
+
   it("releases the spend reservation when a Code turn fails to start", async () => {
     const settle = vi.fn();
     const admit = vi.fn().mockReturnValue({
@@ -1382,6 +1777,115 @@ describe("CodeOperationRuntime", () => {
       await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
 
       expect(await instructionTokens(operationId(89))).toBe((first ?? 0) * 2);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
+  it("stops counting earlier turns' instructions once the ledger records a compaction, and records one the runtime made by itself under its turn", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const recorded: Array<unknown> = [];
+    const compactedAfter: Array<number> = [];
+    let ledgerCompacted = false;
+    const fixture = runtimeFixture({
+      provider: { ...providerDriver(connection), kind: "codex" },
+      sessionCompactions: {
+        record: (input) => {
+          recorded.push(input);
+        },
+        compactedAfter: (_, globalSequence) => {
+          compactedAfter.push(globalSequence);
+          return ledgerCompacted;
+        },
+      },
+    });
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        profileId: "60000000-0000-4000-8000-000000000001",
+        profileContext: {
+          displayName: "Reviewer",
+          instructions: "Review as a skeptic. ".repeat(40).trim(),
+          approvedSkillIds: [],
+        },
+      }),
+    );
+    const usage = (sequence: number) =>
+      providerEvent({
+        kind: "usage",
+        inputTokens: 10,
+        outputTokens: 2,
+        contextTokens: 9_000,
+        promptRetention: "kept",
+        sequence,
+      });
+    const reports = async (operation: ReturnType<typeof operationId>, count: number) => {
+      let accounting: Array<unknown> = [];
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+        accounting = frames.flatMap((frame) =>
+          frame.event.kind === "usage" ? [frame.event.contextBreakdown?.sentContext] : [],
+        );
+        if (accounting.length < count) throw new Error("not every report yet");
+      });
+      return accounting;
+    };
+    const turn = async (operation: number, prompt: string, events: ProviderRuntimeEvent[]) => {
+      const reference = storedEvidence(operation + 100, prompt);
+      fixture.evidenceValues.set(reference.contentId, prompt);
+      const sends = vi.mocked(connection.send).mock.calls.length;
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(operation),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: reference,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(sends + 1));
+      for (const event of events) await Effect.runPromise(Queue.offer(queue, event));
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+    };
+    try {
+      await turn(90, "first", [usage(1)]);
+      expect(await reports(operationId(90), 1)).toEqual([{ status: "counted" }]);
+      await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
+
+      // A compaction the ledger records after that report, such as one the
+      // person asked for between turns, means the session no longer holds
+      // every copy the first turn sent.
+      ledgerCompacted = true;
+      await turn(91, "second", [
+        usage(1),
+        providerEvent({ kind: "context-compacted", trigger: "automatic", sequence: 2 }),
+        usage(3),
+      ]);
+      expect(await reports(operationId(91), 2)).toEqual([
+        { status: "uncounted", reason: "compacted" },
+        { status: "uncounted", reason: "compacted" },
+      ]);
+      // Asked after the first turn's report, by its place in the journal.
+      expect(compactedAfter).toEqual([expect.any(Number)]);
+      expect(compactedAfter[0]).toBeGreaterThan(0);
+      expect(recorded).toEqual([
+        {
+          threadId,
+          turnKey: String(operationId(91)),
+          sighting: {
+            position: 1,
+            tokensBefore: { kind: "known", tokens: 9_000, accuracy: "provider-reported" },
+          },
+          executor: {
+            kind: "runtime",
+            driverKind: "codex",
+            providerInstanceId: thread().providerInstanceId,
+            modelId: thread().modelId,
+          },
+          priorOccupancy: { tokens: 9_000, observedAt: now },
+        },
+      ]);
     } finally {
       await fixture.runtime.close();
       fixture.close();
@@ -5229,6 +5733,7 @@ function runtimeFixture(options: {
   >[0]["resolveProviderDriver"];
   isProviderModelAllowed?: (thread: CodeThread) => boolean;
   compactionRunning?: (threadId: CodeThreadId) => boolean;
+  sessionCompactions?: Parameters<typeof createCodeOperationRuntime>[0]["sessionCompactions"];
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
   nativeHarness?: Parameters<typeof createCodeOperationRuntime>[0]["nativeHarness"];
   onPendingRequestWithdrawn?: () => void;
@@ -5301,6 +5806,7 @@ function runtimeFixture(options: {
   }
   let activeThread = thread();
   const snapshotPolicies: Array<string | undefined> = [];
+  let restoredTrees = 0;
   const checkout = decodeCodeCheckoutIdentity({
     id: checkoutId,
     repositoryId: activeThread.repositoryId,
@@ -5549,6 +6055,9 @@ function runtimeFixture(options: {
     ...(options.compactionRunning === undefined
       ? {}
       : { compactionRunning: options.compactionRunning }),
+    ...(options.sessionCompactions === undefined
+      ? {}
+      : { sessionCompactions: options.sessionCompactions }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     ...(options.nativeHarness === undefined ? {} : { nativeHarness: options.nativeHarness }),
     ...(options.onPendingRequestWithdrawn === undefined
@@ -5621,7 +6130,10 @@ function runtimeFixture(options: {
               anchorId: "3f1b0c9a-5d42-4e77-9a1c-6b2e8f0d4c31",
             };
       },
-      restoreWorkingTree: async () => ({ status: "failed" as const }),
+      restoreWorkingTree: async () => {
+        restoredTrees += 1;
+        return { status: "failed" as const };
+      },
       releaseCheckpoint: async () => {},
     },
   });
@@ -5646,6 +6158,8 @@ function runtimeFixture(options: {
       otherThreads.set(String(next.id), next);
     },
     snapshotPolicies,
+    /** How many times Git was asked to overwrite the working tree. */
+    restoredTrees: () => restoredTrees,
     /** Fire the shell's own exit, the way a `exit` typed into it would. */
     exitTerminal: () => exitTerminal?.(),
     /** Every runtime work state this runtime journalled, oldest first. */

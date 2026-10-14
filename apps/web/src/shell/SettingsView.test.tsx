@@ -167,10 +167,10 @@ describe("SettingsView", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("offers the completed-thread archive window in General and reports Never as off", async () => {
+  it("offers the put-away archive window in General and reports Never as off", async () => {
     const user = userEvent.setup();
     const { props } = renderSettings();
-    const select = screen.getByRole("combobox", { name: "Archive completed threads" });
+    const select = screen.getByRole("combobox", { name: "Archive put-away threads" });
     expect(select).toHaveTextContent("After 7 days");
     await user.click(select);
     await user.click(await screen.findByRole("option", { name: "Never" }));
@@ -687,10 +687,11 @@ describe("SettingsView", () => {
     } as unknown as CodeController;
     renderSettings({
       codeController,
-      initialDeepLink: { section: "code", setting: "code-default-folder-threads" },
+      initialDeepLink: { section: "code", setting: "code-require-git" },
     });
     expect(screen.getByRole("heading", { name: "Code defaults" })).toBeVisible();
-    expect(screen.getByRole("switch", { name: "Threads without a Project" })).toHaveFocus();
+    expect(screen.getByRole("switch", { name: "Code needs a Git repository" })).toHaveFocus();
+    expect(screen.queryByRole("switch", { name: "Threads without a Project" })).toBeNull();
   });
 
   it("sets Glass from one control: Off paints the sidebar solid, a level turns glass back on", async () => {

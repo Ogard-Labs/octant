@@ -250,10 +250,17 @@ features are unaffected. This is the accepted cost of keeping unreviewed
 skills out of the runtime; fx and Kimi Code have always worked this way for
 `.agents`.
 
-Two gaps remain. A skill folder above the Project, when the Project is a
+Codex finds `.agents/skills` by itself and has no setting that stops it, so
+Octant switches off each Project skill Codex finds whenever a Codex thread
+starts or resumes. A skill added to the Project during a Codex thread is
+available to that thread until it is next resumed. Codex releases from 0.66.0
+up to 0.108.0 cannot switch a Project skill off for one thread, so Octant
+refuses to start a Codex thread on them and asks you to update Codex.
+
+Gaps remain. A skill folder above the Project, when the Project is a
 subfolder of a repository, is not blocked for the runtimes that look upward
-(GitHub Copilot, Grok Build, Devin). Codex still loads `.agents/skills` by
-itself.
+(GitHub Copilot, Grok Build, Devin). Codex also loads the skills in your own
+`~/.agents/skills` and Codex skills folders by itself.
 
 Type `/` in a Chat, Work, or Code composer — including Chat's first message — to find commands and enabled skills. Browser and Computer entries appear only when those capabilities are available.
 Choosing a skill creates a visible selection that can be removed before sending;

@@ -6,6 +6,7 @@ import {
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import { SessionCompactionService } from "../context/sessionCompaction";
 import { ContextHarnessError, ContextHarnessService } from "../context/contextHarnessService";
+import { automaticCompactionId } from "../context/automaticCompaction";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -47,6 +48,7 @@ import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { WorkAttachmentStore } from "./workAttachmentStore";
 import { WorkTurnProjection } from "./workTurnProjection";
 import {
+  WORK_THREAD_MARKED_DONE_TURN_REFUSAL,
   WorkTurnService,
   WorkTurnServiceError,
   type WorkTurnServiceDependencies,
@@ -432,6 +434,72 @@ describe("WorkTurnService", () => {
         contextTokens: 188,
         contextWindow: 1000,
       });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("journals a compaction the runtime made by itself on the thread's context ledger, once per turn and place", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
+    attachmentRoots.push(root);
+    const connection = openSqlite(join(root, "context.sqlite3"));
+    try {
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      let sequence = 0;
+      const contextHarness = new ContextHarnessService({
+        persistence: { connection, journal, status: () => ({ state: "current", integrity: "ok" }) },
+        uuid: () => `83000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+        clock: () => now,
+      });
+      const sighting = {
+        position: 1,
+        tokensBefore: { kind: "known", tokens: 900, accuracy: "provider-reported" },
+      } as const;
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        input.onAutomaticCompaction?.(sighting);
+        // The same compaction seen again, as a recovered stream would show it.
+        input.onAutomaticCompaction?.(sighting);
+        return { kind: "completed" as const, response: "Ready" };
+      });
+      const fixture = serviceFixture({ contextHarness, turnRuntime: { run } });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      expect(run).toHaveBeenCalledOnce();
+      const subject = decodeContextSubjectRef({
+        aggregateType: "work-thread",
+        aggregateId: String(ids.thread),
+      });
+      const runInput = run.mock.calls[0]?.[0];
+      expect(contextHarness.latestCompaction(subject)).toMatchObject({
+        status: "completed",
+        receipt: {
+          compactionId: automaticCompactionId(subject, String(runInput?.command.turnId), 1),
+          trigger: "automatic",
+          executor: {
+            kind: "runtime",
+            driverKind: runInput?.driver.kind,
+            providerInstanceId: runInput?.command.authority.providerInstanceId,
+            modelId: runInput?.command.authority.modelId,
+          },
+          tokensBefore: sighting.tokensBefore,
+          summary: { visibility: "runtime-only" },
+        },
+      });
+      expect(
+        connection
+          .prepare(
+            `SELECT COUNT(*) AS count FROM event_journal
+             WHERE aggregate_type = 'context-ledger' AND event_name LIKE 'context.compaction-%'`,
+          )
+          .get(),
+      ).toEqual({ count: 1 });
     } finally {
       connection.close();
     }
@@ -2623,6 +2691,57 @@ describe("WorkTurnService", () => {
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
   });
 
+  it("refuses every turn on a thread a person marked Done, and admits one after reactivation", async () => {
+    let markedDone = true;
+    const onTurnRequested = vi.fn();
+    const run = workRunFor(ids.thread);
+    const fixture = serviceFixture({
+      completionConfirmed: () => markedDone,
+      onTurnRequested,
+      agentRuns: { getById: (runId) => (String(runId) === String(run.id) ? run : undefined) },
+    });
+    const refusal = {
+      failure: { category: "invalid", message: WORK_THREAD_MARKED_DONE_TURN_REFUSAL },
+    };
+
+    // A window's turn (also how the queue dispatches), the host's
+    // usage-limit continuation, and a child's result delivery.
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).rejects.toMatchObject(
+      refusal,
+    );
+    await expect(
+      fixture.service.startFirstTurn(ROUTINE_HOST_SCOPE_ID, startCommand(), {
+        limitRecovery: true,
+      }),
+    ).rejects.toMatchObject(refusal);
+    await expect(
+      fixture.service.startFirstTurn(ROUTINE_HOST_SCOPE_ID, {
+        ...startCommand(),
+        delivery: { kind: "agent-result", runId: run.id },
+      }),
+    ).rejects.toMatchObject(refusal);
+    expect(onTurnRequested).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.projection.lookup(ids.request)).toBeUndefined();
+
+    markedDone = false;
+    const result = await fixture.service.startFirstTurn(ids.window, startCommand());
+    expect(result.kind).toBe("accepted");
+    await fixture.waitForIdle();
+  });
+
+  it("refuses a turn when a person marks the thread Done while the turn is prepared", async () => {
+    let reads = 0;
+    const fixture = serviceFixture({ completionConfirmed: () => reads++ > 0 });
+
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).rejects.toMatchObject({
+      failure: { category: "invalid", message: WORK_THREAD_MARKED_DONE_TURN_REFUSAL },
+    });
+    expect(reads).toBeGreaterThan(1);
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.projection.lookup(ids.request)).toBeUndefined();
+  });
+
   it("admits a delivery turn the journaled run backs and carries its mark", async () => {
     const run = workRunFor(ids.thread);
     const fixture = serviceFixture({
@@ -2707,6 +2826,8 @@ function serviceFixture(
     readonly threadAccess?: "ask-first" | "auto-accept-edits";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
     readonly agentRuns?: WorkTurnServiceDependencies["agentRuns"];
+    /** Read on every thread read, so a test can mark and reactivate between turns. */
+    readonly completionConfirmed?: () => boolean;
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -2818,6 +2939,7 @@ function serviceFixture(
         bindingRevisionId: ids.binding,
         workingDirectory: ".",
         ...(options.threadAccess === undefined ? {} : { access: options.threadAccess }),
+        ...(options.completionConfirmed?.() === true ? { completionConfirmed: true } : {}),
         version: 1,
         createdAt: now,
         updatedAt: now,
