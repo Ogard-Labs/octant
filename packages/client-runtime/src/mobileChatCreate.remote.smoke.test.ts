@@ -18,6 +18,7 @@ import {
   HOST_ID,
   ORIGIN,
   TICKET_ID,
+  HOST_KEY_FINGERPRINT,
 } from "./remoteConnectionFixtures";
 
 const hostId = decodeStableHostId(HOST_ID);
@@ -160,6 +161,7 @@ describe("mobile chat create over remote session", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
     });
     await waitUntil(() => bridge.getState().kind === "ready");
     const connection = bridge.connection();

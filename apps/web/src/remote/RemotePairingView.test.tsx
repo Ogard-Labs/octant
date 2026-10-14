@@ -323,6 +323,7 @@ describe("RemotePairingView", () => {
         credentialGeneration: 1,
         deviceKeyId: "key-1",
         origin: serverBaseUrl,
+        hostKeyFingerprint: "a".repeat(64),
       },
     };
     const client = createMockClient({

@@ -96,6 +96,7 @@ function loadOrCreateSigning(directory: string): HostSigningPort {
 
   return {
     hostKeyFingerprint,
+    hostPublicKey: publicDer.toString("base64url"),
     signHostPayload: (payload: string) =>
       cryptoSign("sha256", Buffer.from(payload, "utf8"), {
         key: privateKey,

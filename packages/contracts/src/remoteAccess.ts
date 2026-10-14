@@ -68,6 +68,11 @@ export const HostHelloV1 = Schema.Struct({
   hostId: StableHostId,
   displayName: boundedString(128),
   hostKeyFingerprint: fingerprint,
+  // Unpadded base64url of the host identity key's DER SubjectPublicKeyInfo;
+  // `hostKeyFingerprint` is its SHA-256. A client checks `signature` against
+  // it. Optional only because hosts built before clients verified the hello
+  // sent none; a client refuses a hello without it.
+  hostPublicKey: Schema.optional(base64Url.pipe(Schema.maxLength(512))),
   serverBuildVersion: boundedString(128),
   supportedProtocolRange: ProtocolRange,
   authenticationProtocolVersions: Schema.NonEmptyArray(positiveInteger),

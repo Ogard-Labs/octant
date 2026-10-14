@@ -28,7 +28,7 @@
 // queue so concurrent host actions cannot start multiple gateway generations
 // or race the owned handle across their `await` points.
 
-import { createHash } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import { classifyRemoteListenerAddress } from "@octant/domain";
 import {
   isPrivateListenerFailureCode,
@@ -104,11 +104,22 @@ export class PrivateListenerLifecycleError extends Error {
   }
 }
 
+/**
+ * SHA-256 (lowercase hex) of the leaf certificate's DER SubjectPublicKeyInfo.
+ * It hashes the key rather than the PEM text, so a certificate reissued for
+ * the same key keeps its fingerprint and any tool that reads the key agrees.
+ */
 export function privateListenerCertificateFingerprint(certificatePem: string): string {
   if (typeof certificatePem !== "string" || certificatePem.trim().length === 0) {
     throw new PrivateListenerLifecycleError("invalid-tls");
   }
-  return createHash("sha256").update(certificatePem.replaceAll(/\s+/g, "")).digest("hex");
+  let spki: Buffer;
+  try {
+    spki = new X509Certificate(certificatePem).publicKey.export({ format: "der", type: "spki" });
+  } catch {
+    throw new PrivateListenerLifecycleError("invalid-tls");
+  }
+  return createHash("sha256").update(spki).digest("hex");
 }
 
 function disabledStatus(): PrivateListenerHostStatus {

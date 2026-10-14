@@ -25,6 +25,7 @@ import {
   HOST_ID,
   ORIGIN,
   TICKET_ID,
+  HOST_KEY_FINGERPRINT,
 } from "./remoteConnectionFixtures";
 
 const hostId = decodeStableHostId(HOST_ID);
@@ -123,6 +124,7 @@ describe("remote authenticated product smoke", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
     });
     await waitUntil(() => bridge.getState().kind === "ready");
     expect(server.productProofVerified()).toBe(false);

@@ -108,6 +108,7 @@ function createFixture(options?: {
   const signCalls: string[] = [];
   const signing: HostSigningPort = {
     hostKeyFingerprint: createHash("sha256").update(hostPublicDer).digest("hex"),
+    hostPublicKey: hostPublicDer.toString("base64url"),
     signHostPayload: (payload) => {
       signCalls.push(payload);
       return sign("sha256", Buffer.from(payload, "utf8"), {
@@ -373,6 +374,7 @@ describe("RemoteProtocolService host hello", () => {
         "hostId",
         "displayName",
         "hostKeyFingerprint",
+        "hostPublicKey",
         "serverBuildVersion",
         "supportedProtocolRange",
         "authenticationProtocolVersions",
@@ -387,6 +389,12 @@ describe("RemoteProtocolService host hello", () => {
       /projects|threads|providers|models|roots|worktree|devices|username/i,
     );
     expect(hello.hostKeyFingerprint).toBe(fx.signing.hostKeyFingerprint);
+    // The client checks the signature against this key, and the key against
+    // the fingerprint it pinned at pairing.
+    expect(hello.hostPublicKey).toBe(Buffer.from(fx.hostPublicDer).toString("base64url"));
+    expect(createHash("sha256").update(fx.hostPublicDer).digest("hex")).toBe(
+      hello.hostKeyFingerprint,
+    );
     expect(hello.expiresAt).toBe(new Date(nowMs + HOST_HELLO_NONCE_TTL_MS).toISOString());
     expect(fx.signCalls).toHaveLength(1);
     expect(verifyHostHello(fx, hello)).toBe(true);
@@ -779,6 +787,7 @@ describe("RemoteProtocolService negotiation", () => {
     const { device: registered } = pairDevice(fx, device);
     const brokenSigning: HostSigningPort = {
       hostKeyFingerprint: fx.signing.hostKeyFingerprint,
+      hostPublicKey: fx.signing.hostPublicKey,
       signHostPayload: (payload) => {
         // Only the negotiated-protocol signature fails; host hello signing works.
         if (payload.startsWith("octant.negotiated-protocol.v1\n")) {

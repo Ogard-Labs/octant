@@ -60,6 +60,7 @@ function makeSigning() {
   return {
     signing: {
       hostKeyFingerprint: createHash("sha256").update(hostPublicDer).digest("hex"),
+      hostPublicKey: hostPublicDer.toString("base64url"),
       signHostPayload: (payload: string) =>
         sign("sha256", Buffer.from(payload, "utf8"), {
           key: hostKeys.privateKey,

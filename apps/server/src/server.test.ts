@@ -1884,6 +1884,7 @@ describe("startOctantServer", () => {
                   serverBuildVersion: "0.1.0",
                   signing: {
                     hostKeyFingerprint: "a".repeat(64),
+                    hostPublicKey: "test-host-public-key",
                     signHostPayload: () => "signature",
                   },
                   webAssets: () => Promise.resolve(new Response("web", { status: 200 })),
@@ -2109,6 +2110,7 @@ describe("startOctantServer", () => {
                     serverBuildVersion: "0.1.0",
                     signing: {
                       hostKeyFingerprint: "a".repeat(64),
+                      hostPublicKey: "test-host-public-key",
                       signHostPayload: () => "signature",
                     },
                     webAssets: () => Promise.resolve(new Response("web", { status: 200 })),
@@ -2198,6 +2200,7 @@ describe("startOctantServer", () => {
                     serverBuildVersion: "0.1.0",
                     signing: {
                       hostKeyFingerprint: "a".repeat(64),
+                      hostPublicKey: "test-host-public-key",
                       signHostPayload: () => "signature",
                     },
                     webAssets: () => Promise.resolve(new Response("web", { status: 200 })),

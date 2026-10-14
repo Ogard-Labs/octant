@@ -10,6 +10,7 @@ import { bindFetchPort } from "./bindFetchPort";
 import { createPairingDeviceKeyAdapter } from "./pairingDeviceKeyAdapter";
 import {
   createRemoteConnection,
+  requireProvenHostHello,
   RemoteConnectionError,
   type RemoteConnection,
   type RemoteConnectionState,
@@ -208,10 +209,7 @@ export function createRemoteSessionBridge(
     return { kind: "unavailable", reason: "Remote host is unavailable.", ...partial };
   };
 
-  const establishConnection = async (
-    approval: RemotePairingApproval,
-    expectedIdentity?: { readonly hostId: string; readonly hostKeyFingerprint: string },
-  ): Promise<void> => {
+  const establishConnection = async (approval: RemotePairingApproval): Promise<void> => {
     const helloResponse = await fetch(new URL("/api/remote/hello", approval.origin).toString(), {
       method: "GET",
     });
@@ -219,16 +217,13 @@ export function createRemoteSessionBridge(
       throw new RemoteConnectionError("unavailable", "Remote host hello failed.");
     }
     const hello = decodeHostAnswer(HostHelloV1)(await helloResponse.json());
-    if (
-      expectedIdentity !== undefined &&
-      (hello.hostId !== expectedIdentity.hostId ||
-        hello.hostKeyFingerprint !== expectedIdentity.hostKeyFingerprint)
-    ) {
-      throw new RemoteConnectionError(
-        "host-changed",
-        "Host identity or key fingerprint changed at the same endpoint.",
-      );
-    }
+    // The display name shown while connecting comes from this hello, so it is
+    // checked against the key recorded at pairing before anything is shown.
+    // The connection below checks every hello it fetches again.
+    await requireProvenHostHello(hello, {
+      hostId: approval.hostId,
+      hostKeyFingerprint: approval.hostKeyFingerprint,
+    });
     const facts = factsFromHello(hello);
     hostFacts = facts;
 
@@ -334,17 +329,15 @@ export function createRemoteSessionBridge(
           displayName: UNKNOWN_REMOTE_HOST_DISPLAY_NAME,
         });
         try {
-          await establishConnection(
-            {
-              ticketId: "00000000-0000-4000-8000-000000000000",
-              hostId: metadata.hostId,
-              deviceId: metadata.deviceId,
-              credentialGeneration: metadata.credentialGeneration,
-              deviceKeyId: metadata.keyId,
-              origin: metadata.origin,
-            },
-            metadata,
-          );
+          await establishConnection({
+            ticketId: "00000000-0000-4000-8000-000000000000",
+            hostId: metadata.hostId,
+            deviceId: metadata.deviceId,
+            credentialGeneration: metadata.credentialGeneration,
+            deviceKeyId: metadata.keyId,
+            origin: metadata.origin,
+            hostKeyFingerprint: metadata.hostKeyFingerprint,
+          });
         } catch (error) {
           if (error instanceof RemoteConnectionError && shouldRemoveDeviceKey(error)) {
             await deviceKeyStore.remove(metadata.keyId).catch(() => undefined);

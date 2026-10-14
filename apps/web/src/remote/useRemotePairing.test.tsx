@@ -14,6 +14,7 @@ import {
   createFakeRemoteServer,
   fingerprintFromPem,
   HOST_ID,
+  HOST_KEY_FINGERPRINT,
   ORIGIN,
   TICKET_ID,
 } from "../../../../packages/client-runtime/src/remoteConnectionFixtures";
@@ -65,7 +66,7 @@ async function seedApprovedDevice(
   await store.updateMetadata(deviceKeyId, {
     deviceId,
     credentialGeneration: 1,
-    hostKeyFingerprint: "a".repeat(64),
+    hostKeyFingerprint: HOST_KEY_FINGERPRINT,
   });
 }
 
@@ -279,6 +280,7 @@ describe("useRemotePairing resume", () => {
       credentialGeneration: 1,
       deviceKeyId: claim.deviceKeyId,
       origin: ORIGIN,
+      hostKeyFingerprint: claim.hostKeyFingerprint,
     };
     const client: RemotePairingClient = {
       requestHostHello: vi.fn(async () => hostHello),

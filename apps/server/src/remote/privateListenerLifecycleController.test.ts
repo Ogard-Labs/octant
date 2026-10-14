@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { PrivateListenerConfig } from "../privateListener";
 import {
@@ -8,7 +8,33 @@ import {
   type PrivateListenerGatewayLifecycle,
 } from "./privateListenerLifecycleController";
 
-const CERT = "-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----";
+// A throwaway self-signed P-256 certificate, and a reissue of it for the same
+// key under another name and serial. Only public material.
+const CERT =
+  "-----BEGIN CERTIFICATE-----\n" +
+  "MIIBhDCCASugAwIBAgIUApBnaMxwXDjiJEFcUZmT1vEoiMUwCgYIKoZIzj0EAwIw\n" +
+  "HzEdMBsGA1UEAwwUb2N0YW50LWxpc3RlbmVyLXRlc3QwIBcNMjYxMDE0MTU1MTQ4\n" +
+  "WhgPMjEyNjA5MjAxNTUxNDhaMB8xHTAbBgNVBAMMFG9jdGFudC1saXN0ZW5lci10\n" +
+  "ZXN0MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEjloqBB63xDIGRaEK1yipFl6l\n" +
+  "oQCHcfTcNKtC/iJfvwcpghCu4QKWU7EbfC1eRuBlBK5FCAheLeG1dqn6VuWPvKND\n" +
+  "MEEwHQYDVR0OBBYEFE5WdXRaXovmWB1O7JqcOePoJ+aQMA8GA1UdEwEB/wQFMAMB\n" +
+  "Af8wDwYDVR0RBAgwBocEwKgBFDAKBggqhkjOPQQDAgNHADBEAiAVIfW93+rk2+cA\n" +
+  "M3OQW5UyQ3pILnqTGkNUm4UGmbK0wgIgVK1hchGz7t4LkDk/lm/+Lp8VPzDEVe2m\n" +
+  "k5kjFUP/KM0=\n" +
+  "-----END CERTIFICATE-----";
+const CERT_REISSUED_FOR_SAME_KEY =
+  "-----BEGIN CERTIFICATE-----\n" +
+  "MIIBhDCCASqgAwIBAgIUOmo+N8ZSGWod1GJxKSm4D1zoFRYwCgYIKoZIzj0EAwIw\n" +
+  "JzElMCMGA1UEAwwcb2N0YW50LWxpc3RlbmVyLXRlc3QtcmVuZXdlZDAgFw0yNjEw\n" +
+  "MTQxNTUxNTRaGA8yMTI2MDkyMDE1NTE1NFowJzElMCMGA1UEAwwcb2N0YW50LWxp\n" +
+  "c3RlbmVyLXRlc3QtcmVuZXdlZDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABI5a\n" +
+  "KgQet8QyBkWhCtcoqRZepaEAh3H03DSrQv4iX78HKYIQruECllOxG3wtXkbgZQSu\n" +
+  "RQgIXi3htXap+lblj7yjMjAwMB0GA1UdDgQWBBROVnV0Wl6L5lgdTuyanDnj6Cfm\n" +
+  "kDAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0gAMEUCIQDE1dGsTkaqXjXb\n" +
+  "D8ni+x6cYyvvOicS2pMu0/66ywPgfQIgasWRq8iXCO2/ls89WvT+BAPVZczAGCXp\n" +
+  "lj4Pp8sZ9Oc=\n" +
+  "-----END CERTIFICATE-----";
+const CERT_KEY_FINGERPRINT = "6439998429a39fc7b86f685ca4aac1beaf22985b03fecbe183e99beadef5d2ce";
 const KEY = "-----BEGIN PRIVATE KEY-----\nDEF\n-----END PRIVATE KEY-----";
 
 function lanConfig(overrides: Partial<PrivateListenerConfig> = {}): PrivateListenerConfig {
@@ -85,9 +111,7 @@ describe("private listener lifecycle controller", () => {
       port: 9443,
       origin: "https://192.168.1.20:9443",
       exposureClass: "lan-private",
-      certificateFingerprint: createHash("sha256")
-        .update(CERT.replaceAll(/\s+/g, ""))
-        .digest("hex"),
+      certificateFingerprint: CERT_KEY_FINGERPRINT,
       certificateReady: true,
     });
     expect(JSON.stringify(status)).not.toContain("PRIVATE KEY");
@@ -355,11 +379,22 @@ describe("private listener lifecycle controller", () => {
     expect(createGateway).not.toHaveBeenCalled();
   });
 
-  it("computes a stable certificate fingerprint without returning the PEM", () => {
-    const fingerprint = privateListenerCertificateFingerprint(CERT);
-    expect(fingerprint).toMatch(/^[a-f0-9]{64}$/);
-    expect(fingerprint).toBe(
-      createHash("sha256").update(CERT.replaceAll(/\s+/g, "")).digest("hex"),
+  it("fingerprints the certificate's public key, so a reissue for the same key keeps it", () => {
+    const spki = new X509Certificate(CERT).publicKey.export({ format: "der", type: "spki" });
+    expect(privateListenerCertificateFingerprint(CERT)).toBe(
+      createHash("sha256").update(spki).digest("hex"),
     );
+    expect(privateListenerCertificateFingerprint(CERT)).toBe(CERT_KEY_FINGERPRINT);
+    expect(privateListenerCertificateFingerprint(CERT_REISSUED_FOR_SAME_KEY)).toBe(
+      CERT_KEY_FINGERPRINT,
+    );
+  });
+
+  it("refuses a certificate it cannot read as invalid TLS", () => {
+    expect(() =>
+      privateListenerCertificateFingerprint(
+        "-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----",
+      ),
+    ).toThrow(PrivateListenerLifecycleError);
   });
 });

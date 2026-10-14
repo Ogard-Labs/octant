@@ -8,6 +8,7 @@ import {
 } from "node:crypto";
 import { vi } from "vitest";
 import {
+  buildHostHelloSignaturePayload,
   buildRemoteChallengeProofPayload,
   buildRemoteKeyRotationProofPayload,
   buildRemoteRequestProofPayload,
@@ -24,7 +25,6 @@ import type { DeviceKeyStore } from "./remoteConnection";
 
 export const ORIGIN = "https://mac.example.test";
 export const HOST_ID = "11111111-1111-4111-8111-111111111111";
-export const HOST_KEY_FINGERPRINT = "a".repeat(64);
 export const DEVICE_LABEL = "Ada's Safari";
 export const TICKET_ID = "44444444-4444-4444-8444-444444444444";
 export const TICKET_PROOF = "ticket_proof_1234567890";
@@ -48,6 +48,50 @@ export function fingerprintFromPem(pem: string): string {
     "base64",
   );
   return createHash("sha256").update(der).digest("hex");
+}
+
+/** A host identity key: the public half as a hello carries it, and a signer. */
+export interface TestHostKey {
+  readonly publicKey: string;
+  readonly fingerprint: string;
+  readonly sign: (payload: string) => string;
+}
+
+export function createTestHostKey(): TestHostKey {
+  const pair = p256KeyPair();
+  const spki = pair.publicKey.export({ format: "der", type: "spki" });
+  return {
+    publicKey: spki.toString("base64url"),
+    fingerprint: createHash("sha256").update(spki).digest("hex"),
+    sign: (payload) => signIeeeP1363(pair, payload),
+  };
+}
+
+/** The identity key of the fake host every fixture pairs with by default. */
+export const HOST_KEY = createTestHostKey();
+export const HOST_KEY_FINGERPRINT = HOST_KEY.fingerprint;
+
+export interface UnsignedTestHostHello {
+  readonly productId: string;
+  readonly hostId: string;
+  readonly displayName: string;
+  readonly serverBuildVersion: string;
+  readonly supportedProtocolRange: { readonly min: number; readonly max: number };
+  readonly authenticationProtocolVersions: ReadonlyArray<number>;
+  readonly securityFloor: number;
+  readonly remoteOrigin: string;
+  readonly nonce: string;
+  readonly expiresAt: string;
+}
+
+/** A hello as a real host signs it with `key`. */
+export function signTestHostHello(key: TestHostKey, unsigned: UnsignedTestHostHello) {
+  const facts = { ...unsigned, hostKeyFingerprint: key.fingerprint };
+  return {
+    ...facts,
+    hostPublicKey: key.publicKey,
+    signature: key.sign(buildHostHelloSignaturePayload(facts)),
+  };
 }
 
 function signIeeeP1363(pair: ReturnType<typeof p256KeyPair>, payload: string): string {
@@ -104,7 +148,10 @@ export function createTestDeviceKeyStore(): {
 export interface FakeRemoteServerConfig {
   readonly origin?: string;
   readonly hostId?: string;
-  readonly hostKeyFingerprint?: string;
+  /** The host identity key this host signs its hello with. */
+  readonly hostKey?: TestHostKey;
+  /** Rewrites the signed hello, as something between client and host could. */
+  readonly tamperHello?: (hello: Record<string, unknown>) => Record<string, unknown>;
   readonly approve?: boolean;
   readonly advertisedRemoteOrigin?: string;
   readonly incompatibleProtocol?: boolean;
@@ -139,7 +186,7 @@ export interface FakeRemoteServer {
 export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemoteServer {
   const origin = config.origin ?? ORIGIN;
   const hostId = config.hostId ?? HOST_ID;
-  const hostKeyFingerprint = config.hostKeyFingerprint ?? HOST_KEY_FINGERPRINT;
+  const hostKey = config.hostKey ?? HOST_KEY;
   const approve = config.approve ?? true;
   const now = () => Date.now();
   const nonces = new Map<string, number>();
@@ -172,11 +219,10 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
     const nonce = randomBytes(32).toString("base64url");
     nonces.set(sha256(nonce), now() + 60_000);
     const range = config.incompatibleProtocol ? { min: 9, max: 9 } : { min: 1, max: 1 };
-    return {
+    const signed = signTestHostHello(hostKey, {
       productId: "octant",
       hostId,
       displayName: "This Mac",
-      hostKeyFingerprint,
       serverBuildVersion: SERVER_BUILD_VERSION,
       supportedProtocolRange: range,
       authenticationProtocolVersions: [REMOTE_AUTHENTICATION_PROTOCOL_VERSION],
@@ -184,8 +230,8 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
       remoteOrigin: config.advertisedRemoteOrigin ?? origin,
       nonce,
       expiresAt: new Date(now() + 60_000).toISOString(),
-      signature: "host_sig",
-    };
+    });
+    return config.tamperHello === undefined ? signed : config.tamperHello(signed);
   };
 
   const consumeNonce = (nonce: string) => {

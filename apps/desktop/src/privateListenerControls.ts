@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import { classifyRemoteListenerAddress } from "@octant/domain";
 
 export type PrivateListenerExposureClass = "lan-private" | "tailscale";
@@ -135,11 +135,21 @@ export interface CreatePrivateListenerControlServiceOptions {
   readonly fingerprintFromPem?: (certificatePem: string) => string;
 }
 
+/**
+ * SHA-256 (lowercase hex) of the leaf certificate's DER SubjectPublicKeyInfo,
+ * the value the host reports for the listener certificate.
+ */
 export function certificateFingerprintFromPem(certificatePem: string): string {
   if (typeof certificatePem !== "string" || certificatePem.trim().length === 0) {
     throw new PrivateListenerControlFailure("invalid-tls");
   }
-  return createHash("sha256").update(certificatePem.replaceAll(/\s+/g, "")).digest("hex");
+  let spki: Buffer;
+  try {
+    spki = new X509Certificate(certificatePem).publicKey.export({ format: "der", type: "spki" });
+  } catch {
+    throw new PrivateListenerControlFailure("invalid-tls");
+  }
+  return createHash("sha256").update(spki).digest("hex");
 }
 
 export function createPrivateListenerControlService(

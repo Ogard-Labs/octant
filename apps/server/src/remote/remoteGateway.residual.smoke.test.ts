@@ -284,6 +284,7 @@ function makeSigning() {
   const publicDer = keys.publicKey.export({ format: "der", type: "spki" });
   return {
     hostKeyFingerprint: createHash("sha256").update(publicDer).digest("hex"),
+    hostPublicKey: publicDer.toString("base64url"),
     signHostPayload: (payload: string) =>
       cryptoSign("sha256", Buffer.from(payload, "utf8"), {
         key: keys.privateKey,

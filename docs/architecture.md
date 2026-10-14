@@ -5025,6 +5025,37 @@ mechanisms are:
   and keys can still follow a link or submit a form within the context's
   approved origins; the host's navigation guards refuse any page outside them,
   so a paired client cannot take the host browser to a new origin.
+  - **Host identity on every connection.** The host hello carries the host
+    identity public key (DER SubjectPublicKeyInfo, base64url), its fingerprint
+    (SHA-256 of those bytes, lowercase hex), and a signature over the hello.
+    Every client (phone, desktop window reaching another host, and the paired
+    browser page) checks that the key hashes to the stated fingerprint and
+    that the signature verifies before it sends a pairing claim or a challenge
+    request. At pairing it records the proven fingerprint with the device
+    registration; on every later hello it also requires the proven host id
+    and fingerprint to equal that record. Only the hello is checked; the
+    negotiation record's signature is not. Outcomes:
+    - A hello that does not prove its key is refused with "This host could not
+      prove its identity". The device key stays, because
+      whatever answered does not hold the host key and can neither change nor
+      end the pairing.
+    - A proven hello from a different host id or key is "host identity
+      changed": the client deletes that device key and asks for a new
+      pairing.
+    - A hello with no key comes from a host built before this check. The
+      client refuses it as incompatible and asks to update the host, keeping
+      the pairing.
+
+    Records written before hellos were checked need no migration: the host has
+    always stated the SHA-256 of the key's SubjectPublicKeyInfo, so those
+    fingerprints already pin the key. Older clients ignore the added field.
+    First contact is still trust on first use over TLS: the hello's nonce is
+    the host's, so the check does not bind the TLS connection, and an attacker
+    who can terminate TLS for the listener's name could relay a genuine
+    hello. The listener's `certificateFingerprint` is likewise the SHA-256 of
+    the leaf certificate's SubjectPublicKeyInfo, not of its PEM text. It is
+    shown in Settings and by `octant listener` for the person to compare, and
+    no client pins it.
 - **Provider keys on a host without the desktop app.** _Designed, not yet
   built._ The desktop saves an endpoint's API key or bearer token over
   native IPC from its own renderer, so a browser client — local or paired —

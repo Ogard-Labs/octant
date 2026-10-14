@@ -19,6 +19,7 @@ import {
   HOST_ID,
   ORIGIN,
   TICKET_ID,
+  HOST_KEY_FINGERPRINT,
 } from "./remoteConnectionFixtures";
 
 const hostId = decodeStableHostId(HOST_ID);
@@ -153,6 +154,7 @@ async function readyBridge(): Promise<ReturnType<typeof createRemoteSessionBridg
     credentialGeneration: 1,
     deviceKeyId,
     origin: ORIGIN,
+    hostKeyFingerprint: HOST_KEY_FINGERPRINT,
   });
   await waitUntil(() => bridge.getState().kind === "ready");
   return bridge;

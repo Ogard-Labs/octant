@@ -57,6 +57,7 @@ async function readyBridge(config: Parameters<typeof createFakeRemoteServer>[0] 
     credentialGeneration: 1,
     deviceKeyId,
     origin: ORIGIN,
+    hostKeyFingerprint: HOST_KEY_FINGERPRINT,
   });
   const start = Date.now();
   while (bridge.getState().kind !== "ready") {
