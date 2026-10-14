@@ -1493,7 +1493,8 @@ record; this section is the effective rule, and it is narrower than the record.
   has no tool to read what became of a message. 0049 remains the Chat mention
   path.
 - **Refusals in the Agents center.** Every refusal is journaled: at the send,
-  at the tool, and at delivery. The refusal event names its sender and
+  at the tool (a turn in Plan, a profile without the tool, a call with no
+  message; a cancelled turn is not a refusal), and at delivery. The refusal event names its sender and
   recipient threads, because a message refused before admission has no
   `agent.message-sent@1` to say who sent it. The projection keeps those beside
   the messages that were refused later, and the Agents center lists the newest

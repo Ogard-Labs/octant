@@ -94,6 +94,34 @@ describe("the agent message tool", () => {
     });
   });
 
+  it("journals a call that names a recipient but carries no message, and one with an undecodable recipient next to a good one", async () => {
+    const { tools, send, recordRefusedSend } = fixture();
+
+    expect(
+      await tools.execute({
+        name: AGENT_MESSAGE_TOOL_NAME,
+        inputJson: JSON.stringify({ recipients: [{ threadId: recipientThreadId }] }),
+      }),
+    ).toMatchObject({ isError: true, result: { status: "refused", reason: "policy" } });
+    expect(
+      await tools.execute({
+        name: AGENT_MESSAGE_TOOL_NAME,
+        inputJson: JSON.stringify({
+          recipients: [{ threadId: recipientThreadId }, { threadId: "" }],
+          message: "Handoff.",
+        }),
+      }),
+    ).toMatchObject({ isError: true, result: { status: "refused" } });
+
+    expect(send).not.toHaveBeenCalled();
+    expect(recordRefusedSend).toHaveBeenCalledTimes(2);
+    expect(recordRefusedSend).toHaveBeenLastCalledWith({
+      senderThreadId,
+      recipients: [{ threadId: recipientThreadId }],
+      reason: "policy",
+    });
+  });
+
   it("answers a refused call the same when the refusal cannot be journaled or names nobody", async () => {
     const { tools, recordRefusedSend } = fixture({ posture: "plan" });
     recordRefusedSend.mockRejectedValueOnce(new Error("journal unavailable"));

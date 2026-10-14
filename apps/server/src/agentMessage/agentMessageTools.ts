@@ -129,6 +129,7 @@ export function createAgentMessageTools(input: {
           threadId: decodeAgentMessageEndpointId(String(candidate.threadId)),
         }));
         if (decodedRecipients.length === 0 || typeof parsed.message !== "string") {
+          await journalRefusedCall(inputJson);
           return {
             result: {
               status: "refused",
@@ -141,6 +142,7 @@ export function createAgentMessageTools(input: {
         recipients = decodedRecipients;
         message = parsed.message;
       } catch {
+        await journalRefusedCall(inputJson);
         return {
           result: { status: "refused", reason: "policy", message: "The tool input is invalid." },
           isError: true,
