@@ -5742,8 +5742,10 @@ mechanisms are:
   computer then signs its acceptance of that one approval, which makes the
   approver its only parent. Revoke writes a signed revocation, and only a
   computer that brought the revoked one in, directly or through others, can
-  revoke it. Store setup, joining, and revoking happen on the host, never from
-  a paired phone. Store credentials live in the host credential store — macOS
+  revoke it. A member leaves by signing a left record with its own key, which
+  cuts it just before that record; it then forgets its identity and deletes
+  its device key. Store setup, joining, revoking, and leaving happen on the
+  host, never from a paired phone. Store credentials live in the host credential store — macOS
   Keychain or freedesktop Secret Service — and are not written into the
   replica. An S3-compatible store is contacted only over authenticated TLS. A
   plaintext endpoint is refused, and store credentials are not sent on it.

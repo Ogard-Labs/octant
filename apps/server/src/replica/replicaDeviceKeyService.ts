@@ -110,6 +110,22 @@ export async function createReplicaDeviceKey(
   return { instanceId, publicKey, fingerprint: fingerprintOf(publicKey) };
 }
 
+/**
+ * Delete an instance's device key once this computer has left with it, so the
+ * identity cannot sign again here. A key that is already absent is gone.
+ */
+export async function removeReplicaDeviceKey(
+  store: CredentialStore,
+  instanceId: string,
+): Promise<void> {
+  const id = credentialId(instanceId);
+  try {
+    await store.delete(id);
+  } catch {
+    if (!(await keyIsAbsent(store, id))) throw new ReplicaDeviceKeyFailure("unavailable");
+  }
+}
+
 export function makeReplicaDeviceSigner(
   store: CredentialStore,
   instanceId: string,

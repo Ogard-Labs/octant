@@ -256,8 +256,8 @@ export const ReplicaStoreSettingsView = Schema.Struct({
   credentialStore: Schema.Literal("available", "unavailable"),
   /**
    * This computer has an identity in a replica in the chosen store. Its store
-   * cannot change until leaving a replica is supported; sync on/off and a new
-   * key pair for the same bucket still can.
+   * cannot change until it leaves that replica; sync on/off and a new key pair
+   * for the same bucket still can.
    */
   replicaMember: Schema.Boolean,
 }).annotations(strict);

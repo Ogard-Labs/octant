@@ -407,6 +407,7 @@ function makeComputer(store: LaggedStore, name: string, rng: Rng): Computer {
     credentials: {
       create: () => seededKey(rng, credentials),
       sign: (instanceId, payload) => makeReplicaDeviceSigner(credentials, instanceId).sign(payload),
+      remove: (instanceId) => credentials.delete(instanceId),
     },
     journal: createReplicaMembershipJournal({
       journal,
@@ -420,6 +421,7 @@ function makeComputer(store: LaggedStore, name: string, rng: Rng): Computer {
     state: () => projection.state(),
     localHostId: LOCAL_HOST_ID,
     clock: () => NOW,
+    syncOff: async () => undefined,
   });
   return { name, service, projection, credentials, stolen: false };
 }
