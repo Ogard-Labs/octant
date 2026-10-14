@@ -833,12 +833,18 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     (!queueFollowUp || messageQueue.available) &&
     projectId !== undefined &&
     (props.turnClient !== undefined || props.mutationClient !== undefined);
+  // Without a turn client there is no read to wait for.
+  const firstPageSettled =
+    props.turnClient === undefined || loaded.threadKey === String(props.threadId);
   const settledTurnCount = turns.filter(
     (turn) => turn.status !== "accepted" && turn.status !== "running" && turn.status !== "waiting",
   ).length;
   const transcriptRows = useMemo<ReadonlyArray<WorkTranscriptRow>>(() => {
     const rows: WorkTranscriptRow[] = [];
-    if (turns.length === 0) rows.push({ kind: "empty", key: "empty" });
+    // Only a settled first read can say the thread has no turns. Before it
+    // arrives an existing thread looks the same as a new one, and the prompt
+    // for a new thread would flash over the messages that are on their way.
+    if (turns.length === 0 && firstPageSettled) rows.push({ kind: "empty", key: "empty" });
     // A key names the turn, never its position: earlier pages arrive above,
     // and the list keeps the reader's row in place by its key.
     for (const turn of turns) {
@@ -894,7 +900,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     }
     if (status !== undefined) rows.push({ kind: "status", key: "status", text: status });
     return rows;
-  }, [pendingRequests, status, turns]);
+  }, [firstPageSettled, pendingRequests, status, turns]);
 
   useEffect(() => {
     const requestGeneration = ++transcriptGeneration.current;

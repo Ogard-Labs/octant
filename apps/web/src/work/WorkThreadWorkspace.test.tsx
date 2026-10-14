@@ -1217,6 +1217,80 @@ describe("WorkThreadWorkspace", () => {
     });
   });
 
+  it("never paints the new-thread prompt for an existing thread while its first page loads", async () => {
+    const firstPage = deferred<ReturnType<typeof decodeWorkThreadTranscriptWindow>>();
+    const turnClient = {
+      transcript: vi.fn(),
+      transcriptWindow: vi.fn(() => firstPage.promise),
+    };
+    const prompt = /Describe what you want made/;
+    const seen: boolean[] = [];
+    const watcher = new MutationObserver(() => seen.push(screen.queryByText(prompt) !== null));
+    render(
+      <WorkThreadWorkspace
+        initialThread={workThread()}
+        threadClient={{ bootstrap: vi.fn(), execute: vi.fn() } as unknown as WorkThreadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+    watcher.observe(document.body, { childList: true, subtree: true });
+    await waitFor(() => expect(turnClient.transcriptWindow).toHaveBeenCalledOnce());
+    expect(screen.getByLabelText("Work prompt")).toBeVisible();
+    expect(screen.queryByText(prompt)).not.toBeInTheDocument();
+
+    await act(async () => {
+      firstPage.resolve(
+        decodeWorkThreadTranscriptWindow({
+          version: 1,
+          threadId,
+          turns: [workTurn()],
+          liveCursor: 0,
+          hasEarlier: false,
+          hasLater: false,
+        }),
+      );
+    });
+    expect(await screen.findByText("Here is the confined summary.")).toBeVisible();
+    watcher.disconnect();
+    expect(screen.queryByText(prompt)).not.toBeInTheDocument();
+    expect(seen).not.toContain(true);
+  });
+
+  it("shows the new-thread prompt once a brand-new thread's first read comes back empty", async () => {
+    const firstPage = deferred<ReturnType<typeof decodeWorkThreadTranscriptWindow>>();
+    const turnClient = {
+      transcript: vi.fn(),
+      transcriptWindow: vi.fn(() => firstPage.promise),
+    };
+    render(
+      <WorkThreadWorkspace
+        initialThread={workThread()}
+        threadClient={{ bootstrap: vi.fn(), execute: vi.fn() } as unknown as WorkThreadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+    await waitFor(() => expect(turnClient.transcriptWindow).toHaveBeenCalledOnce());
+    expect(screen.queryByText(/Describe what you want made/)).not.toBeInTheDocument();
+
+    await act(async () => {
+      firstPage.resolve(
+        decodeWorkThreadTranscriptWindow({
+          version: 1,
+          threadId,
+          turns: [],
+          liveCursor: 0,
+          hasEarlier: false,
+          hasLater: false,
+        }),
+      );
+    });
+    expect(await screen.findByText(/Describe what you want made/)).toBeVisible();
+  });
+
   it("starts transcript and pending-request reads together from the navigation thread", async () => {
     const transcript = deferred<{ readonly threadId: typeof threadId; readonly turns: [] }>();
     const requests = deferred<{ readonly requests: [] }>();
