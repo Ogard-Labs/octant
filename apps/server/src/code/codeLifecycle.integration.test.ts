@@ -370,7 +370,7 @@ function makeRuntime(
       readReviewFinding: () => undefined,
       readReviewFindings: () => [],
     },
-    windowAccess: { canAccessProject: async () => true },
+    windowAccess: { canAccessProject: async () => true, standingAuthority: (run) => run() },
     resolveCheckoutRoot: async () => ({
       checkoutRoot,
       shell: "/bin/zsh",

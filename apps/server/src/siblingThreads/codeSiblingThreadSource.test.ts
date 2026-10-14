@@ -76,15 +76,10 @@ function evidenceFor(input: {
   readonly decisions?: ReadonlyArray<string>;
 }): CodeSiblingThreadEvidence & {
   readonly readTranscript: ReturnType<typeof vi.fn>;
-  readonly standingReads: () => number;
 } {
-  let standing = 0;
-  let insideStanding = false;
-  const readTranscript = vi.fn(async () => {
-    // The mention read must run on the window's standing authority.
-    if (!insideStanding) return undefined;
-    return [{ role: "user" as const, text: "Ship it.", occurredAt: created as never }];
-  });
+  const readTranscript = vi.fn(async () => [
+    { role: "user" as const, text: "Ship it.", occurredAt: created as never },
+  ]);
   return {
     threads: () => input.threads,
     thread: (threadId) => input.threads.find((thread) => thread.id === threadId),
@@ -92,17 +87,7 @@ function evidenceFor(input: {
     turnAwaitsPerson: (threadId) => input.parked?.includes(String(threadId)) === true,
     decisionPending: (thread) => input.decisions?.includes(String(thread.id)) === true,
     mentions: { readTranscript },
-    standingAuthority: async (read) => {
-      standing += 1;
-      insideStanding = true;
-      try {
-        return await read();
-      } finally {
-        insideStanding = false;
-      }
-    },
     readTranscript,
-    standingReads: () => standing,
   };
 }
 
@@ -234,7 +219,7 @@ describe("Code sibling-thread source", () => {
     );
   });
 
-  it("reads a transcript through the mention read for the turn's window, on its standing authority", async () => {
+  it("reads a transcript through the mention read for the turn's window", async () => {
     const target = codeThread("a1000000-0000-4000-8000-000000000051");
     const evidence = evidenceFor({ threads: [target] });
     const source = codeSiblingThreadSource(evidence, windowId);
@@ -243,6 +228,5 @@ describe("Code sibling-thread source", () => {
       { role: "user", text: "Ship it.", occurredAt: created },
     ]);
     expect(evidence.readTranscript).toHaveBeenCalledExactlyOnceWith(windowId, String(target.id));
-    expect(evidence.standingReads()).toBe(1);
   });
 });

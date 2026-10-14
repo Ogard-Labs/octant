@@ -5038,6 +5038,7 @@ export function startOctantServer(
           }),
         windowAccess: {
           canAccessProject: canAccessCodeProject,
+          standingAuthority: (run) => codeProjectAccess.standingAuthority(run),
         },
         resolveCheckoutRoot: async (windowId, thread, checkout) => {
           const root = await roots.resolve(windowId, thread, checkout, rootProbePath);
@@ -5399,7 +5400,6 @@ export function startOctantServer(
                       options,
                     ),
                 },
-                standingAuthority: (read) => codeProjectAccess.standingAuthority(read),
               },
               windowId,
             ),
