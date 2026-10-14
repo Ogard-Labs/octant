@@ -660,5 +660,26 @@ describe("standalone skill activation", () => {
     expect(canvasSkills.map((candidate) => String(candidate.skill.qualifiedId))).toEqual([
       claudeId,
     ]);
+
+    // A stale command for a nonexistent digest/key fails as stale without disabling the live skill.
+    const staleDigest = `sha256:${"9".repeat(64)}` as never;
+    const staleId = `agents-skills-directory:project:project-1:working:deploy:${staleDigest}`;
+    await expect(
+      service.execute({
+        kind: "set-skill-desired",
+        qualifiedId: staleId,
+        digest: staleDigest,
+        desired: true,
+      }),
+    ).resolves.toEqual({
+      kind: "extension-command-failed",
+      failure: { category: "stale", message: "Skill state is out of date." },
+    });
+    expect(
+      service
+        .snapshot(baseSnapshot)
+        .skills?.find((candidate) => String(candidate.skill.qualifiedId) === claudeId)
+        ?.effectiveState,
+    ).toEqual({ kind: "effective" });
   });
 });

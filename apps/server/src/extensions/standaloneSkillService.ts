@@ -170,7 +170,7 @@ export class StandaloneSkillService {
       case "trust-skill-source":
       case "set-skill-desired":
       case "select-skill-collision":
-        return { kind: "extension-state-updated", snapshot: await this.#mutateActivation(command) };
+        return this.#mutateActivation(command);
     }
   }
 
@@ -182,8 +182,22 @@ export class StandaloneSkillService {
       | { readonly kind: "set-skill-desired" }
       | { readonly kind: "select-skill-collision" }
     >,
-  ): Promise<ExtensionSnapshot> {
+  ): Promise<ExtensionCommandResult> {
     const key = command.qualifiedId;
+    const target = [...this.#discovery.snapshot().skills, ...bundledSkillRecords()].find(
+      (candidate) => String(candidate.skill.qualifiedId) === key,
+    );
+    if (
+      target === undefined ||
+      (command.kind === "select-skill-collision"
+        ? target.skill.name !== command.name
+        : String(target.skill.digest) !== String(command.digest))
+    ) {
+      return {
+        kind: "extension-command-failed",
+        failure: { category: "stale", message: "Skill state is out of date." },
+      };
+    }
     const existing = this.#activations[key] ?? {
       reviewed: false,
       trusted: false,
@@ -201,7 +215,7 @@ export class StandaloneSkillService {
         break;
       case "set-skill-desired": {
         const updated = command.desired
-          ? this.#disableOtherSameNamedSkills(key, this.#skillNameOf(key))
+          ? this.#disableOtherSameNamedSkills(key, target.skill.name)
           : {};
         this.#activations = {
           ...this.#activations,
@@ -211,23 +225,20 @@ export class StandaloneSkillService {
         break;
       }
       case "select-skill-collision": {
-        const selectedKey = command.qualifiedId;
-        const selected = this.#activations[selectedKey] ?? {
-          reviewed: false,
-          trusted: false,
-          desiredEnabled: false,
-        };
-        const updated = this.#disableOtherSameNamedSkills(selectedKey, command.name);
+        const updated = this.#disableOtherSameNamedSkills(key, target.skill.name);
         this.#activations = {
           ...this.#activations,
           ...updated,
-          [selectedKey]: { ...selected, reviewed: true, trusted: true, desiredEnabled: true },
+          [key]: { ...existing, reviewed: true, trusted: true, desiredEnabled: true },
         };
         break;
       }
     }
     await this.#activationStore.write(this.#activations);
-    return this.snapshot(this.#lifecycle.snapshot());
+    return {
+      kind: "extension-state-updated",
+      snapshot: this.snapshot(this.#lifecycle.snapshot()),
+    };
   }
 
   #skillNameOf(qualifiedId: string): string | undefined {
@@ -240,9 +251,8 @@ export class StandaloneSkillService {
 
   #disableOtherSameNamedSkills(
     selectedKey: string,
-    name: string | undefined,
+    name: string,
   ): Readonly<Record<string, StandaloneSkillActivationState>> {
-    if (name === undefined) return {};
     const updated: Record<string, StandaloneSkillActivationState> = {};
     for (const [candidateKey, candidate] of Object.entries(this.#activations)) {
       if (candidateKey !== selectedKey && this.#skillNameOf(candidateKey) === name) {
