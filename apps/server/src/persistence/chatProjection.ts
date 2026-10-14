@@ -269,9 +269,7 @@ export class ChatProjection implements Projection {
       event.globalSequence,
     );
     // A late attempt for a turn an edit already replaced must not bring its text back.
-    if (
-      readTurnIds(connection, String(updatedTurn.threadId)).active.includes(String(updatedTurn.id))
-    ) {
+    if (!isTurnReplacedByEdit(connection, updatedTurn)) {
       indexTranscriptSearchForTurn(
         connection,
         updatedTurn,
@@ -1323,6 +1321,30 @@ function readTurnIds(
     })),
   ).map((turn) => turn.id);
   return { journaled: order.map((row) => row.turn_id), active };
+}
+
+/**
+ * Whether a later edit replaced this turn: it names a turn at or before this
+ * one. Streaming persists an attempt update per delta, so this reads only the
+ * turns after this one (none, for the turn being streamed) rather than folding
+ * the whole thread.
+ */
+function isTurnReplacedByEdit(connection: SqliteConnection, turn: ChatTurn): boolean {
+  return (
+    connection
+      .prepare(`
+        SELECT 1
+        FROM chat_turn_projection AS edit
+        INNER JOIN chat_turn_projection AS revised
+          ON revised.thread_id = edit.thread_id
+          AND revised.turn_id = json_extract(edit.turn_json, '$.supersedes')
+        WHERE edit.thread_id = ?
+          AND edit.sequence > ?
+          AND revised.sequence <= ?
+        LIMIT 1
+      `)
+      .get(String(turn.threadId), turn.sequence, turn.sequence) !== undefined
+  );
 }
 
 /**
