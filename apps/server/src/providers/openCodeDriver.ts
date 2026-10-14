@@ -132,8 +132,8 @@ interface SessionState {
   readonly toolNames: Set<string>;
   readonly pendingToolAnswers: Map<string, PendingToolAnswer>;
   usageTotals: OpenCodeUsageTotals | undefined;
-  /** OpenCode compacted the session during the current prompt. */
-  windowCompacted: boolean;
+  /** A compaction was reported since the prompt's latest usage report. */
+  compactionReported: boolean;
   managedTools: ManagedToolsLease | undefined;
   readonly stopMemory: { current: ProviderOutputStopReason | undefined };
 }
@@ -2183,7 +2183,7 @@ function newSessionState(
     toolNames: new Set(tools.map((tool) => tool.name)),
     pendingToolAnswers: new Map(),
     usageTotals: undefined,
-    windowCompacted: false,
+    compactionReported: false,
     managedTools: undefined,
     stopMemory: { current: undefined },
   };
@@ -2338,9 +2338,26 @@ function mapAndOffer(
   }
   // A compacted session sends the model its summary and, at most, a recent tail
   // of messages (`filterCompacted` in opencode `session/message-v2.ts`), so
-  // how much of the earlier prompts survives is OpenCode's own choice.
-  if (event.type === "session.compacted" || event.type === "session.next.compaction.ended") {
-    state.windowCompacted = true;
+  // how much of the earlier prompts survives is OpenCode's own choice. The
+  // turn runner that sees the event says so for the rest of the turn. One
+  // compaction may be announced under more than one of these names (OpenCode 2
+  // renames the legacy event, and no release has been probed for which it
+  // sends), so the first since the latest usage report stands for it.
+  if (
+    (event.type === "session.compacted" || event.type === "session.next.compaction.ended") &&
+    !state.compactionReported
+  ) {
+    state.compactionReported = true;
+    offer({
+      kind: "context-compacted",
+      trigger: "automatic",
+      instanceId,
+      sessionId: state.sessionId,
+      sequence: state.nextSequence,
+      correlationId: state.correlationId,
+      occurredAt: clock() as UtcTimestamp,
+    });
+    state.nextSequence += 1;
   }
   let mapped: ReadonlyArray<ProviderRuntimeEvent>;
   try {
@@ -2408,9 +2425,11 @@ function mapAndOffer(
         ...normalized,
         ...state.usageTotals,
         // Each prompt is stored as a user message the session sends again with
-        // every later request until OpenCode compacts it.
-        promptRetention: state.windowCompacted ? "compacted" : "kept",
+        // every later request until OpenCode compacts it; the compaction is its
+        // own event, which the turn runner follows.
+        promptRetention: "kept",
       };
+      state.compactionReported = false;
     }
     if (normalized.kind === "approval-request") {
       state.approvals.add(normalized.requestId);
@@ -2429,9 +2448,7 @@ function mapAndOffer(
     }
     // A shutdown's hold ends the turn, as every runner treats `waiting`.
     if (isTerminalEvent(normalized) || event.type === "session.execution.interrupted") {
-      // A compaction belongs to the prompt it happened in; the next prompt's
-      // reports start from a window OpenCode has not compacted since.
-      state.windowCompacted = false;
+      state.compactionReported = false;
       retire(state);
     }
     state.nextSequence = normalized.sequence + 1;

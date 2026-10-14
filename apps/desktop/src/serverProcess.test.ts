@@ -413,6 +413,28 @@ describe("serverSpawnSpec", () => {
     });
   });
 
+  it("tells a packaged host where the terminal launcher is, and never a development host", () => {
+    const options = {
+      browserBrokerToken: "browser-token",
+      browserBrokerUrl: "http://127.0.0.1:42000/",
+      terminalLauncherDirectory: "/Applications/Octant.app/Contents/Resources/terminal-launcher",
+      desktopBridgeSecret: "desktop-secret",
+      root: "/repo",
+      port: 13_773,
+      instanceId: "managed-instance",
+      execPath: "/Applications/Octant.app/Contents/MacOS/Octant",
+      // A stale value from the parent never reaches the host.
+      env: { PATH: "/usr/bin:/bin", OCTANT_TERMINAL_LAUNCHER_DIRECTORY: "/tmp/elsewhere" },
+    };
+    expect(serverSpawnSpec({ ...options, packaged: true }).env).toHaveProperty(
+      "OCTANT_TERMINAL_LAUNCHER_DIRECTORY",
+      "/Applications/Octant.app/Contents/Resources/terminal-launcher",
+    );
+    expect(serverSpawnSpec({ ...options, packaged: false }).env).not.toHaveProperty(
+      "OCTANT_TERMINAL_LAUNCHER_DIRECTORY",
+    );
+  });
+
   it("passes the packaged app version to the host and drops a stale inherited value", () => {
     const spec = serverSpawnSpec({
       browserBrokerToken: "browser-token",

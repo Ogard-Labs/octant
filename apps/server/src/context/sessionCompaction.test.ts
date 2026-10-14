@@ -28,6 +28,7 @@ import type {
 } from "@octant/provider-sdk/driver";
 import { deriveCatalogEpoch } from "./capabilityCatalog";
 import { ContextHarnessService, type SessionConversationMessage } from "./contextHarnessService";
+import { automaticCompactionId } from "./automaticCompaction";
 import { makeProviderCapacityScheduler } from "./contextRuntime";
 import {
   SessionCompactionService,
@@ -1349,6 +1350,206 @@ describe("compacting a session a runtime keeps", () => {
       });
       world.close();
     });
+  });
+});
+
+describe("journaling a runtime's own compactions", () => {
+  const executor = {
+    kind: "runtime",
+    driverKind: "codex",
+    providerInstanceId,
+    modelId,
+  } as const;
+  const sighting = {
+    position: 1,
+    tokensBefore: { kind: "known", tokens: 900, accuracy: "provider-reported" },
+    tokensAfter: 300,
+  } as const;
+  const compactionEvents = (fixture: ReturnType<typeof createFixture>) =>
+    fixture.connection
+      .prepare(
+        `SELECT event_name FROM event_journal
+         WHERE aggregate_type = 'context-ledger' AND event_name LIKE 'context.compaction-%'`,
+      )
+      .all() as ReadonlyArray<{ readonly event_name: string }>;
+
+  it("journals one receipt per compaction, under an id a restarted host derives again", () => {
+    const fixture = createFixture();
+    planSession(fixture);
+    const record = { subject, turnKey: "attempt-1", sighting, executor } as const;
+
+    expect(fixture.harness.recordAutomaticCompaction(record)).toBe("recorded");
+    const latest = fixture.harness.latestCompaction(subject);
+    expect(latest).toEqual({
+      status: "completed",
+      receipt: {
+        compactionId: automaticCompactionId(subject, "attempt-1", 1),
+        subject,
+        executor,
+        trigger: "automatic",
+        tokensBefore: sighting.tokensBefore,
+        tokensAfter: { kind: "known", tokens: 300, accuracy: "provider-reported" },
+        tokensFreed: { kind: "measured", tokens: 600, accuracy: "provider-reported" },
+        summary: { visibility: "runtime-only" },
+        usage: { kind: "unreported" },
+        completedAt: now,
+      },
+    });
+    // No command asked for it, so there is no request to pair it with.
+    expect(compactionEvents(fixture).map((row) => row.event_name)).toEqual([
+      "context.compaction-completed@1",
+    ]);
+    // The same notification seen again within the turn changes nothing.
+    expect(fixture.harness.recordAutomaticCompaction(record)).toBe("already-recorded");
+    fixture.connection.close();
+
+    // Nor does a recovery that replays the turn's stream on the next start.
+    const restarted = createFixture(fixture.path);
+    expect(restarted.harness.closeInterruptedCompactions()).toBe(0);
+    expect(restarted.harness.recordAutomaticCompaction(record)).toBe("already-recorded");
+    expect(restarted.harness.latestCompaction(subject)).toEqual(latest);
+    // The turn's second compaction, and another turn's first, are their own.
+    expect(
+      restarted.harness.recordAutomaticCompaction({
+        ...record,
+        sighting: { ...sighting, position: 2 },
+      }),
+    ).toBe("recorded");
+    expect(restarted.harness.recordAutomaticCompaction({ ...record, turnKey: "attempt-2" })).toBe(
+      "recorded",
+    );
+    expect(compactionEvents(restarted)).toHaveLength(3);
+    restarted.connection.close();
+  });
+
+  it("reads the window before from what the host knows when the runtime gave no figure", () => {
+    const fixture = createFixture();
+    const codeSubject = decodeContextSubjectRef({
+      aggregateType: "code-thread",
+      aggregateId: "82000000-0000-4000-8000-000000000099",
+    });
+    const unmeasured = { position: 1 } as const;
+    // A Code thread has no plan; without a journaled report there is no figure.
+    expect(
+      fixture.harness.recordAutomaticCompaction({
+        subject: codeSubject,
+        turnKey: "operation-1",
+        sighting: unmeasured,
+        executor,
+      }),
+    ).toBe("unmeasured");
+    expect(compactionEvents(fixture)).toEqual([]);
+    expect(
+      fixture.harness.recordAutomaticCompaction({
+        subject: codeSubject,
+        turnKey: "operation-1",
+        sighting: unmeasured,
+        executor,
+        priorOccupancy: { tokens: 700, observedAt: "2026-07-18T20:00:00.000Z" },
+      }),
+    ).toBe("recorded");
+    const code = fixture.harness.latestCompaction(codeSubject);
+    expect(code?.status === "completed" && code.receipt).toMatchObject({
+      tokensBefore: { kind: "known", tokens: 700, accuracy: "provider-reported" },
+      tokensAfter: { kind: "pending" },
+      tokensFreed: { kind: "unknown", reason: "awaiting-next-report" },
+    });
+    // That compaction came after the report, so a later one reads the report
+    // only as an upper bound.
+    expect(
+      fixture.harness.recordAutomaticCompaction({
+        subject: codeSubject,
+        turnKey: "operation-2",
+        sighting: unmeasured,
+        executor,
+        priorOccupancy: { tokens: 700, observedAt: "2026-07-18T20:00:00.000Z" },
+      }),
+    ).toBe("recorded");
+    expect(fixture.harness.latestCompaction(codeSubject)).toMatchObject({
+      receipt: { tokensBefore: { tokens: 700, accuracy: "conservative-heuristic" } },
+    });
+
+    // A planned thread with no report falls back to the plan's own estimate.
+    planSession(fixture);
+    expect(
+      fixture.harness.recordAutomaticCompaction({
+        subject,
+        turnKey: "attempt-1",
+        sighting: unmeasured,
+        executor,
+      }),
+    ).toBe("recorded");
+    expect(fixture.harness.latestCompaction(subject)).toMatchObject({
+      receipt: {
+        tokensBefore: {
+          kind: "known",
+          tokens: fixture.harness.inspect(subject).next.plan.plannedInputTokens,
+          accuracy: "conservative-heuristic",
+        },
+      },
+    });
+    fixture.connection.close();
+  });
+
+  it("tells a later turn the session was compacted after a report, by journal order", () => {
+    const fixture = createFixture();
+    planSession(fixture);
+    // Every event here carries the same clock reading; only the journal
+    // says which came first.
+    const report = fixture.journal.headSequence();
+    expect(fixture.harness.sessionCompactedAfter(subject, report)).toBe(false);
+    fixture.harness.requestCompaction({
+      subject,
+      compactionId,
+      executor: { kind: "host", providerInstanceId, modelId },
+    });
+    fixture.harness.failCompaction(subject, compactionId, "summary-failed");
+    // A request that ended without touching the session changed nothing.
+    expect(fixture.harness.sessionCompactedAfter(subject, report)).toBe(false);
+    fixture.harness.recordAutomaticCompaction({
+      subject,
+      turnKey: "attempt-1",
+      sighting,
+      executor,
+    });
+    expect(fixture.harness.sessionCompactedAfter(subject, report)).toBe(true);
+    // A report journaled after the compaction already describes the
+    // compacted window.
+    expect(fixture.harness.sessionCompactedAfter(subject, fixture.journal.headSequence())).toBe(
+      false,
+    );
+    fixture.connection.close();
+  });
+
+  it("erases a runtime's own compaction when the thread is purged", () => {
+    const fixture = createFixture();
+    planSession(fixture);
+    fixture.harness.recordAutomaticCompaction({
+      subject,
+      turnKey: "attempt-1",
+      sighting,
+      executor,
+    });
+
+    erasePurgedThread({
+      connection: fixture.connection,
+      mode: "chat",
+      threadId: threadId as never,
+    });
+    expect(
+      verifyDatabase({
+        connection: fixture.connection,
+        journal: fixture.journal,
+        projections: fixture.projections,
+      }).issues,
+    ).toEqual([]);
+    expect(compactionEvents(fixture)).toEqual([]);
+    fixture.connection.close();
+
+    const restarted = createFixture(fixture.path);
+    expect(restarted.harness.latestCompaction(subject)).toBeUndefined();
+    expect(restarted.harness.sessionCompactedAfter(subject, 0)).toBe(false);
+    restarted.connection.close();
   });
 });
 

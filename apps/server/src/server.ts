@@ -283,6 +283,7 @@ import { CodeProjectPullRequestSnapshotStore } from "./code/codeProjectPullReque
 import { createGhCommandPort, GhPullRequestPort } from "./code/ghPullRequestPort";
 import { RepositoryTestProcessPort } from "./code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "./code/terminalProcessPort";
+import type { TerminalLauncher } from "./code/terminalService";
 import { defaultTerminalShell } from "./code/terminalShell";
 import { CodeOperationApprovalStore } from "./code/codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./code/codeSessionAuthorityStore";
@@ -1224,6 +1225,8 @@ export interface StartOctantServerOptions {
   readonly githubAuthenticationPort?: GhAuthenticationPort;
   readonly ghExecutable?: string;
   readonly codeFileHelperPath?: string;
+  /** The packaged desktop's `octant` for a terminal with a Browser grant. */
+  readonly terminalLauncher?: TerminalLauncher;
   readonly createCodeFileHelperTransport?: (path: string) => FileHelperProcessTransport;
   readonly codeRepositoryPort?: ManagedWorktreeRepositoryPort;
   readonly webAssetsPath?: string;
@@ -4901,6 +4904,7 @@ export function startOctantServer(
           },
           approvals: requireBrowserToolApprovalService(),
         },
+        ...(options.terminalLauncher === undefined ? {} : { launcher: options.terminalLauncher }),
         journal: persistence.journal,
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
@@ -5072,6 +5076,22 @@ export function startOctantServer(
           contextHarness.compactionRunning(
             decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
           ),
+        sessionCompactions: {
+          record: ({ threadId, ...input }) => {
+            contextHarness.recordAutomaticCompaction({
+              subject: decodeContextSubjectRef({
+                aggregateType: "code-thread",
+                aggregateId: threadId,
+              }),
+              ...input,
+            });
+          },
+          compactedAfter: (threadId, globalSequence) =>
+            contextHarness.sessionCompactedAfter(
+              decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+              globalSequence,
+            ),
+        },
         providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom }) =>
           selectCodeConversation(thread.id, {
             purpose: "provider-switch",

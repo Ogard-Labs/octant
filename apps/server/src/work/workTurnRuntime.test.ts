@@ -6,6 +6,7 @@ import {
   decodeProjectId,
   decodeProviderInstanceId,
   decodeStartWorkThreadTurnCommand,
+  decodeProviderRuntimeEvent,
   type ProviderRuntimeEvent,
   type ThreadTaskProgressList,
   CorrelationId,
@@ -152,6 +153,76 @@ describe("WorkTurnRuntime", () => {
       }),
     );
     expect(outcome).toEqual({ kind: "completed", response: "Hello from Work" });
+  });
+
+  it("tells the service of each compaction the runtime made by itself, once, and of no requested one", async () => {
+    const event = (sequence: number, value: Record<string, unknown>) =>
+      decodeProviderRuntimeEvent({
+        instanceId: ids.provider,
+        sequence,
+        correlationId: String(ids.project),
+        occurredAt: "2026-08-11T12:00:00.000Z",
+        sessionId: ids.session,
+        ...value,
+      });
+    const events: ProviderRuntimeEvent[] = [
+      event(1, { kind: "usage", inputTokens: 120, outputTokens: 8, contextTokens: 4_000 }),
+      event(2, { kind: "context-compacted", trigger: "automatic", tokensAfter: 1_000 }),
+      event(2, { kind: "context-compacted", trigger: "automatic", tokensAfter: 1_000 }),
+      event(3, { kind: "context-compacted", trigger: "requested" }),
+      event(4, { kind: "text-delta", text: "Done" }),
+      event(5, { kind: "completed" }),
+    ];
+    const driver: ProviderDriver = {
+      kind: "codex",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          subscribe: Effect.succeed(Stream.fromIterable(events)),
+          start: () => Effect.void,
+          send: () => Effect.void,
+          resume: () => Effect.void,
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        } as never),
+    };
+    const sightings: unknown[] = [];
+
+    const outcome = await new WorkTurnRuntime().run({
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Summarize the brief",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      signal: new AbortController().signal,
+      onAutomaticCompaction: (sighting) => sightings.push(sighting),
+    });
+
+    expect(outcome).toEqual({ kind: "completed", response: "Done" });
+    expect(sightings).toEqual([
+      {
+        position: 1,
+        tokensBefore: { kind: "known", tokens: 4_000, accuracy: "provider-reported" },
+        tokensAfter: 1_000,
+      },
+    ]);
   });
 
   it("parks a provider-declared usage limit as a rate-limited outcome with its reset", async () => {

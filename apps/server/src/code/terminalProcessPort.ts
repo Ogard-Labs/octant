@@ -93,6 +93,11 @@ export interface TerminalLaunchInput {
   readonly columns: number;
   readonly rows: number;
   readonly executionPolicy?: ProviderExecutionPolicy;
+  /**
+   * Read-only grants beyond the shell's own: the terminal launcher a Browser
+   * grant puts on `PATH`, and the runtime it starts with.
+   */
+  readonly additionalReadRoots?: ReadonlyArray<string>;
 }
 
 interface TerminalProcessDependencies {
@@ -395,6 +400,7 @@ export class TerminalProcessPort {
           ...(this.#dependencies.platform === "darwin"
             ? shellConfigurationReadRoots(this.#dependencies.homeDirectory)
             : []),
+          ...(input.additionalReadRoots ?? []),
         ],
       });
     } catch (error) {

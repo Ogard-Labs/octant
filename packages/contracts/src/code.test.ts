@@ -580,6 +580,28 @@ describe("Code delivery outcome contracts", () => {
       }),
     ).toThrow();
   });
+
+  it("offers no command that marks a Code thread Done by hand", () => {
+    // A person may mark a Work thread Done; a Code thread reaches Done only
+    // through its objectively satisfied delivery target.
+    expect(() =>
+      decodeCodeCommand({
+        kind: "confirm-work-thread-completion",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        deliveryTarget: "Ship the fix",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeCommand({
+        kind: "confirm-code-delivery-outcome",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        outcomeKind: "merged-pr",
+        completionConfirmed: true,
+      }),
+    ).toThrow();
+  });
 });
 
 describe("Code persistence contracts", () => {

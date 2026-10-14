@@ -44,11 +44,14 @@ describe("deriveThreadBoardStatus", () => {
     ).toEqual({ status: "in-progress", reason: "executing" });
   });
 
-  it("derives Done only when the confirmed delivery target is objectively satisfied", () => {
+  it("derives Done when the delivery target is satisfied or a person marked the Work thread Done", () => {
     expect(deriveThreadBoardStatus(statusInput({ deliverySatisfaction: "done" }))).toEqual({
       status: "done",
       reason: "delivery-satisfied",
     });
+    expect(
+      deriveThreadBoardStatus(statusInput({ deliverySatisfaction: "done", recovering: true })),
+    ).toEqual({ status: "done", reason: "delivery-satisfied" });
   });
 
   it("keeps Done first: a satisfied target stays Done even while activity continues", () => {
@@ -130,7 +133,7 @@ describe("deriveThreadBoardStatus", () => {
     ).toEqual({ status: "waiting", reason: "interrupted" });
   });
 
-  it("never derives Done from an ambiguous or stale delivery target", () => {
+  it("never derives Done from a delivery target that is still waiting", () => {
     expect(
       deriveThreadBoardStatus(statusInput({ deliverySatisfaction: "waiting" })).status,
     ).not.toBe("done");

@@ -24,9 +24,10 @@ import {
 
 /*
  * A harness for the tool egress proxy that never leaves this machine. Names
- * resolve through an injected resolver to documentation addresses
- * (203.0.113.0/24, 2001:db8::/32), which the private check treats as public;
- * the injected dialer then routes each such address to a loopback fixture.
+ * resolve through an injected resolver to public addresses (93.184.216.0/24,
+ * 2606:2800:220:1::/64; documentation ranges would be refused as reserved),
+ * and the injected dialer routes each such address to a loopback fixture and
+ * throws for any other, so nothing is dialled on the internet.
  * The private check itself is never replaced, so every refusal it makes is
  * the production one.
  */
@@ -134,7 +135,7 @@ export async function startEgressHarness(
     ...(options.limits === undefined ? {} : { limits: options.limits }),
     resolveAll: async (host) => {
       resolved.push(host);
-      return options.resolve === undefined ? ["203.0.113.10"] : options.resolve(host);
+      return options.resolve === undefined ? ["93.184.216.10"] : options.resolve(host);
     },
     connect: ({ address, port }) => {
       dialed.push({ address, port });

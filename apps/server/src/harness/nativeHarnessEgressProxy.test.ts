@@ -36,7 +36,7 @@ describe("native harness tool egress proxy", () => {
     const origin = await tcpFixture();
     const harness = await startEgressHarness({
       rules: [threadRule("registry.example.com", 443)],
-      routes: new Map([["203.0.113.10", origin.port]]),
+      routes: new Map([["93.184.216.10", origin.port]]),
     });
     expect(harness.records.started).toEqual([
       expect.objectContaining({ launch: harness.launch, threadTainted: false }),
@@ -54,7 +54,7 @@ describe("native harness tool egress proxy", () => {
 
     const closed = await harness.proxy.close();
     expect(closed.status).toBe("summarized");
-    expect(harness.dialed).toEqual([{ address: "203.0.113.10", port: 443 }]);
+    expect(harness.dialed).toEqual([{ address: "93.184.216.10", port: 443 }]);
     expect(harness.records.summaries).toEqual([
       expect.objectContaining({
         bytesSent: 4,
@@ -87,7 +87,7 @@ describe("native harness tool egress proxy", () => {
     try {
       const harness = await startEgressHarness({
         rules: [threadRule("registry.example.com", 443)],
-        routes: new Map([["203.0.113.10", port]]),
+        routes: new Map([["93.184.216.10", port]]),
       });
       const tunnel = await openTunnel(
         harness.proxy,
@@ -126,7 +126,7 @@ describe("native harness tool egress proxy", () => {
     });
     const harness = await startEgressHarness({
       rules: [threadRule("files.example.com", 8080)],
-      routes: new Map([["203.0.113.10", origin.port]]),
+      routes: new Map([["93.184.216.10", origin.port]]),
     });
     const answer = await exchange(
       harness.proxy,
@@ -163,7 +163,7 @@ describe("native harness tool egress proxy", () => {
     const harness = await startEgressHarness({
       endpoint: { kind: "unix-socket", parentDirectory: parent },
       rules: [threadRule("registry.example.com", 443)],
-      routes: new Map([["203.0.113.10", origin.port]]),
+      routes: new Map([["93.184.216.10", origin.port]]),
     });
     const endpoint = harness.proxy.endpoint;
     if (endpoint.kind !== "unix-socket") throw new Error("expected a socket endpoint");
@@ -202,7 +202,7 @@ describe("native harness tool egress proxy", () => {
     const origin = await tcpFixture();
     const harness = await startEgressHarness({
       rules: [threadRule("registry.example.com", 443)],
-      routes: new Map([["203.0.113.10", origin.port]]),
+      routes: new Map([["93.184.216.10", origin.port]]),
     });
     for (let index = 0; index < 70; index += 1) {
       await openTunnel(

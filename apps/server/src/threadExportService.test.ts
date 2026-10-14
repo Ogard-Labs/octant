@@ -404,6 +404,17 @@ describe("ThreadExportService", () => {
     expect(outcome.bundle.evidence.completion?.satisfactionEvidence).toBe("The brief is on disk.");
   });
 
+  it("exports a Work thread a person marked Done without an evidence note", async () => {
+    const fixture = workFixture();
+    const { completionEvidence: _note, ...withoutNote } = fixture.thread;
+    const outcome = await service({
+      work: { ...fixture, thread: { ...withoutNote, completionConfirmed: true } },
+    }).exportThread(windowId as never, "local-window", { mode: "work", threadId: workThreadId });
+    expect(outcome.kind).toBe("exported");
+    if (outcome.kind !== "exported") return;
+    expect(outcome.bundle.evidence).not.toHaveProperty("completion");
+  });
+
   it("exports every turn of a Work thread longer than one transcript answer carries", async () => {
     const fixture = workFixture();
     const turns = Array.from({ length: 65 }, (_, index) => ({

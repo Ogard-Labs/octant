@@ -34,6 +34,11 @@ interface ServerSpawnSpecOptions {
   readonly serveAvdBrokerToken?: string;
   readonly serveAvdBrokerUrl?: string;
   readonly codeFileHelperPath?: string;
+  /**
+   * The packaged app's terminal launcher folder (`octant mcp` only), which the
+   * host puts on a Browser-granted thread terminal's `PATH`.
+   */
+  readonly terminalLauncherDirectory?: string;
   readonly credentialBrokerToken?: string;
   readonly credentialBrokerUrl?: string;
   readonly desktopBridgeSecret: string;
@@ -95,6 +100,7 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
   delete inherited.OCTANT_SIMULATOR_DEVICE_BROKER_TOKEN;
   delete inherited.OCTANT_SERVE_AVD_BROKER_URL;
   delete inherited.OCTANT_SERVE_AVD_BROKER_TOKEN;
+  delete inherited.OCTANT_TERMINAL_LAUNCHER_DIRECTORY;
   const env = {
     ...inherited,
     OCTANT_BROWSER_BROKER_TOKEN: options.browserBrokerToken,
@@ -149,6 +155,9 @@ export function serverSpawnSpec(options: ServerSpawnSpecOptions) {
       ...env,
       ...(packagedPath === undefined ? {} : { PATH: packagedPath }),
       ...packagedArtifactVersion(options.appVersion),
+      ...(options.terminalLauncherDirectory === undefined
+        ? {}
+        : { OCTANT_TERMINAL_LAUNCHER_DIRECTORY: options.terminalLauncherDirectory }),
       ELECTRON_RUN_AS_NODE: "1",
       OCTANT_PACKAGED_RUNTIME: "1",
     },

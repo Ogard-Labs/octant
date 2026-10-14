@@ -30,6 +30,7 @@ import {
 import { liveCodeTestSourcePort } from "./codeDirectoryPort";
 import { createCodeAcpClientTools } from "./codeAcpClientTools";
 import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
 
 const now = "2026-07-21T00:00:00.000Z";
 const providerInstanceId = decodeProviderInstanceId("87000000-0000-4000-8000-000000000001");
@@ -767,6 +768,97 @@ describe("CodeTurnRunner", () => {
         ],
         sentContext: { status: "counted" },
       });
+    });
+
+    it("stops counting what Octant sent once the runtime compacts during the turn, and reports each compaction it made by itself once", async () => {
+      const usage = (sequence: number, contextTokens: number) =>
+        event({
+          kind: "usage",
+          inputTokens: 10,
+          outputTokens: 20,
+          contextTokens,
+          promptRetention: "kept",
+          sequence,
+        });
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.fromIterable([
+            usage(1, 9_000),
+            event({ kind: "context-compacted", trigger: "automatic", sequence: 2 }),
+            // The same notification delivered again is the same compaction.
+            event({ kind: "context-compacted", trigger: "automatic", sequence: 2 }),
+            event({
+              kind: "context-compacted",
+              trigger: "automatic",
+              tokensAfter: 2_000,
+              sequence: 3,
+            }),
+            usage(4, 3_000),
+            event({ kind: "completed", sequence: 5 }),
+          ]),
+        ),
+      });
+      const observed: CodeTurnEvent[] = [];
+      const sightings: AutomaticCompactionSighting[] = [];
+      await Effect.runPromise(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              persistEvent: (next) => Effect.sync(() => observed.push(next)),
+              contextAccount: {
+                carried: { status: "counted", parts: [] },
+                turn: [{ kind: "skills", tokens: 300, accuracy: "conservative-heuristic" }],
+              },
+              onAutomaticCompaction: (sighting) => sightings.push(sighting),
+            }),
+          ),
+        ),
+      );
+
+      expect(sightings).toEqual([
+        {
+          position: 1,
+          tokensBefore: { kind: "known", tokens: 9_000, accuracy: "provider-reported" },
+        },
+        // A compaction since the report changed the window it describes, so
+        // the report is only an upper bound.
+        {
+          position: 2,
+          tokensBefore: { kind: "known", tokens: 9_000, accuracy: "conservative-heuristic" },
+          tokensAfter: 2_000,
+        },
+      ]);
+      expect(
+        observed.flatMap((entry) =>
+          entry.category === "usage" ? [entry.contextBreakdown?.sentContext] : [],
+        ),
+      ).toEqual([{ status: "counted" }, { status: "uncounted", reason: "compacted" }]);
+      expect(observed.map((entry) => entry.providerKind)).not.toContain("context-compacted");
+    });
+
+    it("leaves a compaction the connection's compact asked for to the command that asked", async () => {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.fromIterable([
+            event({ kind: "context-compacted", trigger: "requested", sequence: 1 }),
+            event({ kind: "completed", sequence: 2 }),
+          ]),
+        ),
+      });
+      const sightings: AutomaticCompactionSighting[] = [];
+      await Effect.runPromise(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              onAutomaticCompaction: (sighting) => sightings.push(sighting),
+            }),
+          ),
+        ),
+      );
+
+      expect(sightings).toEqual([]);
     });
 
     it("leaves what Octant sent in the remainder when the runtime does not say what it keeps", async () => {

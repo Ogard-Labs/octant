@@ -231,8 +231,16 @@ export function isPrivateAddress(address: string): boolean {
   return true;
 }
 
+/**
+ * Every block the IANA IPv4 special-purpose registry marks not globally
+ * reachable, plus multicast. 192.0.0.0/24 is refused whole: its two
+ * reachable exceptions are PCP and TURN anycast, which answer from the
+ * nearest server, often the local gateway. 192.88.99.0/24 is refused whole
+ * for the same reason: deprecated 6to4 relay anycast around the 6a44 relay
+ * address 192.88.99.2, which is not globally reachable.
+ */
 function isPrivateIpv4(address: string): boolean {
-  const [a = 0, b = 0] = address.split(".").map(Number);
+  const [a = 0, b = 0, c = 0] = address.split(".").map(Number);
   return (
     a === 0 ||
     a === 10 ||
@@ -241,6 +249,12 @@ function isPrivateIpv4(address: string): boolean {
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
     (a === 100 && b >= 64 && b <= 127) ||
+    (a === 192 && b === 0 && c === 0) || // IETF protocol assignments
+    (a === 192 && b === 0 && c === 2) || // documentation
+    (a === 192 && b === 88 && c === 99) || // 6to4 and 6a44 relay anycast
+    (a === 198 && (b === 18 || b === 19)) || // benchmarking
+    (a === 198 && b === 51 && c === 100) || // documentation
+    (a === 203 && b === 0 && c === 113) || // documentation
     a >= 224
   );
 }
@@ -248,8 +262,10 @@ function isPrivateIpv4(address: string): boolean {
 /**
  * Judged on the address's value, not its spelling. Matching text prefixes let
  * `0:0:0:0:0:ffff:7f00:1` through, which connects to loopback, and missed
- * most of fe80::/10. Forms that carry an IPv4 address — mapped, NAT64, 6to4 —
- * are judged by the address they carry, because that is where the packet goes.
+ * most of fe80::/10. Forms that carry an IPv4 address — mapped, NAT64, 6to4,
+ * Teredo — are judged by the address they carry, because that is where the
+ * packet goes. The rest follows the IANA IPv6 special-purpose registry's
+ * not-globally-reachable blocks.
  */
 function isPrivateIpv6(address: string): boolean {
   const words = ipv6Words(address);
@@ -267,7 +283,20 @@ function isPrivateIpv6(address: string): boolean {
     return w2 === 0 && w3 === 0 && w4 === 0 && w5 === 0 ? isPrivateIpv4(carried(w6, w7)) : true;
   }
   if (w0 === 0x2002) return isPrivateIpv4(carried(w1, w2));
+  if (w0 === 0x2001 && w1 === 0) {
+    // 2001::/32 is Teredo: the server's IPv4 address in plain, the client's
+    // inverted in the last 32 bits.
+    return isPrivateIpv4(carried(w2, w3)) || isPrivateIpv4(carried(~w6 & 0xffff, ~w7 & 0xffff));
+  }
+  // 2001::/23 is refused whole, like 192.0.0.0/24: its reachable exceptions
+  // are anycast services, AMT, AS112, and overlay identifiers, none of them a
+  // page or a package registry.
   return (
+    (w0 === 0x100 && w1 === 0 && w2 === 0 && (w3 === 0 || w3 === 1)) || // 100::/64 discard, 100:0:0:1::/64 dummy
+    (w0 === 0x2001 && w1 < 0x200) || // 2001::/23 IETF protocol assignments
+    (w0 === 0x2001 && w1 === 0xdb8) || // 2001:db8::/32 documentation
+    (w0 === 0x3fff && w1 < 0x1000) || // 3fff::/20 documentation
+    w0 === 0x5f00 || // 5f00::/16 segment routing SIDs
     (w0 & 0xfe00) === 0xfc00 || // fc00::/7 unique local
     (w0 & 0xffc0) === 0xfe80 || // fe80::/10 link-local
     (w0 & 0xffc0) === 0xfec0 || // fec0::/10 site-local
