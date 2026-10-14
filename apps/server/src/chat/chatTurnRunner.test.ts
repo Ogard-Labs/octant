@@ -3607,6 +3607,73 @@ describe("ChatTurnRunner", () => {
       }
     });
 
+    it.each([
+      { stop: "confirmed", heldSlots: 0 },
+      { stop: "refused", heldSlots: 1 },
+    ] as const)(
+      "keeps the slot of a cancelled turn only while its stop is unconfirmed ($stop)",
+      async ({ stop, heldSlots }) => {
+        const { scheduler, reservation } = makeScheduler();
+        const queue = Effect.runSync(Queue.unbounded<never>());
+        const refuse = () => Effect.fail({ category: "unavailable", message: "gone" } as never);
+        const connection = {
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
+          start: () => Effect.succeed({ sessionId }),
+          send: () => Queue.offer(queue, { kind: "text-delta", sessionId, text: "…" } as never),
+          interrupt: refuse,
+          stop: stop === "confirmed" ? () => Effect.void : refuse,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        };
+        const controller = new AbortController();
+        const runner = new ChatTurnRunner({
+          capacityScheduler: scheduler,
+          contextHarness: makeHarness(),
+          researchRouter: new ResearchRouter({
+            searxngClient: {
+              search: async () => ({ query: "x", backend: "searxng", results: [] }),
+            },
+          }),
+        });
+        const fiber = Effect.runFork(
+          Effect.scoped(
+            runner.run({
+              thread: thread(),
+              attempt: attempt(),
+              prompt: "hello",
+              scratchRoot: "/tmp/octant-scratch/thread",
+              driver: { acquire: () => Effect.succeed(connection) } as never,
+              providerInstanceId,
+              serviceLimits: serviceLimits(),
+              contextSubject: subject,
+              contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+              requestShape: "chat-turn",
+              varianceReserve: 20,
+              reservationId: reservation,
+              estimatedTokens: 100,
+              researchEnabled: false,
+              researchRoute: researchRoute({ kind: "disabled" }),
+              attachments: [],
+              signal: controller.signal,
+              persistAttempt: () => Effect.void,
+              persistResponse: () =>
+                Effect.succeed({
+                  contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                  digest: "d".repeat(64),
+                  byteLength: 1,
+                }),
+            }),
+          ),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        controller.abort();
+        await Effect.runPromise(Fiber.await(fiber));
+
+        expect(scheduler.snapshot(providerInstanceId).allocated.concurrency).toBe(heldSlots);
+      },
+    );
+
     it("does not back off when the endpoint is down without naming a wait", async () => {
       const { turn } = endpoint();
       await turn({ category: "unavailable", message: "The provider is unavailable." });

@@ -635,9 +635,10 @@ export class ProviderCapacityScheduler {
     } else {
       const now = this.#now();
       const reservation = this.#transitionAt(record.reservation, "ambiguous", now);
-      // The owner saw the request end, so it no longer occupies a provider
-      // slot; only its usage is unknown, and that stays counted at the
-      // estimate until it is reconciled or expires. Holding the slot as well
+      // A terminal signal says the owner saw the request end (an owner that
+      // abandoned a request it could not stop sends none), so it no longer
+      // occupies a provider slot; only its usage is unknown, and that stays
+      // counted at the estimate until it is reconciled or expires. Holding the slot as well
       // leaked it for good, because nothing expires terminal work: a failed
       // turn, or one whose endpoint reported no usage, then refused every
       // later turn on that provider until the host restarted.

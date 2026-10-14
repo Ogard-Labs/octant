@@ -39,6 +39,7 @@ import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import {
   capacityWaitSentence,
+  type CapacityTerminalSignal,
   type ProviderCapacityScheduler,
 } from "../context/providerCapacityScheduler";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
@@ -347,6 +348,10 @@ export class ChatTurnRunner {
       let promptSent = false;
       let sawVisibleResponse = false;
       let terminalOutcome: ChatAttemptOutcome | undefined;
+      // Set when the provider itself ended the turn (a reply, a refusal, a
+      // stop of its own), as opposed to the runner abandoning a request that
+      // may still be executing: a cancel, a timeout, a budget, a lost stream.
+      let providerEndedTurn = false;
       let outputLimited = false;
       const turnStartedAt = clock();
       // Re-based when the prompt is sent, so the wait for a first token never
@@ -510,6 +515,7 @@ export class ChatTurnRunner {
             }
           }
           terminalOutcome = outcome;
+          providerEndedTurn = true;
           return yield* Effect.fail(failure);
         });
       };
@@ -664,9 +670,18 @@ export class ChatTurnRunner {
           const unanswered = openQuestions.get(String(input.attempt.id));
           openQuestions.delete(String(input.attempt.id));
           unanswered?.abandon("Chat turn ended before the answer was delivered.");
-          yield* connection
-            .stop(input.attempt.providerSessionId)
-            .pipe(Effect.catchAll(() => Effect.void));
+          const stopped = yield* connection.stop(input.attempt.providerSessionId).pipe(
+            Effect.as(true),
+            Effect.catchAll(() => Effect.succeed(false)),
+          );
+          // Telling the scheduler the turn ended frees its provider slot. That
+          // is only true when the provider ended the turn or confirmed the
+          // stop; a request the runner abandoned and could not stop may still
+          // be executing, so it keeps its slot until the host restarts.
+          const recordCapacityEnd = (signal: Omit<CapacityTerminalSignal, "reservationId">) => {
+            if (!stopped && !providerEndedTurn) return;
+            capacityScheduler.recordTerminal({ reservationId: input.reservationId, ...signal });
+          };
           // Every turn that reached the provider leaves one ledger row. A turn
           // that failed or was cancelled used to leave none, so a money ceiling
           // counted it as free; one that reported nothing is recorded as
@@ -702,8 +717,7 @@ export class ChatTurnRunner {
                 reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
                 observedTokens: actualInputTokens + actualOutputTokens,
               });
-              capacityScheduler.recordTerminal({
-                reservationId: input.reservationId,
+              recordCapacityEnd({
                 outcome: "completed",
                 actualTokens: actualInputTokens + actualOutputTokens,
               });
@@ -711,8 +725,7 @@ export class ChatTurnRunner {
               spendCeiling?.settle({
                 reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
               });
-              capacityScheduler.recordTerminal({
-                reservationId: input.reservationId,
+              recordCapacityEnd({
                 outcome: "completed",
               });
             }
@@ -722,8 +735,7 @@ export class ChatTurnRunner {
             spendCeiling?.settle({
               reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
             });
-            capacityScheduler.recordTerminal({
-              reservationId: input.reservationId,
+            recordCapacityEnd({
               outcome:
                 terminalOutcome === "cancelled"
                   ? "cancelled"
@@ -736,8 +748,7 @@ export class ChatTurnRunner {
             spendCeiling?.settle({
               reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
             });
-            capacityScheduler.recordTerminal({
-              reservationId: input.reservationId,
+            recordCapacityEnd({
               outcome: "interrupted",
             });
           }
@@ -804,6 +815,7 @@ export class ChatTurnRunner {
         // session is reattached and verified, but no generation is continued.
         yield* persistOutcome("waiting");
         terminalOutcome = "waiting";
+        providerEndedTurn = true;
         return yield* Effect.fail(
           decodeChatFailure({
             category: "waiting",
@@ -1325,6 +1337,7 @@ export class ChatTurnRunner {
                 if (event.kind === "waiting") {
                   yield* persistOutcome("waiting");
                   terminalOutcome = "waiting";
+                  providerEndedTurn = true;
                   return;
                 }
                 if (event.kind === "user-input-request") {
@@ -1399,6 +1412,7 @@ export class ChatTurnRunner {
                   yield* input.persistAttempt(currentAttempt);
                   if (event.stopReason === "max-tokens") outputLimited = true;
                   terminalOutcome = "completed";
+                  providerEndedTurn = true;
                   yield* observeCompleted();
                   return;
                 }
@@ -1431,12 +1445,14 @@ export class ChatTurnRunner {
                     };
                     yield* input.persistAttempt(currentAttempt);
                     terminalOutcome = "completed";
+                    providerEndedTurn = true;
                     return;
                   }
                   yield* persistOutcome("interrupted", {
                     code: decodeDiagnosticFailureCode("interrupted"),
                   });
                   terminalOutcome = "interrupted";
+                  providerEndedTurn = true;
                   return yield* Effect.fail(
                     decodeChatFailure({ category: "interrupted", message: event.message }),
                   );

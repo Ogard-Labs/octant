@@ -2462,8 +2462,10 @@ owner reports how it ended. A reported end frees the slot at once, whether the
 work completed, failed, was cancelled, or timed out, and whether or not the
 provider reported usage: usage it did not report stays counted at the estimate
 (`ambiguous`) until it is reconciled or newer provider facts replace it. Only
-work whose end nobody saw keeps its slot: work running at shutdown, and a
-managed child whose provider never confirmed it stopped. Holding the slot of
+work whose end nobody saw keeps its slot: work running at shutdown, a managed
+child whose provider never confirmed it stopped, and a Chat turn the host
+abandoned (cancelled, timed out, over its event budget) whose provider refused
+the stop, since that request may still be executing. Holding the slot of
 every turn that ended without usage leaked it: two failed turns, or two replies
 from an endpoint that reports no usage, refused every later turn on that
 provider until the host restarted.
