@@ -860,6 +860,32 @@ turn runs, so each reply in that section marks the sidecar itself (label
 `subagent-result`, content reference `subagent-result-<run>`) by the same
 order; a reply that cannot mark it refuses the turn.
 
+A Canvas carries the mark of what wrote it. Every Canvas version commits
+through the Canvas event store, and when the thread the Canvas belongs to, or
+the managed child writing it, is marked at that moment, the store first appends
+`canvas.outside-content-carried@1` (aggregate `canvas-outside-content`, one
+event per writer, naming the writer and the first marked version) in the same
+journal unit as the version, so no moment exists at which the Canvas holds that
+text unmarked; a mark that cannot be read or recorded refuses the version. This
+covers an agent's create and revise, a child's, a hand-off document, a person's
+edit, and a version taken from another computer, which marks the thread it
+lands in first (`Synced from …`). The Canvas tool's `read` and `preview` are how
+another thread's model reaches a Canvas (any Canvas of its Project, by id), so
+both mark the reader (label `canvas`, content reference `canvas-<canvas>`)
+after the Canvas is read and before anything from it is returned, when the
+Canvas records a writer other than the reader or the thread it belongs to is
+marked now; the second rule covers a Canvas written before marks were recorded
+at write time. A reader that cannot be marked is not given the Canvas. A child
+is marked under its run, as its other tools are. A writer reading its own
+Canvas passes on nothing. The mark recorded at write time is the Canvas's own:
+a person's clear on the writer reviews what that thread read, not every thread
+that will read the Canvas later, so it leaves the Canvas marked. It survives
+replay, and a purge of the Canvas, or of the thread it belongs to, erases it.
+A Chat Canvas selection carries only its name into planning, never the
+Canvas's text, and a Canvas's mirrored or exported files are files: another
+thread that reads them with its own file tools is not marked, as for any file a
+marked thread writes.
+
 An in-place restore (`restore-git-checkpoint`, sent by both Restore files to
 this point and Undo restore) overwrites a checkout other threads may share, so
 the host refuses it, as a `conflict` before Git is touched and before any undo
@@ -1719,6 +1745,8 @@ flowchart LR
     side task, and a thread confirmed from a planner proposal start with their
     source's mark when they are made, and a mention or Side Chat of a marked
     thread marks the thread reading it (see the Code fork rule under Modes).
+    A Canvas written while its writer was marked keeps that mark after the
+    writer is cleared, and marks the next thread that reads it.
   - A clear removes the mark only. Nothing leaves the model's context and the
     provider session is not restarted, so what the thread read can still steer
     the model.
@@ -2189,9 +2217,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   login. A confined Plan launch refuses an account directory that
   is the checkout, sits inside it, or is an ancestor of it
   ([0145](decisions/0145-a-plan-turn-is-confined-by-octant.md)).
-  Plan stays read-only for the project and checkout. The only write
-  a confined Plan Claude launch receives is that assigned leaf plus
-  the launch temporary directory.
+  Plan stays read-only for the project and checkout. A confined Plan
+  Claude launch reads that assigned leaf and writes only its runtime
+  folders, plus the launch temporary directory, as the
+  [security section](#security-and-authority) states.
   A thread stays on the instance it started with; there is no
   automatic failover, rotation, or load-balancing between accounts. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
@@ -3795,19 +3824,23 @@ native harness in `apps/server/src/harness`:
   what it asked for, ok/refused/failed, duration), noted live on the session
   while the turn runs and journaled with the record when it ends. `NativeHarnessQuestionStore` blocks an `ask-user` call until an
   answer arrives from any surface (`POST /api/native-harness/sessions/:thread/questions`,
-  or the Code thread's own inline question path), or until it expires or the
-  turn is interrupted. `NativeHarnessApprovalStore` likewise blocks a tool
-  call that needs a person until a decision arrives
+  or the Code thread's own inline question path), or until the turn is
+  interrupted or ten minutes pass. `NativeHarnessApprovalStore` likewise
+  blocks a tool call that needs a person until a decision arrives
   (`POST /api/native-harness/sessions/:thread/approvals`), the turn is
-  interrupted, or ten minutes pass. Expiry denies the call and is journaled as
-  `expired`, the same way whether the timer or the clock caught it: the host
-  checks the clock whenever an approval is asked, answered, or listed
-  (including a read of the session view), so an approval whose timer fired
-  late (a busy host, a machine that slept) is never still shown as pending,
-  approvable, or holding a slot. At most 32 approvals wait at once across the
-  whole host, the cap MCP and browser tool approvals use; a call past it is
-  refused at once as `approval-too-many-waiting`, journals no approval, and
-  tells the lead nobody was asked. `NativeHarnessTurnObserver` puts the stable
+  interrupted, or ten minutes pass. For both, expiry ends the call (as
+  `question-expired`, or as a denied call) and is journaled as `expired`, the
+  same way whether the timer or the clock caught it: the host checks the
+  clock whenever a question or approval is asked, answered, or listed
+  (including a read of the session view), so one whose timer fired late (a
+  busy host, a machine that slept) is never still shown as pending,
+  answerable, or holding a slot. A Code thread's inline copy of a question is
+  withdrawn whenever the question settles, however it settled. At most 32
+  questions and 32 approvals wait at once across the whole host, the cap MCP
+  and browser tool approvals use; one
+  past it is refused at once as `question-too-many-waiting` or
+  `approval-too-many-waiting`, journals nothing, and tells the lead nobody
+  was asked. `NativeHarnessTurnObserver` puts the stable
   instructions block in front of every harness turn, records the completed
   reply, and asks the `advisor` slot for a review. An advisor with no model of
   its own is off: unlike other jobs, its unconfigured slot does not fall back
@@ -5077,12 +5110,12 @@ mechanisms are:
   because Bubblewrap would create it in the person's own Project (see
   [Extensions and skills](#extensions-and-skills)).
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                         |
-  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------ |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                       |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only the assigned account leaf |
-  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                      |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                         |
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                             |
+  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                           |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only the account's runtime folders |
+  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                          |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                             |
 
   Codex is unwrapped because its app-server is leased once per provider
   instance: `providerRuntimeRegistry` keys runtimes by `instanceId`, so one
@@ -5105,11 +5138,35 @@ mechanisms are:
   `thread.external-content-ingested@1`, and the gate that mark applies to
   Octant's computer-use, MCP, and native-harness calls does not cover a tool
   the runtime executes itself.
-  A confined Claude Plan launch may write only the assigned leaf of that
-  account's state directory (`~/.claude` or
-  `~/.claude-accounts/<instanceId>`) and the launch temporary directory.
-  The checkout must not be that leaf, sit inside it, or be an ancestor of
-  it, so Plan cannot reopen the project through the account grant.
+  A confined Claude Plan launch reads the assigned leaf of that account's
+  state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
+  writes only two folders in it, `sessions/` and `projects/`, plus the
+  launch temporary directory. Octant creates the two folders before the
+  launch. Measured on macOS 27 with Claude Code 2.1.299, one Plan turn
+  wrote session records in `sessions/`, its transcript in `projects/`, and
+  `.claude.json` (with a lock, a temporary file and a copy in `backups/`)
+  and `.last-cleanup` at the top of the leaf. The top-level writes are
+  refused, and the runtime carries on without them: a second measured
+  Plan turn under this grant answered and completed while its
+  `.claude.json` lock and temporary file and its `.last-cleanup` were
+  denied, its transcript landed in `projects/`, and the sandbox refused
+  nothing else that the first turn had been allowed. That keeps a Plan
+  launch from writing what a later session outside this sandbox would
+  load: `settings.json` and its hooks, `.claude.json` and its per-project
+  MCP servers, `skills/`, `plugins/`, `agents/` and `commands/`. An
+  earlier smoke test planted a `SessionStart` hook in `settings.json` from a
+  Plan launch that was allowed to run Git. A subscription login kept in a
+  file rather than the macOS Keychain, as on Linux, is the one file also
+  writable, `.credentials.json` in the secure-storage directory, so the
+  runtime can save a refreshed login (maintainer decision, 2026-10-14).
+  The cost is that a Plan launch there could replace the stored login. An
+  API-key launch and a macOS launch get no such file. `projects/` stays writable because resume
+  reads transcripts from there, so other sessions' transcripts and the
+  per-project `memory/` folders beside them, which a later session also
+  reads, stay writable too.
+  The checkout must not be the leaf or a granted folder, sit inside
+  one, or be an ancestor of one, so Plan cannot reopen the project
+  through the account grant.
   A confined Claude launch on a subscription account signs in with the
   unmodified CLI, which on macOS reads its login by running
   `/usr/bin/security` against the login keychain. Measured on macOS 27.0.1
