@@ -167,6 +167,32 @@ describe("live mobile session lifecycle", () => {
       expect(await deviceKeyStore.findByOrigin(second!.origin)).toBeDefined();
     });
 
+    it("removes a host that cannot be reached without sending anything to it", async () => {
+      const { storage, deviceKeyStore, registry, hub } = await pairTwoHosts();
+      const unreachable = vi.fn(async () => {
+        throw new TypeError("Network request failed");
+      });
+      vi.stubGlobal("fetch", unreachable);
+      try {
+        const first = await registry.get(firstHostId);
+
+        const result = await removeMobileHost({
+          hostId: firstHostId,
+          registry,
+          hub,
+          deviceKeyStore,
+        });
+
+        expect(result).toEqual({ localCredentialRemoved: true });
+        expect(unreachable).not.toHaveBeenCalled();
+        expect(await registry.get(firstHostId)).toBeUndefined();
+        expect(await storage.getItem("octant.remote.device-keys.v1")).not.toContain(first!.keyId);
+        expect((await registry.list()).map((host) => host.hostId)).toEqual([secondHostId]);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
     it("stops the removed host's session before its key is deleted", async () => {
       const { deviceKeyStore, registry, hub } = await pairTwoHosts();
       const keyStillStoredAtSync: boolean[] = [];

@@ -8,6 +8,7 @@ import { InboxHomeScreen } from "../inbox/InboxHomeScreen";
 import { backMobileHomeView, type MobileHomeView } from "../inbox/homeView";
 import { ThreadScreen } from "../inbox/ThreadScreen";
 import { PairingPanel } from "../hosts/PairingPanel";
+import { RemoveHostPanel } from "../hosts/RemoveHostPanel";
 import { createUnavailableNotificationPermissionPort } from "../notifications/notificationPermissionPort";
 import { PushNotificationsPanel } from "../notifications/PushNotificationsPanel";
 import { createUnavailableDeviceIntegrityPort } from "../security/deviceIntegrityPort";
@@ -255,6 +256,13 @@ function HostsBody(props: {
                         onRevoked={() => {
                           removeHost(host.hostId);
                         }}
+                      />
+                    ) : null}
+                    {environment.kind === "live" ? (
+                      <RemoveHostPanel
+                        hostLabel={host.label}
+                        onRemove={() => removeHost(host.hostId)}
+                        testIdSuffix={host.hostId}
                       />
                     ) : null}
                   </View>

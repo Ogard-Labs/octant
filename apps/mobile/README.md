@@ -17,9 +17,13 @@ in the host’s SQLite journal (`octant.sqlite3` under `OCTANT_DATA_DIR` /
 Application Support). The phone does not keep a separate IndexedDB/SQLite thread
 database — only device keys, host registry, and session material locally.
 
-Removing a host from the phone's list stops that host's session and deletes its
-device key from secure storage. Other hosts' keys stay. If the key cannot be
-deleted, the host still leaves the list and the hosts screen says so.
+Remove on a host works without a connection to it. After the person confirms, it
+stops that host's session, takes the host off the list, and deletes the host's
+device key from secure storage. Other hosts' keys stay. Remove sends nothing to
+the host and does not revoke: the host still lists this device until it is
+revoked from the desktop, and Revoke (offered while the host is reachable) is the
+stronger option. If the key cannot be deleted, the host still leaves the list and
+the hosts screen says so.
 
 ## Develop
 
