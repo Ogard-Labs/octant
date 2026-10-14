@@ -62,6 +62,7 @@ export function formatUnsignedDeveloperPackageSmokeEvidence(commit: string): str
     "Unsigned developer-package smoke evidence:",
     `  package commit: asserted ${commit}`,
     "  launch: asserted (Keychain helper, SQLite ABI, Node-mode health, app window, shell bootstrap)",
+    "  restart with existing Code Projects and a thread: asserted (Node-mode and app window)",
     "  first-run: maintainer",
     "  provider setup: maintainer",
     "  thread creation: maintainer",
@@ -82,6 +83,9 @@ async function main(): Promise<void> {
     await probePackagedKeychainHelper(env);
     await probePackagedSqlite(env);
     await smokePackagedNodeServer(env);
+    // The app smoke below then starts on this same data folder, so the desktop
+    // host also has to come up with an existing Code Project and thread.
+    await smokePackagedExistingCodeDataRestart(env);
     await smokePackagedApplication(env, dataDirectory);
     console.log(formatUnsignedDeveloperPackageSmokeEvidence(commit));
   } finally {
@@ -160,6 +164,321 @@ async function smokePackagedNodeServer(env: NodeJS.ProcessEnv): Promise<void> {
           },
         ),
     });
+  }
+}
+
+/**
+ * Seed two Code Projects and a thread, stop the host, and start it again on
+ * the same data folder.
+ *
+ * A fresh data folder hides a host that cannot survive its own data: on
+ * Electron 43.5.0 the host aborted in a better-sqlite3 statement finalizer
+ * within a second of every start on a folder holding two Code Projects, while
+ * fresh folders and a folder with a single Project passed. No provider turn
+ * runs; the thread names a local compatible endpoint that is never called.
+ */
+async function smokePackagedExistingCodeDataRestart(env: NodeJS.ProcessEnv): Promise<void> {
+  const repositories = [
+    await mkdtemp(resolve(tmpdir(), "octant-packaged-smoke-repository.")),
+    await mkdtemp(resolve(tmpdir(), "octant-packaged-smoke-repository.")),
+  ] as const;
+  try {
+    for (const repository of repositories) await initializeRepository(repository);
+    const desktopBridgeSecret = randomBytes(32).toString("base64url");
+    const seeded = await withPackagedNodeServer(env, desktopBridgeSecret, (serverUrl) =>
+      seedCodeProjectsAndThread(serverUrl, desktopBridgeSecret, repositories),
+    );
+    await withPackagedNodeServer(env, desktopBridgeSecret, async (serverUrl) => {
+      const window = await registerWindowAuthority(serverUrl, desktopBridgeSecret);
+      await openCodeProject(window, seeded.projectId);
+      const thread = await fetch(`${serverUrl}/api/code/threads/${seeded.threadId}`, {
+        headers: window.headers,
+      });
+      if (thread.status !== 200) {
+        throw new Error(
+          `Restarted packaged host could not read its Code thread (${thread.status}).`,
+        );
+      }
+      await stayHealthy(serverUrl, EXISTING_DATA_HOLD_MS);
+    });
+    console.log("Packaged restart with existing Code Projects and a thread passed.");
+  } finally {
+    for (const repository of repositories) {
+      await rm(repository, { recursive: true, force: true });
+    }
+  }
+}
+
+/** Long enough to cover the startup work existing Code Projects trigger. */
+const EXISTING_DATA_HOLD_MS = 10_000;
+
+async function initializeRepository(repository: string): Promise<void> {
+  const gitEnv = { PATH: "/usr/bin:/bin", HOME: repository };
+  await runCommand("git", ["-C", repository, "init", "-q", "-b", "main"], gitEnv);
+  await runCommand(
+    "git",
+    [
+      "-C",
+      repository,
+      "-c",
+      "user.name=Octant smoke",
+      "-c",
+      "user.email=smoke@octant.invalid",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "Seed",
+    ],
+    gitEnv,
+  );
+}
+
+async function withPackagedNodeServer<T>(
+  env: NodeJS.ProcessEnv,
+  desktopBridgeSecret: string,
+  use: (serverUrl: string) => Promise<T>,
+): Promise<T> {
+  const port = 13_776;
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const child = spawn(executable, [serverEntry], {
+    detached: true,
+    env: {
+      ...env,
+      ELECTRON_RUN_AS_NODE: "1",
+      OCTANT_SERVER_PORT: String(port),
+      OCTANT_DESKTOP_BRIDGE_SECRET: desktopBridgeSecret,
+    },
+    stdio: "inherit",
+  });
+  try {
+    await waitForStorageReady(serverUrl, 20_000);
+    return await use(serverUrl);
+  } finally {
+    await cleanupPackagedProcess({
+      child,
+      requestQuit: async () => signalProcessGroup(child, "SIGTERM"),
+      waitForExit: waitForExitResult,
+      signalGroup: signalGroupByPid,
+      waitForServerCleanup: () => waitForServerCleanup(serverUrl, 10_000),
+      assertNoProcesses: () =>
+        waitForProcessCleanup(
+          (remainingMs) => assertNoPackagedProcesses([serverEntry], remainingMs),
+          {
+            timeoutMs: 10_000,
+            probeTimeoutMs: PACKAGED_SMOKE_PROCESS_PROBE_TIMEOUT_MS,
+          },
+        ),
+    });
+  }
+}
+
+interface SmokeWindowAuthority {
+  readonly windowId: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly send: (path: string, body: unknown, step: string) => Promise<unknown>;
+}
+
+async function registerWindowAuthority(
+  serverUrl: string,
+  desktopBridgeSecret: string,
+): Promise<SmokeWindowAuthority> {
+  const capability = randomBytes(32).toString("base64url");
+  const rendererIdentity = randomBytes(32).toString("base64url");
+  const windowId = randomUUID();
+  const registered = await fetch(`${serverUrl}/api/desktop/window-authorities`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-octant-desktop-secret": desktopBridgeSecret,
+    },
+    body: JSON.stringify({ windowId, capability, rendererIdentity }),
+  });
+  if (registered.status !== 204) {
+    throw new Error("Packaged restart smoke could not register a window authority.");
+  }
+  const headers = {
+    origin: "file://",
+    "content-type": "application/json",
+    "x-octant-window-capability": capability,
+    "x-octant-renderer-identity": rendererIdentity,
+  };
+  return {
+    windowId,
+    headers,
+    send: async (path, body, step) => {
+      const response = await fetch(`${serverUrl}${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        throw new Error(`Packaged restart smoke could not ${step} (${response.status}).`);
+      }
+      return await response.json();
+    },
+  };
+}
+
+/** Code commands answer only for the Project the window has open. */
+async function openCodeProject(window: SmokeWindowAuthority, projectId: string): Promise<void> {
+  const shell = await window.send("/api/shell/bootstrap", undefined, "bootstrap the shell");
+  const workspace = isRecord(shell) && isRecord(shell.workspace) ? shell.workspace : undefined;
+  if (!isRecord(shell) || workspace === undefined) {
+    throw new Error("Packaged restart smoke received no workspace.");
+  }
+  await window.send(
+    "/api/shell/commands",
+    {
+      kind: "apply-workspace-operation",
+      windowId: workspace.windowId,
+      expectedVersion: shell.workspaceVersion,
+      operation: {
+        kind: "switch-project-surface",
+        mode: "code",
+        surface: { kind: "project", id: randomUUID(), projectId, mode: "code", title: "Smoke" },
+      },
+    },
+    "open the Code Project",
+  );
+}
+
+interface SeededCodeProject {
+  readonly projectId: string;
+  readonly bindingRevisionId: unknown;
+  readonly repositoryId: unknown;
+  readonly checkoutId: unknown;
+}
+
+async function createCodeProject(
+  serverUrl: string,
+  desktopBridgeSecret: string,
+  window: SmokeWindowAuthority,
+  repository: string,
+): Promise<SeededCodeProject> {
+  const receipt = await fetch(`${serverUrl}/api/desktop/project-binding-receipts`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-octant-desktop-secret": desktopBridgeSecret,
+    },
+    body: JSON.stringify({ windowId: window.windowId, projectType: "code", path: repository }),
+  });
+  const receiptBody: unknown = receipt.ok ? await receipt.json() : undefined;
+  if (!isRecord(receiptBody) || typeof receiptBody.receiptId !== "string") {
+    throw new Error(`Packaged restart smoke could not bind its repository (${receipt.status}).`);
+  }
+  const projectId = randomUUID();
+  await window.send(
+    "/api/projects/commands",
+    {
+      kind: "create-code-project",
+      projectId,
+      expectedVersion: 0,
+      name: "Packaged restart smoke",
+      receiptId: receiptBody.receiptId,
+      hostId: "local",
+    },
+    "create a Code Project",
+  );
+  await openCodeProject(window, projectId);
+  const prepared = await window.send(
+    "/api/code/commands",
+    { kind: "prepare-code-project-checkout", projectId },
+    "prepare the checkout",
+  );
+  const checkout =
+    isRecord(prepared) && isRecord(prepared.checkout) ? prepared.checkout : undefined;
+  if (!isRecord(prepared) || checkout === undefined) {
+    throw new Error("Packaged restart smoke received no prepared checkout.");
+  }
+  return {
+    projectId,
+    bindingRevisionId: prepared.bindingRevisionId,
+    repositoryId: checkout.repositoryId,
+    checkoutId: checkout.id,
+  };
+}
+
+async function seedCodeProjectsAndThread(
+  serverUrl: string,
+  desktopBridgeSecret: string,
+  repositories: readonly [string, string],
+): Promise<{ readonly projectId: string; readonly threadId: string }> {
+  const window = await registerWindowAuthority(serverUrl, desktopBridgeSecret);
+  const send = window.send;
+  await createCodeProject(serverUrl, desktopBridgeSecret, window, repositories[1]);
+  // Created last, so it is the Project the window has open for the thread.
+  const project = await createCodeProject(serverUrl, desktopBridgeSecret, window, repositories[0]);
+  const providerInstanceId = randomUUID();
+  const modelId = "packaged-restart-smoke";
+  await send(
+    "/api/providers/commands",
+    {
+      kind: "create-openai-compatible-provider",
+      instanceId: providerInstanceId,
+      expectedVersion: 0,
+      displayName: "Packaged restart smoke",
+      configuration: {
+        kind: "openai-compatible-http",
+        // Nothing listens here; the smoke never starts a turn.
+        baseUrl: "http://127.0.0.1:9/v1",
+        authentication: "none",
+        protocol: "chat-completions",
+        manualModelIds: [modelId],
+      },
+    },
+    "create a provider",
+  );
+  const threadId = randomUUID();
+  const now = new Date().toISOString();
+  const created = await send(
+    "/api/code/commands",
+    {
+      kind: "create-code-thread",
+      thread: {
+        id: threadId,
+        projectId: project.projectId,
+        bindingRevisionId: project.bindingRevisionId,
+        repositoryId: project.repositoryId,
+        checkoutId: project.checkoutId,
+        title: "Packaged restart smoke",
+        lifecycle: "active",
+        providerInstanceId,
+        modelId,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        deliveryTarget: {
+          branchIntent: "main",
+          remoteName: "origin",
+          proposedBaseRepository: "local/smoke",
+          proposedBaseBranch: "main",
+          outcomeKind: "local-implementation",
+          confirmedAt: now,
+        },
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      },
+    },
+    "create a Code thread",
+  );
+  if (!isRecord(created) || created.kind !== "thread-created") {
+    throw new Error("Packaged restart smoke did not create its Code thread.");
+  }
+  return { projectId: project.projectId, threadId };
+}
+
+async function stayHealthy(serverUrl: string, durationMs: number): Promise<void> {
+  const deadline = Date.now() + durationMs;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${serverUrl}/health`, {
+      signal: AbortSignal.timeout(1_000),
+    }).catch(() => undefined);
+    if (response?.ok !== true) {
+      throw new Error("Packaged host stopped answering after restarting on existing Code data.");
+    }
+    await sleep(250);
   }
 }
 
