@@ -744,6 +744,194 @@ describe("CodeTerminalPane", () => {
   });
 });
 
+describe("CodeTerminalPane Browser switch", () => {
+  const restart = {
+    columns: 100,
+    createTerminalId: () => ids.terminal as never,
+    credentialRefs: [],
+    rows: 30,
+  };
+  const granted = {
+    status: "granted",
+    grantId: "90000000-0000-4000-8000-000000000001",
+    threadId: ids.thread,
+    terminalId: ids.terminal,
+    issuedAt: "2026-10-14T09:00:00.000Z",
+  } as const;
+
+  function renderSwitch(
+    client: ReturnType<typeof codeClient>,
+    overrides: Partial<Parameters<typeof CodeTerminalPane>[0]> = {},
+  ) {
+    let next = 0;
+    return render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => `70000000-0000-4000-8000-00000000010${next++}` as never}
+        executionPolicy="approval-gated"
+        loadRuntime={xtermRuntime().loadRuntime}
+        offerBrowserGrant
+        restart={restart}
+        result={terminalResult}
+        scope={scope}
+        {...overrides}
+      />,
+    );
+  }
+
+  it("restarts the terminal with the Browser only after the person agrees, and shows it on from the host's answer", async () => {
+    const client = codeClient({ evidence: "ready" });
+    vi.mocked(client.executeOperation).mockImplementation(async (command) => {
+      if (command.kind === "stop-terminal") {
+        return {
+          ...terminalResult,
+          operationId: command.operationId,
+          state: "interrupted",
+        } as never;
+      }
+      if (command.kind === "start-terminal") {
+        return {
+          kind: "terminal-state",
+          operationId: command.operationId,
+          terminalId: command.terminalId,
+          state: "running",
+          browserGrant: granted,
+        } as never;
+      }
+      return { kind: "operation-accepted", operationId: command.operationId } as never;
+    });
+    renderSwitch(client);
+    expect(screen.queryByRole("status", { name: /Browser on/ })).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Let this terminal use the Browser…" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Let this terminal use the Browser?",
+    });
+    expect(dialog).toHaveTextContent("The terminal restarts, so anything running in it stops.");
+    expect(dialog).toHaveTextContent("the desktop app does not include it yet");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(client.executeOperation).not.toHaveBeenCalled();
+
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Let this terminal use the Browser…" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Restart with the Browser" }));
+
+    expect(await screen.findByText("Browser on")).toBeVisible();
+    expect(screen.getByText(/If this window changes Project, start the CLI again/)).toBeVisible();
+    const commands = vi.mocked(client.executeOperation).mock.calls.map(([command]) => command);
+    expect(commands.map((command) => command.kind)).toEqual(["stop-terminal", "start-terminal"]);
+    expect(commands[1]).toMatchObject({
+      kind: "start-terminal",
+      terminalId: ids.terminal,
+      browserGrant: "on",
+    });
+  });
+
+  it("shows a grant the host reports and switches it off without restarting the shell", async () => {
+    const client = codeClient({ evidence: "ready" });
+    vi.mocked(client.executeOperation).mockImplementation(
+      async (command) =>
+        ({
+          kind: "terminal-state",
+          operationId: command.operationId,
+          terminalId: ids.terminal,
+          state: "running",
+          browserGrant: {
+            ...granted,
+            status: "revoked",
+            reason: "switched-off",
+            revokedAt: "2026-10-14T09:05:00.000Z",
+          },
+        }) as never,
+    );
+    renderSwitch(client, { result: { ...terminalResult, browserGrant: granted as never } });
+
+    expect(screen.getByText("Browser on")).toBeVisible();
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    expect(
+      screen.queryByRole("menuitem", { name: "Let this terminal use the Browser…" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Switch the Browser off" }));
+
+    expect(await screen.findByText(/Browser off for this terminal/)).toHaveTextContent(
+      "start the CLI again",
+    );
+    expect(screen.queryByText("Browser on")).not.toBeInTheDocument();
+    expect(client.executeOperation).toHaveBeenCalledOnce();
+    expect(client.executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "revoke-terminal-browser-grant",
+        terminalId: ids.terminal,
+      }),
+    );
+  });
+
+  it("says why the host refused, and does not pretend the terminal has the Browser", async () => {
+    const client = codeClient({ evidence: "ready" });
+    vi.mocked(client.executeOperation).mockImplementation(
+      async (command) =>
+        (command.kind === "start-terminal"
+          ? {
+              kind: "terminal-state",
+              operationId: command.operationId,
+              terminalId: command.terminalId,
+              state: "unavailable",
+              browserGrant: { status: "refused", reason: "not-local-window" },
+            }
+          : { ...terminalResult, operationId: command.operationId, state: "interrupted" }) as never,
+    );
+    renderSwitch(client);
+
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Let this terminal use the Browser…" }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Restart with the Browser" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Only the person at a window on the host can let a terminal use the Browser.",
+    );
+    expect(screen.queryByText("Browser on")).not.toBeInTheDocument();
+    expect(screen.getByText("Unavailable")).toBeVisible();
+  });
+
+  it("offers no Browser in Plan or on a terminal this window cannot restart", async () => {
+    const plan = renderSwitch(codeClient(), {
+      executionPolicy: "plan",
+      onOpenAnotherTerminal: vi.fn(),
+    });
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    expect(await screen.findByRole("menuitem", { name: "New terminal" })).toBeVisible();
+    expect(
+      screen.queryByRole("menuitem", { name: "Let this terminal use the Browser…" }),
+    ).not.toBeInTheDocument();
+    plan.unmount();
+
+    render(
+      <CodeTerminalPane
+        client={codeClient()}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="approval-gated"
+        loadRuntime={xtermRuntime().loadRuntime}
+        offerBrowserGrant
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+    expect(await screen.findByRole("menuitem", { name: "Stop terminal" })).toBeVisible();
+    expect(
+      screen.queryByRole("menuitem", { name: "Let this terminal use the Browser…" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
 function terminalWriteData(client: ReturnType<typeof codeClient>): readonly string[] {
   return (client.executeOperation as ReturnType<typeof vi.fn>).mock.calls.flatMap((call) => {
     const command = call[0] as { readonly kind?: string; readonly data?: string };

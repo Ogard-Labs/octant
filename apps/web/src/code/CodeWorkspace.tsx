@@ -1357,6 +1357,7 @@ function TerminalWorkspaceSurface(
         client={props.client}
         createOperationId={() => props.nextUuid() as never}
         executionPolicy={props.threadPolicy}
+        offerBrowserGrant
         onAddSelectionToChat={(selection) =>
           props.controller.setPendingDraft(
             appendTerminalSelection(props.controller.pendingDraft, selection),

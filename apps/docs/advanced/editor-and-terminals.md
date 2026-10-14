@@ -94,6 +94,9 @@ never readable by another's. On macOS the shell starts as a login shell and
 can read, but never change, your shell configuration, its frameworks, and the
 version managers your PATH uses (mise, asdf, pyenv, rbenv, Volta, nvm, Bun,
 rustup); credential directories such as `~/.ssh` and `~/.aws` stay unreadable.
+A Code thread terminal can also be switched on so that a provider CLI you
+start in it can use the thread's Browser; see
+[Browser for a CLI in a terminal](./terminal-browser).
 Local process monitoring
 covers only processes Octant launches and owns; arbitrary host-process
 discovery and control are deferred.

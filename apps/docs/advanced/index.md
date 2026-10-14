@@ -31,6 +31,7 @@ without over-trusting a surface that has not shipped.
 ## Browser, Apple, Android, and extensions
 
 - [Browser and computer use](/advanced/browser-and-computer-use) — isolated browser contexts and host-controlled computer use.
+- [Browser for a CLI in a terminal](/advanced/terminal-browser) — let a provider CLI you type into a Code thread's terminal use that thread's Browser.
 - [Apple Development Workbench](/advanced/apple-workbench) — provider-neutral Xcode, Simulator, and validation workflows.
 - [Android emulator](/advanced/android-emulator) — in-app AVD pane, `adb` input, and `octant_android`.
 - [Plugins and skills](/advanced/plugins-and-skills) — install, trust, enable, and use extension packages and standalone skills.

@@ -265,7 +265,7 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly terminalBrowserGrants?: Pick<
     TerminalBrowserGrantService,
-    "open" | "abandon" | "switchOff" | "terminalClosed" | "resolveCredential"
+    "open" | "abandon" | "switchOff" | "terminalClosed" | "resolveCredential" | "liveGrant"
   >;
   readonly resolvePullRequestTarget: (
     threadId: CodeThreadId,

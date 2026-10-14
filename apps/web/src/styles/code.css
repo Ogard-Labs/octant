@@ -125,6 +125,13 @@
   min-height: 0;
 }
 
+/* The actions trigger floats over the pane's top-right corner, so a notice
+   above the terminal keeps its text and its own action clear of it. */
+.code-terminal-pane > .code-terminal-pane__browser,
+.code-terminal-pane > p[role="status"] {
+  padding-right: calc(var(--oct-rail-button-h) + var(--oct-space-4));
+}
+
 .code-test-pane__definition,
 .code-git-pane__actions,
 .code-pr-pane__form,

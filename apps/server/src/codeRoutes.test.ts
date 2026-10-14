@@ -210,6 +210,52 @@ describe("Code routes", () => {
     expect(executeOperation).toHaveBeenCalledOnce();
   });
 
+  it("never lets a paired device ask for a terminal Browser grant as the person", async () => {
+    // The host mints a grant only for the person at a local window; a request
+    // that reaches it as anything else is refused and starts no terminal.
+    const executeOperation = vi.fn(async (_windowId, command) => ({
+      kind: "operation-accepted",
+      operationId: command.operationId,
+    }));
+    const route = routeFixture({ execute: vi.fn(), executeOperation });
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000915";
+    const remoteRequest = request("/api/code/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind: "start-terminal",
+        operationId: "00000000-0000-4000-8000-000000000916",
+        threadId,
+        checkoutId,
+        terminalId: "00000000-0000-4000-8000-000000000917",
+        columns: 100,
+        rows: 30,
+        credentialRefs: [],
+        browserGrant: "on",
+      }),
+    });
+    bindPrincipalRouteContext(remoteRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000918" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+
+    expect((await route(remoteRequest))?.status).toBe(200);
+    expect(executeOperation).toHaveBeenCalledOnce();
+    expect(executeOperation).toHaveBeenCalledWith(
+      remoteDeviceId,
+      expect.objectContaining({ kind: "start-terminal", browserGrant: "on" }),
+      { initiator: "agent" },
+    );
+  });
+
   it("carries a Project terminal command with the window and caller the host proved", async () => {
     const execute = vi.fn(async (_windowId, _caller, command) => ({
       kind: "project-terminal-refused",

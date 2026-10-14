@@ -6,12 +6,14 @@ boundary: the grant is one more transport for the Browser family, with no new
 authority ([Architecture: app-managed tool transport](../architecture.md#providers)
 and [Architecture: security and authority](../architecture.md#security-and-authority)).
 
-**Delivery state.** The host side is built: the grant, its loopback endpoint, its
-lifecycle, and its refusals. The `octant mcp` command that a CLI is pointed at is
-built too. Not built: the switch in the local window and the approval wording
-that names the terminal, the user guide, and desktop packaging of the command.
-Until those land nothing in the product starts a terminal with a grant on, so the
-feature is inert for a person in the desktop app.
+**Delivery state.** Built: the grant, its loopback endpoint, its lifecycle, and
+its refusals; the `octant mcp` command that a CLI is pointed at; the switch in a
+local window, the approval card that names the terminal, and the user guide
+(`apps/docs/advanced/terminal-browser.md`).
+Not built: desktop packaging of the command. Until it lands the desktop app puts
+no `octant` on a terminal's `PATH`, so the feature works there only with a
+headless install's command, and the window says so before it restarts a
+terminal.
 
 ## The problem
 
@@ -137,6 +139,45 @@ the grant is over.
   with a JSON-RPC parse error and does not reach the host. stdout carries
   protocol frames only; everything a person should read goes to stderr.
 
+## The window
+
+- **The switch.** A Code thread terminal's actions menu (the floating button
+  and the right-click menu) offers **Let this terminal use the Browser…** when
+  the terminal belongs to a Code thread this window can restart and the thread
+  is not in Plan. A running shell cannot be given the variables, so a confirmation
+  says first that the terminal restarts and anything running in it stops, and
+  that the `octant` command must be on the terminal's `PATH` (a headless install
+  has it; the desktop app does not yet). Confirming stops the shell and starts
+  the same terminal with `browserGrant: "on"`. A refusal shows the host's reason
+  and the terminal stays stopped, so a shell never looks as if it has what it
+  lacks; the menu's **Restart terminal** goes on without it. The Zen terminal
+  card, which cannot restart its shell, shows the state and **Switch off** but
+  offers no switch-on.
+- **State comes from the host.** The window shows **Browser on** only when the
+  host's latest answer about that running shell carries a live grant: the start
+  that minted it, or an attach. An attach to a running terminal reports the
+  terminal's live grant for that thread, so a reload, a second window, or a
+  return from another thread reads the grant as it is; a shell that stopped took
+  its grant with it. The on notice carries **Switch off** and says that a
+  Project change in this window means starting the CLI again.
+- **Switch off** sends `revoke-terminal-browser-grant` and leaves the shell
+  running. The notice that follows says a CLI that used the Browser stops at its
+  next call and has to be started again after the Browser is switched back on.
+- **A paired device has no switch.** The paired-device client renders no thread
+  terminal, and the host refuses its start with a grant (`not-local-window`)
+  before any terminal starts.
+- **The approval card.** The Code thread column lists the host's Browser
+  approvals for that thread (mode `code`) and shows the first as an approval
+  card labelled **Browser request from a terminal**: it names the origin and the
+  thread and says a program in the thread's terminal asked, not the thread's
+  agent. In Code only a terminal grant asks through the host's Browser approval
+  service, because a managed Code turn asks through its own operation approval,
+  so every Code entry there came from a terminal. If that ever changes, the
+  approval view must carry who asked before this card may keep its wording. The
+  card offers **Approve once**, **Always allow** (the host's remembered origin,
+  the same one Work offers), and **Deny**; an answer the host no longer accepts
+  is reported as an ended request, never as a silent no-op.
+
 ## Lifecycle
 
 A grant is bound to one host run, one thread, one terminal session, and one
@@ -167,10 +208,6 @@ rest of the thread.
 
 ## Constraints and known gaps
 
-- The Code workspace does not yet show a Browser approval raised through the
-  host's Browser approval service (Chat and Work do). Until the window switch
-  lands, an effect that needs an approval waits and expires as a denial rather
-  than running.
 - The confined terminal must be able to reach `127.0.0.1` for a CLI to use the
   endpoint. On macOS the thread terminal's Seatbelt profile allows network
   (`networkEgress` is `allow` for every terminal launch), and a shell started
@@ -205,4 +242,11 @@ host call), relaying with the bearer token and session, the `unauthorized`,
 unreachable, and unexpected-failure endings, and that neither the token nor the
 address reaches stdout or stderr.
 `apps/server/src/code/codeOperationService.test.ts` covers the start and switch-off
-commands, and `apps/server/src/persistence/threadPurge.test.ts` the purge.
+commands and the live grant an attach reports, `apps/server/src/codeRoutes.test.ts`
+that a paired device's start with a grant reaches the host as an agent (which the
+host refuses), and `apps/server/src/persistence/threadPurge.test.ts` the purge.
+`apps/web/src/code/CodeTerminalPane.test.tsx` covers the switch (confirmation,
+restart with the grant, the on state from the host's answer, switch-off without a
+restart, a refusal, and no switch in Plan or on a terminal the window cannot
+restart), and `apps/web/src/code/TerminalBrowserApprovalPrompt.test.tsx` the
+approval card's wording and scope.
