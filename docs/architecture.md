@@ -858,6 +858,32 @@ turn runs, so each reply in that section marks the sidecar itself (label
 `subagent-result`, content reference `subagent-result-<run>`) by the same
 order; a reply that cannot mark it refuses the turn.
 
+A Canvas carries the mark of what wrote it. Every Canvas version commits
+through the Canvas event store, and when the thread the Canvas belongs to, or
+the managed child writing it, is marked at that moment, the store first appends
+`canvas.outside-content-carried@1` (aggregate `canvas-outside-content`, one
+event per writer, naming the writer and the first marked version) in the same
+journal unit as the version, so no moment exists at which the Canvas holds that
+text unmarked; a mark that cannot be read or recorded refuses the version. This
+covers an agent's create and revise, a child's, a hand-off document, a person's
+edit, and a version taken from another computer, which marks the thread it
+lands in first (`Synced from …`). The Canvas tool's `read` and `preview` are how
+another thread's model reaches a Canvas (any Canvas of its Project, by id), so
+both mark the reader (label `canvas`, content reference `canvas-<canvas>`)
+after the Canvas is read and before anything from it is returned, when the
+Canvas records a writer other than the reader or the thread it belongs to is
+marked now; the second rule covers a Canvas written before marks were recorded
+at write time. A reader that cannot be marked is not given the Canvas. A child
+is marked under its run, as its other tools are. A writer reading its own
+Canvas passes on nothing. The mark recorded at write time is the Canvas's own:
+a person's clear on the writer reviews what that thread read, not every thread
+that will read the Canvas later, so it leaves the Canvas marked. It survives
+replay, and a purge of the Canvas, or of the thread it belongs to, erases it.
+A Chat Canvas selection carries only its name into planning, never the
+Canvas's text, and a Canvas's mirrored or exported files are files: another
+thread that reads them with its own file tools is not marked, as for any file a
+marked thread writes.
+
 An in-place restore (`restore-git-checkpoint`, sent by both Restore files to
 this point and Undo restore) overwrites a checkout other threads may share, so
 the host refuses it, as a `conflict` before Git is touched and before any undo
@@ -1717,6 +1743,8 @@ flowchart LR
     side task, and a thread confirmed from a planner proposal start with their
     source's mark when they are made, and a mention or Side Chat of a marked
     thread marks the thread reading it (see the Code fork rule under Modes).
+    A Canvas written while its writer was marked keeps that mark after the
+    writer is cleared, and marks the next thread that reads it.
   - A clear removes the mark only. Nothing leaves the model's context and the
     provider session is not restarted, so what the thread read can still steer
     the model.
