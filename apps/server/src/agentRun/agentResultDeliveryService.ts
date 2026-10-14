@@ -10,7 +10,10 @@
  * is found in the projection and delivered like one that finished live.
  */
 import {
+  CONTEXT_COMPACTION_EVENT_NAMES,
   decodeAgentRunResultDeliverySettled,
+  decodeContextCompactionCompleted,
+  decodeContextCompactionFailed,
   MAX_AGENT_RUN_RESULT_DELIVERY_BATCH_SIZE,
   decodeAgentRunStatusChanged,
   decodeCodeOperationEventFrame,
@@ -169,7 +172,8 @@ export class AgentResultDeliveryService {
    * A deferred delivery re-fires when its parent thread's aggregate commits
    * — the active turn settling is exactly such a commit. Code turns journal
    * on their own `code-operation` aggregates, so their frames name the
-   * thread for the same wake.
+   * thread for the same wake, and a compaction that held the parent's turns
+   * ends on the thread's context ledger, which names it as the subject.
    */
   #watchParent(event: EventEnvelope): void {
     const candidates: ReadonlyArray<readonly [AgentRunDeliveryAggregateType, string]> = (() => {
@@ -182,6 +186,25 @@ export class AgentResultDeliveryService {
           return [["code-thread", String(frame.threadId)] as const];
         } catch (error) {
           this.#options.onError?.("Agent-run delivery could not decode a code frame.", error);
+          return [];
+        }
+      }
+      if (
+        event.aggregateType === "context-ledger" &&
+        (event.eventName === CONTEXT_COMPACTION_EVENT_NAMES.completed ||
+          event.eventName === CONTEXT_COMPACTION_EVENT_NAMES.failed)
+      ) {
+        try {
+          const subject =
+            event.eventName === CONTEXT_COMPACTION_EVENT_NAMES.completed
+              ? decodeContextCompactionCompleted(event.payload).receipt.subject
+              : decodeContextCompactionFailed(event.payload).subject;
+          const kind = String(subject.aggregateType);
+          return kind === "chat-thread" || kind === "work-thread" || kind === "code-thread"
+            ? [[kind, String(subject.aggregateId)] as const]
+            : [];
+        } catch (error) {
+          this.#options.onError?.("Agent-run delivery could not decode a compaction.", error);
           return [];
         }
       }

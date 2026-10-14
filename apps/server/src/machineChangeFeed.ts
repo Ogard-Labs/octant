@@ -1,4 +1,5 @@
 import {
+  CONTEXT_COMPACTION_EVENT_NAMES,
   NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
 } from "@octant/contracts";
@@ -200,6 +201,11 @@ function topicsForEvent(event: {
     return ["projects", "chat-navigation", "work-navigation", "code-navigation"];
   }
   if (aggregateType.startsWith("chat-")) return ["chat-navigation"];
+  // A compaction of a Chat session ends on the thread's context ledger, and
+  // its outcome rides the thread's held stream, which wakes on Chat changes.
+  if (aggregateType === "context-ledger") {
+    return compactionOutcomeSubjectType(event) === "chat-thread" ? ["chat-navigation"] : [];
+  }
   if (aggregateType.startsWith("work-")) return ["work-navigation"];
   if (aggregateType === "code-operation") {
     const kind = codeOperationEventKind(event.payload);
@@ -218,6 +224,25 @@ const CODE_NAVIGATION_EVENT_KINDS = new Set([
   "input-requested",
   "operation-result",
 ]);
+
+function compactionOutcomeSubjectType(event: {
+  readonly eventName?: string;
+  readonly payload?: unknown;
+}): string | undefined {
+  const { eventName, payload } = event;
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const ended =
+    eventName === CONTEXT_COMPACTION_EVENT_NAMES.completed
+      ? Reflect.get(payload, "receipt")
+      : eventName === CONTEXT_COMPACTION_EVENT_NAMES.failed
+        ? payload
+        : undefined;
+  if (typeof ended !== "object" || ended === null) return undefined;
+  const subject = Reflect.get(ended, "subject");
+  if (typeof subject !== "object" || subject === null) return undefined;
+  const aggregateType = Reflect.get(subject, "aggregateType");
+  return typeof aggregateType === "string" ? aggregateType : undefined;
+}
 
 function codeOperationEventKind(payload: unknown): string | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;

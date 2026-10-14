@@ -38,6 +38,7 @@ import {
   decodeAgentRunParentThreadId,
   decodeAgentRunId,
   decodeChatThreadId,
+  decodeContextSubjectRef,
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceContentId,
@@ -7813,8 +7814,16 @@ export function startOctantServer(
           readThread: (threadId) => persistence.readChatThread(threadId),
           readThreadView: (threadId) => persistence.readChatThreadView(threadId),
           execute: (input, executionContext) => chatService.execute(input, executionContext),
+          compacting: (threadId) =>
+            contextHarness.compactionRunning(
+              decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: threadId }),
+            ),
         },
         work: {
+          compacting: (threadId) =>
+            contextHarness.compactionRunning(
+              decodeContextSubjectRef({ aggregateType: "work-thread", aggregateId: threadId }),
+            ),
           isEnabled: () =>
             enabledModes(
               persistence.readShellSettings()?.settings ?? defaultShellSettings(),
@@ -8235,7 +8244,9 @@ export function startOctantServer(
                   modelId: thread.modelId,
                 };
           },
-          turnRunning: (threadId) => chatService.isTurnActive(decodeChatThreadId(threadId)),
+          turnRunning: (threadId) =>
+            chatService.isTurnActive(decodeChatThreadId(threadId)) ||
+            chatService.isTurnStarting(decodeChatThreadId(threadId)),
           conversation: (threadId) =>
             chatService.sessionCompactionConversation(decodeChatThreadId(threadId)),
           scratchRoot: (threadId) => chatService.scratchRoot(decodeChatThreadId(threadId)),
@@ -8265,9 +8276,15 @@ export function startOctantServer(
               ...(providerPolicy === undefined ? {} : { providerPolicy }),
             };
           },
-          turnRunning: (threadId) => workTurnService.isTurnActive(decodeWorkThreadId(threadId)),
+          turnRunning: (threadId) =>
+            workTurnService.isTurnActive(decodeWorkThreadId(threadId)) ||
+            workTurnService.isTurnStarting(decodeWorkThreadId(threadId)),
           conversation: (threadId) =>
             workTurnService.sessionCompactionConversation(decodeWorkThreadId(threadId)),
+          // The Work stream is fed in process; the Chat stream reads the
+          // journaled outcome itself.
+          settled: (threadId, compaction) =>
+            workTurnService.compactionSettled(decodeWorkThreadId(threadId), compaction),
           // A Work turn's provider session starts in the bound root; the
           // tool-free summary request starts there too and gains nothing.
           scratchRoot: async (threadId) => {

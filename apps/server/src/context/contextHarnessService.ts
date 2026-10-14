@@ -765,6 +765,15 @@ export class ContextHarnessService {
     return readContextCompactions(this.#persistence.connection, subject).at(-1);
   }
 
+  /**
+   * Whether a requested compaction of this subject is under way. No turn
+   * starts meanwhile: its plan would fail the compaction as `context-changed`
+   * after the summary was already paid for.
+   */
+  compactionRunning(subject: ContextSubjectRef): boolean {
+    return this.latestCompaction(subject)?.status === "running";
+  }
+
   compaction(
     subject: ContextSubjectRef,
     compactionId: ContextCompactionId,

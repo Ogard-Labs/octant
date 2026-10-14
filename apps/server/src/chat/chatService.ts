@@ -4,6 +4,7 @@ import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { createHash } from "node:crypto";
 import {
   ActorId,
+  CONTEXT_COMPACTION_EVENT_NAMES,
   CorrelationId,
   EventId,
   ReplayCursor,
@@ -20,6 +21,8 @@ import {
   decodeChatFailure,
   decodeChatPublicEvent,
   decodeCapacityReservationId,
+  decodeContextCompactionCompleted,
+  decodeContextCompactionFailed,
   decodeContextEntry,
   decodeContextSubjectRef,
   decodeProviderAttachmentInput,
@@ -286,6 +289,12 @@ const CHAT_EVENT_NAMES = new Set([
   "thread.follow-up-updated@1",
   "chat.deletion-requested@1",
   "chat.deleted@1",
+]);
+
+/** The context-ledger events that end a compaction of a Chat thread's session. */
+const COMPACTION_SETTLED_EVENT_NAMES = new Set<string>([
+  CONTEXT_COMPACTION_EVENT_NAMES.completed,
+  CONTEXT_COMPACTION_EVENT_NAMES.failed,
 ]);
 
 /**
@@ -732,6 +741,8 @@ function openQuestion(attempt: ChatAttempt): ChatAttempt["pendingQuestion"] {
 export interface ChatSubscribeOptions {
   /** Put the body behind each streamed delta on its `attempt-updated` frame. */
   readonly contents?: boolean;
+  /** Send a `compaction-settled` frame when a compaction of the session ends. */
+  readonly compaction?: boolean;
 }
 
 export class ChatService {
@@ -785,6 +796,8 @@ export class ChatService {
   readonly #activeAttempts = new Map<string, AbortController>();
   readonly #activeThreadExecutions = new Set<string>();
   readonly #threadAdmissions = new Map<string, Promise<void>>();
+  /** Admissions of a turn or a resumed attempt, queued or being prepared, per thread. */
+  readonly #startingTurns = new Map<string, number>();
 
   constructor(options: ChatServiceOptions) {
     this.#persistence = options.persistence;
@@ -1446,6 +1459,14 @@ export class ChatService {
       if (events.length === 0) break;
       for (const envelope of events) {
         cursor = envelope.globalSequence;
+        if (
+          options?.compaction === true &&
+          COMPACTION_SETTLED_EVENT_NAMES.has(envelope.eventName)
+        ) {
+          const frame = this.#toCompactionFrame(threadId, envelope);
+          if (frame !== undefined) yield frame;
+          continue;
+        }
         if (!CHAT_EVENT_NAMES.has(envelope.eventName)) continue;
         const frame = this.#toEventFrame(threadId, envelope, options?.contents === true);
         if (frame === undefined) continue;
@@ -2120,7 +2141,7 @@ export class ChatService {
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "send-chat-turn" }>,
     executionContext?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
-    const accepted = await this.#withThreadAdmission(command.threadId, async () => {
+    const accepted = await this.#withTurnAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
       this.#admitHarnessTurn(thread);
       if (command.submissionId !== undefined) {
@@ -2154,6 +2175,7 @@ export class ChatService {
       const userMessageRef = userMessage.reference;
       const view = this.#persistence.readChatThreadView(thread.id);
       this.#assertNoActiveTurn(view, thread.id);
+      this.#assertNotCompacting(thread.id);
       const sequence = (view?.turns.length ?? 0) + 1;
       const turnId = this.#uuid() as ChatTurn["id"];
       // Extension selection checks can reject disabled/revoked extensions.
@@ -2297,7 +2319,7 @@ export class ChatService {
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "deliver-chat-agent-result" }>,
     executionContext?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
-    const accepted = await this.#withThreadAdmission(command.threadId, async () => {
+    const accepted = await this.#withTurnAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
       if (this.#agentRuns === undefined) {
         throw new ChatServiceError(
@@ -2353,6 +2375,7 @@ export class ChatService {
       const userMessage = this.#prepareContent(thread.id, "user", prompt);
       const userMessageRef = userMessage.reference;
       this.#assertNoActiveTurn(view, thread.id);
+      this.#assertNotCompacting(thread.id);
       const sequence = (view?.turns.length ?? 0) + 1;
       const turnId = this.#uuid() as ChatTurn["id"];
       const routing = await this.#computeTurnRouting(thread, turnId);
@@ -2496,12 +2519,13 @@ export class ChatService {
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "edit-chat-turn" }>,
     executionContext?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
-    const accepted = await this.#withThreadAdmission(command.threadId, async () => {
+    const accepted = await this.#withTurnAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
       this.#admitHarnessTurn(thread);
       this.#assertExpectedThreadVersion(thread, command.expectedVersion);
       const view = this.#requireThreadView(command.threadId);
       this.#assertNoActiveTurn(view, thread.id);
+      this.#assertNotCompacting(thread.id);
       const through = chatTurnsThrough(view.turns, command.turnId);
       if (through === undefined) {
         throw new ChatServiceError({
@@ -2823,11 +2847,12 @@ export class ChatService {
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "retry-chat-turn" }>,
     executionContext?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
-    const accepted = await this.#withThreadAdmission(command.threadId, async () => {
+    const accepted = await this.#withTurnAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
       this.#assertExpectedThreadVersion(thread, command.expectedVersion);
       const view = this.#requireThreadView(command.threadId);
       this.#assertNoActiveTurn(view, thread.id);
+      this.#assertNotCompacting(thread.id);
       const turn = view.turns.find((candidate) => String(candidate.id) === String(command.turnId));
       const attempt = turn?.attempts.find(
         (candidate) => String(candidate.id) === String(command.attemptId),
@@ -3152,11 +3177,12 @@ export class ChatService {
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "resume-chat-turn" }>,
     executionContext?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
-    const accepted = await this.#withThreadAdmission(command.threadId, async () => {
+    const accepted = await this.#withTurnAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
       this.#assertExpectedThreadVersion(thread, command.expectedVersion);
       const view = this.#requireThreadView(command.threadId);
       this.#assertNoActiveTurn(view, thread.id);
+      this.#assertNotCompacting(thread.id);
       const turn = view.turns.find((candidate) => String(candidate.id) === String(command.turnId));
       const attempt = turn?.attempts.find(
         (candidate) => String(candidate.id) === String(command.attemptId),
@@ -5400,6 +5426,42 @@ export class ChatService {
     });
   }
 
+  /**
+   * The outcome of a compaction of this thread's session, read back from the
+   * context ledger it was journaled on. A failure's event names no executor,
+   * so the frame carries the folded record rather than the raw event.
+   */
+  #toCompactionFrame(
+    threadId: ChatThreadId,
+    envelope: {
+      readonly globalSequence: number;
+      readonly aggregateType: string;
+      readonly aggregateId: string;
+      readonly eventName: string;
+      readonly payload: unknown;
+    },
+  ): ChatEventFrame | undefined {
+    if (envelope.aggregateType !== "context-ledger") return undefined;
+    if (String(envelope.aggregateId) !== String(threadId)) return undefined;
+    try {
+      const ended =
+        envelope.eventName === CONTEXT_COMPACTION_EVENT_NAMES.completed
+          ? decodeContextCompactionCompleted(envelope.payload).receipt
+          : decodeContextCompactionFailed(envelope.payload);
+      if (String(ended.subject.aggregateType) !== "chat-thread") return undefined;
+      const compaction = this.#contextHarness.compaction(ended.subject, ended.compactionId);
+      // A purge erased it after it ended.
+      if (compaction === undefined || compaction.status === "running") return undefined;
+      return decodeChatEventFrame({
+        threadId,
+        sequence: envelope.globalSequence,
+        event: { kind: "compaction-settled", threadId, compaction },
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
   #toEventFrame(
     threadId: ChatThreadId,
     envelope: {
@@ -5656,9 +5718,47 @@ export class ChatService {
     }
   }
 
+  /**
+   * A turn planned while the session is being compacted would fail the
+   * compaction after its summary was paid for, so the send waits it out.
+   */
+  #assertNotCompacting(threadId: ChatThreadId): void {
+    if (
+      this.#contextHarness.compactionRunning(
+        decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: String(threadId) }),
+      )
+    ) {
+      throw new ChatServiceError({
+        category: "waiting",
+        message: "This session is being compacted. Send again when it finishes.",
+      });
+    }
+  }
+
   #withAggregateHeadVersion(thread: ChatThread): ChatThread {
     const version = readAggregateVersion(this.#persistence.connection, "chat-thread", thread.id);
     return { ...thread, version };
+  }
+
+  /**
+   * Whether a new turn is queued or being prepared on this thread. Its plan
+   * is journaled before its attempt is, so a compaction admitted in between
+   * would be failed by that plan after its summary was paid for.
+   */
+  isTurnStarting(threadId: ChatThreadId): boolean {
+    return this.#startingTurns.has(String(threadId));
+  }
+
+  async #withTurnAdmission<T>(threadId: ChatThreadId, work: () => Promise<T>): Promise<T> {
+    const key = String(threadId);
+    this.#startingTurns.set(key, (this.#startingTurns.get(key) ?? 0) + 1);
+    try {
+      return await this.#withThreadAdmission(threadId, work);
+    } finally {
+      const remaining = (this.#startingTurns.get(key) ?? 1) - 1;
+      if (remaining === 0) this.#startingTurns.delete(key);
+      else this.#startingTurns.set(key, remaining);
+    }
   }
 
   async #withThreadAdmission<T>(threadId: ChatThreadId, work: () => Promise<T>): Promise<T> {

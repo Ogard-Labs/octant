@@ -449,7 +449,7 @@ function applyWorkTurnStreamFrame(
   turns: ReadonlyArray<WorkTurnState>,
   frame: WorkTurnStreamFrame,
 ): ReadonlyArray<WorkTurnState> {
-  if (frame.kind === "snapshot-required") return turns;
+  if (frame.kind === "snapshot-required" || frame.kind === "compaction-settled") return turns;
   const index = turns.findIndex(
     (turn) =>
       String(turn.requestId) ===

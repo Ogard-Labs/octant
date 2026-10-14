@@ -35,6 +35,7 @@ import {
   type AgentRun,
   type Project,
   type UtcTimestamp,
+  type WorkTurnStreamFrame,
 } from "@octant/contracts";
 import { Effect, Queue, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -112,6 +113,35 @@ describe("WorkTurnService", () => {
       expect(run).not.toHaveBeenCalled();
     },
   );
+
+  it("counts a turn as starting while its context loads, so a compaction cannot slip in before it is accepted", async () => {
+    const release = deferred<void>();
+    const entered = deferred<void>();
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: vi.fn<WorkTurnRuntimePort["run"]>().mockResolvedValue({
+          kind: "completed",
+          response: "Done",
+        }),
+      },
+      resolveFileMentionContext: async () => {
+        entered.resolve();
+        await release.promise;
+        return [];
+      },
+    });
+    expect(fixture.service.isTurnStarting(ids.thread)).toBe(false);
+    const pending = fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      fileMentionPaths: ["notes.md"],
+    });
+    await entered.promise;
+    expect(fixture.service.isTurnActive(ids.thread)).toBe(false);
+    expect(fixture.service.isTurnStarting(ids.thread)).toBe(true);
+    release.resolve();
+    await expect(pending).resolves.toMatchObject({ kind: "accepted" });
+    expect(fixture.service.isTurnStarting(ids.thread)).toBe(false);
+  });
 
   it("fails an accepted host turn revoked during the model context probe without starting it", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-work-context-"));
@@ -501,7 +531,7 @@ describe("WorkTurnService", () => {
     }
   });
 
-  it("compacts a Work session on request and sends the summary on the next turn", async () => {
+  it("holds a Work turn while the session compacts, streams the receipt, and sends the summary next turn", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-work-compaction-"));
     attachmentRoots.push(root);
     const connection = openSqlite(join(root, "context.sqlite3"));
@@ -574,6 +604,35 @@ describe("WorkTurnService", () => {
         aggregateType: "work-thread",
         aggregateId: String(ids.thread),
       });
+      // A turn is not accepted while a compaction runs: its plan would fail the
+      // compaction after the summary was paid for.
+      const held = decodeContextCompactionId("83000000-0000-4000-8000-00000000c0d0");
+      contextHarness.requestCompaction({
+        subject,
+        compactionId: held,
+        executor: {
+          kind: "host",
+          providerInstanceId: decodeProviderInstanceId(ids.provider),
+          modelId: decodeProviderModelId("model-a"),
+        },
+      });
+      const sentBeforeHold = sent.length;
+      await expect(
+        fixture.service.startFirstTurn(ids.window, {
+          ...startCommand(),
+          requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-0000000000ff"),
+          turnId: decodeWorkTurnId("bbbbbbbb-bbbb-4bbb-8bbb-0000000000ff"),
+          prompt: "Held while compacting",
+        }),
+      ).rejects.toMatchObject({
+        failure: {
+          category: "stale",
+          message: "This session is being compacted. Send again when it finishes.",
+        },
+      });
+      expect(sent).toHaveLength(sentBeforeHold);
+      expect(fixture.service.isTurnActive(ids.thread)).toBe(false);
+      contextHarness.failCompaction(subject, held, "summary-failed");
       const compaction = new SessionCompactionService({
         harness: contextHarness,
         threads: {
@@ -589,6 +648,8 @@ describe("WorkTurnService", () => {
             conversation: (threadId) =>
               fixture.service.sessionCompactionConversation(decodeWorkThreadId(threadId)),
             scratchRoot: async () => root,
+            settled: (threadId, settled) =>
+              fixture.service.compactionSettled(decodeWorkThreadId(threadId), settled),
           },
         },
         modeEnabled: () => true,
@@ -610,6 +671,18 @@ describe("WorkTurnService", () => {
       expect(compaction.inspect(subject, undefined, "local-window").compaction).toEqual({
         status: "available",
       });
+      const listening = new AbortController();
+      const frames: Array<WorkTurnStreamFrame> = [];
+      const stream = (async () => {
+        for await (const frame of fixture.service.subscribe(
+          ids.window,
+          ids.thread,
+          fixture.service.liveCursor(ids.thread),
+          listening.signal,
+        )) {
+          frames.push(frame);
+        }
+      })();
       compaction.start(
         {
           kind: "compact-session",
@@ -619,10 +692,22 @@ describe("WorkTurnService", () => {
         "local-window",
       );
       await compaction.settled();
-      expect(contextHarness.latestCompaction(subject)).toMatchObject({
+      const completed = contextHarness.latestCompaction(subject);
+      expect(completed).toMatchObject({
         status: "completed",
         receipt: { trigger: "requested", summary: { visibility: "stored" } },
       });
+      // The receipt reaches the thread's live stream as the compaction ends.
+      await vi.waitFor(() => expect(frames).toHaveLength(1));
+      listening.abort();
+      await stream;
+      expect(frames).toEqual([
+        expect.objectContaining({
+          kind: "compaction-settled",
+          threadId: ids.thread,
+          compaction: completed,
+        }),
+      ]);
 
       await runTurn(5);
       const next = sent.at(-1) ?? [];

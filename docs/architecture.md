@@ -2449,12 +2449,11 @@ journal the frame; the harness additionally keeps its own record.
 **Compacting a session on request.** Built so far: the host path for Chat and
 Work on a direct endpoint — the `compact-session` command, its receipt,
 refusals and journal events, the per-thread `compaction` answer on the
-inspector snapshot, and the host summary. Not built yet: the provider seam and
-every runtime row, so a runtime-owned conversation and every Code thread is
-refused `runtime-cannot-compact`; the receipt on the live stream; the send
-block while a compaction runs, so until then a turn that starts mid-compaction
-fails it as `context-changed`; and the UI, so `compact-range` stays a listed
-remedy with no action behind it. **Compact session** replaces what the model sees from
+inspector snapshot, the host summary, the outcome on the thread's live stream,
+and the server's send block while a compaction runs. Not built yet: the
+provider seam and every runtime row, so a runtime-owned conversation and every
+Code thread is refused `runtime-cannot-compact`; and the UI, so `compact-range`
+stays a listed remedy with no action behind it. **Compact session** replaces what the model sees from
 the next turn on with a summary of the earlier conversation and a recent tail,
 when the person asks, outside a turn. It never deletes or rewrites the journal:
 the thread keeps every message, tool call and result, and the compaction is
@@ -2575,9 +2574,19 @@ _Command and receipt._ One new `ContextCommand` kind in
 
 The command answers as soon as the request is journaled, with
 `{ kind: "compaction-started", compactionId, executor }`, because a runtime's
-compaction is a model call that can outlast an HTTP request. The receipt arrives
-on the thread's live stream as `context.compaction-completed@1` and is also on
-the inspector snapshot as `latestCompaction`:
+compaction is a model call that can outlast an HTTP request. When it ends, the
+outcome arrives on the thread's live stream as a `compaction-settled` event
+carrying the compaction's record: the receipt that
+`context.compaction-completed@1` journaled, or the failure that
+`context.compaction-failed@1` journaled, with the executor its request named. A
+failure rides the stream too, because a
+window that disabled send while the compaction ran must learn that it ended
+either way. A Chat thread's events stream reads the outcome back from the
+journal and sends it only to a subscriber that asks with `compaction=1`, as
+`contents=1` is asked for, because a client that decodes frames strictly would
+refuse an event it does not know; a Work thread's turn stream carries it as a
+frame of its own. The receipt is also on the inspector snapshot as
+`latestCompaction`:
 
 - `executor`: `{ kind: "host", providerInstanceId, modelId }`, or
   `{ kind: "runtime", driverKind, providerInstanceId, modelId? }`.
@@ -2696,6 +2705,17 @@ context answer), and the renderer never decides it.
   can't show it." Actions: **Compact** and Cancel.
 - While it runs, the popover reads "Compacting…", the composer's send is
   disabled with "Compacting session" as the reason, and no new turn starts.
+  The server enforces the last part, not the window: a Chat send, edit, retry,
+  resume or delivered subagent result is refused `waiting`, and a Work turn
+  `stale`, with "This session is being compacted. Send again when it
+  finishes." A subagent result, and a usage-limit continuation the person
+  opted into, wait the compaction out instead of being spent: each is offered
+  again as soon as the compaction ends. The two cannot interleave the other
+  way either: a turn or a resumed attempt counts as running for compaction
+  from the moment it is queued until it is accepted, because it reads the
+  conversation it plans from while it is prepared (a Chat turn journals its
+  plan before its attempt), so a compaction can neither be planned over nor
+  commit a summary the turn never read.
 - The result line, in the popover and on the timeline divider:
   "Compacted · 41.2k freed · summary by Codex", "Compacted · freed amount shows
   after the next reply", "Compacted · nothing freed", or "Couldn't compact:

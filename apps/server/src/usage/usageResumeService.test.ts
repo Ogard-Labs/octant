@@ -568,6 +568,55 @@ describe("UsageResumeService", () => {
     expect(resumeRow(connection, "chat-thread", ids.thread)?.detail).toBe("A request is pending.");
   });
 
+  it("keeps a continuation a compaction held armed and offers it again when the compaction ends", async () => {
+    const connection = openConnection();
+    let dispatches = 0;
+    const spies = {
+      chat: portSpies({
+        dispatch: vi.fn(async () => {
+          dispatches += 1;
+          return dispatches === 1
+            ? ({ kind: "deferred", detail: "The session is being compacted." } as const)
+            : ({ kind: "dispatched" } as const);
+        }),
+      }),
+      work: portSpies(),
+      code: portSpies(),
+    };
+    const { store } = serviceWith(connection, spies);
+    seededChatThread(connection);
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 2,
+      events: [pending(USAGE_RESUME_SCHEDULED, { resume: record() })],
+    });
+
+    fireDue(Date.parse(RESET));
+    await vi.waitFor(() => expect(spies.chat.dispatch).toHaveBeenCalledOnce());
+    // Not spent: still scheduled, and armed to try again.
+    expect(resumeRow(connection, "chat-thread", ids.thread)?.status).toBe("scheduled");
+    expect(listPendingUsageResumes(connection)).toHaveLength(1);
+    expect(timers.size).toBe(1);
+
+    store.append({
+      aggregate: { aggregateType: "context-ledger", aggregateId: ids.thread },
+      expectedVersion: 0,
+      events: [
+        pending("context.compaction-failed@1", {
+          compactionId: "00000000-0000-4000-8000-0000000000c1",
+          subject: { aggregateType: "chat-thread", aggregateId: ids.thread },
+          reason: "summary-failed",
+          sessionMayHaveChanged: false,
+          failedAt: NOW,
+        }),
+      ],
+    });
+    await vi.waitFor(() =>
+      expect(resumeRow(connection, "chat-thread", ids.thread)?.status).toBe("dispatched"),
+    );
+    expect(spies.chat.dispatch).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the opt-in armed when its settlement cannot commit", async () => {
     const connection = openConnection();
     const spies = { chat: portSpies(), work: portSpies(), code: portSpies() };

@@ -400,6 +400,40 @@ describe("usage-resume ports", () => {
     );
   });
 
+  it("defers a Chat or Work continuation a compaction refused, and spends one refused otherwise", async () => {
+    let compacting = true;
+    const ports = createUsageResumePorts(
+      dependencies({
+        chat: {
+          readThread: () => undefined,
+          readThreadView: () => undefined,
+          execute: async () => {
+            throw new Error("This session is being compacted. Send again when it finishes.");
+          },
+          compacting: () => compacting,
+        },
+        work: {
+          readThread: () => workThread(),
+          listTurns: () => [waitingWorkTurn()],
+          startFirstTurn: async () => {
+            throw new Error("This session is being compacted. Send again when it finishes.");
+          },
+          compacting: () => compacting,
+        },
+      }),
+    );
+
+    const deferred = {
+      kind: "deferred",
+      detail: "The session is being compacted; the continuation runs once it finishes.",
+    };
+    await expect(ports.chat.dispatch(record())).resolves.toEqual(deferred);
+    await expect(ports.work.dispatch(record())).resolves.toEqual(deferred);
+    compacting = false;
+    await expect(ports.chat.dispatch(record())).resolves.toMatchObject({ kind: "refused" });
+    await expect(ports.work.dispatch(record())).resolves.toMatchObject({ kind: "refused" });
+  });
+
   it("marks a Code limit recovery turn as the host's own dispatch", async () => {
     const executeOperation = vi.fn(async () => ({
       kind: "provider-turn-state" as const,
