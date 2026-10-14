@@ -263,10 +263,15 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
         // frame. It is opt-in because a client that decodes frames strictly
         // would refuse a field it does not know.
         const contentsParam = url.searchParams.get("contents");
+        // `compaction=1` asks for a frame when a compaction of the session
+        // ends, opt-in for the same reason.
+        const compactionParam = url.searchParams.get("compaction");
         if (
           afterSequenceParam === null ||
-          url.searchParams.size !== (contentsParam === null ? 1 : 2) ||
-          (contentsParam !== null && contentsParam !== "1")
+          url.searchParams.size !==
+            1 + (contentsParam === null ? 0 : 1) + (compactionParam === null ? 0 : 1) ||
+          (contentsParam !== null && contentsParam !== "1") ||
+          (compactionParam !== null && compactionParam !== "1")
         ) {
           return failureResponse(
             { category: "invalid", message: "Chat replay cursor is invalid." },
@@ -289,6 +294,7 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
             frames: (cursor, signal) =>
               dependencies.service.subscribe(threadId, cursor, signal, {
                 contents: contentsParam === "1",
+                compaction: compactionParam === "1",
               }),
             afterSequence,
             ...(dependencies.waitForThreadChange === undefined

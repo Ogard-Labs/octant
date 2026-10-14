@@ -29,6 +29,7 @@ import {
   decodeWorkTurnRequestId,
   decodeWorkTurnState,
   decodeStartWorkThreadTurnCommand,
+  type ContextCompactionSettledRecord,
   type ContextInspectorSnapshot,
   type MentionableThreadId,
   type TurnUsage,
@@ -793,9 +794,8 @@ export class WorkTurnService {
     const afterPreparation = this.#agentResultDelivery(command);
     if (afterPreparation !== undefined) return afterPreparation;
 
-    // Context and attachment reads can outlive the host's queue admission.
-    if (options?.admissionCurrent?.() === false) {
-      await Effect.runPromise(
+    const closePreparedTools = () =>
+      Effect.runPromise(
         Effect.promise(async () => {
           await extensionTools?.close?.();
         }).pipe(
@@ -803,6 +803,23 @@ export class WorkTurnService {
           Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
         ),
       );
+    // Read with nothing awaited before the acceptance below, so a compaction
+    // requested while this turn was prepared is seen here, and one requested
+    // after it finds this turn accepted and is refused as `turn-running`.
+    if (
+      this.#contextHarness?.compactionRunning(
+        decodeContextSubjectRef({
+          aggregateType: "work-thread",
+          aggregateId: String(command.threadId),
+        }),
+      ) === true
+    ) {
+      await closePreparedTools();
+      throw this.#failure("stale", "This session is being compacted. Send again when it finishes.");
+    }
+    // Context and attachment reads can outlive the host's queue admission.
+    if (options?.admissionCurrent?.() === false) {
+      await closePreparedTools();
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
     }
 
@@ -1019,6 +1036,14 @@ export class WorkTurnService {
 
   closeLiveUpdates(): void {
     this.#liveUpdates.close();
+  }
+
+  /**
+   * A compaction of the thread's session ended. The thread's live feed carries
+   * its receipt, or its failure, so a window waiting on it need not poll.
+   */
+  compactionSettled(threadId: WorkThreadId, compaction: ContextCompactionSettledRecord): void {
+    this.#liveUpdates.settleCompaction(threadId, compaction);
   }
 
   /** The live feed cursor for a thread; subscribe from here to read from now. */

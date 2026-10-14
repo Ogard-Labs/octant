@@ -8235,7 +8235,9 @@ export function startOctantServer(
                   modelId: thread.modelId,
                 };
           },
-          turnRunning: (threadId) => chatService.isTurnActive(decodeChatThreadId(threadId)),
+          turnRunning: (threadId) =>
+            chatService.isTurnActive(decodeChatThreadId(threadId)) ||
+            chatService.isTurnStarting(decodeChatThreadId(threadId)),
           conversation: (threadId) =>
             chatService.sessionCompactionConversation(decodeChatThreadId(threadId)),
           scratchRoot: (threadId) => chatService.scratchRoot(decodeChatThreadId(threadId)),
@@ -8268,6 +8270,10 @@ export function startOctantServer(
           turnRunning: (threadId) => workTurnService.isTurnActive(decodeWorkThreadId(threadId)),
           conversation: (threadId) =>
             workTurnService.sessionCompactionConversation(decodeWorkThreadId(threadId)),
+          // The Work stream is fed in process; the Chat stream reads the
+          // journaled outcome itself.
+          settled: (threadId, compaction) =>
+            workTurnService.compactionSettled(decodeWorkThreadId(threadId), compaction),
           // A Work turn's provider session starts in the bound root; the
           // tool-free summary request starts there too and gains nothing.
           scratchRoot: async (threadId) => {

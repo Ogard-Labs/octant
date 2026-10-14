@@ -2,6 +2,7 @@ import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark } from "./agentRun";
+import { ContextCompactionSettledRecord } from "./context";
 import { ExtensionSelection } from "./extensions";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
@@ -362,6 +363,13 @@ export const WorkTurnStreamFrame = Schema.Union(
     sequence: Schema.Int.pipe(Schema.positive()),
     threadId: WorkThreadId,
     requestId: WorkTurnRequestId,
+  }).annotations(strict),
+  /** A compaction of the thread's session ended, with its receipt or its failure. */
+  Schema.Struct({
+    kind: Schema.Literal("compaction-settled"),
+    sequence: Schema.Int.pipe(Schema.positive()),
+    threadId: WorkThreadId,
+    compaction: ContextCompactionSettledRecord,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("snapshot-required"),
