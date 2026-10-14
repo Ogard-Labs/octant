@@ -23,6 +23,8 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "linear-issue": "A Linear issue",
   "mcp-tool": "Results from connected tools",
   "planner-proposal": "The planner thread that proposed this one",
+  "runtime-web-fetch": "Web pages the provider fetched with its own tools",
+  "runtime-web-search": "Web searches the provider ran with its own tools",
   "product-feedback-comment": "A comment sent as feedback",
   "sibling-thread": "Other threads in this Project",
   "side-chat": "The thread this side chat is about",

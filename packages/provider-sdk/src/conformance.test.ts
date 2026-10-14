@@ -385,7 +385,10 @@ describe("runProviderConformance", () => {
   const eventCapabilityCases = [
     ["reasoning", ["reasoning-delta"]],
     ["usage", ["usage"]],
-    ["toolActivity", ["tool-start", "tool-progress", "tool-success", "tool-failure"]],
+    [
+      "toolActivity",
+      ["tool-start", "outside-content-read", "tool-progress", "tool-success", "tool-failure"],
+    ],
     ["fileChanges", ["file-change"]],
     ["diffs", ["diff"]],
     ["taskProgress", ["task-progress"]],

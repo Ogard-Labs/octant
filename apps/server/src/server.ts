@@ -2133,12 +2133,20 @@ export function startOctantServer(
     const agentRunLiveConversations = new AgentRunLiveConversationStore({
       persistence: agentRunSessionStore.conversations,
     });
+    const externalContentIngestionStore = new ExternalContentIngestionStore({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
     // Managed subagent execution. A managed child runs as an in-process
     // provider session, not a spawned process, so authority is re-derived from
     // the run rather than inherited from the parent thread at execution time.
     const agentRunSessionSupervisor = new AgentRunSessionSupervisor({
       port: createAgentRunSessionRuntime({
         reviewCapture: createAgentRunReviewCapture(),
+        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         canCaptureReview: (run) => {
           const thread = persistence.readCodeThread(decodeCodeThreadId(String(run.parentThreadId)));
           return thread?.lifecycle === "active" && thread.executionPolicy !== "plan";
@@ -2792,13 +2800,6 @@ export function startOctantServer(
       port: githubCataloguePort,
       snapshot: (signal) => githubCapabilityService.snapshot(signal),
       cacheStats,
-    });
-    const externalContentIngestionStore = new ExternalContentIngestionStore({
-      journal: persistence.journal,
-      connection: persistence.connection,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
     // Harness tool egress rules, proposals, and launch records. Recovery runs
     // here, before any route admits a turn: a launch the last run never
@@ -7239,6 +7240,7 @@ export function startOctantServer(
     let workRequestService: WorkRequestService | undefined;
     const workTurnService = new WorkTurnService({
       liveTurns,
+      recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
       contextHarness,

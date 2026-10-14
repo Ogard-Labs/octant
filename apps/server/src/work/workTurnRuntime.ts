@@ -26,6 +26,11 @@ import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { TurnCompactions, type AutomaticCompactionSighting } from "../context/automaticCompaction";
+import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
+import {
+  markThreadReadByRuntime,
+  RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+} from "../context/runtimeOutsideContentMark";
 import { normalizedProviderCallbackId } from "./workRequestRuntime";
 import {
   countsTowardTurnEventBudget,
@@ -68,6 +73,11 @@ export interface WorkTurnRuntimePort {
     /** The thread's access; absent reads as ask-first, which Work always was. */
     readonly access?: WorkAccess;
     readonly appManagedTools?: AppManagedToolSet;
+    /**
+     * Records that the runtime's own web search or page fetch put outside
+     * content in front of the model. Without it such a call stops the turn.
+     */
+    readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
     readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
     /**
      * Told of each compaction the runtime made by itself during this turn, so
@@ -294,6 +304,20 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
               Effect.gen(function* () {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > MAX_EVENTS) return;
+                if (event.kind === "outside-content-read") {
+                  const marked = markThreadReadByRuntime({
+                    record: input.recordExternalContentIngestion,
+                    threadId: String(input.command.threadId),
+                    event,
+                  });
+                  if (marked.status === "marked") return;
+                  // The scope's finalizer interrupts the session, as for any
+                  // turn that ends before its terminal event.
+                  return yield* Effect.fail<ProviderFailure>({
+                    category: "provider-failed",
+                    message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+                  });
+                }
                 if (event.kind === "usage") input.onUsage?.(event);
                 const sighting = compactions.observe(event);
                 if (sighting !== undefined && input.onAutomaticCompaction !== undefined) {

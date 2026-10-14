@@ -7,6 +7,7 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
+import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -35,6 +36,15 @@ const SECRET_SHAPED =
   /(?:bearer\s+[A-Za-z0-9._-]{20,}|(?:refresh_token|access_token|api[_-]?key|token)\s*[=:]\s*\S+|authorization\s*:\s*[^\r\n]+|\b(?:sk-[A-Za-z0-9_-]{16,}|gh[opusr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|lin_api_[A-Za-z0-9_]+|xox[abp]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b)/gi;
 const SUMMARY_MAX_CHARACTERS = 1_024;
 const PATH_MAX_CHARACTERS = 4_096;
+const OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS = 1_024;
+/** Claude's own tools that bring outside content to the model, and the input naming what. */
+const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
+  string,
+  { readonly source: "web-search" | "web-fetch"; readonly targetKey: string }
+> = new Map([
+  ["WebSearch", { source: "web-search", targetKey: "query" }],
+  ["WebFetch", { source: "web-fetch", targetKey: "url" }],
+]);
 // Claude's AskUserQuestion schema itself carries at most this many questions
 // in one tool call; more than that is not a shape the SDK can answer.
 const MAX_QUESTIONS = 4;
@@ -411,11 +421,28 @@ function mapToolUse(
     resolved.state.fileChange = authoritativeFileChange;
   }
   if (!resolved.created || !resolved.state.emitsActivity) return [{ kind: "ignored" }];
+  const start = event(context, {
+    kind: "tool-start",
+    toolCallId: resolved.state.toolCallId,
+    toolName: resolved.state.toolName,
+  });
+  const outsideContent = OUTSIDE_CONTENT_TOOLS.get(content.toolName);
+  if (outsideContent === undefined) return [start];
+  // The driver offers Claude neither tool today and refuses a session that
+  // reports either, so this marks the thread only if that ever changes:
+  // Claude runs both itself and hands the model what came back.
+  const target = summarizeStepArgument(
+    jsonString(content.input, outsideContent.targetKey) ?? "",
+    OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS,
+  );
   return [
+    start,
     event(context, {
-      kind: "tool-start",
+      kind: "outside-content-read",
       toolCallId: resolved.state.toolCallId,
       toolName: resolved.state.toolName,
+      source: outsideContent.source,
+      ...(target === undefined ? {} : { target }),
     }),
   ];
 }

@@ -7,6 +7,7 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
+import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import type { Event } from "@opencode-ai/sdk/v2/types";
 import { outputStopReason } from "./outputStopReason";
 
@@ -38,6 +39,22 @@ export interface OpenCodeShutdownInterruption {
 
 /** Every event the mapper reads: the SDK's, plus the 2.0.22 one it lacks. */
 export type OpenCodeEvent = Event | OpenCodeShutdownInterruption;
+
+const OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS = 1_024;
+
+/**
+ * OpenCode's own tools that fetch from outside the machine and hand the model
+ * what came back, with the input naming what. `codesearch` queries a hosted
+ * code-documentation search, so it reads outside content like a web search.
+ */
+const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
+  string,
+  { readonly source: "web-search" | "web-fetch"; readonly targetKey: string }
+> = new Map([
+  ["webfetch", { source: "web-fetch", targetKey: "url" }],
+  ["websearch", { source: "web-search", targetKey: "query" }],
+  ["codesearch", { source: "web-search", targetKey: "query" }],
+]);
 
 const OPENCODE_SHUTDOWN_MESSAGE =
   "OpenCode shut down while this turn was running. Check what it did, then resume.";
@@ -223,9 +240,29 @@ export function mapOpenCodeEvent(
     case "session.next.tool.called": {
       const toolCallId = normalizeText(event.properties.callID);
       const toolName = normalizeText(event.properties.tool);
-      return toolCallId === undefined || toolName === undefined
-        ? []
-        : [mappedEvent(context, { kind: "tool-start", toolCallId, toolName })];
+      if (toolCallId === undefined || toolName === undefined) return [];
+      const start = mappedEvent(context, { kind: "tool-start", toolCallId, toolName });
+      const outsideContent = OUTSIDE_CONTENT_TOOLS.get(toolName);
+      if (outsideContent === undefined) return [start];
+      const requested = event.properties.input[outsideContent.targetKey];
+      const target = summarizeStepArgument(
+        typeof requested === "string" ? requested : "",
+        OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS,
+      );
+      return [
+        start,
+        mappedEvent(
+          context,
+          {
+            kind: "outside-content-read",
+            toolCallId,
+            toolName,
+            source: outsideContent.source,
+            ...(target === undefined ? {} : { target }),
+          },
+          1,
+        ),
+      ];
     }
     case "session.next.tool.progress": {
       const toolCallId = normalizeText(event.properties.callID);

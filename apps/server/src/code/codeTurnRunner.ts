@@ -22,6 +22,11 @@ import type {
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import { octantWindowBreakdown, type CodeTurnContextAccount } from "./codeTurnContext";
 import { TurnCompactions, type AutomaticCompactionSighting } from "../context/automaticCompaction";
+import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
+import {
+  markThreadReadByRuntime,
+  RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+} from "../context/runtimeOutsideContentMark";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
@@ -165,6 +170,11 @@ export interface CodeTurnRunnerInput {
    * permission mode and Octant's own gate answers every prompt.
    */
   readonly harnessAutoReviewEnabled?: boolean;
+  /**
+   * Records that the runtime's own web search or page fetch put outside
+   * content in front of the model. Without it such a call stops the turn.
+   */
+  readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
   readonly sanitizeProviderEvent: (
     input: CodeProviderEventSanitizerInput,
   ) => Effect.Effect<ProviderRuntimeEvent, CodeTurnFailure>;
@@ -393,6 +403,21 @@ export class CodeTurnRunner {
                 );
                 if (!isSanitizedEventValid(boundedEvent, sanitizedEvent, input.checkoutRoot)) {
                   return yield* fail("failed", "Provider event sanitization failed closed.");
+                }
+                if (sanitizedEvent.kind === "outside-content-read") {
+                  // The tool start before it is the transcript's record of the
+                  // call; this one only marks the thread, from the sanitized
+                  // copy so no secret reaches the mark's reference.
+                  const marked = markThreadReadByRuntime({
+                    record: input.recordExternalContentIngestion,
+                    threadId: String(input.thread.id),
+                    event: sanitizedEvent,
+                  });
+                  if (marked.status === "marked") return;
+                  yield* connection
+                    .interrupt(input.sessionId)
+                    .pipe(Effect.catchAll(() => Effect.void));
+                  return yield* fail("failed", RUNTIME_OUTSIDE_CONTENT_REFUSAL);
                 }
                 const sighting = compactions.observe(sanitizedEvent);
                 if (sighting !== undefined && input.onAutomaticCompaction !== undefined) {
@@ -661,7 +686,10 @@ function withToolName(toolNames: Map<string, string>, event: CodeTurnEvent): Cod
 
 function normalizeProviderEvent(
   input: CodeTurnRunnerInput,
-  event: Exclude<ProviderRuntimeEvent, { readonly kind: "context-compacted" }>,
+  event: Exclude<
+    ProviderRuntimeEvent,
+    { readonly kind: "context-compacted" | "outside-content-read" }
+  >,
   /** Whether the runtime compacted the session earlier in this turn. */
   compacted: boolean,
 ): Effect.Effect<CodeTurnEvent, CodeTurnFailure> {

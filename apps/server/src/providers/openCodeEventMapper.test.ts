@@ -781,6 +781,38 @@ describe("OpenCode 2.0.22 events", () => {
     ).toMatchObject([{ kind: "tool-failure", toolCallId: "call_1" }]);
   });
 
+  it("marks the thread when OpenCode fetches or searches the web itself, and for no other tool", () => {
+    const calls = new Map<string, string>();
+    const called = (id: string, name: string, input: Record<string, unknown>) => {
+      const call = { assistantMessageID, id };
+      adaptAndMap("session.tool.input.started", { ...call, name }, calls);
+      return adaptAndMap("session.tool.called", { ...call, input, executed: false }, calls);
+    };
+
+    expect(called("call_1", "read", { filePath: "/repo/README.md" })).toEqual([
+      expect.objectContaining({ kind: "tool-start", toolName: "read" }),
+    ]);
+    expect(
+      called("call_2", "webfetch", { url: "https://example.invalid/a", format: "markdown" }),
+    ).toEqual([
+      expect.objectContaining({ kind: "tool-start", toolCallId: "call_2", sequence: 41 }),
+      expect.objectContaining({
+        kind: "outside-content-read",
+        toolCallId: "call_2",
+        toolName: "webfetch",
+        source: "web-fetch",
+        target: "https://example.invalid/a",
+        sequence: 42,
+      }),
+    ]);
+    for (const name of ["websearch", "codesearch"]) {
+      expect(called(`call_${name}`, name, { query: "effect schema union" })).toMatchObject([
+        { kind: "tool-start", toolName: name },
+        { kind: "outside-content-read", source: "web-search", target: "effect schema union" },
+      ]);
+    }
+  });
+
   it("ignores a tool update that names no call", () => {
     for (const type of ["session.tool.progress", "session.tool.success", "session.tool.failed"]) {
       expect(adaptAndMap(type, { assistantMessageID, executed: false })).toBe("ignored");

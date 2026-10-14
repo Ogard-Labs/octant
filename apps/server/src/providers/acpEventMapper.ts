@@ -7,11 +7,22 @@ import type {
   ProviderSessionId,
   UtcTimestamp,
 } from "@octant/contracts";
+import { summarizeStepArgument } from "@octant/domain/live-turn-policy";
 import type { AcpServerNotification, AcpServerRequest } from "./acpProtocol";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const LABEL_MAX_CHARACTERS = 256;
 const SUMMARY_MAX_CHARACTERS = 1_024;
+const OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS = 1_024;
+
+interface AcpToolState {
+  readonly toolCallId: string;
+  terminal: boolean;
+  title?: string;
+  kind?: string;
+  /** Set once the call has marked the thread as reading outside content. */
+  outsideContentReported?: true;
+}
 
 export interface AcpEventContext {
   readonly instanceId: ProviderInstanceId;
@@ -23,10 +34,7 @@ export interface AcpEventContext {
   readonly displayName: string;
   sequence: number;
   terminal: boolean;
-  readonly tools: Map<
-    string,
-    { readonly toolCallId: string; terminal: boolean; title?: string; kind?: string }
-  >;
+  readonly tools: Map<string, AcpToolState>;
   readonly requestIds: Map<string | number, string>;
   readonly makeRequestId: () => string;
 }
@@ -170,6 +178,7 @@ function mapTool(
     context.tools.set(providerId, created);
     return [
       event(context, { kind: "tool-start", toolCallId: created.toolCallId, toolName: title }),
+      ...outsideContentRead(context, created, update),
     ];
   }
   if (state === undefined)
@@ -180,10 +189,13 @@ function mapTool(
   const toolKind = normalized(update.kind, LABEL_MAX_CHARACTERS);
   if (title !== undefined) state.title = title;
   if (toolKind !== undefined) state.kind = toolKind;
+  // An agent may name the kind only once the call is under way.
+  const read = outsideContentRead(context, state, update);
   const status = string(update.status);
   if (status === "completed") {
     state.terminal = true;
     return [
+      ...read,
       event(context, {
         kind: "tool-success",
         toolCallId: state.toolCallId,
@@ -194,6 +206,7 @@ function mapTool(
   if (status === "failed") {
     state.terminal = true;
     return [
+      ...read,
       event(context, {
         kind: "tool-failure",
         toolCallId: state.toolCallId,
@@ -202,10 +215,40 @@ function mapTool(
     ];
   }
   return [
+    ...read,
     event(context, {
       kind: "tool-progress",
       toolCallId: state.toolCallId,
       message: normalized(update.title, SUMMARY_MAX_CHARACTERS) ?? "Tool is running.",
+    }),
+  ];
+}
+
+/**
+ * ACP's `fetch` kind is a tool "retrieving external data", which the agent
+ * runs itself and hands to the model, so the thread is marked the first time
+ * a call is seen with it. Its `search` kind is shared with local file
+ * searches, so a web search reported under it cannot be told apart and is not
+ * marked.
+ */
+function outsideContentRead(
+  context: AcpEventContext,
+  state: AcpToolState,
+  update: Readonly<Record<string, unknown>>,
+): ReadonlyArray<AcpMappedNotification> {
+  if (state.kind !== "fetch" || state.outsideContentReported === true) return [];
+  state.outsideContentReported = true;
+  const target = summarizeStepArgument(
+    string(record(update.rawInput)?.url) ?? state.title ?? "",
+    OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS,
+  );
+  return [
+    event(context, {
+      kind: "outside-content-read",
+      toolCallId: state.toolCallId,
+      toolName: state.title ?? "Tool",
+      source: "web-fetch",
+      ...(target === undefined ? {} : { target }),
     }),
   ];
 }

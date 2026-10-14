@@ -41,6 +41,11 @@ import {
   type ProviderCapacityScheduler,
   type SchedulerCapacityEnforcement,
 } from "../context/providerCapacityScheduler";
+import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
+import {
+  markThreadReadByRuntime,
+  RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+} from "../context/runtimeOutsideContentMark";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import type { AgentRunSessionRecord, AgentRunSessionStatePort } from "./agentRunSessionStore";
@@ -282,6 +287,12 @@ export interface AgentRunSessionRuntimeOptions {
     readonly run: AgentRun;
     readonly event: Extract<ProviderRuntimeEvent, { kind: "child-agent-activity" }>;
   }) => void;
+  /**
+   * Records that the child's runtime ran its own web search or page fetch.
+   * A child's mark is kept under its run id, where its harness tools read it.
+   * Without it such a call stops the child's turn.
+   */
+  readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
   readonly onTextDelta?: (input: {
     readonly runId: AgentRunId;
     readonly text: string;
@@ -918,6 +929,7 @@ export function createAgentRunSessionRuntime(
           shutdown,
           onTextDelta: options.onTextDelta,
           onChildActivity: options.onChildActivity,
+          recordExternalContentIngestion: options.recordExternalContentIngestion,
           onUserMessage: options.onUserMessage,
           interactions: options.interactions,
           onSessionEnding: () => {
@@ -1245,6 +1257,7 @@ interface ManagedSessionInput {
   readonly shutdown: SessionShutdown;
   readonly onTextDelta?: AgentRunSessionRuntimeOptions["onTextDelta"];
   readonly onChildActivity?: AgentRunSessionRuntimeOptions["onChildActivity"];
+  readonly recordExternalContentIngestion?: RecordExternalContentIngestion | undefined;
   readonly onUserMessage?: AgentRunSessionRuntimeOptions["onUserMessage"];
   readonly interactions: AgentRunSessionRuntimeOptions["interactions"];
   readonly onConnectionReady: (
@@ -1711,6 +1724,18 @@ function collectSessionEvents(
                 reason: "Managed AgentRun turn exceeded its bounded event budget.",
               };
               return;
+            }
+            if (event.kind === "outside-content-read") {
+              const marked = markThreadReadByRuntime({
+                record: input.recordExternalContentIngestion,
+                threadId: String(input.run.id),
+                event,
+              });
+              if (marked.status === "marked") return;
+              return yield* Effect.fail({
+                category: "provider-failed",
+                message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+              } satisfies ProviderFailure);
             }
             if (event.kind === "file-change" && event.instanceId === input.providerInstanceId) {
               const path = isAbsolute(event.path)

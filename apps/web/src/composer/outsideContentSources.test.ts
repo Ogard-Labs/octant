@@ -24,6 +24,8 @@ const RECORDED_LABELS: ReadonlyArray<string> = [
   "linear-issue",
   "mcp-tool",
   "planner-proposal",
+  "runtime-web-fetch",
+  "runtime-web-search",
   "product-feedback-comment",
   "sibling-thread",
   "side-chat",

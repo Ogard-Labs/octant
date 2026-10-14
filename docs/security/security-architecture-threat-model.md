@@ -320,9 +320,14 @@ guidance instead.
   named reason (`search-query-refused-under-taint: …`) before any request leaves (Henrik decision
   2026-10-10). Residual risk: a short plain-word query can still leak a few words, but only to the
   endpoint the person chose. Revisit if a default hosted third-party search provider ships.
-  A provider runtime's own built-in web search or page fetch does not append
-  `external-content-ingested`. Residual risk: that read leaves the thread unmarked, and the
-  mark's gate does not cover a tool the runtime executes itself.
+  A provider runtime's own built-in web search or page fetch appends `external-content-ingested`
+  (labels `runtime-web-search`, `runtime-web-fetch`) as soon as its adapter sees the call, before
+  any later tool call the result could steer; a mark that cannot be recorded stops the turn
+  (Henrik decision 2026-10-14: track it). Residual risks: the mark's gate does not cover a tool
+  the runtime executes itself; an ACP agent's web search reported under the `search` kind it
+  shares with local file searches leaves the thread unmarked; and the record names the query or
+  address only when the runtime reported one at the start. Which calls each runtime exposes is
+  listed in `docs/architecture.md`, Persistence, Provider runtimes' own web tools.
 - **A person may clear the mark.** The mark keeps its thread lifetime, and a person at a local
   window may clear it after reviewing what the thread read (Henrik decision 2026-10-12). The clear
   is journaled with who and when (`thread.external-content-cleared@1`: the thread, the window, the

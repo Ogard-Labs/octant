@@ -1352,6 +1352,113 @@ describe("ChatTurnRunner", () => {
     expect(updates.some((entry) => entry.outcome === "completed")).toBe(false);
   });
 
+  it("marks the thread when the runtime runs its own web search, and stops the turn when it cannot", async () => {
+    const run = async (
+      record: Parameters<ChatTurnRunner["run"]>[0]["recordExternalContentIngestion"],
+    ) => {
+      const updates: ChatAttempt[] = [];
+      const interrupted: unknown[] = [];
+      const correlationId = "82000000-0000-4000-8000-000000000099";
+      const queue = Effect.runSync(Queue.unbounded<never>());
+      const events = [
+        { kind: "tool-start", sessionId, toolCallId: "call-1", toolName: "Read" },
+        { kind: "tool-success", sessionId, toolCallId: "call-1", summary: "Read." },
+        {
+          kind: "outside-content-read",
+          sessionId,
+          correlationId,
+          toolCallId: "call-2",
+          toolName: "webSearch",
+          source: "web-search",
+          target: "Stavanger weather",
+        },
+        { kind: "text-delta", sessionId, text: "Rain." },
+        { kind: "completed", sessionId },
+      ] as never[];
+      const connection = {
+        subscribe: Effect.succeed(Stream.fromQueue(queue)),
+        start: () => Effect.succeed({ sessionId }),
+        send: () => Queue.offerAll(queue, events),
+        interrupt: (id: unknown) => Effect.sync(() => interrupted.push(id)),
+        stop: () => Effect.void,
+        answerApproval: () => Effect.void,
+        answerUserInput: () => Effect.void,
+        answerTool: () => Effect.void,
+      };
+      const { scheduler, reservation } = makeScheduler();
+      const runner = new ChatTurnRunner({
+        capacityScheduler: scheduler,
+        contextHarness: makeHarness(),
+        researchRouter: new ResearchRouter({
+          searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        }),
+        timeoutMs: 1_000,
+      });
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          runner.run({
+            thread: thread(),
+            attempt: attempt(),
+            prompt: "What is the weather?",
+            scratchRoot: "/tmp/octant-scratch/thread",
+            driver: { acquire: () => Effect.succeed(connection) } as never,
+            providerInstanceId,
+            serviceLimits: serviceLimits(),
+            contextSubject: subject,
+            contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+            requestShape: "chat-turn",
+            varianceReserve: 20,
+            reservationId: reservation,
+            estimatedTokens: 100,
+            researchEnabled: false,
+            researchRoute: researchRoute({ kind: "disabled" }),
+            attachments: [],
+            ...(record === undefined ? {} : { recordExternalContentIngestion: record }),
+            persistAttempt: (next) => Effect.sync(() => updates.push(next)),
+            persistResponse: () =>
+              Effect.succeed({
+                contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                digest: "f".repeat(64),
+                byteLength: 5,
+              }),
+          }),
+        ),
+      );
+      return { exit, updates, interrupted };
+    };
+
+    const marks: unknown[] = [];
+    const marked = await run((mark) => {
+      marks.push(mark);
+      return {
+        kind: "recorded",
+        taint: { externalContentIngested: true, ingestedSources: ["runtime-web-search"] },
+      };
+    });
+    expect(marked.exit._tag).toBe("Success");
+    expect(marked.updates.at(-1)?.outcome).toBe("completed");
+    expect(marks).toEqual([
+      expect.objectContaining({
+        threadId: String(threadId),
+        provenance: { origin: "tool-result", sourceLabel: "runtime-web-search" },
+      }),
+    ]);
+
+    for (const refused of [
+      undefined,
+      () => ({ kind: "refused" as const, reason: "contended" as const }),
+    ]) {
+      const stopped = await run(refused);
+      expect(stopped.exit._tag).toBe("Failure");
+      expect(stopped.updates.at(-1)).toMatchObject({
+        outcome: "failed",
+        failure: { code: "outside-content-unmarked" },
+      });
+      expect(stopped.updates.some((entry) => entry.responseRefs.length > 0)).toBe(false);
+      expect(stopped.interrupted).toEqual([sessionId]);
+    }
+  });
+
   it("honors abort for the owned session and ends cancelled without completing", async () => {
     const interrupt = vi.fn(() => Effect.void);
     const stop = vi.fn(() => Effect.void);

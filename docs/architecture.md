@@ -1666,11 +1666,8 @@ flowchart LR
 - **Untrusted-content taint.** Browser observations, tool results, and imported
   external content that already carry tainting provenance append
   `thread.external-content-ingested@1` with thread identity and bounded source
-  labels. Raw bodies never enter the payload. A provider runtime's own built-in
-  web search or page fetch does not append this event. Where the runtime reports
-  the call, Octant records ordinary tool activity. The call sits outside the
-  mark and outside the gate that mark applies to computer-use, MCP, and the
-  native harness. The thread-lifetime taint
+  labels. Raw bodies never enter the payload; a provider runtime's own web tools
+  append it too, as the next item describes. The thread-lifetime taint
   projection rebuilds from the journal; session, turn, and restart boundaries
   never clear it. Irreversible or authority-bearing actions on a tainted thread
   still require fresh confirmation after replay. One gate enforces that:
@@ -1683,6 +1680,34 @@ flowchart LR
   destructive, credential, outside-Project, or privilege-expansion class
   without that flag. A Code Git action a person takes from a window is that
   person's own per-action act, and no agent tool issues one.
+- **Provider runtimes' own web tools.** A runtime's built-in web search or page
+  fetch hands its result to the model without Octant seeing it, so the adapter
+  reports the call as a normalized `outside-content-read` event when it first
+  sees it: `web-search` or `web-fetch`, the runtime's tool name, and the query
+  or address as one redacted, bounded line when the runtime gave one. A call
+  that later fails may already have returned a page, so the start marks.
+  - Chat, Work, and Code turn runners mark the thread. A child run's runner
+    marks the run's own id, which is where its harness tools read the mark.
+  - The label is `runtime-web-search` or `runtime-web-fetch`, with origin
+    `tool-result`. The reference names the runtime tool, the turn, the call,
+    and the query or address with its separators replaced, cut to 256
+    characters. It never holds page content.
+  - A mark that cannot be recorded stops the turn, because the content has
+    already reached the model.
+  - Marking is all this does. The mark gates computer-use, MCP, and the native
+    harness; it does not gate a tool the runtime executes itself.
+  - Codex: its `webSearch` item, on `item/started`. A start may carry an empty
+    query.
+  - OpenCode: `webfetch`, `websearch`, and `codesearch` on `tool.called`.
+  - ACP agents: a tool call whose kind is `fetch`, the first time the agent
+    names that kind. ACP's `search` kind also covers local file searches, so a
+    web search an agent reports under it is not marked. That is a residual gap.
+  - Claude: `WebSearch` and `WebFetch`. The driver offers Claude neither tool
+    and refuses a session that reports either, so this marks the thread only
+    if one is ever offered.
+  - Pi and the direct endpoints have no built-in web tool. Pi is launched with
+    only its file and shell tools, and a direct endpoint fails a turn whose
+    stream carries a hosted or server-side tool's output.
 - **Clearing taint.** Taint keeps its thread lifetime, and a person at a local
   window may clear it. A clear records that they reviewed what the thread read.
   - It appends `thread.external-content-cleared@1` on the thread's
@@ -5045,10 +5070,12 @@ mechanisms are:
   an exception. Octant-owned tools those threads reach stay confined either
   way. A runtime's own built-in tools (Codex's shell, Claude's Bash on the
   postures that write) run under that runtime's sandbox, not Octant's.
-  A runtime's own built-in web search or page fetch does not append
-  `thread.external-content-ingested@1`, and the gate that mark applies to
-  Octant's computer-use, MCP, and native-harness calls does not cover a tool
-  the runtime executes itself.
+  A runtime's own built-in web search or page fetch appends
+  `thread.external-content-ingested@1` where its adapter can observe it
+  ([Persistence](#persistence), Provider runtimes' own web tools, lists which
+  calls are observable), but the gate that mark applies to Octant's computer-use,
+  MCP, and native-harness calls does not cover a tool the runtime executes
+  itself.
   A confined Claude Plan launch may write only the assigned leaf of that
   account's state directory (`~/.claude` or
   `~/.claude-accounts/<instanceId>`) and the launch temporary directory.

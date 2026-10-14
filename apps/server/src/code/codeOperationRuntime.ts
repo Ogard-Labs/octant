@@ -3489,6 +3489,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               );
             },
           },
+          ...(this.#options.recordExternalContentIngestion === undefined
+            ? {}
+            : { recordExternalContentIngestion: this.#options.recordExternalContentIngestion }),
           sanitizeProviderEvent: ({ event }) =>
             Effect.try({
               try: () => sanitizeProviderEvent(event, active.checkoutRoot, active.secrets),

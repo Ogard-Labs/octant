@@ -35,6 +35,11 @@ import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Cause, Deferred, Effect, Fiber, Option, Schema, Scope, Stream } from "effect";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import { TurnCompactions } from "../context/automaticCompaction";
+import type { RecordExternalContentIngestion } from "../context/inheritedExternalContentMark";
+import {
+  markThreadReadByRuntime,
+  RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+} from "../context/runtimeOutsideContentMark";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import {
@@ -275,6 +280,11 @@ export interface ChatTurnRunnerInput {
   readonly onHarnessRetryCleared?: () => void;
   /** Tells the navigation read what the running turn is doing, from its start to its end. */
   readonly liveTurn?: LiveTurnTracker;
+  /**
+   * Records that the runtime's own web search or page fetch put outside
+   * content in front of the model. Without it such a call stops the turn.
+   */
+  readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
 }
 
 export type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -952,6 +962,27 @@ export class ChatTurnRunner {
                     decodeChatFailure({
                       category: "interrupted",
                       message: "Chat turn was cancelled.",
+                    }),
+                  );
+                }
+                if (event.kind === "outside-content-read") {
+                  const marked = markThreadReadByRuntime({
+                    record: input.recordExternalContentIngestion,
+                    threadId: String(input.thread.id),
+                    event,
+                  });
+                  if (marked.status === "marked") return;
+                  yield* connection
+                    .interrupt(input.attempt.providerSessionId)
+                    .pipe(Effect.catchAll(() => Effect.void));
+                  return yield* failTurn(
+                    {
+                      code: decodeDiagnosticFailureCode("outside-content-unmarked"),
+                      message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+                    },
+                    decodeChatFailure({
+                      category: "failed",
+                      message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
                     }),
                   );
                 }

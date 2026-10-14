@@ -25,6 +25,7 @@ const DIFF_MAX_CHARACTERS = 65_536;
 const LABEL_MAX_CHARACTERS = 256;
 const SUMMARY_MAX_CHARACTERS = 1_024;
 const PATH_MAX_CHARACTERS = 4_096;
+const OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS = 1_024;
 
 export interface CodexEventContext {
   readonly instanceId: ProviderInstanceId;
@@ -446,8 +447,20 @@ function mapLifecycle(
           return protocolFailure("Provider started a tool item more than once.");
         }
         const id = toolCallId(context, item.id);
+        // Codex runs the search itself and hands the model what it found, so
+        // the start is the last point at which the thread can be marked
+        // before the results can steer anything. A start may carry an empty
+        // query; the completion carries the one Codex ran.
+        const target = summarizeStepArgument(item.query, OUTSIDE_CONTENT_TARGET_MAX_CHARACTERS);
         return [
           event(context, { kind: "tool-start", toolCallId: id, toolName: "Web search" }),
+          event(context, {
+            kind: "outside-content-read",
+            toolCallId: id,
+            toolName: "webSearch",
+            source: "web-search",
+            ...(target === undefined ? {} : { target }),
+          }),
           event(context, { kind: "tool-progress", toolCallId: id, message: "Searching the web." }),
         ];
       }

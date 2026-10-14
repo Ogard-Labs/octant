@@ -141,6 +141,68 @@ describe("ACP event normalization", () => {
     ]);
   });
 
+  it("marks the thread once for a fetch-kind tool, whenever the agent names the kind", () => {
+    const update = (value: Record<string, unknown>) =>
+      mapAcpNotification(ctx, {
+        kind: "notification",
+        method: "session/update",
+        params: { sessionId: "acp-session-1", update: value },
+      }).map((result) => {
+        if (result.kind !== "event") throw new Error("Expected events");
+        return decodeProviderRuntimeEvent(result.event);
+      });
+    const ctx = context();
+
+    // A local read, and a search kind shared with file searches, mark nothing.
+    expect(
+      update({ sessionUpdate: "tool_call", toolCallId: "p-1", title: "Read file", kind: "read" }),
+    ).toMatchObject([{ kind: "tool-start" }]);
+    expect(
+      update({ sessionUpdate: "tool_call", toolCallId: "p-2", title: "Grep", kind: "search" }),
+    ).toMatchObject([{ kind: "tool-start" }]);
+
+    expect(
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "p-3",
+        title: "Fetch page",
+        kind: "fetch",
+        rawInput: { url: "https://example.invalid/page" },
+      }),
+    ).toMatchObject([
+      { kind: "tool-start", toolCallId: "tool-3" },
+      {
+        kind: "outside-content-read",
+        toolCallId: "tool-3",
+        toolName: "Fetch page",
+        source: "web-fetch",
+        target: "https://example.invalid/page",
+      },
+    ]);
+    expect(
+      update({ sessionUpdate: "tool_call_update", toolCallId: "p-3", status: "completed" }),
+    ).toMatchObject([{ kind: "tool-success", toolCallId: "tool-3" }]);
+
+    // An agent that names the kind only once the call runs still marks, once.
+    expect(
+      update({ sessionUpdate: "tool_call", toolCallId: "p-4", title: "web_fetch" }),
+    ).toMatchObject([{ kind: "tool-start", toolCallId: "tool-4" }]);
+    expect(
+      update({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "p-4",
+        kind: "fetch",
+        status: "in_progress",
+      }),
+    ).toMatchObject([
+      { kind: "outside-content-read", toolCallId: "tool-4", target: "web_fetch" },
+      { kind: "tool-progress", toolCallId: "tool-4" },
+    ]);
+    expect(
+      update({ sessionUpdate: "tool_call_update", toolCallId: "p-4", status: "failed" }),
+    ).toMatchObject([{ kind: "tool-failure", toolCallId: "tool-4" }]);
+  });
+
   it("shows the provider's reason when a tool call fails", () => {
     const ctx = context();
     event(

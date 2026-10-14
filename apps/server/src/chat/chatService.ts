@@ -5213,6 +5213,9 @@ export class ChatService {
               thread: input.thread,
               attempt: input.attempt,
               prompt: input.prompt,
+              ...(this.#recordExternalContentIngestion === undefined
+                ? {}
+                : { recordExternalContentIngestion: this.#recordExternalContentIngestion }),
               context: [
                 ...(this.#nativeHarness?.contextFor(harnessScope) ?? []),
                 ...input.prepared.context.providerContext,

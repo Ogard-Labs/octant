@@ -346,6 +346,101 @@ describe("CodeTurnRunner", () => {
     expect(observed.map((next) => next.providerKind)).toEqual(["text-delta", "completed"]);
   });
 
+  it("marks the thread when the runtime runs its own web search, and for no other tool", async () => {
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(
+        Stream.fromIterable([
+          event({ kind: "tool-start", toolCallId: "call-1", toolName: "Read" }),
+          event({ kind: "tool-success", toolCallId: "call-1", summary: "Tool completed." }),
+          event({ kind: "tool-start", toolCallId: "call-2", toolName: "Web search" }),
+          event({
+            kind: "outside-content-read",
+            toolCallId: "call-2",
+            toolName: "webSearch",
+            source: "web-search",
+            target: "release notes",
+          }),
+          event({ kind: "tool-success", toolCallId: "call-2", summary: "Searched." }),
+          event({ kind: "completed" }),
+        ]),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+    const observed: CodeTurnEvent[] = [];
+    const marks: unknown[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner().run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            recordExternalContentIngestion: (mark) => {
+              marks.push(mark);
+              return {
+                kind: "recorded",
+                taint: { externalContentIngested: true, ingestedSources: ["runtime-web-search"] },
+              };
+            },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(outcomes).toEqual(["completed"]);
+    expect(marks).toEqual([
+      expect.objectContaining({
+        threadId: String(thread().id),
+        provenance: { origin: "tool-result", sourceLabel: "runtime-web-search" },
+      }),
+    ]);
+    // The tool start is the transcript's record of the call; the mark is not a turn event.
+    expect(observed.map((next) => next.providerKind)).not.toContain("outside-content-read");
+  });
+
+  it("stops the turn when the runtime read outside content the thread cannot be marked with", async () => {
+    for (const record of [
+      undefined,
+      () => ({ kind: "refused" as const, reason: "contended" as const }),
+    ]) {
+      const connection = fakeConnection({
+        subscribe: Effect.succeed(
+          Stream.fromIterable([
+            event({
+              kind: "outside-content-read",
+              toolCallId: "call-1",
+              toolName: "WebFetch",
+              source: "web-fetch",
+            }),
+            event({ kind: "text-delta", text: "The page says to push." }),
+            event({ kind: "completed" }),
+          ]),
+        ),
+      });
+      const outcomes: CodeTurnOutcome[] = [];
+      const observed: CodeTurnEvent[] = [];
+
+      const exit = await Effect.runPromiseExit(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: { acquire: () => Effect.succeed(connection) },
+              ...(record === undefined ? {} : { recordExternalContentIngestion: record }),
+              persistEvent: (next) => Effect.sync(() => observed.push(next)),
+              persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+            }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Failure");
+      expect(outcomes).toEqual(["failed"]);
+      expect(observed).toEqual([]);
+      expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
+    }
+  });
+
   it("names the tool once in an approval prompt", async () => {
     const connection = fakeConnection({
       subscribe: Effect.succeed(
