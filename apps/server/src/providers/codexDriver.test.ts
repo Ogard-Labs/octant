@@ -174,7 +174,9 @@ function fixture(
     },
     skillsList: async (value) => {
       calls.push({ method: "skills/list", input: value });
-      return input.skillsList === undefined ? { data: [{ skills: [] }] } : input.skillsList();
+      return input.skillsList === undefined
+        ? { data: [{ skills: [], errors: [] }] }
+        : input.skillsList();
     },
     threadStart: async (value) => {
       calls.push({ method: "thread/start", input: value });
@@ -1478,7 +1480,7 @@ describe("Codex thread and turn lifecycle", () => {
     await chat.close();
   });
 
-  it("switches off by path every Project skill Codex lists, on start and every resume, in every mode", async () => {
+  it("switches off by path every Project skill Codex lists or could not load, on start and every resume, in every mode", async () => {
     const listing: CodexSkillsListResult = {
       data: [
         {
@@ -1490,6 +1492,7 @@ describe("Codex thread and turn lifecycle", () => {
             { path: "/Users/someone/.codex/skills/.system/imagegen/SKILL.md", scope: "system" },
             { path: "/etc/codex/skills/policy/SKILL.md", scope: "admin" },
           ],
+          errors: [{ path: `${projectRoot}/.agents/skills/unreadable/SKILL.md` }],
         },
       ],
     };
@@ -1498,6 +1501,7 @@ describe("Codex thread and turn lifecycle", () => {
         { path: `${projectRoot}/.agents/skills/probe/SKILL.md`, enabled: false },
         { path: "/tmp/.agents/skills/repo-probe/SKILL.md", enabled: false },
         { path: `${projectRoot}/.agents/skills/later/SKILL.md`, enabled: false },
+        { path: `${projectRoot}/.agents/skills/unreadable/SKILL.md`, enabled: false },
       ],
     };
     for (const mode of ["chat", "work", "code"] as const) {

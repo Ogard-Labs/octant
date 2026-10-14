@@ -4014,20 +4014,21 @@ prompt, schema, tool, route, model, or capability.
   no switch, so before every `thread/start` and `thread/resume`, in every
   mode, the driver lists Codex's skills at the Project root (`skills/list`
   with `forceReload`) and sends a `skills.config` rule with the thread that
-  disables each Project skill by its `SKILL.md` path. A path, not a name,
-  because a name rule would also disable a user skill of that name. Every
-  scope other than `user`, `system`, and `admin` counts as the Project's, so
-  a scope a later release adds is disabled too. A thread whose skills cannot
-  be listed does not start. The rules hold for the thread as started or
-  resumed: Codex still lists those skills, as disabled, and a skill created
-  in the Project during a thread is enabled from the next turn until the
-  thread is resumed. Codex also loads the user's own `~/.agents/skills` and
-  `$CODEX_HOME/skills` (`scope: user`) by itself; those are not handled.
-  Measured against codex-cli 0.162.1, nothing stops the discovery itself:
-  the app-server ignores `features.skip_host_skill_discovery`,
-  `project_root_markers = []` still scans the Project root, and a
-  `skills.config` rule matches one skill's exact name or `SKILL.md` path,
-  never a folder. Only the skill folder is
+  disables each Project skill by its `SKILL.md` path, and each package Codex
+  reported it could not load, which carries a path but no scope. A path, not
+  a name, because a name rule would also disable a user skill of that name.
+  Every scope other than `user`, `system`, and `admin` counts as the
+  Project's, so a scope a later release adds is disabled too. A thread whose
+  skills cannot be listed does not start. The rules hold for the thread as
+  started or resumed: Codex still lists those skills, as disabled, and a
+  skill created in the Project during a thread is enabled from the next turn
+  until the thread is resumed. Codex also loads the user's own
+  `~/.agents/skills` and `$CODEX_HOME/skills` (`scope: user`) by itself;
+  those are not handled. Measured against codex-cli 0.162.1, nothing stops
+  the discovery itself: the app-server ignores
+  `features.skip_host_skill_discovery`, `project_root_markers = []` still
+  scans the Project root, and a `skills.config` rule matches one skill's
+  exact name or `SKILL.md` path, never a folder. Only the skill folder is
   denied; the folder around it (`.claude`, `.github`, `.grok`, and so on)
   stays readable, because it holds the runtime's own settings or the
   Project's other content. fx and Kimi Code deny all of `.agents`. Because the

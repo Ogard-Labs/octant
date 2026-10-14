@@ -204,7 +204,11 @@ const CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT = new Set(["user", "system", "admin
  * So each Project skill found at `cwd` is switched off by its path; a name
  * would also switch off a user skill of the same name. The listing bypasses
  * Codex's cache because a skill added since the last listing would otherwise
- * be missed. A thread whose skills cannot be listed does not start.
+ * be missed. A package Codex could not load at listing time is switched off
+ * too: it is reported only by path, with no scope, and a read that failed
+ * once (codex-cli 0.162.1 reports a malformed `SKILL.md` the same way) could
+ * succeed on the next turn. A thread whose skills cannot be listed does not
+ * start.
  *
  * The rules hold for the thread as started or resumed: a skill created in the
  * Project later is enabled from the next turn until the thread is resumed.
@@ -216,9 +220,12 @@ function codexProjectSkillsConfig(
   return request(() => client.skillsList({ cwds: [cwd], forceReload: true })).pipe(
     Effect.map((result) => ({
       config: result.data.flatMap((entry) =>
-        entry.skills
-          .filter((skill) => !CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT.has(skill.scope))
-          .map((skill) => ({ path: skill.path, enabled: false as const })),
+        [
+          ...entry.skills.filter(
+            (skill) => !CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT.has(skill.scope),
+          ),
+          ...entry.errors,
+        ].map((skill) => ({ path: skill.path, enabled: false as const })),
       ),
     })),
   );

@@ -36,7 +36,7 @@ describe("Codex provider conformance", () => {
       rateLimitsRead: async () => ({ rateLimits: { rateLimitReachedType: null } }),
       modelList: async () => ({ data: [model()], nextCursor: null }),
       configRead: async () => ({ config: {} }),
-      skillsList: async () => ({ data: [{ skills: [] }] }),
+      skillsList: async () => ({ data: [{ skills: [], errors: [] }] }),
       threadStart: async (input: CodexThreadStartInput) =>
         thread(`thread-${++startedThread}`, input.cwd),
       threadResume: async ({ threadId }) => {
@@ -170,7 +170,7 @@ describe("Codex provider conformance", () => {
         rateLimitsRead: async () => ({ rateLimits: { rateLimitReachedType: null } }),
         modelList: async () => ({ data: [model()], nextCursor: null }),
         configRead: async () => ({ config: {} }),
-        skillsList: async () => ({ data: [{ skills: [] }] }),
+        skillsList: async () => ({ data: [{ skills: [], errors: [] }] }),
         threadStart: async (input: CodexThreadStartInput) => thread("thread-compact", input.cwd),
         threadResume: async ({ threadId }) => thread(threadId, projectRoot),
         turnStart: async ({ threadId }) => {
@@ -347,7 +347,7 @@ function createCodexConformanceFixture(input: { readonly appTool?: boolean } = {
     rateLimitsRead: async () => ({ rateLimits: { rateLimitReachedType: null } }),
     modelList: async () => ({ data: [model()], nextCursor: null }),
     configRead: async () => ({ config: {} }),
-    skillsList: async () => ({ data: [{ skills: [] }] }),
+    skillsList: async () => ({ data: [{ skills: [], errors: [] }] }),
     threadStart: async (input: CodexThreadStartInput) => thread(`thread-1`, input.cwd),
     threadResume: async ({ threadId }) => {
       if (threadId === "stale") throw new Error("private stale detail");

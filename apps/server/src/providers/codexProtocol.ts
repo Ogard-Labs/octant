@@ -114,13 +114,15 @@ export const decodeThreadStartResult = decode(ThreadResult);
 export const decodeThreadResumeResult = decode(ThreadResult);
 
 /**
- * Of `skills/list` only where each skill was found and its scope are read: a
- * thread switches the skills Codex found in the Project off by their paths.
+ * Of `skills/list` only paths and scopes are read: a thread switches the
+ * skills Codex found in the Project off by their paths, and every package it
+ * could not load as well, which carries a path but no scope.
  */
 const SkillsListResult = Schema.Struct({
   data: Schema.Array(
     Schema.Struct({
       skills: Schema.Array(Schema.Struct({ path: Schema.NonEmptyString, scope: Schema.String })),
+      errors: Schema.Array(Schema.Struct({ path: Schema.NonEmptyString })),
     }),
   ),
 });
