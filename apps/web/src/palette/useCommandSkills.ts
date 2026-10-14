@@ -1,9 +1,15 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
-import { useEffect, useState } from "react";
+import type { StandaloneSkillRecord } from "@octant/contracts/extensions";
+import type { OctantMode } from "@octant/contracts/modes";
+import { skillReachesAudience } from "@octant/plugin-host/skills";
+import { useEffect, useMemo, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { CommandPluginServer, CommandSkill } from "./buildOctantCommands";
 
-const NO_SKILLS: ReadonlyArray<CommandSkill> = [];
+/** A skill as offered, with the scope that decides which composer may see it. */
+type OfferedSkill = CommandSkill & Pick<StandaloneSkillRecord, "scope" | "projectScope">;
+
+const NO_SKILLS: ReadonlyArray<OfferedSkill> = [];
 const NO_PLUGIN_SERVERS: ReadonlyArray<CommandPluginServer> = [];
 
 /** How often the host is re-read for extension state it may have changed. */
@@ -12,6 +18,17 @@ const DEFAULT_REFRESH_MS = 5_000;
 export interface CommandSkillsOptions {
   readonly refreshMs?: number;
   readonly changeRevision?: number;
+  /**
+   * The mode, Project, and thread the `/` affordance is opened from. A skill
+   * scoped to another thread or Project is left out, so the window never
+   * names a Project-root skill from one Project inside another, or inside
+   * Chat. Without it every effective skill is offered.
+   */
+  readonly audience?: {
+    readonly mode: OctantMode;
+    readonly projectId: string | null;
+    readonly threadId: string | null;
+  };
 }
 
 /**
@@ -57,7 +74,7 @@ export function useCommandExtensions(
   readonly skills: ReadonlyArray<CommandSkill>;
   readonly pluginServers: ReadonlyArray<CommandPluginServer>;
 } {
-  const [skills, setSkills] = useState<ReadonlyArray<CommandSkill>>(NO_SKILLS);
+  const [offered, setOffered] = useState<ReadonlyArray<OfferedSkill>>(NO_SKILLS);
   const [pluginServers, setPluginServers] =
     useState<ReadonlyArray<CommandPluginServer>>(NO_PLUGIN_SERVERS);
   const refreshMs = options.refreshMs ?? DEFAULT_REFRESH_MS;
@@ -71,7 +88,7 @@ export function useCommandExtensions(
       try {
         const snapshot = await client.snapshot();
         if (!active) return;
-        setSkills((current) =>
+        setOffered((current) =>
           sameSkills(
             current,
             (snapshot.skills ?? [])
@@ -81,6 +98,8 @@ export function useCommandExtensions(
               .map((record) => ({
                 skillId: String(record.skill.qualifiedId),
                 displayName: record.displayName,
+                ...(record.scope === undefined ? {} : { scope: record.scope }),
+                ...(record.projectScope === undefined ? {} : { projectScope: record.projectScope }),
               })),
           ),
         );
@@ -106,7 +125,7 @@ export function useCommandExtensions(
         );
       } catch {
         if (active) {
-          setSkills(NO_SKILLS);
+          setOffered(NO_SKILLS);
           setPluginServers(NO_PLUGIN_SERVERS);
         }
       } finally {
@@ -136,21 +155,48 @@ export function useCommandExtensions(
     };
   }, [client, options.changeRevision, refreshMs]);
 
+  const mode = options.audience?.mode;
+  const projectId = options.audience?.projectId ?? null;
+  const threadId = options.audience?.threadId ?? null;
+  const skills = useMemo(
+    () =>
+      offered
+        .filter(
+          (skill) =>
+            mode === undefined ||
+            skillReachesAudience(skill, { mode, projectId, threadRef: threadId }),
+        )
+        .map(({ skillId, displayName }) => ({ skillId, displayName })),
+    [offered, mode, projectId, threadId],
+  );
+
   return { skills, pluginServers };
 }
 
-/** Keep the previous array when the host reports the same skills. */
+/** Keep the previous array when the host reports the same skills in the same scopes. */
 function sameSkills(
-  current: ReadonlyArray<CommandSkill>,
-  next: ReadonlyArray<CommandSkill>,
-): ReadonlyArray<CommandSkill> {
+  current: ReadonlyArray<OfferedSkill>,
+  next: ReadonlyArray<OfferedSkill>,
+): ReadonlyArray<OfferedSkill> {
   if (current.length !== next.length) return next;
   return current.every(
     (skill, index) =>
-      skill.skillId === next[index]?.skillId && skill.displayName === next[index]?.displayName,
+      skill.skillId === next[index]?.skillId &&
+      skill.displayName === next[index]?.displayName &&
+      scopeKey(skill) === scopeKey(next[index]),
   )
     ? current
     : next;
+}
+
+function scopeKey(skill: OfferedSkill | undefined): string {
+  if (skill?.scope !== undefined) {
+    return `thread:${skill.scope.mode}:${String(skill.scope.projectId)}:${String(skill.scope.threadRef)}`;
+  }
+  if (skill?.projectScope !== undefined) {
+    return `project:${skill.projectScope.mode}:${String(skill.projectScope.projectId)}`;
+  }
+  return "shared";
 }
 
 /** Keep the previous array when the host reports the same plugin servers. */

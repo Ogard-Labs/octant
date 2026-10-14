@@ -42,8 +42,15 @@ function sameReference(left: string | null | undefined, right: string | null | u
   return String(left) === String(right);
 }
 
+export interface SkillAudience {
+  readonly mode: OctantMode;
+  readonly projectId: string | null;
+  /** `null` for a new-task draft, which has no thread yet. */
+  readonly threadRef: string | null;
+}
+
 /**
- * The skills one thread, or one new-task draft (`threadRef: null`), may see.
+ * May this thread, or this new-task draft, see the skill?
  *
  * A thread-scoped skill reaches only its exact thread, a Project-scoped skill
  * reaches every thread of that Project and mode, and an unscoped skill (the
@@ -51,36 +58,35 @@ function sameReference(left: string | null | undefined, right: string | null | u
  * matches no Project scope: Chat Projects have no filesystem, so a skill found
  * at a Work or Code Project root never reaches Chat.
  */
+export function skillReachesAudience(
+  record: Pick<StandaloneSkillRecord, "scope" | "projectScope">,
+  audience: SkillAudience,
+): boolean {
+  if (record.scope !== undefined) {
+    return (
+      record.scope.mode === audience.mode &&
+      sameReference(record.scope.projectId, audience.projectId) &&
+      sameReference(record.scope.threadRef, audience.threadRef)
+    );
+  }
+  if (record.projectScope !== undefined) {
+    return (
+      record.projectScope.mode === audience.mode &&
+      sameReference(record.projectScope.projectId, audience.projectId)
+    );
+  }
+  return true;
+}
+
+/** The catalog one thread or new-task draft sees: its own, its Project's, then shared skills. */
 export function filterSkillCatalogForScope(
   catalog: SkillCatalog,
-  scope: {
-    readonly mode: OctantMode;
-    readonly projectId: string | null;
-    readonly threadRef: string | null;
-  },
+  scope: SkillAudience,
 ): SkillCatalog {
-  const exact: StandaloneSkillRecord[] = [];
-  const project: StandaloneSkillRecord[] = [];
-  const shared: StandaloneSkillRecord[] = [];
-  for (const record of catalog.skills) {
-    if (record.scope !== undefined) {
-      if (
-        record.scope.mode === scope.mode &&
-        sameReference(record.scope.projectId, scope.projectId) &&
-        sameReference(record.scope.threadRef, scope.threadRef)
-      ) {
-        exact.push(record);
-      }
-    } else if (record.projectScope !== undefined) {
-      if (
-        record.projectScope.mode === scope.mode &&
-        sameReference(record.projectScope.projectId, scope.projectId)
-      ) {
-        project.push(record);
-      }
-    } else {
-      shared.push(record);
-    }
-  }
-  return buildSkillCatalog([...exact, ...project, ...shared]);
+  const reached = catalog.skills.filter((record) => skillReachesAudience(record, scope));
+  return buildSkillCatalog([
+    ...reached.filter((record) => record.scope !== undefined),
+    ...reached.filter((record) => record.scope === undefined && record.projectScope !== undefined),
+    ...reached.filter((record) => record.scope === undefined && record.projectScope === undefined),
+  ]);
 }
