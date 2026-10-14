@@ -435,6 +435,8 @@ export class CodeOperationEventStore {
          * Absent when that turn reported none or the report said nothing of it.
          */
         readonly priorTurnBreakdown?: ProviderContextBreakdown;
+        /** When that report was recorded; present with the breakdown. */
+        readonly priorTurnReportedAt?: string;
       }
     | { readonly status: "rebuild-required" } {
     try {
@@ -493,7 +495,9 @@ export class CodeOperationEventStore {
         priorTurn: priorStart !== undefined,
         priorTurnSettled,
         ...(session?.kind === "provider-session-ready" ? { session } : {}),
-        ...(priorTurnBreakdown === undefined ? {} : { priorTurnBreakdown }),
+        ...(priorTurnBreakdown === undefined || priorUsage === undefined
+          ? {}
+          : { priorTurnBreakdown, priorTurnReportedAt: priorUsage.occurredAt }),
       };
     } catch {
       return { status: "rebuild-required" };

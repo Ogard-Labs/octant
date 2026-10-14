@@ -1487,7 +1487,7 @@ describe("mapClaudeMessage", () => {
           permissionDenials: [],
         }),
       );
-      expect(settled).toMatchObject({ kind: "usage", promptRetention: "compacted" });
+      expect(settled).toMatchObject({ kind: "usage", promptRetention: "kept" });
       if (contextTokens === undefined) expect(settled).not.toHaveProperty("contextTokens");
       else expect(settled).toMatchObject({ contextTokens });
     },

@@ -271,7 +271,9 @@ function imageSize(
  * session starts with nothing. A fork's first turn starts from another thread's
  * conversation, whose copies this thread never counted. A resumed session
  * carries what the last report of its previous turn said; a previous turn with
- * no report, or one from before Octant counted, leaves the session uncounted.
+ * no report, or one from before Octant counted, leaves the session uncounted,
+ * and so does a compaction journaled since that report, which kept a share of
+ * the earlier prompts Octant cannot measure.
  */
 export function carriedSentContext(input: {
   readonly freshSession: boolean;
@@ -279,11 +281,14 @@ export function carriedSentContext(input: {
   readonly priorTurn: boolean;
   /** The latest usage report of the thread, when it belongs to the prior turn. */
   readonly previousBreakdown?: ProviderContextBreakdown | undefined;
+  /** Whether the thread's context ledger records a compaction of the session since that report. */
+  readonly compactedSinceReport?: boolean;
 }): CarriedSentContext {
   if (input.forkSeeded) return { status: "uncounted", reason: "history-unknown" };
   if (input.freshSession || !input.priorTurn) return { status: "counted", parts: [] };
   const accounting = input.previousBreakdown?.sentContext;
   if (accounting === undefined) return { status: "uncounted", reason: "history-unknown" };
+  if (input.compactedSinceReport === true) return { status: "uncounted", reason: "compacted" };
   if (accounting.status === "uncounted") return accounting;
   return {
     status: "counted",

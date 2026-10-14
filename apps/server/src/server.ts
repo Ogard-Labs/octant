@@ -5123,6 +5123,22 @@ export function startOctantServer(
           contextHarness.compactionRunning(
             decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
           ),
+        sessionCompactions: {
+          record: ({ threadId, ...input }) => {
+            contextHarness.recordAutomaticCompaction({
+              subject: decodeContextSubjectRef({
+                aggregateType: "code-thread",
+                aggregateId: threadId,
+              }),
+              ...input,
+            });
+          },
+          compactedSince: (threadId, since) =>
+            contextHarness.sessionCompactedSince(
+              decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+              since,
+            ) !== undefined,
+        },
         providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom }) =>
           selectCodeConversation(thread.id, {
             purpose: "provider-switch",

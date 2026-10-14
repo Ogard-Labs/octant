@@ -25,6 +25,7 @@ import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
+import { TurnCompactions, type AutomaticCompactionSighting } from "../context/automaticCompaction";
 import { normalizedProviderCallbackId } from "./workRequestRuntime";
 import {
   countsTowardTurnEventBudget,
@@ -68,6 +69,11 @@ export interface WorkTurnRuntimePort {
     readonly access?: WorkAccess;
     readonly appManagedTools?: AppManagedToolSet;
     readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
+    /**
+     * Told of each compaction the runtime made by itself during this turn, so
+     * the thread's context ledger can record it.
+     */
+    readonly onAutomaticCompaction?: (sighting: AutomaticCompactionSighting) => void;
     /** The prompt is about to go to the provider, so the turn may now be charged. */
     readonly onPromptSent?: () => void;
     readonly onDelta?: (response: string) => void;
@@ -271,6 +277,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         void Effect.runPromise(Deferred.succeed(hold, undefined));
       };
       const answeredToolRequestIds = new Set<string>();
+      const compactions = new TurnCompactions();
       const events = yield* subscribeThenSend({
         connection,
         consume: (runtimeEvents) =>
@@ -288,6 +295,17 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (handledEvents > MAX_EVENTS) return;
                 if (event.kind === "usage") input.onUsage?.(event);
+                const sighting = compactions.observe(event);
+                if (sighting !== undefined && input.onAutomaticCompaction !== undefined) {
+                  const record = input.onAutomaticCompaction;
+                  // The receipt is accounting; failing to write it never
+                  // fails the turn whose session it describes.
+                  yield* Effect.try(() => record(sighting)).pipe(
+                    Effect.catchAll(() =>
+                      Effect.logWarning("An automatic compaction could not be journaled."),
+                    ),
+                  );
+                }
                 if (event.kind === "child-agent-activity") input.onChildActivity?.(event);
                 if (event.kind === "text-delta") {
                   response = appendBoundedResponse(response, event.text);
