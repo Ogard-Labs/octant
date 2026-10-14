@@ -7,6 +7,8 @@ import type {
   ProviderServiceLimits,
 } from "@octant/contracts";
 import {
+  DEFAULT_CAPACITY_BACKOFF_MS,
+  MAX_CAPACITY_BACKOFF_MS,
   ProviderCapacityScheduler,
   ProviderCapacitySchedulerRejected,
   type CapacityWorkRequest,
@@ -363,8 +365,8 @@ describe("ProviderCapacityScheduler", () => {
     expect(state.scheduler.drain(providerA).dispatched.map((entry) => entry.id)).toEqual([id(37)]);
   });
 
-  it.each(["cancelled", "interrupted", "timeout", "process-death"] as const)(
-    "holds %s work ambiguously until actual usage reconciliation",
+  it.each(["completed", "cancelled", "interrupted", "timeout", "process-death"] as const)(
+    "frees the slot of %s work with unreported usage at once and holds only its usage ambiguously",
     (outcome) => {
       const { scheduler } = fixture();
       scheduler.updateProviderFacts({
@@ -374,18 +376,94 @@ describe("ProviderCapacityScheduler", () => {
         enforcement: { kind: "observable-api", maxObservableConcurrency: 1 },
       });
       scheduler.submit(work(40));
-      scheduler.submit(work(41));
+      expect(scheduler.submit(work(41)).status).toBe("queued");
 
       const terminal = scheduler.recordTerminal({ reservationId: id(40), outcome });
       expect(terminal.reservation.state).toBe("ambiguous");
-      expect(terminal.dispatched).toEqual([]);
-      expect(scheduler.snapshot(providerA).allocated.concurrency).toBe(1);
+      expect(terminal.dispatched.map((entry) => entry.id)).toEqual([id(41)]);
+      expect(scheduler.snapshot(providerA).allocated).toMatchObject({
+        concurrency: 1,
+        tokens: 1_000,
+      });
 
       const reconciled = scheduler.reconcile(id(40), 320);
       expect(reconciled.reservation.state).toBe("reconciled");
-      expect(reconciled.dispatched.map((entry) => entry.id)).toEqual([id(41)]);
+      expect(scheduler.snapshot(providerA).allocated).toMatchObject({
+        concurrency: 1,
+        tokens: 820,
+      });
     },
   );
+
+  it("keeps admitting work after any number of turns that ended without reported usage", () => {
+    const { scheduler } = fixture();
+    scheduler.updateProviderFacts({
+      limits: providerLimits(providerA, {}),
+      enforcement: { kind: "observable-api", maxObservableConcurrency: 2 },
+    });
+    for (let index = 0; index < 5; index++) {
+      expect(scheduler.submit(work(80 + index)).status).toBe("dispatched");
+      scheduler.markRunning(id(80 + index));
+      scheduler.recordTerminal({ reservationId: id(80 + index), outcome: "interrupted" });
+    }
+    expect(scheduler.snapshot(providerA).allocated.concurrency).toBe(0);
+  });
+
+  it("backs a provider off for its own wait after a capacity signal and admits work again once it passes", () => {
+    const state = fixture();
+    state.scheduler.updateProviderFacts({
+      limits: providerLimits(providerA, {}),
+      enforcement: { kind: "observable-api", maxObservableConcurrency: 2 },
+    });
+    state.scheduler.recordCapacitySignal({ providerInstanceId: providerA, retryAfterMs: 2_000 });
+    expect(state.scheduler.submit(work(90))).toMatchObject({
+      status: "queued",
+      reason: "retry-after",
+      notBeforeMs: baseMs + 2_000,
+    });
+    state.scheduler.recordTerminal({ reservationId: id(90), outcome: "cancelled" });
+
+    // Facts observed during the wait do not erase it.
+    state.advance(1_000);
+    state.scheduler.updateProviderFacts({
+      limits: providerLimits(providerA, {
+        updatedAt: new Date(baseMs + 1_000).toISOString() as ProviderServiceLimits["updatedAt"],
+      }),
+      enforcement: { kind: "observable-api", maxObservableConcurrency: 2 },
+    });
+    expect(state.scheduler.submit(work(91)).status).toBe("queued");
+    state.scheduler.recordTerminal({ reservationId: id(91), outcome: "cancelled" });
+
+    state.advance(1_000);
+    expect(state.scheduler.submit(work(92)).status).toBe("dispatched");
+  });
+
+  it("bounds a capacity backoff whatever wait the provider names", () => {
+    const state = fixture();
+    state.scheduler.updateProviderFacts({
+      limits: providerLimits(providerA, {}),
+      enforcement: { kind: "observable-api", maxObservableConcurrency: 2 },
+    });
+    state.scheduler.recordCapacitySignal({ providerInstanceId: providerA });
+    expect(state.scheduler.submit(work(93))).toMatchObject({
+      reason: "retry-after",
+      notBeforeMs: baseMs + DEFAULT_CAPACITY_BACKOFF_MS,
+    });
+    state.scheduler.recordTerminal({ reservationId: id(93), outcome: "cancelled" });
+
+    state.scheduler.recordCapacitySignal({
+      providerInstanceId: providerA,
+      retryAfterMs: 24 * 60 * 60 * 1_000,
+    });
+    expect(state.scheduler.submit(work(94))).toMatchObject({
+      reason: "retry-after",
+      notBeforeMs: baseMs + MAX_CAPACITY_BACKOFF_MS,
+    });
+    state.scheduler.recordTerminal({ reservationId: id(94), outcome: "cancelled" });
+
+    state.advance(MAX_CAPACITY_BACKOFF_MS);
+    expect(state.scheduler.submit(work(95)).status).toBe("dispatched");
+  });
 
   it("conservatively expires ambiguous restart work without assuming zero usage", () => {
     const state = fixture({ ambiguousTtlMs: 1_000 });

@@ -7,6 +7,7 @@ import {
   type ProviderInstanceId,
   type ProviderModelId,
   type ProviderServiceLimits,
+  type UtcTimestamp,
 } from "@octant/contracts";
 export type ProviderCapacitySchedulerRejectionCode =
   | "invalid-configuration"
@@ -117,6 +118,44 @@ export type SubmissionResult =
       readonly notBeforeMs?: number;
     };
 
+/**
+ * What a turn refused for capacity tells the person: what is full and, when
+ * the scheduler knows, how long until it frees. A bare "capacity is
+ * unavailable" pointed at the provider even when the wait was Octant's own
+ * slot count or a rate limit the endpoint had named.
+ */
+export function capacityWaitSentence(input: {
+  readonly reason: Extract<SubmissionResult, { status: "queued" }>["reason"];
+  readonly notBeforeMs?: number;
+  readonly nowMs: number;
+}): string {
+  const wait =
+    input.notBeforeMs === undefined
+      ? "Try this turn again shortly."
+      : `Try this turn again in ${describeWait(input.notBeforeMs - input.nowMs)}.`;
+  switch (input.reason) {
+    case "retry-after":
+      return `The provider rate-limited this endpoint. ${wait}`;
+    case "quota-exhausted":
+      return "The provider reports its quota is used up.";
+    case "request-capacity":
+      return `The provider's request allowance is used up. ${wait}`;
+    case "token-capacity":
+      return `The provider's token allowance is used up. ${wait}`;
+    case "provider-concurrency":
+    case "observable-concurrency":
+      return "Other turns are using every request this provider takes at once. Try this turn again when one finishes.";
+    case "queued-behind-earlier-work":
+      return `Earlier work on this provider is still waiting for capacity. ${wait}`;
+  }
+}
+
+function describeWait(milliseconds: number): string {
+  const seconds = Math.max(1, Math.ceil(milliseconds / 1_000));
+  if (seconds < 120) return seconds === 1 ? "1 second" : `${seconds} seconds`;
+  return `${Math.ceil(seconds / 60)} minutes`;
+}
+
 export interface CapacityTerminalSignal {
   readonly reservationId: CapacityReservationId;
   readonly outcome: "completed" | "cancelled" | "interrupted" | "timeout" | "process-death";
@@ -146,9 +185,21 @@ interface ProviderState {
   facts: SchedulerProviderFacts;
   retryJitterUnit: number;
   queue: Array<QueueRecord>;
+  /** Until when this host backs the provider off after it signalled capacity. */
+  backoffUntilMs?: number;
 }
 
 const MAX_AMBIGUOUS_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+/**
+ * How long a provider is backed off after a capacity signal. These are the
+ * bounds a direct endpoint's own retries use (`DEFAULT_ENDPOINT_RETRY_POLICY`):
+ * by the time a turn fails on a rate limit those retries have already waited,
+ * so this only keeps new turns from piling onto the same limit. A provider's
+ * own wait is honoured up to the cap, so one header cannot refuse turns for an
+ * hour; with no wait named the shorter default applies.
+ */
+export const DEFAULT_CAPACITY_BACKOFF_MS = 10_000;
+export const MAX_CAPACITY_BACKOFF_MS = 60_000;
 const MAX_OBSERVABLE_CONCURRENCY = 64;
 const TERMINAL_OUTCOMES = new Set([
   "completed",
@@ -346,7 +397,9 @@ export class ProviderCapacityScheduler {
       if (
         record.request.providerInstanceId === limits.providerInstanceId &&
         !record.concurrent &&
-        (record.reservation.state === "reconciled" || record.reservation.state === "released")
+        (record.reservation.state === "reconciled" ||
+          record.reservation.state === "released" ||
+          record.reservation.state === "ambiguous")
       ) {
         record.countsCapacity = false;
       }
@@ -355,7 +408,31 @@ export class ProviderCapacityScheduler {
       facts: { limits, enforcement },
       retryJitterUnit: random,
       queue: existing?.queue ?? [],
+      ...(existing?.backoffUntilMs === undefined
+        ? {}
+        : { backoffUntilMs: existing.backoffUntilMs }),
     });
+  }
+
+  /**
+   * Backs a provider off after it refused a request for capacity: a rate limit,
+   * or an overloaded endpoint that said how long to wait. Work on the provider
+   * waits with reason `retry-after` until the bounded wait passes, then runs
+   * again; facts observed meanwhile neither shorten nor erase it. Any other
+   * failure is not a capacity signal and must not be reported here.
+   */
+  recordCapacitySignal(input: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly retryAfterMs?: number;
+  }): void {
+    const provider = this.#providers.get(input.providerInstanceId);
+    if (provider === undefined) return;
+    const waitMs =
+      input.retryAfterMs === undefined
+        ? DEFAULT_CAPACITY_BACKOFF_MS
+        : Math.min(safeNonNegative(input.retryAfterMs, "Retry wait"), MAX_CAPACITY_BACKOFF_MS);
+    const untilMs = this.#checkedAdd(this.#now(), waitMs, "Backoff deadline");
+    provider.backoffUntilMs = Math.max(provider.backoffUntilMs ?? 0, untilMs);
   }
 
   submit(request: CapacityWorkRequest): SubmissionResult {
@@ -558,6 +635,14 @@ export class ProviderCapacityScheduler {
     } else {
       const now = this.#now();
       const reservation = this.#transitionAt(record.reservation, "ambiguous", now);
+      // A terminal signal says the owner saw the request end (an owner that
+      // abandoned a request it could not stop sends none), so it no longer
+      // occupies a provider slot; only its usage is unknown, and that stays
+      // counted at the estimate until it is reconciled or expires. Holding the slot as well
+      // leaked it for good, because nothing expires terminal work: a failed
+      // turn, or one whose endpoint reported no usage, then refused every
+      // later turn on that provider until the host restarted.
+      record.concurrent = false;
       record.ambiguousSinceMs = now;
       record.reservation = reservation;
     }
@@ -759,7 +844,7 @@ export class ProviderCapacityScheduler {
       const now = this.#now();
       const admission = this.#options.capacityPolicy.evaluateAdmission({
         providerInstanceId: record.request.providerInstanceId,
-        limits: provider.facts.limits,
+        limits: this.#limitsWithBackoff(provider, now),
         enforcement: provider.facts.enforcement,
         demand: {
           requests: record.request.requests,
@@ -778,6 +863,23 @@ export class ProviderCapacityScheduler {
       if (error instanceof ProviderCapacitySchedulerRejected) throw error;
       return reject("invalid-configuration", "Capacity policy rejected scheduler admission.");
     }
+  }
+
+  /**
+   * The provider's facts with this host's own backoff folded in as a retry
+   * window, so the policy waits on whichever of the two ends later.
+   */
+  #limitsWithBackoff(provider: ProviderState, nowMs: number): ProviderServiceLimits {
+    const limits = provider.facts.limits;
+    const backoffUntilMs = provider.backoffUntilMs;
+    if (backoffUntilMs === undefined || nowMs >= backoffUntilMs) return limits;
+    if (limits.retry.status === "active" && Date.parse(limits.retry.until) >= backoffUntilMs) {
+      return limits;
+    }
+    return freezeLimits({
+      ...limits,
+      retry: { status: "active", until: new Date(backoffUntilMs).toISOString() as UtcTimestamp },
+    });
   }
 
   #allocated(
