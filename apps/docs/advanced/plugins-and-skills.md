@@ -236,13 +236,24 @@ with its package under **Extension packages**.
 
 Some agent runtimes load skills from a Project by themselves, from
 `.agents/skills`, `.claude/skills`, or a folder of their own such as
-`.github/skills` or `.gemini/skills`. Octant blocks each such runtime from
-reading those folders at the Project root, so a skill there reaches a turn
-only through the steps above. The folders around them, such as the rest of
-`.claude`, stay readable. Two gaps remain. A skill folder above the Project, when
-the Project is a subfolder of a repository, is not blocked for the runtimes
-that look upward (GitHub Copilot, Grok Build, Devin). Codex still loads
-`.agents/skills` by itself.
+`.github/skills` or `.gemini/skills`. Grok Build also loads its commands
+folders (`.agents/commands`, `.claude/commands`, `.grok/commands`) as skills.
+Octant blocks each such runtime from reading and writing those folders at the
+Project root, so a skill there reaches a turn only through the steps above.
+The folders around them, such as the rest of `.claude`, stay readable.
+
+Because the block covers writing too, an agent's own `git` commands on those
+runtimes warn about tracked files in a blocked folder, and a `git checkout`,
+rebase, or pull across commits that touch one fails with a misleading "local
+changes would be overwritten" error. Nothing is lost, and Octant's own Git
+features are unaffected. This is the accepted cost of keeping unreviewed
+skills out of the runtime; fx and Kimi Code have always worked this way for
+`.agents`.
+
+Two gaps remain. A skill folder above the Project, when the Project is a
+subfolder of a repository, is not blocked for the runtimes that look upward
+(GitHub Copilot, Grok Build, Devin). Codex still loads `.agents/skills` by
+itself.
 
 Type `/` in a Chat, Work, or Code composer — including Chat's first message — to find commands and enabled skills. Browser and Computer entries appear only when those capabilities are available.
 Choosing a skill creates a visible selection that can be removed before sending;

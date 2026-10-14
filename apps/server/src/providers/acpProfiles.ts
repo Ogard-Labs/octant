@@ -655,8 +655,8 @@ const grokProfile: AcpProviderProfile = {
     // In a trusted folder Grok loads all of these as Project skills by itself;
     // `grok inspect --json` on 1.0.50 lists a package or command file from
     // each. Its switches are not relied on: with GROK_CLAUDE_SKILLS_ENABLED and
-    // GROK_CURSOR_SKILLS_ENABLED false it still listed the Project .claude and
-    // .cursor packages, and nothing turns off .agents or .grok. With these
+    // GROK_CURSOR_SKILLS_ENABLED false it still listed those folders'
+    // packages, and nothing turns off .agents or .grok. With these
     // folders unreadable it listed the rest and carried on.
     forbiddenRootEntries: [
       ".agents/commands",
