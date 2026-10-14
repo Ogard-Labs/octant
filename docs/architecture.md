@@ -322,7 +322,7 @@ through the transport its adapter verified:
 | ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate                                                                                                                                      |
 | Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                                                                                                                                                                   |
 | Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                                                                                                                                                          |
-| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant, reached through `octant mcp`; the person adds that command to their CLI, and Octant writes no provider configuration. Not yet packaged in the desktop app ([detail](design/terminal-browser-grant.md)) |
+| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant, reached through `octant mcp`; the person adds that command to their CLI, and Octant writes no provider configuration. The macOS app ships the command too ([detail](design/terminal-browser-grant.md)) |
 
 No transport edits a person's provider MCP, hook, or global configuration;
 OpenCode's per-launch posture stays in its connection-private configuration.
@@ -5017,7 +5017,7 @@ mechanisms are:
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
-- **Terminal Browser grant (built except desktop packaging).** A person may start a Code thread
+- **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per
   terminal, and honored only from a local window: a paired device, a routine, or
@@ -5036,8 +5036,11 @@ mechanisms are:
   and end are journaled without the token or address. The window switches a
   terminal on with a restart the person confirms, shows the state the host
   reports, and shows the first effect on an origin as a request from the
-  terminal, not from the thread's agent. Not built: desktop packaging of the
-  `octant` command. Detail is in
+  terminal, not from the thread's agent. The packaged macOS app ships an
+  `octant` that runs only `octant mcp`, with the app's own executable in Node
+  mode; a granted terminal, and no other, starts with its folder first on
+  `PATH` and may read that folder and the app runtime it starts with, nothing
+  more. Detail is in
   [Terminal Browser grant](design/terminal-browser-grant.md).
 - **Terminal shell configuration.** On macOS a thread or Project terminal is
   the person's login shell (`-l`), and its read roots add, read-only and only

@@ -35,6 +35,50 @@ describe("TerminalService", () => {
     );
   });
 
+  it("puts the launcher first on PATH and lets the shell read it only when the launch carries one", async () => {
+    const process = fakeProcess();
+    const port = { start: vi.fn(() => process) };
+    const service = new TerminalService({
+      port,
+      inheritedEnvironment: { PATH: "/usr/bin:/bin" },
+      credentials: { resolve: vi.fn(async (reference) => `resolved-${reference}`) },
+    });
+    const launch = {
+      shell: "/bin/zsh",
+      cwd: "/private/repo",
+      stateScope: "repo_test",
+      columns: 100,
+      rows: 30,
+      credentialReferences: [],
+    };
+
+    await service.launch({ ...launch, terminalId: "terminal-plain" });
+    await service.launch({
+      ...launch,
+      terminalId: "terminal-granted",
+      launcher: {
+        directory: "/Applications/Octant.app/Contents/Resources/terminal-launcher",
+        readRoots: [
+          "/Applications/Octant.app/Contents/Resources/terminal-launcher",
+          "/Applications/Octant.app/Contents/MacOS/Octant",
+        ],
+      },
+    });
+
+    const [plain, granted] = port.start.mock.calls.map((call) => (call as unknown[])[0]);
+    expect(plain).toMatchObject({ environment: { PATH: "/usr/bin:/bin" } });
+    expect(plain).not.toHaveProperty("additionalReadRoots");
+    expect(granted).toMatchObject({
+      environment: {
+        PATH: "/Applications/Octant.app/Contents/Resources/terminal-launcher:/usr/bin:/bin",
+      },
+      additionalReadRoots: [
+        "/Applications/Octant.app/Contents/Resources/terminal-launcher",
+        "/Applications/Octant.app/Contents/MacOS/Octant",
+      ],
+    });
+  });
+
   it("fails the launch when the ownership receipt cannot be persisted", async () => {
     const process = fakeProcess();
     process.receiptReady = Promise.reject(new Error("receipt unavailable"));

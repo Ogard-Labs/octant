@@ -3327,6 +3327,29 @@ describe("CodeOperationService terminal Browser grant", () => {
     expect(JSON.stringify(result)).not.toContain("terminal-browser-grant:");
   });
 
+  it("puts the app's launcher only on a terminal started with a grant", async () => {
+    const launcher = {
+      directory: "/Applications/Octant.app/Contents/Resources/terminal-launcher",
+      readRoots: ["/Applications/Octant.app/Contents/Resources/terminal-launcher"],
+    };
+    const opening = {
+      kind: "granted",
+      outcome: granted,
+      credentialReferences: references,
+      launcher,
+    };
+    const granting = fixture(opening);
+    await granting.service.execute(ids.window, startWithGrant, { initiator: "user" });
+    expect(granting.terminals.launch).toHaveBeenCalledWith(expect.objectContaining({ launcher }));
+
+    const plain = fixture(opening);
+    const { browserGrant: _off, ...withoutGrant } = startWithGrant;
+    await plain.service.execute(ids.window, withoutGrant, { initiator: "user" });
+    expect(plain.terminals.launch).toHaveBeenCalledWith(
+      expect.not.objectContaining({ launcher: expect.anything() }),
+    );
+  });
+
   it("starts no terminal when the host refuses the grant, so it never looks as if it has one", async () => {
     const refusal = { status: "refused", reason: "not-local-window" } as const;
     const { service, grants, terminals } = fixture({ kind: "refused", outcome: refusal });

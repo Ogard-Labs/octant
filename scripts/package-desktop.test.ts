@@ -1,4 +1,5 @@
-import { readFile, mkdtemp, mkdir, writeFile, access, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { readFile, mkdtemp, mkdir, writeFile, access, rm, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { DESKTOP_PRELOAD_FILENAME } from "../apps/desktop/src/runtimePaths";
@@ -23,6 +24,7 @@ import {
   REQUIRED_STAGED_PACKAGED_FILES,
   REQUIRED_DARWIN_HELPER_FILES,
   REQUIRED_DARWIN_MANAGED_TOOL_FILES,
+  REQUIRED_DARWIN_TERMINAL_LAUNCHER_FILES,
   REQUIRED_CODE_WEB_ASSET_PATTERNS,
   APPIMAGE_TOOL_URL,
   APPIMAGE_TOOL_SHA256,
@@ -35,6 +37,7 @@ import {
   createQuitAppleScript,
   createServerRuntimeManifest,
   createDesktopRuntimeManifest,
+  installTerminalLauncher,
   linuxPackageDirectoryName,
   packagedBundlePath,
   packagedLinuxBundlePath,
@@ -238,7 +241,13 @@ describe("desktop packaging boundary", () => {
       "apps/server/node_modules/node-pty/build/Release/spawn-helper",
       ...REQUIRED_DARWIN_HELPER_FILES,
       ...REQUIRED_DARWIN_MANAGED_TOOL_FILES,
+      ...REQUIRED_DARWIN_TERMINAL_LAUNCHER_FILES,
     ]);
+    expect(REQUIRED_DARWIN_TERMINAL_LAUNCHER_FILES).toEqual([
+      "Octant.app/Contents/Resources/terminal-launcher/octant",
+      "Octant.app/Contents/Resources/terminal-launcher/octant.mjs",
+    ]);
+    expect(PACKAGED_EXECUTABLE_FILES).toContain("terminal-launcher/octant");
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-keychain-helper");
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-code-file-helper");
     expect(PACKAGED_EXECUTABLE_FILES).toContain("native/octant-device-helper");
@@ -924,5 +933,47 @@ describe("desktop packaging boundary", () => {
     expect(() => validatePackagedRendererPolicy(source)).not.toThrow();
     expect(source).not.toMatch(/frame-ancestors/);
     expect(source).not.toMatch(/\[::1]/);
+  });
+});
+
+describe("the terminal launcher the desktop app ships", () => {
+  it("runs the bundled octant with the app's own runtime in Node mode from wherever the app sits", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "octant-terminal-launcher-"));
+    try {
+      const repository = resolve(root, "repository");
+      await mkdir(resolve(repository, "packages/cli/dist"), { recursive: true });
+      await writeFile(
+        resolve(repository, "packages/cli/dist/terminalLauncherMain.mjs"),
+        "// bundle\n",
+      );
+      // An app moved to a path with a space, as a person's Applications folder can be.
+      const contents = resolve(root, "Moved Apps/Octant.app/Contents");
+      const launcher = resolve(contents, "Resources/terminal-launcher");
+      await installTerminalLauncher(repository, launcher);
+      await mkdir(resolve(contents, "MacOS"), { recursive: true });
+      // Stands in for the app's executable: reports how it was started.
+      await writeFile(
+        resolve(contents, "MacOS/Octant"),
+        '#!/bin/sh\nprintf "%s\\n" "node-mode=$ELECTRON_RUN_AS_NODE" "$@"\n',
+        { mode: 0o755 },
+      );
+
+      expect((await readdir(launcher)).sort()).toEqual(["octant", "octant.mjs"]);
+      expect((await stat(resolve(launcher, "octant"))).mode & 0o777).toBe(0o755);
+      expect((await stat(resolve(launcher, "octant.mjs"))).mode & 0o777).toBe(0o644);
+      const output = execFileSync("/bin/sh", ["-c", "octant mcp --help"], {
+        env: { PATH: `${launcher}:/usr/bin:/bin` },
+        encoding: "utf8",
+      });
+      expect(output.split("\n")).toEqual([
+        "node-mode=1",
+        `${launcher}/octant.mjs`,
+        "mcp",
+        "--help",
+        "",
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

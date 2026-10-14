@@ -68,6 +68,7 @@ import {
 } from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
+import type { TerminalLauncher } from "./terminalService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { CodeApprovalValidationPort } from "./codeOperationApprovalStore";
 import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoveryService";
@@ -199,6 +200,7 @@ export interface CodeOperationTerminalPort {
       readonly environmentName: string;
       readonly reference: string;
     }[];
+    readonly launcher?: TerminalLauncher;
     readonly executionPolicy?: CodeThread["executionPolicy"];
   }) => Promise<CodeOperationTerminalSnapshot>;
   readonly attach: (terminalId: string) => CodeOperationTerminalSnapshot;
@@ -1982,6 +1984,9 @@ export class CodeOperationService {
             browserGrant?.kind === "granted"
               ? [...credentialReferences, ...browserGrant.credentialReferences]
               : credentialReferences,
+          ...(browserGrant?.kind === "granted" && browserGrant.launcher !== undefined
+            ? { launcher: browserGrant.launcher }
+            : {}),
           executionPolicy: thread.executionPolicy,
         });
         owner.starting = starting;
