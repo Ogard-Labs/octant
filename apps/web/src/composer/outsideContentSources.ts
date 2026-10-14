@@ -12,6 +12,7 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "agent-message": "A message from another agent",
   "browser-observation": "Pages seen in the browser",
   "browser-page": "A browser page sent as feedback",
+  canvas: "A Canvas written by another thread",
   "chat-branch": "The thread this was branched or restored from",
   "code-fork": "The thread this was forked or restored from",
   "follow-up": "The thread that suggested this one",

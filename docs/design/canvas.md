@@ -1,7 +1,7 @@
 # Canvas
 
-This topic specification owns the Canvas agent tool's `describe` and `preview`
-operations, document recipes, thread presentation, the closed block catalogue,
+This topic specification owns the Canvas agent tool's `describe`, `read`, and
+`preview` operations, document recipes, thread presentation, the closed block catalogue,
 diagram boards and comments, and the `design` block. Architecture owns the
 Canvas boundary and authority rules
 ([Architecture: process topology](../architecture.md#process-topology)) and the
@@ -156,6 +156,16 @@ images in a tool result.
 The signed desktop app bundles the `playwright-core` driver but no browser
 binary, so it resolves Chromium from the host's installed browsers. On a host
 with none, `preview` is warnings-only, and the user guide says so.
+
+`read` and `preview` reach any Canvas of the reader's Project by id, so both
+carry its outside-content mark to the reader. After the Canvas is read or the
+preview is drawn, and before anything from it is returned, the host marks the
+reading thread (a managed child under its run) with label `canvas` when the
+Canvas records a marked writer other than the reader or the thread it belongs
+to is marked now. A reader that cannot be marked gets a refusal instead of the
+Canvas. Architecture owns the rule, including how a Canvas records a marked
+writer at write time
+([Architecture: modes](../architecture.md#modes-chat-work-and-code)).
 A thread reference card reports the effective presentation and the first
 version's time (`canvasCreatedAt`). A Canvas that has outgrown the bound, by a
 revision or a person's edit, is listed as `sidebar`.

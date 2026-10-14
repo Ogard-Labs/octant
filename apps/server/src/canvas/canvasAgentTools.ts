@@ -9,6 +9,7 @@ import {
   decodeCanvasId,
   type CanvasActor,
   type CanvasDocumentRecipe,
+  type CanvasId,
   type CanvasPresentation,
   type ChatThread,
   type HostId,
@@ -21,6 +22,7 @@ import { JSONSchema, Schema } from "effect";
 import type { CanvasWorkspaceScope } from "@octant/contracts/canvas-cards";
 import type { ChildCanvasWorkspaceResolution } from "./childCanvasWorkspace";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { ReaderMarking } from "../context/inheritedExternalContentMark";
 import type { CanvasService } from "./canvasService";
 import type {
   CanvasPreviewOutcome,
@@ -183,6 +185,16 @@ export interface CanvasAgentToolPort {
     { readonly id: string; readonly type: string; readonly lifecycle: string } | undefined
   >;
   readonly canvas: Pick<CanvasService, "create" | "revise" | "get" | "threadReferenceCards">;
+  /**
+   * Marks the thread or managed child about to read a Canvas, when the
+   * Canvas carries outside content (`markCanvasReader`). Called after a read or
+   * a preview succeeds and before anything from it is returned; `refused`
+   * withholds it, so a model never sees a marked Canvas on an unmarked thread.
+   */
+  readonly markReader: (input: {
+    readonly readerId: string;
+    readonly canvasId: CanvasId;
+  }) => ReaderMarking;
   /**
    * Renders a shipped Canvas and reports its layout warnings. Absent on a host
    * that has not wired the preview service, so the tool refuses the operation
@@ -819,6 +831,7 @@ export function createCanvasAgentTools(
     scope: "thread",
     port: options.port,
     originThreadId: owner.thread.id,
+    readerId: owner.thread.id,
     providerInstanceId: owner.thread.providerInstanceId,
     modelId: owner.thread.modelId,
     resolveTarget: () => resolveCanvasTarget(options.windowId, owner, options.port),
@@ -855,6 +868,8 @@ export function createChildCanvasAgentTools(options: {
     scope: "run",
     port: options.port,
     originThreadId: options.run.parentThreadId,
+    // A child's own mark is kept under its run, as every tool it calls keeps it.
+    readerId: options.run.id,
     providerInstanceId: options.run.providerInstanceId,
     modelId: options.run.modelId,
     ...(author === undefined ? {} : { author }),
@@ -926,6 +941,8 @@ function canvasToolSet(options: {
   readonly scope: "thread" | "run";
   readonly port: CanvasAgentToolPort;
   readonly originThreadId: string;
+  /** The thread or run whose model reads what this tool returns. */
+  readonly readerId: string;
   readonly providerInstanceId: CanvasAuthoringThread["providerInstanceId"];
   readonly modelId: CanvasAuthoringThread["modelId"];
   readonly author?: CanvasActor;
@@ -1028,6 +1045,9 @@ function canvasToolSet(options: {
         if (outcome.kind !== "ready") {
           return { result: { error: "That Canvas is unavailable." }, isError: true };
         }
+        if (!readerMarked(options, canvasId)) {
+          return { result: { error: CANVAS_READER_UNMARKED }, isError: true };
+        }
         return {
           result: {
             canvasId: input.canvasId,
@@ -1069,6 +1089,9 @@ function canvasToolSet(options: {
           target.context,
           target.project,
         );
+        if (outcome.kind === "preview" && !readerMarked(options, canvasId)) {
+          return { result: { error: CANVAS_READER_UNMARKED }, isError: true };
+        }
         return previewToolResult(outcome, imagesInToolResults);
       }
 
@@ -1193,6 +1216,17 @@ function canvasToolSet(options: {
       };
     },
   };
+}
+
+const CANVAS_READER_UNMARKED =
+  "That Canvas carries outside content, and this thread could not be marked with it, so it was not read. Try again.";
+
+/** Whether the reader may be handed the Canvas: marked when it must be, or nothing to mark. */
+function readerMarked(
+  options: { readonly port: CanvasAgentToolPort; readonly readerId: string },
+  canvasId: CanvasId,
+): boolean {
+  return options.port.markReader({ readerId: options.readerId, canvasId }).status !== "refused";
 }
 
 /**

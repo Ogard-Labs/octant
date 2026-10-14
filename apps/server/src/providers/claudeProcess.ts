@@ -4,6 +4,7 @@ import {
   accessSync,
   constants,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   realpathSync,
   rmSync,
@@ -453,31 +454,19 @@ function runProbe(
 }
 
 /**
- * The directories the Claude runtime writes outside the checkout.
- *
- * 0009 scopes a confined launch's writes to the provider home and a private
- * temp. For this runtime that is its configuration directory, the secure
- * storage directory when the host names one, and one shared scratch directory
- * the runtime opens for itself. The last is `/tmp/claude-<uid>` and not
- * `$TMPDIR`: measured on macOS 27, a launch whose `TMPDIR` pointed at a private
- * directory still exited before speaking a byte with
- * `EEXIST: file already exists, mkdir '/tmp/claude-501'`, because the profile
- * denied the stat that would have found the directory already there. It is
- * shared with every other use of the runtime on this host, so it is named as a
- * write root rather than hidden inside the temp grant.
+ * Refuse a runtime state path that is the checkout, sits inside it, or is an
+ * ancestor of it, so a Plan launch cannot reopen the project through a state
+ * grant (0145).
  */
-function planStateDirectories(
+function refuseStateOverlappingCheckout(
   boundRoot: string,
-  stateDirectories: ReadonlyArray<string>,
+  paths: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
   // A provider may create its state directory during launch. Resolve through
   // the nearest existing ancestor, so a not-yet-created leaf under a symlinked
   // prefix (`/tmp` is `/private/tmp` on macOS) cannot dodge the overlap check.
-  const canonicalDirectories = stateDirectories.map(
-    (path) => canonicalClaudeAccountDirectory(path).path,
-  );
-  for (const path of canonicalDirectories) {
-    // 0145: the checkout must not be the leaf, sit inside it, or be an ancestor.
+  const canonicalPaths = paths.map((path) => canonicalClaudeAccountDirectory(path).path);
+  for (const path of canonicalPaths) {
     if (
       path === boundRoot ||
       path.startsWith(`${boundRoot}${sep}`) ||
@@ -489,16 +478,92 @@ function planStateDirectories(
       );
     }
   }
-  return canonicalDirectories;
+  return canonicalPaths;
 }
 
-function claudeRuntimeStateDirectories(environment: SpawnOptions["env"]): ReadonlyArray<string> {
+/**
+ * The account's state directories: the configuration directory, and the
+ * secure-storage directory when the host names one. A Plan launch reads them
+ * whole and writes only {@link CLAUDE_PLAN_RUNTIME_STATE_FOLDERS} inside the
+ * configuration directory.
+ */
+function claudeAccountStateDirectories(environment: SpawnOptions["env"]): {
+  readonly configuration: string | undefined;
+  readonly secureStorage: string | undefined;
+} {
   const configuration =
     environment.CLAUDE_CONFIG_DIR ??
     (environment.HOME === undefined ? undefined : join(environment.HOME, ".claude"));
-  return [configuration, environment.CLAUDE_SECURESTORAGE_CONFIG_DIR].filter(
-    (path): path is string => path !== undefined && isAbsolute(path),
+  const secureStorage = environment.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+  return {
+    configuration:
+      configuration !== undefined && isAbsolute(configuration) ? configuration : undefined,
+    secureStorage:
+      secureStorage !== undefined && isAbsolute(secureStorage) ? secureStorage : undefined,
+  };
+}
+
+/**
+ * The folders of the configuration directory a Plan launch may write.
+ *
+ * Measured on macOS 27 with Claude Code 2.1.299, one Plan turn (its start,
+ * three read-tool calls, the answer) wrote exactly these under `CLAUDE_CONFIG_DIR`:
+ * `sessions/<pid>.json` and its `.key` files, the transcript under
+ * `projects/<checkout>/<session>.jsonl`, plus `.claude.json` (through a lock,
+ * a temporary file and a copy in `backups/`) and `.last-cleanup` at the top.
+ * Only the two folders are granted. The top-level files are refused: the
+ * global `.claude.json` carries per-project MCP servers, `settings.json` its
+ * hooks, and `skills/`, `plugins/`, `agents/` and `commands/` what a later
+ * session loads, so a Plan launch able to write any of them could plant code
+ * that runs on a later turn outside this sandbox. A second measured Plan turn
+ * under this grant answered and completed with its `.claude.json` saves and
+ * `.last-cleanup` refused, and its transcript still written to `projects/`.
+ */
+const CLAUDE_PLAN_RUNTIME_STATE_FOLDERS = ["sessions", "projects"] as const;
+
+/**
+ * Where a Plan launch may write outside the checkout, created when missing.
+ *
+ * The folders are made here, outside the sandbox, because the configuration
+ * directory itself is no longer writable to the launch, and Bubblewrap can bind
+ * only a folder that exists. On a host that keeps the subscription sign-in in
+ * a file rather than the macOS Keychain, the runtime refreshes that one file,
+ * `.credentials.json` in the secure-storage directory (the configuration
+ * directory when none is named), and it stays writable so a refreshed login
+ * is kept (a maintainer decision of 2026-10-14, accepting that such a launch
+ * could replace the stored login). It is the only file granted, and only where
+ * it is the login: a launch with an API key, or on macOS, gets none.
+ */
+function planStateWriteRoots(
+  boundRoot: string,
+  environment: SpawnOptions["env"],
+  readsSignInFromKeychain: boolean,
+): { readonly readRoots: ReadonlyArray<string>; readonly writeRoots: ReadonlyArray<string> } {
+  const { configuration, secureStorage } = claudeAccountStateDirectories(environment);
+  const readRoots = refuseStateOverlappingCheckout(
+    boundRoot,
+    [configuration, secureStorage].filter((path): path is string => path !== undefined),
   );
+  if (configuration === undefined) return { readRoots, writeRoots: [] };
+  const folders = CLAUDE_PLAN_RUNTIME_STATE_FOLDERS.map((folder) => join(configuration, folder));
+  try {
+    for (const folder of folders) mkdirSync(folder, { recursive: true, mode: 0o700 });
+  } catch {
+    throw new ProcessConfinementError(
+      "invalid-configuration",
+      "Claude Plan confinement could not create the runtime's session folders.",
+    );
+  }
+  const credentialsFile =
+    readsSignInFromKeychain || environment.ANTHROPIC_API_KEY !== undefined
+      ? []
+      : [join(secureStorage ?? configuration, ".credentials.json")];
+  // Resolved again after creation: a folder that is a link into the checkout
+  // is refused like the configuration directory itself.
+  return {
+    readRoots,
+    writeRoots: refuseStateOverlappingCheckout(boundRoot, [...folders, ...credentialsFile]),
+  };
 }
 
 /**
@@ -584,10 +649,6 @@ function confineClaudeLaunch(
     }
   };
   try {
-    const stateDirectories = planStateDirectories(
-      boundRoot,
-      claudeRuntimeStateDirectories(spawnOptions.env),
-    );
     // A subscription launch on macOS reads its own sign-in by running
     // `/usr/bin/security` against the login keychain. Measured on macOS 27.0.1
     // with Claude Code 2.1.296: with exec of that binary and the two
@@ -602,18 +663,19 @@ function confineClaudeLaunch(
     // that folder, so the grant serves the sign-in read and not the model. A
     // launch that carries an API key reads nothing from the store and gets
     // none of this. Linux keeps the login in a file inside the account
-    // directory, which the launch already holds, and Seatbelt rules do not
-    // apply there.
+    // directory, which the launch may rewrite (see `planStateWriteRoots`), and
+    // Seatbelt rules do not apply there.
     const readsSignInFromKeychain =
       process.platform === "darwin" && spawnOptions.env.ANTHROPIC_API_KEY === undefined;
+    const stateRoots = planStateWriteRoots(boundRoot, spawnOptions.env, readsSignInFromKeychain);
     const launch = options.confinement.prepare({
       executable: spawnOptions.command,
       args: spawnOptions.args,
       boundRoot,
       temporaryDirectory,
-      additionalWriteRoots: stateDirectories,
-      readRoots: [boundRoot, temporaryDirectory, ...stateDirectories],
-      privateHomeAllowPaths: [boundRoot, temporaryDirectory, ...stateDirectories],
+      additionalWriteRoots: stateRoots.writeRoots,
+      readRoots: [boundRoot, temporaryDirectory, ...stateRoots.readRoots],
+      privateHomeAllowPaths: [boundRoot, temporaryDirectory, ...stateRoots.readRoots],
       // The runtime calls its own control plane, so it resolves the runtime
       // egress policy rather than the thread default (0132, 0145). This driver
       // carries Code threads, and the policy no longer reads the mode.
