@@ -14,7 +14,11 @@ import {
 } from "./agentMessageProjection";
 import { AgentMessageBodyStore } from "./agentMessageBodyStore";
 import {
-  AgentMessageDeliveryRefused,
+  AGENT_MESSAGE_TOOL_NAME,
+  MAX_JOURNALED_REFUSALS_PER_TURN,
+  createAgentMessageTools,
+} from "./agentMessageTools";
+import {
   AgentMessageService,
   type AgentMessageEndpointFacts,
   type AgentMessageEndpointResolver,
@@ -569,14 +573,55 @@ describe("the agent message delivery service", () => {
     expect(await bodyStore.read(record!.bodyReference.contentReference)).toBeUndefined();
   });
 
-  it("rejects more recipients than one petition may name before journaling anything", async () => {
-    const { service, events } = fixture();
+  it("refuses a petition naming too many recipients as a refusal, journaling the first few", async () => {
+    const { service, names, projection } = fixture();
     const recipients = Array.from({ length: 5 }, (_unused, index) => ({
       threadId: decodeEndpoint(`code-0000-0000-4000-8000-${String(index).padStart(12, "0")}`),
     }));
-    await expect(
-      service.send({ senderThreadId, recipients, body: "Any body." }),
-    ).rejects.toBeInstanceOf(AgentMessageDeliveryRefused);
-    expect(events).toHaveLength(0);
+    const outcomes = await service.send({ senderThreadId, recipients, body: "Any body." });
+
+    expect(outcomes).toHaveLength(4);
+    for (const outcome of outcomes) {
+      expect(outcome).toMatchObject({ status: "refused", reason: "policy" });
+    }
+    expect(names()).toEqual(Array(4).fill("agent.message-refused@1"));
+    expect(projection.messagingFacts(MAX_OPEN_AGENT_MESSAGES_PER_SENDER).refused).toBe(4);
+    expect(projection.inFlight()).toEqual([]);
+  });
+
+  it("answers a refusal the turn's budget will not journal without journaling it", async () => {
+    const { service, names } = fixture();
+    const outcomes = await service.send({
+      senderThreadId,
+      recipients: [{ threadId: otherProjectThreadId }],
+      body: handoff,
+      refusalBudget: { admit: () => false },
+    });
+    expect(outcomes[0]).toMatchObject({ status: "refused", reason: "unauthorized" });
+    expect(names()).toEqual([]);
+  });
+
+  it("journals no more refusals than a turn's cap when the model loops on refused and malformed calls", async () => {
+    const { service, names } = fixture();
+    const tools = createAgentMessageTools({
+      service,
+      senderThreadId: String(senderThreadId),
+      toolConstraints: [],
+      profileDisplayName: "Reviewer",
+      readPosture: () => "approval-gated",
+    });
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const unknown = `code-0000-0000-4000-8000-${String(attempt).padStart(12, "0")}`;
+      await tools.execute({
+        name: AGENT_MESSAGE_TOOL_NAME,
+        inputJson: JSON.stringify({ recipients: [{ threadId: unknown }], message: handoff }),
+      });
+      // A call that names a recipient but carries no message.
+      await tools.execute({
+        name: AGENT_MESSAGE_TOOL_NAME,
+        inputJson: JSON.stringify({ recipients: [{ threadId: unknown }] }),
+      });
+    }
+    expect(names().length).toBe(MAX_JOURNALED_REFUSALS_PER_TURN);
   });
 });

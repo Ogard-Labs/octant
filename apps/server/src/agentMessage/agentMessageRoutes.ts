@@ -64,12 +64,15 @@ export function createAgentMessageRouteHandler(
         headers: { "content-type": "application/json" },
       });
     }
-    const visible = new Set<string>();
-    for (const senderThreadId of dependencies.projection.senderThreadIds()) {
-      if (await dependencies.windowCanOpenThread(windowId, senderThreadId)) {
-        visible.add(senderThreadId);
-      }
-    }
+    // The totals count only messages whose sender the window may open, so every
+    // sender is asked once for this read, together rather than one after the
+    // other. A grant is never remembered between reads: a window that closed a
+    // Project stops seeing its messages on the next poll.
+    const senders = [...dependencies.projection.senderThreadIds()];
+    const mayOpen = await Promise.all(
+      senders.map((senderThreadId) => dependencies.windowCanOpenThread(windowId, senderThreadId)),
+    );
+    const visible = new Set(senders.filter((_sender, index) => mayOpen[index] === true));
     const facts: AgentMessageMessagingFacts = decodeAgentMessageMessagingFacts(
       dependencies.projection.messagingFacts(
         MAX_OPEN_AGENT_MESSAGES_PER_SENDER,

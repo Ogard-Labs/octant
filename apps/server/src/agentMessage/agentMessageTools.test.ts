@@ -1,7 +1,11 @@
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentMessageService } from "./agentMessageService";
-import { AGENT_MESSAGE_TOOL_NAME, createAgentMessageTools } from "./agentMessageTools";
+import {
+  AGENT_MESSAGE_TOOL_NAME,
+  MAX_JOURNALED_REFUSALS_PER_TURN,
+  createAgentMessageTools,
+} from "./agentMessageTools";
 
 const senderThreadId = "code-0000-0000-4000-8000-00000000000a";
 const recipientThreadId = "code-0000-0000-4000-8000-00000000000b";
@@ -60,6 +64,7 @@ describe("the agent message tool", () => {
       senderThreadId,
       recipients: [{ threadId: recipientThreadId }],
       body: "Handoff.",
+      refusalBudget: expect.anything(),
     });
   });
 
@@ -91,6 +96,7 @@ describe("the agent message tool", () => {
       senderThreadId,
       recipients: [{ threadId: recipientThreadId }],
       reason: "policy",
+      refusalBudget: expect.anything(),
     });
   });
 
@@ -119,7 +125,35 @@ describe("the agent message tool", () => {
       senderThreadId,
       recipients: [{ threadId: recipientThreadId }],
       reason: "policy",
+      refusalBudget: expect.anything(),
     });
+  });
+
+  it("lets a turn journal each distinct refusal once and only up to its cap, however long the model loops", async () => {
+    const { tools, recordRefusedSend } = fixture({ posture: "plan" });
+    // Stand in for the service: it journals a refusal when the turn's budget admits it.
+    let journaled = 0;
+    recordRefusedSend.mockImplementation(async (request) => {
+      for (const recipient of request.recipients) {
+        if (request.refusalBudget?.admit(String(recipient.threadId), request.reason) !== false) {
+          journaled += 1;
+        }
+      }
+    });
+
+    // The same refused call, over and over, is one refusal.
+    for (let attempt = 0; attempt < 30; attempt += 1) await tools.execute(call);
+    expect(journaled).toBe(1);
+
+    // Calls naming a new thread each are one more, until the cap.
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const threadId = `code-0000-0000-4000-8000-${String(attempt).padStart(12, "0")}`;
+      await tools.execute({
+        name: AGENT_MESSAGE_TOOL_NAME,
+        inputJson: JSON.stringify({ recipients: [{ threadId }], message: "Handoff." }),
+      });
+    }
+    expect(journaled).toBe(MAX_JOURNALED_REFUSALS_PER_TURN);
   });
 
   it("answers a refused call the same when the refusal cannot be journaled or names nobody", async () => {

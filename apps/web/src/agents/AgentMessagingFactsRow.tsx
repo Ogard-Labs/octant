@@ -64,6 +64,7 @@ export function AgentMessagingFactsRow(props: AgentMessagingFactsRowProps) {
   const facts = props.facts ?? loaded;
   if (facts === undefined) return null;
   const refusals = facts.recent.filter((entry) => entry.state === "refused");
+  const shownRefusals = refusals.slice(0, SHOWN_REFUSALS);
   const latestRefusal = refusals[0];
   return (
     <>
@@ -86,7 +87,7 @@ export function AgentMessagingFactsRow(props: AgentMessagingFactsRowProps) {
       </p>
       {refusals.length === 0 ? null : (
         <ul aria-label="Refused agent messages" className="agents-center__refusals">
-          {refusals.slice(0, SHOWN_REFUSALS).map((entry) => (
+          {shownRefusals.map((entry) => (
             <li key={String(entry.messageId)}>
               <span title={String(entry.senderThreadId)}>
                 {threadLabel(String(entry.senderThreadId))}
@@ -101,8 +102,8 @@ export function AgentMessagingFactsRow(props: AgentMessagingFactsRowProps) {
               </time>
             </li>
           ))}
-          {refusals.length > SHOWN_REFUSALS ? (
-            <li>{refusals.length - SHOWN_REFUSALS} more recent refusals</li>
+          {facts.refused > shownRefusals.length ? (
+            <li>{facts.refused - shownRefusals.length} more refusals</li>
           ) : null}
         </ul>
       )}

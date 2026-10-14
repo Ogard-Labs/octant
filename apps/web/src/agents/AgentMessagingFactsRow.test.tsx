@@ -64,6 +64,25 @@ describe("AgentMessagingFactsRow", () => {
     );
   });
 
+  it("counts the refusals it does not list from the host's total, not from the few it was sent", () => {
+    const refused = (id: number) => ({
+      messageId: `10000000-0000-4000-8000-0000000000${String(10 + id)}` as never,
+      senderThreadId: "code-0000-0000-4000-8000-00000000000a" as never,
+      recipientThreadId: `code-0000-0000-4000-8000-0000000000${String(10 + id)}` as never,
+      state: "refused" as const,
+      refuseReason: "policy" as const,
+      occurredAt: new Date().toISOString() as never,
+    });
+    render(
+      <AgentMessagingFactsRow
+        client={undefined}
+        facts={{ ...facts, refused: 40, recent: [0, 1, 2, 3, 4, 5, 6].map(refused) }}
+      />,
+    );
+    expect(screen.getAllByRole("listitem")).toHaveLength(6);
+    expect(screen.getByText("35 more refusals")).toBeVisible();
+  });
+
   it("shows no refusal list while nothing was refused", () => {
     render(
       <AgentMessagingFactsRow

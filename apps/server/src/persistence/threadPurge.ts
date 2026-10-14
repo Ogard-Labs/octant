@@ -196,6 +196,11 @@ const THREAD_OWNERSHIP_PATHS = [
   "$.record.provenance.threadId",
   "$.record.document.provenance.threadId",
   "$.originThreadId",
+  // An agent message is its own aggregate and names both its threads, so a
+  // purge of either end takes the message and its refusal with it. Without
+  // these a restart replays the message and the purged thread's id back.
+  "$.senderThreadId",
+  "$.recipientThreadId",
 ] as const;
 
 const CANVAS_LINK_PATHS = [

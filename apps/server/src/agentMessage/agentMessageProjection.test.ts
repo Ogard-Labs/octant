@@ -11,6 +11,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   AgentMessageProjection,
+  MAX_EARLY_REFUSALS_PER_SENDER,
   hydrateAgentMessageProjectionFromJournal,
 } from "./agentMessageProjection";
 import { AgentMessageBodyStore } from "./agentMessageBodyStore";
@@ -153,6 +154,30 @@ describe("the agent message projection", () => {
     // Purging the thread it names forgets it.
     projection.forgetForThread(String(early.senderThreadId));
     expect(projection.messagingFacts(8).refused).toBe(0);
+  });
+
+  it("keeps only the newest refusals of a sender, and still counts the rest", () => {
+    const projection = new AgentMessageProjection();
+    const total = MAX_EARLY_REFUSALS_PER_SENDER + 25;
+    for (let index = 0; index < total; index += 1) {
+      projection.apply({
+        kind: "message-refused",
+        messageId: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        correlationId: "20000000-0000-4000-8000-0000000000e1",
+        refuseReason: "policy",
+        senderThreadId: "code-0000-0000-4000-8000-00000000000a",
+        recipientThreadId: `code-0000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        occurredAt: new Date(Date.UTC(2026, 8, 10, 12, 0, index)).toISOString(),
+      } as AgentMessageRefused);
+    }
+
+    const facts = projection.messagingFacts(8, 1000);
+    expect(facts.refused).toBe(total);
+    expect(facts.recent).toHaveLength(MAX_EARLY_REFUSALS_PER_SENDER);
+    // The newest are the ones kept.
+    expect(facts.recent[0]?.recipientThreadId).toBe(
+      `code-0000-0000-4000-8000-${String(total - 1).padStart(12, "0")}`,
+    );
   });
 
   it("orders settled messages and early refusals together, newest first", () => {
