@@ -10,7 +10,15 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { isApplePlatform } from "../platform";
 import { useKeybindings } from "../keybindings/useKeybindings";
+import type { ContextCompactionExecutor } from "@octant/contracts/context";
 import { ContextInspector } from "./ContextInspector";
+import {
+  CompactSessionButton,
+  CompactSessionConfirm,
+  CompactionStatusLine,
+  compactionAnnouncement,
+} from "./CompactSession";
+import { compactionOffer } from "./sessionCompactionPresentation";
 import {
   autoCompactRoom,
   contextHealthLabel,
@@ -24,6 +32,7 @@ import {
 } from "./contextInspectorModel";
 import {
   useComposerContextMeterScope,
+  type ComposerCompaction,
   type ComposerContextUsageFallback,
 } from "./composerContextMeterScope";
 import { resetCountdownLabel } from "../lib/relativeTime";
@@ -59,17 +68,22 @@ export function ComposerContextMeter() {
   const fallback = snapshot === undefined ? scope.fallback : undefined;
   const [open, setOpen] = useState(false);
   const [inspecting, setInspecting] = useState(false);
+  // The executor the confirm names is the one the host offered when the
+  // person asked; a later answer does not rewrite a dialog they are reading.
+  const [confirming, setConfirming] = useState<ContextCompactionExecutor | undefined>(undefined);
   const seenOpenNonce = useRef(scope.openNonce);
 
   useEffect(() => {
     setOpen(false);
     setInspecting(false);
+    setConfirming(undefined);
   }, [scope.subjectKey]);
 
   useEffect(() => {
     if (scope.visible) return;
     setOpen(false);
     setInspecting(false);
+    setConfirming(undefined);
   }, [scope.visible]);
 
   useEffect(() => {
@@ -115,6 +129,17 @@ export function ComposerContextMeter() {
   });
   const triggerLabel = label + limitAlertText;
   const openUsage = scope.openUsage;
+  const compaction = scope.compaction;
+  const offer = compactionOffer(compaction?.controller.state);
+  const requestCompaction = () => {
+    if (offer.kind !== "available") return;
+    setOpen(false);
+    setConfirming(offer.executor);
+  };
+  const compactControls =
+    compaction === undefined ? undefined : (
+      <CompactControls compaction={compaction} offer={offer} onRequest={requestCompaction} />
+    );
 
   // The panel shows one of three things, and a screen reader that is told the
   // dialog is named for a heading it does not contain has been told the wrong
@@ -151,9 +176,13 @@ export function ComposerContextMeter() {
       >
         {windowModel === undefined || snapshot === undefined ? (
           fallback === undefined ? (
-            <p className="context-window-popover__source">{emptyMessage(scope.status)}</p>
+            <>
+              <p className="context-window-popover__source">{emptyMessage(scope.status)}</p>
+              {compactControls === undefined ? null : <PopoverFooter secondary={compactControls} />}
+            </>
           ) : (
             <ContextUsageFallback
+              compactControls={compactControls}
               fallback={fallback}
               {...(openUsage === undefined
                 ? {}
@@ -167,6 +196,7 @@ export function ComposerContextMeter() {
           )
         ) : (
           <ContextUsagePopover
+            compactControls={compactControls}
             onInspect={() => {
               setOpen(false);
               setInspecting(true);
@@ -188,6 +218,7 @@ export function ComposerContextMeter() {
             : { healthLabel: `Next turn: ${contextHealthLabel(health)}` }),
         })}
         {limitAlertText}
+        {compactionAnnouncement(compaction)}
       </span>
       {inspecting && snapshot !== undefined ? (
         <OctantDialog
@@ -198,6 +229,21 @@ export function ComposerContextMeter() {
         >
           <ContextInspector
             busy={scope.busy}
+            {...(compaction === undefined
+              ? {}
+              : {
+                  compaction: {
+                    offer,
+                    onRequest: requestCompaction,
+                    starting: compaction.controller.starting,
+                    status: (
+                      <CompactionStatusLine
+                        className="context-inspector__compaction oct-meta"
+                        compaction={compaction}
+                      />
+                    ),
+                  },
+                })}
             onClose={() => setInspecting(false)}
             onRebuild={scope.rebuild}
             onSetExcluded={scope.setExcluded}
@@ -206,7 +252,43 @@ export function ComposerContextMeter() {
           />
         </OctantDialog>
       ) : null}
+      {confirming === undefined || compaction === undefined ? null : (
+        <CompactSessionConfirm
+          executor={confirming}
+          names={compaction.names}
+          onCancel={() => setConfirming(undefined)}
+          onConfirm={() => {
+            void compaction.controller.compact().finally(() => setConfirming(undefined));
+          }}
+          pending={compaction.controller.starting}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * The popover's compaction row: how the latest one went, or that one runs,
+ * then the button. Both read only the host's answer.
+ */
+function CompactControls(props: {
+  readonly compaction: ComposerCompaction;
+  readonly offer: ReturnType<typeof compactionOffer>;
+  readonly onRequest: () => void;
+}) {
+  return (
+    <>
+      <CompactionStatusLine
+        className="context-window-popover__compaction"
+        compaction={props.compaction}
+      />
+      <CompactSessionButton
+        className="context-window-popover__compact"
+        offer={props.offer}
+        onRequest={props.onRequest}
+        starting={props.compaction.controller.starting}
+      />
+    </>
   );
 }
 
@@ -382,6 +464,7 @@ function providerUsageLabel(fallback: ComposerContextUsageFallback): string {
 }
 
 function ContextUsageFallback(props: {
+  readonly compactControls: ReactNode;
   readonly fallback: ComposerContextUsageFallback;
   readonly onOpenUsage?: () => void;
 }) {
@@ -469,8 +552,13 @@ function ContextUsageFallback(props: {
           ))
         )}
       </LimitSection>
-      {props.onOpenUsage === undefined ? null : (
-        <FooterAction label="View usage" onClick={props.onOpenUsage} />
+      {props.onOpenUsage === undefined && props.compactControls === undefined ? null : (
+        <PopoverFooter
+          {...(props.onOpenUsage === undefined
+            ? {}
+            : { action: { label: "View usage", onClick: props.onOpenUsage } })}
+          secondary={props.compactControls}
+        />
       )}
     </>
   );
@@ -589,6 +677,7 @@ function ThreadTotals(props: { readonly fallback: ComposerContextUsageFallback }
 }
 
 function ContextUsagePopover(props: {
+  readonly compactControls: ReactNode;
   readonly onInspect: () => void;
   readonly snapshot: ContextInspectorSnapshot;
   readonly windowModel: ReturnType<typeof contextWindowModel>;
@@ -671,7 +760,10 @@ function ContextUsagePopover(props: {
           </p>
         ) : null}
       </LimitSection>
-      <FooterAction label="Inspect context" onClick={props.onInspect} />
+      <PopoverFooter
+        action={{ label: "Inspect context", onClick: props.onInspect }}
+        secondary={props.compactControls}
+      />
     </>
   );
 }
@@ -945,19 +1037,29 @@ function distinctScopes(limits: ReadonlyArray<{ readonly window: string }>): num
   return new Set(limits.map((limit) => providerLimitWindowName(limit.window).scope ?? "")).size;
 }
 
-function FooterAction(props: { readonly label: string; readonly onClick: () => void }) {
+/**
+ * The popover's last row: its own way onward, with the Compact session
+ * controls beside it where the host answers about compaction.
+ */
+function PopoverFooter(props: {
+  readonly action?: { readonly label: string; readonly onClick: () => void };
+  readonly secondary?: ReactNode;
+}) {
   return (
     <div className="context-window-popover__footer">
-      <OctantButton
-        className="context-window-popover__footer-action"
-        onClick={props.onClick}
-        size="sm"
-        type="button"
-        variant="ghost"
-      >
-        <span>{props.label}</span>
-        <ChevronRight aria-hidden="true" size={14} />
-      </OctantButton>
+      {props.action === undefined ? null : (
+        <OctantButton
+          className="context-window-popover__footer-action"
+          onClick={props.action.onClick}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          <span>{props.action.label}</span>
+          <ChevronRight aria-hidden="true" size={14} />
+        </OctantButton>
+      )}
+      {props.secondary}
     </div>
   );
 }

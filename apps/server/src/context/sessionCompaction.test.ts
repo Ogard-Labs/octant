@@ -1272,11 +1272,46 @@ describe("compacting a session a runtime keeps", () => {
       world.close();
     });
 
+    it("tells a window whether its Code thread compacts, who would compact it, and how the latest one went", async () => {
+      const world = createRuntimeWorld({ hang: true }, "code-thread");
+      world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
+
+      expect(world.service.state(codeSubject, "local-window")).toEqual({
+        subject: codeSubject,
+        compaction: { status: "available" },
+        executor: { kind: "runtime", driverKind: "codex", providerInstanceId, modelId },
+      });
+      // A paired device is refused, and is not told who would compact.
+      expect(world.service.state(codeSubject, "remote-device")).toEqual({
+        subject: codeSubject,
+        compaction: { status: "refused", reason: "remote-client" },
+      });
+
+      world.service.start(command(codeSubject), "local-window", windowId);
+      expect(world.service.state(codeSubject, "local-window")).toMatchObject({
+        compaction: { status: "refused", reason: "compaction-running" },
+        latestCompaction: { status: "running", executor: { kind: "runtime" } },
+      });
+      expect(world.service.state(codeSubject, "local-window")).not.toHaveProperty("executor");
+
+      await world.service.settled();
+      expect(world.service.state(codeSubject, "local-window").latestCompaction).toMatchObject({
+        status: "failed",
+        reason: "timed-out",
+        sessionMayHaveChanged: true,
+      });
+      world.close();
+    });
+
     it("refuses where Code has no compaction support", () => {
       const world = createWorld();
       expect(refusalOf(() => world.service.start(command(codeSubject), "local-window"))).toBe(
         "runtime-cannot-compact",
       );
+      expect(world.service.state(codeSubject, "local-window").compaction).toEqual({
+        status: "refused",
+        reason: "runtime-cannot-compact",
+      });
       world.close();
     });
   });

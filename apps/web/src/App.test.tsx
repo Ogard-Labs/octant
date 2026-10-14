@@ -80,7 +80,7 @@ import {
   workShellBootstrap,
   workThreadId,
 } from "./App.test-fixtures";
-import { contextFixture } from "./context/contextFixtures";
+import { compactionStateFixture, contextFixture } from "./context/contextFixtures";
 
 const automationGate = vi.hoisted(() => ({ enabled: false }));
 vi.mock("./automation/automationCenterGate", () => ({
@@ -2349,6 +2349,7 @@ describe("App", () => {
     const contextApi: ContextClient = {
       inspect,
       execute: vi.fn(),
+      readCompaction: vi.fn(async (subject) => compactionStateFixture(subject)),
       externalContentAvailable: false,
       readExternalContent: vi.fn(),
       clearExternalContent: vi.fn(),
@@ -2445,6 +2446,7 @@ describe("App", () => {
         };
       }),
       execute: vi.fn(),
+      readCompaction: vi.fn(async (subject) => compactionStateFixture(subject)),
       externalContentAvailable: false,
       readExternalContent: vi.fn(),
       clearExternalContent: vi.fn(),

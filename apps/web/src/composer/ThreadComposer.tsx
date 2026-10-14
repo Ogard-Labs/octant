@@ -5,6 +5,7 @@ import { ComposerOutsideContentNotice } from "./OutsideContentNotice";
 import type { ReactNode } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
+import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ThreadStats } from "../threadStats/ThreadStats";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -127,6 +128,14 @@ export interface ThreadComposerProps {
 
 export function ThreadComposer(props: ThreadComposerProps) {
   const notice = useComposerNotice();
+  // The host refuses a turn while the session compacts, so send waits too, and
+  // says why under the row.
+  const compacting = useComposerCompacting();
+  const compactingNote = compacting ? (
+    <p className="oct-meta thread-composer__compacting" data-compacting="">
+      Compacting session
+    </p>
+  ) : null;
   const activeDropKey = useActiveComposerThreadDropKey();
   const dropKey = props.threadDropKey;
   const dropActive = dropKey !== undefined && activeDropKey === dropKey;
@@ -162,7 +171,11 @@ export function ThreadComposer(props: ThreadComposerProps) {
       {...(props.row.toolbar === true ? { role: "toolbar" } : {})}
     >
       {props.row.leading}
-      <ThreadComposerTrailing actions={props.row.actions} controls={props.row.trailing} />
+      <ThreadComposerTrailing
+        actions={props.row.actions}
+        compacting={compacting}
+        controls={props.row.trailing}
+      />
     </div>
   );
   const body = followUp ? (
@@ -170,7 +183,10 @@ export function ThreadComposer(props: ThreadComposerProps) {
       <div className="thread-composer__surface">
         <ComposerOutsideContentNotice busy={props.threadBusy === true} />
         {message}
-        <div className="thread-composer__feedback">{props.footer}</div>
+        <div className="thread-composer__feedback">
+          {compactingNote}
+          {props.footer}
+        </div>
         {controls}
       </div>
       {props.context === undefined ? null : (
@@ -182,6 +198,7 @@ export function ThreadComposer(props: ThreadComposerProps) {
     <>
       {message}
       {controls}
+      {compactingNote}
       {props.footer}
       <ThreadStats />
     </>
@@ -228,12 +245,13 @@ function ComposerThreadDropCue() {
   );
 }
 
-function sendRefused(send: ThreadComposerSend): boolean {
-  return send.disabled === true || send.disabledReason !== undefined;
+function sendRefused(send: ThreadComposerSend, compacting: boolean): boolean {
+  return compacting || send.disabled === true || send.disabledReason !== undefined;
 }
 
 function ThreadComposerTrailing(props: {
   readonly actions: ThreadComposerActions;
+  readonly compacting: boolean;
   readonly controls?: ReactNode;
 }) {
   const meter = <ComposerContextMeter />;
@@ -245,7 +263,7 @@ function ThreadComposerTrailing(props: {
         {meter}
         <OctantButton
           aria-label={send.ariaLabel}
-          disabled={sendRefused(send)}
+          disabled={sendRefused(send, props.compacting)}
           {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
           size="icon"
           type={send.onSend === undefined ? "submit" : "button"}
@@ -275,7 +293,7 @@ function ThreadComposerTrailing(props: {
       ) : null}
       <OctantButton
         aria-label={send.ariaLabel}
-        disabled={sendRefused(send)}
+        disabled={sendRefused(send, props.compacting)}
         {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
         size="icon"
         type="button"

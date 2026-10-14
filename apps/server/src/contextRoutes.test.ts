@@ -260,6 +260,80 @@ describe("context routes", () => {
       subject,
     });
   });
+
+  describe("compaction state", () => {
+    const codeSubject = subjectOf("code-thread");
+    const query = (threadSubject: ContextSubjectRef) =>
+      `/api/context/compaction?aggregateType=${String(threadSubject.aggregateType)}&aggregateId=${String(threadSubject.aggregateId)}`;
+
+    it("answers a window that can open the thread, Code included", async () => {
+      const compactionState = vi.fn((threadSubject: ContextSubjectRef) => ({
+        subject: threadSubject,
+        compaction: { status: "refused" as const, reason: "no-session" as const },
+      }));
+      const windowCanOpenThread = vi.fn(async () => true);
+      const route = handler({ compactionState }, windowCanOpenThread);
+
+      const response = await route(read(query(codeSubject)));
+
+      expect(response?.status).toBe(200);
+      await expect(response?.json()).resolves.toEqual({
+        subject: codeSubject,
+        compaction: { status: "refused", reason: "no-session" },
+      });
+      expect(windowCanOpenThread).toHaveBeenCalledWith(windowId, "code-thread", subjectId);
+      expect(compactionState).toHaveBeenCalledWith(codeSubject, "local-window");
+    });
+
+    it("refuses a window that cannot open the thread before the service is asked", async () => {
+      const compactionState = vi.fn();
+      const route = handler({ compactionState }, async () => false);
+
+      const response = await route(read(query(codeSubject)));
+
+      expect(response?.status).toBe(403);
+      expect(compactionState).not.toHaveBeenCalled();
+    });
+
+    it("refuses missing authority, a malformed or widened query, and any method but GET", async () => {
+      const compactionState = vi.fn();
+      const route = handler({ compactionState });
+
+      expect((await route(read(query(codeSubject), "")))?.status).toBe(401);
+      expect((await route(read("/api/context/compaction")))?.status).toBe(400);
+      expect(
+        (await route(read(`${query(codeSubject)}&windowId=${String(windowId)}`)))?.status,
+      ).toBe(400);
+      expect(
+        (await route(read(`/api/context/compaction?aggregateType=code-thread&aggregateId=x`)))
+          ?.status,
+      ).toBe(400);
+      expect((await route(request(query(codeSubject), {})))?.status).toBe(400);
+      expect(
+        (await route(read(query(subjectOf("project")))))?.status,
+        "a subject that is no thread",
+      ).toBe(403);
+      expect(compactionState).not.toHaveBeenCalled();
+    });
+
+    it("tells the service a paired device is asking", async () => {
+      const compactionState = vi.fn((threadSubject: ContextSubjectRef) => ({
+        subject: threadSubject,
+        compaction: { status: "refused" as const, reason: "remote-client" as const },
+      }));
+      const route = handler({ compactionState });
+      const remote = read(query(subject));
+      bindPrincipalRouteContext(remote, {
+        principal: { kind: "remote-device" } as never,
+        scopeId: windowId,
+      });
+
+      const response = await route(remote);
+
+      expect(response?.status).toBe(200);
+      expect(compactionState).toHaveBeenCalledWith(subject, "remote-device");
+    });
+  });
 });
 
 function handler(
@@ -274,6 +348,7 @@ function handler(
       principal: ContextRoutePrincipal,
       window: WindowId,
     ) => ReturnType<ContextRouteService["execute"]>;
+    compactionState: ContextRouteService["compactionState"];
   }> = {},
   windowCanOpenThread: (
     windowId: WindowId,
@@ -288,6 +363,12 @@ function handler(
       inspect: service.inspect ?? (() => ({ subject, sequence: 1 }) as never),
       execute:
         service.execute ?? (() => ({ kind: "context-rebuilt", snapshot: { subject } }) as never),
+      compactionState:
+        service.compactionState ??
+        ((threadSubject) => ({
+          subject: threadSubject,
+          compaction: { status: "refused", reason: "no-session" },
+        })),
     },
     windowCanOpenThread,
     windowAuthorityStore: store,
@@ -301,6 +382,10 @@ function request(path: string, body: unknown, authority = capability): Request {
     headers: headers(authority),
     body: JSON.stringify(body),
   });
+}
+
+function read(path: string, authority = capability): Request {
+  return new Request(`http://127.0.0.1${path}`, { method: "GET", headers: headers(authority) });
 }
 
 function headers(authority: string): HeadersInit {

@@ -3,7 +3,12 @@ import { ContextClientFailure } from "@octant/client-runtime/context-client";
 import type { ContextCommand } from "@octant/contracts";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { contextFixture, contextReconnectFixture, contextReplayFixture } from "./contextFixtures";
+import {
+  compactionStateFixture,
+  contextFixture,
+  contextReconnectFixture,
+  contextReplayFixture,
+} from "./contextFixtures";
 import { useContextController } from "./useContextController";
 
 const subject = contextFixture().subject;
@@ -332,6 +337,7 @@ function fakeClient(overrides: Partial<ContextClient> = {}): ContextClient {
   return {
     inspect: vi.fn(async () => contextFixture()),
     execute: vi.fn(async () => ({ kind: "context-rebuilt" as const, snapshot: contextFixture() })),
+    readCompaction: vi.fn(async (subject) => compactionStateFixture(subject)),
     externalContentAvailable: false,
     readExternalContent: vi.fn(),
     clearExternalContent: vi.fn(),

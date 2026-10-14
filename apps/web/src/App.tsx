@@ -407,6 +407,8 @@ import { ThreadStatsProvider } from "./threadStats/threadStatsScope";
 import { OutputLimitContinueProvider } from "./transcript/outputLimitNote";
 import { useThreadTurnMetrics } from "./threadStats/useThreadTurnMetrics";
 import { useContextController } from "./context/useContextController";
+import { useSessionCompaction } from "./context/useSessionCompaction";
+import type { ComposerCompaction } from "./context/composerContextMeterScope";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import {
   createCodeReadCursorStore,
@@ -3182,6 +3184,36 @@ function LaunchedShell(
     activeCodeThreadController?.threadUsage,
     providerController.observedByInstance,
   ]);
+  // Turns starting and ending move each mode's navigation feed, which is when
+  // the host's answer about compacting the thread can change.
+  const sessionCompaction = useSessionCompaction({
+    client: contextClient,
+    subject: contextSubject,
+    revision:
+      activeMode === "chat"
+        ? machineChanges.chatNavigation
+        : activeMode === "work"
+          ? machineChanges.workNavigation
+          : machineChanges.codeNavigation,
+    // A compaction changes what the next turn is planned from.
+    onSettled: () => void contextController.retry(),
+  });
+  const composerCompaction = useMemo<ComposerCompaction>(
+    () => ({
+      controller: sessionCompaction,
+      names: {
+        provider: (providerInstanceId) =>
+          providerController.instances.find(
+            (instance) => String(instance.id) === String(providerInstanceId),
+          )?.displayName,
+        model: (providerInstanceId, modelId) =>
+          providerController.observedByInstance
+            .get(providerInstanceId)
+            ?.models.find((listed) => String(listed.id) === String(modelId))?.displayName,
+      },
+    }),
+    [providerController.instances, providerController.observedByInstance, sessionCompaction],
+  );
   const workCreateThreadAvailable = workProviderChoice !== undefined;
   const enabledProjectTypes = new Set(
     enabledModes(controller.settings ?? { chatEnabled: true, workEnabled: true }),
@@ -7437,6 +7469,7 @@ function LaunchedShell(
                   >
                     <ComposerContextMeterProvider
                       busy={contextController.status === "updating"}
+                      compaction={composerCompaction}
                       onOpenUsage={() => void controller.openSettings({ section: "usage" })}
                       onRebuild={() => void contextController.rebuild()}
                       onSetExcluded={(entryId, excluded) =>

@@ -8555,6 +8555,7 @@ export function startOctantServer(
           command.kind === "compact-session"
             ? sessionCompaction.start(command, principal, windowId)
             : contextHarness.execute(command),
+        compactionState: (subject, principal) => sessionCompaction.state(subject, principal),
       },
       windowCanOpenThread,
       windowAuthorityStore,

@@ -1,3 +1,4 @@
+import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ComputerUseMention, useComputerUseMention } from "../computerUse/ComputerUseMention";
 import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import {
@@ -274,6 +275,7 @@ export function ChatComposer(props: ChatComposerProps) {
     props.sendDisabledReason ??
     (trimmedDraft.length === 0 && !hasQuoteChips ? "Enter a message before sending." : undefined);
   const [sendPending, setSendPending] = useState(false);
+  const compacting = useComposerCompacting();
   const [attachmentNotice, setAttachmentNotice] = useState<string>();
   const [sendError, setSendError] = useState<string | undefined>(undefined);
   const sendDisabledReason = extensionResolving
@@ -351,7 +353,7 @@ export function ChatComposer(props: ChatComposerProps) {
   }
 
   function send() {
-    if (sendDisabledReason !== undefined) return;
+    if (sendDisabledReason !== undefined || compacting) return;
     markInteraction("renderer", "send-requested");
     setSendPending(true);
     setSendError(undefined);

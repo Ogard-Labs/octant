@@ -9,6 +9,7 @@ import {
   type ContextCompactionRecord,
   type ContextCompactionRefusalReason,
   type ContextCompactionSettledRecord,
+  type ContextCompactionState,
   type ContextInspectorSnapshot,
   type ContextSubjectRef,
   type KnownTokenMeasurement,
@@ -259,6 +260,28 @@ export class SessionCompactionService {
   ): ContextInspectorSnapshot {
     const snapshot = this.#options.harness.inspect(subject, afterSequence);
     return { ...snapshot, compaction: this.#admission(subject, principal).availability };
+  }
+
+  /**
+   * Whether this caller may compact the thread now, its latest compaction, and
+   * who would compact it. A Code thread has no context plan, so this is the
+   * only read that tells its window; it decides exactly as {@link start} does.
+   */
+  state(subject: ContextSubjectRef, principal: Principal): ContextCompactionState {
+    const admission = this.#admission(subject, principal);
+    const latestCompaction = this.#options.harness.latestCompaction(subject);
+    const executor = admission.run === undefined ? undefined : this.#executor(admission.run);
+    // `start` refuses a run it cannot name an executor for, so this does too.
+    const compaction: ContextCompactionAvailability =
+      admission.availability.status === "available" && executor === undefined
+        ? { status: "refused", reason: "provider-unavailable" }
+        : admission.availability;
+    return {
+      subject,
+      compaction,
+      ...(latestCompaction === undefined ? {} : { latestCompaction }),
+      ...(compaction.status === "available" && executor !== undefined ? { executor } : {}),
+    };
   }
 
   /**

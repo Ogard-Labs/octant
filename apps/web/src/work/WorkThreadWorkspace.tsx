@@ -1,3 +1,4 @@
+import { useComposerCompacting } from "../context/composerContextMeterScope";
 import {
   BrowserUseMention,
   ComputerUseMention,
@@ -823,8 +824,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
   const fileMentionOpen = fileMentions.open && !mention.open;
+  const compacting = useComposerCompacting();
   const canSubmit =
     trimmed.length > 0 &&
+    !compacting &&
     !creating &&
     !slash.resolving &&
     !completionLocked &&

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeContextCommand,
+  decodeContextCompactionState,
   decodeContextCommandResult,
   decodeContextFailure,
   decodeContextInspectorRequest,
@@ -286,6 +287,36 @@ describe("context RPC contracts", () => {
       tokensFreed: { kind: "estimated", tokens: 0, accuracy: "conservative-heuristic" },
     });
     rejects({ subject: { ...subject, aggregateId: "10000000-0000-4000-8000-000000000099" } });
+  });
+
+  it("names who would compact only while the server offers it", () => {
+    const executor = { kind: "runtime", driverKind: "codex", providerInstanceId };
+    expect(
+      decodeContextCompactionState({ subject, compaction: { status: "available" }, executor }),
+    ).toEqual({ subject, compaction: { status: "available" }, executor });
+    const running = {
+      status: "running",
+      compactionId: "60000000-0000-4000-8000-000000000001",
+      executor,
+      requestedAt: timestamp,
+    };
+    expect(
+      decodeContextCompactionState({
+        subject,
+        compaction: { status: "refused", reason: "compaction-running" },
+        latestCompaction: running,
+      }).latestCompaction,
+    ).toEqual(running);
+    expect(() =>
+      decodeContextCompactionState({ subject, compaction: { status: "available" } }),
+    ).toThrow();
+    expect(() =>
+      decodeContextCompactionState({
+        subject,
+        compaction: { status: "refused", reason: "remote-client" },
+        executor,
+      }),
+    ).toThrow();
   });
 });
 

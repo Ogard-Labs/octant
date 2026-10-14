@@ -3,10 +3,20 @@ import type { ContextEntryId } from "@octant/contracts/context";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import type { CodeProviderLimit } from "@octant/contracts/code-operations";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import type { CompactionNames } from "./sessionCompactionPresentation";
 import type { ContextControllerStatus } from "./useContextController";
+import type { SessionCompactionController } from "./useSessionCompaction";
+
+/** The thread's Compact session control, as the host answered it, and the names it shows. */
+export interface ComposerCompaction {
+  readonly controller: SessionCompactionController;
+  readonly names: CompactionNames;
+}
 
 export interface ComposerContextMeterScopeValue {
   readonly busy: boolean;
+  /** Absent where the window has no way to ask the host about compaction. */
+  readonly compaction?: ComposerCompaction;
   /**
    * Opens the host's usage surface. Absent where none is reachable, and then
    * the meter offers no way there rather than a control that does nothing.
@@ -73,6 +83,7 @@ const ComposerContextMeterVisibleContext = createContext(false);
 export interface ComposerContextMeterProviderProps {
   readonly busy?: boolean;
   readonly children: ReactNode;
+  readonly compaction?: ComposerCompaction;
   readonly onOpenUsage?: () => void;
   readonly onRebuild?: () => void;
   readonly onSetExcluded?: (entryId: ContextEntryId, excluded: boolean) => void;
@@ -100,6 +111,7 @@ export function ComposerContextMeterProvider(props: ComposerContextMeterProvider
       setExcluded,
       setPinned,
       status: props.status,
+      ...(props.compaction === undefined ? {} : { compaction: props.compaction }),
       ...(props.onOpenUsage === undefined ? {} : { openUsage: props.onOpenUsage }),
       ...(props.snapshot === undefined ? {} : { snapshot: props.snapshot }),
       ...(props.fallback === undefined ? {} : { fallback: props.fallback }),
@@ -107,6 +119,7 @@ export function ComposerContextMeterProvider(props: ComposerContextMeterProvider
     }),
     [
       props.busy,
+      props.compaction,
       props.onOpenUsage,
       openNonce,
       props.snapshot,
@@ -141,4 +154,16 @@ export function useComposerContextMeterScope(): ComposerContextMeterScopeValue {
   const data = useContext(ComposerContextMeterDataContext);
   const visible = useContext(ComposerContextMeterVisibleContext);
   return { ...data, visible };
+}
+
+/**
+ * The host has a compaction running on the thread this composer writes to.
+ * The host refuses a turn meanwhile; the composer holds send rather than
+ * offering one it would refuse.
+ */
+export function useComposerCompacting(): boolean {
+  const scope = useComposerContextMeterScope();
+  return (
+    scope.visible && scope.compaction?.controller.state?.latestCompaction?.status === "running"
+  );
 }

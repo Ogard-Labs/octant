@@ -1,7 +1,8 @@
 import type { ContextEntryId, ContextRemedy, ServiceLimitBucket } from "@octant/contracts/context";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { hasKnownContextWindow } from "@octant/domain/context-policy";
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
+import { CompactSessionButton } from "./CompactSession";
 import {
   contextWindowSourceLabel,
   contextCategoryLabel,
@@ -13,6 +14,7 @@ import {
   tokenMeasurementLabel,
   type ContextCompositionEntry,
 } from "./contextInspectorModel";
+import type { CompactionOffer } from "./sessionCompactionPresentation";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCard } from "../ui/base/OctantCard";
 import "./context.css";
@@ -25,6 +27,14 @@ const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
 
 export interface ContextInspectorProps {
   readonly busy: boolean;
+  /** The Compact session control, where the host answers about compaction. */
+  readonly compaction?: {
+    readonly offer: CompactionOffer;
+    readonly onRequest: () => void;
+    readonly starting: boolean;
+    /** How the latest compaction went, or that one runs. */
+    readonly status: ReactNode;
+  };
   readonly onClose: () => void;
   readonly onRebuild: () => void;
   readonly onSetExcluded: (entryId: ContextEntryId, excluded: boolean) => void;
@@ -37,6 +47,11 @@ export function ContextInspector(props: ContextInspectorProps) {
   const { snapshot } = props;
   const { plan } = snapshot.next;
   const composition = contextCompositionEntries(snapshot);
+  // Compacting is the one remedy with an action behind it, and a session the
+  // host will never compact is not offered it.
+  const remedies = uniqueRemedies(plan.remedies).filter(
+    (remedy) => remedy.kind !== "compact-range" || props.compaction?.offer.kind !== "hidden",
+  );
   const close = () => {
     props.onClose();
     queueMicrotask(() => props.restoreFocus?.current?.focus());
@@ -47,8 +62,16 @@ export function ContextInspector(props: ContextInspectorProps) {
         <div>
           <span className="context-inspector__eyebrow">{snapshot.displayLabel}</span>
           <h2>Context inspector</h2>
+          {props.compaction?.status}
         </div>
         <div className="context-inspector__header-actions">
+          {props.compaction === undefined ? null : (
+            <CompactSessionButton
+              offer={props.compaction.offer}
+              onRequest={props.compaction.onRequest}
+              starting={props.compaction.starting}
+            />
+          )}
           <OctantButton
             disabled={props.busy}
             onClick={props.onRebuild}
@@ -196,12 +219,22 @@ export function ContextInspector(props: ContextInspectorProps) {
           )}
         </section>
 
-        {plan.remedies.length === 0 ? null : (
+        {remedies.length === 0 ? null : (
           <section aria-labelledby="context-remedies-title" className="context-inspector__section">
             <h3 id="context-remedies-title">Safe remedies</h3>
             <ul>
-              {uniqueRemedies(plan.remedies).map((remedy) => (
-                <li key={remedyKey(remedy)}>{remedyLabel(remedy)}</li>
+              {remedies.map((remedy) => (
+                <li key={remedyKey(remedy)}>
+                  {remedy.kind === "compact-range" && props.compaction !== undefined ? (
+                    <CompactSessionButton
+                      offer={props.compaction.offer}
+                      onRequest={props.compaction.onRequest}
+                      starting={props.compaction.starting}
+                    />
+                  ) : (
+                    remedyLabel(remedy)
+                  )}
+                </li>
               ))}
             </ul>
           </section>
@@ -365,7 +398,7 @@ function remedyLabel(remedy: ContextRemedy): string {
   return {
     "unpin-context": "Unpin context",
     "exclude-context": "Exclude optional context",
-    "compact-range": "Compact a conversation range",
+    "compact-range": "Compact session",
     "unload-capabilities": "Unload optional capabilities",
     "replace-with-reference": "Replace content with a local reference",
     "reduce-output-reserve": "Reduce the explicit output reserve",

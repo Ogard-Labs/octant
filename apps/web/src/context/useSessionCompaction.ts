@@ -1,0 +1,178 @@
+import { ContextClientFailure, type ContextClient } from "@octant/client-runtime/context-client";
+import {
+  decodeContextCompactionId,
+  type ContextCompactionRefusalReason,
+  type ContextSubjectRef,
+} from "@octant/contracts/context";
+import type { ContextCompactionState } from "@octant/contracts/context-rpc";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+export interface SessionCompactionController {
+  /** The host's latest answer for this thread; absent until it answers. */
+  readonly state?: ContextCompactionState;
+  /** The person confirmed, and the host has not answered the request yet. */
+  readonly starting: boolean;
+  /** Why the host refused the person's last request, while it still refuses. */
+  readonly refusal?: ContextCompactionRefusalReason;
+  /** The request could not reach the host or was not understood. */
+  readonly errorMessage?: string;
+  /**
+   * A compaction this window watched end. Its outcome is announced once;
+   * a result that was already there when the thread opened is not.
+   */
+  readonly settledId?: string;
+  readonly compact: () => Promise<void>;
+}
+
+export interface UseSessionCompactionOptions {
+  readonly client: ContextClient | undefined;
+  readonly subject: ContextSubjectRef | undefined;
+  /**
+   * Changes when the thread's turns move on, which is when the host's answer
+   * (a turn running, a session to compact) can change.
+   */
+  readonly revision?: number;
+  /** Called once a compaction this window watched has ended. */
+  readonly onSettled?: () => void;
+  readonly newCompactionId?: () => string;
+  /** How often to ask again while a compaction runs. */
+  readonly pollMs?: number;
+}
+
+const DEFAULT_POLL_MS = 1_500;
+
+/**
+ * The Compact session control's state, read from the host and never derived
+ * here. A running compaction is asked about again until it ends: Work and Code
+ * streams do not carry its outcome to this window, and the read is the one
+ * answer every thread kind shares.
+ */
+export function useSessionCompaction(
+  options: UseSessionCompactionOptions,
+): SessionCompactionController {
+  const { client, revision } = options;
+  const aggregateType = options.subject?.aggregateType;
+  const aggregateId = options.subject?.aggregateId;
+  const subject = useMemo<ContextSubjectRef | undefined>(
+    () =>
+      aggregateType === undefined || aggregateId === undefined
+        ? undefined
+        : { aggregateType, aggregateId },
+    [aggregateId, aggregateType],
+  );
+  const [state, setState] = useState<ContextCompactionState | undefined>(undefined);
+  const [starting, setStarting] = useState(false);
+  const [refusal, setRefusal] = useState<ContextCompactionRefusalReason | undefined>(undefined);
+  const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
+  const [settledId, setSettledId] = useState<string | undefined>(undefined);
+  // Counts answers, so a running compaction is asked about again after each
+  // one even when the host's answer is unchanged.
+  const [answers, setAnswers] = useState(0);
+  const requestRef = useRef<AbortController | undefined>(undefined);
+  // Compactions this window saw running or asked for, so the end of one is
+  // told apart from a result that was already there.
+  const watched = useRef(new Set<string>());
+  const onSettled = useRef(options.onSettled);
+  onSettled.current = options.onSettled;
+  const newCompactionId = options.newCompactionId ?? randomId;
+  const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
+
+  const load = useCallback(async () => {
+    requestRef.current?.abort();
+    if (client === undefined || subject === undefined) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    try {
+      const next = await client.readCompaction(subject, controller.signal);
+      if (controller.signal.aborted) return;
+      const latest = next.latestCompaction;
+      if (latest !== undefined) {
+        const id = latestId(latest);
+        if (latest.status === "running") watched.current.add(id);
+        else if (watched.current.delete(id)) {
+          setSettledId(id);
+          onSettled.current?.();
+        }
+      }
+      if (next.compaction.status === "available") setRefusal(undefined);
+      setState(next);
+      setAnswers((count) => count + 1);
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (error instanceof ContextClientFailure && error.category === "interrupted") return;
+      // A host that cannot say is not offering anything.
+      setState(undefined);
+    }
+  }, [client, subject]);
+
+  useEffect(() => {
+    watched.current.clear();
+    setState(undefined);
+    setStarting(false);
+    setRefusal(undefined);
+    setErrorMessage(undefined);
+    setSettledId(undefined);
+    void load();
+    return () => requestRef.current?.abort();
+  }, [load]);
+
+  const observedRevision = useRef(revision);
+  useEffect(() => {
+    if (revision === undefined || observedRevision.current === revision) return;
+    observedRevision.current = revision;
+    void load();
+  }, [load, revision]);
+
+  const running = state?.latestCompaction?.status === "running";
+  useEffect(() => {
+    if (!running) return;
+    const timer = setTimeout(() => void load(), pollMs);
+    return () => clearTimeout(timer);
+  }, [answers, load, pollMs, running]);
+
+  const startingRef = useRef(false);
+  const compact = useCallback(async () => {
+    if (client === undefined || subject === undefined || startingRef.current) return;
+    startingRef.current = true;
+    setStarting(true);
+    setRefusal(undefined);
+    setErrorMessage(undefined);
+    const compactionId = decodeContextCompactionId(newCompactionId());
+    watched.current.add(String(compactionId));
+    try {
+      await client.execute({ kind: "compact-session", subject, compactionId });
+    } catch (error) {
+      watched.current.delete(String(compactionId));
+      if (
+        error instanceof ContextClientFailure &&
+        error.category === "compaction-refused" &&
+        error.reason !== undefined
+      ) {
+        setRefusal(error.reason);
+      } else {
+        setErrorMessage("Couldn't compact: the host did not answer. Try again.");
+      }
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
+    }
+    await load();
+  }, [client, load, newCompactionId, subject]);
+
+  return {
+    starting,
+    compact,
+    ...(state === undefined ? {} : { state }),
+    ...(refusal === undefined ? {} : { refusal }),
+    ...(errorMessage === undefined ? {} : { errorMessage }),
+    ...(settledId === undefined ? {} : { settledId }),
+  };
+}
+
+function latestId(record: NonNullable<ContextCompactionState["latestCompaction"]>): string {
+  return String(record.status === "completed" ? record.receipt.compactionId : record.compactionId);
+}
+
+function randomId(): string {
+  return globalThis.crypto.randomUUID();
+}
