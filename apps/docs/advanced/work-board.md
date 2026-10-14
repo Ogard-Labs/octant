@@ -1,5 +1,5 @@
 ---
-description: The runtime-derived Work Thread Board, its statuses, Project grouping, filters, and delivery confirmation.
+description: The runtime-derived Work Thread Board, its statuses, Project grouping, filters, and marking a thread Done.
 ---
 
 # Work Thread Board
@@ -16,16 +16,16 @@ projection over one ordered card set.
 
 - **Ready** — configured, queued, or idle with unmet delivery criteria.
 - **In progress** — a provider turn, tool, or child run is actively executing.
-- **Waiting** — needs approval or input, an interrupted turn, recovery, or
-  stale or ambiguous delivery evidence. The specific reason stays on the card.
-- **Done** — the user-confirmed Work delivery target is objectively satisfied.
-  A completed model turn is not enough.
+- **Waiting** — needs approval or input, an interrupted turn, or recovery.
+  The specific reason stays on the card.
+- **Done** — you marked the thread Done. A completed model turn is not
+  enough.
 
 **Done** is a first-class visible status in both groupings, with no implicit
 completed-item suppression. A thread you **Put away** from the sidebar is
 different: it leaves the board until you reopen it or
-send it a new message. Ambiguous evidence becomes **Waiting**, never
-**Done**. Unread is a client overlay and is not part of the server card.
+send it a new message. Only your mark makes a Work thread **Done**. Unread is
+a client overlay and is not part of the server card.
 Refresh re-queries local authoritative state and keeps the last useful view
 while refreshing or on failure.
 
@@ -72,12 +72,16 @@ follow-up, recovery, and last meaningful activity. Opening a card activates
 that exact Project and thread. Work is OS-confined: cards never carry a Git
 checkout, worktree, or pull request.
 
-## Delivery targets
+## Marking a thread Done
 
-A Work thread is Done only when you confirm the current delivery target —
-the thread title — with bounded satisfaction evidence. Agents cannot mark
-the thread complete. Stale citations, a mismatched binding revision, or
-outstanding child-run results keep the thread in **Waiting**.
+A Work thread is Done when you say so. In the task, open **Task actions**
+(the ⋯ button in the composer), choose **Mark done**, and confirm. You do not
+have to describe what was delivered. The card moves to **Done** and stays
+there: stale citations, a renamed thread, or child runs still going do not
+move it back to **Waiting**. Agents cannot mark a thread Done.
+
+Once a thread is marked Done, its composer and provider lock. To work in it
+again, archive it and reactivate it, which clears the mark.
 
 ## Out of scope
 

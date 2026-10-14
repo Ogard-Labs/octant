@@ -807,7 +807,51 @@ describe("WorkThreadService", () => {
     );
   });
 
-  it("persists an authorized explicit completion confirmation", async () => {
+  it("lets a person mark a Work thread Done with no evidence text", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+
+    const marked = await fixture.service.execute(ids.window, {
+      kind: "confirm-work-thread-completion",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      deliveryTarget: "Draft brief",
+    });
+    expect(marked).toMatchObject({
+      kind: "thread-completion-confirmed",
+      thread: { id: ids.thread, lifecycle: "active", version: 2, completionConfirmed: true },
+    });
+    if (!("thread" in marked)) throw new Error("Expected the marked thread.");
+    // No note means no evidence record, so a paired phone on an older build
+    // still decodes the thread.
+    expect(marked.thread).not.toHaveProperty("completionEvidence");
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({
+            eventName: "work.thread-completion-confirmed@1",
+            actor: expect.objectContaining({ kind: "local-user" }),
+          }),
+        ],
+      }),
+    );
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "confirm-work-thread-completion",
+        threadId: ids.thread,
+        expectedVersion: 2,
+        deliveryTarget: "Draft brief",
+      }),
+    ).rejects.toEqual(
+      new WorkThreadServiceError({
+        category: "invalid",
+        message: "Work thread completion was already confirmed.",
+      }),
+    );
+  });
+
+  it("keeps an evidence note an older client sends with the mark", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
 
     await expect(
@@ -821,43 +865,36 @@ describe("WorkThreadService", () => {
     ).resolves.toMatchObject({
       kind: "thread-completion-confirmed",
       thread: {
-        id: ids.thread,
-        lifecycle: "active",
-        version: 2,
+        completionConfirmed: true,
         completionEvidence: {
           deliveryTarget: "Draft brief",
           satisfactionEvidence: "The requested brief was reviewed and saved.",
         },
       },
     });
-    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
-      expect.objectContaining({
-        expectedVersion: 1,
-        events: [
-          expect.objectContaining({
-            eventName: "work.thread-completion-confirmed@1",
-          }),
-        ],
-      }),
-    );
+  });
+
+  it("refuses a routine or anything else acting as the host when it tries to mark a thread Done", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
 
     await expect(
-      fixture.service.execute(ids.window, {
+      fixture.service.execute(ROUTINE_HOST_SCOPE_ID, {
         kind: "confirm-work-thread-completion",
         threadId: ids.thread,
-        expectedVersion: 2,
+        expectedVersion: 1,
         deliveryTarget: "Draft brief",
-        satisfactionEvidence: "The requested brief was reviewed and saved.",
       }),
     ).rejects.toEqual(
       new WorkThreadServiceError({
-        category: "invalid",
-        message: "Work thread completion was already confirmed.",
+        category: "unauthorized",
+        message: "Only a person can mark a Work thread Done.",
       }),
     );
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.projection.read(ids.thread)?.completionConfirmed).toBeUndefined();
   });
 
-  it("rejects completion unless evidence names the authoritative delivery target", async () => {
+  it("refuses a mark that names a different delivery target than the thread holds", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
 
     await expect(
@@ -866,7 +903,6 @@ describe("WorkThreadService", () => {
         threadId: ids.thread,
         expectedVersion: 1,
         deliveryTarget: "A different request",
-        satisfactionEvidence: "Something else was delivered.",
       }),
     ).rejects.toEqual(
       new WorkThreadServiceError({
@@ -885,7 +921,6 @@ describe("WorkThreadService", () => {
       threadId: ids.thread,
       expectedVersion: 1,
       deliveryTarget: "Draft brief",
-      satisfactionEvidence: "The requested brief was reviewed and saved.",
     });
     await fixture.service.execute(ids.window, {
       kind: "change-work-thread-lifecycle",
@@ -914,7 +949,6 @@ describe("WorkThreadService", () => {
         threadId: ids.thread,
         expectedVersion: 4,
         deliveryTarget: "Draft brief",
-        satisfactionEvidence: "The requested brief was reviewed and saved again.",
       }),
     ).resolves.toMatchObject({
       kind: "thread-completion-confirmed",
