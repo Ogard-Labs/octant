@@ -8,6 +8,7 @@ import {
   NativeHarnessTranscriptMessageAppended,
   NativeHarnessTranscriptOpened,
   NativeHarnessTranscriptToolSettled,
+  NativeHarnessTranscriptCompacted,
   NativeHarnessAdvisorIntervention,
   NativeHarnessContextReduction,
   NativeHarnessFollowUpCreation,
@@ -155,5 +156,6 @@ export function registerNativeHarnessEvents(registry: EventRegistry): EventRegis
       NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES.toolSettled,
       1,
       NativeHarnessTranscriptToolSettled,
-    );
+    )
+    .register(NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES.compacted, 1, NativeHarnessTranscriptCompacted);
 }

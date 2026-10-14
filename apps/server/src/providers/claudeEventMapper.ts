@@ -1052,7 +1052,16 @@ export function mapClaudeMessage(
       // or an unknown amount; a stale pre-compaction figure would show it full.
       if (message.postTokens === undefined) delete context.contextTokens;
       else context.contextTokens = message.postTokens;
-      return [{ kind: "ignored" }];
+      // `manual` is the runtime's name for a compaction `/compact` asked for,
+      // and only the connection's `compact` sends that command.
+      return [
+        event(context, {
+          kind: "context-compacted",
+          trigger: message.trigger === "manual" ? "requested" : "automatic",
+          tokensBefore: message.preTokens,
+          ...(message.postTokens === undefined ? {} : { tokensAfter: message.postTokens }),
+        }),
+      ];
     case "ignored":
       return [{ kind: "ignored" }];
     default:

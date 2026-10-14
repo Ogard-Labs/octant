@@ -341,6 +341,7 @@ async function driverFixture(port: ReturnType<typeof createAgentRunClaudeResumeI
       },
     ],
     account: { ready: true, apiProvider: "firstParty" },
+    compactAnnounced: true,
   };
   const closed = vi.fn(() => Effect.void);
   const query: ClaudeQueryPort = {
@@ -348,6 +349,7 @@ async function driverFixture(port: ReturnType<typeof createAgentRunClaudeResumeI
     sessionId: Effect.succeed(identity.sdkSessionId),
     messages: Stream.never,
     send: () => Effect.void,
+    requestCompaction: () => Effect.void,
     interrupt: () => Effect.void,
     setPermissionMode: () => Effect.void,
     supportedModels: () => Effect.succeed(initialization.models),

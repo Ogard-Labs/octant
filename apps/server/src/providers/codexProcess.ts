@@ -232,7 +232,10 @@ function parseCodexVersion(output: string): string | undefined {
 }
 
 /** A release, not its prereleases: `0.145.0-alpha.1` predates `0.145.0`. */
-function isAtLeastRelease(version: string, floor: readonly [number, number, number]): boolean {
+export function isAtLeastRelease(
+  version: string,
+  floor: readonly [number, number, number],
+): boolean {
   const match = /^(\d+)\.(\d+)\.(\d+)(-)?/.exec(version);
   if (match === null) return false;
   const core = [Number(match[1]), Number(match[2]), Number(match[3])];

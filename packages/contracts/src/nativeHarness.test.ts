@@ -14,6 +14,7 @@ import {
   decodeNativeHarnessToolResultBounds,
   decodeNativeHarnessTurnRecord,
 } from "./nativeHarness";
+import { decodeNativeHarnessTranscriptCompacted } from "./nativeHarnessTranscript";
 
 const at = "2026-09-05T10:00:00.000Z";
 const later = "2026-09-05T10:00:05.000Z";
@@ -379,5 +380,26 @@ describe("native harness follow-up suggestions", () => {
         confirmed: false,
       }),
     ).toThrow();
+  });
+});
+
+describe("a compacted harness transcript", () => {
+  const compacted = {
+    sessionId: "00000000-0000-4000-8000-0000000000c1",
+    summary: "Chose the queue design.",
+    turns: 2,
+    afterTurns: 3,
+  };
+
+  it("names the turns its summary stands for and how many had run", () => {
+    expect(decodeNativeHarnessTranscriptCompacted(compacted)).toEqual(compacted);
+  });
+
+  it.each([
+    ["covers the latest turn", { ...compacted, turns: 3 }],
+    ["has no summary", { ...compacted, summary: "" }],
+    ["covers no turn", { ...compacted, turns: 0 }],
+  ])("refuses a compaction that %s", (_, value) => {
+    expect(() => decodeNativeHarnessTranscriptCompacted(value)).toThrow();
   });
 });

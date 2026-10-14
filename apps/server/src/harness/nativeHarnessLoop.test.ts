@@ -1362,6 +1362,7 @@ describe("cancelling a turn without rebuilding the session", () => {
         if (rejectSettle) throw new Error("journal append failed");
         inner.settle(id, result);
       },
+      compact: (id, compaction) => inner.compact(id, compaction),
     };
     const scripted = scriptedTransport([
       {
@@ -1399,5 +1400,251 @@ describe("cancelling a turn without rebuilding the session", () => {
     const results = scripted.requests[1]?.history.flatMap((message) => message.toolResults ?? []);
     expect(results?.map((result) => result.toolCallId)).toEqual(["call-read"]);
     expect(JSON.parse(results?.[0]?.resultJson ?? "{}")).toMatchObject({ interrupted: true });
+  });
+});
+
+describe("compacting an Octant Harness session", () => {
+  const compactionId = "80000000-0000-4000-8000-000000000904";
+  const answers = (count: number): NativeHarnessResponse[] =>
+    Array.from({ length: count }, (_, index) => ({ text: `answer ${index + 1}`, toolCalls: [] }));
+
+  function compactOf(connection: ProviderConnection) {
+    const compact = connection.compact;
+    if (compact === undefined) throw new Error("A Code harness connection compacts.");
+    return compact;
+  }
+
+  it("summarizes the turns before the latest and sends the summary and that turn next", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const { transport, requests } = scriptedTransport([
+      ...answers(3),
+      { text: "  The parser was rewritten; tests still fail on Windows paths.  ", toolCalls: [] },
+      { text: "answer 4", toolCalls: [] },
+    ]);
+    const { result, events } = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          for (const prompt of ["first", "second", "third"]) {
+            yield* sendAndCollect(connection, prompt, isTerminal);
+          }
+          const seen = yield* Effect.fork(
+            Stream.runCollect(
+              (yield* connection.subscribe).pipe(
+                Stream.takeUntil((event) => event.kind === "context-compacted"),
+              ),
+            ),
+          );
+          const result = yield* compactOf(connection)({ sessionId, compactionId });
+          const events = Array.from(yield* Fiber.join(seen));
+          yield* sendAndCollect(connection, "fourth", isTerminal);
+          return { result, events };
+        }),
+      ),
+    );
+
+    expect(result).toEqual({ kind: "compacted" });
+    expect(events.map((event) => event.kind)).toEqual(["context-compacted"]);
+    expect(events[0]).toMatchObject({ trigger: "requested" });
+    const summaryRequest = requests[3];
+    expect(summaryRequest?.tools).toEqual([]);
+    expect(summaryRequest?.history).toHaveLength(1);
+    expect(summaryRequest?.history[0]?.text).toContain("User: first");
+    expect(summaryRequest?.history[0]?.text).toContain("Assistant: answer 2");
+    expect(summaryRequest?.history[0]?.text).not.toContain("third");
+    expect(requests[4]?.history.map((message) => message.text)).toEqual([
+      "Summary of the earlier turns of this session:\n\nThe parser was rewritten; tests still fail on Windows paths.",
+      "third",
+      "answer 3",
+      "fourth",
+    ]);
+    // Every message stays in the transcript; the marker says what requests read.
+    const transcript = transcripts.load(sessionId);
+    expect(transcript?.messages.map((message) => message.text)).toEqual([
+      "first",
+      "answer 1",
+      "second",
+      "answer 2",
+      "third",
+      "answer 3",
+      "fourth",
+      "answer 4",
+    ]);
+    expect(transcript?.compactions).toEqual([
+      {
+        summary: "The parser was rewritten; tests still fail on Windows paths.",
+        turns: 2,
+        afterTurns: 3,
+      },
+    ]);
+  });
+
+  it("resumes a compacted session from its summary and the turns after it", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const { transport, requests } = scriptedTransport([
+      ...answers(2),
+      { text: "Earlier: chose the queue design.", toolCalls: [] },
+      { text: "answer 3", toolCalls: [] },
+    ]);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* sendAndCollect(connection, "first", isTerminal);
+          yield* sendAndCollect(connection, "second", isTerminal);
+          yield* compactOf(connection)({ sessionId, compactionId });
+        }),
+      ),
+    );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: { driverKind: "openai-compatible", value: String(sessionId) },
+            executionPolicy: "approval-gated",
+          });
+          yield* sendAndCollect(connection, "third", isTerminal);
+        }),
+      ),
+    );
+    expect(requests.at(-1)?.history.map((message) => message.text)).toEqual([
+      "Summary of the earlier turns of this session:\n\nEarlier: chose the queue design.",
+      "second",
+      "answer 2",
+      "third",
+    ]);
+  });
+
+  it("keeps the compaction in the journal, so a restarted host resumes from the summary", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-harness-compaction-"));
+    directories.push(directory);
+    let identity = 0;
+    const { transport, requests } = scriptedTransport([
+      ...answers(2),
+      { text: "Chose the queue design.", toolCalls: [] },
+      { text: "answer 3", toolCalls: [] },
+    ]);
+    const withJournal = <A, E>(
+      body: (transcripts: NativeHarnessTranscriptStore) => Effect.Effect<A, E, Scope.Scope>,
+    ) =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const persistence = yield* Persistence;
+            return yield* body(
+              new JournalNativeHarnessTranscriptStore({
+                journal: persistence.journal,
+                uuid: () => `80000000-0000-4000-8000-${String(++identity).padStart(12, "0")}`,
+                clock: () => now,
+                actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+              }),
+            );
+          }).pipe(
+            Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
+          ),
+        ),
+      );
+    await withJournal((transcripts) =>
+      Effect.gen(function* () {
+        const connection = yield* connect(transport, transcripts);
+        yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+        yield* sendAndCollect(connection, "first", isTerminal);
+        yield* sendAndCollect(connection, "second", isTerminal);
+        yield* compactOf(connection)({ sessionId, compactionId });
+      }),
+    );
+    await withJournal((transcripts) =>
+      Effect.gen(function* () {
+        const connection = yield* connect(transport, transcripts);
+        yield* connection.resume({
+          sessionId,
+          resumeCursor: { driverKind: "openai-compatible", value: String(sessionId) },
+          executionPolicy: "approval-gated",
+        });
+        yield* sendAndCollect(connection, "third", isTerminal);
+      }),
+    );
+    expect(requests.at(-1)?.history.map((message) => message.text)).toEqual([
+      "Summary of the earlier turns of this session:\n\nChose the queue design.",
+      "second",
+      "answer 2",
+      "third",
+    ]);
+  });
+
+  it("refuses with nothing to compact while the session has only its latest turn", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const { transport, requests } = scriptedTransport(answers(1));
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const empty = yield* compactOf(connection)({ sessionId, compactionId });
+          yield* sendAndCollect(connection, "first", isTerminal);
+          return [empty, yield* compactOf(connection)({ sessionId, compactionId })];
+        }),
+      ),
+    );
+    expect(result).toEqual([
+      { kind: "refused", reason: "no-session" },
+      { kind: "refused", reason: "nothing-to-compact" },
+    ]);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("leaves the session as it was when the endpoint cannot summarize it", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const { transport, requests } = scriptedTransport(answers(2));
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* sendAndCollect(connection, "first", isTerminal);
+          yield* sendAndCollect(connection, "second", isTerminal);
+          // The script has run out, so the summary request fails.
+          return yield* compactOf(connection)({ sessionId, compactionId });
+        }),
+      ),
+    );
+    expect(result).toEqual({
+      kind: "failed",
+      message: "The endpoint could not summarize the session.",
+      sessionMayHaveChanged: false,
+    });
+    expect(requests).toHaveLength(3);
+    expect(transcripts.load(sessionId)?.compactions).toEqual([]);
+  });
+
+  it("offers no compaction on a Chat or Work connection, whose history the host plans", async () => {
+    const { transport } = scriptedTransport([]);
+    const offered = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const modes = [];
+          for (const mode of ["chat", "work"] as const) {
+            const connection = yield* createNativeHarnessConnection({
+              instanceId,
+              driverKind: "openai-compatible",
+              projectRoot,
+              mode,
+              transport,
+              transcripts: new MemoryNativeHarnessTranscriptStore(),
+              admitTurn: () => undefined,
+              clock: () => now,
+              correlationId: () => "80000000-0000-4000-8000-000000000903",
+            });
+            modes.push(connection.compact === undefined);
+          }
+          return modes;
+        }),
+      ),
+    );
+    expect(offered).toEqual([true, true]);
   });
 });

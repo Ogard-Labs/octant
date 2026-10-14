@@ -2295,6 +2295,21 @@ describe("provider registry contracts", () => {
         capabilities: { ...observed.capabilities, modelSwitch: "supported" },
       }),
     ).toMatchObject({ capabilities: { modelSwitch: "supported" } });
+    // Session compaction is reported for each mode, and absent reads as unsupported.
+    expect(decodeProviderObservedState(observed).capabilities.sessionCompaction).toBeUndefined();
+    const sessionCompaction = { chat: "unsupported", work: "unsupported", code: "supported" };
+    expect(
+      decodeProviderObservedState({
+        ...observed,
+        capabilities: { ...observed.capabilities, sessionCompaction },
+      }).capabilities.sessionCompaction,
+    ).toEqual(sessionCompaction);
+    expect(() =>
+      decodeProviderObservedState({
+        ...observed,
+        capabilities: { ...observed.capabilities, sessionCompaction: "supported" },
+      }),
+    ).toThrow();
     expect(() =>
       decodeProviderObservedState({ ...observed, rawDiagnostics: { port: 1234 } }),
     ).toThrow();
@@ -2493,6 +2508,13 @@ describe("provider runtime contracts", () => {
       researchId: "research-1",
       sourceCount: 1,
     },
+    {
+      kind: "context-compacted",
+      trigger: "requested",
+      tokensBefore: 48_000,
+      tokensAfter: 6_000,
+    },
+    { kind: "context-compacted", trigger: "automatic" },
   ] as const)("decodes a strict $kind event", (event) => {
     expect(decodeProviderRuntimeEvent({ ...common, ...event })).toMatchObject(event);
     expect(() =>

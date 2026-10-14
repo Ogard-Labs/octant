@@ -1,4 +1,5 @@
 import type {
+  ContextCompactionRefusalReason,
   ProviderDriverKind,
   ProviderExecutionPolicy,
   ProviderFailure,
@@ -85,6 +86,37 @@ export interface ProviderSessionResume {
   readonly modelId?: ProviderModelId;
   readonly modelOptionValues?: ProviderModelOptionValues;
 }
+
+export interface ProviderSessionCompactionRequest {
+  readonly sessionId: ProviderSessionId;
+  /** The host's id for this compaction. */
+  readonly compactionId: string;
+}
+
+/**
+ * How a requested compaction ended. A refusal changed nothing. A failure says
+ * `sessionMayHaveChanged: false` only when the adapter can attest it; an
+ * adapter that cannot tell says `true`.
+ */
+export type ProviderSessionCompaction =
+  | {
+      readonly kind: "compacted";
+      /** The window's occupancy before and after, when the runtime reported it. */
+      readonly tokensBefore?: number;
+      readonly tokensAfter?: number;
+    }
+  | {
+      readonly kind: "refused";
+      readonly reason: Extract<
+        ContextCompactionRefusalReason,
+        "runtime-version-unsupported" | "no-session" | "turn-running" | "nothing-to-compact"
+      >;
+    }
+  | {
+      readonly kind: "failed";
+      readonly message: string;
+      readonly sessionMayHaveChanged: boolean;
+    };
 
 export interface ProviderApprovalAnswer {
   readonly sessionId: ProviderSessionId;
@@ -174,6 +206,16 @@ export interface ProviderConnection {
     readonly sessionId: ProviderSessionId;
     readonly message: string;
   }) => Effect.Effect<"steered" | "unsupported", ProviderFailure>;
+  /**
+   * Asks the runtime to compact a session it holds, outside any turn. Present
+   * only on a connection whose mode's sessions the runtime can compact; a
+   * connection without it cannot compact. It resolves once the runtime
+   * reports the compaction ended, after the `context-compacted` event with
+   * trigger `requested` when it compacted, and leaves the session resumable.
+   */
+  readonly compact?: (
+    input: ProviderSessionCompactionRequest,
+  ) => Effect.Effect<ProviderSessionCompaction, ProviderFailure>;
   readonly interrupt: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly stop: (sessionId: ProviderSessionId) => Effect.Effect<void, ProviderFailure>;
   readonly answerApproval: (input: ProviderApprovalAnswer) => Effect.Effect<void, ProviderFailure>;

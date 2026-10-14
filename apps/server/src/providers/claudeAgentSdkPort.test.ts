@@ -208,6 +208,7 @@ describe("Claude Agent SDK port", () => {
               },
             ],
             account: { ready: true, apiProvider: "firstParty" },
+            compactAnnounced: false,
           });
 
           expect(harness.invocation?.options).toMatchObject({
@@ -256,9 +257,24 @@ describe("Claude Agent SDK port", () => {
     } as never);
 
     await expect(
-      Effect.runPromise(Effect.scoped(harness.port.openQuery(openInput))),
-    ).resolves.toBeDefined();
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.map(harness.port.openQuery(openInput), (query) => query.initialization),
+        ),
+      ),
+    ).resolves.toMatchObject({ compactAnnounced: true });
     expect(harness.query.initializationResult).toHaveBeenCalledOnce();
+  });
+
+  test("says compaction cannot be asked for when the runtime announces no compact command", async () => {
+    const harness = makeHarness();
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.map(harness.port.openQuery(openInput), (query) => query.initialization),
+        ),
+      ),
+    ).resolves.toMatchObject({ compactAnnounced: false });
   });
 
   test.each([
@@ -473,6 +489,25 @@ describe("Claude Agent SDK port", () => {
 
           expect(yield* query.interrupt()).toBeUndefined();
           expect(harness.query.close).toHaveBeenCalledOnce();
+        }),
+      ),
+    );
+  });
+
+  test("sends the runtime's compact command as its own input, without tools", async () => {
+    const harness = makeHarness();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          const iterator = harness.invocation!.prompt[Symbol.asyncIterator]();
+          yield* query.requestCompaction();
+          const delivered = yield* Effect.promise(() => iterator.next());
+          if (delivered.done) throw new Error("Expected a delivered command.");
+          expect(delivered.value.message).toEqual({ role: "user", content: "/compact" });
+          expect(delivered.value.session_id).toBe("session-1");
+          expect(harness.query.setMcpServers).not.toHaveBeenCalled();
         }),
       ),
     );

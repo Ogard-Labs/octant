@@ -140,8 +140,35 @@ describe("Runtime compaction", () => {
     expect(decodeMessage(boundary, openInput, active)).toEqual({
       kind: "compaction",
       sessionId: "session-1",
+      trigger: "auto",
+      preTokens: 167_412,
       postTokens: 18_204,
     });
+  });
+
+  it("carries how a compaction ended on the status that reports it", () => {
+    // Shaped as `SDKStatusMessage` in @anthropic-ai/claude-agent-sdk 0.3.211.
+    for (const compact_result of ["success", "failed"] as const) {
+      expect(
+        decodeMessage(
+          {
+            type: "system",
+            subtype: "status",
+            status: null,
+            compact_result,
+            uuid: "u-status",
+            session_id: "session-1",
+          },
+          openInput,
+          active,
+        ),
+      ).toEqual({
+        kind: "status",
+        sessionId: "session-1",
+        status: null,
+        compactResult: compact_result,
+      });
+    }
   });
 
   it("accepts the fields the runtime adds beyond its published type", () => {
@@ -162,7 +189,7 @@ describe("Runtime compaction", () => {
         openInput,
         active,
       ),
-    ).toEqual({ kind: "compaction", sessionId: "session-1" });
+    ).toEqual({ kind: "compaction", sessionId: "session-1", trigger: "manual", preTokens: 90_000 });
   });
 
   it.each([

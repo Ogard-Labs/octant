@@ -6,6 +6,7 @@ import {
   EventId,
   NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE,
   NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES,
+  decodeNativeHarnessTranscriptCompacted,
   decodeNativeHarnessTranscriptMessageAppended,
   decodeNativeHarnessTranscriptOpened,
   decodeNativeHarnessTranscriptToolSettled,
@@ -42,6 +43,20 @@ export interface NativeHarnessTranscript {
     readonly calls: ReadonlyArray<NativeHarnessTranscriptToolCall>;
     readonly settled: ReadonlyArray<NativeHarnessTranscriptToolResult>;
   };
+  /**
+   * Every compaction, oldest first. Requests are built from the latest one's
+   * `summary` in place of its first `turns` turns; `messages` still holds every
+   * message, and a fork takes the compaction its source was reading then.
+   */
+  readonly compactions: ReadonlyArray<NativeHarnessTranscriptCompaction>;
+}
+
+export interface NativeHarnessTranscriptCompaction {
+  readonly summary: string;
+  /** How many turns, from the transcript's first, the summary stands for. */
+  readonly turns: number;
+  /** How many turns the session had run when it was compacted. */
+  readonly afterTurns: number;
 }
 
 export type NativeHarnessTranscriptEvent =
@@ -51,7 +66,8 @@ export type NativeHarnessTranscriptEvent =
       readonly forkedFrom?: NativeHarnessTranscriptForkOrigin;
     }
   | { readonly kind: "message"; readonly message: NativeHarnessTranscriptMessage }
-  | { readonly kind: "settled"; readonly result: NativeHarnessTranscriptToolResult };
+  | { readonly kind: "settled"; readonly result: NativeHarnessTranscriptToolResult }
+  | { readonly kind: "compacted"; readonly compaction: NativeHarnessTranscriptCompaction };
 
 export interface NativeHarnessTranscriptStore {
   /**
@@ -70,6 +86,11 @@ export interface NativeHarnessTranscriptStore {
     sessionId: ProviderSessionId,
     result: NativeHarnessTranscriptToolResult,
   ) => void;
+  /** Records that requests are built from a summary in place of the first turns. */
+  readonly compact: (
+    sessionId: ProviderSessionId,
+    compaction: NativeHarnessTranscriptCompaction,
+  ) => void;
 }
 
 /**
@@ -83,6 +104,7 @@ export function foldNativeHarnessTranscript(
 ): NativeHarnessTranscript | undefined {
   let binding: NativeHarnessTranscriptBinding | undefined;
   let forkedFrom: NativeHarnessTranscriptForkOrigin | undefined;
+  const compactions: NativeHarnessTranscriptCompaction[] = [];
   const messages: NativeHarnessTranscriptMessage[] = [];
   let pendingCalls: ReadonlyArray<NativeHarnessTranscriptToolCall> = [];
   const pendingResults = new Map<string, NativeHarnessTranscriptToolResult>();
@@ -101,9 +123,12 @@ export function foldNativeHarnessTranscript(
     pendingResults.clear();
   };
   for (const event of events) {
-    if (event.kind === "opened") {
+    if (event.kind === "compacted") {
+      compactions.push(event.compaction);
+    } else if (event.kind === "opened") {
       binding = event.binding;
       forkedFrom = event.forkedFrom;
+      compactions.length = 0;
       messages.length = 0;
       pendingCalls = [];
       pendingResults.clear();
@@ -124,6 +149,7 @@ export function foldNativeHarnessTranscript(
     ...(pendingCalls.length === 0
       ? {}
       : { openStep: { calls: pendingCalls, settled: [...pendingResults.values()] } }),
+    compactions,
   };
 }
 
@@ -152,6 +178,10 @@ export class MemoryNativeHarnessTranscriptStore implements NativeHarnessTranscri
 
   settle(sessionId: ProviderSessionId, result: NativeHarnessTranscriptToolResult): void {
     this.#events.get(String(sessionId))?.push({ kind: "settled", result });
+  }
+
+  compact(sessionId: ProviderSessionId, compaction: NativeHarnessTranscriptCompaction): void {
+    this.#events.get(String(sessionId))?.push({ kind: "compacted", compaction });
   }
 }
 
@@ -213,6 +243,14 @@ export class JournalNativeHarnessTranscriptStore implements NativeHarnessTranscr
       sessionId,
       NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES.toolSettled,
       decodeNativeHarnessTranscriptToolSettled({ sessionId, result }),
+    );
+  }
+
+  compact(sessionId: ProviderSessionId, compaction: NativeHarnessTranscriptCompaction): void {
+    this.#append(
+      sessionId,
+      NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES.compacted,
+      decodeNativeHarnessTranscriptCompacted({ sessionId, ...compaction }),
     );
   }
 
@@ -285,6 +323,10 @@ function decodeEvent(
   }
   if (eventName === names.toolSettled) {
     return { kind: "settled", result: decodeNativeHarnessTranscriptToolSettled(payload).result };
+  }
+  if (eventName === names.compacted) {
+    const { summary, turns, afterTurns } = decodeNativeHarnessTranscriptCompacted(payload);
+    return { kind: "compacted", compaction: { summary, turns, afterTurns } };
   }
   return undefined;
 }

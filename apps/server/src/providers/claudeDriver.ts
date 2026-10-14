@@ -25,6 +25,7 @@ import type {
   ProviderAcquireInput,
   ProviderConnection,
   ProviderDriver,
+  ProviderSessionCompaction,
 } from "@octant/provider-sdk/driver";
 import type { ProviderContextFactsSource } from "@octant/provider-sdk/context-facts";
 import {
@@ -359,7 +360,28 @@ interface SessionState {
   releasing: boolean;
   released: boolean;
   releasePromise?: Promise<void>;
+  /** The compaction `compact` asked for, until the runtime reports how it ended. */
+  compaction?: ClaudePendingCompaction | undefined;
 }
+
+interface ClaudePendingCompaction {
+  /** The runtime marked the cut, so the session holds the summary now. */
+  boundary?: { readonly tokensBefore: number; readonly tokensAfter?: number } | undefined;
+  /** The runtime's status said the compaction succeeded. */
+  succeeded: boolean;
+  readonly settle: (outcome: ProviderSessionCompaction) => void;
+}
+
+/**
+ * Claude reports a compaction that did not finish only as `failed`, with no
+ * word on whether the session was already rewritten, so a failure is always
+ * one that may have changed it.
+ */
+const CLAUDE_COMPACTION_UNCERTAIN = {
+  kind: "failed",
+  message: "Claude did not finish compacting the session.",
+  sessionMayHaveChanged: true,
+} as const satisfies ProviderSessionCompaction;
 
 interface ConnectionFactories {
   readonly clock: () => string;
@@ -602,12 +624,17 @@ function observation(
     readonly readiness: "ready" | "unauthenticated" | "incompatible" | "unavailable";
     readonly version: string;
     readonly models?: readonly ProviderModel[];
+    /** The runtime announced `compact` when the probe opened it. */
+    readonly compactAnnounced?: boolean;
     readonly credentialStatus?: "stored" | "missing" | "unavailable";
     readonly message?: string;
   },
   clock: () => string,
 ) {
   const observedAt = clock() as UtcTimestamp;
+  // Claude Code keeps every mode's session, so `/compact` reaches all of them
+  // alike; an install that does not announce the command cannot be asked.
+  const sessionCompaction = input.compactAnnounced === true ? "supported" : "unavailable";
   const result = decodeProviderProbeResult({
     instanceId: options.instanceId,
     readiness: input.readiness,
@@ -615,7 +642,17 @@ function observation(
     detectedVersion: input.version,
     ...(input.credentialStatus === undefined ? {} : { credentialStatus: input.credentialStatus }),
     models: input.models ?? [],
-    capabilities: input.readiness === "ready" ? availableCapabilities : unavailableCapabilities,
+    capabilities:
+      input.readiness === "ready"
+        ? {
+            ...availableCapabilities,
+            sessionCompaction: {
+              chat: sessionCompaction,
+              work: sessionCompaction,
+              code: sessionCompaction,
+            },
+          }
+        : unavailableCapabilities,
     ...(input.message === undefined ? {} : { message: input.message }),
     ...(input.readiness === "ready" ? { lastSuccessfulProbeAt: observedAt } : {}),
     observedAt,
@@ -694,7 +731,11 @@ function probeSdk(
   options: ClaudeDriverOptions,
   environmentFactory: ClaudeEnvironmentFactory,
   environmentOptions: ClaudeEnvironmentScopeOptions,
-): Effect.Effect<readonly ProviderModel[], ProviderFailure, Scope.Scope> {
+): Effect.Effect<
+  { readonly models: readonly ProviderModel[]; readonly compactAnnounced: boolean },
+  ProviderFailure,
+  Scope.Scope
+> {
   return Effect.gen(function* () {
     const environment = yield* environmentFactory(options.authentication, environmentOptions);
     // Acquired before the query, so it is released after the query closes.
@@ -728,7 +769,7 @@ function probeSdk(
     if (models.length === 0) {
       return yield* Effect.fail(failure("protocol", "Claude returned no usable models."));
     }
-    return models;
+    return { models, compactAnnounced: query.initialization.compactAnnounced };
   });
 }
 
@@ -820,7 +861,7 @@ function makeProbe(
           ? {}
           : { configDirectory: options.configDirectory }),
       }).pipe(
-        Effect.map((models) => ({ kind: "ready" as const, models })),
+        Effect.map((probed) => ({ kind: "ready" as const, ...probed })),
         Effect.catchAll((providerFailure) =>
           providerFailure.category === "protocol" || providerFailure.category === "unsupported"
             ? Effect.succeed({
@@ -851,6 +892,7 @@ function makeProbe(
           readiness: "ready",
           version,
           models: sdkResult.models,
+          compactAnnounced: sdkResult.compactAnnounced,
           ...(options.authentication === "api-key" ? { credentialStatus: "stored" as const } : {}),
         },
         clock,
@@ -1067,6 +1109,18 @@ function makeConnection(
         void release(state).catch(() => undefined);
       });
     };
+    const settleCompaction = (state: SessionState) => {
+      const pending = state.compaction;
+      if (pending === undefined) return;
+      state.compaction = undefined;
+      pending.settle(
+        pending.boundary !== undefined
+          ? { kind: "compacted", ...pending.boundary }
+          : pending.succeeded
+            ? { kind: "compacted" }
+            : CLAUDE_COMPACTION_UNCERTAIN,
+      );
+    };
     const terminal = (
       state: SessionState,
       value:
@@ -1079,6 +1133,7 @@ function makeConnection(
         | { readonly kind: "waiting"; readonly message: string },
     ) => {
       if (state.terminal) return;
+      settleCompaction(state);
       state.terminal = true;
       if (state.context !== undefined) state.context.terminal = true;
       const sequence = state.context?.sequence ?? 1;
@@ -1145,6 +1200,7 @@ function makeConnection(
     };
     const closeAfterPublishedTerminal = (state: SessionState) => {
       if (state.terminal) return;
+      settleCompaction(state);
       state.terminal = true;
       clearAuthorityState(state);
       state.terminalResult.resolve(undefined);
@@ -1172,6 +1228,31 @@ function makeConnection(
         state.context = makeEventContext(state, message.sessionId, 1);
         state.initialized.resolve(message.sessionId);
         return;
+      }
+      const pendingCompaction = state.compaction;
+      if (pendingCompaction !== undefined) {
+        // `/compact` is answered by a boundary marking the cut and a status
+        // saying how it went, and closed by a result. It is settled once both
+        // the boundary and a successful status are in, on a failed status, or
+        // at the latest by that result, so the boundary's event always goes
+        // out before the answer does.
+        if (message.kind === "status" && message.compactResult === "failed") {
+          pendingCompaction.boundary = undefined;
+          pendingCompaction.succeeded = false;
+          settleCompaction(state);
+          return;
+        }
+        if (message.kind === "status" && message.compactResult === "success") {
+          pendingCompaction.succeeded = true;
+          if (pendingCompaction.boundary !== undefined) settleCompaction(state);
+          return;
+        }
+        if (message.kind === "compaction" && message.trigger === "manual") {
+          pendingCompaction.boundary = {
+            tokensBefore: message.preTokens,
+            ...(message.postTokens === undefined ? {} : { tokensAfter: message.postTokens }),
+          };
+        }
       }
       if (message.kind === "result" && state.pendingTurns === 0) {
         closeAfterPublishedTerminal(state);
@@ -1981,6 +2062,55 @@ function makeConnection(
             return Effect.fail(sanitizeFailure(providerFailure));
           }),
         );
+      },
+      compact: ({ sessionId }) => {
+        const state = sessions.get(sessionId);
+        if (state === undefined || state.terminal || state.released) {
+          return Effect.fail(failure("protocol", "Claude session is not active."));
+        }
+        if (state.pendingTurns > 0 || state.compaction !== undefined) {
+          return Effect.succeed<ProviderSessionCompaction>({
+            kind: "refused",
+            reason: "turn-running",
+          });
+        }
+        if (!state.query.initialization.compactAnnounced) {
+          return Effect.succeed<ProviderSessionCompaction>({
+            kind: "refused",
+            reason: "runtime-version-unsupported",
+          });
+        }
+        return Effect.async<ProviderSessionCompaction>((resume) => {
+          const pending: ClaudePendingCompaction = {
+            succeeded: false,
+            settle: (outcome) => resume(Effect.succeed(outcome)),
+          };
+          // A finished turn closed its event context; the compaction's own
+          // events are numbered on from it, as the next turn's would be.
+          if (state.context?.terminal === true && state.claudeSessionId !== undefined) {
+            state.context = makeEventContext(state, state.claudeSessionId, state.context.sequence);
+          }
+          state.compaction = pending;
+          Effect.runFork(
+            state.query.requestCompaction().pipe(
+              // The command never reached the runtime's input, so nothing ran.
+              Effect.catchAll(() =>
+                Effect.sync(() => {
+                  if (state.compaction !== pending) return;
+                  state.compaction = undefined;
+                  pending.settle({
+                    kind: "failed",
+                    message: "Claude did not accept the compaction request.",
+                    sessionMayHaveChanged: false,
+                  });
+                }),
+              ),
+            ),
+          );
+          return Effect.sync(() => {
+            if (state.compaction === pending) state.compaction = undefined;
+          });
+        });
       },
       interrupt: (sessionId) => {
         const state = sessions.get(sessionId);

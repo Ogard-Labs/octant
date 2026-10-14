@@ -4,7 +4,10 @@ import {
   type ProviderFailure,
   type ProviderModelId,
 } from "@octant/contracts";
-import { runProviderConformance } from "@octant/provider-sdk/conformance";
+import {
+  runProviderConformance,
+  runSessionCompactionConformance,
+} from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
 import { Effect, PubSub, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
@@ -36,84 +39,117 @@ const modelId = "claude-sonnet" as ProviderModelId;
 const projectRoot = "/tmp/octant-claude-conformance";
 const occurredAt = "2026-07-17T00:00:00.000Z";
 
+function conformanceDriver(
+  makeQuery: (input: ClaudeOpenQueryInput, sdkSessionId: string) => ConformanceQuery = (
+    input,
+    sdkSessionId,
+  ) => new ConformanceQuery(input, sdkSessionId),
+) {
+  const opened: ConformanceQuery[] = [];
+  const histories = new Map<string, ClaudeSessionMetadata>();
+  let runtimeNumber = 0;
+  const sdk: ClaudeAgentSdkPort = {
+    openQuery: (input) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const query = makeQuery(
+            input,
+            input.resumeSessionId ?? `sdk-conformance-${++runtimeNumber}`,
+          );
+          opened.push(query);
+          histories.set(query.sdkSessionId, {
+            sessionId: query.sdkSessionId,
+            projectRoot: input.projectRoot,
+            lastModified: 1,
+          });
+          return query;
+        }),
+        (query) => query.close(),
+      ),
+    findSession: ({ sessionId: sdkSessionId, projectRoot: root }) =>
+      Effect.succeed(
+        histories.get(sdkSessionId)?.projectRoot === root ? histories.get(sdkSessionId) : undefined,
+      ),
+  };
+  const identities = new Map<string, ClaudeResumeIdentity>();
+  const resumeIdentityPort: ClaudeResumeIdentityPort = {
+    lookup: async ({ sdkSessionId }, signal) => {
+      if (signal.aborted) throw new Error("cancelled");
+      return identities.get(sdkSessionId);
+    },
+    put: async (identity, signal) => {
+      if (signal.aborted) throw new Error("cancelled");
+      identities.set(identity.sdkSessionId, identity);
+    },
+    remove: async ({ sdkSessionId }, signal) => {
+      if (signal.aborted) throw new Error("cancelled");
+      identities.delete(sdkSessionId);
+    },
+  };
+  const registry = new ProviderRuntimeRegistry();
+  const driver = makeClaudeDriver({
+    instanceId,
+    binaryPath: "/opt/homebrew/bin/claude",
+    authentication: "subscription",
+    process: {
+      probeVersion: () => Effect.succeed("2.1.211"),
+      probeSubscription: () => Effect.succeed("authenticated" as const),
+      spawn: vi.fn() as ClaudeProcessPort["spawn"],
+    },
+    sdk,
+    runtimeRegistry: registry,
+    resumeIdentityPort,
+    permissionPersistence: () => "current-session",
+    makeEnvironmentScope: () =>
+      Effect.acquireRelease(
+        Effect.succeed({
+          environment: { PATH: "/usr/bin", CLAUDE_CONFIG_DIR: "/provider-native" },
+        } satisfies ClaudeEnvironmentScope),
+        () => Effect.void,
+      ),
+    isProjectConfinedPath: (root, path) => path.startsWith(`${root}/`),
+    clock: () => occurredAt,
+    correlationId: () => "80000000-0000-4000-8000-000000000724",
+    requestId: (() => {
+      let id = 0;
+      return () => `request-${++id}`;
+    })(),
+    taskId: () => "task-1",
+    toolCallId: () => "tool-1",
+    startupTimeoutMs: 500,
+    interruptTimeoutMs: 500,
+  });
+  return { driver, opened };
+}
+
 describe("Claude provider conformance", () => {
+  it("holds Claude to its session-compaction claim", async () => {
+    const { driver, opened } = conformanceDriver(
+      (input, sdkSessionId) => new CompletingQuery(input, sdkSessionId),
+    );
+    await expect(
+      runSessionCompactionConformance({
+        driver,
+        probeInput: { instanceId },
+        acquireInput: { instanceId, projectRoot, mode: "code" },
+        sessionStart: { sessionId, modelId, executionPolicy: "approval-gated" },
+        turns: [
+          { sessionId, prompt: "remember the plan", attachments: [], tools: [] },
+          { sessionId, prompt: "carry on", attachments: [], tools: [] },
+        ],
+        resume: (handle) => ({
+          sessionId: handle.sessionId,
+          resumeCursor: handle.resumeCursor ?? { driverKind: "claude", value: "missing" },
+          executionPolicy: "approval-gated",
+        }),
+        compactionId: "80000000-0000-4000-8000-000000000725",
+        isReleased: () => opened.length > 0 && opened.every((query) => query.closed),
+      }),
+    ).resolves.toEqual({ claim: "supported", compacted: true, released: true });
+  });
+
   it("passes the real driver lifecycle, capabilities, resume, failure, and cleanup harness", async () => {
-    const opened: ConformanceQuery[] = [];
-    const histories = new Map<string, ClaudeSessionMetadata>();
-    let runtimeNumber = 0;
-    const sdk: ClaudeAgentSdkPort = {
-      openQuery: (input) =>
-        Effect.acquireRelease(
-          Effect.sync(() => {
-            const query = new ConformanceQuery(
-              input,
-              input.resumeSessionId ?? `sdk-conformance-${++runtimeNumber}`,
-            );
-            opened.push(query);
-            histories.set(query.sdkSessionId, {
-              sessionId: query.sdkSessionId,
-              projectRoot: input.projectRoot,
-              lastModified: 1,
-            });
-            return query;
-          }),
-          (query) => query.close(),
-        ),
-      findSession: ({ sessionId: sdkSessionId, projectRoot: root }) =>
-        Effect.succeed(
-          histories.get(sdkSessionId)?.projectRoot === root
-            ? histories.get(sdkSessionId)
-            : undefined,
-        ),
-    };
-    const identities = new Map<string, ClaudeResumeIdentity>();
-    const resumeIdentityPort: ClaudeResumeIdentityPort = {
-      lookup: async ({ sdkSessionId }, signal) => {
-        if (signal.aborted) throw new Error("cancelled");
-        return identities.get(sdkSessionId);
-      },
-      put: async (identity, signal) => {
-        if (signal.aborted) throw new Error("cancelled");
-        identities.set(identity.sdkSessionId, identity);
-      },
-      remove: async ({ sdkSessionId }, signal) => {
-        if (signal.aborted) throw new Error("cancelled");
-        identities.delete(sdkSessionId);
-      },
-    };
-    const registry = new ProviderRuntimeRegistry();
-    const driver = makeClaudeDriver({
-      instanceId,
-      binaryPath: "/opt/homebrew/bin/claude",
-      authentication: "subscription",
-      process: {
-        probeVersion: () => Effect.succeed("2.1.211"),
-        probeSubscription: () => Effect.succeed("authenticated" as const),
-        spawn: vi.fn() as ClaudeProcessPort["spawn"],
-      },
-      sdk,
-      runtimeRegistry: registry,
-      resumeIdentityPort,
-      permissionPersistence: () => "current-session",
-      makeEnvironmentScope: () =>
-        Effect.acquireRelease(
-          Effect.succeed({
-            environment: { PATH: "/usr/bin", CLAUDE_CONFIG_DIR: "/provider-native" },
-          } satisfies ClaudeEnvironmentScope),
-          () => Effect.void,
-        ),
-      isProjectConfinedPath: (root, path) => path.startsWith(`${root}/`),
-      clock: () => occurredAt,
-      correlationId: () => "80000000-0000-4000-8000-000000000724",
-      requestId: (() => {
-        let id = 0;
-        return () => `request-${++id}`;
-      })(),
-      taskId: () => "task-1",
-      toolCallId: () => "tool-1",
-      startupTimeoutMs: 500,
-      interruptTimeoutMs: 500,
-    });
+    const { driver, opened } = conformanceDriver();
 
     const evidence = await runProviderConformance({
       driver,
@@ -212,8 +248,32 @@ class ConformanceQuery implements ClaudeQueryPort {
       },
     ],
     account: { ready: true as const, apiProvider: "firstParty" as const },
+    compactAnnounced: true,
   };
   readonly supportedModels = () => Effect.succeed(this.initialization.models);
+  /** `/compact` as the runtime answers it: the cut, its status, and the closing result. */
+  readonly requestCompaction: ClaudeQueryPort["requestCompaction"] = () =>
+    Effect.promise(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      await this.emit({
+        kind: "status",
+        sessionId: this.sdkSessionId,
+        status: "compacting",
+      });
+      await this.emit({
+        kind: "compaction",
+        sessionId: this.sdkSessionId,
+        trigger: "manual",
+        preTokens: 48_000,
+        postTokens: 6_000,
+      });
+      await this.emit({
+        kind: "status",
+        sessionId: this.sdkSessionId,
+        status: null,
+        compactResult: "success",
+      });
+    });
   readonly accountInfo = () => Effect.succeed(this.initialization.account);
   readonly readPlanUsage = () => Effect.succeed(undefined);
   readonly setPermissionMode = () => Effect.void;
@@ -363,7 +423,7 @@ class ConformanceQuery implements ClaudeQueryPort {
     }
   }
 
-  private emit(message: ClaudeDecodedMessage): Promise<boolean> {
+  protected emit(message: ClaudeDecodedMessage): Promise<boolean> {
     return Effect.runPromise(PubSub.publish(this.#pubsub, message));
   }
 }
@@ -394,4 +454,26 @@ function usage() {
     cacheCreationInputTokens: 0,
     cacheReadInputTokens: 0,
   };
+}
+
+/** A runtime whose turns finish with a reply, so there is a session to compact. */
+class CompletingQuery extends ConformanceQuery {
+  override readonly send: ClaudeQueryPort["send"] = () =>
+    Effect.promise(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      await this.emit({
+        kind: "stream-event",
+        sessionId: this.sdkSessionId,
+        event: { kind: "text-delta", index: 0, text: "noted" },
+      });
+      await this.emit({
+        kind: "result",
+        sessionId: this.sdkSessionId,
+        outcome: "success",
+        subtype: "success",
+        stopReason: "end_turn",
+        usage: usage(),
+        permissionDenials: [],
+      });
+    });
 }

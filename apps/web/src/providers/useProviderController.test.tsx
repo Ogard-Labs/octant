@@ -3466,7 +3466,7 @@ function observation(patch: Partial<ProviderObservedState> = {}): ProviderObserv
         "appManagedTools",
         "citations",
       ].map((key) => [key, "supported"]),
-    ) as Awaited<ReturnType<ProviderClient["probe"]>>["capabilities"],
+    ) as Omit<Awaited<ReturnType<ProviderClient["probe"]>>["capabilities"], "sessionCompaction">,
     observedAt: "2026-07-14T10:00:00.000Z" as never,
     ...patch,
   };
@@ -3481,7 +3481,7 @@ function failureObservation(
     models: [],
     capabilities: Object.fromEntries(
       Object.keys(observation().capabilities).map((key) => [key, "unavailable"]),
-    ) as ProviderObservedState["capabilities"],
+    ) as Omit<ProviderObservedState["capabilities"], "sessionCompaction">,
     message: "Provider probe failed.",
   });
 }

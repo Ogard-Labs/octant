@@ -4,7 +4,10 @@ import {
   type OpenAiCompatibleProtocol,
   type ProviderModelId,
 } from "@octant/contracts";
-import { runProviderConformance } from "@octant/provider-sdk/conformance";
+import {
+  runProviderConformance,
+  runSessionCompactionConformance,
+} from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
 import { describe, expect, it } from "vitest";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
@@ -147,6 +150,57 @@ describe("OpenAI-compatible provider conformance", () => {
     expect(runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
     expect(chatEvidence).toMatchObject({ nativeAttachmentHonest: true, released: true });
   });
+});
+
+describe("OpenAI-compatible session compaction conformance", () => {
+  it.each(["code", "work"] as const)(
+    "holds Octant Harness to its %s-mode compaction claim",
+    async (mode) => {
+      let released = false;
+      const driver = makeOpenAiCompatibleDriver({
+        instanceId,
+        configuration: configuration("chat-completions"),
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+        fetch: async (url) => (String(url).endsWith("/models") ? models() : chatStream("noted")),
+        onConnectionReleased: () => {
+          released = true;
+        },
+        clock: () => "2026-07-15T12:00:00.000Z",
+        correlationId: () => "80000000-0000-4000-8000-000000000515",
+      });
+      await expect(
+        runSessionCompactionConformance({
+          driver,
+          probeInput: { instanceId },
+          acquireInput: { instanceId, projectRoot: "/tmp/octant-compatible-conformance", mode },
+          sessionStart: {
+            sessionId: successfulSessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          },
+          turns: [
+            { sessionId: successfulSessionId, prompt: "first", attachments: [], tools: [] },
+            { sessionId: successfulSessionId, prompt: "second", attachments: [], tools: [] },
+          ],
+          resume: (handle) => ({
+            sessionId: handle.sessionId,
+            resumeCursor: handle.resumeCursor ?? {
+              driverKind: "openai-compatible",
+              value: String(successfulSessionId),
+            },
+            executionPolicy: "approval-gated",
+          }),
+          compactionId: "80000000-0000-4000-8000-000000000516",
+          isReleased: () => released,
+        }),
+      ).resolves.toEqual(
+        mode === "code"
+          ? { claim: "supported", compacted: true, released: true }
+          : { claim: "unsupported", compacted: false, released: true },
+      );
+    },
+  );
 });
 
 function configuration(protocol: OpenAiCompatibleProtocol) {

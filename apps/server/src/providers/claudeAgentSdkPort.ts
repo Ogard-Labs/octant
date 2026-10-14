@@ -144,6 +144,11 @@ export interface ClaudeInitialization {
   readonly models: readonly ClaudeModelInfo[];
   readonly account: ClaudeAccountState;
   /**
+   * The runtime announced its `compact` command, so `/compact` reaches the
+   * runtime as a request rather than as text for the model.
+   */
+  readonly compactAnnounced: boolean;
+  /**
    * Where the runtime compacts the session by itself, in tokens, when it said
    * compaction is on. Absent when it said nothing usable.
    */
@@ -333,11 +338,17 @@ export type ClaudeDecodedMessage =
       readonly sessionId: string;
       readonly status: "compacting" | "requesting" | null;
       readonly permissionMode?: ClaudePermissionMode;
+      /** How a compaction the runtime just ran ended, when this status reports one. */
+      readonly compactResult?: "success" | "failed";
     }
   | {
-      /** The runtime compacted the session's window by itself. */
+      /** The runtime compacted the session's window. */
       readonly kind: "compaction";
       readonly sessionId: string;
+      /** `manual` when `/compact` asked for it, `auto` when the runtime chose to. */
+      readonly trigger: "manual" | "auto";
+      /** What the window held before the cut, in tokens. */
+      readonly preTokens: number;
       /** What the compacted window holds, in tokens, when the runtime said. */
       readonly postTokens?: number;
     }
@@ -364,6 +375,12 @@ export interface ClaudeQueryPort {
   readonly sessionId: Effect.Effect<string, ProviderFailure>;
   readonly messages: Stream.Stream<ClaudeDecodedMessage, ProviderFailure>;
   readonly send: (message: ClaudeUserMessage) => Effect.Effect<void, ProviderFailure>;
+  /**
+   * Sends the runtime's own `/compact` command. It is a control input, not a
+   * person's turn: it carries no tools and the runtime answers it with a
+   * compaction boundary and a status, not a reply.
+   */
+  readonly requestCompaction: () => Effect.Effect<void, ProviderFailure>;
   readonly interrupt: () => Effect.Effect<void, ProviderFailure>;
   readonly setPermissionMode: (mode: ClaudePermissionMode) => Effect.Effect<void, ProviderFailure>;
   readonly supportedModels: () => Effect.Effect<readonly ClaudeModelInfo[], ProviderFailure>;
@@ -1120,6 +1137,19 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                     session_id: initializedSessionId ?? announcedSessionId ?? "",
                   });
                 }, "input delivery"),
+              requestCompaction: () =>
+                request(async () => {
+                  const messageId = crypto.randomUUID();
+                  issuedMessageIds.add(messageId);
+                  return prompt.offer({
+                    type: "user",
+                    message: { role: "user", content: "/compact" },
+                    parent_tool_use_id: null,
+                    origin: { kind: "human" },
+                    uuid: messageId,
+                    session_id: initializedSessionId ?? announcedSessionId ?? "",
+                  });
+                }, "compaction request"),
               interrupt: () =>
                 request(async () => {
                   for (const message of prompt.clear()) issuedMessageIds.delete(message.uuid);

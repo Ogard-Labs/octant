@@ -8,7 +8,7 @@ import type {
 } from "@octant/contracts";
 
 export const capabilityLabels: ReadonlyArray<
-  readonly [keyof ProviderObservedState["capabilities"], string]
+  readonly [Exclude<keyof ProviderObservedState["capabilities"], "sessionCompaction">, string]
 > = [
   ["streaming", "Streaming"],
   ["resume", "Resume"],

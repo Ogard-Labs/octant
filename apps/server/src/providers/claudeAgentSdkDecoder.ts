@@ -661,6 +661,9 @@ export function decodeInitialization(value: unknown): ClaudeInitialization {
   return {
     models: decodeModels(initialized.models),
     account: decodeAccount(initialized.account),
+    compactAnnounced: initialized.commands.some(
+      (command: unknown) => object(command)?.name === "compact",
+    ),
   };
 }
 
@@ -1211,6 +1214,9 @@ export function decodeMessage(
       ...(mode === "default" || mode === "bypassPermissions" || mode === "plan" || mode === "auto"
         ? { permissionMode: mode }
         : {}),
+      ...(message.compact_result === "success" || message.compact_result === "failed"
+        ? { compactResult: message.compact_result }
+        : {}),
     };
   }
   // Claude Code compacts its own session when the window nears its threshold
@@ -1234,6 +1240,8 @@ export function decodeMessage(
     return {
       kind: "compaction",
       sessionId: message.session_id,
+      trigger: metadata.trigger,
+      preTokens: nonNegativeInteger(metadata.pre_tokens) ?? 0,
       ...(postTokens === undefined ? {} : { postTokens }),
     };
   }

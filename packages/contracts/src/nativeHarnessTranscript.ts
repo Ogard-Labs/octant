@@ -23,6 +23,7 @@ export const NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES = {
   opened: "native-harness-transcript-opened@1",
   messageAppended: "native-harness-transcript-message-appended@1",
   toolSettled: "native-harness-transcript-tool-settled@1",
+  compacted: "native-harness-transcript-compacted@1",
 } as const;
 
 /** Where a session may be resumed: the same endpoint, model, root, and mode it started under. */
@@ -92,6 +93,23 @@ export const NativeHarnessTranscriptToolSettled = Schema.Struct({
 }).annotations(strict);
 export type NativeHarnessTranscriptToolSettled = typeof NativeHarnessTranscriptToolSettled.Type;
 
+/**
+ * The session was compacted once it had run `afterTurns` turns: from then on,
+ * the model reads `summary` in place of the conversation's first `turns`
+ * turns, counted from the transcript's own first turn. Those messages stay in
+ * the aggregate; only what a request is built from changes. The latest turn is
+ * never summarized, and a later compaction supersedes an earlier one.
+ */
+export const NativeHarnessTranscriptCompacted = Schema.Struct({
+  sessionId: ProviderSessionId,
+  summary: TranscriptText.pipe(Schema.minLength(1)),
+  turns: Schema.Int.pipe(Schema.positive()),
+  afterTurns: Schema.Int.pipe(Schema.positive()),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((compacted) => compacted.turns < compacted.afterTurns));
+export type NativeHarnessTranscriptCompacted = typeof NativeHarnessTranscriptCompacted.Type;
+
 export const decodeNativeHarnessTranscriptOpened = Schema.decodeUnknownSync(
   NativeHarnessTranscriptOpened,
 );
@@ -100,4 +118,7 @@ export const decodeNativeHarnessTranscriptMessageAppended = Schema.decodeUnknown
 );
 export const decodeNativeHarnessTranscriptToolSettled = Schema.decodeUnknownSync(
   NativeHarnessTranscriptToolSettled,
+);
+export const decodeNativeHarnessTranscriptCompacted = Schema.decodeUnknownSync(
+  NativeHarnessTranscriptCompacted,
 );
