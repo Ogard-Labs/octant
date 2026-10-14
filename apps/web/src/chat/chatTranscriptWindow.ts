@@ -176,3 +176,28 @@ function unionBy<T>(
   const seen = new Set(first.map(key));
   return [...first, ...second.filter((item) => !seen.has(key(item)))];
 }
+
+/**
+ * The Canvas cards a shown run can place. A detached run stops before turns
+ * that are not loaded, and placement puts a Canvas on the last turn opened at
+ * or before it was written, so a Canvas a later, unloaded turn wrote would
+ * land on the run's last turn. Only cards written by the time that turn last
+ * changed belong to the run; the rest wait for their own turns to be shown.
+ */
+export function canvasCardsForShownRun<T extends { readonly canvasCreatedAt?: string | undefined }>(
+  cards: ReadonlyArray<T>,
+  run: ChatThreadView,
+  runEndsBeforeNewest: boolean,
+): ReadonlyArray<T> {
+  if (!runEndsBeforeNewest) return cards;
+  const last = run.turns.at(-1);
+  if (last === undefined) return [];
+  const settledAt = Math.max(
+    Date.parse(String(last.createdAt)),
+    ...last.attempts.map((attempt) => Date.parse(String(attempt.updatedAt))),
+  );
+  return cards.filter(
+    (card) =>
+      card.canvasCreatedAt !== undefined && Date.parse(String(card.canvasCreatedAt)) <= settledAt,
+  );
+}

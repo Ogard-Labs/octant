@@ -239,6 +239,9 @@ export function useChatController(options: ChatControllerOptions) {
   // Set when the open thread changes: the next newest read replaces what is
   // loaded, so leaving a thread releases its earlier pages.
   const releaseLoadedPages = useRef(true);
+  // Counts jump requests, so a page read for an earlier jump that answers
+  // after a later one cannot replace the later jump's range.
+  const revealGeneration = useRef(0);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
   const [settingsMessage, setSettingsMessage] = useState<string | undefined>(undefined);
   const composerDraft = useComposerThreadDraft({
@@ -1215,6 +1218,7 @@ export function useChatController(options: ChatControllerOptions) {
 
   /** Leave the detached range and show the newest turns again. */
   const jumpToLatest = useCallback(() => {
+    revealGeneration.current += 1;
     const current = transcriptWindowRef.current;
     if (current?.detached === undefined) return;
     const { detached: _left, ...rest } = current;
@@ -1242,12 +1246,19 @@ export function useChatController(options: ChatControllerOptions) {
         return;
       }
       if (!state.windowed || holdsTurn(state.detached?.view, key)) return;
+      const generation = ++revealGeneration.current;
       try {
         const page = await client.threadWindow(threadId, {
           limit: CHAT_WINDOW_PAGE_TURNS,
           through: turnId,
         });
-        if (!mounted.current || String(activeThreadIdRef.current ?? "") !== threadKey) return;
+        if (
+          !mounted.current ||
+          String(activeThreadIdRef.current ?? "") !== threadKey ||
+          generation !== revealGeneration.current
+        ) {
+          return;
+        }
         const current = transcriptWindowRef.current;
         const currentTail = activeViewRef.current;
         if (current === undefined || currentTail === undefined) return;

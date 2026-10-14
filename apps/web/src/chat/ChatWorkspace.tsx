@@ -50,6 +50,7 @@ import {
 } from "./ChatComposer";
 import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ChatTranscript } from "./ChatTranscript";
+import { canvasCardsForShownRun } from "./chatTranscriptWindow";
 import { formatOutgoingMessageWithQuotes, type TranscriptQuoteChip } from "./quoteSelection";
 import {
   unattachedCapabilityMentionCopy,
@@ -460,13 +461,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const thread = view.thread;
   const connectionLost = props.controller.status === "disconnected";
   const canvasClient = props.canvasClient;
+  // A Canvas sits inline after the turn that wrote it, in whichever run the
+  // transcript shows: the newest turns, or a run the reader jumped to.
+  const shownRun = transcriptWindow?.detached;
   const canvasPlacement = placeThreadCanvases(
     threadTurnSpans(
-      activeChatTurns(view.turns),
+      activeChatTurns((shownRun?.view ?? view).turns),
       (turn) => String(turn.id),
       (turn) => turn.createdAt,
     ),
-    threadCanvases.cards,
+    shownRun === undefined
+      ? threadCanvases.cards
+      : canvasCardsForShownRun(threadCanvases.cards, shownRun.view, shownRun.hasLater),
   );
   const canvasPanelId = `chat-canvas-panel-${thread.id}`;
   const pendingExtensionSelections = props.pendingExtensionSelections ?? extensionDraft.receipts;

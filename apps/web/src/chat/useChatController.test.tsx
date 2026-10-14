@@ -2459,6 +2459,29 @@ describe("useChatController thread windows", () => {
     expect(result.current.transcriptWindow?.detached).toBeUndefined();
   });
 
+  it("keeps the later of two jumps when the earlier one's page answers last", async () => {
+    const host = windowHost(100);
+    const held = deferred<void>();
+    const threadWindow = vi.fn(
+      async (id: ChatThreadId, request: Parameters<ChatClient["threadWindow"]>[1]) => {
+        if (request.through === turnIdAt(5)) await held.promise;
+        return host.threadWindow(id, request);
+      },
+    );
+    const { result } = renderWindowed(host, { threadWindow });
+    await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(70));
+
+    let first: Promise<void> | undefined;
+    act(() => {
+      first = result.current.revealTurn(turnIdAt(5) as never);
+    });
+    await act(async () => result.current.revealTurn(turnIdAt(40) as never));
+    held.resolve();
+    await act(async () => first);
+
+    expect(indexes(result.current.transcriptWindow?.detached?.view).at(-1)).toBe(40);
+  });
+
   it("joins the jumped-to run onto the newest turns once loading later pages reaches them", async () => {
     const host = windowHost(70);
     const { result } = renderWindowed(host);

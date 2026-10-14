@@ -1,6 +1,11 @@
 import { decodeChatThreadView, type ChatThreadView } from "@octant/contracts/chat";
 import { describe, expect, it } from "vitest";
-import { joinChatViews, joinDetachedRange, refreshChatTail } from "./chatTranscriptWindow";
+import {
+  canvasCardsForShownRun,
+  joinChatViews,
+  joinDetachedRange,
+  refreshChatTail,
+} from "./chatTranscriptWindow";
 
 const now = "2026-07-20T08:00:00.000Z";
 const threadId = "00000000-0000-4000-8000-000000000801";
@@ -191,5 +196,20 @@ describe("joining Chat thread pages", () => {
     const joined = joinDetachedRange(tail, true, detached([3, 4, 5, 6]));
     expect(joined === undefined ? [] : ids(joined.view)).toEqual([3, 4, 5, 6, 7, 8].map(turnId));
     expect(joined?.hasEarlier).toBe(true);
+  });
+
+  it("places on a jumped-to run only the Canvases written by the time its last turn settled", () => {
+    const run = view([3, 4]);
+    const cards = [
+      { canvasId: "during", canvasCreatedAt: now },
+      { canvasId: "later", canvasCreatedAt: "2026-07-20T09:00:00.000Z" },
+      { canvasId: "undated" },
+    ];
+
+    expect(canvasCardsForShownRun(cards, run, true).map((card) => card.canvasId)).toEqual([
+      "during",
+    ]);
+    // The newest turns end the thread, so every card may land on them.
+    expect(canvasCardsForShownRun(cards, run, false)).toBe(cards);
   });
 });
