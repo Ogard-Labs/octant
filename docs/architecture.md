@@ -4797,12 +4797,15 @@ mechanisms are:
   tool the provider reaches for; and a turn started from a phone has no
   window binding to hold it against and must keep working. Stopping the turn
   is how the person ends its reach.
-  What still applies to every such call: the thread's live execution policy
-  (the turn's requested ceiling, clamped by the thread's current grant, so a
-  thread put in Plan mode mid-turn refuses writes and process launches on the
-  next call, and a Plan turn is read-only throughout), the turn's confinement,
-  path containment inside the captured root, and the approvals the posture
-  requires. The next turn on the thread checks the window's binding again, so
+  What still applies to every call of Octant's own tools: the thread's live
+  execution policy (the turn's requested ceiling, clamped by the thread's
+  current grant, so a thread put in Plan mode mid-turn refuses writes and
+  process launches on the next call, and a Plan turn is read-only throughout),
+  the turn's confinement, path containment inside the captured root, and the
+  approvals the posture requires. A provider's own built-in tools run under
+  the posture and sandbox the turn was launched with and do not reread the
+  thread's grant mid-turn, so lowering it takes effect on them with the next
+  turn or when the person stops the turn. The next turn on the thread checks the window's binding again, so
   after a rebind or a window close it starts on the new binding or is refused,
   as any new turn is.
   The two rules fit because they judge different things. The captured checkout
