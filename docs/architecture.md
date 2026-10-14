@@ -5005,7 +5005,7 @@ mechanisms are:
   certificate and private key PEMs, and Octant makes none, so a second,
   always-on computer first needs a Tailscale certificate or the person's own
   certificate authority. This proposal lets the host make its own certificate
-  and has the pairing link carry a fingerprint of its key, which Octant's own
+  and has the pairing code carry a fingerprint of its key, which Octant's own
   clients pin. Nothing below is built; the rules above stay the current
   behavior until the maintainer accepts this and the slices land.
   - **What stays.** No public ingress, no relay, and no Octant-operated
@@ -5063,19 +5063,26 @@ mechanisms are:
     prefix. Pinning the key rather than the certificate lets renewal keep the
     pin. The prefix names the algorithm: a client refuses a prefix it does not
     know rather than skipping the check.
-  - **Link and QR code.** For a self-made listener the host mints an app link,
-    `octant://pair#origin=<listener origin>&ticketId=<id>&ticketProof=<proof>&pin=<pin>`,
-    with everything in the fragment as the ticket is today. The QR code
-    encodes the same link, so a phone's camera opens the Octant app and not a
-    browser that cannot use the pin. The 10-character human-entry code has no
-    room for a pin and is not offered for a self-made listener. The pin is
-    public. The link is only as trustworthy as the way it reaches the device:
-    scanned from the host's screen or terminal, or pasted by the person. The
-    host-side approval with the comparison code stays the check that the
-    person's own device made the claim. Another app on a phone can register
-    the `octant` scheme and claim the ticket; the host then shows a claim the
-    person's device never made, and the person denies it.
-  - **How each client pins.** A client takes a pin only from a pairing link,
+  - **Pairing code and QR code.** For a self-made listener the host mints an
+    app pairing code, `octant-pair-1.<payload>`, where the payload is the
+    unpadded base64url of a JSON object holding the listener origin, ticket
+    id, ticket proof, and pin. It deliberately has no URL scheme, so no
+    operating system hands it to an app: an unrelated app that registers a
+    scheme cannot receive the ticket. The QR code encodes the same text. The
+    Octant app reads it only from its own QR scanner or its paste field, and
+    the desktop app only from its paste field; a phone's system camera shows
+    it as text and opens nothing. A handoff through a registered scheme is
+    refused because the receiving app could claim the ticket with its own key
+    and show the very comparison code the host shows, so the code could not
+    tell the person's device from a lookalike. An OS-verified app link would
+    need a domain Octant operates, which the release boundary excludes. The
+    10-character human-entry code has no room for a pin and is not offered for
+    a self-made listener. The pin is public; the pairing code is as
+    trustworthy as the way it reaches the device, scanned from the host's
+    screen or terminal by the Octant app or pasted by the person. The
+    host-side approval with the comparison code stays the check that the claim
+    is the person's.
+  - **How each client pins.** A client takes a pin only from a pairing code,
     or from the rotation route below, and records it with the device
     registration for that exact origin (device-key metadata and the host
     registry). On every connection to that origin, the first hello included,
@@ -5085,19 +5092,22 @@ mechanisms are:
     chain validation and never falls back to it, so a certificate a public
     authority issued for the same name does not pass. An origin with no pin
     uses platform trust only, so it never accepts a self-made certificate.
-    Validation is replaced for a pinned origin, never turned off.
+    The only exception is a rotation window the host announced over a proven
+    session (below). Validation is replaced for a pinned origin, never turned
+    off.
     - **Phone.** Requests to a pinned origin go through a small in-tree native
       module that checks the pins in the platform's TLS trust callback on iOS
       and Android; the app's ordinary fetch is not used for those origins. It
       must work under the platform's transport security rules without an
-      arbitrary-loads exception. The pairing screen accepts the
-      `octant://pair` deep link and a pasted link; typing the origin and
-      ticket by hand stays for hosts with a pasted certificate.
+      arbitrary-loads exception. The pairing screen reads the pairing code
+      from the app's own QR scanner, which needs camera permission, or from
+      a paste; typing the origin and ticket by hand stays for hosts with a
+      pasted certificate.
     - **Desktop to host.** The desktop app reaches another host through
       Electron's network stack. The main process keeps the pins owner-only
       under the app's data and checks them in the session's certificate
       verification hook. The renderer can ask main to record a pin only while
-      completing a pairing link, and main records pins only for names and
+      completing a pairing code, and main records pins only for names and
       addresses the listener address classifier calls private LAN or
       Tailscale, never a public name, so a compromised renderer cannot pin a
       public site. A pinned name whose key does not match is refused even when
@@ -5119,16 +5129,18 @@ mechanisms are:
       over a trusted certificate, it does not let the person continue past
       that warning at all. Octant installs no trust root and never asks the
       person to.
-  - **One-line start on the new computer.** `octant server install --pair`,
-    and `octant server start --pair` from a checkout, install and start the
-    service as today, then, over the loopback administration channel:
+  - **One-line start on the new computer.**
+    `octant server install --artifact <path> --pair`, and
+    `octant server start --pair` from a checkout, install and start the
+    service as today (`install` still needs the artifact it installs), then,
+    over the loopback administration channel:
     1. find the address: an up interface with an address the classifier calls
        Tailscale, else one private LAN address. More than one candidate of
        that kind, or none, refuses and names what it found; `--hostname`
        chooses instead;
     2. enable the listener on port 8443 (`--port` overrides) with a self-made
        certificate, or with `--cert` and `--key` when given;
-    3. mint a pairing ticket and print the app link and a QR code in the
+    3. mint a pairing ticket and print the pairing code and a QR code in the
        terminal;
     4. wait up to the ticket's five minutes for a claim, show the device
        label, key fingerprint, and comparison code, and ask `Approve? [y/N]`.
@@ -5139,20 +5151,26 @@ mechanisms are:
     and the device pairs again, which is why Tailscale comes first. On a Mac
     with the desktop app, Settings → Remote access does the same as the
     command: enabling with no PEMs uses a self-made certificate and shows the
-    link and QR code.
+    pairing code and QR code.
   - **Rotation.** Renewal keeps the key and needs nothing from clients.
     Replacing the key is host-local, from Settings or
     `octant listener replace-key`. The host makes the next key and
     certificate and keeps serving the current one. For up to 30 days it
-    announces both pins on a new authenticated remote route that needs a
-    device session and request proof and joins the forward list and route
-    classifier like every product route. A device records the next pin only
-    from that route, on a connection that passed its current pin. When the
-    person switches, or the 30 days end, the host serves the new key and
-    deletes the old one; a device that did not connect in time sees the
-    mismatch and pairs again. Moving between a pasted and a self-made
-    certificate uses the same announcement, which then says `pinned` with
-    the pins or `platform`, and a device changes its trust mode only that
+    announces the current trust and the next trust on a new authenticated
+    remote route that needs a device session and request proof and joins the
+    forward list and route classifier like every product route. The next
+    trust is a pin, or `platform` when the next certificate is pasted. A
+    device records the next trust only from that route, on a connection that
+    passed its current trust, and stages it: until the window ends the device
+    accepts either the current or the staged trust for that origin, and the
+    first connection that passes only the staged trust makes it current and
+    drops the old. So a device that reconnects before the host switches still
+    passes on the current certificate, and one that reconnects after passes
+    on the new one. When the person switches, or the 30 days end, the host
+    serves the new certificate and, for a self-made key, deletes the old key;
+    a device that did not connect during the window sees the mismatch and
+    pairs again. Moving between a pasted and a self-made certificate uses the
+    same staged announcement, and a device changes its trust mode only that
     way. Because the announcement travels under the old key, it cannot recover
     from a stolen key: for a suspected compromise the person replaces the key
     and revokes every device, and each device pairs again. Rotating the host
@@ -5162,9 +5180,9 @@ mechanisms are:
       its security key has changed. Octant stopped before sending anything.
       If its key was replaced on purpose, pair again from that computer.";
     - platform trust fails for an origin with no pin: "Octant couldn't verify
-      this computer's certificate. Pair with the full link or QR code from
+      this computer's certificate. Pair with the full pairing code or QR code from
       that computer.";
-    - unknown pin prefix: "This pairing link needs a newer version of
+    - unknown pin prefix: "This pairing code needs a newer version of
       Octant.";
     - a browser link asked for on a self-made listener: "A browser can't check
       this computer's own certificate. Pair from the Octant app or the desktop
@@ -5179,7 +5197,7 @@ mechanisms are:
     - key file readable by others: "The listener's certificate key can be
       read by other users on this computer, so Octant won't use it. Run
       `octant listener replace-key` to make a new one.";
-    - no claim in time: "No device used the link within five minutes. Run the
+    - no claim in time: "No device used the pairing code within five minutes. Run the
       command again for a new one."
   - **Open decisions**, each with the recommended option:
     1. _Separate TLS key or the host identity key._ Recommend separate. The
@@ -5187,7 +5205,7 @@ mechanisms are:
        which a TLS server cannot use, and rotating it revokes every device;
        a separate key keeps certificate work away from device trust.
     2. _Pin encoding._ Recommend `sha256-` plus base64url over hex: it keeps
-       the link and QR code shorter and leaves room for another algorithm.
+       the pairing code and QR code shorter and leaves room for another algorithm.
     3. _Certificate generation._ Recommend a small in-tree DER writer for
        this one certificate shape, tested by parsing the result with the
        platform's X.509 reader and a real TLS handshake, over a new
@@ -5211,8 +5229,12 @@ mechanisms are:
     9. _Phone pinning._ Recommend the in-tree native module over a
        third-party pinning library, because it is the one check that must be
        right and is small.
-    10. _Command shape._ Recommend `--pair` on both `server install` and
-        `server start`, since `install` needs an artifact today.
+    10. _Command shape._ Recommend `--pair` on both
+        `server install --artifact <path>` and `server start`, keeping the
+        artifact argument `install` needs today.
+    11. _Phone QR scanner._ Recommend the app's own scanner, which adds camera
+        permission and a camera package, over paste only, which keeps the
+        app smaller but makes the phone path a copy-and-paste chore.
   - **Slices**, each with its tests:
     1. _Host certificate._ Generation, storage, renewal, the self-made enable
        variant on the administration routes and `octant listener`, and the
@@ -5221,9 +5243,9 @@ mechanisms are:
        the key is absent from every administration response, status read,
        log line, journal event, and diagnostics export; a key file another
        user can read is refused; a restart and a renewal keep the pin.
-    2. _Pinned link._ Link building and parsing, Settings and `octant pair`
+    2. _Pairing code._ Building and parsing the code, Settings and `octant pair`
        output, QR code, no browser link or human-entry code for a self-made
-       listener. Tests: the link round-trips; a link with a missing or
+       listener. Tests: the code round-trips; a code with a missing or
        unknown pin is refused with its copy.
     3. _Client pin rule._ The pin and trust mode in device-key metadata and the
        host registry, and a pinned transport port in the client runtime.
@@ -5235,7 +5257,7 @@ mechanisms are:
        and any other is refused; a public name cannot be pinned; a trusted
        certificate with the wrong key is refused for a pinned name; a
        packaged-app smoke.
-    5. _Phone._ The native module, deep link, and pasted link. Tests: module
+    5. _Phone._ The native module, in-app scanner, and pasted code. Tests: module
        tests on both platforms and the device pass from the
        [TestFlight runbook](mobile-testflight.md) against a self-made host,
        including a refused mismatch.
@@ -5245,9 +5267,11 @@ mechanisms are:
        Tailscale with only the command and the host approval.
     7. _Rotation._ Replace key, the announcement route, switching. Tests: the
        route refuses an unauthenticated caller and is not on the loopback-only
-       list; a device records the next pin only over a proven session that
-       passed its current pin; a device that missed the window sees the
-       mismatch; revocation is unchanged.
+       list; a device stages the next trust only over a proven session that
+       passed its current trust; during a self-made-to-pasted move, a device
+       that reconnects before the switch and one that reconnects after both
+       pass; a device that missed the window sees the mismatch; revocation is
+       unchanged.
   - **User guide when built.** `apps/docs/advanced/remote-access.md` (the
     HTTPS and certificate rule, both enabling sections, and a new section for
     adding a computer), `apps/docs/guide/linux-host.md` (the Tailscale pairing
