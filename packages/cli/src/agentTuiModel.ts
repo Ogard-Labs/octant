@@ -242,7 +242,11 @@ export function statusLineFrom(
     if (stats.length > 0) parts.push(stats);
   } else if (thread !== undefined) {
     parts.push(thread.modelId);
-    parts.push(`${thread.turns.length} turns`);
+    parts.push(
+      thread.hasEarlier === true
+        ? `newest ${thread.turns.length} turns`
+        : `${thread.turns.length} turns`,
+    );
   }
   return parts.join(" · ");
 }

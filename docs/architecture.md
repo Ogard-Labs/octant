@@ -1648,7 +1648,16 @@ flowchart LR
   native harness. The thread-lifetime taint
   projection rebuilds from the journal; session, turn, and restart boundaries
   never clear it. Irreversible or authority-bearing actions on a tainted thread
-  still require fresh confirmation after replay.
+  still require fresh confirmation after replay. One gate enforces that:
+  `resolveThreadElevation` in `packages/domain/src/toolCallPolicy.ts` asks
+  afresh, under every posture that allows the tool at all, Full access
+  included, for each closed-catalog entry marked `irreversibleUnderTaint`
+  (MCP tools, computer-use, the harness's `web-fetch`, `bash`, `edit`,
+  `write`, and `goal-check`); Plan refuses all of these but `web-fetch`
+  before that check. A contract test refuses a catalog entry in a
+  destructive, credential, outside-Project, or privilege-expansion class
+  without that flag. A Code Git action a person takes from a window is that
+  person's own per-action act, and no agent tool issues one.
 - **Clearing taint.** Taint keeps its thread lifetime, and a person at a local
   window may clear it. A clear records that they reviewed what the thread read.
   - It appends `thread.external-content-cleared@1` on the thread's
@@ -1741,8 +1750,10 @@ flowchart LR
   the local registry entry.
   Removing a host, from the desktop's federated hosts or the phone's host list,
   stops that host's session and deletes its device key from secure storage;
-  other hosts' keys stay. The host leaves the list even when the key cannot be
-  deleted, and the phone says so.
+  other hosts' keys stay. On the phone, Remove works with no connection to the
+  host, asks first, and sends nothing to the host, so it does not revoke: the
+  host keeps listing the device until it is revoked from the desktop. The host
+  leaves the list even when the key cannot be deleted, and the phone says so.
   Reopened Code terminals retain their runtime-work identity and resume at the
   persisted aggregate version, including restart interruption events. Live
   recorders keep their expected version so conflicting writes remain refused.
@@ -1769,7 +1780,9 @@ flowchart LR
   whole, and its window read starts from the newest turns without scanning the
   thread; a fork's earlier pages continue into its source at the fork point.
   The forward Code conversation read is unchanged for export, forks, hand-off,
-  mentions, the phone, and the CLI.
+  mentions, and the CLI's live feed. The phone and the CLI open a Code thread
+  on its newest window without Load earlier, and read the tail of the forward
+  read from a host without the window route.
   The older whole-transcript route answers with the newest 64 turns of a longer
   thread, oldest first; export and `#thread` mentions read the whole thread on
   the host. One post-commit Machine change feed invalidates mode
@@ -4473,7 +4486,11 @@ prompt, schema, tool, route, model, or capability.
   wait at once across the whole host; the cap is shared by every thread and
   window, not counted per thread. A call past that cap is denied immediately
   with the refusal a declined call already uses, and answering or expiry
-  frees the slot. An MCP
+  frees the slot. An unanswered approval expires after five minutes and the
+  call is denied; the host checks that against the clock whenever approvals
+  are listed, answered, or requested, so a prompt whose timer fired late (a
+  busy host, a machine that slept) cannot still be approved or hold a slot.
+  An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
   carried it.
