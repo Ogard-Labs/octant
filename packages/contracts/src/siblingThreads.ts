@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { UtcTimestamp } from "./events";
+import { AggregateId, CorrelationId, UtcTimestamp } from "./events";
 import { MAX_NATIVE_HARNESS_DELEGATE_WAIT_MS } from "./nativeHarness";
 import type { ProviderToolDefinition } from "./providers";
 import {
@@ -78,11 +78,14 @@ export type SiblingThreadsToolInput = typeof SiblingThreadsToolInput.Type;
  * Why a call was refused. `unauthorized` covers every reference outside the
  * readable set in one sentence, including reference text that does not parse
  * as `<thread id>@<project id>`; `rate-limited` is a spent per-turn bound;
- * `unavailable` is a read the host could not mark as outside content, so it
- * returned nothing; `policy` is a call whose input fails
+ * `unavailable` is a call the host could not complete (mark as outside
+ * content, journal, or read its own facts for), so it returned nothing;
+ * `policy` is a call whose input fails
  * `SiblingThreadsToolInput` (an unknown action, an extra field, a timeout out
- * of range, a reference over 128 characters) or a cancelled turn. Neither
- * `policy` case depends on any thread, so it confirms nothing about one.
+ * of range, a reference over 128 characters), a cancelled turn, a profile
+ * that does not permit the tool, or a caller that is not a thread the host
+ * knows. No `policy` case depends on another thread, so it confirms nothing
+ * about one.
  */
 export const SiblingThreadRefuseReason = Schema.Literal(
   "unauthorized",
@@ -154,6 +157,32 @@ export const SIBLING_THREADS_TOOL_DEFINITION: ProviderToolDefinition = {
   },
 };
 
+/**
+ * The journal record of one answered `read` or `wait`, on the reader's own
+ * stream: the `sibling-thread-observation` aggregate keyed by the reader's
+ * thread id. It names the reader, the target, the action, and how many bytes
+ * the answer carried, never the text, so a person can see what a thread looked
+ * at without the journal holding another conversation. `threadId` is the
+ * reader, so purging the reader takes its records with it. `list` is not
+ * journaled: it reads no transcript, and its taint mark is its record.
+ */
+export const SIBLING_THREAD_OBSERVATION_AGGREGATE = "sibling-thread-observation";
+export const SIBLING_THREAD_EVENT_NAMES = {
+  observed: "thread.sibling-observed@1",
+} as const;
+
+export const SiblingThreadObserved = Schema.Struct({
+  kind: Schema.Literal("sibling-observed"),
+  threadId: AggregateId,
+  targetThreadId: AggregateId,
+  action: Schema.Literal("read", "wait"),
+  correlationId: CorrelationId,
+  returnedBytes: Schema.Int.pipe(Schema.nonNegative()),
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type SiblingThreadObserved = typeof SiblingThreadObserved.Type;
+
+export const decodeSiblingThreadObserved = Schema.decodeUnknownSync(SiblingThreadObserved);
 export const decodeSiblingThreadReference = Schema.decodeUnknownSync(SiblingThreadReference);
 export const decodeSiblingThreadsToolInput = Schema.decodeUnknownSync(SiblingThreadsToolInput);
 export const decodeSiblingThreadsToolResult = Schema.decodeUnknownSync(SiblingThreadsToolResult);

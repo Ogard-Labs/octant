@@ -95,6 +95,34 @@ optional `senderRunId`, `recipientThreadId`, optional `recipientRunId`,
 `bodyReference` (opaque), `byteLength`, `refuseReason`, `occurredAt`. No
 absolute paths, raw body text, credentials, or provider payloads.
 
+## Sibling-thread reads
+
+The `octant_threads` tool is messaging's read-only companion: a Code turn may
+list, read, and wait on the other open Code threads of its own Project. The
+effective rule is the paragraph on seeing sibling threads in
+[`../architecture.md`](../architecture.md); this section records how its read
+path meets the threats above.
+
+- **Taint before return (T2).** A `list` or `read` answer reaches the provider
+  only after the host has journaled `thread.external-content-ingested@1` on
+  the reader, under the source label `sibling-thread`, for that call. A call
+  the host cannot mark returns `unavailable` and nothing else. The answer sits
+  inside the shared external-data frame. `wait` returns a closed set of states
+  and does not mark.
+- **One-sentence refusal (T6).** Every reference outside the readable set (an
+  unknown or malformed one, another Project, the caller, a child run, a
+  completed, archived, or deleted thread) refuses `unauthorized` in one
+  sentence. The set is re-decided at every call, again after `read` reads its
+  transcript, and on every look of a `wait`, so a thread that closes or moves
+  meanwhile refuses too.
+- **Per-turn bounds (T3).** A turn may make 8 `read` and 4 `wait` calls, and
+  each `wait` blocks at most 120 seconds. Refused calls count toward the
+  bound, so probing references costs what reading does.
+- **No effect on the target (T4).** The only appends are the reader's own mark
+  and its `thread.sibling-observed@1` record on the `sibling-thread-observation`
+  stream, which names reader, target, action, and bytes returned, never text
+  (T5). The tool is therefore offered in Plan.
+
 ## Acceptance sketch
 
 | Criterion                        | Evidence                                                                               |

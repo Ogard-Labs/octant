@@ -5,6 +5,7 @@ import {
   MAX_SIBLING_THREAD_WAIT_MS,
   SIBLING_THREADS_TOOL_DEFINITION,
   SIBLING_THREADS_TOOL_NAME,
+  decodeSiblingThreadObserved,
   decodeSiblingThreadReference,
   decodeSiblingThreadsToolInput,
   decodeSiblingThreadsToolResult,
@@ -90,5 +91,22 @@ describe("the sibling threads contract", () => {
         message: "This turn has already read 8 threads.",
       }),
     ).toMatchObject({ reason: "rate-limited" });
+  });
+
+  it("journals an answered read with its size and never its text", () => {
+    const observed = {
+      kind: "sibling-observed",
+      threadId: "c0000000-0000-4000-8000-000000000001",
+      targetThreadId: "c0000000-0000-4000-8000-000000000002",
+      action: "read",
+      correlationId: "d0000000-0000-4000-8000-000000000001",
+      returnedBytes: 1_024,
+      occurredAt: "2026-10-14T07:00:00.000Z",
+    };
+    expect(decodeSiblingThreadObserved(observed)).toEqual(observed);
+    expect(() =>
+      decodeSiblingThreadObserved({ ...observed, transcript: [{ role: "user", text: "x" }] }),
+    ).toThrow();
+    expect(() => decodeSiblingThreadObserved({ ...observed, action: "list" })).toThrow();
   });
 });
