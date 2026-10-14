@@ -1854,6 +1854,115 @@ describe("AppleToolchainService lifecycle", () => {
   });
 });
 
+describe("AppleToolchainService Open URL", () => {
+  const actor = {
+    kind: "local-user" as const,
+    actorId: "30000000-0000-4000-8000-000000000099" as never,
+  };
+  const url = "https://example.com/reset?token=do-not-keep-this";
+
+  function openUrlService(openurl: { readonly stderr?: string; readonly exitCode?: number }) {
+    const discovery = discoveryExecutor();
+    const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) =>
+      input.argv[2] === "openurl"
+        ? processResult("", openurl)
+        : await discovery(input as Parameters<typeof discovery>[0]),
+    );
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-10-14T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    const openedWith = () => execute.mock.calls.filter(([input]) => input.argv[2] === "openurl");
+    return { service, artifacts, openedWith };
+  }
+
+  function openUrlRequest(overrides: Partial<AppleSimulatorRequest> = {}) {
+    return simulatorRequest({
+      kind: "open-url",
+      bundleIdentifier: undefined,
+      requestedBy: actor,
+      url: url as never,
+      approval: { kind: "approved", approvalId: ids.approval as never },
+      ...overrides,
+    });
+  }
+
+  it("opens the approved address on the Simulator as one argument and records only its origin", async () => {
+    const { service, artifacts, openedWith } = openUrlService({});
+    const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: true };
+    await service.discover(discoveryRequest, gated);
+
+    const evidence = await service.execute(openUrlRequest(), gated);
+
+    expect(evidence.outcome).toBe("succeeded");
+    expect(evidence.requestedBy).toEqual(actor);
+    expect(openedWith().map(([input]) => input.argv)).toEqual([
+      ["xcrun", "simctl", "openurl", ids.simulator, url],
+    ]);
+    expect(evidence.diagnostics[0]?.message).toContain("https://example.com");
+    expect(JSON.stringify(evidence)).not.toContain("do-not-keep-this");
+    for (const bytes of artifacts.values()) {
+      expect(new TextDecoder().decode(bytes)).not.toContain("do-not-keep-this");
+    }
+  });
+
+  it("keeps the address out of a failure even when simctl quotes it back", async () => {
+    const { service, artifacts } = openUrlService({
+      exitCode: 1,
+      stderr: `An error was encountered processing the command: ${url}\n`,
+    });
+    await service.discover(discoveryRequest, context);
+
+    const evidence = await service.execute(openUrlRequest(), context);
+
+    expect(evidence.outcome).toBe("failed");
+    expect(JSON.stringify(evidence)).not.toContain("do-not-keep-this");
+    for (const bytes of artifacts.values()) {
+      expect(new TextDecoder().decode(bytes)).not.toContain("do-not-keep-this");
+    }
+  });
+
+  it("asks before every Open URL: no approval, Plan, or an input grant never sends it", async () => {
+    const { service, openedWith } = openUrlService({});
+    const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: false };
+    await service.discover(discoveryRequest, gated);
+
+    const unapproved = await service.execute(
+      openUrlRequest({ approval: { kind: "not-required" } }),
+      gated,
+    );
+    expect(unapproved.outcome).toBe("unauthorized");
+
+    // Allow input covers taps and typing, not opening an address.
+    const underGrant = await service.execute(
+      openUrlRequest({
+        actionId: "30000000-0000-4000-8000-000000000013" as never,
+        approval: { kind: "not-required" },
+      }),
+      { ...gated, approvalValid: true, inputGranted: true },
+    );
+    expect(underGrant.outcome).toBe("unauthorized");
+
+    const planned = await service.execute(
+      openUrlRequest({ actionId: "30000000-0000-4000-8000-000000000014" as never }),
+      { ...context, executionPolicy: "plan" as const },
+    );
+    expect(planned.outcome).toBe("unauthorized");
+    expect(openedWith()).toEqual([]);
+  });
+
+  it("tells the pane this host can open an address", async () => {
+    const { service } = openUrlService({});
+    expect(service.snapshot(context).capabilities).toEqual({ openUrl: true });
+  });
+});
+
 describe("AppleToolchainService Simulator input", () => {
   const actor = {
     kind: "local-user" as const,

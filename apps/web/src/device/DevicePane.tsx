@@ -35,6 +35,11 @@ export interface DevicePaneProps {
   readonly needsApproval: boolean;
   readonly problem?: DeviceProblem;
   readonly diagnostics: DeviceDiagnostics;
+  /**
+   * The host reported that it can open an address on this device. Without it
+   * More has no Open URL at all; it is never shown disabled.
+   */
+  readonly canOpenUrl?: boolean;
 }
 
 /**
@@ -57,6 +62,7 @@ export function DevicePane(props: DevicePaneProps) {
   const [approvalDeferred, setApprovalDeferred] = useState(false);
   const [focusAllow, setFocusAllow] = useState(false);
   const [typing, setTyping] = useState(false);
+  const [openingUrl, setOpeningUrl] = useState(false);
   const [picking, setPicking] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   // A dismissed line stays dismissed until the failure behind it clears: the
@@ -72,6 +78,7 @@ export function DevicePane(props: DevicePaneProps) {
     setApprovalDeferred(false);
     setFocusAllow(false);
     setTyping(false);
+    setOpeningUrl(false);
     setPicking(false);
   }, [deviceId]);
 
@@ -82,6 +89,7 @@ export function DevicePane(props: DevicePaneProps) {
   });
 
   const act = (action: DeviceAction) => props.onAction?.(action);
+  const canOpenUrl = live !== undefined && canAct && props.canOpenUrl === true;
   const approvalWanted = props.needsApproval && live !== undefined && canAct;
   const line = lineFor({
     view,
@@ -112,6 +120,18 @@ export function DevicePane(props: DevicePaneProps) {
             onSend: (text) => enqueue({ kind: "type-text", text }, false),
           }
         : undefined,
+    openUrl:
+      openingUrl && canOpenUrl
+        ? {
+            kind: "open-url",
+            deviceName: live.device.name,
+            onClose: () => setOpeningUrl(false),
+            onOpen: (url) => {
+              setOpeningUrl(false);
+              act({ kind: "open-url", url });
+            },
+          }
+        : undefined,
     canAct,
     act,
   });
@@ -119,8 +139,14 @@ export function DevicePane(props: DevicePaneProps) {
   const choosable = props.devices.filter((one) => one.state !== "unavailable");
 
   const onMenu = (item: DeviceMenuItem) => {
-    if (item === "type-text") setTyping(true);
-    else if (item === "lock") enqueue({ kind: "key-press", key: "lock" }, false);
+    // One field at a time: the line shows only one of them.
+    if (item === "type-text") {
+      setOpeningUrl(false);
+      setTyping(true);
+    } else if (item === "open-url") {
+      setTyping(false);
+      setOpeningUrl(true);
+    } else if (item === "lock") enqueue({ kind: "key-press", key: "lock" }, false);
     else if (item === "switch-device") setPicking(true);
     else if (item === "diagnostics") setDiagnosticsOpen(true);
     else if (item === "stop-live-view") act({ kind: "stop-live-view" });
@@ -141,6 +167,7 @@ export function DevicePane(props: DevicePaneProps) {
           back: props.platform === "android",
           screenshot: live !== undefined && canAct && !props.busy,
           typeText: hardware,
+          openUrl: canOpenUrl,
           switchDevice: canAct && choosable.length > 0 && view.kind !== "setup",
           stopLiveView:
             live !== undefined &&
@@ -454,9 +481,14 @@ function lineFor(input: {
   readonly onDismiss: () => void;
   readonly approval: DeviceLineContent | undefined;
   readonly typing: DeviceLineContent | undefined;
+  readonly openUrl: DeviceLineContent | undefined;
   readonly canAct: boolean;
   readonly act: (action: DeviceAction) => void;
 }): DeviceLineContent | undefined {
+  // The Open URL field shows only while the person who chose it from More
+  // keeps it open, and it closes when the address is sent; an earlier error,
+  // a stopped live view, or the Allow input ask returns once it is put away.
+  if (input.openUrl !== undefined) return input.openUrl;
   if (input.problem !== undefined) {
     return { kind: "error", problem: input.problem, onDismiss: input.onDismiss };
   }
