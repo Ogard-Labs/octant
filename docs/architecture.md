@@ -4087,12 +4087,15 @@ mechanisms are:
   capability matrix, the thread's elevation state, and the actor's authority
   before anything executes. Tool results and external content are data with
   provenance, never instructions.
-  A Code turn's tool call runs on the turn's window as it stands when the
-  call runs (its persisted Project binding), never on the admission of the
-  request that started the turn, whether that request has ended or is still
-  open; a turn a paired device started therefore reaches no Project through
-  its tools, because the device's own scope holds no binding. Other work a
-  request defers still loses that request's admission when dispatch completes.
+  Every Project check inside a Code turn's tool call is judged on the turn's
+  window as it stands when the call runs (its persisted Project binding),
+  never on the admission of the request that started the turn, whether that
+  request has ended or is still open; a paired device's scope holds no
+  binding, so its wider in-request reach never carries into those checks.
+  Tools that act on the turn's admitted checkout without a window check (the
+  provider's own tools, ACP client file and terminal access) are bounded by
+  the turn's admission, posture, and confinement instead. Other work a request
+  defers still loses that request's admission when dispatch completes.
 - **Approvals.** Independent categories — project file writes, shell commands,
   network access, external application observation or control, destructive
   actions, credential access, access outside the bound root, privilege or
