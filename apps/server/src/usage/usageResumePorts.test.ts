@@ -388,6 +388,26 @@ describe("usage-resume ports", () => {
     await expect(ports.work.inspect(record())).resolves.toEqual({ kind: "ready" });
   });
 
+  it("defers a Work continuation the Done mark refused during dispatch, so inspection ends it with the note", async () => {
+    let reads = 0;
+    const ports = createUsageResumePorts(
+      dependencies({
+        work: {
+          readThread: () => workThread(reads++ === 0 ? {} : { completionConfirmed: true }),
+          listTurns: () => [waitingWorkTurn()],
+          startFirstTurn: async () => {
+            throw new Error("This task is marked Done.");
+          },
+        },
+      }),
+    );
+
+    await expect(ports.work.dispatch(record())).resolves.toEqual({
+      kind: "deferred",
+      detail: "The Work thread was marked Done.",
+    });
+  });
+
   it("marks a Chat limit recovery retry as the host's own dispatch", async () => {
     const execute = vi.fn(async () => ({}));
     const ports = createUsageResumePorts(

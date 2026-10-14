@@ -116,6 +116,11 @@ export function createWorkAgentResultDeliveryPort(
         if (error instanceof WorkTurnServiceError && error.failure.category === "stale") {
           return { kind: "deferred", detail: "The parent Work thread is mid-turn." };
         }
+        // Marked Done while the turn was prepared: a refusal here would settle
+        // the result as failed, and reactivation could no longer deliver it.
+        if (input.readThread(thread.id)?.completionConfirmed === true) {
+          return { kind: "deferred", detail: "The parent Work thread is marked Done." };
+        }
         return { kind: "refused", detail: refusalDetail(error) };
       }
     },

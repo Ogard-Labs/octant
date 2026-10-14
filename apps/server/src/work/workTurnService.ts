@@ -855,12 +855,20 @@ export class WorkTurnService {
       throw this.#failure("invalid", planned.message);
     }
 
+    // The turn journals on its own aggregate, so a Done mark committed while
+    // the turn was prepared raises no version conflict. Reread the thread
+    // last: nothing after this awaits before the acceptance is journaled.
+    const markedWhilePreparing =
+      thread !== undefined &&
+      (await this.#threads.read(authenticatedWindowId, command.threadId))?.completionConfirmed ===
+        true;
+
     // Preparation awaits filesystem and provider context; recheck the journal before admission.
     const afterPreparation = this.#agentResultDelivery(command);
     if (afterPreparation !== undefined) return afterPreparation;
 
     // Context and attachment reads can outlive the host's queue admission.
-    if (options?.admissionCurrent?.() === false) {
+    if (markedWhilePreparing || options?.admissionCurrent?.() === false) {
       await Effect.runPromise(
         Effect.promise(async () => {
           await extensionTools?.close?.();
@@ -869,6 +877,9 @@ export class WorkTurnService {
           Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
         ),
       );
+      if (markedWhilePreparing) {
+        throw this.#failure("invalid", WORK_THREAD_MARKED_DONE_TURN_REFUSAL);
+      }
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
     }
 

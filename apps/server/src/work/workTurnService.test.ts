@@ -2663,6 +2663,18 @@ describe("WorkTurnService", () => {
     await fixture.waitForIdle();
   });
 
+  it("refuses a turn when a person marks the thread Done while the turn is prepared", async () => {
+    let reads = 0;
+    const fixture = serviceFixture({ completionConfirmed: () => reads++ > 0 });
+
+    await expect(fixture.service.startFirstTurn(ids.window, startCommand())).rejects.toMatchObject({
+      failure: { category: "invalid", message: WORK_THREAD_MARKED_DONE_TURN_REFUSAL },
+    });
+    expect(reads).toBeGreaterThan(1);
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.projection.lookup(ids.request)).toBeUndefined();
+  });
+
   it("admits a delivery turn the journaled run backs and carries its mark", async () => {
     const run = workRunFor(ids.thread);
     const fixture = serviceFixture({

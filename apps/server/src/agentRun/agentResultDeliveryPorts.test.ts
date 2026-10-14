@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import { CodeServiceError } from "../code/codeService";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { WorkTurnServiceError } from "../work/workTurnService";
 import {
   createCodeAgentResultDeliveryPort,
   createWorkAgentResultDeliveryPort,
@@ -217,6 +218,27 @@ describe("agent result delivery to a Work or Code parent", () => {
     parent = decodeWorkThread({ ...workThread, version: 3 });
     expect(await work.port.dispatch([run])).toMatchObject({ kind: "dispatched" });
     expect(work.startFirstTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds a Work parent's result when the Done mark lands while the turn is prepared", async () => {
+    let reads = 0;
+    const startFirstTurn = vi.fn(async () => {
+      throw new WorkTurnServiceError({ category: "invalid", message: "This task is marked Done." });
+    });
+    const port = createWorkAgentResultDeliveryPort({
+      uuid,
+      resultText: () => "Found the regression.",
+      isEnabled: () => true,
+      readThread: () =>
+        reads++ === 0 ? workThread : decodeWorkThread({ ...workThread, completionConfirmed: true }),
+      startFirstTurn,
+    });
+
+    expect(await port.dispatch([run])).toEqual({
+      kind: "deferred",
+      detail: "The parent Work thread is marked Done.",
+    });
+    expect(startFirstTurn).toHaveBeenCalledTimes(1);
   });
 
   it("holds a Code parent's result while its session compacts, then delivers it", async () => {

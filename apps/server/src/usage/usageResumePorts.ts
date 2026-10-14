@@ -371,6 +371,11 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
           : refused("message" in result ? result.message : "The continuation was not admitted.");
       } catch (error) {
         if (deps.work.compacting?.(thread.id) === true) return COMPACTION_DEFERRAL;
+        // Marked Done after inspection passed: defer, so the next inspection
+        // ends the opt-in as invalidated with its note rather than as failed.
+        if (deps.work.readThread(thread.id)?.completionConfirmed === true) {
+          return { kind: "deferred", detail: "The Work thread was marked Done." };
+        }
         return refused(refusalDetail(error));
       }
     },
