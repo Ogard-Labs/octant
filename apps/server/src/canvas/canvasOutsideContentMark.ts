@@ -39,25 +39,33 @@ export function registerCanvasOutsideContentEvents(registry: EventRegistry): Eve
   return registry.register(CANVAS_OUTSIDE_CONTENT_CARRIED, 1, CanvasOutsideContentCarried);
 }
 
-/** A Canvas holds a handful of writers at most; one page reads them all. */
-const MAX_RECORDED_WRITERS = 1_000;
+/** The journal's largest replay page. */
+const WRITERS_PAGE = 1_000;
 
 /**
  * The threads and managed children whose marked writes a Canvas carries, read
- * from the journal itself so no projection can fall behind it.
+ * from the journal itself so no projection can fall behind it. Every page is
+ * read: the count is the aggregate's head, which the next record must name.
  */
 export function canvasOutsideContentWriters(
   journal: Pick<Journal, "replayAggregate">,
   canvasId: string,
 ): ReadonlyArray<string> {
-  return journal
-    .replayAggregate({
+  const writers: string[] = [];
+  let afterVersion = 0;
+  while (true) {
+    const page = journal.replayAggregate({
       aggregateType: CANVAS_OUTSIDE_CONTENT_AGGREGATE_TYPE,
       aggregateId: canvasId,
-      afterVersion: 0,
-      limit: MAX_RECORDED_WRITERS,
-    })
-    .map((event) => decodeCanvasOutsideContentCarried(event.payload).writerId);
+      afterVersion,
+      limit: WRITERS_PAGE,
+    });
+    for (const event of page) {
+      writers.push(decodeCanvasOutsideContentCarried(event.payload).writerId);
+      afterVersion = event.aggregateVersion;
+    }
+    if (page.length < WRITERS_PAGE) return writers;
+  }
 }
 
 /**

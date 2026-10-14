@@ -248,3 +248,25 @@ describe("a Canvas written by a thread marked with outside content", () => {
     expect(unreadable.read(readerThreadId)).toEqual({ status: "refused" });
   });
 });
+
+describe("a Canvas's recorded writers", () => {
+  it("are read past one journal page, so the next record names the aggregate's real head", () => {
+    const recorded = Array.from({ length: 1_001 }, (_, index) => ({
+      aggregateVersion: index + 1,
+      payload: {
+        canvasId: String(canvasId),
+        versionId: "00000000-0000-4000-8000-000000000001",
+        writerId: `writer-${String(index)}`,
+      },
+    }));
+    const journal = {
+      replayAggregate: (cursor: { readonly afterVersion: number; readonly limit: number }) =>
+        recorded.slice(cursor.afterVersion, cursor.afterVersion + cursor.limit),
+    } as never;
+
+    const writers = canvasOutsideContentWriters(journal, String(canvasId));
+
+    expect(writers).toHaveLength(1_001);
+    expect(writers.at(-1)).toBe("writer-1000");
+  });
+});
