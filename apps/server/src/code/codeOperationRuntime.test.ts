@@ -6818,7 +6818,7 @@ it("offers the agent message tool to a Code turn and withholds it from one in Pl
       supportsAppManagedTools: true,
       agentMessages: ({ thread: sender, readPosture }) =>
         createAgentMessageTools({
-          service: { send: async () => [] },
+          service: { send: async () => [], recordRefusedSend: async () => undefined },
           senderThreadId: String(sender.id),
           toolConstraints: [],
           profileDisplayName: "the bound profile",
@@ -6870,7 +6870,7 @@ describe("sibling-threads tool on Code turns", () => {
         supportsAppManagedTools: true,
         agentMessages: ({ thread: sender, readPosture }) =>
           createAgentMessageTools({
-            service: { send: async () => [] },
+            service: { send: async () => [], recordRefusedSend: async () => undefined },
             senderThreadId: String(sender.id),
             toolConstraints: sender.toolConstraints ?? [],
             profileDisplayName: "the bound profile",

@@ -3473,6 +3473,7 @@ export function startOctantServer(
     const agentMessageRoutes = createAgentMessageRouteHandler({
       windowAuthorityStore,
       projection: agentMessageProjection,
+      windowCanOpenThread: (windowId, threadId) => windowCanOpenThreadById(windowId, threadId),
     });
     const projectBindingRoutes = createProjectBindingRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
@@ -8353,6 +8354,28 @@ export function startOctantServer(
         return false;
       }
     };
+    // The same rule for a caller that holds only a thread id (a capture, an
+    // agent message). The projections say which kind of thread it is, so one
+    // check runs instead of all three on every read.
+    const windowCanOpenThreadById = async (
+      windowId: WindowId,
+      threadId: string,
+    ): Promise<boolean> => {
+      const id = String(threadId);
+      let threadKind: "chat-thread" | "work-thread" | "code-thread" | undefined;
+      try {
+        if (persistence.readChatThread(decodeChatThreadId(id)) !== undefined) {
+          threadKind = "chat-thread";
+        } else if (persistence.readCodeThread(decodeCodeThreadId(id)) !== undefined) {
+          threadKind = "code-thread";
+        } else if (workThreadProjection.read(decodeWorkThreadId(id)) !== undefined) {
+          threadKind = "work-thread";
+        }
+      } catch {
+        return false;
+      }
+      return threadKind !== undefined && (await windowCanOpenThread(windowId, threadKind, id));
+    };
     // Which Projects a window can open, by the rule its threads are opened by.
     const windowCanOpenProjectById = async (
       windowId: WindowId,
@@ -8691,24 +8714,7 @@ export function startOctantServer(
     const browserAutomationRoutes = createBrowserAutomationRouteHandler({
       service: browserAutomationService,
       captures: browserCaptures,
-      windowCanOpenThread: async (windowId, threadId) => {
-        const id = String(threadId);
-        // A capture names only its thread. The projections say which kind of
-        // thread it is, so one check runs instead of all three on every read.
-        let threadKind: "chat-thread" | "work-thread" | "code-thread" | undefined;
-        try {
-          if (persistence.readChatThread(decodeChatThreadId(id)) !== undefined) {
-            threadKind = "chat-thread";
-          } else if (persistence.readCodeThread(decodeCodeThreadId(id)) !== undefined) {
-            threadKind = "code-thread";
-          } else if (workThreadProjection.read(decodeWorkThreadId(id)) !== undefined) {
-            threadKind = "work-thread";
-          }
-        } catch {
-          return false;
-        }
-        return threadKind !== undefined && (await windowCanOpenThread(windowId, threadKind, id));
-      },
+      windowCanOpenThread: windowCanOpenThreadById,
       projectBrowsers: liveProjectBrowsers,
       authority: browserAuthority,
       approvals: requireBrowserToolApprovalService(),
