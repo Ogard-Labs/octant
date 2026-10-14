@@ -667,6 +667,79 @@ describe("queued turn admission", () => {
     expect(await port.inspect(input)).toMatchObject({ status: "ready" });
   });
 
+  it("holds a Work thread's queue while a person's Done mark stands, and releases it after reactivation", async () => {
+    const { deps } = setup();
+    const now = thread.createdAt;
+    const projectId = "92000000-0000-4000-8000-000000000010";
+    const bindingRevisionId = "92000000-0000-4000-8000-000000000011";
+    const binding = { canonicalRoot: "/workspace/project" };
+    const project = decodeProject({
+      id: projectId,
+      name: "Project",
+      type: "work",
+      lifecycle: "active",
+      pinned: false,
+      rank: "0/1",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      binding,
+      bindingHistory: [
+        {
+          revisionId: bindingRevisionId,
+          revision: 1,
+          currentBinding: binding,
+          actor: { kind: "local-user", actorId: windowId },
+          changedAt: now,
+        },
+      ],
+    });
+    const active = decodeWorkThread({
+      id: threadId,
+      projectId,
+      bindingRevisionId,
+      title: "Queued work",
+      lifecycle: "active",
+      providerInstanceId: thread.providerInstanceId,
+      modelId: thread.modelId,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    let workThread = decodeWorkThread({ ...active, completionConfirmed: true });
+    const startFirstTurn = vi.fn<ThreadMessageQueuePortDependencies["work"]["startFirstTurn"]>();
+    const port = createThreadMessageQueuePort({
+      ...deps,
+      persistence: { ...deps.persistence, readProject: () => project },
+      work: { readThread: () => workThread, listTurns: () => [], startFirstTurn },
+    });
+    const scope = { mode: "work", threadId } as const;
+    const held = { status: "held", reason: "thread-unavailable" };
+
+    for (const intent of ["enqueue", "dispatch", "resume"] as const)
+      expect(await port.inspect({ scope, windowId, intent })).toEqual(held);
+    // What the queue already holds stays readable and removable.
+    expect(await port.inspect({ scope, windowId, intent: "read" })).toMatchObject({
+      status: "ready",
+    });
+    expect(
+      await port.admit({
+        scope,
+        windowId,
+        messageId: decodeThreadQueueMessageId("92000000-0000-4000-8000-000000000004"),
+        binding: "previous binding",
+        payload: { mode: "work", prompt: "Continue." },
+        signal: new AbortController().signal,
+      }),
+    ).toEqual({ status: "refused", reason: "thread-unavailable" });
+    expect(startFirstTurn).not.toHaveBeenCalled();
+
+    workThread = decodeWorkThread({ ...active, version: 3 });
+    expect(await port.inspect({ scope, windowId, intent: "dispatch" })).toMatchObject({
+      status: "ready",
+    });
+  });
+
   it("requires the original live window and refuses a disabled mode", async () => {
     const { deps } = setup();
     const input = { scope: { mode: "chat", threadId }, windowId, intent: "enqueue" } as const;

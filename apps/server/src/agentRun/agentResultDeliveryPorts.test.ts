@@ -131,7 +131,7 @@ const mark = {
   runGenerations: [{ runId: run.id, generation: 1 }],
 };
 
-function workPort(isEnabled = true) {
+function workPort(isEnabled = true, readThread = () => workThread) {
   const startFirstTurn = vi.fn(
     async () => ({ kind: "accepted", turn: { delivery: mark } }) as never,
   );
@@ -139,7 +139,7 @@ function workPort(isEnabled = true) {
     uuid,
     resultText: () => "Found the regression.",
     isEnabled: () => isEnabled,
-    readThread: () => workThread,
+    readThread,
     startFirstTurn,
   });
   return { port, startFirstTurn };
@@ -202,6 +202,21 @@ describe("agent result delivery to a Work or Code parent", () => {
       detail: "Work is turned off on this host.",
     });
     expect(work.startFirstTurn).not.toHaveBeenCalled();
+  });
+
+  it("holds a Work parent's result while a person's Done mark stands, then delivers it", async () => {
+    let parent = decodeWorkThread({ ...workThread, completionConfirmed: true });
+    const work = workPort(true, () => parent);
+
+    expect(await work.port.dispatch([run])).toEqual({
+      kind: "deferred",
+      detail: "The parent Work thread is marked Done.",
+    });
+    expect(work.startFirstTurn).not.toHaveBeenCalled();
+
+    parent = decodeWorkThread({ ...workThread, version: 3 });
+    expect(await work.port.dispatch([run])).toMatchObject({ kind: "dispatched" });
+    expect(work.startFirstTurn).toHaveBeenCalledTimes(1);
   });
 
   it("holds a Code parent's result while its session compacts, then delivers it", async () => {

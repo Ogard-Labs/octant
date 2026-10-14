@@ -360,6 +360,34 @@ describe("usage-resume ports", () => {
     expect(startFirstTurn).not.toHaveBeenCalled();
   });
 
+  it("ends a scheduled Work continuation with a note when a person marked the thread Done", async () => {
+    let markedDone = true;
+    const startFirstTurn = vi.fn(async () => ({
+      kind: "accepted" as const,
+      turn: waitingWorkTurn(),
+    }));
+    const ports = createUsageResumePorts(
+      dependencies({
+        work: {
+          readThread: () =>
+            workThread({
+              usageResume: { record: record(), status: "scheduled" },
+              ...(markedDone ? { completionConfirmed: true } : {}),
+            }),
+          listTurns: () => [waitingWorkTurn()],
+          startFirstTurn,
+        },
+      }),
+    );
+
+    await expect(ports.work.inspect(record())).resolves.toEqual({
+      kind: "invalid",
+      detail: "The Work thread was marked Done.",
+    });
+    markedDone = false;
+    await expect(ports.work.inspect(record())).resolves.toEqual({ kind: "ready" });
+  });
+
   it("marks a Chat limit recovery retry as the host's own dispatch", async () => {
     const execute = vi.fn(async () => ({}));
     const ports = createUsageResumePorts(

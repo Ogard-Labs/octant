@@ -590,6 +590,23 @@ export class WorkThreadService {
         });
         return { kind: "thread-completion-confirmed", thread: confirmed };
       }
+      // A person's Done mark locks what the thread would run next. Archiving,
+      // reactivating (which clears the mark), renaming, putting away and
+      // cancelling a scheduled resume stay open.
+      if (current.completionConfirmed === true) {
+        if (command.kind === "change-work-thread-provider") {
+          throw this.#failure(
+            "invalid",
+            "This task is marked Done. Archive and reactivate it before changing its provider.",
+          );
+        }
+        if (command.kind === "schedule-work-usage-resume") {
+          throw this.#failure(
+            "invalid",
+            "This task is marked Done. Archive and reactivate it before resuming it.",
+          );
+        }
+      }
       const usageResumeUpdatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "schedule-work-usage-resume") {
         if (current.lifecycle !== "active") {

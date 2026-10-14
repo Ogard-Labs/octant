@@ -296,6 +296,12 @@ function workPort(deps: UsageResumePortDependencies): UsageResumeModePort {
       if (thread === undefined || thread.lifecycle !== "active") {
         return invalid("The Work thread is no longer active.");
       }
+      // The opt-in was to continue at the reset. Held until the person
+      // reactivates the thread, it would run at a time they never chose, so
+      // it ends here with a note they see on the thread.
+      if (thread.completionConfirmed === true) {
+        return invalid("The Work thread was marked Done.");
+      }
       if (String(thread.providerInstanceId) !== String(record.providerInstanceId)) {
         return invalid("The thread's provider changed.");
       }

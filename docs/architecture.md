@@ -1071,8 +1071,32 @@ for work the person had already finished. The host refuses the mark from a
 routine or anything else acting as the host, and no provider tool can send it,
 so an agent cannot mark a thread Done. An optional note sent with the mark is
 kept as the thread's completion evidence; without one the thread carries no
-evidence record. The renderer then locks the task's composer, files, and
-provider until the thread is archived and reactivated, which clears the mark.
+evidence record.
+
+The mark locks the thread on the host until the thread is archived and
+reactivated, which clears it; a lock only in the window let a queued message,
+a routine, or a child's result start a turn anyway. Work turn admission, the
+one path every Work turn takes, refuses a turn on a marked thread before it
+counts as the person re-engaging, whoever sends it: a window or phone, the
+message queue, a usage-limit continuation, a child run's result delivery, a
+goal round, or a routine. The host also refuses a provider or model change
+and a new resume-at-reset opt-in. Each refusal reaches the window and the
+phone through the ordinary refusal of that command. Renaming, archiving,
+putting away and cancelling a scheduled resume stay open. Nothing owed to the
+thread is dropped silently:
+
+- The message queue holds. It refuses a new message, keeps the messages it
+  already has with the visible `thread-unavailable` hold, and the person
+  resumes or removes them after reactivating.
+- A child run's result waits, readable on the run, and is delivered as a turn
+  once reactivation commits.
+- A resume-at-reset that falls due while the mark stands ends as
+  `invalidated` with a note on the thread. Held until reactivation, it would
+  run at a time the person never chose.
+
+Work artifacts belong to the Project, not the thread, so the mark does not
+lock them; changes from the thread happen in turns, which it refuses. A turn
+already running when the mark lands finishes normally.
 
 **Pull-request merge.** The person at a local desktop window may merge one
 open pull request from its review (`POST /api/code/project-pull-requests/merge`).
@@ -1879,7 +1903,8 @@ flowchart LR
   regardless of harness. Every dispatch checks the current Project, provider,
   model, checkout, access and context policy. Only normal turn completion
   advances the queue automatically. Cancellation, failure, changed authority,
-  unavailable attachments and uncertain delivery hold it with a visible reason.
+  unavailable attachments, uncertain delivery and a Work thread's Done mark
+  hold it with a visible reason.
   Restart recovery also holds pending work until an authenticated user resumes
   it; recovery never restores a temporary grant or guesses that an ambiguous
   send failed. Closing a composer cannot delete an accepted queued attachment.

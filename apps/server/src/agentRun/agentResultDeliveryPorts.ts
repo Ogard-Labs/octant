@@ -79,6 +79,12 @@ export function createWorkAgentResultDeliveryPort(
       if (thread === undefined || thread.bindingRevisionId === undefined) {
         return { kind: "refused", detail: "The parent Work thread is gone." };
       }
+      // A parent a person marked Done takes no turn, but the result is still
+      // owed: it waits, readable on the child's run, and lands as a turn once
+      // the thread is reactivated, whose commit wakes this delivery.
+      if (thread.completionConfirmed === true) {
+        return { kind: "deferred", detail: "The parent Work thread is marked Done." };
+      }
       try {
         const result = await input.startFirstTurn(ROUTINE_HOST_SCOPE_ID, {
           kind: "start-work-thread-turn",
