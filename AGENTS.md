@@ -153,8 +153,8 @@ test count.
 - Use the unified real-thread hierarchy and server-authoritative Work/Code
   boards. Chat has no board.
 - A Code thread is Done only when its user-confirmed delivery target is
-  objectively satisfied. A Work thread is Done by the same rule, or, once it is
-  built, when a person marks it Done. Remote clients never exceed host, mode,
+  objectively satisfied. A Work thread is Done when a person marks it Done. An
+  agent cannot mark any thread Done. Remote clients never exceed host, mode,
   provider, Project, or thread authority.
 
 ## Originality, Privacy, And Architecture

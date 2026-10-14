@@ -1049,12 +1049,20 @@ Threads form one real hierarchy (Project → thread → linked or child thread).
 Work and Code have server-derived thread boards (Ready / In progress / Waiting /
 Done); Chat has no board. Code lists active open and draft pull requests from
 connected Projects in a manually refreshed workspace and joins exact
-thread-owned PR status onto Code board cards. A Work or Code thread is Done
-only when its user-confirmed delivery target is objectively satisfied;
-ambiguous state resolves to Waiting. Not built yet: a person may also mark a
-Work thread Done, and a Work thread so marked is Done. A Code thread keeps the objective rule, with no
-person's mark that overrides it. Until this is built, a Work thread reaches
-Done only through the rule above.
+thread-owned PR status onto Code board cards. A Code thread is Done only when
+its user-confirmed delivery target is objectively satisfied; ambiguous state
+resolves to Waiting, and no person's mark overrides it. A Work thread is Done
+when a person
+marks it Done (`confirm-work-thread-completion`, naming the thread's current
+title). The mark is final: it needs no evidence text, and stale supporting
+evidence, a later rename, or an outstanding child run does not return the card
+to Waiting. Requiring fresh, matching evidence filled boards with Waiting cards
+for work the person had already finished. The host refuses the mark from a
+routine or anything else acting as the host, and no provider tool can send it,
+so an agent cannot mark a thread Done. An optional note sent with the mark is
+kept as the thread's completion evidence; without one the thread carries no
+evidence record. The renderer then locks the task's composer, files, and
+provider until the thread is archived and reactivated, which clears the mark.
 
 **Pull-request merge.** The person at a local desktop window may merge one
 open pull request from its review (`POST /api/code/project-pull-requests/merge`).

@@ -434,8 +434,10 @@ ordinary Review views.
 
 Work and Code have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
-Chat has no board. Not built yet: a person may mark a Work thread Done; a Code
-thread reaches Done only by its objectively satisfied delivery target
+Chat has no board. A person marks a Work thread Done with **Mark done** in the
+task's Task actions menu, after a confirmation, and the card moves to Done and
+stays there; a Code thread reaches Done only by its objectively satisfied
+delivery target
 ([Architecture: modes](../architecture.md#modes-chat-work-and-code)). Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
 Projects. The same cached read backs the right dock's Pull requests tool and

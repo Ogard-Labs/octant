@@ -601,7 +601,7 @@ describe("WorkThreadWorkspace", () => {
     expect(cancelFirstTurn).not.toHaveBeenCalled();
   });
 
-  it("confirms completion through the user-facing Work action", async () => {
+  it("lets a person mark the task Done from Task actions, with no evidence text", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async () => ({
       kind: "thread-completion-confirmed" as const,
@@ -623,15 +623,17 @@ describe("WorkThreadWorkspace", () => {
 
     await screen.findByLabelText("Bound provider and model");
     await user.click(screen.getByRole("button", { name: "Task actions" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Mark complete" }));
-    await user.type(
-      screen.getByRole("textbox", { name: "What this task delivered" }),
-      "The reviewed draft is saved in the bound folder.",
-    );
+    await user.click(await screen.findByRole("menuitem", { name: "Mark done" }));
+    const dialog = await screen.findByRole("dialog", { name: "Mark this task Done?" });
+    expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(execute).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Task actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Mark done" }));
     await user.click(
-      screen.getByRole("button", {
-        name: "Confirm this task is complete",
-      }),
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Mark done" }),
     );
 
     expect(execute).toHaveBeenCalledWith({
@@ -639,9 +641,10 @@ describe("WorkThreadWorkspace", () => {
       threadId,
       expectedVersion: 1,
       deliveryTarget: "Draft brief",
-      satisfactionEvidence: "The reviewed draft is saved in the bound folder.",
     });
-    expect(await screen.findByText("Delivery marked complete.")).toBeInTheDocument();
+    expect(await screen.findByText("Marked Done.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "Task actions" })).not.toBeInTheDocument();
   });
 
   it("blocks artifact and provider mutations after completion until reactivation", async () => {
