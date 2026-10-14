@@ -3982,40 +3982,48 @@ prompt, schema, tool, route, model, or capability.
   listed only where one thread would see several sources without exactly one
   in use. Installed marketplace skills are switched with their package, not
   here.
-  Runtimes that load `<project>/.claude/skills` by themselves are denied that
-  one folder in the OS profile (`forbiddenRootEntries`, read and write, in
-  every posture including Full access); the rest of `<project>/.claude` stays
-  readable. The deny covers the Project root only. Copilot and Grok also walk
-  upward from the session folder (the Project root) to the repository root,
-  Copilot to the home folder when there is none, so when a Project is a
-  subfolder of a repository a `.claude/skills` in a folder above the Project
-  root is not covered. Below Full access the profile hides such a folder only
-  when it lies inside the home folder. Loading of `.agents/skills` and
-  runtime-specific folders by these runtimes is a separate gap. On Linux a
-  deny path the Project does not have is skipped in every posture, because
-  Bubblewrap would create it as a mount point (an empty folder, or a failed
-  start on a read-only root); a denied folder that appears mid-session is
-  therefore not masked until the runtime restarts, while macOS Seatbelt
-  `subpath` denies cover a missing path.
+  A runtime that loads Project skill folders by itself is denied each such
+  folder in the OS profile (`forbiddenRootEntries`, read and write, in every
+  posture including Full access) unless a switch of its own is proven to turn
+  that loading off. Codex is the exception: it has no Octant OS profile, so
+  its `.agents/skills` loading is not handled yet. Only the skill folder is
+  denied; the folder around it (`.claude`, `.github`, `.grok`, and so on)
+  stays readable, because it holds the runtime's own settings or the
+  Project's other content. fx and Kimi Code deny all of `.agents`, as they
+  did before. The deny covers
+  the Project root only. Copilot, Grok, and Devin also walk upward from the
+  session folder (the Project root) to the repository root, Copilot to the
+  home folder when there is none, so when a Project is a subfolder of a
+  repository a skill folder above the Project root is not covered. No switch
+  closes that: Copilot's `enableConfigDiscovery` is a session option its ACP
+  server never sets and no flag or variable reaches, and neither Grok nor
+  Devin has one. Below Full access the profile hides such a folder only when
+  it lies inside the home folder. On Linux a deny path the Project does not
+  have is skipped in every posture, because Bubblewrap would create it as a
+  mount point (an empty folder, or a failed start on a read-only root); a
+  denied folder that appears mid-session is therefore not masked until the
+  runtime restarts, while macOS Seatbelt `subpath` denies cover a missing
+  path.
 
-  | Runtime                       | `<project>/.claude/skills`                                                                                   | How                                                                                                                                                      |
-  | ----------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | GitHub Copilot (ACP)          | Loads it by itself: the ACP session never sets `enableConfigDiscovery`, which defaults on (CLI 1.0.90)       | Denied (`forbiddenRootEntries`); no flag or variable turns discovery off in ACP                                                                          |
-  | Grok Build (ACP)              | Loads it by itself (`compat.claude.skills`, default on)                                                      | Denied. `GROK_CLAUDE_SKILLS_ENABLED=false` is not relied on: `grok inspect --json` on 1.0.50 still listed a Project `.claude/skills` package with it set |
-  | fx (ACP)                      | Merges workspace skill roots by itself                                                                       | Denied, with `.agents`, `AGENTS.md`, `.mcp.json`, `.fx.json`                                                                                             |
-  | Goose (ACP)                   | Loads it by itself, per its documentation (not installed here)                                               | Denied; no documented switch                                                                                                                             |
-  | Cline (ACP)                   | Loads it by itself, per its documentation (not installed here)                                               | Denied; only a per-skill toggle is documented                                                                                                            |
-  | Kimi Code (ACP)               | Not read: loads only `.agents/skills` and `.kimi-code/skills` (0.38 bundle)                                  | Readable; `.agents` and `.kimi-code` stay denied                                                                                                         |
-  | Gemini CLI, Qwen Code (ACP)   | Not read, per their documentation (`.gemini/skills` or `.agents/skills`; `.qwen/skills`); not installed here | Readable                                                                                                                                                 |
-  | GLM Agent (ACP)               | Unverified: not installed here and no documentation found                                                    | Readable                                                                                                                                                 |
-  | Claude (Agent SDK)            | Switched off                                                                                                 | `settingSources: []`, `skills: []`                                                                                                                       |
-  | OpenCode (server and ACP)     | Switched off                                                                                                 | `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1`, `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`, project config off, `skill` permission denied                             |
-  | Kilo (ACP)                    | Switched off                                                                                                 | `KILO_DISABLE_EXTERNAL_SKILLS=1`, `KILO_DISABLE_PROJECT_CONFIG=1`, `KILO_PURE=1`                                                                         |
-  | Devin (ACP)                   | Switched off                                                                                                 | `read_config_from.claude: false`, `read_config_from.agents_standard: false`                                                                              |
-  | Mistral Vibe (ACP)            | Switched off                                                                                                 | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`                                                          |
-  | Pi, Oh My Pi                  | Switched off                                                                                                 | `--no-skills`                                                                                                                                            |
-  | Codex                         | Not read (no `.claude/skills` path in the 0.162 binary)                                                      | Readable                                                                                                                                                 |
-  | Direct HTTP and image drivers | Not read: no runtime of their own                                                                            | n/a                                                                                                                                                      |
+  | Runtime                       | Project skill folders it loads by itself                                                                                                                                            | How                                                                                                                                                                                  |
+  | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | GitHub Copilot (ACP)          | `.agents/skills`, `.claude/skills`, `.github/skills`: the ACP session never sets `enableConfigDiscovery`, which defaults on (`copilot skill list`, CLI 1.0.90)                      | Denied (`forbiddenRootEntries`); no flag or variable turns discovery off in ACP                                                                                                      |
+  | Grok Build (ACP)              | In a trusted folder: `.agents/skills`, `.agents/commands`, `.claude/skills`, `.claude/commands`, `.cursor/skills`, `.grok/skills`, `.grok/commands` (`grok inspect --json`, 1.0.50) | Denied. `GROK_CLAUDE_SKILLS_ENABLED=false` and `GROK_CURSOR_SKILLS_ENABLED=false` are not relied on: inspect still listed the Project `.claude` and `.cursor` packages with them set |
+  | Devin (ACP)                   | `.agents/skills`, `.cognition/skills`, `.devin/skills`, and `.github/skills` unless switched off (`devin skills list`, 3000.10.27 and 3000.11.3)                                    | `read_config_from` sets every source false, `copilot` included, which removes `.github/skills`; the other three are denied, since no source turns them off                           |
+  | fx (ACP)                      | Merges workspace skill roots by itself                                                                                                                                              | Denied: `.agents` and `.claude/skills`, with `AGENTS.md`, `.mcp.json`, `.fx.json`                                                                                                    |
+  | Goose (ACP)                   | `.agents/skills`, `.claude/skills`, `.goose/skills`, per its documentation (not installed here)                                                                                     | Denied; no documented switch                                                                                                                                                         |
+  | Cline (ACP)                   | `.agents/skills`, `.claude/skills`, `.cline/skills`, `.clinerules/skills`, per its documentation and source (not installed here)                                                    | Denied; only a per-skill toggle is documented                                                                                                                                        |
+  | Gemini CLI (ACP)              | `.agents/skills`, `.gemini/skills` once the folder is trusted, per its documentation and source (not installed here)                                                                | Denied; no documented variable or flag                                                                                                                                               |
+  | Qwen Code (ACP)               | `.agents/skills`, `.qwen/skills`, per its source (not installed here)                                                                                                               | Denied; only bare mode skips them                                                                                                                                                    |
+  | GLM Agent (ACP)               | `.claude/skills`, advertised as commands and put into the message when `/name` is typed, per its README (not installed here)                                                        | Denied                                                                                                                                                                               |
+  | Kimi Code (ACP)               | `.agents/skills`, `.kimi-code/skills` (0.38 bundle)                                                                                                                                 | Denied: `.agents` and `.kimi-code`                                                                                                                                                   |
+  | Claude (Agent SDK)            | None: switched off                                                                                                                                                                  | `settingSources: []`, `skills: []`                                                                                                                                                   |
+  | OpenCode (server and ACP)     | None: switched off                                                                                                                                                                  | `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1`, `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`, project config off, `skill` permission denied                                                         |
+  | Kilo (ACP)                    | None: switched off                                                                                                                                                                  | `KILO_DISABLE_EXTERNAL_SKILLS=1`, `KILO_DISABLE_PROJECT_CONFIG=1`, `KILO_PURE=1`                                                                                                     |
+  | Mistral Vibe (ACP)            | None: switched off                                                                                                                                                                  | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`                                                                                      |
+  | Pi, Oh My Pi                  | None: switched off                                                                                                                                                                  | `--no-skills`                                                                                                                                                                        |
+  | Codex                         | `.agents/skills`, in the Project and up to the repository root (app-server `skills/list`, 0.162.1); not `.claude/skills`                                                            | Not handled yet: Codex runs without an Octant OS profile, so a root deny does not apply                                                                                              |
+  | Direct HTTP and image drivers | None: no runtime of their own                                                                                                                                                       | n/a                                                                                                                                                                                  |
 
   Where a skill is found decides who sees it, in the catalog, the palette, the
   turn resolver, presets, Code profile admission, and Canvas refresh. A skill

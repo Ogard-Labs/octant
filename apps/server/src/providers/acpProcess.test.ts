@@ -419,6 +419,27 @@ describe("ACP process lifecycle", () => {
     );
   });
 
+  it("switches off every Project skill source Devin's own config can turn off", () => {
+    const managedHome = "/private/tmp/octant-devin-home";
+    const content = devin.process
+      .managedFiles({ managedHome, executionPolicy: "approval-gated" })
+      .find((file) => file.path === join(managedHome, ".config/devin/config.json"))?.content;
+    const configuration = JSON.parse(content ?? "{}") as {
+      readonly read_config_from?: Readonly<Record<string, boolean>>;
+    };
+    // `copilot` is the source behind <project>/.github/skills: Devin 3000.10.27
+    // and 3000.11.3 list a package there until it is false.
+    expect(configuration.read_config_from).toEqual({
+      cursor: false,
+      windsurf: false,
+      claude: false,
+      opencode: false,
+      zed: false,
+      copilot: false,
+      agents_standard: false,
+    });
+  });
+
   it("does not send the unsupported session close method to Devin", () => {
     expect(devin.closesSessions).toBe(false);
   });
@@ -1340,15 +1361,66 @@ describe("Kimi Code host-profile extension surfaces", () => {
   });
 });
 
-describe.each([fx, copilot, grok, goose, cline])(
-  "Project .claude/skills for a runtime that loads it by itself ($displayName)",
-  (profile) => {
-    it("denies <project>/.claude/skills and leaves the rest of .claude readable", async () => {
+// Each row lists the Project skill folders a runtime loads by itself, from its
+// installed bundle, source, or documentation, and the folders around them that
+// stay readable because they hold the runtime's own settings or other content.
+describe.each([
+  { profile: fx, denied: [".agents", ".claude/skills"], readable: [".claude"] },
+  {
+    profile: copilot,
+    denied: [".agents/skills", ".claude/skills", ".github/skills"],
+    readable: [".agents", ".claude", ".github"],
+  },
+  {
+    profile: grok,
+    denied: [
+      ".agents/commands",
+      ".agents/skills",
+      ".claude/commands",
+      ".claude/skills",
+      ".cursor/skills",
+      ".grok/commands",
+      ".grok/skills",
+    ],
+    readable: [".agents", ".claude", ".cursor", ".grok"],
+  },
+  {
+    profile: goose,
+    denied: [".agents/skills", ".claude/skills", ".goose/skills"],
+    readable: [".agents", ".claude", ".goose"],
+  },
+  {
+    profile: cline,
+    denied: [".agents/skills", ".claude/skills", ".cline/skills", ".clinerules/skills"],
+    readable: [".agents", ".claude", ".cline", ".clinerules"],
+  },
+  {
+    profile: gemini,
+    denied: [".agents/skills", ".gemini/skills"],
+    readable: [".agents", ".gemini"],
+  },
+  {
+    profile: qwen,
+    denied: [".agents/skills", ".qwen/skills"],
+    readable: [".agents", ".qwen"],
+  },
+  { profile: glm, denied: [".claude/skills"], readable: [".claude"] },
+  {
+    profile: devin,
+    denied: [".agents/skills", ".cognition/skills", ".devin/skills"],
+    readable: [".agents", ".cognition", ".devin"],
+  },
+])(
+  "Project skill folders a runtime loads by itself ($profile.displayName)",
+  ({ profile, denied, readable }) => {
+    it("denies each such folder and leaves the folders around it readable", async () => {
       const target = fixture(profile);
       const managedHome = join(target.canonicalRoot, "managed-home");
       const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
       mkdirSync(hostAuthenticationPath, { recursive: true });
-      mkdirSync(join(target.canonicalRoot, ".claude", "skills"), { recursive: true });
+      for (const entry of denied) {
+        mkdirSync(join(target.canonicalRoot, entry), { recursive: true });
+      }
       const launch = await Effect.runPromise(
         makeAcpConfinementLive({
           platform: "darwin",
@@ -1370,15 +1442,19 @@ describe.each([fx, copilot, grok, goose, cline])(
         }),
       );
       const profileText = seatbeltProfile(launch);
-      expect(profileText).toContain(
-        `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
-      );
-      expect(profileText).toContain(
-        `(deny file-write* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
-      );
-      expect(profileText).not.toContain(
-        `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude")}"))`,
-      );
+      for (const entry of denied) {
+        expect(profileText).toContain(
+          `(deny file-read* (subpath "${join(target.canonicalRoot, entry)}"))`,
+        );
+        expect(profileText).toContain(
+          `(deny file-write* (subpath "${join(target.canonicalRoot, entry)}"))`,
+        );
+      }
+      for (const entry of readable) {
+        expect(profileText).not.toContain(
+          `(deny file-read* (subpath "${join(target.canonicalRoot, entry)}"))`,
+        );
+      }
     });
   },
 );

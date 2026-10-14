@@ -234,10 +234,15 @@ discovery must hold; an ambiguous unqualified invocation opens a chooser or
 fails closed. A skill installed from the marketplace is switched on and off
 with its package under **Extension packages**.
 
-Some agent runtimes load `.claude/skills` from a Project by themselves. Octant
-blocks those runtimes from reading `<project>/.claude/skills`, so a skill there
-reaches a turn only through the steps above; the rest of `.claude` stays
-readable.
+Some agent runtimes load skills from a Project by themselves, from
+`.agents/skills`, `.claude/skills`, or a folder of their own such as
+`.github/skills` or `.gemini/skills`. Octant blocks each such runtime from
+reading those folders at the Project root, so a skill there reaches a turn
+only through the steps above. The folders around them, such as the rest of
+`.claude`, stay readable. Two gaps remain. A skill folder above the Project, when
+the Project is a subfolder of a repository, is not blocked for the runtimes
+that look upward (GitHub Copilot, Grok Build, Devin). Codex still loads
+`.agents/skills` by itself.
 
 Type `/` in a Chat, Work, or Code composer — including Chat's first message — to find commands and enabled skills. Browser and Computer entries appear only when those capabilities are available.
 Choosing a skill creates a visible selection that can be removed before sending;
