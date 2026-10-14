@@ -83,8 +83,8 @@ export type SiblingThreadsToolInput = typeof SiblingThreadsToolInput.Type;
  * `policy` is a call whose input fails
  * `SiblingThreadsToolInput` (an unknown action, an extra field, a timeout out
  * of range, a reference over 128 characters), a cancelled turn, a profile
- * that does not permit the tool, or a caller that is not a thread the host
- * knows. No `policy` case depends on another thread, so it confirms nothing
+ * that does not permit the tool, or a caller that is not an open thread the
+ * host knows. No `policy` case depends on another thread, so it confirms nothing
  * about one.
  */
 export const SiblingThreadRefuseReason = Schema.Literal(

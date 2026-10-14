@@ -158,27 +158,20 @@ export class SiblingThreadsService {
     readonly call: SiblingThreadsToolInput;
     readonly signal?: AbortSignal;
   }): Promise<SiblingThreadOutcome> {
-    const callerThread = input.source.thread(input.callerThreadId);
-    if (callerThread === undefined) return refused("policy", CALLER_REFUSAL);
-    const caller: SiblingThreadCaller = {
-      threadId: callerThread.threadId,
-      projectId: callerThread.projectId,
-      mode: callerThread.mode,
-    };
-    switch (input.call.action) {
-      case "list":
-        return this.#list(caller, input.source);
-      case "read":
-        return await this.#read(caller, input.source, input.call.reference);
-      case "wait":
-        return await this.#wait(
-          caller,
-          input.source,
-          input.call.reference,
-          input.call.timeoutMs,
-          input.signal,
-        );
+    if (input.call.action === "list") {
+      const caller = callerOf(input.source, input.callerThreadId);
+      if (caller === undefined) return refused("policy", CALLER_REFUSAL);
+      return this.#list(caller, input.source);
     }
+    const call: TargetCall = {
+      callerThreadId: input.callerThreadId,
+      source: input.source,
+      reference: input.call.reference,
+      signal: input.signal,
+    };
+    return input.call.action === "read"
+      ? await this.#read(call)
+      : await this.#wait(call, input.call.timeoutMs);
   }
 
   #list(caller: SiblingThreadCaller, source: SiblingThreadSource): SiblingThreadOutcome {
@@ -204,20 +197,19 @@ export class SiblingThreadsService {
     return this.#deliverIngested(caller, "list", answer);
   }
 
-  async #read(
-    caller: SiblingThreadCaller,
-    source: SiblingThreadSource,
-    reference: string,
-  ): Promise<SiblingThreadOutcome> {
-    const admitted = this.#resolve(caller, source, reference);
-    if (admitted === undefined) return refused("unauthorized", SIBLING_THREAD_UNREACHABLE);
-    const entries = await source.readTranscript(admitted.threadId);
-    // The mention read answers nothing where an Open would refuse, and the
-    // thread may have closed or moved while it ran, so both refuse alike.
-    const target = this.#resolve(caller, source, reference);
-    if (entries === undefined || target === undefined) {
-      return refused("unauthorized", SIBLING_THREAD_UNREACHABLE);
-    }
+  async #read(call: TargetCall): Promise<SiblingThreadOutcome> {
+    const before = decideTarget(call);
+    if (before.status === "refused") return before.outcome;
+    const entries = await call.source.readTranscript(before.target.threadId);
+    // Either thread may have closed or moved, or the turn been cancelled,
+    // while the transcript was read, so the whole decision is taken again
+    // before anything is marked, journaled, or returned.
+    const after = decideTarget(call);
+    if (after.status === "refused") return after.outcome;
+    // The mention read answers nothing where an Open would refuse, so an
+    // unreadable transcript refuses like any other unreachable thread.
+    if (entries === undefined) return refused("unauthorized", SIBLING_THREAD_UNREACHABLE);
+    const { caller, target } = after;
     const window = boundThreadMentionTranscript(
       entries.map((entry) => ({ ...entry, text: bounded(entry.text, MAX_ENTRY_CHARACTERS) })),
     );
@@ -234,20 +226,14 @@ export class SiblingThreadsService {
     return await this.#journaled(caller, target, "read", outcome);
   }
 
-  async #wait(
-    caller: SiblingThreadCaller,
-    source: SiblingThreadSource,
-    reference: string,
-    timeoutMs: number | undefined,
-    signal: AbortSignal | undefined,
-  ): Promise<SiblingThreadOutcome> {
+  async #wait(call: TargetCall, timeoutMs: number | undefined): Promise<SiblingThreadOutcome> {
     const deadline = this.#now() + siblingThreadWaitMs(timeoutMs);
     for (;;) {
-      if (signal?.aborted === true) return refused("policy", CANCELLED);
-      // Re-decided on every look: a thread that closes or moves while the
-      // caller waits on it stops being one this thread may watch.
-      const target = this.#resolve(caller, source, reference);
-      if (target === undefined) return refused("unauthorized", SIBLING_THREAD_UNREACHABLE);
+      // Re-decided on every look: a caller or target that closes or moves
+      // while the caller waits stops this thread watching it.
+      const decided = decideTarget(call);
+      if (decided.status === "refused") return decided.outcome;
+      const { caller, target } = decided;
       const remaining = deadline - this.#now();
       if (target.state !== "working" || remaining <= 0) {
         // A closed set of states carries no text another thread wrote, so
@@ -259,19 +245,8 @@ export class SiblingThreadsService {
         });
         return await this.#journaled(caller, target, "wait", { answer, providerResult: answer });
       }
-      await this.#sleep(Math.min(WAIT_POLL_MS, remaining), signal);
+      await this.#sleep(Math.min(WAIT_POLL_MS, remaining), call.signal);
     }
-  }
-
-  #resolve(
-    caller: SiblingThreadCaller,
-    source: SiblingThreadSource,
-    reference: string,
-  ): SiblingThreadSnapshot | undefined {
-    const named = parseSiblingThreadReference(reference);
-    const target = named === undefined ? undefined : source.thread(named.threadId);
-    const decision = decideSiblingThreadTarget({ caller, reference, target });
-    return decision.status === "admitted" ? target : undefined;
   }
 
   /**
@@ -435,6 +410,58 @@ export function createSiblingThreadTools(input: {
       }
     },
   };
+}
+
+interface TargetCall {
+  readonly callerThreadId: CodeThreadId;
+  readonly source: SiblingThreadSource;
+  readonly reference: string;
+  readonly signal: AbortSignal | undefined;
+}
+
+/**
+ * The caller as the host holds it now, or `undefined` once it is unknown,
+ * completed, or archived: a closed thread sees nothing, as a closed sender
+ * sends nothing.
+ */
+function callerOf(
+  source: SiblingThreadSource,
+  callerThreadId: CodeThreadId,
+): SiblingThreadCaller | undefined {
+  const caller = source.thread(callerThreadId);
+  if (caller === undefined || caller.closed) return undefined;
+  return { threadId: caller.threadId, projectId: caller.projectId, mode: caller.mode };
+}
+
+/**
+ * Decides a `read` or `wait` from the host's facts at this moment: the turn
+ * is still live, the caller is still an open thread, and the reference still
+ * names a thread it may see.
+ */
+function decideTarget(call: TargetCall):
+  | {
+      readonly status: "admitted";
+      readonly caller: SiblingThreadCaller;
+      readonly target: SiblingThreadSnapshot;
+    }
+  | { readonly status: "refused"; readonly outcome: SiblingThreadOutcome } {
+  if (call.signal?.aborted === true) {
+    return { status: "refused", outcome: refused("policy", CANCELLED) };
+  }
+  const caller = callerOf(call.source, call.callerThreadId);
+  if (caller === undefined) {
+    return { status: "refused", outcome: refused("policy", CALLER_REFUSAL) };
+  }
+  const named = parseSiblingThreadReference(call.reference);
+  const target = named === undefined ? undefined : call.source.thread(named.threadId);
+  const decision = decideSiblingThreadTarget({ caller, reference: call.reference, target });
+  if (decision.status === "refused" || target === undefined) {
+    return {
+      status: "refused",
+      outcome: refused("unauthorized", SIBLING_THREAD_UNREACHABLE),
+    };
+  }
+  return { status: "admitted", caller, target };
 }
 
 function refused(reason: SiblingThreadRefuseReason, message: string): SiblingThreadOutcome {

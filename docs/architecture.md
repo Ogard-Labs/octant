@@ -1387,8 +1387,9 @@ or stops a thread.
   nothing outside the caller's Project. A call
   whose input fails the tool's schema (an unknown action, an extra field, a
   timeout out of range, a reference over 128 characters), whose turn was
-  cancelled, whose profile leaves the tool out, or whose caller the host
-  does not know refuses `policy`; none depends on another thread. Inside
+  cancelled, whose profile leaves the tool out, or whose caller is unknown,
+  completed, or archived refuses `policy`; none depends on another thread.
+  The caller and the turn are re-checked wherever the target is. Inside
   it, `list` makes the set visible on purpose; a `sent` answer from messaging
   already confirmed it.
 - **Taint and framing.** A `read` or `list` answer joins the turn inside the

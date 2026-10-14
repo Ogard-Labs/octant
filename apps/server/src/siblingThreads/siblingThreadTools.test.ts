@@ -466,6 +466,50 @@ describe("the sibling threads tool", () => {
     ).toMatchObject({ reason: "unauthorized" });
   });
 
+  it("refuses a read or wait once the caller itself closes or moves, or its turn is cancelled", async () => {
+    const { call, threads, setOnSleep, marks, observations, newTurn } = harness();
+    const callerRefusal = {
+      status: "refused",
+      reason: "policy",
+      message: "This thread cannot see other threads.",
+    };
+
+    const moving = call({ action: "read", reference: referenceTo(ids.idle) }, undefined, newTurn());
+    threads.set(String(ids.caller), snapshot(ids.caller, { projectId: projectB }));
+    // A caller that moved away no longer shares a Project with its target.
+    expect((await moving).result).toEqual({
+      status: "refused",
+      reason: "unauthorized",
+      message: SIBLING_THREAD_UNREACHABLE,
+    });
+
+    threads.set(String(ids.caller), snapshot(ids.caller));
+    setOnSleep(() => {
+      threads.set(String(ids.caller), snapshot(ids.caller, { closed: true }));
+    });
+    expect(
+      (await call({ action: "wait", reference: referenceTo(ids.working) }, undefined, newTurn()))
+        .result,
+    ).toEqual(callerRefusal);
+    expect((await call({ action: "list" }, undefined, newTurn())).result).toEqual(callerRefusal);
+
+    threads.set(String(ids.caller), snapshot(ids.caller));
+    const turn = new AbortController();
+    const cancelled = call(
+      { action: "read", reference: referenceTo(ids.idle) },
+      turn.signal,
+      newTurn(),
+    );
+    turn.abort();
+    expect((await cancelled).result).toEqual({
+      status: "refused",
+      reason: "policy",
+      message: "The turn was cancelled.",
+    });
+    expect(marks()).toEqual([]);
+    expect(observations()).toEqual([]);
+  });
+
   it("journals every answered read and wait on the reader, without the text, and replays it", async () => {
     const { call, observations } = harness();
 
