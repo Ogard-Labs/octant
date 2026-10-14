@@ -316,7 +316,42 @@ export class ReplicaMembershipService {
   }
 
   execute(command: ReplicaMembershipCommand): Promise<ReplicaMembershipOutcome> {
-    return this.#serially(() => this.#run(command));
+    return this.#serially(async () => {
+      await this.#finishLeaving();
+      return this.#run(command);
+    });
+  }
+
+  /**
+   * Finish the cleanup of every identity this computer left: turn sync off
+   * and delete the device key, journaling each step once it happened. The
+   * host calls it on start; every command calls it first, so a key a locked
+   * credential store kept is deleted on a later try.
+   */
+  finishLeaving(): Promise<void> {
+    return this.#serially(() => this.#finishLeaving());
+  }
+
+  async #finishLeaving(): Promise<void> {
+    for (const leave of this.#ports.state().unfinishedLeaves) {
+      // Only the step outside the journal may fail quietly; it is tried again
+      // on the next start or command. A journal that refuses is not quiet.
+      if (!leave.syncOff && (await succeeds(() => this.#ports.syncOff?.()))) {
+        this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.leftCleanup, {
+          instanceId: leave.instanceId,
+          step: "sync-off",
+        });
+      }
+      if (
+        !leave.keyRemoved &&
+        (await succeeds(() => this.#ports.credentials.remove(leave.instanceId)))
+      ) {
+        this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.leftCleanup, {
+          instanceId: leave.instanceId,
+          step: "key-removed",
+        });
+      }
+    }
   }
 
   /**
@@ -430,7 +465,8 @@ export class ReplicaMembershipService {
    * computers show it as left rather than going quiet; what it published
    * before stays in the store and keeps counting. Then the identity is
    * journaled as left - the projection forgets it, its founder, its held
-   * records, and its queue - its device key is deleted, and sync turns off.
+   * records, and its queue - and sync turns off and its device key is
+   * deleted, each step journaled and retried until it happened.
    * Joining again, here or in another store, is a new identity with a new key.
    *
    * A record that cannot be published refuses the leave and changes nothing:
@@ -487,16 +523,14 @@ export class ReplicaMembershipService {
       instanceId: local.instanceId,
       toldStore: tells,
     });
-    let keyRemoved = true;
-    try {
-      await this.#ports.credentials.remove(local.instanceId);
-    } catch {
-      // The identity is already gone here, so the leave stands and the
-      // result says the key stayed; once the record landed, every computer
-      // cuts this one at it, so nothing that key signs later counts.
-      keyRemoved = false;
-    }
-    await this.#ports.syncOff?.().catch(() => undefined);
+    // The journal now says this identity left, and remembers the cleanup
+    // still to do, so a stop here finishes it on the next start.
+    await this.#finishLeaving();
+    const keyRemoved = !this.#ports
+      .state()
+      .unfinishedLeaves.some(
+        (leave) => same(leave.instanceId, local.instanceId) && !leave.keyRemoved,
+      );
     return { kind: "left", instanceId: local.instanceId, toldStore: tells, keyRemoved };
   }
 
@@ -1678,6 +1712,15 @@ function broughtIn(
 
 function same(left: ReplicaInstanceId, right: ReplicaInstanceId): boolean {
   return String(left) === String(right);
+}
+
+async function succeeds(step: () => Promise<void> | undefined): Promise<boolean> {
+  try {
+    await step();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function sha256Hex(bytes: Uint8Array): string {

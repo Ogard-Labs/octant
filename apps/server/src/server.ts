@@ -11465,6 +11465,9 @@ export function startOctantServer(
           // only once the host is serving; with sync off each pass returns
           // before any store call.
           stopArtifactSync = artifactSyncService.start();
+          // A leave the host stopped in the middle of finishes its cleanup:
+          // sync off and the device key deleted.
+          void replicaMembershipService.finishLeaving().catch(() => undefined);
           return {
             url: localServer.url,
             ...(remoteListener === undefined ? {} : { remoteListener }),

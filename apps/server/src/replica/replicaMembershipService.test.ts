@@ -1664,6 +1664,53 @@ describe("leaving a replica", () => {
     expect(viewOf(south).thisComputer.kind).toBe("none");
   });
 
+  it("finishes a leave the host stopped in the middle of on its next start", async () => {
+    const store = memoryStore();
+    const north = computer({ store: selected(store) });
+    const south = computer({
+      store: selected(store),
+      stopAfter: REPLICA_MEMBERSHIP_EVENT_NAMES.left,
+    });
+    expectKind(
+      await north.service.execute({ kind: "create-replica", displayName: "MacBook" }),
+      "replica-created",
+    );
+    await joinThrough(south, north, "Mac mini");
+    const southId = south.id();
+    await expect(south.service.execute({ kind: "leave" })).rejects.toThrow("The host stopped.");
+    // The identity is gone, but its key is still here and the cleanup is remembered.
+    expect(south.projection.state().local).toBeUndefined();
+    expect(await south.credentials.has(String(southId))).toBe(true);
+    expect(south.projection.state().unfinishedLeaves).toEqual([
+      { instanceId: southId, syncOff: false, keyRemoved: false },
+    ]);
+
+    south.restart();
+    await south.service.finishLeaving();
+    expect(await south.credentials.has(String(southId))).toBe(false);
+    expect(south.projection.state().unfinishedLeaves).toEqual([]);
+  });
+
+  it("deletes a key the credential store kept on the next command", async () => {
+    const store = memoryStore();
+    const { south } = await joinedPair(store);
+    const southId = south.id();
+    const remove = south.credentials.delete;
+    const locked = south.credentials as { delete: CredentialStore["delete"] };
+    locked.delete = async () => {
+      throw new Error("The credential store is locked.");
+    };
+    expect(expectKind(await south.service.execute({ kind: "leave" }), "left").keyRemoved).toBe(
+      false,
+    );
+    expect(await south.credentials.has(String(southId))).toBe(true);
+
+    locked.delete = remove;
+    await south.service.execute({ kind: "pull" });
+    expect(await south.credentials.has(String(southId))).toBe(false);
+    expect(south.projection.state().unfinishedLeaves).toEqual([]);
+  });
+
   it("rebuilds a computer that left with no identity when the journal is replayed", async () => {
     const store = memoryStore();
     const { south } = await joinedPair(store);

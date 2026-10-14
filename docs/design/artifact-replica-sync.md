@@ -226,8 +226,12 @@ them in.
   queue, so nothing queued under the identity that left publishes, there or
   under a later identity in another store. Versions, tombstones, comments,
   and settled slots stay, so the library and every Canvas's history are
-  unchanged. The device key is then deleted from the credential store, and
-  Settings › Sync's switch turns off. With no identity, pull, publish,
+  unchanged. Then Settings › Sync's switch turns off and the device key is
+  deleted from the credential store; each step is journaled once it
+  happened (`replica.left-cleanup@2`), and a step not journaled yet is
+  retried on host start and before every membership command, so a host
+  that stops right after leaving, or a locked credential store, does not
+  leave the key or the switch behind. With no identity, pull, publish,
   restore, and every membership command but create and join answer before
   any store call. Joining again, in this store or another, is a new
   identity with a new key. What the computer published before it left stays
