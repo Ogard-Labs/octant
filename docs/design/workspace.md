@@ -166,7 +166,10 @@ References are cleared when the pane or its authority context changes; reload
 restores only the authoritative visible surface. Closing image creation stops
 observation, while only Cancel job cancels generation on the host. Editor drafts
 remain in the thread draft store; approval requests keep their explicit controls.
-Thread titles appear once in the title row. A thread pane's title row is its
+Thread titles appear once in the title row, and the row shows the thread's
+current title: a pane stores the title the thread had when it opened, so the
+shell reads the title from the navigation rows instead, and a rename made in
+any window reaches every open pane. A thread pane's title row is its
 drag handle: an environment mark (a small neutral tile holding a laptop glyph
 when the thread runs on this computer, a cloud glyph and the host's name when
 it runs on another host), the title, a quiet chip naming the Project, and for

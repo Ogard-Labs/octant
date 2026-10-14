@@ -527,14 +527,14 @@ describe("Chat routes", () => {
     await expect(response?.json()).resolves.toMatchObject({ category: "stale" });
   });
 
-  it("still answers the whole-thread read with the view the service read", async () => {
+  it("answers the whole-thread read with the view the service read and no-store", async () => {
     const read = vi.fn(() => windowView);
     const readWindow = vi.fn();
     const route = routeFixture({ read, readWindow });
     const response = await route(request(`/api/chat/threads/${threadId}`));
 
     expect(response?.status).toBe(200);
-    expect(response?.headers.get("cache-control")).toBeNull();
+    expect(response?.headers.get("cache-control")).toBe("no-store");
     await expect(response?.json()).resolves.toEqual(windowView);
     expect(readWindow).not.toHaveBeenCalled();
   });
