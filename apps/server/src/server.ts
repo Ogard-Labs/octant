@@ -6411,6 +6411,7 @@ export function startOctantServer(
       windowAuthorityStore,
       store: {
         read: (threadId) => {
+          nativeHarnessApprovals.expireOverdue();
           const view = nativeHarnessSessionsLive.read(threadId);
           const suggestions = threadFollowUpSuggestions.read(threadId);
           return view === undefined || suggestions === undefined
