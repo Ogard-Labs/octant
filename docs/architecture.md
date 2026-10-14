@@ -70,12 +70,12 @@ The design rests on a small set of invariants that every package obeys:
   duplicate answers, and settles the underlying callback only when complete.
 - **Capabilities are honest and fail closed.** Every provider reports what it
   supports in every mode; an unsupported capability is disabled or refused,
-  never silently emulated. A first-class provider may offer a capability in
-  full; every other provider gets a documented degraded form, listed in the
-  "degraded on" matrix, or reports the capability unsupported. Not built yet:
-  the matrix is not written, and which providers are first-class is not yet
-  named. The app-managed tools below stay provider-neutral, and a seam is never
-  widened for one vendor.
+  never silently emulated. Claude Code and Codex are the first-class providers
+  and may offer a capability in full; every other provider gets a documented
+  degraded form, listed in the [provider capability
+  matrix](#security-and-authority) ("degraded on"), or reports the capability
+  unsupported. The app-managed tools below stay provider-neutral, and a seam is
+  never widened for one vendor.
 - **Install ≠ trust ≠ enable.** Extensions contribute nothing until each of
   those steps has been taken explicitly, and even then only within the mode,
   Project, thread, and provider policy that applies.
@@ -4727,6 +4727,106 @@ mechanisms are:
   reads its product from the same directory without write access; XCTest
   results also land inside it. Simulator captures remain isolated in their own
   private directory and are writable only by the capture launch.
+
+- **Provider capability matrix ("degraded on").** Claude Code and Codex are the
+  first-class providers: the two subscription coding runtimes the product is
+  built around. A feature may be built in full for them first. Every other
+  provider is listed below with what is weaker, and reports the capability
+  `unsupported` or `unavailable` and fails closed where it has no form of it.
+  Nothing in code makes the providers match; the conformance harness checks
+  that a driver reports its own capabilities honestly, not that drivers agree.
+  A feature only some providers have still reaches the others through
+  `@octant/provider-sdk` or `@octant/plugin-api`, and no seam is widened for one
+  vendor.
+
+  The first token of each cell is what the driver declares in its static
+  capability block (`ProviderCapabilitySupport`, or `absent` where the block
+  omits an optional capability, which reads as `unsupported`; `varies` where the
+  value is computed per install, profile, or model). The words after it say how
+  that value is refined once the driver probes or runs. A refinement that
+  upgrades a declaration (`unavailable` to `supported` after a reply reports
+  usage) is the degraded form: the capability exists but is not promised before
+  it is seen.
+
+  | Capability               | Claude Code                                                  | Codex                                                     | OpenCode                                                          | Pi                                                                             | ACP agents                                                                    | Ollama                                                    | Harness endpoints                                                                 | Oh My Pi                              |
+  | ------------------------ | ------------------------------------------------------------ | --------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------- |
+  | `streaming`              | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`                                                                   | `unavailable` until a reply streams                       | `unavailable` until a reply streams; a chat-completions endpoint may answer whole | `supported`                           |
+  | `resume`                 | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`; `unsupported` when the agent offers neither load nor resume      | `supported` by replaying history Octant holds             | `supported` by replaying history Octant holds                                     | `unsupported`                         |
+  | `interruption`           | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`                                                                   | `supported`                                               | `supported`                                                                       | `supported`                           |
+  | `approvals`              | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`                                                                   | `unsupported`                                             | `unsupported`; every Harness tool call passes the server instead                  | `unsupported`                         |
+  | `userQuestions`          | `supported`                                                  | `unsupported`                                             | `supported`; `unsupported` on the 2.x route                       | `unsupported`                                                                  | `varies`: `unsupported` on Mistral Vibe and fx                                | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+  | `reasoning`              | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `unavailable`; `supported` when the agent reports a reasoning option or model | `varies`: from each model's reported thinking             | `unavailable` until a response carries reasoning                                  | `supported`                           |
+  | `usage`                  | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `unsupported`; turns are not measured                                         | `unavailable` until a reply reports counts                | `unavailable` until a response reports usage                                      | `unsupported`; turns are not measured |
+  | `toolActivity`           | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`                                                                   | `varies`: from the models' tool support                   | `unsupported`                                                                     | `unsupported`                         |
+  | `fileChanges`            | `supported`                                                  | `supported`                                               | `unsupported`                                                     | `unavailable`                                                                  | `unavailable`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unavailable`                         |
+  | `diffs`                  | `supported`                                                  | `supported`                                               | `supported`                                                       | `unavailable`                                                                  | `unavailable`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unavailable`                         |
+  | `taskProgress`           | `supported`                                                  | `supported`                                               | `supported`                                                       | `unavailable`                                                                  | `supported`                                                                   | `unsupported`                                             | `unsupported`                                                                     | `unavailable`                         |
+  | `nativeChildAgents`      | `unsupported`; Octant owns delegation                        | `unsupported`; Octant owns delegation                     | `unsupported`                                                     | `unsupported`                                                                  | `unavailable`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+  | `nativeAttachments`      | `unsupported`                                                | `unsupported`; `supported` when a model takes image input | `unsupported`; `supported` when a model takes non-text input      | `unsupported`                                                                  | `unsupported`                                                                 | `varies`: `supported` when a model takes images           | `unsupported`                                                                     | `unsupported`                         |
+  | `nativeWebResearch`      | `unsupported`                                                | `unsupported`                                             | `unsupported`                                                     | `unsupported`                                                                  | `unsupported`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+  | `appManagedTools`        | `supported`                                                  | `supported`                                               | `unsupported`; `supported` on macOS in a verified isolated config | `unsupported`; `supported` once the probe attests the tool bridge on Pi 0.85.1 | `varies`: `supported` on macOS when the agent serves HTTP MCP                 | `unsupported`                                             | `unsupported`; `supported` for each model a person verified                       | `unsupported`                         |
+  | `acpClientCapabilities`  | `absent`                                                     | `absent`                                                  | `absent`                                                          | `absent`                                                                       | `supported`                                                                   | `absent`                                                  | `absent`                                                                          | `absent`                              |
+  | `modelSwitch`            | `supported`                                                  | `supported`                                               | `absent`; the session stays on its model                          | `absent`; same                                                                 | `absent`; same                                                                | `absent`; Octant replays history, so the model may change | `absent`; Octant replays history, so the model may change                         | `absent`                              |
+  | `sessionCompaction.chat` | `supported`; `unavailable` when the install lacks `/compact` | `supported`; `unavailable` before Codex 0.162.1           | `absent`                                                          | `absent`                                                                       | `absent`                                                                      | `absent`; Octant summarizes                               | `unsupported`; Octant summarizes                                                  | `absent`                              |
+  | `sessionCompaction.work` | as Chat                                                      | as Chat                                                   | `absent`                                                          | `absent`                                                                       | `absent`                                                                      | `absent`                                                  | `unsupported`; Octant summarizes                                                  | `absent`                              |
+  | `sessionCompaction.code` | as Chat                                                      | as Chat                                                   | `absent`                                                          | `absent`                                                                       | `absent`                                                                      | `absent`                                                  | `supported`; Octant Harness compacts its own transcript                           | `absent`                              |
+  | `citations`              | `unsupported`                                                | `unsupported`                                             | `unsupported`                                                     | `unsupported`                                                                  | `unsupported`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+  | `harnessAutoReview`      | `supported`                                                  | `supported`                                               | `unsupported`                                                     | `unsupported`                                                                  | `unsupported`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+
+  Which driver kinds each column covers, and how each may be used in a mode, as
+  `providerCatalogCapabilities` in `@octant/domain` holds it. A runtime's Work and
+  Code tools reach the models its connection check reports with tool use;
+  Harness endpoints reach them only for models a person verified.
+
+  | Column            | Driver kinds                                                                                                     | Chat  | Work              | Code              | Agent loop       |
+  | ----------------- | ---------------------------------------------------------------------------------------------------------------- | ----- | ----------------- | ----------------- | ---------------- |
+  | Claude Code       | `claude`                                                                                                         | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Codex             | `codex`                                                                                                          | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | OpenCode          | `opencode`                                                                                                       | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Pi                | `pi`                                                                                                             | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | ACP agents        | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Ollama            | `ollama`                                                                                                         | `yes` | `no`              | `no`              | `replies-only`   |
+  | Harness endpoints | `openai-compatible`, `anthropic-compatible`, `azure-foundry`                                                     | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Oh My Pi          | `oh-my-pi`                                                                                                       | `no`  | `no`              | `no`              | `none`           |
+
+  The image profiles (`openai-image`, `gemini-native-image`, `bfl-image`,
+  `ideogram-image`) are not turn drivers and are not in the matrix.
+
+  Where each provider is weaker than Claude Code and Codex:
+
+  - **Codex** has no user questions, so a question the model would ask is not
+    offered. It takes image input only when a model reports it. Compaction
+    needs Codex 0.162.1 or newer.
+  - **OpenCode** reports no file changes, has no model switch inside a session
+    and no runtime compaction, and offers Octant's tools only on macOS in the
+    verified isolated configuration. A 2.x runtime whose confined jail cannot
+    serve a Git work tree is listing-only: models show, no turn is offered.
+  - **Pi** reports no user questions, file changes, diffs, or task progress,
+    and offers Octant's tools only after its probe attests the tool bridge on
+    the one release that bridge was read against.
+  - **ACP agents** do not report usage, so a spend ceiling leaves their turns
+    out and says so. They report no file changes or diffs, ask no user
+    questions on Mistral Vibe and fx, resume only when the agent offers load or
+    resume, and offer Octant's tools only on macOS when the agent serves HTTP
+    MCP. fx is also refused in Chat and Plan.
+  - **Ollama** is replies only: Chat, no tools, no approvals, no questions, no
+    file changes. Streaming, reasoning, usage, and tool activity are claimed
+    only after a reply shows them.
+  - **Harness endpoints** carry the Octant Harness agent loop. They have no
+    provider approvals or questions, claim streaming, reasoning, and usage only
+    after a response shows them, and offer Octant's tools per verified model.
+    Chat and Work compaction is the host's, not the endpoint's.
+  - **Oh My Pi** lists models and starts no session; its driver refuses
+    `acquire`, so it never reaches a picker.
+
+  `providerFeatureMatrix.test.ts` pins this section: every
+  `ProviderCapabilities` field has a row, every non-image driver kind appears in
+  exactly one column, the leading token of each cell equals the value in the
+  driver's static capability block, and the mode columns equal
+  `providerCatalogCapabilities`. It cannot see a refinement made at probe time
+  (the words after the first token), nor the compaction rows, which the drivers
+  assign outside the static blocks; the conformance harness covers the
+  compaction claim, and the rest is reviewed with the driver.
 
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,

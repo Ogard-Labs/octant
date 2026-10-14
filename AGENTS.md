@@ -127,10 +127,10 @@ test count.
 - Work never silently becomes Code. Coding work promotes to a linked Code
   thread only with explicit user approval.
 - Every supported provider reports capabilities honestly in every mode and
-  fails closed when unsupported. A first-class provider may offer a capability
-  in full; every other provider gets a documented degraded form, listed in the
-  architecture's "degraded on" matrix, or reports the capability unsupported.
-  The matrix is not written yet.
+  fails closed when unsupported. Claude Code and Codex are the first-class
+  providers and may offer a capability in full; every other provider gets a
+  documented degraded form, listed in the architecture's "degraded on" matrix,
+  or reports the capability unsupported.
 - Browser/computer use, tests, Apple validation, approvals, memory, and subagents
   are app-managed, provider-neutral capabilities. Core Apple development cannot
   depend on an optional extension.
