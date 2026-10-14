@@ -1188,11 +1188,10 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(profileText).toContain(
       `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
     );
-    expect(profileText).toContain(
-      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
-    );
+    // Kimi loads Project skills from .agents/skills and .kimi-code/skills,
+    // never .claude/skills, so that folder stays readable like any file.
     expect(profileText).not.toContain(
-      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude")}"))`,
+      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
     );
   });
 
@@ -1210,7 +1209,6 @@ describe("Kimi Code host-profile extension surfaces", () => {
     const canonicalHostPath = realpathSync(hostAuthenticationPath);
     mkdirSync(join(target.canonicalRoot, ".kimi-code"));
     mkdirSync(join(target.canonicalRoot, ".agents"));
-    mkdirSync(join(target.canonicalRoot, ".claude", "skills"), { recursive: true });
     const launch = await Effect.runPromise(
       makeAcpConfinementLive({
         platform: "darwin",
@@ -1248,47 +1246,6 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(profileText).toContain(
       `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
     );
-    expect(profileText).toContain(
-      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
-    );
-    expect(profileText).not.toContain(
-      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude")}"))`,
-    );
-  });
-
-  it("denies .claude/skills for fx while leaving the rest of .claude readable", async () => {
-    const target = fixture(fx);
-    const managedHome = join(target.canonicalRoot, "managed-fx");
-    mkdirSync(join(target.canonicalRoot, ".claude", "skills"), { recursive: true });
-    const launch = await Effect.runPromise(
-      makeAcpConfinementLive({
-        platform: "darwin",
-        sandboxPath: target.sandboxPath,
-        temporaryDirectory: join(target.canonicalRoot, "tmp"),
-      }).prepare({
-        profile: fx,
-        binaryPath: target.binaryPath,
-        root: target.canonicalRoot,
-        managedHome,
-        mode: "code",
-        executionPolicy: "approval-gated",
-        environment: sanitizeAcpEnvironment(
-          fx,
-          { PATH: "/usr/bin", HOME: "/Users/octant-test" },
-          { managedHome, executionPolicy: "approval-gated" },
-        ),
-      }),
-    );
-    const profileText = seatbeltProfile(launch);
-    expect(profileText).toContain(
-      `(deny file-read* (subpath "${join(target.canonicalRoot, ".agents")}"))`,
-    );
-    expect(profileText).toContain(
-      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
-    );
-    expect(profileText).not.toContain(
-      `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude")}"))`,
-    );
   });
 
   it("binds the host root on Linux Full access and overlays the denied extension paths", async () => {
@@ -1297,7 +1254,7 @@ describe("Kimi Code host-profile extension surfaces", () => {
     const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
     directories.push(hostHome);
     const hostAuthenticationPath = join(hostHome, ".kimi-code");
-    mkdirSync(hostAuthenticationPath, { recursive: true });
+    mkdirSync(join(hostAuthenticationPath, "skills"), { recursive: true });
     writeFileSync(join(hostAuthenticationPath, "mcp.json"), "{}\n");
     const canonicalHostPath = realpathSync(hostAuthenticationPath);
     const launch = await Effect.runPromise(
@@ -1331,6 +1288,9 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(launch.args).toContainEqual("--tmpfs");
     expect(launch.args).toContain(join(canonicalHostPath, "skills"));
     expect(launch.args).toContain(join(canonicalHostPath, "mcp.json"));
+    // A denied entry the Project does not have is not created in it.
+    expect(launch.args).not.toContain(join(target.canonicalRoot, ".agents"));
+    expect(existsSync(join(target.canonicalRoot, ".agents"))).toBe(false);
   });
 
   it("uses native sandbox-exec so a Full access child cannot read planted MCP config", async () => {
@@ -1379,6 +1339,49 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(allowed.stdout).toContain("telemetry = false");
   });
 });
+
+describe.each([fx, copilot, grok, goose, cline])(
+  "Project .claude/skills for a runtime that loads it by itself ($displayName)",
+  (profile) => {
+    it("denies <project>/.claude/skills and leaves the rest of .claude readable", async () => {
+      const target = fixture(profile);
+      const managedHome = join(target.canonicalRoot, "managed-home");
+      const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+      mkdirSync(hostAuthenticationPath, { recursive: true });
+      mkdirSync(join(target.canonicalRoot, ".claude", "skills"), { recursive: true });
+      const launch = await Effect.runPromise(
+        makeAcpConfinementLive({
+          platform: "darwin",
+          sandboxPath: target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath,
+        }).prepare({
+          profile,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome,
+          mode: "code",
+          executionPolicy: "approval-gated",
+          environment: sanitizeAcpEnvironment(
+            profile,
+            { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+            { managedHome, executionPolicy: "approval-gated" },
+          ),
+        }),
+      );
+      const profileText = seatbeltProfile(launch);
+      expect(profileText).toContain(
+        `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
+      );
+      expect(profileText).toContain(
+        `(deny file-write* (subpath "${join(target.canonicalRoot, ".claude/skills")}"))`,
+      );
+      expect(profileText).not.toContain(
+        `(deny file-read* (subpath "${join(target.canonicalRoot, ".claude")}"))`,
+      );
+    });
+  },
+);
 
 describe("ACP probe confinement", () => {
   it("allows provider control-plane egress without granting Chat thread authority", async () => {

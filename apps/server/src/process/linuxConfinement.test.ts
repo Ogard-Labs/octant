@@ -95,6 +95,26 @@ describe("Linux Full access extension denials", () => {
     expect(launch.args.at(-1)).toBe("acp");
   });
 
+  it("leaves a deny path that does not exist alone instead of creating it in the folder", () => {
+    const { boundRoot, bwrapPath } = fixture();
+    const missingSkills = join(boundRoot, ".claude", "skills");
+    const missingAgents = join(boundRoot, ".agents");
+    const launch = buildLinuxAllowDefaultDenyLaunch(
+      {
+        executable: "/bin/true",
+        args: ["acp"],
+        cwd: boundRoot,
+        denyPaths: [missingSkills, missingAgents],
+      },
+      { bwrapPath },
+    );
+    // With the host root bound writable, Bubblewrap would make the mount point
+    // in the person's own Project and leave an empty folder behind.
+    expect(launch.args).not.toContain(missingSkills);
+    expect(launch.args).not.toContain(missingAgents);
+    expect(launch.args).not.toContain("--tmpfs");
+  });
+
   it("fails closed when a deny file cannot be overlaid", () => {
     const { boundRoot, bwrapPath, root } = fixture();
     const fifo = join(root, "mcp.json");

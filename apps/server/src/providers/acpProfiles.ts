@@ -644,6 +644,12 @@ const grokProfile: AcpProviderProfile = {
     }),
     args: () => ["agent", "stdio"],
     managedFiles: () => [],
+    // Grok loads <project>/.claude/skills by itself (compat.claude.skills,
+    // default on). Its switch is not relied on: with
+    // GROK_CLAUDE_SKILLS_ENABLED=false, `grok inspect --json` on 1.0.50 still
+    // listed a Project .claude/skills package. With the folder unreadable it
+    // listed the other skills and carried on.
+    forbiddenRootEntries: [".claude/skills"],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".grok"),
@@ -691,6 +697,9 @@ const gooseProfile: AcpProviderProfile = {
     }),
     args: () => ["acp"],
     managedFiles: () => [],
+    // Goose's documentation lists <project>/.claude/skills among the folders
+    // it loads skills from by itself, with no setting that turns it off.
+    forbiddenRootEntries: [".claude/skills"],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".config/goose"),
@@ -832,6 +841,10 @@ const copilotProfile: AcpProviderProfile = {
     }),
     args: () => ["--acp"],
     managedFiles: () => [],
+    // The ACP session is created without enableConfigDiscovery, which
+    // defaults to on (CLI 1.0.90), so Copilot loads <project>/.claude/skills
+    // on its own. No flag or variable turns that discovery off in ACP.
+    forbiddenRootEntries: [".claude/skills"],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".copilot"),
@@ -874,6 +887,9 @@ const clineProfile: AcpProviderProfile = {
     }),
     args: () => ["--acp"],
     managedFiles: () => [],
+    // Cline's documentation lists <project>/.claude/skills as a Project skill
+    // folder, enabled when found, with only a per-skill toggle to turn it off.
+    forbiddenRootEntries: [".claude/skills"],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".cline", "data"),
@@ -1066,7 +1082,9 @@ const kimiProfile: AcpProviderProfile = {
     // AGENTS.md. Deny those surfaces in the OS profile so reused login cannot
     // start extra executables; config.toml and credentials stay readable.
     hostDeniedEntries: ["AGENTS.md", "mcp.json", "skills", "plugins", "hooks"],
-    forbiddenRootEntries: [".kimi-code", ".agents", ".claude/skills"],
+    // Kimi loads Project skills from .agents/skills and .kimi-code/skills
+    // only; it never reads .claude/skills on its own, so that stays readable.
+    forbiddenRootEntries: [".kimi-code", ".agents"],
     // Authentication lives in the provider-owned Kimi data root. The process
     // still runs inside Octant's project/managed-home Seatbelt boundary and
     // the reviewed command inventory remains the authority for ACP commands.
