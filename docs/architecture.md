@@ -1547,7 +1547,9 @@ flowchart LR
   - The mark is keyed by the bare thread id, and Chat, Work, and Code
     threads share one id space: the journal refuses to start a thread under an
     id another mode's thread already holds, so a client-chosen id cannot share
-    another mode's mark or, by being purged, erase it.
+    another mode's mark or, by being purged, erase it. A mark that threads of
+    two modes already share (history from before that check) cannot be told
+    apart, so a clear of it is refused as `thread-unavailable`.
   - One clear covers that thread and only it. A child run and a fork keep
     their own taint; a Code fork starts with its source's mark when it is
     made (see the Code fork rule under Modes).

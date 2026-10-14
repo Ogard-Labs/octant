@@ -7,6 +7,7 @@ import type {
   ChatNavigationThread,
   ChatThreadId,
   ChatThreadView,
+  OctantMode,
   CodeCheckoutId,
   CodeCheckoutIdentity,
   CodeFileId,
@@ -150,6 +151,7 @@ import type { GithubCloneProjection } from "./githubCloneProjection";
 import type { ImageJobProjection } from "../image/imageJobProjection";
 import type { ReplicaMembershipProjection } from "../replica/replicaMembershipProjection";
 import type { ReplicaArtifactProjection } from "../replica/replicaArtifactProjection";
+import { readThreadIdModes } from "./threadIdentity";
 
 export interface VerifiedStoreBackupReceipt extends StoreBackupReceipt {
   readonly path: string;
@@ -218,6 +220,8 @@ export interface PersistenceService {
   readonly readCodeSettings: () => ProjectedCodeSettings | undefined;
   readonly readThemeSettings: () => ProjectedThemeSettings | undefined;
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
+  /** The modes whose journaled thread answers to this id; see `readThreadIdModes`. */
+  readonly readThreadIdModes: (threadId: string) => ReadonlyArray<OctantMode>;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
   readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
   readonly readCodeCheckout: (checkoutId: CodeCheckoutId) => CodeCheckoutIdentity | undefined;
@@ -452,6 +456,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readCodeSettings: () => readCodeSettings(connection),
       readThemeSettings: () => readThemeSettings(connection),
       readCodeThread: (threadId) => readCodeThread(connection, threadId),
+      readThreadIdModes: (threadId) => readThreadIdModes(connection, threadId),
       readCodeThreads: () => readCodeThreads(connection),
       readCodeThreadActivity: () => readCodeThreadActivity(connection),
       readCodeCheckout: (checkoutId) => readCodeCheckout(connection, checkoutId),

@@ -16,6 +16,7 @@ import {
   AggregateId,
   CorrelationId,
   type CodeAttachmentId,
+  type OctantMode,
   type CodeAttachmentMediaType,
   type CodeAttachmentReference,
   EventId,
@@ -187,6 +188,7 @@ import type {
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
 
+const THREAD_ID_IN_USE_MESSAGE = "That thread ID is already in use.";
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -387,6 +389,8 @@ export interface CodePersistencePort {
     Partial<Pick<Journal, "transaction">>;
   readonly readCodeSettings: () => { readonly settings: CodeSettings } | undefined;
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
+  /** The modes whose journaled thread answers to this id. */
+  readonly readThreadIdModes: (threadId: string) => ReadonlyArray<OctantMode>;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
   readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
   readonly readCodeRuntimeWorks: (
@@ -1206,6 +1210,7 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.threadId) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
+        this.#assertThreadIdFree(command.threadId);
         const inheritedMark = this.#requireForkOrigin(
           command.projectId,
           command.threadId,
@@ -1621,6 +1626,7 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.thread.id) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
+        this.#assertThreadIdFree(command.thread.id);
         const inheritedMark = this.#requireForkOrigin(
           command.thread.projectId,
           command.thread.id,
@@ -3243,10 +3249,21 @@ export class CodeService {
     return this.#failure(category, message);
   }
 
+  /**
+   * Refuses an id another mode's thread already holds before anything is
+   * prepared, so a colliding id creates no worktree and journals no checkout.
+   * The journal refuses the same append as the backstop for a race.
+   */
+  #assertThreadIdFree(threadId: CodeThreadId): void {
+    if (this.#persistence.readThreadIdModes(String(threadId)).length > 0) {
+      throw this.#failure("conflict", THREAD_ID_IN_USE_MESSAGE);
+    }
+  }
+
   #mapFailure(error: unknown): CodeServiceError {
     if (error instanceof CodeServiceError) return error;
     if (error instanceof ThreadIdInUse) {
-      return this.#failure("conflict", "That thread ID is already in use.");
+      return this.#failure("conflict", THREAD_ID_IN_USE_MESSAGE);
     }
     if (error instanceof ConcurrencyConflict) {
       return this.#failure("stale", "Code state changed; reload and retry.");
