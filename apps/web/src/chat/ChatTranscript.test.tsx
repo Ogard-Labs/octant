@@ -1547,6 +1547,7 @@ describe("ChatTranscript", () => {
       offerEarlier: true,
       supersededTurnCount: 0,
       earlier: "idle" as const,
+      shownRun: 0,
     };
     const controls = (state: Record<string, unknown> = {}) => ({
       state: { ...windowState, ...state },
@@ -1559,6 +1560,90 @@ describe("ChatTranscript", () => {
       const whole = longView(20);
       return decodeChatThreadView({ ...whole, turns: whole.turns.slice(from, to) });
     };
+
+    describe("a search hit", () => {
+      const whole = longView(300);
+      const slice = (from: number, to: number) =>
+        decodeChatThreadView({ ...whole, turns: whole.turns.slice(from, to) });
+      const hit = whole.turns[250]!.id;
+      const jumpedTo = controls({
+        shownRun: 1,
+        detached: {
+          view: slice(221, 251),
+          hasEarlier: true,
+          hasLater: true,
+          earlier: "idle",
+          later: "idle",
+        },
+      });
+
+      /** Renders the hit the way the shell does: passed on until it has been shown. */
+      function shellTarget() {
+        let target: typeof hit | undefined = hit;
+        const spend = vi.fn(() => {
+          target = undefined;
+        });
+        return {
+          spend,
+          props: () => ({
+            onTurnRevealed: spend,
+            ...(target === undefined ? {} : { revealTurnId: target }),
+          }),
+        };
+      }
+
+      it("keeps the same list when the jumped-to run joins the newest messages", async () => {
+        const shell = shellTarget();
+        const { rerender } = render(
+          <ChatTranscript {...shell.props()} transcriptWindow={jumpedTo} view={slice(271, 300)} />,
+        );
+        expect(await screen.findByText("User turn 250")).toBeVisible();
+        await waitFor(() => expect(shell.spend).toHaveBeenCalledOnce());
+        const list = document.querySelector("[data-transcript-window]");
+
+        // Load later reached the newest messages: one run, still the same run.
+        rerender(
+          <ChatTranscript
+            {...shell.props()}
+            transcriptWindow={controls({ shownRun: 1 })}
+            view={slice(221, 300)}
+          />,
+        );
+
+        // The list is not mounted again, so the reader's place carries over
+        // (the rendered check measures it) and no jump target is applied anew.
+        expect(document.querySelector("[data-transcript-window]")).toBe(list);
+      });
+
+      it("does not jump back to it when an earlier page after Jump to latest holds it", async () => {
+        const shell = shellTarget();
+        const { rerender } = render(
+          <ChatTranscript {...shell.props()} transcriptWindow={jumpedTo} view={slice(271, 300)} />,
+        );
+        expect(await screen.findByText("User turn 250")).toBeVisible();
+        await waitFor(() => expect(shell.spend).toHaveBeenCalledOnce());
+
+        // Jump to latest shows a different run; then Load earlier brings 241 on.
+        rerender(
+          <ChatTranscript
+            {...shell.props()}
+            transcriptWindow={controls({ shownRun: 2 })}
+            view={slice(271, 300)}
+          />,
+        );
+        rerender(
+          <ChatTranscript
+            {...shell.props()}
+            transcriptWindow={controls({ shownRun: 2 })}
+            view={slice(241, 300)}
+          />,
+        );
+
+        // The reader stays on the newest messages they were reading.
+        await waitFor(() => expect(screen.getByText("User turn 271")).toBeInTheDocument());
+        expect(screen.queryByText("User turn 250")).not.toBeInTheDocument();
+      });
+    });
 
     it("counts revised messages from the host when earlier turns are not loaded", () => {
       render(

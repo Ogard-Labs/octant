@@ -1067,6 +1067,11 @@ function LaunchedShell(
   const [revealChatTurn, setRevealChatTurn] = useState<
     { readonly threadId: ChatThreadId; readonly turnId: ChatTurnId } | undefined
   >(undefined);
+  // A search hit is a one-time jump: once the transcript has shown it, the
+  // target is dropped, so a list that mounts again (a jumped-to run joining
+  // the newest messages, or Jump to latest followed by Load earlier) does not
+  // jump the reader back to it.
+  const spendRevealChatTurn = useCallback(() => setRevealChatTurn(undefined), []);
   const openThreadSearch = useCallback(() => {
     setSearchQuery("");
     setRevealChatTurn(undefined);
@@ -7531,6 +7536,7 @@ function LaunchedShell(
                         chatController={chatController}
                         chatReadCursorStore={chatReadCursorStore}
                         {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
+                        onChatTurnRevealed={spendRevealChatTurn}
                         onPinTerminal={(request) => void zen.pinTerminal(request)}
                         onPinCanvasInFocusZone={(request) => void zen.pinCanvas(request)}
                         onStartPlanTask={(request) => {

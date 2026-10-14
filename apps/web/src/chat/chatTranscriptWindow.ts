@@ -20,6 +20,15 @@ export interface ChatDetachedRange {
   readonly hasLater: boolean;
   readonly earlier: ChatWindowPageState;
   readonly later: ChatWindowPageState;
+  /**
+   * How many superseded turns the thread had when every turn in this run was
+   * last known active: when the read that made the run answered, or a later
+   * page anchored on its last turn did (an edit supersedes everything after
+   * the turn it revises, so an active last turn means the whole run is).
+   * A newest read that counts differently may have superseded part of the
+   * run, so the run is let go.
+   */
+  readonly verifiedAtSupersededCount: number;
 }
 
 /**
@@ -36,6 +45,13 @@ export interface ChatTranscriptWindowState {
   readonly supersededTurnCount: number;
   readonly earlier: ChatWindowPageState;
   readonly detached?: ChatDetachedRange;
+  /**
+   * Names the run on screen. It changes when the transcript shows a different
+   * run (a jump, Jump to latest, a run let go), so the list starts over, and
+   * stays when a jumped-to run joins the newest turns, because the reader is
+   * still reading the same rows.
+   */
+  readonly shownRun: number;
 }
 
 export const chatTurnKey = (turn: ChatTurnView): string => String(turn.id);
@@ -49,6 +65,7 @@ export function wholeThreadWindowState(view: ChatThreadView): ChatTranscriptWind
     offerEarlier: false,
     supersededTurnCount: view.turns.length - activeChatTurns(view.turns).length,
     earlier: "idle",
+    shownRun: 0,
   };
 }
 

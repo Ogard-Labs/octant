@@ -132,6 +132,8 @@ export interface ChatWorkspaceProps {
   readonly onThreadBranched?: (thread: ChatThread) => void;
   /** Scroll the transcript to this turn when the thread view is ready. */
   readonly revealTurnId?: ChatTurnId;
+  /** Called once `revealTurnId` is on screen, so the shell can spend the jump. */
+  readonly onTurnRevealed?: () => void;
 }
 
 /**
@@ -1043,6 +1045,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 })}
             busy={isSending || branchPending}
             {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
+            {...(props.onTurnRevealed === undefined
+              ? {}
+              : { onTurnRevealed: props.onTurnRevealed })}
             {...(transcriptWindow === undefined
               ? {}
               : {

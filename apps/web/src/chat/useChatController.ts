@@ -521,17 +521,20 @@ export function useChatController(options: ChatControllerOptions) {
             offerEarlier: newest.hasEarlier,
             supersededTurnCount: newest.supersededTurnCount,
             earlier: "idle",
+            shownRun: (state?.shownRun ?? 0) + 1,
           },
           true,
         );
         return activeViewRef.current;
       }
       const refreshed = refreshChatTail(current, state.hasEarlier, newest);
-      // An edit superseded turns since the last read; a detached range may
-      // hold some of them, so it is let go and the newest turns show.
+      // An edit since the detached run was last known whole may have
+      // superseded part of it, so it is let go and the newest turns show. The
+      // run's own record decides: page reads update the shared count too, so
+      // comparing against that could miss an edit inside the run.
       const { detached, ...rest } = state;
       const keepDetached =
-        detached !== undefined && newest.supersededTurnCount === state.supersededTurnCount;
+        detached !== undefined && newest.supersededTurnCount === detached.verifiedAtSupersededCount;
       applyTail(
         refreshed.view,
         {
@@ -539,6 +542,7 @@ export function useChatController(options: ChatControllerOptions) {
           hasEarlier: refreshed.hasEarlier,
           supersededTurnCount: newest.supersededTurnCount,
           ...(keepDetached ? { detached } : {}),
+          shownRun: detached !== undefined && !keepDetached ? state.shownRun + 1 : state.shownRun,
         },
         true,
       );
@@ -1198,6 +1202,9 @@ export function useChatController(options: ChatControllerOptions) {
             view: appendChatPage(current.detached.view, page.view),
             hasLater: page.hasLater,
             later: "idle",
+            // The page was anchored on the run's last turn, so the whole run
+            // was still active when it answered.
+            verifiedAtSupersededCount: page.supersededTurnCount,
           },
         },
         false,
@@ -1209,7 +1216,7 @@ export function useChatController(options: ChatControllerOptions) {
       if (failureCategory(error) === "stale") {
         // The run this page continued is no longer the conversation.
         const { detached: _gone, ...rest } = current;
-        applyWindowState(rest);
+        applyWindowState({ ...rest, shownRun: current.shownRun + 1 });
         return;
       }
       applyWindowState({ ...current, detached: { ...current.detached, later: "failed" } });
@@ -1222,7 +1229,7 @@ export function useChatController(options: ChatControllerOptions) {
     const current = transcriptWindowRef.current;
     if (current?.detached === undefined) return;
     const { detached: _left, ...rest } = current;
-    applyWindowState(rest);
+    applyWindowState({ ...rest, shownRun: current.shownRun + 1 });
   }, [applyWindowState]);
 
   /**
@@ -1245,8 +1252,11 @@ export function useChatController(options: ChatControllerOptions) {
         jumpToLatest();
         return;
       }
-      if (!state.windowed || holdsTurn(state.detached?.view, key)) return;
+      if (!state.windowed) return;
+      // A newer jump, even one that needs no read, outdates any page still
+      // being read for an earlier one.
       const generation = ++revealGeneration.current;
+      if (holdsTurn(state.detached?.view, key)) return;
       try {
         const page = await client.threadWindow(threadId, {
           limit: CHAT_WINDOW_PAGE_TURNS,
@@ -1267,12 +1277,14 @@ export function useChatController(options: ChatControllerOptions) {
           {
             ...current,
             supersededTurnCount: page.supersededTurnCount,
+            shownRun: current.shownRun + 1,
             detached: {
               view: page.view,
               hasEarlier: page.hasEarlier,
               hasLater: page.hasLater,
               earlier: "idle",
               later: "idle",
+              verifiedAtSupersededCount: page.supersededTurnCount,
             },
           },
           false,

@@ -104,6 +104,8 @@ export interface ChatTranscriptProps {
   readonly checkpoints?: ChatTranscriptCheckpoints;
   /** Scrolls this turn into the window. Used by jump-to-message. */
   readonly revealTurnId?: ChatTurnId;
+  /** Called once `revealTurnId` is on screen; the jump is then spent. */
+  readonly onTurnRevealed?: () => void;
   /**
    * A message the user has already sent that the host has not begun running,
    * because a response was still in flight when it was sent. It belongs at the
@@ -367,10 +369,11 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       items={turns}
       {...(props.afterTurn === undefined ? {} : { afterItem: props.afterTurn })}
       itemTag="li"
-      // Moving between the newest turns and a detached range is a different
-      // run of rows, so the list starts over: it opens on the jump target, or
-      // at the end on the way back.
-      key={`${String(props.view.thread.id)}${detached === undefined ? "" : ":detached"}`}
+      // Showing a different run (a jump, or Jump to latest) starts the list
+      // over: it opens on the jump target, or at the end on the way back. A
+      // jumped-to run that joins the newest turns keeps its rows and the
+      // reader's place.
+      key={`${String(props.view.thread.id)}:${String(windowState?.shownRun ?? 0)}`}
       {...(detached === undefined ? {} : { followOutput: false })}
       lead={lead}
       listClassName="chat-transcript__turns thread-column"
@@ -550,6 +553,9 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       }}
       restoreKey={String(props.view.thread.id)}
       {...(props.revealTurnId === undefined ? {} : { revealKey: String(props.revealTurnId) })}
+      {...(props.onTurnRevealed === undefined
+        ? {}
+        : { onRevealed: () => props.onTurnRevealed?.() })}
       role="region"
       trail={trail}
     />

@@ -189,6 +189,7 @@ describe("joining Chat thread pages", () => {
       hasLater: true,
       earlier: "idle" as const,
       later: "idle" as const,
+      verifiedAtSupersededCount: 0,
     });
     const tail = view([6, 7, 8]);
 

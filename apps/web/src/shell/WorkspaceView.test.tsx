@@ -1407,7 +1407,7 @@ describe("WorkspaceView subagent tray", () => {
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
   });
 
-  it("asks the Chat pane for the page that holds a search hit it has not loaded", async () => {
+  it("asks the Chat pane for the page that holds a search hit it has not loaded and spends the hit once shown", async () => {
     const now = "2026-07-28T16:00:00.000Z";
     const providerId = "20000000-0000-4000-8000-000000000001";
     const hitTurnId = "70000000-0000-4000-8000-000000000001";
@@ -1435,13 +1435,41 @@ describe("WorkspaceView subagent tray", () => {
       workListVersion: 0,
       followUpVersion: 0,
     });
-    const threadWindow = vi.fn(async () => ({
+    const hitPage = decodeChatThreadView({
+      ...view,
+      turns: [
+        {
+          id: hitTurnId,
+          threadId: ids.thread,
+          sequence: 1,
+          userMessageRef: {
+            contentId: "70000000-0000-4000-8000-000000000002",
+            digest: "a".repeat(64),
+            byteLength: 3,
+          },
+          attachmentIds: [],
+          attempts: [],
+          createdAt: now,
+        },
+      ],
+      contents: [
+        {
+          contentId: "70000000-0000-4000-8000-000000000002",
+          role: "user",
+          body: "Hit",
+          digest: "a".repeat(64),
+          byteLength: 3,
+        },
+      ],
+    });
+    const threadWindow = vi.fn(async (_id: unknown, request: { readonly through?: string }) => ({
       version: 1 as const,
-      view,
+      view: request.through === undefined ? view : hitPage,
       hasEarlier: true,
-      hasLater: false,
+      hasLater: request.through !== undefined,
       supersededTurnCount: 0,
     }));
+    const onChatTurnRevealed = vi.fn();
     const chatClient = {
       bootstrap: vi.fn(async () =>
         decodeChatBootstrap({
@@ -1478,6 +1506,7 @@ describe("WorkspaceView subagent tray", () => {
         chatClient={chatClient}
         chatReadCursorStore={createChatReadCursorStore()}
         mode="chat"
+        onChatTurnRevealed={onChatTurnRevealed}
         revealChatTurn={{ threadId: ids.thread as never, turnId: hitTurnId as never }}
       />,
     );
@@ -1485,6 +1514,8 @@ describe("WorkspaceView subagent tray", () => {
     await waitFor(() =>
       expect(threadWindow).toHaveBeenCalledWith(ids.thread, { limit: 30, through: hitTurnId }),
     );
+    // Once the hit is on screen the jump is spent, so the shell can drop it.
+    await waitFor(() => expect(onChatTurnRevealed).toHaveBeenCalledOnce());
   });
 
   it("shows a Work thread's working subagent in its composer", async () => {

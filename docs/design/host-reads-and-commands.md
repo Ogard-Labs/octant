@@ -93,9 +93,13 @@ turn. A jump to a turn that is not loaded (a transcript search hit) reads that
 page and shows it as one detached range in place of the newest turns, which
 keep receiving live updates; **Load later messages** reads `after` its newest
 turn and joins it to the newest turns once the two share a turn, and **Jump to
-latest** leaves it. Sending a message leaves it first, and leaving the thread
-ends the jump, so coming back opens on the newest turns. The client holds at most
-the newest run and one detached range, never two runs with a gap shown as one.
+latest** leaves it. Sending a message leaves it first. A jump is spent once its
+target is on screen, so a list that starts over later (after Jump to latest, or
+on coming back to the thread) never jumps back to it; a run that joins the
+newest turns keeps the reader's rows. The detached range is let go when a newest
+read counts a different number of superseded turns than the range was last
+known whole at. The client holds at most the newest run and one detached range,
+never two runs with a gap shown as one.
 Readers that need the whole thread read the unchanged whole-thread route: the
 Markdown copy and save, and the thread's attachment, source, and turn counts
 in the Environment panel while it is open.

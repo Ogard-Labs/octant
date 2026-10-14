@@ -3002,6 +3002,7 @@ describe("ChatWorkspace", () => {
             offerEarlier: true,
             supersededTurnCount: 0,
             earlier: "idle",
+            shownRun: 0,
           },
         })}
         providerSnapshot={providerSnapshot()}
@@ -3030,6 +3031,7 @@ describe("ChatWorkspace", () => {
             offerEarlier: true,
             supersededTurnCount: 0,
             earlier: "idle",
+            shownRun: 0,
           },
         })}
         providerSnapshot={providerSnapshot()}

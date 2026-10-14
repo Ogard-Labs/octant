@@ -642,9 +642,9 @@ loads the first reads "Loading later messages" and stays focusable, and a
 failed page says "Later messages could not be loaded." with **Try again**.
 Load later keeps the reader's row in place rather than following the new
 rows to their end. Once a later page reaches the newest messages the two runs
-become one and the row goes away; Jump to latest, or sending a message, returns
-to the newest messages at the end. A jump lasts until the reader leaves the
-thread: coming back opens on the newest messages.
+become one and the row goes away, with the reader's row where it was; Jump to
+latest, or sending a message, returns to the newest messages at the end. A
+jump happens once: after its message has been shown, nothing jumps back to it.
 
 A thread's Browser captures are a plain list of rows under a sentence-case
 section label (`oct-section-label`, "Browser captures"), not a card group: each

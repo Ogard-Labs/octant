@@ -2455,8 +2455,11 @@ describe("useChatController thread windows", () => {
     // The newest turns stay what the rest of the thread reads.
     expect(indexes(result.current.activeView)[0]).toBe(70);
 
+    const jumpedRun = result.current.transcriptWindow?.shownRun ?? 0;
     act(() => result.current.jumpToLatest());
     expect(result.current.transcriptWindow?.detached).toBeUndefined();
+    // A different run is on screen, so the list starts over at the end.
+    expect(result.current.transcriptWindow?.shownRun).toBe(jumpedRun + 1);
   });
 
   it("keeps the later of two jumps when the earlier one's page answers last", async () => {
@@ -2482,12 +2485,66 @@ describe("useChatController thread windows", () => {
     expect(indexes(result.current.transcriptWindow?.detached?.view).at(-1)).toBe(40);
   });
 
+  it("drops a page read for an earlier jump once a later jump lands inside the run already shown", async () => {
+    const host = windowHost(100);
+    const held = deferred<void>();
+    const threadWindow = vi.fn(
+      async (id: ChatThreadId, request: Parameters<ChatClient["threadWindow"]>[1]) => {
+        if (request.through === turnIdAt(5)) await held.promise;
+        return host.threadWindow(id, request);
+      },
+    );
+    const { result } = renderWindowed(host, { threadWindow });
+    await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(70));
+    await act(async () => result.current.revealTurn(turnIdAt(40) as never));
+
+    let earlier: Promise<void> | undefined;
+    act(() => {
+      earlier = result.current.revealTurn(turnIdAt(5) as never);
+    });
+    // Already in the run on screen, so no read; it is still the newest jump.
+    await act(async () => result.current.revealTurn(turnIdAt(35) as never));
+    held.resolve();
+    await act(async () => earlier);
+
+    expect(indexes(result.current.transcriptWindow?.detached?.view).at(-1)).toBe(40);
+  });
+
+  it("lets a jumped-to run go when an edit inside it lands, even after an earlier page was read", async () => {
+    const host = windowHost(100);
+    const execute = vi.fn(async () =>
+      decodeChatCommandResult({ kind: "thread-updated", thread: bootstrap().threads[0]! }),
+    );
+    const { result } = renderWindowed(host, { execute });
+    await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(70));
+    await act(async () => result.current.revealTurn(turnIdAt(40) as never));
+    expect(indexes(result.current.transcriptWindow?.detached?.view)).toHaveLength(30);
+
+    // Turn 30 is revised: 30 to 99 leave the conversation.
+    host.edit(30);
+    // A page before the run still answers (turn 11 is active) and carries the new count.
+    await act(async () => result.current.loadEarlier());
+    await act(async () => {
+      await result.current.execute({
+        kind: "rename-chat-thread",
+        threadId,
+        expectedVersion: result.current.activeView!.thread.version,
+        title: "Renamed",
+      });
+    });
+
+    await waitFor(() => expect(result.current.transcriptWindow?.detached).toBeUndefined());
+    expect(indexes(result.current.activeView)).not.toContain(35);
+    expect(indexes(result.current.activeView).at(-1)).toBe(170);
+  });
+
   it("joins the jumped-to run onto the newest turns once loading later pages reaches them", async () => {
     const host = windowHost(70);
     const { result } = renderWindowed(host);
     await waitFor(() => expect(indexes(result.current.activeView)[0]).toBe(40));
     await act(async () => result.current.revealTurn(turnIdAt(9) as never));
     expect(indexes(result.current.transcriptWindow?.detached?.view)).toHaveLength(10);
+    const jumpedRun = result.current.transcriptWindow?.shownRun;
 
     await act(async () => result.current.loadLater());
     expect(indexes(result.current.transcriptWindow?.detached?.view)).toHaveLength(40);
@@ -2497,6 +2554,8 @@ describe("useChatController thread windows", () => {
     expect(result.current.transcriptWindow?.detached).toBeUndefined();
     expect(indexes(result.current.activeView)).toEqual(Array.from({ length: 70 }, (_, i) => i));
     expect(result.current.transcriptWindow?.hasEarlier).toBe(false);
+    // Still the run the reader jumped to, so the list keeps their place.
+    expect(result.current.transcriptWindow?.shownRun).toBe(jumpedRun);
   });
 
   it("brings the reader back to the newest turns before sending", async () => {

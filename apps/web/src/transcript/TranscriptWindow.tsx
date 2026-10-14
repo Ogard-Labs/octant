@@ -49,6 +49,12 @@ export interface TranscriptWindowProps<T> {
   readonly itemTag?: "div" | "li";
   readonly revealKey?: string;
   /**
+   * Called once the `revealKey` row has been brought into view, so the owner
+   * can drop a one-time jump target instead of passing it on to a list that
+   * mounts again later and would jump back to it.
+   */
+  readonly onRevealed?: (key: string) => void;
+  /**
    * Keys that must stay mounted even when they leave the window. Chat uses this
    * for the turn being edited so the draft is not discarded by recycling.
    */
@@ -162,7 +168,13 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     gap,
     scrollMargin,
     scrollEndThreshold: FOLLOW_THRESHOLD_PX,
-    ...(align === "end" ? { anchorTo: "end" as const, followOnAppend: follows } : {}),
+    // Follow appended rows only while this list is following. The virtualizer
+    // on its own follows whenever the view sits at the end, which carried a
+    // reader at the bottom of a jumped-to run to the newest message when the
+    // run joined the newest turns, past the page they had just loaded.
+    ...(align === "end"
+      ? { anchorTo: "end" as const, followOnAppend: follows && followingRef.current }
+      : {}),
     useFlushSync: false,
     getItemKey: (index) => {
       const item = items[index];
@@ -251,12 +263,36 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     scrollToContentEnd(scroll);
   }, [align, items.length, restoreKey, trailSize, scrollMargin, totalSize, virtualizer]);
 
+  // The key-to-index map of the latest render, for the reveal settling below,
+  // which outlives the render that started it.
+  const keyIndexRef = useRef(keyIndex);
+  keyIndexRef.current = keyIndex;
+  const onRevealedRef = useRef(props.onRevealed);
+  onRevealedRef.current = props.onRevealed;
+  const settleRevealRef = useRef<(() => void) | undefined>(undefined);
+  useLayoutEffect(() => () => settleRevealRef.current?.(), []);
+
   useLayoutEffect(() => {
     if (revealKey === undefined || revealKey === appliedRevealKeyRef.current) return;
     const index = items.findIndex((item, itemIndex) => itemKey(item, itemIndex) === revealKey);
     if (index < 0) return;
     virtualizer.scrollToIndex(index, { align: "center" });
     appliedRevealKeyRef.current = revealKey;
+    const key = revealKey;
+    const scroll = scrollElementRef.current;
+    settleRevealRef.current?.();
+    settleRevealRef.current =
+      scroll === null
+        ? undefined
+        : settleReveal(
+            scroll,
+            () => keyIndexRef.current.get(key),
+            () => {
+              settleRevealRef.current = undefined;
+              onRevealedRef.current?.(key);
+            },
+          );
+    if (settleRevealRef.current === undefined) onRevealedRef.current?.(key);
   }, [itemKey, items, revealKey, virtualizer]);
 
   // Only a row added at the end is news. Earlier rows loaded above, a row that
@@ -509,6 +545,74 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       </div>
     </div>
   );
+}
+
+/**
+ * Centres a revealed row against the rendered rows, frame by frame, until it
+ * stays put. The virtualizer scrolls to the row from estimated heights; rows
+ * then measure taller as they mount, and its own correction can stop short,
+ * which left a search hit far back in a jumped-to run a thousand pixels below
+ * the view. Stops after a second and a half, or as soon as the reader scrolls
+ * by hand, and then reports the reveal done. Answers the cancel function, or
+ * undefined where frames are unavailable.
+ */
+function settleReveal(
+  scroll: HTMLElement,
+  indexOfTarget: () => number | undefined,
+  done: () => void,
+): (() => void) | undefined {
+  if (typeof requestAnimationFrame !== "function") return undefined;
+  const MAX_FRAMES = 90;
+  const STABLE_FRAMES = 4;
+  let frame = 0;
+  let stable = 0;
+  let handle: number | undefined;
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    if (handle !== undefined) cancelAnimationFrame(handle);
+    for (const type of ["wheel", "touchstart", "pointerdown", "keydown"] as const) {
+      scroll.removeEventListener(type, finish);
+    }
+    done();
+  };
+  for (const type of ["wheel", "touchstart", "pointerdown", "keydown"] as const) {
+    scroll.addEventListener(type, finish, { passive: true });
+  }
+  const step = () => {
+    handle = undefined;
+    frame += 1;
+    const index = indexOfTarget();
+    const row =
+      index === undefined
+        ? null
+        : scroll.querySelector(`[data-transcript-row][data-index="${String(index)}"]`);
+    if (row instanceof HTMLElement) {
+      const frameRect = scroll.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const offset = rowRect.top + rowRect.height / 2 - (frameRect.top + frameRect.height / 2);
+      const max = scroll.scrollHeight - scroll.clientHeight;
+      const target = Math.max(0, Math.min(max, scroll.scrollTop + offset));
+      if (Math.abs(target - scroll.scrollTop) > 1) {
+        scroll.scrollTop = target;
+        stable = 0;
+      } else {
+        stable += 1;
+      }
+    }
+    if (stable >= STABLE_FRAMES || frame >= MAX_FRAMES || index === undefined) finish();
+    else handle = requestAnimationFrame(step);
+  };
+  handle = requestAnimationFrame(step);
+  return () => {
+    if (finished) return;
+    finished = true;
+    if (handle !== undefined) cancelAnimationFrame(handle);
+    for (const type of ["wheel", "touchstart", "pointerdown", "keydown"] as const) {
+      scroll.removeEventListener(type, finish);
+    }
+  };
 }
 
 function lastKeyOf<T>(
