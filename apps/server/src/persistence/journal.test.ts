@@ -11,6 +11,7 @@ import {
   ConcurrencyConflict,
   DuplicateEventIdentity,
   EventPayloadInvalid,
+  JournalInputInvalid,
   JournalWriteFailed,
   ThreadIdInUse,
   UnknownEventName,
@@ -707,6 +708,66 @@ describe("Journal", () => {
         .replayAggregateType({ aggregateType: "fixture", afterSequence: 0, limit: 10 })
         .map((event) => event.eventId),
     ).toEqual([ids.event1, ids.event2]);
+    connection.close();
+  });
+
+  it("leaves out rows of an aggregate type by event name or payload prefix, and reports each aggregate's version", () => {
+    const connection = openMigratedConnection();
+    const journal = createJournal(connection);
+    const other = "00000000-0000-4000-8000-000000000099";
+    journal.append(
+      appendRequest([
+        pendingEvent(ids.event1, { payload: { value: "launch:a" } }),
+        pendingEvent(ids.event2, { payload: { value: "page:b" } }),
+      ]),
+    );
+    journal.append({
+      aggregate: { aggregateType: "fixture", aggregateId: other },
+      expectedVersion: 0,
+      events: [pendingEvent(ids.event3, { payload: { value: "launch:c" } })],
+    });
+    const read = (narrowing: object) =>
+      journal
+        .replayAggregateType({
+          aggregateType: "fixture",
+          afterSequence: 0,
+          limit: 10,
+          ...narrowing,
+        })
+        .map((event) => event.eventId);
+
+    expect(read({ eventName: "fixture.recorded" })).toEqual([ids.event1, ids.event2, ids.event3]);
+    expect(read({ exceptEventName: "fixture.recorded" })).toEqual([]);
+    expect(read({ payloadPrefix: { path: "value", prefix: "launch:" } })).toEqual([
+      ids.event1,
+      ids.event3,
+    ]);
+    expect(read({ payloadPrefix: { path: "missing.key", prefix: "launch:" } })).toEqual([]);
+    expect(() => read({ payloadPrefix: { path: "value') OR 1=1 --", prefix: "x" } })).toThrow(
+      JournalInputInvalid,
+    );
+    expect(
+      [...journal.aggregateVersions("fixture")].toSorted((left, right) =>
+        left.aggregateId.localeCompare(right.aggregateId),
+      ),
+    ).toEqual([
+      { aggregateId: ids.aggregate, aggregateVersion: 2 },
+      { aggregateId: other, aggregateVersion: 1 },
+    ]);
+
+    // A payload that is not JSON fails its read as the unnarrowed replay does,
+    // rather than failing the query or vanishing from it.
+    connection.exec("PRAGMA ignore_check_constraints = ON");
+    connection
+      .prepare("UPDATE event_journal SET payload_json = ? WHERE global_sequence = ?")
+      .run("{not-json", 2);
+    connection.exec("PRAGMA ignore_check_constraints = OFF");
+    expect(() => read({ payloadPrefix: { path: "value", prefix: "launch:" } })).toThrow(
+      expect.objectContaining({ _tag: "ReplayEventInvalid", reason: "malformed-json" }),
+    );
+    expect(() => read({})).toThrow(
+      expect.objectContaining({ _tag: "ReplayEventInvalid", reason: "malformed-json" }),
+    );
     connection.close();
   });
 

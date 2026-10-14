@@ -48,6 +48,7 @@ import {
   type ToolEgressRule,
   type ToolEgressRuleScope,
 } from "@octant/domain/tool-egress-policy";
+import { uptime } from "node:os";
 import { Option, Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import {
@@ -111,6 +112,17 @@ export function toolEgressLaunchTaintReference(launchId: string): string {
 
 const REPLAY_BATCH = 1_000;
 
+/**
+ * How long an expired rule stays in memory after this host first sees it
+ * expired, counted on elapsed time rather than the wall clock. A request it
+ * would have matched is refused `expired` until then and `no-rule` after, and
+ * learn mode proposes both; either way the rule allows nothing once
+ * `expiresAt` passes.
+ */
+export const EXPIRED_TOOL_EGRESS_RULE_RETENTION_MS = 24 * 3_600_000;
+/** The least time between two sweeps of expired rules, which run when rules are read. */
+const EXPIRED_RULE_SWEEP_INTERVAL_MS = 60_000;
+
 /** Who answered: a person at a local window, a paired device, or the reviewer. */
 export type ToolEgressAnsweringPrincipal =
   | { readonly kind: "local-window" }
@@ -166,7 +178,10 @@ export interface ToolEgressLiveLaunch {
 }
 
 export interface ToolEgressRulesOptions {
-  readonly journal: Pick<Journal, "append" | "replayAggregateType" | "transaction">;
+  readonly journal: Pick<
+    Journal,
+    "append" | "replayAggregateType" | "aggregateVersions" | "transaction"
+  >;
   /** The Code thread rules may be granted on, or nothing for any other thread. */
   readonly readCodeThread: (threadId: string) => { readonly projectId: string } | undefined;
   /** Whether the thread has taken in outside content. A read that throws counts as tainted. */
@@ -186,6 +201,12 @@ export interface ToolEgressRulesOptions {
   readonly personActor: typeof EventActor.Type;
   readonly uuid: () => string;
   readonly clock: () => string;
+  /**
+   * Suspend-aware elapsed milliseconds that setting the wall clock cannot
+   * move; the host's uptime unless a test supplies its own. Only the time an
+   * expired rule stays in memory is counted on it.
+   */
+  readonly elapsedMs?: () => number;
 }
 
 interface StoredRule {
@@ -205,6 +226,8 @@ interface StoredProposal {
 
 interface OpenLaunch {
   readonly launch: ToolEgressLaunch;
+  /** The journal position of its latest start; its decision batches come after it. */
+  readonly startSequence: number;
   readonly entries: Map<string, ToolEgressDecisionEntry>;
 }
 
@@ -250,9 +273,15 @@ export class ToolEgressRules {
    */
   readonly #unreadableAggregates = new Set<string>();
   readonly #live = new Map<string, LiveLaunchState>();
+  readonly #elapsedMs: () => number;
+  /** When expired rules are next swept from memory, in elapsed milliseconds. */
+  #nextSweepAt = Number.NEGATIVE_INFINITY;
+  /** When each held rule was first seen expired, in elapsed milliseconds. */
+  readonly #seenExpiredAt = new WeakMap<StoredRule, number>();
 
   constructor(options: ToolEgressRulesOptions) {
     this.#options = options;
+    this.#elapsedMs = options.elapsedMs ?? (() => uptime() * 1_000);
     this.#hostActor = decodeActor(options.hostActor);
     this.#personActor = decodeActor(options.personActor);
     this.#hydrate();
@@ -418,6 +447,7 @@ export class ToolEgressRules {
   }): ToolEgressAnswerOutcome {
     const thread = this.#options.readCodeThread(input.threadId);
     if (thread === undefined) return { kind: "refused", reason: "not-a-code-thread" };
+    this.#sweepExpiredRules();
     const now = this.#timestamp();
     if (now === undefined) return { kind: "refused", reason: "unavailable" };
     const tainted = this.#tainted(input.threadId);
@@ -574,6 +604,7 @@ export class ToolEgressRules {
   }): ToolEgressAnswerOutcome {
     const thread = this.#options.readCodeThread(input.threadId);
     if (thread === undefined) return { kind: "refused", reason: "not-a-code-thread" };
+    this.#sweepExpiredRules();
     const actor = this.#actorFor(input.principal);
     let appended: "appended" | "unavailable";
     if (this.#threadRules.get(input.threadId)?.has(input.ruleId) === true) {
@@ -645,6 +676,7 @@ export class ToolEgressRules {
   view(threadId: string, caller: ToolEgressPerson["kind"]): ToolEgressThreadView | undefined {
     const thread = this.#options.readCodeThread(threadId);
     if (thread === undefined) return undefined;
+    this.#sweepExpiredRules();
     const now = this.#timestamp() ?? "";
     const tainted = this.#tainted(threadId);
     const live = (rules: Map<string, StoredRule> | undefined): ToolEgressRuleView[] =>
@@ -707,6 +739,7 @@ export class ToolEgressRules {
    * proposal is never among them.
    */
   #rulesFor(launch: ToolEgressLaunch): ReadonlyArray<ToolEgressRule> {
+    this.#sweepExpiredRules();
     const ruleThread = String(launch.parentThreadId ?? launch.threadId);
     const readable = (aggregateType: string, id: string) =>
       !this.#unreadableAggregates.has(aggregateKey(aggregateType, id));
@@ -838,6 +871,49 @@ export class ToolEgressRules {
     return count;
   }
 
+  /**
+   * Drops rules that have been expired for the retention, at most once a
+   * minute. Both the minute and the retention run on elapsed time from when
+   * this host first saw a rule expired, so a wall clock set forward drops
+   * nothing early (a rule live again once the clock is corrected is still
+   * held) and one set back does not stop the sweeps. Expiry itself is decided
+   * from `expiresAt` on every request whether or not a rule is still held, so
+   * a sweep that is late, skipped, or stopped by an unreadable clock changes
+   * no decision.
+   */
+  #sweepExpiredRules(force = false): void {
+    let nowMs: number;
+    let elapsed: number;
+    try {
+      nowMs = Date.parse(this.#options.clock());
+      elapsed = this.#elapsedMs();
+    } catch {
+      return;
+    }
+    if (!Number.isFinite(nowMs) || !Number.isFinite(elapsed)) return;
+    if (!force && elapsed < this.#nextSweepAt) return;
+    this.#nextSweepAt = elapsed + EXPIRED_RULE_SWEEP_INTERVAL_MS;
+    for (const held of [this.#threadRules, this.#projectRules]) {
+      for (const [owner, rules] of held) {
+        for (const [ruleId, rule] of rules) {
+          // An unreadable expiry is never held as expired here; the decision
+          // still refuses it.
+          if (!(nowMs >= Date.parse(rule.expiresAt))) {
+            this.#seenExpiredAt.delete(rule);
+            continue;
+          }
+          const seen = this.#seenExpiredAt.get(rule);
+          if (seen === undefined) {
+            this.#seenExpiredAt.set(rule, elapsed);
+          } else if (elapsed - seen >= EXPIRED_TOOL_EGRESS_RULE_RETENTION_MS) {
+            rules.delete(ruleId);
+          }
+        }
+        if (rules.size === 0) held.delete(owner);
+      }
+    }
+  }
+
   #timestamp(): string | undefined {
     try {
       return Option.getOrUndefined(decodeTimestampOption(this.#options.clock()));
@@ -924,14 +1000,31 @@ export class ToolEgressRules {
     return "appended";
   }
 
+  /**
+   * Rebuilds the store from the journal without decoding what cannot change
+   * it. One pass reads, in journal order, every rule, proposal, learn-mode,
+   * launch start and settlement record, and every launch's taint mark; a
+   * second reads the decision batches of the launches still open, the only
+   * ones recovery summarizes. A settled launch's batches, and outside content
+   * that is not a launch's mark, are never read. Each aggregate's version is
+   * then taken from the journal, as a replay of every row would leave it.
+   */
   #hydrate(): void {
+    const names = TOOL_EGRESS_EVENT_NAMES;
     // Proposals close when a rule for their host is granted after them, and a
     // Project rule lives on another aggregate, so both are read in journal order.
     const streams = [
-      TOOL_EGRESS_THREAD_AGGREGATE,
-      TOOL_EGRESS_PROJECT_AGGREGATE,
-      THREAD_EXTERNAL_CONTENT_AGGREGATE,
-    ].map((aggregateType) => new ReplayStream(this.#options.journal, aggregateType));
+      new ReplayStream(this.#options.journal, {
+        aggregateType: TOOL_EGRESS_THREAD_AGGREGATE,
+        exceptEventName: names.decisionsRecorded,
+      }),
+      new ReplayStream(this.#options.journal, { aggregateType: TOOL_EGRESS_PROJECT_AGGREGATE }),
+      new ReplayStream(this.#options.journal, {
+        aggregateType: THREAD_EXTERNAL_CONTENT_AGGREGATE,
+        eventName: THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested,
+        payloadPrefix: { path: "contentReference", prefix: LAUNCH_TAINT_REFERENCE_PREFIX },
+      }),
+    ];
     for (;;) {
       let next: ReplayStream | undefined;
       for (const stream of streams) {
@@ -941,17 +1034,47 @@ export class ToolEgressRules {
         if (nextHead === undefined || head.globalSequence < nextHead.globalSequence) next = stream;
       }
       const envelope = next?.take();
-      if (envelope === undefined) return;
-      try {
-        this.#apply(envelope);
-      } catch {
-        // A record that no longer decodes grants nothing; the rest still replay.
-        this.#versions.set(
-          aggregateKey(envelope.aggregateType, String(envelope.aggregateId)),
-          envelope.aggregateVersion,
-        );
-        this.#failClosedOnUnreadable(envelope);
+      if (envelope === undefined) break;
+      this.#replay(envelope);
+    }
+    // A batch only adds to a launch still open since its latest start, so the
+    // batches before that start, and every settled launch's, change nothing.
+    for (const [launchId, open] of this.#openLaunches) {
+      const batches = new ReplayStream(
+        this.#options.journal,
+        {
+          aggregateType: TOOL_EGRESS_THREAD_AGGREGATE,
+          eventName: names.decisionsRecorded,
+          payloadPrefix: { path: "launch.launchId", prefix: launchId },
+        },
+        open.startSequence,
+      );
+      for (let envelope = batches.take(); envelope !== undefined; envelope = batches.take()) {
+        if (envelope.eventName !== names.decisionsRecorded) continue;
+        const launch = (
+          envelope.payload as { readonly launch?: { readonly launchId?: unknown } } | null
+        )?.launch;
+        if (launch?.launchId === launchId) this.#replay(envelope);
       }
+    }
+    for (const { aggregateId, aggregateVersion } of this.#options.journal.aggregateVersions(
+      TOOL_EGRESS_THREAD_AGGREGATE,
+    )) {
+      this.#versions.set(aggregateKey(TOOL_EGRESS_THREAD_AGGREGATE, aggregateId), aggregateVersion);
+    }
+    this.#sweepExpiredRules(true);
+  }
+
+  #replay(envelope: EventEnvelope): void {
+    try {
+      this.#apply(envelope);
+    } catch {
+      // A record that no longer decodes grants nothing; the rest still replay.
+      this.#versions.set(
+        aggregateKey(envelope.aggregateType, String(envelope.aggregateId)),
+        envelope.aggregateVersion,
+      );
+      this.#failClosedOnUnreadable(envelope);
     }
   }
 
@@ -1041,6 +1164,7 @@ export class ToolEgressRules {
         const started = payload as ThreadEgressLaunchStartedPayload;
         this.#openLaunches.set(String(started.launch.launchId), {
           launch: started.launch,
+          startSequence: envelope.globalSequence,
           entries: new Map(),
         });
         return;
@@ -1142,23 +1266,30 @@ export class ToolEgressRules {
   }
 }
 
+type ReplayCursor = Omit<Parameters<Journal["replayAggregateType"]>[0], "afterSequence" | "limit">;
+
 class ReplayStream {
   readonly #journal: Pick<Journal, "replayAggregateType">;
-  readonly #aggregateType: string;
+  readonly #cursor: ReplayCursor;
   #buffer: ReadonlyArray<EventEnvelope> = [];
   #index = 0;
-  #afterSequence = 0;
+  #afterSequence: number;
   #done = false;
 
-  constructor(journal: Pick<Journal, "replayAggregateType">, aggregateType: string) {
+  constructor(
+    journal: Pick<Journal, "replayAggregateType">,
+    cursor: ReplayCursor,
+    afterSequence = 0,
+  ) {
     this.#journal = journal;
-    this.#aggregateType = aggregateType;
+    this.#cursor = cursor;
+    this.#afterSequence = afterSequence;
   }
 
   peek(): EventEnvelope | undefined {
     if (this.#index >= this.#buffer.length && !this.#done) {
       this.#buffer = this.#journal.replayAggregateType({
-        aggregateType: this.#aggregateType,
+        ...this.#cursor,
         afterSequence: this.#afterSequence,
         limit: REPLAY_BATCH,
       });

@@ -4031,6 +4031,15 @@ listener per confined launch:
   machine did, and its tunnels close then. Revocation closes them at once.
   Expiry is derived from the stored timestamp rather than journaled as its own
   event, so replay reaches the same answer with no clock-dependent record.
+  The host keeps an expired rule in memory for 24 hours after it first sees
+  the rule expired, during which a request it would have matched is refused
+  `expired`; after that a sweep (at most one a minute, run when rules are
+  read) drops it, and the same request is refused `no-rule`. Learn mode
+  proposes both alike, and neither changes when the rule stopped allowing
+  anything. The 24 hours and the minute run on the host's suspend-aware
+  uptime, not the wall clock: a clock set forward cannot drop a rule that is
+  live again once the clock is corrected, and a clock set back does not stop
+  the sweeps.
 - **Who grants.** Rules arise only from answering a `network-access` approval
   — a learn-mode proposal or a person adding a rule in the thread's rules
   list — never from a model tool call, a tool result, a reviewer, or
@@ -4195,6 +4204,17 @@ where it was or narrows it:
   the same time is not suspended mid-run by it. A rule granted while a launch
   runs reaches that launch at its next request, even if that launch has
   already fetched outside content its thread is not yet marked for.
+- _What a restart reads._ Startup rebuilds the store in journal order from
+  the rule, proposal, learn-mode, launch start, summary, and incomplete
+  records, and from the launch marks (`tool-egress-launch:` references) among
+  the threads' outside-content records. It reads decision batches only for
+  launches still open, the ones recovery summarizes, and takes each
+  `thread-egress` aggregate's version from the journal. The rows it leaves
+  out cannot change a rule, a taint, a clamp, or what recovery writes, so the
+  journal skips them in SQL and never decodes them. A test compares this with
+  a replay of every row on seeded journals, unreadable revocations included.
+  Measured on a journal of 2,000 settled launches (37,162 rows, about 24,000 of
+  them decision batches), startup went from 2.7 s to 0.25 s.
 - _Where the lists show._ A Code thread's Agents tab shows Network access once
   its commands run through these rules, or once the thread holds a rule or a
   proposal. Until phase 4 routes commands to the proxy, the card says that
