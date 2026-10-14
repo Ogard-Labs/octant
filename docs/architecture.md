@@ -4792,10 +4792,45 @@ mechanisms are:
   scope holds no binding, so its wider in-request reach never carries into
   those checks, and the routine host scope passes for any active Code Project
   as before.
-  Tools that act on the turn's admitted checkout without a window check (the
-  provider's own tools, ACP client file and terminal access) are bounded by
-  the turn's admission, posture, and confinement instead. Other work a request
-  defers still loses that request's admission when dispatch completes.
+  **A turn keeps its checkout.** A Code turn acts on the checkout it was
+  started on until the turn ends. Starting the turn checks the window's
+  Project binding once; the turn then captures the checkout root, the
+  checkout's and Project's identity, and the confinement it runs under (the
+  terminal sandbox and its writable roots). Every tool that acts on that
+  captured checkout runs on the capture and does not look at the window's
+  binding again: the ACP client's file read and write and terminal tools, the
+  native harness's file tools, and the provider's own built-in tools. A window
+  moved to another Project, a window that closes, and a turn a paired device
+  started therefore do not cut a running turn off from its own checkout, and
+  a call never lands on the window's new binding. Two reasons: a provider
+  runtime's built-in tools cannot be cut mid-turn and act on the checkout
+  anyway, so the same rule for Octant's tools keeps one behavior whichever
+  tool the provider reaches for; and a turn started from a phone has no
+  window binding to hold it against and must keep working. Stopping the turn
+  is how the person ends its reach.
+  What still applies to every call of Octant's own tools: the thread's live
+  execution policy (the turn's requested ceiling, clamped by the thread's
+  current grant, so a thread put in Plan mode mid-turn refuses writes and
+  process launches on the next call, and a Plan turn is read-only throughout),
+  the turn's confinement, path containment inside the captured root, and the
+  approvals the posture requires. A provider's own built-in tools run under
+  the posture and sandbox the turn was launched with and do not reread the
+  thread's grant mid-turn, so lowering it takes effect on them with the next
+  turn or when the person stops the turn. The next turn on the thread checks the window's binding again, so
+  after a rebind or a window close it starts on the new binding or is refused,
+  as any new turn is.
+  The two rules fit because they judge different things. The captured checkout
+  covers what the turn does to its own checkout. The window's standing
+  authority covers an app-managed tool that reaches a Project-scoped service
+  on the window's behalf, such as reading, writing to, or stopping a terminal
+  the window holds, the planner board, a device-effect approval, or a sibling
+  thread's transcript: those hold nothing the turn captured, so they follow
+  the window's binding and liveness when the call runs, as above. A rebind
+  or a closed window can therefore stop a turn's window-held terminal or board
+  calls while its file and process tools on the checkout keep working until
+  the turn ends.
+  Other work a request defers still loses that request's admission when
+  dispatch completes.
 - **Approvals.** Independent categories — project file writes, shell commands,
   network access, external application observation or control, destructive
   actions, credential access, access outside the bound root, privilege or
