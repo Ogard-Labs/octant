@@ -131,9 +131,9 @@ Choosing a different store also removes a bucket's access key and secret from
 your Keychain or Secret Service.
 
 Once this computer belongs to a replica — it set one up or asked to join one —
-its store can't be changed until leaving a replica is supported. Settings ›
-Sync says so and turns off the store controls. You can still turn sync off and
-on, and enter a new access key and secret for the same bucket.
+its store can't be changed until it [leaves that replica](#leave-a-replica).
+Settings › Sync says so and turns off the store controls. You can still turn
+sync off and on, and enter a new access key and secret for the same bucket.
 
 ## What leaves this computer
 
@@ -240,10 +240,11 @@ computer, or from the one that set up the store. A computer you revoke cannot
 remove the computer that brought it in.
 
 **Computers** lists every computer in the replica, who approved it, and
-whether it was revoked. **Revoke…** appears only on computers yours brought
+whether it was revoked or left. **Revoke…** appears only on computers yours brought
 in. Before it revokes, your computer reads the store, so what the revoked
 computer already signed - artifact versions and approvals alike - keeps
-counting and the computers it brought in stay. The revoke screen lists those
+counting and the computers it brought in stay. Counting stops at the first
+place it skipped, so it cannot fill that gap later. The revoke screen lists those
 computers, so you can revoke them in the same step, for example when the
 computer was stolen, and it lists the revocations the computer already wrote.
 You can also stop counting before the first of those revocations; computers
@@ -263,6 +264,37 @@ computers writes next, that computer stops publishing and says so. Remove
 those files with your storage provider's own tools, change the store's access
 keys, or move to a new store.
 
+## Leave a replica
+
+To stop syncing this computer, or to move it to another store, select
+**Leave…** under **Leave replica** in **Settings › Sync** and confirm. Only
+the Octant app on the computer itself can do this; a paired phone or browser
+cannot.
+
+- **Your other computers see that it left.** This computer first writes one
+  signed record into the store saying so, and your other computers list it
+  as **Left** once they read it, not as revoked. Everything it copied out
+  before stays in the store and keeps counting on them.
+- **This computer stops syncing.** It forgets the replica, removes its signing
+  key from your Keychain or Secret Service, and turns sync off. It reads
+  nothing from the store and writes nothing to it from then on. Versions it
+  had not copied out yet stay on this computer and are not sent.
+- **Your artifacts stay.** Every artifact and its history, including versions
+  read in from your other computers, stays in the library here.
+- **Computers it approved stay in the replica.** Only the computers that
+  brought this one in can revoke them afterwards; if it set up the store,
+  none can.
+
+Afterwards you can choose another store, or the same one, and set up sync or
+ask to join there. It joins as a new computer with a new key.
+
+If the store cannot be reached, or sync is off, leaving stops and nothing
+changes, so you can try again once the store is back. If the store is gone
+for good, **Leave without telling them…** leaves without writing the record;
+your other computers then keep listing this computer until one of them
+revokes it, or for good if it is the computer that set up the store. A computer that only asked to join, or that was revoked, writes
+nothing when it leaves.
+
 ## Sync status
 
 **Sync status** shows the last time the store refused this computer, could
@@ -270,7 +302,8 @@ not be reached, or held a file where this computer writes next. Last publish,
 last pull, and the queue say **Not available yet**: Settings does not show
 them in this preview, although versions are copied. A paired phone or a browser on another device sees
 this status and the list of computers, read-only. Setting up sync, joining,
-approving, and revoking happen only in the Octant app on the computer itself.
+approving, revoking, and leaving happen only in the Octant app on the computer
+itself.
 
 ## Turning sync off
 

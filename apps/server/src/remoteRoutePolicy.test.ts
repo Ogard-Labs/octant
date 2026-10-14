@@ -266,6 +266,9 @@ describe("remote route policy", () => {
       "/api/host-control/export",
       "/api/replica-store/settings",
       "/api/replica-store/commands",
+      // Leaving a replica, like every membership command, is the host's own.
+      "/api/replica-membership/commands",
+      "/api/replica-membership/state",
       "/api/missing",
     ]) {
       expect((await fixture.route(request(path, { method: "POST" }))).status).toBe(404);

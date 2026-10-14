@@ -107,10 +107,16 @@ export interface ReplicaMembershipNode {
   /** Whether its approval counts all the way up to the founder. */
   readonly admitted: boolean;
   /**
-   * The last of its sequences that counts, when a revocation or a second
-   * record in one of its slots set one. Undefined means every entry counts.
+   * The last of its sequences that counts, when a revocation, leaving, or a
+   * second record in one of its slots set one. Undefined means every entry
+   * counts.
    */
   readonly cut: number | undefined;
+  /**
+   * It signed a `replica-left` record while it still counted, so its cut is
+   * its own, just before that record: it left rather than was revoked.
+   */
+  readonly left: boolean;
 }
 
 export interface ReplicaDerivedMembership {
@@ -126,6 +132,7 @@ export interface ReplicaDerivedMembership {
 type JoinAccepted = Extract<ReplicaMembershipEntry, { kind: "join-accepted" }>;
 type Revocation = Extract<ReplicaMembershipEntry, { kind: "revocation" }>;
 type Founded = Extract<ReplicaMembershipEntry, { kind: "replica-founded" }>;
+type Left = Extract<ReplicaMembershipEntry, { kind: "replica-left" }>;
 
 interface HeldFacts {
   /** Per instance, the lowest sequence holding two different records. */
@@ -206,7 +213,10 @@ function heldFacts(records: ReadonlyArray<ReplicaHeldRecord>): HeldFacts {
  * its parent is admitted and signed the approval at or before the parent's
  * cut. Its cut is the lowest cut named by a revocation that a strict ancestor
  * signed while admitted and at or before its own cut, or just before a slot
- * it signed two different records into. Everything a computer's cut depends
+ * it signed two different records into. A computer that signed a
+ * `replica-left` record naming this founder, at or before that cut, left: its
+ * cut is then just before its lowest such record. Leaving never cuts the
+ * computers it approved before it left. Everything a computer's cut depends
  * on is above it in the tree and already decided, so there is no iteration
  * and no tie-break. Records this pass does not use - an approval the joiner
  * never accepted, a descendant's revocation of an ancestor, a ghost's
@@ -228,16 +238,36 @@ export function deriveReplicaMembership(
     children.set(parent, [...(children.get(parent) ?? []), accept]);
   }
   const revocations = new Map<string, Revocation[]>();
+  // Each computer's lowest record leaving this founder's replica. A record
+  // naming another founder is a copy from another replica and means nothing.
+  const leaving = new Map<string, Left>();
   for (const entry of facts.live) {
+    if (entry.kind === "replica-left" && String(entry.founder) === founderId) {
+      const id = String(entry.origin.instanceId);
+      const known = leaving.get(id);
+      if (known === undefined || entry.origin.sequence < known.origin.sequence) {
+        leaving.set(id, entry);
+      }
+    }
     if (entry.kind !== "revocation") continue;
     const subject = String(entry.subject);
     revocations.set(subject, [...(revocations.get(subject) ?? []), entry]);
   }
   const capOf = (id: string) => (facts.equivocation.get(id) ?? Infinity) - 1;
+  // A computer left when it wrote its record while it still counted; a cut
+  // above it, from a revocation or a second record in a slot, came first.
+  const leftAt = (id: string, cut: number): number | undefined => {
+    const record = leaving.get(id);
+    return record !== undefined && record.origin.sequence <= cut
+      ? record.origin.sequence
+      : undefined;
+  };
+  const founderLeft = leftAt(founderId, capOf(founderId));
+  const founderCut = founderLeft === undefined ? capOf(founderId) : founderLeft - 1;
   const standing = new Map<
     string,
     { readonly admitted: boolean; readonly cut: number; readonly ancestors: ReadonlySet<string> }
-  >([[founderId, { admitted: true, cut: capOf(founderId), ancestors: new Set() }]]);
+  >([[founderId, { admitted: true, cut: founderCut, ancestors: new Set() }]]);
   const nodes: ReplicaMembershipNode[] = [
     {
       instanceId: root.origin.instanceId,
@@ -246,7 +276,8 @@ export function deriveReplicaMembership(
       parent: undefined,
       approvalSequence: undefined,
       admitted: true,
-      cut: finite(capOf(founderId)),
+      cut: finite(founderCut),
+      left: founderLeft !== undefined,
     },
   ];
   for (let index = 0; index < nodes.length; index += 1) {
@@ -273,6 +304,8 @@ export function deriveReplicaMembership(
         if (by === undefined || !by.admitted || revocation.origin.sequence > by.cut) continue;
         cut = Math.min(cut, revocation.cut);
       }
+      const left = admitted ? leftAt(id, cut) : undefined;
+      if (left !== undefined) cut = left - 1;
       standing.set(id, { admitted, cut, ancestors });
       nodes.push({
         instanceId: accept.origin.instanceId,
@@ -282,6 +315,7 @@ export function deriveReplicaMembership(
         approvalSequence: accept.approvalSequence,
         admitted,
         cut: finite(cut),
+        left: left !== undefined,
       });
     }
   }

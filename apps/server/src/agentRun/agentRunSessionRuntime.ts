@@ -41,6 +41,11 @@ import {
   type ProviderCapacityScheduler,
   type SchedulerCapacityEnforcement,
 } from "../context/providerCapacityScheduler";
+import {
+  NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
+  RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+  type RuntimeOutsideContentMarking,
+} from "../context/runtimeOutsideContentMark";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import type { AgentRunSessionRecord, AgentRunSessionStatePort } from "./agentRunSessionStore";
@@ -282,6 +287,12 @@ export interface AgentRunSessionRuntimeOptions {
     readonly run: AgentRun;
     readonly event: Extract<ProviderRuntimeEvent, { kind: "child-agent-activity" }>;
   }) => void;
+  /**
+   * Records that the child's runtime ran its own web search, page fetch, or
+   * hosted tool. A child's mark is kept under its run id, where its harness
+   * tools read it. Without it such a call stops the child's turn.
+   */
+  readonly outsideContentMarks?: RuntimeOutsideContentMarking;
   readonly onTextDelta?: (input: {
     readonly runId: AgentRunId;
     readonly text: string;
@@ -918,6 +929,7 @@ export function createAgentRunSessionRuntime(
           shutdown,
           onTextDelta: options.onTextDelta,
           onChildActivity: options.onChildActivity,
+          outsideContentMarks: options.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
           onUserMessage: options.onUserMessage,
           interactions: options.interactions,
           onSessionEnding: () => {
@@ -1245,6 +1257,7 @@ interface ManagedSessionInput {
   readonly shutdown: SessionShutdown;
   readonly onTextDelta?: AgentRunSessionRuntimeOptions["onTextDelta"];
   readonly onChildActivity?: AgentRunSessionRuntimeOptions["onChildActivity"];
+  readonly outsideContentMarks: RuntimeOutsideContentMarking;
   readonly onUserMessage?: AgentRunSessionRuntimeOptions["onUserMessage"];
   readonly interactions: AgentRunSessionRuntimeOptions["interactions"];
   readonly onConnectionReady: (
@@ -1501,6 +1514,14 @@ function runSessionTurn(
     if (workspaceRefusal !== undefined) {
       return { kind: "interrupted", reason: boundedReason(workspaceRefusal) };
     }
+    // An earlier turn's read that could not be marked is still in the
+    // session this turn would resume.
+    if (input.outsideContentMarks.settleOwed(String(input.run.id)).status === "refused") {
+      return yield* Effect.fail({
+        category: "provider-failed",
+        message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+      } satisfies ProviderFailure);
+    }
     input.onSessionReady();
     const connection = yield* input.driver.acquire({
       instanceId: input.providerInstanceId,
@@ -1705,6 +1726,17 @@ function collectSessionEvents(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             state.handledEvents += 1;
+            // Marked before the budget is looked at: what the runtime read
+            // reached its model either way.
+            if (event.kind === "outside-content-read") {
+              const marked = input.outsideContentMarks.mark(String(input.run.id), event);
+              if (marked.status === "refused") {
+                return yield* Effect.fail({
+                  category: "provider-failed",
+                  message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+                } satisfies ProviderFailure);
+              }
+            }
             if (state.handledEvents > input.maxEvents) {
               state.outcome = {
                 kind: "interrupted",
@@ -1712,6 +1744,7 @@ function collectSessionEvents(
               };
               return;
             }
+            if (event.kind === "outside-content-read") return;
             if (event.kind === "file-change" && event.instanceId === input.providerInstanceId) {
               const path = isAbsolute(event.path)
                 ? relative(input.projectRoot, event.path)

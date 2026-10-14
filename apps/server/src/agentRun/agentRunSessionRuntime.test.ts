@@ -39,6 +39,7 @@ import {
   MANAGED_AGENT_RUN_TURN_DEADLINE_MS,
   type AgentRunSessionRuntimeOptions,
 } from "./agentRunSessionRuntime";
+import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 
 const testDirectories: string[] = [];
 afterEach(() => {
@@ -956,6 +957,64 @@ describe("createAgentRunSessionRuntime", () => {
       kind: "failed",
       failure: { category: "provider-failed" },
     });
+  });
+
+  it("marks a child under its run id when its runtime searches the web, and stops it when it cannot", async () => {
+    const childTurn = (emit: FakeProvider["emit"]) => {
+      void (async () => {
+        await emit({ kind: "tool-start", sessionId, toolCallId: "call-1", toolName: "Read" });
+        await emit({
+          kind: "outside-content-read",
+          sessionId,
+          correlationId: "77777777-7777-4777-8777-777777777777",
+          toolCallId: "call-2",
+          toolName: "webSearch",
+          source: "web-search",
+        });
+        await emit({ kind: "text-delta", sessionId, text: "Found it." });
+        await emit({ kind: "completed", sessionId });
+      })();
+    };
+    const marks: unknown[] = [];
+    const provider = fakeProvider({ onSend: childTurn });
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, {
+        outsideContentMarks: new RuntimeOutsideContentMarks((mark) => {
+          marks.push(mark);
+          return {
+            kind: "recorded",
+            taint: { externalContentIngested: true, ingestedSources: ["runtime-web-search"] },
+          };
+        }),
+      }),
+    );
+
+    expect(await settled(runtime.start(agentRun()))).toMatchObject({ kind: "completed" });
+    expect(marks).toEqual([
+      expect.objectContaining({
+        threadId: runId,
+        provenance: { origin: "tool-result", sourceLabel: "runtime-web-search" },
+      }),
+    ]);
+
+    const unmarked = fakeProvider({ onSend: childTurn });
+    const refusing = createAgentRunSessionRuntime(
+      runtimeOptions(unmarked, {
+        outsideContentMarks: new RuntimeOutsideContentMarks(() => ({
+          kind: "refused",
+          reason: "contended",
+        })),
+      }),
+    );
+    expect(await settled(refusing.start(agentRun()))).toMatchObject({
+      kind: "failed",
+      failure: {
+        category: "provider-failed",
+        message:
+          "The model read outside content and this thread could not be marked with it, so the turn was stopped. Try again.",
+      },
+    });
+    expect(unmarked.interrupts).toEqual([sessionId]);
   });
 
   it("cancels the session and resolves stop only after the provider is stopped", async () => {

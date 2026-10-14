@@ -1694,11 +1694,8 @@ flowchart LR
 - **Untrusted-content taint.** Browser observations, tool results, and imported
   external content that already carry tainting provenance append
   `thread.external-content-ingested@1` with thread identity and bounded source
-  labels. Raw bodies never enter the payload. A provider runtime's own built-in
-  web search or page fetch does not append this event. Where the runtime reports
-  the call, Octant records ordinary tool activity. The call sits outside the
-  mark and outside the gate that mark applies to computer-use, MCP, and the
-  native harness. The thread-lifetime taint
+  labels. Raw bodies never enter the payload; a provider runtime's own web tools
+  append it too, as the next item describes. The thread-lifetime taint
   projection rebuilds from the journal; session, turn, and restart boundaries
   never clear it. Irreversible or authority-bearing actions on a tainted thread
   still require fresh confirmation after replay. One gate enforces that:
@@ -1711,6 +1708,53 @@ flowchart LR
   destructive, credential, outside-Project, or privilege-expansion class
   without that flag. A Code Git action a person takes from a window is that
   person's own per-action act, and no agent tool issues one.
+- **Provider runtimes' own web tools.** A runtime's built-in web search or page
+  fetch, or a tool the model's provider runs on its own servers, hands its
+  result to the model without Octant seeing it. The adapter reports the call
+  as a normalized `outside-content-read` event when it first sees it:
+  `web-search`, `web-fetch`, or `hosted-tool`, the runtime's tool name, and the
+  query or address as one redacted line bounded in UTF-16 units, when the
+  runtime gave one. A call that later fails, is denied, or is cancelled may
+  already have returned a page, so the start marks. A driver may report it
+  whether or not it reports tool activity.
+  - Chat, Work, and Code turn runners mark the thread. A child run's runner
+    marks the run's own id, which is where its harness tools read the mark.
+    Each runner marks before it looks at its event budget or a Stop, since
+    the read reached the model either way.
+  - The label is `runtime-web-search`, `runtime-web-fetch`, or
+    `runtime-hosted-tool`, with origin `tool-result`. The reference is
+    opaque: `runtime-web-`, the tool's name when it is a plain identifier, and
+    a SHA-256 of the tool, the turn, the call, and the query or address. No
+    query, address, or page content is journaled.
+  - A mark that cannot be recorded stops the turn, because the content has
+    already reached the model. The read stays owed in the host process: the
+    thread's next turn records it before it starts, or is refused with the
+    same reason, so retrying cannot resume the provider session that read it
+    while the thread is unmarked. A host restart forgets what is owed.
+  - Marking does not gate a tool the runtime executes itself. A Code turn
+    whose approvals the runtime's own reviewer answers (harness auto-review)
+    is stopped at the mark and tells the person why, because the reviewer was
+    chosen for the session while the thread was unmarked. The next turn
+    starts without it, as auto-review is off on a marked thread.
+  - A single-shot request (a context summary, a hand-off document, a commit or
+    pull-request draft, a harness single shot) has no thread of its own to
+    mark, so an answer written after such a read is not used.
+  - Codex: its `webSearch` item, on `item/started`. A start may carry an empty
+    query. Octant does not switch Codex's web search off.
+  - OpenCode: `webfetch`, `websearch`, and `codesearch`, and any call its
+    provider executed (`provider.executed`, or `executed` on the 2.0.22
+    stream), on `tool.called`. A call a person then denies has already marked.
+  - ACP agents: a tool call whose kind is `fetch`, or whose kind is `search`
+    with a `rawInput.query` and no path, pattern, glob, or other place to
+    look, the first time the agent reports it. A web search an agent reports
+    under `search` with a path-like input, or with no `query`, is not marked;
+    `search` also covers local file searches, so that residual stays.
+  - Claude: `WebSearch` and `WebFetch`. The driver offers Claude neither tool
+    and refuses a session that reports either, so this marks the thread only
+    if one is ever offered.
+  - Pi and the direct endpoints have no built-in web tool. Pi is launched with
+    only its file and shell tools, and a direct endpoint fails a turn whose
+    stream carries a hosted or server-side tool's output.
 - **Clearing taint.** Taint keeps its thread lifetime, and a person at a local
   window may clear it. A clear records that they reviewed what the thread read.
   - It appends `thread.external-content-cleared@1` on the thread's
@@ -5134,10 +5178,12 @@ mechanisms are:
   an exception. Octant-owned tools those threads reach stay confined either
   way. A runtime's own built-in tools (Codex's shell, Claude's Bash on the
   postures that write) run under that runtime's sandbox, not Octant's.
-  A runtime's own built-in web search or page fetch does not append
-  `thread.external-content-ingested@1`, and the gate that mark applies to
-  Octant's computer-use, MCP, and native-harness calls does not cover a tool
-  the runtime executes itself.
+  A runtime's own built-in web search or page fetch appends
+  `thread.external-content-ingested@1` where its adapter can observe it
+  ([Persistence](#persistence), Provider runtimes' own web tools, lists which
+  calls are observable), but the gate that mark applies to Octant's computer-use,
+  MCP, and native-harness calls does not cover a tool the runtime executes
+  itself.
   A confined Claude Plan launch reads the assigned leaf of that account's
   state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
   writes only two folders in it, `sessions/` and `projects/`, plus the
@@ -5745,8 +5791,10 @@ mechanisms are:
   computer then signs its acceptance of that one approval, which makes the
   approver its only parent. Revoke writes a signed revocation, and only a
   computer that brought the revoked one in, directly or through others, can
-  revoke it. Store setup, joining, and revoking happen on the host, never from
-  a paired phone. Store credentials live in the host credential store — macOS
+  revoke it. A member leaves by signing a left record with its own key, which
+  cuts it just before that record; it then forgets its identity and deletes
+  its device key. Store setup, joining, revoking, and leaving happen on the
+  host, never from a paired phone. Store credentials live in the host credential store — macOS
   Keychain or freedesktop Secret Service — and are not written into the
   replica. An S3-compatible store is contacted only over authenticated TLS. A
   plaintext endpoint is refused, and store credentials are not sent on it.

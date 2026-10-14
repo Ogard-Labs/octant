@@ -22,6 +22,12 @@ import type {
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import { octantWindowBreakdown, type CodeTurnContextAccount } from "./codeTurnContext";
 import { TurnCompactions, type AutomaticCompactionSighting } from "../context/automaticCompaction";
+import {
+  NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
+  RUNTIME_OUTSIDE_CONTENT_AUTO_REVIEW_STOP,
+  RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+  type RuntimeOutsideContentMarking,
+} from "../context/runtimeOutsideContentMark";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
@@ -165,6 +171,12 @@ export interface CodeTurnRunnerInput {
    * permission mode and Octant's own gate answers every prompt.
    */
   readonly harnessAutoReviewEnabled?: boolean;
+  /**
+   * Records that the runtime's own web search, page fetch, or hosted tool put
+   * outside content in front of the model. Without it such a call stops the
+   * turn.
+   */
+  readonly outsideContentMarks?: RuntimeOutsideContentMarking;
   readonly sanitizeProviderEvent: (
     input: CodeProviderEventSanitizerInput,
   ) => Effect.Effect<ProviderRuntimeEvent, CodeTurnFailure>;
@@ -300,6 +312,12 @@ export class CodeTurnRunner {
       ) {
         return yield* fail("failed", "Code turn authority is invalid.");
       }
+      const outsideContentMarks = input.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS;
+      // An earlier turn's read that could not be marked is still in the
+      // session this turn would resume.
+      if (outsideContentMarks.settleOwed(String(input.thread.id)).status === "refused") {
+        return yield* fail("failed", RUNTIME_OUTSIDE_CONTENT_REFUSAL);
+      }
 
       const connection = yield* input.provider
         .acquire({
@@ -371,6 +389,29 @@ export class CodeTurnRunner {
                 yield* idle.touch;
                 timing = observeTurnMetrics(timing, event);
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
+                if (event.kind === "outside-content-read") {
+                  // Marked before the budget or a cancel is looked at: what
+                  // the runtime read reached its model either way. The tool
+                  // start before it is the transcript's record of the call.
+                  const marked = outsideContentMarks.mark(String(input.thread.id), event);
+                  if (marked.status === "refused") {
+                    yield* connection
+                      .interrupt(input.sessionId)
+                      .pipe(Effect.catchAll(() => Effect.void));
+                    return yield* fail("failed", RUNTIME_OUTSIDE_CONTENT_REFUSAL);
+                  }
+                  // The runtime's own reviewer was chosen for this session
+                  // while the thread was unmarked and would keep answering
+                  // approvals for the rest of it; the next turn starts
+                  // without it.
+                  if (input.harnessAutoReviewEnabled === true) {
+                    yield* connection
+                      .interrupt(input.sessionId)
+                      .pipe(Effect.catchAll(() => Effect.void));
+                    return yield* fail("interrupted", RUNTIME_OUTSIDE_CONTENT_AUTO_REVIEW_STOP);
+                  }
+                  if (input.signal?.aborted !== true) return;
+                }
                 if (handledEvents > maxEvents) {
                   yield* connection
                     .interrupt(input.sessionId)
@@ -394,6 +435,8 @@ export class CodeTurnRunner {
                 if (!isSanitizedEventValid(boundedEvent, sanitizedEvent, input.checkoutRoot)) {
                   return yield* fail("failed", "Provider event sanitization failed closed.");
                 }
+                // Marked above; never a turn event.
+                if (sanitizedEvent.kind === "outside-content-read") return;
                 const sighting = compactions.observe(sanitizedEvent);
                 if (sighting !== undefined && input.onAutomaticCompaction !== undefined) {
                   const record = input.onAutomaticCompaction;
@@ -661,7 +704,10 @@ function withToolName(toolNames: Map<string, string>, event: CodeTurnEvent): Cod
 
 function normalizeProviderEvent(
   input: CodeTurnRunnerInput,
-  event: Exclude<ProviderRuntimeEvent, { readonly kind: "context-compacted" }>,
+  event: Exclude<
+    ProviderRuntimeEvent,
+    { readonly kind: "context-compacted" | "outside-content-read" }
+  >,
   /** Whether the runtime compacted the session earlier in this turn. */
   compacted: boolean,
 ): Effect.Effect<CodeTurnEvent, CodeTurnFailure> {

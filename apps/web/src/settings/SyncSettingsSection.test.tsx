@@ -306,7 +306,7 @@ describe("SyncSettingsSection", () => {
 
     expect(await screen.findByText(REPLICA_MEMBER_LOCK)).toBeVisible();
     expect(REPLICA_MEMBER_LOCK).toBe(
-      "This computer belongs to a replica in this store. The store can't be changed until leaving a replica is supported.",
+      "This computer belongs to a replica in this store. Leave the replica below to choose another store.",
     );
     expect(screen.getByRole("combobox", { name: "Store" })).toHaveAttribute("data-disabled");
     expect(screen.getByRole("textbox", { name: "Endpoint" })).toBeDisabled();
