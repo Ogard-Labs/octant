@@ -87,7 +87,41 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/security/escapeSuite/evaluateEscapeSuite.ts",
     "Evaluator for the security escape suite, driven by escapeSuite.server.test.ts as its runner. Remove once a product runner imports it or the suite is retired.",
   ],
+  [
+    "apps/server/src/persistence/sqlitePort.conformance.ts",
+    "Conformance kit that sqlitePort.test.ts and sqlitePort.smoke.ts run against the SQLite port; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port's last conformance test is retired.",
+  ],
+  // ── Reached only through another island, so an island with it ──
+  [
+    "packages/contracts/src/auditEvents.ts",
+    "Audit event schemas whose only consumer is evaluateEscapeSuite.ts. Remove once a product runner reaches the escape suite or the suite is retired.",
+  ],
+  [
+    "packages/domain/src/auditPolicy.ts",
+    "Audit redaction assertions whose only consumer is evaluateEscapeSuite.ts. Remove once a product runner reaches the escape suite or the suite is retired.",
+  ],
+  [
+    "packages/client-runtime/src/remoteProductMutations.ts",
+    "Remote product mutation exercisers whose only consumer is remoteExitEvidenceADriver.ts. Remove once a product caller serves that evidence or the smoke is retired.",
+  ],
+  // ── Egress rules, phase 4 of docs/architecture.md § Harness tool egress rules ──
+  [
+    "apps/server/src/harness/nativeHarnessEgressProxy.ts",
+    "The host egress proxy, exercised by its own, hostile, and benchmark tests but started by no confined launch yet. Remove once the harness confinement launch starts it.",
+  ],
+  [
+    "packages/domain/src/toolEgressPolicy.ts",
+    "The egress rule model and decision the proxy consults; its only consumer is the proxy above, so it is an island with it. Remove once the harness confinement launch reaches the proxy.",
+  ],
+  [
+    "packages/contracts/src/toolEgress.ts",
+    "Egress rule and journal event schemas whose only consumers are the proxy above, its domain policy, and their tests. Remove once the harness confinement launch reaches the proxy.",
+  ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
+  [
+    "packages/provider-sdk/src/conformance.ts",
+    "Provider conformance harness that chatProviderMatrixEvidence.test-support.ts runs against drivers; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the matrix evidence is retired.",
+  ],
   [
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
@@ -104,12 +138,12 @@ function isTestPath(path: string): boolean {
 }
 
 /**
- * Files that are entry points or test scaffolding rather than product modules.
- * These are never candidates, because nothing is expected to import them.
+ * Files that exist to be imported by tests: test files, smokes, fixtures, fakes,
+ * and shared test support. "Reachable only from tests" is their correct state,
+ * so they are never candidates, and what they import is not product use.
  */
-function isExemptByShape(path: string): boolean {
+function isTestScaffolding(path: string): boolean {
   if (isTestPath(path)) return true;
-  if (path.endsWith(".d.ts")) return true;
   if (path.endsWith(".smoke.ts")) return true;
   // Test scaffolding: fixtures, fakes, helpers, and support models exist to be
   // imported by tests, so "reachable only from tests" is their correct state.
@@ -119,6 +153,16 @@ function isExemptByShape(path: string): boolean {
   if (/[Tt]est(Fixtures|Helpers|Model|Support)\.(ts|tsx)$/.test(path)) return true;
   if (/(^|\/)fake[A-Z][^/]*\.(ts|tsx)$/.test(path)) return true;
   if (/(^|\/)testSetup\.(ts|tsx)$/.test(path)) return true;
+  return false;
+}
+
+/**
+ * Files that are entry points or test scaffolding rather than product modules.
+ * These are never candidates, because nothing is expected to import them.
+ */
+function isExemptByShape(path: string): boolean {
+  if (isTestScaffolding(path)) return true;
+  if (path.endsWith(".d.ts")) return true;
   // Process entry points are launched by path or config, never imported.
   if (/(^|\/)(main|bin|index|preload)\.(ts|tsx)$/.test(path)) return true;
   if (path.endsWith("Cli.ts")) return true;
@@ -330,8 +374,9 @@ function collectReferences(
     }
 
     // A test may only confirm that non-test code already reaches a module, so
-    // references originating in tests never count toward reachability.
-    if (isTestPath(file.path)) continue;
+    // references originating in tests or the scaffolding they share (support
+    // files, fixtures, fakes, smokes) never count toward reachability.
+    if (isTestScaffolding(file.path)) continue;
 
     // Electron loads dedicated preloads from bundled output, so there is no
     // TypeScript import edge. Count only literal entries declared by tsdown.
@@ -446,13 +491,16 @@ export function extractImportedNames(content: string): ReadonlySet<string> {
  * A barrel makes every module it names look referenced, so reachability by path
  * cannot see this. The question that survives is whether any name the module
  * exports is imported by name in non-test code somewhere other than the module
- * itself and the barrel that re-exports it. A module exporting nothing is not a
- * candidate: there is no name to look for, and a side-effect-only module is
- * answered by Rule B.
+ * itself and the barrel that re-exports it. Tests, the scaffolding they share,
+ * and modules that are themselves islands do not count as consumers: an island
+ * is unreachable from the running host, so what it imports is not product use
+ * either. A module exporting nothing is not a candidate: there is no name to
+ * look for, and a side-effect-only module is answered by Rule B.
  */
 export function findBarrelOnlyModules(
   files: ReadonlyArray<ScannedFile>,
   exemptions: ReadonlyMap<string, string> = KNOWN_ISLANDS,
+  islands: ReadonlySet<string> = new Set(exemptions.keys()),
 ): ReadonlyArray<WiringViolation> {
   const candidates = files.filter(
     (file) =>
@@ -466,7 +514,8 @@ export function findBarrelOnlyModules(
   for (const file of files) {
     if (
       !SOURCE_EXTENSIONS.some((extension) => file.path.endsWith(extension)) ||
-      isTestPath(file.path) ||
+      isTestScaffolding(file.path) ||
+      islands.has(file.path) ||
       isPackageBarrel(file.path)
     ) {
       continue;
@@ -517,7 +566,7 @@ export function findStaleIslandExemptions(
     [
       ...findUnreachableModules(files, none),
       ...findTypeOnlyReferencedModules(files, none),
-      ...findBarrelOnlyModules(files, none),
+      ...findBarrelOnlyModules(files, none, new Set(exemptions.keys())),
     ].map((violation) => violation.path),
   );
   const violations: WiringViolation[] = [];
