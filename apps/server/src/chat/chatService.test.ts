@@ -241,6 +241,7 @@ function openFixture(options?: {
   }) => Promise<import("./chatService").SideChatSourceContext | undefined>;
   readonly resolveThreadMentionContext?: (input: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+    readonly readerThreadId: string;
     readonly windowId?: WindowId;
   }) => Promise<ReadonlyArray<import("./chatService").ChatThreadMentionContext>>;
   readonly turnOutcome?: "completed" | "waiting" | "interrupted" | "limited";
@@ -1807,11 +1808,16 @@ describe("ChatService", () => {
 
   it("resolves a turn's `#thread` mentions on the server and stores only what the user typed", async () => {
     const windowId = "84000000-0000-4000-8000-000000000099" as WindowId;
-    const asked: Array<{ threadMentionIds: ReadonlyArray<string>; windowId?: string }> = [];
+    const asked: Array<{
+      threadMentionIds: ReadonlyArray<string>;
+      readerThreadId: string;
+      windowId?: string;
+    }> = [];
     const { service, fakeDriver, contextHarness } = openFixture({
       resolveThreadMentionContext: async (input) => {
         asked.push({
           threadMentionIds: input.threadMentionIds.map(String),
+          readerThreadId: input.readerThreadId,
           ...(input.windowId === undefined ? {} : { windowId: String(input.windowId) }),
         });
         return input.threadMentionIds.map((threadId) => ({
@@ -1841,8 +1847,14 @@ describe("ChatService", () => {
     );
 
     // Ids only: the transcript is read by the host on this send's own window,
-    // never taken from the command.
-    expect(asked).toEqual([{ threadMentionIds: ["release-notes-thread"], windowId }]);
+    // never taken from the command, and the thread reading it is the turn's own.
+    expect(asked).toEqual([
+      {
+        threadMentionIds: ["release-notes-thread"],
+        readerThreadId: String(created.thread.id),
+        windowId,
+      },
+    ]);
     const contextText = (fakeDriver.sentTurns[0]?.context ?? [])
       .map((block) => block.text)
       .join("\n");

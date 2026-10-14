@@ -68,6 +68,7 @@ import {
 } from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
+import type { TerminalLauncher } from "./terminalService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { CodeApprovalValidationPort } from "./codeOperationApprovalStore";
 import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoveryService";
@@ -199,6 +200,7 @@ export interface CodeOperationTerminalPort {
       readonly environmentName: string;
       readonly reference: string;
     }[];
+    readonly launcher?: TerminalLauncher;
     readonly executionPolicy?: CodeThread["executionPolicy"];
   }) => Promise<CodeOperationTerminalSnapshot>;
   readonly attach: (terminalId: string) => CodeOperationTerminalSnapshot;
@@ -820,6 +822,8 @@ export interface CodeOperationServiceOptions {
    */
   readonly resolveThreadMentionContext?: (input: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+    /** The thread whose turn names the mentions; a marked mention marks it. */
+    readonly readerThreadId: string;
     readonly windowId: WindowId;
   }) => Promise<ReadonlyArray<CodeThreadMentionContext>>;
   /**
@@ -1980,6 +1984,9 @@ export class CodeOperationService {
             browserGrant?.kind === "granted"
               ? [...credentialReferences, ...browserGrant.credentialReferences]
               : credentialReferences,
+          ...(browserGrant?.kind === "granted" && browserGrant.launcher !== undefined
+            ? { launcher: browserGrant.launcher }
+            : {}),
           executionPolicy: thread.executionPolicy,
         });
         owner.starting = starting;
@@ -3123,7 +3130,7 @@ export class CodeOperationService {
     const context = [
       ...skillContext,
       ...profileContext.blocks,
-      ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
+      ...(await this.#resolveThreadMentions(thread.id, command.threadMentionIds, windowId)),
       ...(await this.#resolveFileMentions(command.fileMentionPaths, windowId, thread)),
       ...(issueContext === undefined
         ? []
@@ -3316,6 +3323,7 @@ export class CodeOperationService {
    * costs only the turn that named it.
    */
   async #resolveThreadMentions(
+    readerThreadId: CodeThreadId,
     threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
     windowId: WindowId,
   ): Promise<ReadonlyArray<ProviderContextBlock>> {
@@ -3328,7 +3336,11 @@ export class CodeOperationService {
     if (resolve === undefined) return unreadable();
     let resolved: ReadonlyArray<CodeThreadMentionContext>;
     try {
-      resolved = await resolve({ threadMentionIds, windowId });
+      resolved = await resolve({
+        threadMentionIds,
+        readerThreadId: String(readerThreadId),
+        windowId,
+      });
     } catch {
       // A resolver that throws proves nothing about any one mention, so every
       // named thread is reported unread rather than half of them guessed.

@@ -230,6 +230,51 @@ describe("TerminalProcessPort", () => {
     expect(launchedCall(spawn)[1]).toEqual(expect.arrayContaining(["--", "/bin/zsh", "-l"]));
   });
 
+  it("lets the shell read the launcher a Browser grant adds, and only to read", () => {
+    const pty = fakePty();
+    const spawn = vi.fn(() => pty);
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    // Inside the confinement's home, which it otherwise hides.
+    const launcher = join(
+      fake.root,
+      "Applications",
+      "Octant.app",
+      "Contents",
+      "Resources",
+      "terminal-launcher",
+    );
+    mkdirSync(launcher, { recursive: true });
+    const port = new TerminalProcessPort({
+      spawn,
+      killProcessGroup: vi.fn(),
+      confinement: fake.confinement,
+      temporaryDirectory: fake.temporaryDirectory,
+      shellStateDirectory: join(fake.root, "terminal-shell"),
+      seatbeltHomeDirectory: fake.root,
+      networkEgress: "allow",
+      platform: "darwin",
+    });
+
+    port.start({
+      shell: "/bin/zsh",
+      cwd: "/private/repo",
+      stateScope: "repo_test",
+      environment: { PATH: `${launcher}:/usr/bin` },
+      columns: 80,
+      rows: 24,
+      additionalReadRoots: [launcher],
+    });
+
+    const profile = launchedProfile(spawn);
+    const resolved = realpathSync(launcher);
+    expect(profile).toContain(`(allow file-read* (subpath "${resolved}"))`);
+    expect(profile).not.toContain(`(allow file-write* (subpath "${resolved}"))`);
+    expect(profile).not.toContain(
+      `(deny file-read* (subpath "${join(realpathSync(fake.root), "Applications")}"))`,
+    );
+  });
+
   it("refuses to start a Plan mode terminal rather than spawning a writable shell", () => {
     const spawn = vi.fn(() => fakePty());
     const fake = createFakeSandboxConfinement();

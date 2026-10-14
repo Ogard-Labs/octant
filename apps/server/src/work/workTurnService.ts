@@ -332,6 +332,8 @@ export interface WorkTurnServiceDependencies {
    */
   readonly resolveThreadMentionContext?: (input: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+    /** The thread whose turn names the mentions; a marked mention marks it. */
+    readonly readerThreadId: string;
     readonly windowId: WindowId;
   }) => Promise<ReadonlyArray<ProviderContextBlock>>;
   /**
@@ -832,6 +834,7 @@ export class WorkTurnService {
         ...(await this.#projectBriefContributions(project, command.threadId)),
         ...(nativeConversation ? [] : this.#priorTranscriptContributions(command.threadId)),
         ...(await this.#threadMentionContributions(
+          command.threadId,
           command.threadMentionIds,
           authenticatedWindowId,
         )),
@@ -1814,6 +1817,7 @@ export class WorkTurnService {
   }
 
   async #threadMentionContributions(
+    readerThreadId: WorkThreadId,
     threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
     windowId: WindowId,
   ): Promise<ReadonlyArray<WorkTurnContextContribution>> {
@@ -1830,7 +1834,11 @@ export class WorkTurnService {
     const resolve = this.#resolveThreadMentionContext;
     if (resolve === undefined) return unreadable();
     try {
-      const blocks = await resolve({ threadMentionIds, windowId });
+      const blocks = await resolve({
+        threadMentionIds,
+        readerThreadId: String(readerThreadId),
+        windowId,
+      });
       return blocks.map((block, index) => ({
         text: block.text,
         sourceKind: "message",

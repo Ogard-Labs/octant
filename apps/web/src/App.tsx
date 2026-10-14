@@ -7958,7 +7958,7 @@ function LaunchedShell(
                           ? {}
                           : { defaultFolder: controller.settings.defaultFolder })}
                         codeDefaultFolderThreads={
-                          codeController.bootstrap?.settings.allowDefaultFolderThreads === true
+                          codeController.bootstrap?.settings.requireGitRepository === false
                         }
                         onEnsureDefaultProject={(mode) => {
                           const destinationHostId = refuseUnlessCreatableDestination({
@@ -7980,7 +7980,7 @@ function LaunchedShell(
                         onOpenCodeSettings={() =>
                           void controller.openSettings({
                             section: "code",
-                            setting: "code-default-folder-threads",
+                            setting: "code-require-git",
                           })
                         }
                         onOpenProviderSettings={() =>

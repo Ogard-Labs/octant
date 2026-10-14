@@ -14,8 +14,14 @@ export const DEFAULT_FOLDER_WORK_SUBFOLDER = "Work";
 export const DEFAULT_FOLDER_CODE_SUBFOLDER = "Code";
 export const DEFAULT_FOLDER_ARTIFACTS_SUBFOLDER = "Artifacts";
 
+/**
+ * The top of home rather than Documents: macOS asks before an app reads
+ * Documents, and a folder Octant creates on its own should not cost a
+ * privacy prompt on a fresh host. A folder the settings already store,
+ * including the earlier `~/Documents/Octant`, stays where it is.
+ */
 export function hostDefaultFolder(home: string = homedir()): DefaultFolder {
-  return decodeDefaultFolder(join(home, "Documents", "Octant"));
+  return decodeDefaultFolder(join(home, "Octant"));
 }
 
 export function effectiveDefaultFolder(

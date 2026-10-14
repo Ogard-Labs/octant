@@ -322,7 +322,7 @@ through the transport its adapter verified:
 | ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate                                                                                                                                      |
 | Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                                                                                                                                                                   |
 | Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                                                                                                                                                          |
-| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant, reached through `octant mcp`; the person adds that command to their CLI, and Octant writes no provider configuration. Not yet packaged in the desktop app ([detail](design/terminal-browser-grant.md)) |
+| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant, reached through `octant mcp`; the person adds that command to their CLI, and Octant writes no provider configuration. The macOS app ships the command too ([detail](design/terminal-browser-grant.md)) |
 
 No transport edits a person's provider MCP, hook, or global configuration;
 OpenCode's per-launch posture stays in its connection-private configuration.
@@ -659,23 +659,32 @@ A Work or Code thread started without a chosen Project lands in the mode's
 **default Project**: the host provisions `<default folder>/Work` or
 `<default folder>/Code` on first use, binds it as an ordinary Project marked
 `origin: "default-folder"`, and reuses it after. The default folder is the
-`defaultFolder` shell setting (`~/Documents/Octant` unless changed, always
-inside the user's home), and artifact files mirror under its `Artifacts`
-subfolder until a mirror setting says otherwise. With the Code setting
-`requireGitRepository` off, a Code thread may start in a folder that is not a
-repository on a `plain-folder` checkout whose head is `none`; every Git-backed
-feature reports itself unavailable there rather than inventing a revision. Code
-threads without a Project need the further `allowDefaultFolderThreads` switch,
-which the host accepts only while Git is not required. See
+`defaultFolder` shell setting (`~/Octant` unless changed, always inside the
+user's home), and artifact files mirror under its `Artifacts` subfolder until a
+mirror setting says otherwise. It sits at the top of home rather than in
+`~/Documents`, which macOS guards with a privacy prompt. Work always offers its
+default Project. Code has one choice, the `requireGitRepository` setting ("Code
+needs a Git repository", on by default). Off, a Code thread may start in a
+folder that is not a repository on a `plain-folder` checkout whose head is
+`none`, and that includes the Code default Project; every Git-backed feature
+reports itself unavailable there rather than inventing a revision. On, both are
+refused. See
 [decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md](decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md).
 
-Not built yet: two decisions change this paragraph, and the shipped host keeps
-the behavior above until they land. The default folder moves from
-`~/Documents/Octant` to `~/Octant`. The `requireGitRepository` and
-`allowDefaultFolderThreads` switches, and the row Work offers to start a thread
-in the default folder instead of a Project, fold into one choice. Both were
-decided together; the choice's wording, and what happens to values stored under
-the old default and the two old switches, are settled when it is built.
+The default folder used to be `~/Documents/Octant`, and threads without a
+Project in Code had a separate `allowDefaultFolderThreads` switch beside the Git
+requirement. A stored folder is kept, so an install that stored
+`~/Documents/Octant` keeps it; only an install that never stored one follows
+the new default. A window saves shell settings whole, filled-in folder
+included, so in practice any install that saved a setting while the old default
+was in effect stored it. Default Projects already bound under the old folder
+stay ordinary Projects with their threads, and a changed folder creates a new
+default Project beside them. Settings, journal events, and update commands that
+still carry `allowDefaultFolderThreads` decode, and the switch is dropped: the
+Git requirement each install stored is the one choice it keeps. The host only
+ever stored that switch on with Git not required, so on-and-on never existed;
+an install that had Git off and the switch off now also offers the Code
+default Project, which is the one combination the single choice cannot keep.
 
 Code task creation accepts a plain-folder checkout when the server admits it under
 Code settings. The renderer preserves its proposed branch as delivery intent without
@@ -797,7 +806,50 @@ the new thread's first message. Starting one is not a review the way a clear
 is. The host's follow-up creator reads the source's mark when it creates the
 thread and hands the mark to the Chat, Work, or Code creation as a host-only
 input no wire command can carry; a source a person cleared passes on nothing.
-Fork, branch, and follow-up journal their marks through one shared step.
+
+A thread a person confirms from a Code planner's proposal starts marked when
+the planner thread is marked, by the same rule (label `planner-proposal`,
+content reference `planner-proposal-<planner thread>-<proposal>`). The planner
+agent wrote the proposal's title and intent after reading whatever marked its
+thread, and the intent becomes the new thread's opening prompt; confirming
+reviews the proposed work, not what the planner read. The planner service reads
+the planner thread's mark at the confirm and hands it to the Code creation as
+the same host-only input; a mark that cannot be journaled refuses the confirm,
+creates nothing, and leaves the proposal pending.
+
+Fork, branch, follow-up, and planner proposal journal their marks through one
+shared step.
+
+A Work-to-Code promotion starts its linked Code thread unmarked. The proposal
+names a Work Project, not a Work thread: its summary is text the person typed
+into the proposal, its artifact refs are opaque names the host checks for
+leaked authority and never reads into the Code thread, and the linked thread
+takes only that summary, as its title. No agent-written or outside text
+crosses, and there is no source thread whose mark the host could read; marking
+from one would mean trusting a thread id the client names. A promotion that
+comes to carry a Work thread's transcript or text an agent wrote must mark by
+the rule above.
+
+A `#thread` mention or a Side Chat's source brings another thread's
+transcript into a turn, so a source marked with outside content marks the
+thread reading it (labels `thread-mention` and `side-chat`, content reference
+`<label>-<source thread>`). The host reads the source's mark after reading its
+transcript and appends the reader's mark before it hands the framed text to
+the turn, the order the sibling-thread `read` keeps, so the reader's provider
+never sees a marked source's text on an unmarked thread. A mark that cannot be
+recorded withholds the text: a mention is answered as unreadable, which costs
+the mention and not the send, and a Side Chat turn is refused. The reference
+names the source, so mentioning one source again journals nothing new until a
+person clears the reader. The sibling-thread `read` marks its caller on every
+call, whatever the target, because an agent chose to read; a mention or a
+Side Chat is the person's own choice of thread, so an unmarked or cleared
+source passes on nothing, as for a fork. Chat, Work, and Code mentions share
+one resolver, and a thread that mentions itself is not marked again. A Side
+Chat's state section also carries finished subagents' replies, and a reply
+marks its parent only when it is delivered, which waits while the parent's
+turn runs, so each reply in that section marks the sidecar itself (label
+`subagent-result`, content reference `subagent-result-<run>`) by the same
+order; a reply that cannot mark it refuses the turn.
 
 An in-place restore (`restore-git-checkpoint`, sent by both Restore files to
 this point and Undo restore) overwrites a checkout other threads may share, so
@@ -1614,9 +1666,10 @@ flowchart LR
     two modes already share (history from before that check) cannot be told
     apart, so a clear of it is refused as `thread-unavailable`.
   - One clear covers that thread and only it. A child run and a fork keep
-    their own taint; a Code fork, a Chat branch or restore, and a follow-up
-    or side task start with their source's mark when they are made (see the
-    Code fork rule under Modes).
+    their own taint; a Code fork, a Chat branch or restore, a follow-up or
+    side task, and a thread confirmed from a planner proposal start with their
+    source's mark when they are made, and a mention or Side Chat of a marked
+    thread marks the thread reading it (see the Code fork rule under Modes).
   - A clear removes the mark only. Nothing leaves the model's context and the
     provider session is not restarted, so what the thread read can still steer
     the model.
@@ -3484,8 +3537,8 @@ native harness in `apps/server/src/harness`:
   hosted third-party search provider ships. A tool the thread was not offered
   refuses as `tool-unavailable` without reaching policy or a person. The harness has no
   per-host network rules, rule expiry, or learn mode yet: a tool process gets the
-  thread's OS-level `none` or `allow`. The approved design for them, with only its pure
-  decision and event schemas built so far, is
+  thread's OS-level `none` or `allow`. The approved design for them, with its pure
+  decision, event schemas, and host proxy built but no command routed through the proxy yet, is
   [Harness tool egress rules](#harness-tool-egress-rules). `nativeHarnessEgress.hostile.test.ts` holds the
   adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
   Seatbelt and shows only the networked one reaching a loopback listener.
@@ -3688,11 +3741,13 @@ composer. The web shows open offers as cards above the chips.
 
 ### Harness tool egress rules
 
-**Status: design approved by the maintainer on 2026-10-13. Phase 1 is in:
-the rule model and decision (`decideToolEgress` in
-`packages/domain/src/toolEgressPolicy.ts`) and the event schemas
-(`packages/contracts/src/toolEgress.ts`). Nothing calls them yet, so nothing
-that runs has changed.** Today a harness tool process gets the thread's
+**Status: design approved by the maintainer on 2026-10-13. Phases 1 and 2
+are in: the rule model and decision (`decideToolEgress` in
+`packages/domain/src/toolEgressPolicy.ts`), the event schemas
+(`packages/contracts/src/toolEgress.ts`), and the host proxy
+(`apps/server/src/harness/nativeHarnessEgressProxy.ts`, which reads request
+heads and ClientHellos in `nativeHarnessEgressWire.ts`). No launch starts the
+proxy yet, so nothing that runs has changed.** Today a harness tool process gets the thread's
 OS-level `none` or `allow` (see Egress and hostile content above). This is the
 approved-but-unfinished design, and the phases below track its delivery. Its
 approval replaces the "no local egress proxy in this release" decision in the
@@ -3735,17 +3790,42 @@ listener per confined launch:
   port means a confined process cannot borrow another launch's identity, and a
   call-scoped rule needs no extra bookkeeping.
 - **Protocol.** HTTP `CONNECT host:port` tunnels, and absolute-form plain
-  `http://` requests, which the proxy forwards with `Proxy-Authorization` and
-  hop-by-hop headers removed and nothing added. Every request must carry
-  `Proxy-Authorization` with the launch token; a missing or wrong token gets
-  `407` and is recorded. The proxy does not terminate TLS, inspect bodies, add
+  `http://` requests, which the proxy forwards in origin form with
+  `Proxy-Authorization` and hop-by-hop headers removed. A proxied plain
+  connection carries exactly one request: the proxy forwards its head and the
+  content its `Content-Length` or `chunked` framing declares, drops anything
+  after it, and shuts a connection whose content does not frame. A second
+  plain request on the same proxied connection would otherwise reach the
+  origin undecided, under whatever `Host` it named, which a shared front end
+  routes on. The rule covers absolute-form requests only: bytes inside a
+  `CONNECT` tunnel are opaque, so plain HTTP a client sends through a tunnel
+  (Node, for one, tunnels `http://` through `CONNECT`) can carry further
+  requests with any `Host` to the tunnel's destination. That is a residual
+  risk alongside fronting inside TLS and Encrypted Client Hello below. The one
+  header the proxy writes is `Connection: close` in place of the client's
+  own, so the client opens a new connection for its next request. Every request must carry
+  `Proxy-Authorization: Basic` with user `octant` and the launch token; a
+  missing or wrong token gets `407` and is recorded under one fixed entry
+  (host `invalid`, port 0), never the host it named, because anyone on the
+  machine can send such a request. A client that asks
+  without credentials first and answers the `407` (Git's default) leaves one
+  `token` refusal per connection it opens that way. A head the proxy cannot
+  read one way only (a repeated `Host`, `Content-Length`, `Transfer-Encoding`,
+  or `Proxy-Authorization`; both framing headers; a `Transfer-Encoding` other
+  than `chunked`, or any `Transfer-Encoding` on HTTP/1.0; a folded line; a line break that is not CRLF; a
+  `Connection` option naming `Host` or a framing header; a `Host` that names
+  another host than the target; an origin-form or `https://` target) gets
+  `400` before any decision and is not a decision record, because it names no
+  destination the proxy accepted as one. A head must arrive within 10 seconds
+  and 32 KiB. The proxy does not terminate TLS, inspect bodies, add
   credentials, or follow redirects; a redirect is the client's next request,
   checked like any other. When the first bytes of a `CONNECT` tunnel are a TLS
   ClientHello with a server name, that name must equal the `CONNECT` host or
   the tunnel closes (`sni-mismatch`). That stops a client naming an allowed
   host to the proxy and a different one to a shared front end; fronting by a
-  Host header inside TLS, and Encrypted Client Hello, remain a residual risk
-  stated in the approval copy for wildcard and CDN-hosted rules.
+  Host header inside TLS, plain requests inside a tunnel (above), and
+  Encrypted Client Hello remain a residual risk stated in the approval copy
+  for wildcard and CDN-hosted rules.
 - **Decision order per request.** Token, then destination syntax (an IP
   literal, a port outside 1–65535, or a name that is not a valid DNS name
   refuses), then the rule match, then resolution, then the private-destination
@@ -3898,11 +3978,18 @@ or body:
   the launch refuses before the command runs.
 - `thread.egress-decisions-recorded@1` while the launch runs: each distinct
   host and port first decided, or whose counts changed, with its decision,
-  reason, request count, and bytes each way. The proxy flushes a batch at 16
-  entries or every 5 seconds, whichever comes first, so a crash loses at most
-  that tail of decisions and counts, never more. When a batch cannot be
-  appended the proxy refuses new requests for that launch
-  (`audit-unavailable`) and keeps existing tunnels until they end.
+  reason, request count, and bytes each way. The proxy flushes a batch once 16
+  entries are first decided, and every changed entry every 5 seconds, so a
+  crash loses at most that tail of decisions and counts, never more. A launch
+  names at most 24 allowed and 28 refused destinations; past those a decision
+  still counts, under one overflow entry (host `overflow.invalid`, port 0) for
+  allowed and one per refusal reason, so its records hold at most 64 entries,
+  its summary is never truncated, and it writes at most four batches beyond
+  one per 5 seconds however many requests it makes. When a batch cannot be
+  appended, or its append has not answered within 10 seconds, the proxy
+  refuses new requests for that launch (`audit-unavailable`) and keeps
+  existing tunnels until they end. A launch start or summary append that has
+  not answered within 10 seconds counts as not appended.
 - `thread.egress-launch-summarized@1` when the launch ends: the final totals,
   including the bytes received that taint the thread, and each distinct host
   and port, at most 64 entries with a `truncated` flag. It is appended before
@@ -3952,7 +4039,9 @@ resolution (served by the system resolver's cache), a linear match over at
 most 128 rules, and a first-chunk peek for the server name. The data path is
 a socket pipe with no inspection, so throughput is bound by loopback. The
 phase 2 benchmark sets the budget: a clone and a package install against a
-local fixture origin within 10% of the direct path.
+local fixture origin within 10% of the direct path. It runs on demand as
+`bun run egress-proxy:benchmark` in `apps/server`, not in the default suite,
+because a wall-clock budget is not a stable CI check.
 
 **Delivery phases.** Each phase lands as its own PR with the hostile cases
 for what it adds in `nativeHarnessEgress.hostile.test.ts`, extending the
@@ -4078,8 +4167,32 @@ prompt, schema, tool, route, model, or capability.
   A runtime that loads Project skill folders by itself is denied each such
   folder in the OS profile (`forbiddenRootEntries`, read and write, in every
   posture including Full access) unless a switch of its own is proven to turn
-  that loading off. Codex is the exception: it has no Octant OS profile, so
-  its `.agents/skills` loading is not handled yet. Only the skill folder is
+  that loading off. Codex is the exception: it has no Octant OS profile and no
+  switch, so before every `thread/start` and `thread/resume`, in every mode,
+  the driver lists Codex's skills at the Project root (`skills/list` with
+  `forceReload`) and sends a `skills.config` rule with the thread that
+  disables each Project skill by its `SKILL.md` path, and each package Codex
+  reported it could not load, which carries a path but no scope. A path, not a
+  name, because a name rule would also disable a user skill of that name.
+  Every scope other than `user`, `system`, and `admin` counts as the
+  Project's, so a scope a later release adds is disabled too. A thread whose
+  skills cannot be listed does not start. Older releases were read at their
+  source tags. Codex loads Project skills by itself from 0.66.0
+  (`.codex/skills` at the repository root, on by default from 0.79.0;
+  `.agents/skills` from 0.94.0), and reads `skills.config` rules from a
+  thread's `config` only from 0.108.0. Before that they came from the user's
+  own config file alone. So a release from 0.66.0 up to 0.108.0 refuses every
+  thread and asks for an update. A release older than 0.66.0 loads no Project
+  skill: when it answers `skills/list` with method-not-found, the thread runs
+  without rules. The rules hold for the thread as started or resumed: Codex
+  still lists those skills, as disabled, and a skill created in the Project
+  during a thread is enabled from the next turn until the thread is resumed.
+  Codex also loads the user's own `~/.agents/skills` and `$CODEX_HOME/skills`
+  (`scope: user`) by itself; those are not handled. Measured against codex-cli
+  0.162.1, nothing stops the discovery itself: the app-server ignores
+  `features.skip_host_skill_discovery`, `project_root_markers = []` still
+  scans the Project root, and a `skills.config` rule matches one skill's exact
+  name or `SKILL.md` path, never a folder. Only the skill folder is
   denied; the folder around it (`.claude`, `.github`, `.grok`, and so on)
   stays readable, because it holds the runtime's own settings or the
   Project's other content. fx and Kimi Code deny all of `.agents`. Because the
@@ -4121,7 +4234,7 @@ prompt, schema, tool, route, model, or capability.
   | Kilo (ACP)                    | None: switched off                                                                                                                                                                  | `KILO_DISABLE_EXTERNAL_SKILLS=1`, `KILO_DISABLE_PROJECT_CONFIG=1`, `KILO_PURE=1`                                                                                |
   | Mistral Vibe (ACP)            | None: switched off                                                                                                                                                                  | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`                                                                 |
   | Pi, Oh My Pi                  | None: switched off                                                                                                                                                                  | `--no-skills`                                                                                                                                                   |
-  | Codex                         | `.agents/skills`, in the Project and up to the repository root (app-server `skills/list`, 0.162.1); not `.claude/skills`                                                            | Not handled yet: Codex runs without an Octant OS profile, so a root deny does not apply                                                                         |
+  | Codex                         | `.agents/skills`, in the Project and up to the repository root (app-server `skills/list`, 0.162.1); not `.claude/skills`                                                            | Disabled by path at each thread start and resume; refused if unlisted. Still listed, as disabled; one made mid-thread stays on until resume                     |
   | Direct HTTP and image drivers | None: no runtime of their own                                                                                                                                                       | n/a                                                                                                                                                             |
 
   Where a skill is found decides who sees it, in the catalog, the palette, the
@@ -4937,7 +5050,7 @@ mechanisms are:
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
-- **Terminal Browser grant (built except desktop packaging).** A person may start a Code thread
+- **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per
   terminal, and honored only from a local window: a paired device, a routine, or
@@ -4956,8 +5069,11 @@ mechanisms are:
   and end are journaled without the token or address. The window switches a
   terminal on with a restart the person confirms, shows the state the host
   reports, and shows the first effect on an origin as a request from the
-  terminal, not from the thread's agent. Not built: desktop packaging of the
-  `octant` command. Detail is in
+  terminal, not from the thread's agent. The packaged macOS app ships an
+  `octant` that runs only `octant mcp`, with the app's own executable in Node
+  mode; a granted terminal, and no other, starts with its folder first on
+  `PATH` and may read that folder and the app runtime it starts with, nothing
+  more. Detail is in
   [Terminal Browser grant](design/terminal-browser-grant.md).
 - **Terminal shell configuration.** On macOS a thread or Project terminal is
   the person's login shell (`-l`), and its read roots add, read-only and only
