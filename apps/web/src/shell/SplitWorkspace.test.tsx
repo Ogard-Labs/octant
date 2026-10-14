@@ -275,6 +275,44 @@ describe("SplitWorkspace", () => {
     expect(screen.queryByText("Running")).not.toBeInTheDocument();
   });
 
+  it("shows a thread's new title on a pane that was opened under its old one", () => {
+    const threadId = "00000000-0000-4000-8000-000000000614";
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: {
+        kind: "code-overview",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "code",
+        threadId,
+        title: "Faster issue validation",
+      },
+    });
+    const { rerender } = render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        liveThreadTitles={new Map([[threadId, "Faster issue validation"]])}
+        renderSurface={() => <p>Transcript</p>}
+      />,
+    );
+    expect(screen.getByTitle("Drag to move or split")).toHaveTextContent("Faster issue validation");
+
+    rerender(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        layout={layout}
+        liveThreadTitles={new Map([[threadId, "Validate issues in the background"]])}
+        renderSurface={() => <p>Transcript</p>}
+      />,
+    );
+    expect(screen.getByTitle("Drag to move or split")).toHaveTextContent(
+      "Validate issues in the background",
+    );
+    expect(screen.queryByText("Faster issue validation")).not.toBeInTheDocument();
+  });
+
   it("claims no environment for a surface that is not a thread", () => {
     render(
       <SplitWorkspace

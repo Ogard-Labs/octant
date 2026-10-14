@@ -244,7 +244,9 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
             origin,
           );
         }
-        return jsonResponse(dependencies.service.read(threadId), 200, origin);
+        return jsonResponse(dependencies.service.read(threadId), 200, origin, {
+          "cache-control": "no-store",
+        });
       }
       if (isWindow) {
         if (request.method !== "GET") {

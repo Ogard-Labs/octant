@@ -106,7 +106,11 @@ known whole at. The client holds at most the newest run and one detached range,
 never two runs with a gap shown as one.
 Readers that need the whole thread read the unchanged whole-thread route: the
 Markdown copy and save, and the thread's attachment, source, and turn counts
-in the Environment panel while it is open.
+in the Environment panel while it is open. Those routes (`GET
+/api/chat/threads/:threadId`, `GET /api/work/turns/transcript/:threadId`, and
+the Code forward `GET /api/code/threads/:threadId/conversation`) carry
+`cache-control: no-store` like the window reads, since a thread changes under
+any cached copy.
 
 A Code window answers `CodeConversationWindow`: the thread's own turns in the
 forward page's turn shape, the bounds, and `earlierUsage`, the fold of every
@@ -131,7 +135,10 @@ Inherited rows keep their source thread, and only the fork's own turns count
 toward its usage. A new fork with fewer turns of its own than one page reads
 its first inherited page when it opens. The forward conversation read
 (`CodeConversationPage` version 3) is unchanged, and export, fork points,
-hand-off, mentions, merge back, and the CLI's live feed still read it.
+hand-off, mentions, merge back, and the CLI's live feed still read it. The
+Review page reads a Code thread's last turn as a one-turn newest window, so its
+cost does not walk the forward pages; against a host with no window route it
+walks them as before.
 
 The phone and the CLI open a Code thread on its newest window and offer no
 Load earlier. The phone asks 20 turns and resolves their text in one evidence

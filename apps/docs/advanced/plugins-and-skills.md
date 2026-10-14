@@ -236,19 +236,39 @@ with its package under **Extension packages**.
 
 Some agent runtimes load skills from a Project by themselves, from
 `.agents/skills`, `.claude/skills`, or a folder of their own such as
-`.github/skills` or `.gemini/skills`. Grok Build also loads its commands
-folders (`.agents/commands`, `.claude/commands`, `.grok/commands`) as skills.
-Octant blocks each such runtime from reading and writing those folders at the
-Project root, so a skill there reaches a turn only through the steps above.
-The folders around them, such as the rest of `.claude`, stay readable.
+`.github/skills` or `.gemini/skills`. Octant blocks each such runtime from
+reading and writing those folders at the Project root, so a skill there reaches
+a turn only through the steps above. The folders around them, such as the rest
+of `.claude`, stay readable.
+
+Several runtimes also start code from a Project by themselves: MCP servers from
+`.mcp.json` or their own config file, hook scripts, and plugins. Octant keeps
+these out the same way, file by file, or with the runtime's own switch where
+one works:
+
+- OpenCode runs with its Project config switched off.
+- Grok Build loads a Project's hooks, MCP servers, plugins, skills, and
+  instructions only in a folder you trusted in Grok. Octant hides Grok's trust
+  list from the runtime, so every Project is untrusted there. Your trust
+  decisions stay in place for Grok itself, and Octant keeps Grok's folder trust
+  switched on even if you turned it off in Grok's settings. A side effect is
+  that Grok in Octant does not read the Project's `AGENTS.md`.
+- GitHub Copilot, Devin, Kimi Code, Mistral Vibe, Cline, Goose, and Kilo are
+  blocked from the specific files and folders that carry those servers, hooks,
+  and plugins, such as `.mcp.json`, `.github/hooks`, `.devin/config.json`,
+  `.vibe/tools`, or `.cline/plugins`. GitHub Copilot also reads
+  `.claude/settings.json` and `.claude/settings.local.json` as repository
+  settings, so those two files are blocked for it. Instruction files such as
+  `AGENTS.md` and `.github/copilot-instructions.md` stay readable for these
+  runtimes. They are text the runtime adds to its context, not code.
 
 Because the block covers writing too, an agent's own `git` commands on those
-runtimes warn about tracked files in a blocked folder, and a `git checkout`,
-rebase, or pull across commits that touch one fails with a misleading "local
-changes would be overwritten" error. Nothing is lost, and Octant's own Git
-features are unaffected. This is the accepted cost of keeping unreviewed
-skills out of the runtime; fx and Kimi Code have always worked this way for
-`.agents`.
+runtimes warn about tracked files in a blocked folder or file, and a
+`git checkout`, rebase, or pull across commits that touch one fails with a
+misleading "local changes would be overwritten" error. Nothing is lost, and
+Octant's own Git features are unaffected. This is the accepted cost of keeping
+unreviewed skills and code out of the runtime; fx and Kimi Code have always
+worked this way for `.agents`.
 
 Codex finds `.agents/skills` by itself and has no setting that stops it, so
 Octant switches off each Project skill Codex finds whenever a Codex thread
@@ -257,10 +277,18 @@ available to that thread until it is next resumed. Codex releases from 0.66.0
 up to 0.108.0 cannot switch a Project skill off for one thread, so Octant
 refuses to start a Codex thread on them and asks you to update Codex.
 
-Gaps remain. A skill folder above the Project, when the Project is a
-subfolder of a repository, is not blocked for the runtimes that look upward
-(GitHub Copilot, Grok Build, Devin). Codex also loads the skills in your own
-`~/.agents/skills` and Codex skills folders by itself.
+Some gaps remain:
+
+- Gemini CLI and Qwen Code still start MCP servers and hooks from
+  `.gemini/settings.json` or `.qwen/settings.json` in a folder they trust.
+  Blocking that file would stop them from starting a session at all.
+- A folder above the Project, when the Project is a subfolder of a repository,
+  is not blocked for the runtimes that look upward (GitHub Copilot, Devin,
+  Kimi Code, Mistral Vibe). Grok Build's trust rule covers every level.
+- MCP servers, hooks, and plugins you set up in a runtime's own profile, such
+  as `~/.copilot/mcp-config.json` or Grok's `~/.grok/config.toml`, still load,
+  because Octant reuses that profile for your sign-in. Codex also loads the
+  skills in your own `~/.agents/skills` and Codex skills folders by itself.
 
 Type `/` in a Chat, Work, or Code composer — including Chat's first message — to find commands and enabled skills. Browser and Computer entries appear only when those capabilities are available.
 Choosing a skill creates a visible selection that can be removed before sending;
