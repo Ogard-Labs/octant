@@ -110,6 +110,14 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Provider conformance harness that chatProviderMatrixEvidence.test-support.ts runs against drivers; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the matrix evidence is retired.",
   ],
   [
+    "packages/contracts/src/remoteServerGrants.ts",
+    "Grant contracts for opening a dev server from a paired device; the plan in docs/plans/open-a-dev-server-from-another-computer.md ships them ahead of the host's grant service and route on purpose. Remove once that service imports them.",
+  ],
+  [
+    "packages/domain/src/remoteServerGrantPolicy.ts",
+    "Grant policy for opening a dev server from a paired device; the plan in docs/plans/open-a-dev-server-from-another-computer.md ships it ahead of the host's grant service and route on purpose. Remove once that service decides grants with it.",
+  ],
+  [
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
