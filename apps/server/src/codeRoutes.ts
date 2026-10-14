@@ -770,6 +770,7 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             ),
             200,
             origin,
+            { "cache-control": "no-store" },
           );
         }
         case "conversation-window": {
