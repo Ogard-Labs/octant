@@ -46,8 +46,6 @@ export interface CodexEventContext {
    * `resetsAt` timing for a usage-limit failure the turn itself reports.
    */
   exhaustedWindowReset?: UtcTimestamp;
-  /** Codex compacted the thread's window during this turn. */
-  windowCompacted?: boolean;
   /**
    * This run is the compaction the connection's `compact` asked for, so the
    * compaction it carries is `requested` rather than the runtime's own.
@@ -476,9 +474,8 @@ function mapLifecycle(
       // Codex rebuilds a compacted thread from a summary and as many recent
       // user messages as fit in 20,000 tokens (`build_compacted_history` in
       // codex-rs `core/src/compact.rs`), so how much of the earlier prompts
-      // survives is Codex's own choice. Usage reports for the rest of the turn
-      // say so.
-      context.windowCompacted = true;
+      // survives is Codex's own choice. The turn runner that sees this event
+      // says so for the rest of the turn.
       // Codex replaces the thread's history before it completes the item, and
       // every failure returns before that replacement (`compact.rs`,
       // `compact_remote_v2.rs` and `compact_token_budget.rs` at
@@ -827,8 +824,9 @@ function mapNotification(
             ? {}
             : { contextWindow: message.params.tokenUsage.modelContextWindow }),
           // Each turn's input is recorded in the thread as a user message and
-          // sent with every later request until Codex compacts the thread.
-          promptRetention: context.windowCompacted === true ? "compacted" : "kept",
+          // sent with every later request until Codex compacts the thread;
+          // the compaction is its own event, which the turn runner follows.
+          promptRetention: "kept",
         }),
       ];
     }

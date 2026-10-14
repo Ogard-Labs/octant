@@ -20,6 +20,7 @@ export const MAX_PENDING_APPROVALS = 32;
 interface PendingApproval {
   readonly view: ExtensionToolApproval;
   readonly windowId: WindowId;
+  readonly expiresAt: number;
   readonly remember?: () => boolean;
   readonly resolve: (approved: boolean) => void;
   readonly timer: ReturnType<typeof setTimeout>;
@@ -76,8 +77,10 @@ export class ExtensionToolApprovalService {
     readonly signal?: AbortSignal;
   }): Promise<boolean> {
     if (input.signal?.aborted) return Promise.resolve(false);
+    this.#expire();
     if (this.#pending.size >= MAX_PENDING_APPROVALS) return Promise.resolve(false);
     const approvalId = this.options.uuid();
+    const requestedAt = this.options.now();
     const view = decodeExtensionToolApproval({
       approvalId,
       threadId: input.threadId,
@@ -89,7 +92,7 @@ export class ExtensionToolApprovalService {
       providerToolName: input.providerToolName,
       mcpToolName: input.mcpToolName,
       inputJson: input.inputJson,
-      requestedAt: new Date(this.options.now()).toISOString(),
+      requestedAt: new Date(requestedAt).toISOString(),
       rememberable: input.remember !== undefined,
     });
     return new Promise<boolean>((resolve) => {
@@ -109,6 +112,7 @@ export class ExtensionToolApprovalService {
       this.#pending.set(approvalId, {
         view,
         windowId: input.windowId,
+        expiresAt: requestedAt + this.#ttlMs,
         ...(input.remember === undefined ? {} : { remember: input.remember }),
         resolve: settle,
         timer,
@@ -121,12 +125,14 @@ export class ExtensionToolApprovalService {
   }
 
   list(windowId: WindowId): ReadonlyArray<ExtensionToolApproval> {
+    this.#expire();
     return [...this.#pending.values()]
       .filter((pending) => this.#answerableBy(pending, windowId))
       .map((pending) => pending.view);
   }
 
   decide(windowId: WindowId, decision: ExtensionToolApprovalDecision): boolean {
+    this.#expire();
     const pending = this.#pending.get(decision.approvalId);
     if (pending === undefined || !this.#answerableBy(pending, windowId)) return false;
     if (decision.remember === true) {
@@ -171,6 +177,20 @@ export class ExtensionToolApprovalService {
   revokeWindow(windowId: WindowId): void {
     for (const pending of this.#pending.values()) {
       if (pending.windowId === windowId) pending.resolve(false);
+    }
+  }
+
+  /**
+   * Denies every prompt whose time is up by the clock, the way the browser
+   * tool-approval service does. The timer alone is not enough: it fires late
+   * behind a busy event loop or across a machine's sleep, and until it fires
+   * an overdue prompt would still be listed, could still be approved, and
+   * would hold a waiting slot.
+   */
+  #expire(): void {
+    const now = this.options.now();
+    for (const pending of this.#pending.values()) {
+      if (pending.expiresAt <= now) pending.resolve(false);
     }
   }
 }

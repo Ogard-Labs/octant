@@ -102,6 +102,7 @@ import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApproval
 import { TerminalBrowserApprovalPrompt } from "./TerminalBrowserApprovalPrompt";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
+import { LoadEarlierMessages } from "../transcript/LoadEarlierMessages";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { boundsInsideViewport } from "../browser/useNativeBrowserSurface";
@@ -1313,7 +1314,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         </div>
       ) : (
         <TranscriptWindow
-          align="start"
           className="code-thread-workspace__conversation transcript-scroll"
           estimateSize={96}
           gap={20}
@@ -1322,6 +1322,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           key={String(props.threadId)}
           listClassName="code-thread-workspace__transcript thread-column"
           {...(confirmingRestore === undefined ? {} : { pinnedKeys: [confirmingRestore] })}
+          {...(props.controller.earlierConversation === undefined
+            ? {}
+            : {
+                lead: (
+                  <LoadEarlierMessages
+                    onLoad={props.controller.loadEarlierConversation}
+                    state={props.controller.earlierConversation}
+                  />
+                ),
+              })}
           {...(canvasClient === undefined
             ? {}
             : {

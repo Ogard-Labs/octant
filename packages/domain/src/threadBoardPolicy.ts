@@ -1,7 +1,8 @@
 /**
  * Shared Work and Code thread-board policy. Status is always derived from
- * authoritative runtime, recovery, and delivery-target evidence; it is never
- * assigned by hand and cards are never dragged between columns.
+ * authoritative runtime, recovery, and delivery-target evidence, and cards are
+ * never dragged between columns. The one status a person sets is Done on a
+ * Work thread: marking it Done satisfies its delivery target upstream.
  *
  * Unread and follow-up are deliberately excluded: they are independent of
  * runtime status. Unread is a client overlay; follow-up is a durable obligation
@@ -60,10 +61,11 @@ export const THREAD_BOARD_PROJECT_STATUS_ORDER = [
  */
 export interface ThreadBoardStatusInput {
   /**
-   * Server-authoritative delivery-target satisfaction. Ambiguous or stale
-   * evidence has already been collapsed to `waiting` upstream, so this is only
-   * `done` when the confirmed target is objectively satisfied. A completed
-   * model turn is never enough on its own.
+   * Server-authoritative delivery-target satisfaction. For Code, ambiguous or
+   * stale evidence has already been collapsed to `waiting` upstream, so this is
+   * only `done` when the confirmed target is objectively satisfied. For Work it
+   * is `done` once a person marked the thread Done. A completed model turn is
+   * never enough on its own.
    */
   readonly deliverySatisfaction: "pending" | "waiting" | "done";
   /** A provider turn, tool, or subagent is actively executing. */

@@ -829,6 +829,39 @@ export function readContextCompaction(
   );
 }
 
+/**
+ * Whether a compaction that may have changed the subject's session ended
+ * after a journal position: a completed one, or a failed one that may have
+ * changed it. Journal order, not the events' clocks, says which came first.
+ */
+export function contextCompactionEndedAfter(
+  connection: SqliteConnection,
+  subject: ContextSubjectRef,
+  globalSequence: number,
+): boolean {
+  const rows = connection
+    .prepare(
+      `SELECT event_name, payload_json FROM event_journal
+       WHERE aggregate_type = 'context-ledger' AND aggregate_id = ?
+         AND event_name IN (?, ?) AND global_sequence > ?`,
+    )
+    .all(
+      subject.aggregateId,
+      CONTEXT_COMPACTION_EVENT_NAMES.completed,
+      CONTEXT_COMPACTION_EVENT_NAMES.failed,
+      globalSequence,
+    ) as ReadonlyArray<{ readonly event_name: string; readonly payload_json: string }>;
+  return rows.some((row) => {
+    const payload: unknown = JSON.parse(row.payload_json);
+    if (row.event_name === CONTEXT_COMPACTION_EVENT_NAMES.completed) {
+      const { receipt } = decodeProjection(() => decodeContextCompactionCompleted(payload));
+      return sameSubject(receipt.subject, subject);
+    }
+    const failed = decodeProjection(() => decodeContextCompactionFailed(payload));
+    return sameSubject(failed.subject, subject) && failed.sessionMayHaveChanged;
+  });
+}
+
 /** Requested compactions that never reached a terminal event, on every subject. */
 export function listRunningContextCompactions(connection: SqliteConnection): ReadonlyArray<{
   readonly subject: ContextSubjectRef;

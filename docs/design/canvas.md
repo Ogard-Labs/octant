@@ -688,8 +688,9 @@ with **Run again**, as is a page that posts more than 250 messages in a second,
 which would starve the renderer that holds **Stop**, and a page that loads a
 second time, which is a page it navigated to. Host chrome holds a running label
 and **Stop**. In the thread a prototype starts only on **Run**; the sidebar
-runs it on open, and the page is out of the tab order until the person pressed
-Run.
+runs it on open. A running page is in the tab order, right after Stop, and Octant
+never moves focus into it when it opens; page script can still take focus on
+its own in some cases (see the frame threat model, F10).
 
 In a browser the page is drawn in a frame sandboxed to `allow-scripts` alone,
 and the renderer accepts only messages whose `source` is that frame's window

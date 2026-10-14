@@ -204,15 +204,6 @@ function buildCard(
   const recovery = recoveryFrom(entry);
   const deliverySatisfaction = evaluateWorkDeliverySatisfaction({
     completionConfirmed: entry.thread.completionConfirmed === true,
-    ...(entry.thread.completionEvidence === undefined
-      ? {}
-      : { completionEvidence: entry.thread.completionEvidence }),
-    currentDeliveryTarget: entry.thread.title,
-    childAgents: {
-      active: evidence.childRuns.active,
-      unacknowledgedResults: evidence.childRuns.unacknowledgedResults,
-    },
-    evidenceFreshness: evidence.staleEvidence ? "stale" : "fresh",
   });
   const derivation = deriveThreadBoardStatus({
     deliverySatisfaction,

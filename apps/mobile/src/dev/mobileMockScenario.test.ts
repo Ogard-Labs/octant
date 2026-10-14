@@ -223,9 +223,12 @@ describe("mobile mock scenarios", () => {
       prompt: "Also lint the new screen",
     });
 
-    await expect(loadMobileCodeConversation(transport, threadId)).resolves.toEqual([
-      expect.objectContaining({ prompt: "Polish the phone Code flow" }),
-      expect.objectContaining({ prompt: "Also lint the new screen" }),
-    ]);
+    await expect(loadMobileCodeConversation(transport, threadId)).resolves.toEqual({
+      turns: [
+        expect.objectContaining({ prompt: "Polish the phone Code flow" }),
+        expect.objectContaining({ prompt: "Also lint the new screen" }),
+      ],
+      hasEarlier: false,
+    });
   });
 });

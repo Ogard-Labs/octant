@@ -412,13 +412,19 @@ describe("OpenCode driver", () => {
     ]);
   });
 
-  it("says each prompt stays in the session until OpenCode compacts it", async () => {
+  it("reports one compaction however OpenCode names it, and leaves each usage report saying prompts are kept", async () => {
     const tokens = { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 }, cost: 0 };
     const fixture = driverFixture({
       events: [
         stepEndedEvent("provider-session", "message-1", tokens),
         { type: "session.compacted", properties: { sessionID: "provider-session" } } as Event,
+        {
+          type: "session.next.compaction.ended",
+          properties: { sessionID: "provider-session" },
+        } as Event,
         stepEndedEvent("provider-session", "message-2", tokens),
+        { type: "session.compacted", properties: { sessionID: "provider-session" } } as Event,
+        stepEndedEvent("provider-session", "message-3", tokens),
         idleEvent("provider-session"),
       ],
     });
@@ -447,9 +453,19 @@ describe("OpenCode driver", () => {
 
     expect(
       Array.from(output).flatMap((event) =>
-        event.kind === "usage" ? [event.promptRetention] : [],
+        event.kind === "usage"
+          ? [`usage ${event.promptRetention}`]
+          : event.kind === "context-compacted"
+            ? [`compacted ${event.trigger}`]
+            : [],
       ),
-    ).toEqual(["kept", "compacted"]);
+    ).toEqual([
+      "usage kept",
+      "compacted automatic",
+      "usage kept",
+      "compacted automatic",
+      "usage kept",
+    ]);
   });
 
   it("rejects a second start for the same session", async () => {

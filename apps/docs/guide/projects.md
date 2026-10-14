@@ -60,7 +60,7 @@ Four tiles at the top of the sidebar count what matters right now: **Inbox**
 (threads that need you), **Running**, **To review** (finished turns you have
 not opened yet), and **Done today**. Click a tile to go there: Running opens
 the Board (the Activity feed in Chat), To review opens the Review page, and
-Done today opens the Completed shelf. Turn the tiles off in **Settings ›
+Done today opens the Put away shelf. Turn the tiles off in **Settings ›
 Sidebar › Count tiles** to get the plain Inbox and Board rows back.
 
 ## Review finished threads

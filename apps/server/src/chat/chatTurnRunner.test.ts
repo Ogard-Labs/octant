@@ -2240,6 +2240,107 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.usage).toEqual({ inputTokens: 12, outputTokens: 8 });
   });
 
+  it("journals each compaction the runtime made by itself during the attempt once, and leaves a requested one to its command", async () => {
+    const recordAutomaticCompaction = vi.fn(() => "recorded" as const);
+    const harness = {
+      reconcileUsage: vi.fn(() => ({ variance: { varianceTokens: 0 }, snapshot: {} as never })),
+      recordAutomaticCompaction,
+    } as unknown as ContextHarnessService;
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const offer = (event: Record<string, unknown>) =>
+      Queue.offer(queue, { sessionId, ...event } as never);
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          yield* offer({ kind: "usage", sequence: 1, inputTokens: 1, outputTokens: 1 });
+          yield* offer({
+            kind: "context-compacted",
+            sequence: 2,
+            trigger: "automatic",
+            tokensBefore: 150_000,
+          });
+          yield* offer({
+            kind: "context-compacted",
+            sequence: 2,
+            trigger: "automatic",
+            tokensBefore: 150_000,
+          });
+          yield* offer({ kind: "context-compacted", sequence: 3, trigger: "requested" });
+          yield* offer({ kind: "text-delta", sequence: 4, text: "Done" });
+          yield* offer({ kind: "completed", sequence: 5 });
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: harness,
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { kind: "claude", acquire: () => Effect.succeed(connection) } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchEnabled: false,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          persistAttempt: () => Effect.void,
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+              digest: "f".repeat(64),
+              byteLength: 5,
+            }),
+        }),
+      ),
+    );
+
+    expect(recordAutomaticCompaction.mock.calls).toEqual([
+      [
+        {
+          subject,
+          turnKey: String(attemptId),
+          sighting: {
+            position: 1,
+            tokensBefore: { kind: "known", tokens: 150_000, accuracy: "provider-reported" },
+          },
+          executor: {
+            kind: "runtime",
+            driverKind: "claude",
+            providerInstanceId,
+            modelId: "model-a",
+          },
+        },
+      ],
+    ]);
+  });
+
   describe("what a turn leaves behind for its observers", () => {
     const base = Date.parse(now);
     const at = (ms: number) => new Date(base + ms).toISOString();
@@ -3398,5 +3499,209 @@ describe("ChatTurnRunner", () => {
     expect(exit._tag).toBe("Failure");
     expect(updates.at(-1)?.outcome).toBe("interrupted");
     expect(updates.some((entry) => entry.outcome === "completed")).toBe(false);
+  });
+
+  describe("capacity after a turn on an endpoint ends", () => {
+    function endpoint() {
+      let nowMs = Date.parse(now);
+      const scheduler = makeProviderCapacityScheduler({
+        now: () => nowMs,
+        random: () => 0,
+        maxRetryJitterMs: 0,
+        ambiguousReservationTtlMs: 60_000,
+      });
+      const runner = new ChatTurnRunner({
+        capacityScheduler: scheduler,
+        contextHarness: makeHarness(),
+        researchRouter: new ResearchRouter({
+          searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        }),
+      });
+      const connection = (send: (queue: Queue.Queue<never>) => Effect.Effect<void, never>) => {
+        const queue = Effect.runSync(Queue.unbounded<never>());
+        return {
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
+          start: () => Effect.succeed({ sessionId }),
+          send: () => send(queue),
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        };
+      };
+      const turn = async (answer: "reply" | Record<string, unknown>) => {
+        const updates: ChatAttempt[] = [];
+        const acquire = vi.fn(() =>
+          Effect.succeed(
+            connection((queue) =>
+              answer === "reply"
+                ? Effect.gen(function* () {
+                    yield* Queue.offer(queue, {
+                      kind: "text-delta",
+                      sessionId,
+                      text: "Hi",
+                    } as never);
+                    yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+                  })
+                : (Effect.fail(answer) as never),
+            ),
+          ),
+        );
+        const exit = await Effect.runPromiseExit(
+          Effect.scoped(
+            runner.run({
+              thread: thread(),
+              attempt: attempt(),
+              prompt: "hello",
+              scratchRoot: "/tmp/octant-scratch/thread",
+              driver: { acquire } as unknown as ProviderDriver,
+              providerInstanceId,
+              serviceLimits: serviceLimits(),
+              contextSubject: subject,
+              contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+              requestShape: "chat-turn",
+              varianceReserve: 20,
+              reservationId: nextReservationId(),
+              estimatedTokens: 100,
+              researchEnabled: false,
+              researchRoute: researchRoute({ kind: "disabled" }),
+              attachments: [],
+              clock: () => new Date(nowMs).toISOString(),
+              persistAttempt: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
+              persistResponse: () =>
+                Effect.succeed({
+                  contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                  digest: "f".repeat(64),
+                  byteLength: 2,
+                }),
+            }),
+          ),
+        );
+        return { exit, last: updates.at(-1), reachedProvider: acquire.mock.calls.length > 0 };
+      };
+      return {
+        turn,
+        advance: (milliseconds: number) => {
+          nowMs += milliseconds;
+        },
+      };
+    }
+
+    it("runs the next turn after a refused request and after replies that reported no usage", async () => {
+      const { turn } = endpoint();
+      const badRequest = {
+        category: "provider-failed",
+        message: "The provider request failed with HTTP 400.",
+      };
+
+      expect((await turn(badRequest)).last?.failure?.code).toBe("provider-failed");
+      expect((await turn(badRequest)).last?.failure?.code).toBe("provider-failed");
+      for (let index = 0; index < 3; index++) {
+        const next = await turn("reply");
+        expect(next.reachedProvider).toBe(true);
+        expect(next.last?.outcome).toBe("completed");
+      }
+    });
+
+    it.each([
+      { stop: "confirmed", heldSlots: 0 },
+      { stop: "refused", heldSlots: 1 },
+    ] as const)(
+      "keeps the slot of a cancelled turn only while its stop is unconfirmed ($stop)",
+      async ({ stop, heldSlots }) => {
+        const { scheduler, reservation } = makeScheduler();
+        const queue = Effect.runSync(Queue.unbounded<never>());
+        const refuse = () => Effect.fail({ category: "unavailable", message: "gone" } as never);
+        const connection = {
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
+          start: () => Effect.succeed({ sessionId }),
+          send: () => Queue.offer(queue, { kind: "text-delta", sessionId, text: "…" } as never),
+          interrupt: refuse,
+          stop: stop === "confirmed" ? () => Effect.void : refuse,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        };
+        const controller = new AbortController();
+        const runner = new ChatTurnRunner({
+          capacityScheduler: scheduler,
+          contextHarness: makeHarness(),
+          researchRouter: new ResearchRouter({
+            searxngClient: {
+              search: async () => ({ query: "x", backend: "searxng", results: [] }),
+            },
+          }),
+        });
+        const fiber = Effect.runFork(
+          Effect.scoped(
+            runner.run({
+              thread: thread(),
+              attempt: attempt(),
+              prompt: "hello",
+              scratchRoot: "/tmp/octant-scratch/thread",
+              driver: { acquire: () => Effect.succeed(connection) } as never,
+              providerInstanceId,
+              serviceLimits: serviceLimits(),
+              contextSubject: subject,
+              contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+              requestShape: "chat-turn",
+              varianceReserve: 20,
+              reservationId: reservation,
+              estimatedTokens: 100,
+              researchEnabled: false,
+              researchRoute: researchRoute({ kind: "disabled" }),
+              attachments: [],
+              signal: controller.signal,
+              persistAttempt: () => Effect.void,
+              persistResponse: () =>
+                Effect.succeed({
+                  contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+                  digest: "d".repeat(64),
+                  byteLength: 1,
+                }),
+            }),
+          ),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        controller.abort();
+        await Effect.runPromise(Fiber.await(fiber));
+
+        expect(scheduler.snapshot(providerInstanceId).allocated.concurrency).toBe(heldSlots);
+      },
+    );
+
+    it("does not back off when the endpoint is down without naming a wait", async () => {
+      const { turn } = endpoint();
+      await turn({ category: "unavailable", message: "The provider is unavailable." });
+
+      expect((await turn("reply")).last?.outcome).toBe("completed");
+    });
+
+    it("refuses turns for the wait a rate limit names, says so, and runs them again once it passes", async () => {
+      const { turn, advance } = endpoint();
+      await turn({
+        category: "rate-limited",
+        message: "The provider rate limit was reached.",
+        retryAfterMs: 20_000,
+      });
+
+      advance(5_000);
+      const refused = await turn("reply");
+      expect(refused.reachedProvider).toBe(false);
+      expect(refused.last).toMatchObject({
+        outcome: "interrupted",
+        failure: {
+          code: "capacity-unavailable",
+          message: "The provider rate-limited this endpoint. Try this turn again in 15 seconds.",
+        },
+      });
+
+      advance(15_000);
+      expect((await turn("reply")).last?.outcome).toBe("completed");
+    });
   });
 });

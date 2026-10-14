@@ -6,11 +6,32 @@ import {
 } from "@octant/contracts";
 import { decideProfileToolConstraint } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
-import type { AgentMessageService } from "./agentMessageService";
+import type { AgentMessageRefusalBudget, AgentMessageService } from "./agentMessageService";
 
 export const AGENT_MESSAGE_TOOL_NAME = "octant_agent_message";
 
 const MAX_TOOL_MESSAGE_BYTES = 65_536;
+
+/**
+ * How many refusals one turn may journal. Every journaled refusal is read back
+ * at each start, under a fixed scan bound, so a model that loops on a refused
+ * call must not be able to fill it. The refusal is still the answer the sender
+ * gets once the budget is spent.
+ */
+export const MAX_JOURNALED_REFUSALS_PER_TURN = 8;
+
+/** One turn's refusals: each distinct (recipient, reason) once, up to the cap. */
+function createRefusalBudget(): AgentMessageRefusalBudget {
+  const journaled = new Set<string>();
+  return {
+    admit: (recipientThreadId, reason) => {
+      const key = `${reason}\u0000${recipientThreadId}`;
+      if (journaled.has(key) || journaled.size >= MAX_JOURNALED_REFUSALS_PER_TURN) return false;
+      journaled.add(key);
+      return true;
+    },
+  };
+}
 
 const definition: ProviderToolDefinition = {
   name: AGENT_MESSAGE_TOOL_NAME,
@@ -61,7 +82,7 @@ const PLAN_REFUSAL = "Plan mode is read-only; this thread cannot send an agent m
  * runs. A refused call never reaches the delivery service.
  */
 export function createAgentMessageTools(input: {
-  readonly service: Pick<AgentMessageService, "send">;
+  readonly service: Pick<AgentMessageService, "send" | "recordRefusedSend">;
   readonly senderThreadId: string;
   readonly senderRunId?: string;
   /** The sender thread's snapshotted profile allowlist; empty permits every tool. */
@@ -70,6 +91,7 @@ export function createAgentMessageTools(input: {
   /** The turn's access posture now, never wider than the one it started with. */
   readonly readPosture: () => ProviderExecutionPolicy;
 }): AppManagedToolSet {
+  const refusalBudget = createRefusalBudget();
   const senderThreadId = decodeAgentMessageEndpointId(input.senderThreadId);
   const senderRunId =
     input.senderRunId === undefined ? undefined : decodeAgentMessageEndpointId(input.senderRunId);
@@ -81,6 +103,30 @@ export function createAgentMessageTools(input: {
     });
     if (profile.status === "refused") return profile.reason;
     return input.readPosture() === "plan" ? PLAN_REFUSAL : undefined;
+  };
+  const journalRefusedCall = async (inputJson: string): Promise<void> => {
+    try {
+      const parsed = JSON.parse(inputJson) as {
+        recipients?: ReadonlyArray<{ threadId?: unknown }>;
+      };
+      const recipients = (parsed.recipients ?? []).flatMap((candidate) => {
+        try {
+          return [{ threadId: decodeAgentMessageEndpointId(String(candidate.threadId)) }];
+        } catch {
+          return [];
+        }
+      });
+      if (recipients.length === 0) return;
+      await input.service.recordRefusedSend({
+        senderThreadId,
+        recipients,
+        reason: "policy",
+        refusalBudget,
+      });
+    } catch {
+      // A call too malformed to name a recipient, or a journal that is not
+      // available, leaves the sender's answer as it was.
+    }
   };
   return {
     // A tool this turn could only be refused is omitted, not advertised.
@@ -94,6 +140,9 @@ export function createAgentMessageTools(input: {
       }
       const refused = refusal();
       if (refused !== undefined) {
+        // The refusal is the sender's to see here and the person's to see in
+        // the Agents center, so it is journaled when the call names anyone.
+        await journalRefusedCall(inputJson);
         return { result: { status: "refused", reason: "policy", message: refused }, isError: true };
       }
       let recipients: ReadonlyArray<{ threadId: string }>;
@@ -107,6 +156,7 @@ export function createAgentMessageTools(input: {
           threadId: decodeAgentMessageEndpointId(String(candidate.threadId)),
         }));
         if (decodedRecipients.length === 0 || typeof parsed.message !== "string") {
+          await journalRefusedCall(inputJson);
           return {
             result: {
               status: "refused",
@@ -119,6 +169,7 @@ export function createAgentMessageTools(input: {
         recipients = decodedRecipients;
         message = parsed.message;
       } catch {
+        await journalRefusedCall(inputJson);
         return {
           result: { status: "refused", reason: "policy", message: "The tool input is invalid." },
           isError: true,
@@ -132,6 +183,7 @@ export function createAgentMessageTools(input: {
             threadId: decodeAgentMessageEndpointId(recipient.threadId),
           })),
           body: message,
+          refusalBudget,
         });
         return { result: outcomes };
       } catch (error) {

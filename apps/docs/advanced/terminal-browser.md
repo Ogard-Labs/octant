@@ -12,11 +12,11 @@ thread's own agent.
 
 ## What you need
 
-- **The `octant` command in the terminal.** A
-  [headless install](/guide/installation#install-a-headless-artifact) puts
-  `octant` in its `bin` folder; add that folder to your `PATH`. The desktop app
-  does not include the command yet, so in the desktop app this only works if
-  you put a headless install's `octant` on the terminal's `PATH` yourself.
+- **The `octant` command in the terminal.** The Octant app for macOS puts its
+  own `octant` on the terminal's `PATH` while the terminal can use the Browser.
+  That one runs only `octant mcp`, and you install nothing for it. With a
+  [headless install](/guide/installation#install-a-headless-artifact), add the
+  install's `bin` folder to your `PATH` instead.
 - **A CLI that can start a stdio MCP server** and pass it the terminal's
   `OCTANT_BROWSER_MCP_URL` and `OCTANT_BROWSER_MCP_TOKEN` variables.
 
@@ -24,7 +24,9 @@ thread's own agent.
 
 Octant never writes a provider's configuration. You add one entry yourself,
 once. It grants nothing: outside a switched-on terminal, `octant mcp` offers no
-tools and says why.
+tools and says why. In the app, a terminal that is not switched on has no
+`octant` at all, so your CLI reports that the `octant` server did not start;
+that is expected.
 
 Claude Code passes the terminal's variables on by itself:
 
@@ -77,7 +79,7 @@ computer that runs Octant, can switch one on; a paired device cannot.
 ## How it ends
 
 The terminal's access ends when you choose **Switch off**, the terminal stops
-or restarts, the thread is completed, archived, or deleted, or Octant stops.
+or restarts, the thread is put away, archived, or deleted, or Octant stops.
 The CLI is then refused at its next Browser call and `octant mcp` exits. To use
 the Browser again, switch the terminal on again and start the CLI again.
 

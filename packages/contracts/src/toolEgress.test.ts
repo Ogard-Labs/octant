@@ -15,7 +15,10 @@ import {
   decodeThreadEgressProposalRaisedPayload,
   decodeThreadEgressRuleGrantedPayload,
   decodeThreadEgressRuleRevokedPayload,
+  decodeThreadEgressLearnModeSetPayload,
+  decodeToolEgressCommand,
   decodeToolEgressRuleHost,
+  decodeToolEgressThreadView,
 } from "./toolEgress";
 
 const threadId = "11111111-1111-4111-8111-111111111111";
@@ -52,6 +55,7 @@ describe("tool egress event names", () => {
       "thread.egress-launch-incomplete@1",
       "thread.egress-launch-started@1",
       "thread.egress-launch-summarized@1",
+      "thread.egress-learn-mode-set@1",
       "thread.egress-proposal-declined@1",
       "thread.egress-proposal-raised@1",
       "thread.egress-rule-granted@1",
@@ -315,11 +319,14 @@ describe("launch records", () => {
       endedAt: "2026-10-13T12:01:00.000Z",
       bytesSent: 1_024,
       bytesReceived: 65_536,
+      malformedRequests: 2,
       entries: [allowed, refused],
       truncated: false,
       threadTainted: false,
     };
     expect(decodeThreadEgressLaunchSummarizedPayload(summary)).toEqual(summary);
+    const { malformedRequests: _uncounted, ...withoutMalformedCount } = summary;
+    expect(() => decodeThreadEgressLaunchSummarizedPayload(withoutMalformedCount)).toThrow();
     expect(() =>
       decodeThreadEgressLaunchSummarizedPayload({
         ...summary,
@@ -342,6 +349,103 @@ describe("launch records", () => {
     expect(decodeThreadEgressLaunchIncompletePayload(incomplete)).toEqual(incomplete);
     expect(() =>
       decodeThreadEgressLaunchIncompletePayload({ ...incomplete, tail: "complete" }),
+    ).toThrow();
+  });
+});
+
+describe("learn mode", () => {
+  it("records a person switching learn mode, and never a reviewer", () => {
+    const set = { threadId, enabled: false, principal: { kind: "local-window" } };
+    expect(decodeThreadEgressLearnModeSetPayload(set)).toEqual(set);
+    expect(() =>
+      decodeThreadEgressLearnModeSetPayload({ ...set, principal: { kind: "reviewer" } }),
+    ).toThrow();
+  });
+});
+
+describe("network-access answers", () => {
+  it("accepts a grant with a lifetime the design offers for its scope, and nothing else", () => {
+    const grant = {
+      kind: "grant-rules",
+      grants: [
+        { host: "Registry.NPMjs.org", port: 443, choice: { kind: "thread", lifetime: "8h" } },
+      ],
+      declineProposalIds: [proposalId],
+    };
+    expect(decodeToolEgressCommand(grant)).toEqual(grant);
+    for (const choice of [
+      { kind: "thread", lifetime: "30d" },
+      { kind: "project", lifetime: "1h" },
+      { kind: "call", lifetime: "8h" },
+      { kind: "thread" },
+    ]) {
+      expect(() =>
+        decodeToolEgressCommand({ ...grant, grants: [{ ...grant.grants[0], choice }] }),
+      ).toThrow();
+    }
+  });
+
+  it("refuses an answer that names a principal, a scope with a launch, or an empty grant", () => {
+    expect(() =>
+      decodeToolEgressCommand({
+        kind: "grant-rules",
+        grants: [
+          {
+            host: "registry.npmjs.org",
+            port: 443,
+            choice: { kind: "thread", lifetime: "8h" },
+            principal: { kind: "local-window" },
+          },
+        ],
+        declineProposalIds: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeToolEgressCommand({ kind: "grant-rules", grants: [], declineProposalIds: [] }),
+    ).toThrow();
+    expect(() =>
+      decodeToolEgressCommand({ kind: "revoke-rule", ruleId, principal: { kind: "reviewer" } }),
+    ).toThrow();
+  });
+
+  it("describes a thread's rules and proposals without a token, path, or principal identity", () => {
+    const view = {
+      threadId,
+      projectId,
+      enforced: false,
+      learnMode: true,
+      threadTainted: false,
+      projectGrant: "allowed",
+      threadRules: [
+        {
+          ruleId,
+          host: "*.githubusercontent.com",
+          port: 443,
+          scope: "thread",
+          expiresAt,
+          grantedAt: "2026-10-13T12:00:00.000Z",
+          grantedBy: "local-window",
+        },
+      ],
+      projectRules: [],
+      proposals: [
+        {
+          proposalId,
+          host: "registry.npmjs.org",
+          port: 443,
+          reason: "no-rule",
+          attempts: 3,
+          raisedAt: "2026-10-13T12:00:00.000Z",
+          threadTainted: false,
+        },
+      ],
+    };
+    expect(decodeToolEgressThreadView(view)).toEqual(view);
+    expect(() =>
+      decodeToolEgressThreadView({
+        ...view,
+        threadRules: [{ ...view.threadRules[0], deviceId }],
+      }),
     ).toThrow();
   });
 });

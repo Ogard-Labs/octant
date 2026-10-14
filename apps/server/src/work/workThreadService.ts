@@ -525,6 +525,14 @@ export class WorkThreadService {
         return { kind: "thread-created", thread: created };
       }
 
+      // Done on a Work thread is a person's mark. A routine, goal round, or
+      // child-run delivery acts as the host, never as the person.
+      if (
+        command.kind === "confirm-work-thread-completion" &&
+        isRoutineHostScope(authenticatedWindowId)
+      ) {
+        throw this.#failure("unauthorized", "Only a person can mark a Work thread Done.");
+      }
       const current = this.#projection.read(command.threadId);
       if (current === undefined || current.lifecycle === "deleted") {
         throw this.#failure("invalid", "Work thread was not found.");
@@ -556,13 +564,19 @@ export class WorkThreadService {
             "Work completion must identify the current delivery target.",
           );
         }
+        // No note, no evidence record: an older paired phone decodes the
+        // thread strictly and requires the note inside that record.
         const confirmed = decodeWorkThread({
           ...current,
           completionConfirmed: true,
-          completionEvidence: {
-            deliveryTarget: command.deliveryTarget,
-            satisfactionEvidence: command.satisfactionEvidence,
-          },
+          ...(command.satisfactionEvidence === undefined
+            ? {}
+            : {
+                completionEvidence: {
+                  deliveryTarget: command.deliveryTarget,
+                  satisfactionEvidence: command.satisfactionEvidence,
+                },
+              }),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
@@ -575,6 +589,23 @@ export class WorkThreadService {
           thread: confirmed,
         });
         return { kind: "thread-completion-confirmed", thread: confirmed };
+      }
+      // A person's Done mark locks what the thread would run next. Archiving,
+      // reactivating (which clears the mark), renaming, putting away and
+      // cancelling a scheduled resume stay open.
+      if (current.completionConfirmed === true) {
+        if (command.kind === "change-work-thread-provider") {
+          throw this.#failure(
+            "invalid",
+            "This task is marked Done. Archive and reactivate it before changing its provider.",
+          );
+        }
+        if (command.kind === "schedule-work-usage-resume") {
+          throw this.#failure(
+            "invalid",
+            "This task is marked Done. Archive and reactivate it before resuming it.",
+          );
+        }
       }
       const usageResumeUpdatedAt = decodeTimestamp(this.#clock());
       if (command.kind === "schedule-work-usage-resume") {
@@ -728,7 +759,7 @@ export class WorkThreadService {
               }
             : command.kind === "complete-work-thread"
               ? // Completing is "I'm done here": any snooze would keep the row
-                // out of the Completed shelf, so it goes.
+                // out of the Put away shelf, so it goes.
                 {
                   ...withoutThreadRest(current),
                   completedAt: updatedAt,
@@ -1184,9 +1215,9 @@ function liveTurnFacts(activity: WorkThreadRuntimeActivity) {
 }
 
 const WORK_COMPLETE_REFUSALS = {
-  archived: "An archived thread cannot be completed.",
-  executing: "Wait for the running turn to finish before completing this thread.",
-  "awaiting-input": "This thread is waiting on you; answer it before completing it.",
+  archived: "An archived thread cannot be put away.",
+  executing: "Wait for the running turn to finish before putting this thread away.",
+  "awaiting-input": "This thread is waiting on you; answer it before putting it away.",
 } as const;
 
 const WORK_SNOOZE_REFUSALS = {

@@ -33,10 +33,16 @@ import {
   boundSideChatSourceTranscript,
   boundThreadMentionTranscript,
   chatTurnAnsweredAttempt,
+  formatThreadMentionContext,
   rankThreadMentionCandidates,
   sideChatTitle,
 } from "@octant/domain";
 import { Schema } from "effect";
+import { randomUUID } from "node:crypto";
+import {
+  markReaderOfMarkedThread,
+  type ThreadOutsideContentMarks,
+} from "../context/inheritedExternalContentMark";
 import type { SideChatSidecarStore } from "./sideChatSidecarStore";
 
 /**
@@ -475,6 +481,92 @@ export class ThreadMentionService {
 interface SideChatAdmission {
   readonly sidecar: SideChatSidecar;
   readonly created: boolean;
+}
+
+/** The source label a mention's reader is marked under; it names the channel. */
+const THREAD_MENTION_SOURCE_LABEL = "thread-mention";
+
+/**
+ * Read the `#thread` mentions a turn names, on the window the turn was sent
+ * from.
+ *
+ * A chip names a thread; it never carries one. The renderer sends ids, and
+ * this resolves them through the same mention resolution an Open would take —
+ * so the sender's Open authority over every named thread is re-derived at send
+ * time, and the transcript window stays the host's decision. The framing is
+ * applied here, on the authoritative side, for the same reason. Chat, Work, and
+ * Code share one resolver because a chip means the same thing in each, and no
+ * mode may read a thread on authority another proved.
+ *
+ * A mentioned thread marked with outside content marks the thread reading it
+ * (`markReaderOfMarkedThread`) before its text is returned, so the reader's
+ * provider never sees a marked transcript on an unmarked thread. A mention
+ * whose mark cannot be recorded is answered as unreadable, which costs the
+ * mention and not the send, like any other mention the host withholds.
+ *
+ * The service is reached lazily so a mode wired before it exists can still
+ * hold this: nothing is read until a turn actually runs.
+ */
+export function threadMentionContextResolver(
+  threadMentions: () => ThreadMentionService,
+  marks: ThreadOutsideContentMarks,
+) {
+  return async ({
+    threadMentionIds,
+    readerThreadId,
+    windowId,
+    dialogueEnabled,
+  }: {
+    readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+    /** The thread whose turn names the mentions, which the host marks. */
+    readonly readerThreadId: string;
+    readonly windowId?: WindowId;
+    readonly dialogueEnabled?: boolean;
+  }): Promise<
+    ReadonlyArray<
+      | { readonly kind: "resolved"; readonly threadId: MentionableThreadId; readonly text: string }
+      | { readonly kind: "unreadable"; readonly threadId: MentionableThreadId }
+    >
+  > => {
+    const unreadable = () =>
+      threadMentionIds.map((threadId) => ({ kind: "unreadable" as const, threadId }));
+    // Without an authenticated window there is no principal to re-derive Open
+    // authority from, so nothing resolves rather than resolving on authority
+    // nobody proved.
+    if (windowId === undefined) return unreadable();
+    let resolved: ThreadMentionCommandResult;
+    try {
+      resolved = await threadMentions().execute(
+        { kind: "resolve-mentions", requestId: randomUUID(), threadIds: threadMentionIds },
+        { windowId },
+      );
+    } catch {
+      return unreadable();
+    }
+    if (resolved.kind !== "mentions-resolved") return unreadable();
+    const byThreadId = new Map(
+      resolved.mentions.map((mention) => [String(mention.threadId), mention]),
+    );
+    return threadMentionIds.map((threadId) => {
+      const mention = byThreadId.get(String(threadId));
+      if (mention === undefined) return { kind: "unreadable" as const, threadId };
+      const marked = markReaderOfMarkedThread({
+        marks,
+        readerThreadId,
+        sourceThreadId: String(mention.threadId),
+        sourceLabel: THREAD_MENTION_SOURCE_LABEL,
+        correlationId: randomUUID,
+      });
+      if (marked.status === "refused") return { kind: "unreadable" as const, threadId };
+      return {
+        kind: "resolved" as const,
+        threadId,
+        text: formatThreadMentionContext([mention], {
+          dialogueEnabled: dialogueEnabled === true,
+        }),
+      };
+    });
+  };
 }
 
 /**

@@ -5,14 +5,10 @@ import {
   decideExternalContentClear,
   decideExternalContentIngestion,
   emptyThreadContentTaint,
-  formatTaintedApprovalPrompt,
-  isIrreversibleOrAuthorityBearingApprovalClass,
   nativeHarnessResultTaintsThread,
   originTaintsThread,
   projectThreadContentTaint,
-  resolveTaintedApproval,
   searchQueryRefusalUnderTaint,
-  type ToolApprovalClass,
 } from "./untrustedContentPolicy";
 
 describe("originTaintsThread", () => {
@@ -123,96 +119,6 @@ describe("decideExternalContentIngestion", () => {
         alreadyRecorded: false,
       }),
     ).toEqual({ kind: "refuse", reason: "unauthorized" });
-  });
-});
-
-describe("irreversible and authority-bearing approval classes", () => {
-  it("identifies the design §8.4 irreversible and authority-bearing classes", () => {
-    const irreversible: ReadonlyArray<ToolApprovalClass> = [
-      "destructive-or-irreversible",
-      "credential-or-secret-access",
-      "access-outside-selected-project",
-      "privilege-expansion-or-sandbox-change",
-    ];
-    for (const approvalClass of irreversible) {
-      expect(isIrreversibleOrAuthorityBearingApprovalClass(approvalClass)).toBe(true);
-    }
-    for (const approvalClass of [
-      "project-file-writes",
-      "shell-commands",
-      "network-access",
-      "external-application-observation-or-control",
-    ] as const) {
-      expect(isIrreversibleOrAuthorityBearingApprovalClass(approvalClass)).toBe(false);
-    }
-  });
-});
-
-describe("resolveTaintedApproval", () => {
-  it("forces fresh per-action confirmation on tainted threads despite standing Full access", () => {
-    const tainted = {
-      externalContentIngested: true,
-      ingestedSources: ["readme-md", "mcp-search"],
-    };
-
-    expect(
-      resolveTaintedApproval({
-        taint: tainted,
-        approvalClass: "destructive-or-irreversible",
-        standingGrant: "remembered-full-access",
-        freshPerActionConfirmation: false,
-      }),
-    ).toEqual({
-      kind: "prompt",
-      reason: "tainted-thread-requires-fresh-confirmation",
-      prompt: formatTaintedApprovalPrompt(tainted.ingestedSources),
-      ignoredStandingGrant: "remembered-full-access",
-    });
-
-    expect(
-      resolveTaintedApproval({
-        taint: tainted,
-        approvalClass: "credential-or-secret-access",
-        standingGrant: "session",
-        freshPerActionConfirmation: false,
-      }).kind,
-    ).toBe("prompt");
-
-    expect(
-      resolveTaintedApproval({
-        taint: tainted,
-        approvalClass: "destructive-or-irreversible",
-        standingGrant: "remembered-full-access",
-        freshPerActionConfirmation: true,
-      }),
-    ).toEqual({ kind: "allow" });
-  });
-
-  it("does not force taint prompts for ordinary approval classes or clean threads", () => {
-    expect(
-      resolveTaintedApproval({
-        taint: { externalContentIngested: true, ingestedSources: ["readme-md"] },
-        approvalClass: "shell-commands",
-        standingGrant: "session",
-        freshPerActionConfirmation: false,
-      }),
-    ).toEqual({ kind: "allow-standing-grant" });
-
-    expect(
-      resolveTaintedApproval({
-        taint: emptyThreadContentTaint(),
-        approvalClass: "destructive-or-irreversible",
-        standingGrant: "remembered-full-access",
-        freshPerActionConfirmation: false,
-      }),
-    ).toEqual({ kind: "allow-standing-grant" });
-  });
-
-  it("names ingested sources in the confirmation prompt", () => {
-    const prompt = formatTaintedApprovalPrompt(["readme-md", "web-fetch"]);
-    expect(prompt).toContain("readme-md");
-    expect(prompt).toContain("web-fetch");
-    expect(prompt.toLowerCase()).toContain("external");
   });
 });
 

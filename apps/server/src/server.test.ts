@@ -1123,6 +1123,16 @@ describe("startOctantServer", () => {
         nextCursor: 0,
         hasMore: false,
       })),
+      conversationWindow: vi.fn(async (_windowId, threadId) => ({
+        status: "ok" as const,
+        window: {
+          version: 1 as const,
+          threadId,
+          turns: [],
+          hasEarlier: false,
+          hasLater: false,
+        },
+      })),
       readEvidence: vi.fn(),
       readEvidenceBatch: vi.fn(async (_windowId, input) => ({
         threadId: input.threadId,
@@ -2485,16 +2495,120 @@ describe("startOctantServer", () => {
               ),
             ).then(assertResponse),
           );
-          // The boundary is registered and authenticated; this subject simply
-          // has no plan, which is an empty answer rather than a failed service.
-          expect(response.status).toBe(200);
+          // The boundary is registered and authenticated, and it asks the
+          // host's own Project rule: this host holds no such Project, so the
+          // window is refused in the words any unreadable subject gets.
+          expect(response.status).toBe(403);
           const body = yield* Effect.promise(() => response.json());
           expect(body).toEqual({
-            kind: "not-planned",
-            subject: {
-              aggregateType: "project",
-              aggregateId: "00000000-0000-4000-8000-000000000471",
+            category: "unauthorized",
+            message: "Context subject is not available to this window.",
+          });
+        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+      ),
+    );
+  });
+
+  it("inspects a Chat Project's context only from a window whose Chat context is that Project", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-"));
+    directories.push(directory);
+    let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
+    const capability = "A".repeat(43);
+    const rendererIdentity = `${"C".repeat(42)}A`;
+    const windowId = "00000000-0000-4000-8000-000000000472";
+    const projectId = "00000000-0000-4000-8000-000000000473";
+    const headers = {
+      "content-type": "application/json",
+      "x-octant-window-capability": capability,
+      "x-octant-renderer-identity": rendererIdentity,
+    };
+    const post = (path: string, body?: unknown) =>
+      Promise.resolve(
+        routeHandler?.(
+          new Request(`http://127.0.0.1:13773${path}`, {
+            method: "POST",
+            headers,
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          }),
+        ),
+      ).then(assertResponse);
+    const inspectProject = () =>
+      post("/api/context/inspect", {
+        subject: { aggregateType: "project", aggregateId: projectId },
+      });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            desktopBridgeSecret: "desktop-secret",
+            serve: (options) => {
+              routeHandler = options.fetch;
+              return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
             },
+          });
+          const registered = yield* Effect.promise(() =>
+            Promise.resolve(
+              routeHandler?.(
+                new Request("http://127.0.0.1:13773/api/desktop/window-authorities", {
+                  method: "POST",
+                  headers: { "x-octant-desktop-secret": "desktop-secret" },
+                  body: JSON.stringify({ windowId, capability, rendererIdentity }),
+                }),
+              ),
+            ),
+          );
+          expect(registered?.status).toBe(204);
+          const created = yield* Effect.promise(() =>
+            post("/api/projects/commands", {
+              kind: "create-chat-project",
+              projectId,
+              expectedVersion: 0,
+              name: "Research",
+              hostId: "local",
+            }),
+          );
+          expect(created.status).toBe(200);
+
+          // The Project exists, but this window's Chat context is elsewhere.
+          const beforeOpening = yield* Effect.promise(inspectProject);
+          expect(beforeOpening.status).toBe(403);
+          expect(yield* Effect.promise(() => beforeOpening.json())).toEqual({
+            category: "unauthorized",
+            message: "Context subject is not available to this window.",
+          });
+
+          const bootstrap = yield* Effect.promise(() => post("/api/shell/bootstrap"));
+          expect(bootstrap.status).toBe(200);
+          const opened = yield* Effect.promise(() =>
+            post("/api/shell/commands", {
+              kind: "apply-workspace-operation",
+              windowId,
+              expectedVersion: 0,
+              operation: {
+                kind: "switch-project-surface",
+                mode: "chat",
+                surface: {
+                  kind: "project",
+                  id: "00000000-0000-4000-8000-000000000474",
+                  projectId,
+                  mode: "chat",
+                  title: "Research",
+                },
+              },
+            }),
+          );
+          expect(opened.status).toBe(200);
+
+          // Nothing has planned the Project's own subject, which is an empty
+          // answer rather than a failed service.
+          const afterOpening = yield* Effect.promise(inspectProject);
+          expect(afterOpening.status).toBe(200);
+          expect(yield* Effect.promise(() => afterOpening.json())).toEqual({
+            kind: "not-planned",
+            subject: { aggregateType: "project", aggregateId: projectId },
           });
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       ),

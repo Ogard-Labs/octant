@@ -1,6 +1,10 @@
 import { decodeWorkspaceLayoutNode } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { activeCodeThreadTabId, openLocalCodeThreadIds } from "./workspaceTabLifecycle";
+import {
+  activeCodeThreadTabId,
+  openLocalCodeThreadIds,
+  workspaceSurfaceTitle,
+} from "./workspaceTabLifecycle";
 
 describe("workspace tab lifecycle", () => {
   /**
@@ -119,5 +123,39 @@ describe("workspace tab lifecycle", () => {
     } as never;
 
     expect(openLocalCodeThreadIds(layout).map(String)).toEqual([threadA, threadB]);
+  });
+
+  it("follows a renamed local thread but not a thread on another host or a utility surface", () => {
+    const threadId = "00000000-0000-4000-8000-000000000701";
+    const titles = new Map([[threadId, "Renamed"]]);
+    const surface = (fields: Record<string, unknown>) =>
+      decodeWorkspaceLayoutNode({
+        kind: "pane",
+        nodeId: "00000000-0000-4000-8000-000000000611",
+        paneId: "00000000-0000-4000-8000-000000000612",
+        surface: {
+          id: "00000000-0000-4000-8000-000000000613",
+          threadId,
+          mode: "code",
+          title: "Original",
+          ...fields,
+        },
+      }) as { readonly surface: Parameters<typeof workspaceSurfaceTitle>[0] };
+
+    expect(workspaceSurfaceTitle(surface({ kind: "code-overview" }).surface, titles)).toBe(
+      "Renamed",
+    );
+    expect(
+      workspaceSurfaceTitle(
+        surface({ kind: "code-overview", hostId: "00000000-0000-4000-8000-000000000999" }).surface,
+        titles,
+      ),
+    ).toBe("Original");
+    expect(
+      workspaceSurfaceTitle(
+        surface({ kind: "code-terminal", terminalId: undefined }).surface,
+        titles,
+      ),
+    ).toBe("Original");
   });
 });

@@ -632,6 +632,8 @@ export interface ChatServiceOptions {
    */
   readonly resolveThreadMentionContext?: (input: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+    /** The thread whose turn names the mentions; a marked mention marks it. */
+    readonly readerThreadId: string;
     readonly windowId?: WindowId;
     readonly dialogueEnabled?: boolean;
   }) => Promise<ReadonlyArray<ChatThreadMentionContext>>;
@@ -729,9 +731,9 @@ export class ChatServiceError extends Error {
 }
 
 const CHAT_COMPLETE_REFUSALS = {
-  archived: "An archived thread cannot be completed.",
-  executing: "Wait for the running answer to finish before completing this thread.",
-  "awaiting-input": "This thread is waiting on you; answer it before completing it.",
+  archived: "An archived thread cannot be put away.",
+  executing: "Wait for the running answer to finish before putting this thread away.",
+  "awaiting-input": "This thread is waiting on you; answer it before putting it away.",
 } as const;
 
 const CHAT_SNOOZE_REFUSALS = {
@@ -3694,6 +3696,7 @@ export class ChatService {
             previous,
           });
     const threadMentionContexts = await this.#resolveThreadMentions(
+      thread.id,
       threadMentionIds,
       executionContext,
       tools?.definitions.some((definition) => definition.name === "octant_thread_message") === true,
@@ -3945,6 +3948,7 @@ export class ChatService {
    * unreadable one costs the mention, not the send.
    */
   async #resolveThreadMentions(
+    readerThreadId: ChatThreadId,
     threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
     executionContext: ChatServiceExecutionContext | undefined,
     dialogueEnabled: boolean,
@@ -3960,6 +3964,7 @@ export class ChatService {
     try {
       resolved = await this.#resolveThreadMentionContext({
         threadMentionIds,
+        readerThreadId: String(readerThreadId),
         ...(executionContext?.windowId === undefined
           ? {}
           : { windowId: executionContext.windowId }),

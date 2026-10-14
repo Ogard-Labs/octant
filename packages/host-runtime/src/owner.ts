@@ -848,38 +848,57 @@ async function quarantineStaleReceipt(
 }
 
 async function defaultProcessAlive(pid: number, expectedProcessStart: string): Promise<boolean> {
+  if (!processExists(pid)) return false;
+  const observed = await tryReadProcessState(pid, process.platform);
+  // ps fails when the process exited after the signal probe; only a second
+  // probe proves that, so any other failure keeps the owner counted as live.
+  if (observed === undefined) return processExists(pid);
+  // An aborted owner whose parent has not reaped it yet stays a zombie with
+  // its original start time. Exit already closed its socket, so it can never
+  // answer again and must not block the next start.
+  if (observed.zombie) return false;
+  // A recycled pid, including one now held by another user's process (where
+  // the signal probe reports EPERM), carries a different start time.
+  return observed.processStart === expectedProcessStart;
+}
+
+function processExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
+    return true;
   } catch (error) {
-    if (
+    return !(
       typeof error === "object" &&
       error !== null &&
       "code" in error &&
       (error as { readonly code?: unknown }).code === "ESRCH"
-    ) {
-      return false;
-    }
-    return true;
+    );
   }
-  const observed = await tryReadProcessStart(pid, process.platform);
-  return observed === undefined || observed === expectedProcessStart;
 }
 
 async function tryReadProcessStart(
   pid: number,
   platform: NodeJS.Platform,
 ): Promise<string | undefined> {
+  return (await tryReadProcessState(pid, platform))?.processStart;
+}
+
+async function tryReadProcessState(
+  pid: number,
+  platform: NodeJS.Platform,
+): Promise<{ readonly processStart: string; readonly zombie: boolean } | undefined> {
   if (!Number.isSafeInteger(pid) || pid < 1 || (platform !== "darwin" && platform !== "linux")) {
     return undefined;
   }
   try {
-    const { stdout } = await execFileAsync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], {
+    const { stdout } = await execFileAsync("/bin/ps", ["-o", "stat=,lstart=", "-p", String(pid)], {
       timeout: 1_000,
       maxBuffer: 4_096,
       env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
     });
-    const startedAt = stdout.trim().replace(/\s+/g, " ");
-    return startedAt === "" ? undefined : `${platform}:${startedAt}`;
+    const [state = "", ...startedAt] = stdout.trim().split(/\s+/);
+    if (state === "" || startedAt.length === 0) return undefined;
+    return { processStart: `${platform}:${startedAt.join(" ")}`, zombie: state.startsWith("Z") };
   } catch {
     return undefined;
   }

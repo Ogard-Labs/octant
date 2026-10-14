@@ -10,32 +10,13 @@ import {
 } from "@octant/contracts";
 
 /**
- * Untrusted-content policy helpers for Security S2.
- * Consumed by the tool-call policy engine step 7 (S1) and approval paths.
+ * Untrusted-content policy helpers for Security S2. The approval rule for a
+ * marked thread is not here: `resolveToolCall` asks afresh for every catalog
+ * entry marked `irreversibleUnderTaint`.
  * Canonical: docs/security/security-architecture-threat-model.md § Untrusted-Content Policy
  * Approved Decision #3: taint scope is thread lifetime (does not clear on session/turn).
  * A person at a local window may clear it; the next ingestion marks the thread again.
  */
-
-/** Design §8.4 approval categories. */
-export type ToolApprovalClass =
-  | "project-file-writes"
-  | "shell-commands"
-  | "network-access"
-  | "external-application-observation-or-control"
-  | "destructive-or-irreversible"
-  | "credential-or-secret-access"
-  | "access-outside-selected-project"
-  | "privilege-expansion-or-sandbox-change";
-
-const IRREVERSIBLE_OR_AUTHORITY_BEARING = new Set<ToolApprovalClass>([
-  "destructive-or-irreversible",
-  "credential-or-secret-access",
-  "access-outside-selected-project",
-  "privilege-expansion-or-sandbox-change",
-]);
-
-export type StandingApprovalGrant = "none" | "session" | "remembered-full-access";
 
 export type ThreadContentTaintEvent =
   | {
@@ -45,16 +26,6 @@ export type ThreadContentTaintEvent =
   | { readonly kind: "content-cleared" }
   | { readonly kind: "session-boundary" }
   | { readonly kind: "turn-boundary" };
-
-export type TaintedApprovalDecision =
-  | { readonly kind: "allow" }
-  | { readonly kind: "allow-standing-grant" }
-  | {
-      readonly kind: "prompt";
-      readonly reason: "tainted-thread-requires-fresh-confirmation";
-      readonly prompt: string;
-      readonly ignoredStandingGrant: StandingApprovalGrant;
-    };
 
 export type ExternalContentIngestionDecision =
   | { readonly kind: "record" }
@@ -302,49 +273,4 @@ function shannonBitsPerCharacter(text: string): number {
     bits -= share * Math.log2(share);
   }
   return bits;
-}
-
-export function isIrreversibleOrAuthorityBearingApprovalClass(
-  approvalClass: ToolApprovalClass,
-): boolean {
-  return IRREVERSIBLE_OR_AUTHORITY_BEARING.has(approvalClass);
-}
-
-export function formatTaintedApprovalPrompt(ingestedSources: ReadonlyArray<string>): string {
-  const named =
-    ingestedSources.length === 0 ? "unknown external sources" : ingestedSources.join(", ");
-  return `This thread ingested external content (${named}). Confirm this irreversible or authority-bearing action explicitly; standing Full access and session grants do not apply.`;
-}
-
-/**
- * Policy step-7 helper: on a tainted thread, irreversible/authority-bearing
- * approval classes require fresh per-action confirmation. Standing session
- * grants and remembered Full access do not silently satisfy them.
- */
-export function resolveTaintedApproval(input: {
-  readonly taint: ThreadExternalContentTaint;
-  readonly approvalClass: ToolApprovalClass;
-  readonly standingGrant: StandingApprovalGrant;
-  readonly freshPerActionConfirmation: boolean;
-}): TaintedApprovalDecision {
-  if (
-    !input.taint.externalContentIngested ||
-    !isIrreversibleOrAuthorityBearingApprovalClass(input.approvalClass)
-  ) {
-    // Taint rule does not constrain this decision; standing grants may apply.
-    return { kind: "allow-standing-grant" };
-  }
-
-  if (input.freshPerActionConfirmation) {
-    return { kind: "allow" };
-  }
-
-  // Standing session grants and remembered Full access never silently satisfy
-  // irreversible/authority-bearing classes on a tainted thread.
-  return {
-    kind: "prompt",
-    reason: "tainted-thread-requires-fresh-confirmation",
-    prompt: formatTaintedApprovalPrompt(input.taint.ingestedSources),
-    ignoredStandingGrant: input.standingGrant,
-  };
 }

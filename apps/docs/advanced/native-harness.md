@@ -365,7 +365,8 @@ waits for it before opening the thread. `--plain` keeps the line-by-line mode, w
 existing thread in whatever mode it is, and `--last` continues the latest
 Code or Work thread of the Project you are in (anywhere else, your latest
 Chat thread). A Code thread keeps its conversation from one run of
-`octant agent` to the next, tool calls included. `--model <model>` picks the
+`octant agent` to the next, tool calls included, and a long one shows its
+newest 50 turns. `--model <model>` picks the
 harness model for a new Work or Code thread — `endpoint/model` when two
 endpoints offer the same id — and an unknown name lists the ones on offer.
 `--project <name>` files a new thread in a Project. The terminal opens the

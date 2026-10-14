@@ -133,6 +133,7 @@ function readFacts(
         access: thread.access,
       },
       ...(turn === undefined ? {} : { tail: tailOf(String(turn.turnId), turn.status) }),
+      markedDone: thread.completionConfirmed === true,
     };
   }
   const id = decodeCodeThreadId(scope.threadId);
@@ -186,7 +187,10 @@ export function createThreadMessageQueuePort(
       (facts.thread.lifecycle !== "active" ||
         facts.thread.completedAt !== undefined ||
         (facts.thread.projectId !== undefined && project?.lifecycle !== "active") ||
-        ("checkoutAvailable" in facts && !facts.checkoutAvailable))
+        ("checkoutAvailable" in facts && !facts.checkoutAvailable) ||
+        // A Work thread a person marked Done takes no new message: the queue
+        // keeps what it holds, shown as held, until the thread is reactivated.
+        ("markedDone" in facts && facts.markedDone))
     )
       return { status: "held", reason: "thread-unavailable" };
     const provider = deps.persistence.readProviderInstance(facts.thread.providerInstanceId);

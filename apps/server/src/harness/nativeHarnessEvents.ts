@@ -29,6 +29,18 @@ import {
   ProjectId,
   AggregateVersion,
   UtcTimestamp,
+  TOOL_EGRESS_EVENT_NAMES,
+  ProjectEgressRuleGrantedPayload,
+  ProjectEgressRuleRevokedPayload,
+  ThreadEgressDecisionsRecordedPayload,
+  ThreadEgressLaunchIncompletePayload,
+  ThreadEgressLaunchStartedPayload,
+  ThreadEgressLaunchSummarizedPayload,
+  ThreadEgressLearnModeSetPayload,
+  ThreadEgressProposalDeclinedPayload,
+  ThreadEgressProposalRaisedPayload,
+  ThreadEgressRuleGrantedPayload,
+  ThreadEgressRuleRevokedPayload,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
@@ -157,5 +169,16 @@ export function registerNativeHarnessEvents(registry: EventRegistry): EventRegis
       1,
       NativeHarnessTranscriptToolSettled,
     )
-    .register(NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES.compacted, 1, NativeHarnessTranscriptCompacted);
+    .register(NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES.compacted, 1, NativeHarnessTranscriptCompacted)
+    .register(TOOL_EGRESS_EVENT_NAMES.threadRuleGranted, 1, ThreadEgressRuleGrantedPayload)
+    .register(TOOL_EGRESS_EVENT_NAMES.threadRuleRevoked, 1, ThreadEgressRuleRevokedPayload)
+    .register(TOOL_EGRESS_EVENT_NAMES.projectRuleGranted, 1, ProjectEgressRuleGrantedPayload)
+    .register(TOOL_EGRESS_EVENT_NAMES.projectRuleRevoked, 1, ProjectEgressRuleRevokedPayload)
+    .register(TOOL_EGRESS_EVENT_NAMES.proposalRaised, 1, ThreadEgressProposalRaisedPayload)
+    .register(TOOL_EGRESS_EVENT_NAMES.proposalDeclined, 1, ThreadEgressProposalDeclinedPayload)
+    .register(TOOL_EGRESS_EVENT_NAMES.launchStarted, 1, ThreadEgressLaunchStartedPayload)
+    .register(TOOL_EGRESS_EVENT_NAMES.decisionsRecorded, 1, ThreadEgressDecisionsRecordedPayload)
+    .register(TOOL_EGRESS_EVENT_NAMES.launchSummarized, 1, ThreadEgressLaunchSummarizedPayload)
+    .register(TOOL_EGRESS_EVENT_NAMES.launchIncomplete, 1, ThreadEgressLaunchIncompletePayload)
+    .register(TOOL_EGRESS_EVENT_NAMES.learnModeSet, 1, ThreadEgressLearnModeSetPayload);
 }

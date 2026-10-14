@@ -52,6 +52,20 @@ describe("the agent message contract", () => {
       }).refuseReason,
     ).toBe("unauthorized");
     expect(
+      decodeAgentMessageRefused({
+        kind: "message-refused",
+        messageId: sent.messageId,
+        correlationId: sent.correlationId,
+        refuseReason: "unauthorized",
+        senderThreadId: sent.senderThreadId,
+        recipientThreadId: sent.recipientThreadId,
+        occurredAt,
+      }),
+    ).toMatchObject({
+      senderThreadId: sent.senderThreadId,
+      recipientThreadId: sent.recipientThreadId,
+    });
+    expect(
       decodeAgentMessageAcknowledged({
         kind: "message-acknowledged",
         messageId: sent.messageId,

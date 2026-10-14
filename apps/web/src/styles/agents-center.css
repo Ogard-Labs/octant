@@ -39,6 +39,25 @@
   font-weight: 500;
 }
 
+/* Refused messages under the bounds line: one quiet row each, sender then the
+   thread it named, the reason, and its age. */
+.agents-center__refusals {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.agents-center__refusals li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+}
+
 .agents-center__body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

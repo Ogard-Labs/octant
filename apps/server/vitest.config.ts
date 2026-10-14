@@ -7,12 +7,12 @@ const processFileGlobs = [
 ];
 
 /**
- * Evidence suites drive real provider binaries or credentials and skip
- * themselves unless the matching `OCTANT_*` environment variables are set.
- * They are not part of `bun run test`; run them on demand with
- * `bun run test:evidence`.
+ * Evidence suites drive real provider binaries or credentials, or hold a
+ * wall-clock budget, and skip themselves unless the matching `OCTANT_*`
+ * environment variables are set. They are not part of `bun run test`; run
+ * them on demand with `bun run test:evidence`.
  */
-const evidenceFileGlobs = ["src/**/*Smoke.integration.test.ts"];
+const evidenceFileGlobs = ["src/**/*Smoke.integration.test.ts", "src/**/*.benchmark.test.ts"];
 
 export default defineConfig({
   test: {

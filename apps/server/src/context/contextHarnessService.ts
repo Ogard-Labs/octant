@@ -60,6 +60,7 @@ import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
+  contextCompactionEndedAfter,
   listRunningContextCompactions,
   readContextCompaction,
   readContextCompactions,
@@ -84,6 +85,7 @@ import type {
 } from "./contextMaintenancePort";
 import type { ContextMaintenanceResult } from "./contextMaintenanceService";
 import { SUMMARY_PROMPT_FRAMING } from "./contextSummaryGenerator";
+import { automaticCompactionId, type AutomaticCompactionSighting } from "./automaticCompaction";
 import {
   makeContextMaintenanceService,
   CONTEXT_SUMMARY_EXPECTED_RETAINED_SHARE,
@@ -1147,6 +1149,142 @@ export class ContextHarnessService {
       throw new ContextHarnessError("unavailable", "Compaction was not recorded.");
     }
     return { kind: "settled", record: completed };
+  }
+
+  /**
+   * Journals a compaction a runtime made by itself during a turn. It has no
+   * command and no requester, so it has no `requested` event: one completed
+   * receipt, under an id derived from the turn and the compaction's place in
+   * it, so a notification seen again after a recovery is journaled once.
+   *
+   * The window before is the runtime's own figure or the turn's latest report
+   * when the turn had one, else the session's occupancy as a requested
+   * compaction reads it. A compaction with no figure at all is not journaled:
+   * a receipt never guesses its figure.
+   */
+  recordAutomaticCompaction(input: {
+    readonly subject: ContextSubjectRef;
+    readonly turnKey: string;
+    readonly sighting: AutomaticCompactionSighting;
+    readonly executor: Extract<ContextCompactionExecutor, { readonly kind: "runtime" }>;
+    /** The session's latest journaled usage report, for a subject the host never planned. */
+    readonly priorOccupancy?: { readonly tokens: number; readonly observedAt: string } | undefined;
+  }): "recorded" | "already-recorded" | "unmeasured" {
+    this.#assertReady();
+    const { subject, sighting } = input;
+    const compactionId = automaticCompactionId(subject, input.turnKey, sighting.position);
+    if (this.compaction(subject, compactionId) !== undefined) return "already-recorded";
+    const before = sighting.tokensBefore ?? this.occupancyBefore(subject, input.priorOccupancy);
+    if (before === undefined) return "unmeasured";
+    const receipt = decodeContextCompactionReceipt({
+      compactionId,
+      subject,
+      executor: input.executor,
+      trigger: "automatic",
+      tokensBefore: before,
+      ...(sighting.tokensAfter === undefined
+        ? {
+            tokensAfter: { kind: "pending" },
+            tokensFreed: { kind: "unknown", reason: "awaiting-next-report" },
+          }
+        : {
+            tokensAfter: {
+              kind: "known",
+              tokens: sighting.tokensAfter,
+              accuracy: "provider-reported",
+            },
+            tokensFreed: {
+              kind: before.accuracy === "provider-reported" ? "measured" : "estimated",
+              tokens: Math.max(0, before.tokens - sighting.tokensAfter),
+              accuracy: before.accuracy,
+            },
+          }),
+      summary: { visibility: "runtime-only" },
+      // The runtime's request rode inside the turn, and the turn's own usage
+      // reports carry what it spent; counting it here too would bill it twice.
+      usage: { kind: "unreported" },
+      completedAt: decodeTimestamp(this.#clock()),
+    });
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "context-ledger", aggregateId: subject.aggregateId },
+      expectedVersion: this.#aggregateVersion(subject.aggregateId),
+      events: [this.#pending(CONTEXT_COMPACTION_EVENT_NAMES.completed, { receipt })],
+    });
+    return "recorded";
+  }
+
+  /**
+   * Whether the ledger records a compaction that may have changed the
+   * subject's session after a journal position, such as the usage report a
+   * turn's window breakdown was counted from.
+   */
+  sessionCompactedAfter(subject: ContextSubjectRef, globalSequence: number): boolean {
+    this.#assertReady();
+    return contextCompactionEndedAfter(this.#persistence.connection, subject, globalSequence);
+  }
+
+  /**
+   * What the newest compaction of the subject's session after `since` left in
+   * its window: its own figure after, or `pending` when it gave none or may
+   * have changed the session without saying how. Undefined when nothing has
+   * compacted the session since; with no `since`, any compaction counts. A
+   * usage report carries only its time, so this compares clocks.
+   */
+  #compactedSince(
+    subject: ContextSubjectRef,
+    since: string | undefined,
+  ): KnownTokenMeasurement | { readonly kind: "pending" } | undefined {
+    const after = since === undefined ? undefined : Date.parse(since);
+    const latest = readContextCompactions(this.#persistence.connection, subject)
+      .filter((record) => {
+        if (record.status === "running") return false;
+        if (record.status === "failed" && !record.sessionMayHaveChanged) return false;
+        const at = record.status === "completed" ? record.receipt.completedAt : record.failedAt;
+        return after === undefined || Date.parse(at) > after;
+      })
+      .at(-1);
+    if (latest === undefined) return undefined;
+    return latest.status === "completed" ? latest.receipt.tokensAfter : { kind: "pending" };
+  }
+
+  /**
+   * How full a runtime's window is before it compacts: the session's latest
+   * usage report (`prior`, or for a subject the host plans, the occupancy its
+   * plan reconciled), else the plan's own estimate. A compaction since that
+   * report changed the window it describes: the figure that compaction
+   * reported after stands instead, and without one the older report is only an
+   * upper bound, and says so. Undefined when the host knows no figure at all.
+   */
+  occupancyBefore(
+    subject: ContextSubjectRef,
+    prior: { readonly tokens: number; readonly observedAt: string } | undefined,
+  ): KnownTokenMeasurement | undefined {
+    this.#assertReady();
+    const planned = this.#restored(subject);
+    const contextTokens = planned?.latestUsage?.contextTokens;
+    const report =
+      prior ??
+      (planned?.latestUsage === undefined || contextTokens === undefined
+        ? undefined
+        : { tokens: contextTokens, observedAt: planned.latestUsage.observedAt });
+    const estimate: KnownTokenMeasurement | undefined =
+      planned === undefined
+        ? undefined
+        : {
+            kind: "known",
+            tokens: planned.next.plan.plannedInputTokens,
+            accuracy: "conservative-heuristic",
+          };
+    const changedSince = this.#compactedSince(subject, report?.observedAt);
+    if (changedSince !== undefined) {
+      if (changedSince.kind === "known") return changedSince;
+      return report === undefined
+        ? estimate
+        : { kind: "known", tokens: report.tokens, accuracy: "conservative-heuristic" };
+    }
+    return report === undefined
+      ? estimate
+      : { kind: "known", tokens: report.tokens, accuracy: "provider-reported" };
   }
 
   /**

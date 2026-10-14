@@ -202,7 +202,6 @@ describe("CodeService reads", () => {
         defaultExecutionPolicy: "approval-gated",
         defaultPermissionPersistence: "current-session",
         requireGitRepository: true,
-        allowDefaultFolderThreads: false,
         defaultDiffLayout: "unified",
         version: 0,
         updatedAt: now,
@@ -808,31 +807,23 @@ describe("CodeService commands", () => {
     );
   });
 
-  it("refuses threads without a Project while a Git repository is still required", async () => {
+  it("keeps the Git requirement a window asks for when it still sends the old default-folder switch", async () => {
     const fixture = serviceFixture();
-    const update = (input: {
-      readonly requireGitRepository: boolean;
-      readonly allowDefaultFolderThreads: boolean;
-    }) =>
-      fixture.service.execute(ids.window, {
-        kind: "update-code-settings",
-        expectedVersion: 0,
-        defaultExecutionPolicy: "approval-gated",
-        defaultPermissionPersistence: "current-session",
-        ...input,
-      });
 
-    await expect(
-      update({ requireGitRepository: true, allowDefaultFolderThreads: true }),
-    ).rejects.toMatchObject({ failure: { category: "invalid" } });
-    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
-
-    await expect(
-      update({ requireGitRepository: false, allowDefaultFolderThreads: true }),
-    ).resolves.toMatchObject({
-      kind: "settings-updated",
-      settings: { requireGitRepository: false, allowDefaultFolderThreads: true },
+    const updated = await fixture.service.execute(ids.window, {
+      kind: "update-code-settings",
+      expectedVersion: 0,
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      requireGitRepository: true,
+      allowDefaultFolderThreads: true,
     });
+
+    expect(updated).toMatchObject({
+      kind: "settings-updated",
+      settings: { requireGitRepository: true },
+    });
+    expect(updated).not.toHaveProperty("settings.allowDefaultFolderThreads");
   });
 
   it("journals an authorized new thread at expected aggregate version zero", async () => {
@@ -4429,7 +4420,7 @@ describe("completing and snoozing a Code thread", () => {
     expect("snooze" in recorded).toBe(false);
   });
 
-  it("refuses to complete a thread while its turn runs or while it waits on the person", async () => {
+  it("refuses to put a thread away while its turn runs or while it waits on the person", async () => {
     const running = serviceFixture();
     running.persistence.readCodeRuntimeWorks.mockReturnValue(providerTurn("running"));
     await expect(
@@ -4438,7 +4429,9 @@ describe("completing and snoozing a Code thread", () => {
         threadId: ids.thread,
         expectedVersion: 1,
       }),
-    ).rejects.toMatchObject({ failure: { category: "invalid", message: /running turn/ } });
+    ).rejects.toMatchObject({
+      failure: { category: "invalid", message: /before putting this thread away/ },
+    });
 
     const waiting = serviceFixture();
     waiting.persistence.readCodeRuntimeWorks.mockReturnValue(providerTurn("waiting"));
@@ -4448,7 +4441,9 @@ describe("completing and snoozing a Code thread", () => {
         threadId: ids.thread,
         expectedVersion: 1,
       }),
-    ).rejects.toMatchObject({ failure: { category: "invalid", message: /waiting on you/ } });
+    ).rejects.toMatchObject({
+      failure: { category: "invalid", message: /answer it before putting it away/ },
+    });
     expect(running.persistence.journal.append).not.toHaveBeenCalled();
     expect(waiting.persistence.journal.append).not.toHaveBeenCalled();
   });

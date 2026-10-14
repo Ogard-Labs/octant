@@ -364,21 +364,23 @@ describe("ReviewPage", () => {
     expect(page.onComplete).toHaveBeenCalledWith(third);
   });
 
-  it("completes the selected thread with C and shows a host refusal in the host's words", async () => {
+  it("puts the selected thread away with C and shows a host refusal in the host's words", async () => {
     const user = userEvent.setup();
     const onComplete = vi
       .fn()
       .mockResolvedValueOnce({
         status: "refused",
-        message: "This thread is waiting on you, so it cannot be completed.",
+        message: "This thread is waiting on you, so it cannot be put away.",
       })
       .mockResolvedValue({ status: "ok" });
     render(<ReviewPage {...props({ onComplete })} />);
 
+    expect(within(current()).getByRole("button", { name: /^Put away/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Complete/ })).toBeNull();
     await user.keyboard("c");
     expect(onComplete).toHaveBeenCalledWith(first);
     expect(await within(current()).findByRole("alert")).toHaveTextContent(
-      "This thread is waiting on you, so it cannot be completed.",
+      "This thread is waiting on you, so it cannot be put away.",
     );
 
     // The refusal belongs to the thread it concerned.

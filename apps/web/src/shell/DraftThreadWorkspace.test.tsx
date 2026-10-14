@@ -966,7 +966,7 @@ describe("DraftThreadWorkspace", () => {
         {...baseProps}
         mode="code"
         projects={[]}
-        defaultFolder="/Users/ada/Documents/Octant"
+        defaultFolder="/Users/ada/Octant"
         onAttachFolder={onAttachFolder}
         onOpenCodeSettings={onOpenCodeSettings}
         onEnsureDefaultProject={onEnsureDefaultProject}
@@ -977,9 +977,33 @@ describe("DraftThreadWorkspace", () => {
     expect(onAttachFolder).toHaveBeenCalledOnce();
     await user.click(screen.getByRole("button", { name: "Open Code settings" }));
     expect(onOpenCodeSettings).toHaveBeenCalledOnce();
-    expect(screen.getByText(/Threads without a Project is turned off/)).toBeVisible();
+    expect(screen.getByText(/Code needs a Git repository/)).toBeVisible();
     expect(onEnsureDefaultProject).not.toHaveBeenCalled();
     expect(onCreateThread).not.toHaveBeenCalled();
+  });
+
+  it("starts Code in the default folder once Code no longer needs a Git repository", async () => {
+    const user = userEvent.setup();
+    const onEnsureDefaultProject = vi.fn(async () => undefined);
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="code"
+        projects={[]}
+        defaultFolder="/Users/ada/Octant"
+        codeDefaultFolderThreads
+        onOpenCodeSettings={vi.fn()}
+        onEnsureDefaultProject={onEnsureDefaultProject}
+      />,
+    );
+    expect(screen.queryByText(/Code needs a Git repository/)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    const row = screen.getByRole("option", { name: /^No project/ });
+    expect(row).not.toHaveAttribute("aria-disabled", "true");
+    expect(row).toHaveTextContent("/Users/ada/Octant/Code");
+    await user.click(row);
+    expect(onEnsureDefaultProject).toHaveBeenCalledWith("code");
   });
 
   it("shows the default-folder child path without a doubled trailing separator", async () => {
@@ -987,7 +1011,7 @@ describe("DraftThreadWorkspace", () => {
     render(
       <DraftThreadWorkspace
         {...baseProps}
-        defaultFolder="/Users/ada/Documents/Octant/"
+        defaultFolder="/Users/ada/Octant/"
         mode="work"
         onEnsureDefaultProject={vi.fn()}
       />,
@@ -995,7 +1019,7 @@ describe("DraftThreadWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     const row = screen.getByRole("option", { name: /^No project/ });
-    expect(row).toHaveTextContent("/Users/ada/Documents/Octant/Work");
+    expect(row).toHaveTextContent("/Users/ada/Octant/Work");
     expect(row.textContent ?? "").not.toContain("//Work");
   });
 

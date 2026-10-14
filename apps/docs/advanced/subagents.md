@@ -248,8 +248,11 @@ runtime-derived [Code Thread Board](/advanced/code-board).
 Octant does not implement Swarm, a general task Kanban, or peer-to-peer
 agent messaging. A Code thread's agent can leave a short message for another
 thread of the same Project: Octant delivers it as untrusted data at the start
-of that thread's next turn, starts nothing there, and returns no reply. Child
-runs are not part of that. Active children cannot be detached, and there are
+of that thread's next turn, starts nothing there, and returns no reply. When
+Octant refuses such a message, whether the thread is in another Project, the
+sender is in Plan, or the recipient closed, the Agents Center lists it with the
+two threads and the reason, so a refusal is not seen by the sending agent
+alone. Child runs are not part of that. Active children cannot be detached, and there are
 no hidden per-thread routing rules. A child's turns count toward its parent
 thread's and Project's spend ceilings like the parent's own. A child on a
 provider that never reports usage, such as an ACP agent, is not measured

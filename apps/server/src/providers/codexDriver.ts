@@ -51,6 +51,7 @@ import {
   decodeAccountReadResult,
   decodeConfigReadResult,
   decodeModelListResult,
+  decodeSkillsListResult,
   decodeThreadResumeResult,
   decodeThreadStartResult,
   decodeThreadCompactStartResult,
@@ -64,6 +65,7 @@ import {
   type CodexRpcId,
   type CodexRateLimitsReadResult,
   type CodexServerMessage,
+  type CodexSkillsListResult,
   type CodexThreadResult,
   type CodexTurnResult,
   type CodexTurnSteerResult,
@@ -91,7 +93,8 @@ export interface CodexThreadStartInput {
   readonly serviceTier?: string;
   /**
    * app-server config overrides: `model_reasoning_effort` carries the reasoning
-   * selection, and a Work or Chat thread carries its mode's overrides.
+   * selection, every thread carries its Project skills switched off, and a
+   * Work or Chat thread carries its mode's overrides.
    */
   readonly config?: CodexThreadConfig;
   /** An empty list gives the thread no execution environment (Chat). */
@@ -106,7 +109,11 @@ export interface CodexThreadConfig {
   readonly "features.view_image"?: false;
   readonly "features.plugins"?: false;
   readonly "features.apps"?: false;
+  readonly project_doc_max_bytes?: 0;
   readonly mcp_servers?: Readonly<Record<string, { readonly enabled: false }>>;
+  readonly skills?: {
+    readonly config: ReadonlyArray<{ readonly path: string; readonly enabled: false }>;
+  };
 }
 
 export interface CodexThreadResumeInput {
@@ -124,9 +131,29 @@ export interface CodexThreadResumeInput {
  * raised `item/fileChange/requestApproval`. A thread does not keep these
  * overrides across `thread/resume`, so they are sent there too.
  */
-const CODEX_WORK_CONFIG = {
+const CODEX_SHELL_OFF_CONFIG = {
   "features.shell_tool": false,
   "features.unified_exec": false,
+} as const satisfies CodexThreadConfig;
+
+/**
+ * A Work turn does not read an agent brief already in the Project's folder.
+ * Codex loads every `AGENTS.md` (and `AGENTS.override.md` or a configured
+ * fallback name) from the repository root down to `cwd` into the model's
+ * instructions by itself; a project doc budget of zero bytes skips that
+ * discovery and leaves the user's own `$CODEX_HOME/AGENTS.md` in place.
+ * Measured against codex-cli 0.162.1 with turns sent to a local stand-in
+ * endpoint: a thread started in a Project holding an `AGENTS.md` sent its
+ * contents with the first turn, the same thread started or resumed with
+ * `project_doc_max_bytes = 0` did not, and a resume without the override sent
+ * them again, so it is stated on every resume like the shell overrides. Read
+ * at the Codex source tags, a zero budget has skipped discovery since 0.24.0
+ * and `thread/start` has applied its `config` since it arrived in 0.56.0, so
+ * every release with this protocol honors it.
+ */
+const CODEX_WORK_CONFIG = {
+  ...CODEX_SHELL_OFF_CONFIG,
+  project_doc_max_bytes: 0,
 } as const satisfies CodexThreadConfig;
 
 /**
@@ -150,7 +177,7 @@ const CODEX_WORK_CONFIG = {
  * name (see `codexChatThreadConfig`).
  */
 const CODEX_CHAT_CONFIG = {
-  ...CODEX_WORK_CONFIG,
+  ...CODEX_SHELL_OFF_CONFIG,
   "features.view_image": false,
   "features.plugins": false,
   "features.apps": false,
@@ -176,6 +203,90 @@ function codexChatThreadConfig(
         ]),
       ),
     })),
+  );
+}
+
+/**
+ * The `skills/list` scopes whose skills do not come from the Project: the
+ * user's own (`$CODEX_HOME/skills`, `~/.agents/skills`), Codex's bundled ones,
+ * and the administrator's. Any other scope, including one a later release
+ * adds, is treated as the Project's and switched off.
+ */
+const CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT = new Set(["user", "system", "admin"]);
+
+/** The first release that loads a Project's skills by itself (see below). */
+const CODEX_PROJECT_SKILLS_RELEASE = [0, 66, 0] as const;
+/** The first release that reads `skills.config` rules from a thread's `config`. */
+const CODEX_THREAD_SKILL_RULES_RELEASE = [0, 108, 0] as const;
+
+/**
+ * Codex loads every `.agents/skills` package in the folders from the
+ * repository root down to `cwd` by itself, as `scope: "repo"`, enabled, so a
+ * Project skill reached a turn without Octant's review, trust and enable
+ * steps. Measured against codex-cli 0.162.1 with `skills/list`: no setting
+ * stops that discovery. `features.skip_host_skill_discovery` is ignored by the
+ * app-server, `project_root_markers = []` still scans `cwd`, and a
+ * `skills.config` rule matches only one skill's exact name or `SKILL.md` path.
+ * So each Project skill found at `cwd` is switched off by its path; a name
+ * would also switch off a user skill of the same name. The listing bypasses
+ * Codex's cache because a skill added since the last listing would otherwise
+ * be missed. A package Codex could not load at listing time is switched off
+ * too: it is reported only by path, with no scope, and a read that failed
+ * once (codex-cli 0.162.1 reports a malformed `SKILL.md` the same way) could
+ * succeed on the next turn. A thread whose skills cannot be listed does not
+ * start.
+ *
+ * The rules hold for the thread as started or resumed: a skill created in the
+ * Project later is enabled from the next turn until the thread is resumed.
+ *
+ * Older releases, read at their source tags: `rust-v0.66.0` is the first to
+ * load a Project's skills by itself (`.codex/skills` at the repository root,
+ * behind a `skills` feature that is on by default from 0.79.0 and always on
+ * from 0.80.0; `.agents/skills` from 0.94.0). `skills/list` arrived in 0.73.0
+ * and `skills.config` path rules in 0.88.0, but until 0.108.0 those rules were
+ * read from the user's own config file only, never from a thread's `config`.
+ * A release from 0.66.0 up to 0.108.0 therefore refuses every thread. One
+ * older than 0.66.0 loads no Project skill and has no `skills/list`, so a
+ * method-not-found answer there leaves nothing to switch off.
+ */
+function codexProjectSkillsConfig(
+  client: CodexClientPort,
+  version: string,
+  cwd: string,
+): Effect.Effect<CodexThreadConfig["skills"], ProviderFailure> {
+  const projectSkillsOff = (result: CodexSkillsListResult) => ({
+    config: result.data.flatMap((entry) =>
+      [
+        ...entry.skills.filter((skill) => !CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT.has(skill.scope)),
+        ...entry.errors,
+      ].map((skill) => ({ path: skill.path, enabled: false as const })),
+    ),
+  });
+  if (isAtLeastRelease(version, CODEX_THREAD_SKILL_RULES_RELEASE)) {
+    return request(() => client.skillsList({ cwds: [cwd], forceReload: true })).pipe(
+      Effect.map(projectSkillsOff),
+    );
+  }
+  if (isAtLeastRelease(version, CODEX_PROJECT_SKILLS_RELEASE)) {
+    return Effect.fail(
+      failure(
+        "incompatible",
+        `Codex ${version} loads a Project's skills by itself and cannot switch them off for a thread. Update Codex to 0.108.0 or later.`,
+      ),
+    );
+  }
+  return Effect.tryPromise({
+    try: () => client.skillsList({ cwds: [cwd], forceReload: true }),
+    catch: (error) => error,
+  }).pipe(
+    Effect.map(projectSkillsOff),
+    Effect.catchAll((error) =>
+      error instanceof CodexRpcClientFailure &&
+      error.kind === "remote" &&
+      error.remoteCode === -32601
+        ? Effect.succeed(undefined)
+        : Effect.fail(providerFailure(error)),
+    ),
   );
 }
 
@@ -214,6 +325,10 @@ export interface CodexClientPort {
   rateLimitsRead(): Promise<CodexRateLimitsReadResult>;
   modelList(cursor?: string): Promise<CodexModelListResult>;
   configRead(input: { readonly cwd: string }): Promise<CodexConfigReadResult>;
+  skillsList(input: {
+    readonly cwds: readonly [string];
+    readonly forceReload: true;
+  }): Promise<CodexSkillsListResult>;
   threadStart(input: CodexThreadStartInput): Promise<CodexThreadResult>;
   threadResume(input: CodexThreadResumeInput): Promise<CodexThreadResult>;
   turnStart(input: CodexTurnStartInput): Promise<CodexTurnResult>;
@@ -652,6 +767,7 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
         decodeModelListResult,
       ),
     configRead: (input) => rpc.request("config/read", input, decodeConfigReadResult),
+    skillsList: (input) => rpc.request("skills/list", input, decodeSkillsListResult),
     threadStart: (input) => rpc.request("thread/start", input, decodeThreadStartResult),
     threadResume: (input) => rpc.request("thread/resume", input, decodeThreadResumeResult),
     turnStart: (input) => rpc.request("turn/start", input, decodeTurnStartResult),
@@ -936,10 +1052,17 @@ function makeConnection(
     })();
     let unsubscribe: (() => void) | undefined;
     let pendingLifecycleRegistrations = 0;
-    const modeThreadConfig = (): Effect.Effect<CodexThreadConfig | undefined, ProviderFailure> =>
-      mode === "chat"
-        ? codexChatThreadConfig(client, projectRoot)
-        : Effect.succeed(mode === "work" ? CODEX_WORK_CONFIG : undefined);
+    const modeThreadConfig = (): Effect.Effect<CodexThreadConfig, ProviderFailure> =>
+      Effect.gen(function* () {
+        const skills = yield* codexProjectSkillsConfig(client, version, projectRoot);
+        const modeConfig =
+          mode === "chat"
+            ? yield* codexChatThreadConfig(client, projectRoot)
+            : mode === "work"
+              ? CODEX_WORK_CONFIG
+              : {};
+        return skills === undefined ? modeConfig : { ...modeConfig, skills };
+      });
 
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
     const activate = (state: SessionState) => {
@@ -1293,15 +1416,14 @@ function makeConnection(
             }
             const dynamicTools = codexDynamicTools(input.tools);
             const modeConfig = yield* modeThreadConfig();
-            const config =
-              modeConfig === undefined ? undefined : { ...optionSettings.config, ...modeConfig };
+            const config = { ...optionSettings.config, ...modeConfig };
             const thread = yield* request(() =>
               client.threadStart({
                 cwd: projectRoot,
                 model: input.modelId,
                 ...settings,
                 ...optionSettings,
-                ...(config === undefined ? {} : { config }),
+                config,
                 ...(mode === "chat" ? { environments: [] as const } : {}),
                 ...(dynamicTools === undefined ? {} : { dynamicTools }),
               }),
@@ -1346,7 +1468,7 @@ function makeConnection(
                   // the same overrides, so they are stated on every resume.
                   client.threadResume({
                     threadId: input.resumeCursor.value,
-                    ...(modeConfig === undefined ? {} : { config: modeConfig }),
+                    config: modeConfig,
                   }),
                 catch: (error) =>
                   error instanceof CodexRpcClientFailure ? error : providerFailure(error),

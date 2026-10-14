@@ -40,6 +40,8 @@ function thread(overrides: {
   readonly providerInstanceId?: string;
   readonly title?: string;
   readonly completionConfirmed?: boolean;
+  /** A mark from an older client carried a note; a person's mark today has none. */
+  readonly completionNote?: string;
   readonly completedAt?: string;
 }): WorkThread {
   return decodeWorkThread({
@@ -48,15 +50,15 @@ function thread(overrides: {
     title: overrides.title ?? "Draft brief",
     lifecycle: overrides.lifecycle ?? "active",
     ...(overrides.completedAt === undefined ? {} : { completedAt: overrides.completedAt }),
-    ...(overrides.completionConfirmed === true
-      ? {
-          completionConfirmed: true,
+    ...(overrides.completionConfirmed === true ? { completionConfirmed: true } : {}),
+    ...(overrides.completionNote === undefined
+      ? {}
+      : {
           completionEvidence: {
             deliveryTarget: overrides.title ?? "Draft brief",
-            satisfactionEvidence: "The brief is in the Project root.",
+            satisfactionEvidence: overrides.completionNote,
           },
-        }
-      : {}),
+        }),
     providerInstanceId: overrides.providerInstanceId ?? ids.providerA,
     modelId: "model-a",
     workingDirectory: ".",
@@ -191,7 +193,7 @@ describe("WorkThreadBoardService derivation", () => {
     expect(decodeWorkBoardView(view)).toEqual(view);
   });
 
-  it("is Done only when the confirmed Work delivery target has objective evidence", async () => {
+  it("shows a thread a person marked Done in Done, with no evidence text", async () => {
     const board = service({
       threads: [boardThread({ thread: thread({ id: ids.done, completionConfirmed: true }) })],
     });
@@ -201,6 +203,21 @@ describe("WorkThreadBoardService derivation", () => {
     expect(card.statusReason).toBe("delivery-satisfied");
     expect(card.deliverySatisfaction).toBe("done");
     expect(card.deliveryTarget).toBe("Draft brief");
+  });
+
+  it("keeps a marked thread Done after it is renamed", async () => {
+    const board = service({
+      threads: [
+        boardThread({
+          thread: decodeWorkThread({
+            ...thread({ id: ids.done, completionConfirmed: true, completionNote: "Saved." }),
+            title: "Renamed brief",
+          }),
+        }),
+      ],
+    });
+    const view = await board.query(decodeWorkBoardQuery({ version: 1 }));
+    expect(cardFor(view.cards, ids.done).status).toBe("done");
   });
 
   it("does not treat a completed model turn as Done when the delivery target is unmet", async () => {
@@ -214,16 +231,16 @@ describe("WorkThreadBoardService derivation", () => {
     expect(card.deliverySatisfaction).not.toBe("done");
   });
 
-  it("waits when confirmation evidence is stale even if the user confirmed", async () => {
+  it("keeps a marked thread Done when its supporting evidence goes stale", async () => {
     const board = service({
       threads: [boardThread({ thread: thread({ id: ids.done, completionConfirmed: true }) })],
       evidence: () => emptyEvidence({ staleEvidence: true }),
     });
     const view = await board.query(decodeWorkBoardQuery({ version: 1 }));
     const card = cardFor(view.cards, ids.done);
-    expect(card.status).toBe("waiting");
-    expect(card.statusReason).toBe("delivery-waiting");
-    expect(card.deliverySatisfaction).toBe("waiting");
+    expect(card.status).toBe("done");
+    expect(card.deliverySatisfaction).toBe("done");
+    expect(card.staleEvidence).toBe(true);
   });
 
   it("keeps a recovering thread visible and in Waiting", async () => {
@@ -301,19 +318,19 @@ describe("WorkThreadBoardService derivation", () => {
     expect(card.lastMeaningfulActivityAt).toBe(now);
   });
 
-  it("waits when confirmed delivery still has unacknowledged child runs", async () => {
+  it("keeps a marked thread Done while child runs are outstanding", async () => {
     const board = service({
       threads: [boardThread({ thread: thread({ id: ids.done, completionConfirmed: true }) })],
       evidence: () =>
         emptyEvidence({
-          childRuns: { active: 0, completed: 1, failed: 0, unacknowledgedResults: 1 },
+          childRuns: { active: 1, completed: 1, failed: 0, unacknowledgedResults: 1 },
         }),
     });
     const view = await board.query(decodeWorkBoardQuery({ version: 1 }));
     const card = cardFor(view.cards, ids.done);
-    expect(card.status).toBe("waiting");
-    expect(card.statusReason).toBe("delivery-waiting");
-    expect(card.deliverySatisfaction).toBe("waiting");
+    expect(card.status).toBe("done");
+    expect(card.deliverySatisfaction).toBe("done");
+    expect(card.childRuns.unacknowledgedResults).toBe(1);
   });
 
   it("does not include a thread the window-filtered source omitted", async () => {

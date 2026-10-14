@@ -220,6 +220,13 @@ servers, replacing raw results with artifact references, reducing the output
 reserve, switching to a larger-context model, or starting a fresh thread with
 a structured handoff.
 
+A turn can also stop as **Interrupted** because the provider has no capacity
+for it right now. The turn says why and, when Octant knows, how long to wait:
+for example, after a provider rate-limits a turn, Octant holds new turns on
+that provider for the wait the provider asked for, up to a minute, and then
+sends them again. A turn that failed for another reason, such as a request the
+endpoint rejected, shows that error instead, and your next turn runs as usual.
+
 ## Unreported thread usage
 
 A new or unused fork has no provider usage report of its own. Its context

@@ -1,6 +1,7 @@
 import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 import { unavailable } from "./moduleState";
 import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
+import { NativeHarnessEgressCard } from "../harness/NativeHarnessEgressCard";
 import { NativeHarnessSessionCard } from "../harness/NativeHarnessSessionCard";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 
@@ -23,6 +24,12 @@ export default function AgentsModule(props: Props) {
     <>
       {props.nativeHarnessClient === undefined ? null : (
         <NativeHarnessSessionCard
+          client={props.nativeHarnessClient}
+          threadId={props.subject.threadId}
+        />
+      )}
+      {props.nativeHarnessClient === undefined || props.subject.mode !== "code" ? null : (
+        <NativeHarnessEgressCard
           client={props.nativeHarnessClient}
           threadId={props.subject.threadId}
         />
