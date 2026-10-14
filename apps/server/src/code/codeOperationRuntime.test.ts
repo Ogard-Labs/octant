@@ -670,7 +670,28 @@ describe("CodeOperationRuntime", () => {
         entered.resolve();
         return stuck.promise;
       });
-      return { entered: entered.promise, release: () => stuck.resolve("secret"), resolve };
+      return {
+        entered: entered.promise,
+        release: (value: string | undefined) => stuck.resolve(value),
+        resolve,
+      };
+    }
+
+    /** A spend ceiling that admits every turn and records what it gave and got back. */
+    function recordingSpendCeiling() {
+      const admit = vi.fn((_input: { readonly reservationId: string }) => ({
+        status: "admitted" as const,
+        reservedTokens: 100,
+        reservations: [
+          { scopeKind: "thread" as const, scopeId: String(threadId), reservedTokens: 100 },
+        ],
+      }));
+      const settle = vi.fn((_input: { readonly reservationId: string }) => undefined);
+      return {
+        spendCeiling: { admit, settle },
+        admitted: () => admit.mock.calls.map(([input]) => String(input.reservationId)),
+        settled: () => settle.mock.calls.map(([input]) => String(input.reservationId)),
+      };
     }
 
     const start = (id: number) =>
@@ -724,7 +745,7 @@ describe("CodeOperationRuntime", () => {
         });
         await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
 
-        credential.release();
+        credential.release("secret");
         await expect(stopped).resolves.toMatchObject({
           kind: "provider-turn-state",
           state: "interrupted",
@@ -752,66 +773,115 @@ describe("CodeOperationRuntime", () => {
       }
     });
 
-    it("does not launch a stopped recovered start again when its operation is retried", async () => {
-      const stalledQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
-      const stalled = {
-        ...providerConnection(stalledQueue),
-        send: vi.fn(() => Effect.never),
-      } as ProviderConnection;
-      const fixture = runtimeFixture({ provider: providerDriver(stalled) });
+    it.each([
+      { ending: "is refused at its admission check", read: "secret" },
+      { ending: "then fails on its own", read: undefined },
+    ])(
+      "does not launch a stopped recovered start again when its operation is retried, and its preparation $ending",
+      async ({ read }) => {
+        const stalledQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+        const stalled = {
+          ...providerConnection(stalledQueue),
+          send: vi.fn(() => Effect.never),
+        } as ProviderConnection;
+        const fixture = runtimeFixture({ provider: providerDriver(stalled) });
+        const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+        const connection = providerConnection(queue);
+        const credential = stuckFirstCredentialRead();
+        let restarted: ReturnType<typeof runtimeFixture> | undefined;
+        try {
+          // The host stops after the start answered `running` and before the
+          // provider produced anything, so the next host recovers the start.
+          await expect(fixture.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "running",
+          });
+          await vi.waitFor(() => expect(stalled.send).toHaveBeenCalledOnce());
+          const spend = recordingSpendCeiling();
+          restarted = runtimeFixture({
+            provider: providerDriver(connection),
+            credentialReferences,
+            credentialResolver: { resolve: credential.resolve },
+            spendCeiling: spend.spendCeiling,
+            restartOf: { directory: fixture.directory, evidenceValues: fixture.evidenceValues },
+          });
+
+          const recovering = restarted.runtime.execute(windowId, start(51));
+          await credential.entered;
+          await expect(restarted.runtime.execute(windowId, stop(52))).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "interrupted",
+          });
+          expect(
+            restarted.conversation().turns.find((turn) => turn.operationId === operationId(51))
+              ?.status,
+          ).toBe("interrupted");
+
+          // A retry answers from the journal rather than preparing the turn again.
+          await expect(restarted.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "interrupted",
+          });
+          expect(credential.resolve).toHaveBeenCalledOnce();
+
+          // The retry reused the operation's reservation rather than replacing it.
+          expect(spend.admitted()).toHaveLength(1);
+
+          // Whatever the preparation answers once it returns, the start reads as
+          // the stop Stop journaled.
+          credential.release(read);
+          await expect(recovering).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "interrupted",
+          });
+          await expect(restarted.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "interrupted",
+          });
+          expect(credential.resolve).toHaveBeenCalledOnce();
+          expect(connection.start).not.toHaveBeenCalled();
+          expect(connection.resume).not.toHaveBeenCalled();
+          expect(connection.send).not.toHaveBeenCalled();
+          // Every reservation taken was given back exactly once.
+          expect(spend.admitted()).toHaveLength(2);
+          expect(spend.settled().toSorted()).toEqual(spend.admitted().toSorted());
+        } finally {
+          await restarted?.runtime.close();
+          restarted?.close();
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      },
+    );
+
+    it("gives back the reservation of a retry answered from the journal for a turn that already ended", async () => {
       const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
       const connection = providerConnection(queue);
-      const credential = stuckFirstCredentialRead();
-      let restarted: ReturnType<typeof runtimeFixture> | undefined;
+      const spend = recordingSpendCeiling();
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        spendCeiling: spend.spendCeiling,
+      });
       try {
-        // The host stops after the start answered `running` and before the
-        // provider produced anything, so the next host recovers the start.
-        await expect(fixture.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+        await expect(fixture.runtime.execute(windowId, start(61))).resolves.toMatchObject({
           kind: "provider-turn-state",
           state: "running",
         });
-        await vi.waitFor(() => expect(stalled.send).toHaveBeenCalledOnce());
-        restarted = runtimeFixture({
-          provider: providerDriver(connection),
-          credentialReferences,
-          credentialResolver: { resolve: credential.resolve },
-          restartOf: { directory: fixture.directory, evidenceValues: fixture.evidenceValues },
-        });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+        await Effect.runPromise(
+          Queue.offer(queue, providerEvent({ kind: "text-delta", text: "Done." })),
+        );
+        await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+        await vi.waitFor(() => expect(spend.settled()).toHaveLength(1));
 
-        const recovering = restarted.runtime.execute(windowId, start(51));
-        await credential.entered;
-        await expect(restarted.runtime.execute(windowId, stop(52))).resolves.toMatchObject({
+        await expect(fixture.runtime.execute(windowId, start(61))).resolves.toMatchObject({
           kind: "provider-turn-state",
-          state: "interrupted",
+          state: "running",
         });
-        expect(
-          restarted.conversation().turns.find((turn) => turn.operationId === operationId(51))
-            ?.status,
-        ).toBe("interrupted");
-
-        // A retry answers from the journal rather than preparing the turn again.
-        await expect(restarted.runtime.execute(windowId, start(51))).resolves.toMatchObject({
-          kind: "provider-turn-state",
-          state: "interrupted",
-        });
-        expect(credential.resolve).toHaveBeenCalledOnce();
-
-        credential.release();
-        await expect(recovering).resolves.toMatchObject({
-          kind: "provider-turn-state",
-          state: "interrupted",
-        });
-        await expect(restarted.runtime.execute(windowId, start(51))).resolves.toMatchObject({
-          kind: "provider-turn-state",
-          state: "interrupted",
-        });
-        expect(credential.resolve).toHaveBeenCalledOnce();
-        expect(connection.start).not.toHaveBeenCalled();
-        expect(connection.resume).not.toHaveBeenCalled();
-        expect(connection.send).not.toHaveBeenCalled();
+        expect(spend.admitted()).toHaveLength(2);
+        expect(spend.settled().toSorted()).toEqual(spend.admitted().toSorted());
+        expect(connection.send).toHaveBeenCalledOnce();
       } finally {
-        await restarted?.runtime.close();
-        restarted?.close();
         await fixture.runtime.close();
         fixture.close();
       }

@@ -1186,6 +1186,8 @@ export function createCodeOperationRuntime(
       // compaction check until it is launched or refused, because it reads the
       // session it resumes while it is prepared.
       let heldStart: string | undefined;
+      /** Whether this call took the operation's spend reservation, and so gives it back. */
+      let ownsReservation = false;
       try {
         const command = decodeCodeOperationCommand(rawCommand);
         if (command.kind === "start-provider-turn") {
@@ -1274,7 +1276,15 @@ export function createCodeOperationRuntime(
               }),
             );
           }
-          if (thread !== undefined && options.spendCeiling !== undefined) {
+          // A retry of an operation that still holds its reservation (its first
+          // call still preparing, or its turn still live) reserves nothing more;
+          // a second reservation under the same operation would replace the
+          // first, which then was never given back.
+          if (
+            thread !== undefined &&
+            options.spendCeiling !== undefined &&
+            !spendReservations.has(String(command.operationId))
+          ) {
             const spendReservationId = decodeSpendCeilingReservationId(options.uuid());
             const spendAdmission = options.spendCeiling.admit({
               reservationId: spendReservationId,
@@ -1292,6 +1302,7 @@ export function createCodeOperationRuntime(
               );
             }
             spendReservations.set(String(command.operationId), spendReservationId);
+            ownsReservation = true;
           }
           turns.noteStart(command);
         }
@@ -1304,7 +1315,11 @@ export function createCodeOperationRuntime(
           if (command.kind === "start-provider-turn") {
             if (result.kind === "provider-turn-state" && result.state === "running") {
               turns.launch(command.threadId);
-            } else {
+              // A `running` answered from the journal, for a turn that already
+              // ended, leaves no live turn to give back what this call reserved.
+              if (ownsReservation && !turns.runsOperation(command.operationId))
+                turns.settleSpendReservation(command.operationId);
+            } else if (ownsReservation) {
               turns.settleSpendReservation(command.operationId);
             }
           }
@@ -1325,7 +1340,7 @@ export function createCodeOperationRuntime(
           // A throw is the service refusing or breaking, not the work finishing.
           // The record closes rather than staying open for a unit that will never
           // report again.
-          if (command.kind === "start-provider-turn") {
+          if (command.kind === "start-provider-turn" && ownsReservation) {
             turns.settleSpendReservation(command.operationId);
           }
           if (observed !== undefined)
@@ -2017,6 +2032,13 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     // A retry of the same operation noted its own command meanwhile.
     if (this.#pending.get(String(command.operationId)) === command)
       this.#pending.delete(String(command.operationId));
+  }
+
+  /** Whether a live turn runs under this operation. */
+  runsOperation(operationId: CodeOperationId): boolean {
+    for (const active of this.#active.values())
+      if (String(active.operationId) === String(operationId)) return true;
+    return false;
   }
 
   launch(threadId: CodeThreadId): void {

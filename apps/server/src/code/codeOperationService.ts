@@ -1225,7 +1225,9 @@ export class CodeOperationService {
                 // an intervening parent admission cannot acquire a stale delivery mark.
                 const afterCheckpoint = this.#agentResultDelivery(command);
                 if (afterCheckpoint !== undefined) {
-                  // The delivery's own result stands; a Stop has nothing to journal.
+                  // The delivery's own result stands, unless a Stop already
+                  // journaled this start; then a Stop has nothing more to journal.
+                  if (startingTurn?.journaled === true) return startingTurn.stopped;
                   if (startingTurn !== undefined) startingTurn.journaled = true;
                   return afterCheckpoint;
                 }
@@ -1394,9 +1396,15 @@ export class CodeOperationService {
         recordedTurnAttachments(frames),
         () => !held.cancelled && admissionCurrent?.() !== false,
       );
-      if (held.cancelled && "admission" in recovered && recovered.admission === "refused") {
-        // Its journal still says `running`; without the stop on record, a
-        // retry of this operation would recover and launch it again.
+      // Stopped before the runtime took it on: whatever the preparation then
+      // answered (the admission refusal, or a failure of its own), the start
+      // reads as stopped, as Stop may already have journaled. Its journal
+      // still says `running`; without the stop on record, a retry of this
+      // operation would recover and launch it again.
+      const takenOn =
+        recovered.kind === "provider-turn-state" &&
+        (recovered.state === "running" || recovered.state === "waiting");
+      if (held.journaled || (held.cancelled && !takenOn)) {
         this.#journalStoppedStart(held);
         return stopped;
       }
@@ -1405,6 +1413,10 @@ export class CodeOperationService {
         ? recovered
         : cached;
     } catch {
+      if (startingTurn?.cancelled === true) {
+        this.#journalStoppedStart(startingTurn);
+        return stopped;
+      }
       return this.#failed(command.operationId, "failed", "Code provider turn recovery failed.");
     } finally {
       if (startingTurn !== undefined) this.#startingTurns.delete(startingTurn);
