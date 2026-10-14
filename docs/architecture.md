@@ -5069,11 +5069,11 @@ mechanisms are:
   wrote session records in `sessions/`, its transcript in `projects/`, and
   `.claude.json` (with a lock, a temporary file and a copy in `backups/`)
   and `.last-cleanup` at the top of the leaf. The top-level writes are
-  refused. Under the narrowed grant a confined launch refused its
-  `.claude.json` saves and still initialized and reported ready, and a
-  launch on the person's own `~/.claude`, whose `.claude.json` sits in the
-  home folder outside any grant, already passed every Plan smoke stage.
-  That keeps a Plan
+  refused, and the runtime carries on without them: a second measured
+  Plan turn under this grant answered and completed while its
+  `.claude.json` lock and temporary file and its `.last-cleanup` were
+  denied, its transcript landed in `projects/`, and the sandbox refused
+  nothing else that the first turn had been allowed. That keeps a Plan
   launch from writing what a later session outside this sandbox would
   load: `settings.json` and its hooks, `.claude.json` and its per-project
   MCP servers, `skills/`, `plugins/`, `agents/` and `commands/`. An
@@ -5081,8 +5081,9 @@ mechanisms are:
   Plan launch that was allowed to run Git. A subscription login kept in a
   file rather than the macOS Keychain, as on Linux, is the one file also
   writable, `.credentials.json` in the secure-storage directory, so the
-  runtime can save a refreshed login. An API-key launch and a macOS
-  launch get no such file. `projects/` stays writable because resume
+  runtime can save a refreshed login (maintainer decision, 2026-10-14).
+  The cost is that a Plan launch there could replace the stored login. An
+  API-key launch and a macOS launch get no such file. `projects/` stays writable because resume
   reads transcripts from there, so other sessions' transcripts and the
   per-project `memory/` folders beside them, which a later session also
   reads, stay writable too.

@@ -515,10 +515,9 @@ function claudeAccountStateDirectories(environment: SpawnOptions["env"]): {
  * global `.claude.json` carries per-project MCP servers, `settings.json` its
  * hooks, and `skills/`, `plugins/`, `agents/` and `commands/` what a later
  * session loads, so a Plan launch able to write any of them could plant code
- * that runs on a later turn outside this sandbox. Measured under this grant,
- * a launch refused its `.claude.json` saves and still initialized; a launch on
- * the person's own `~/.claude` keeps that file in the home folder, outside
- * every grant, and already passed every Plan smoke stage.
+ * that runs on a later turn outside this sandbox. A second measured Plan turn
+ * under this grant answered and completed with its `.claude.json` saves and
+ * `.last-cleanup` refused, and its transcript still written to `projects/`.
  */
 const CLAUDE_PLAN_RUNTIME_STATE_FOLDERS = ["sessions", "projects"] as const;
 
@@ -530,9 +529,10 @@ const CLAUDE_PLAN_RUNTIME_STATE_FOLDERS = ["sessions", "projects"] as const;
  * only a folder that exists. On a host that keeps the subscription sign-in in
  * a file rather than the macOS Keychain, the runtime refreshes that one file,
  * `.credentials.json` in the secure-storage directory (the configuration
- * directory when none is named), and it stays writable. It is the only file
- * granted, and only where it is the login: a launch with an API key, or on
- * macOS, gets none.
+ * directory when none is named), and it stays writable so a refreshed login
+ * is kept (a maintainer decision of 2026-10-14, accepting that such a launch
+ * could replace the stored login). It is the only file granted, and only where
+ * it is the login: a launch with an API key, or on macOS, gets none.
  */
 function planStateWriteRoots(
   boundRoot: string,
