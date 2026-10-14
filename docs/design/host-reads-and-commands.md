@@ -145,7 +145,10 @@ A host without a window route answers 404, and the client reads the thread's
 whole-transcript route instead and shows it as fully loaded. For Code the phone
 and the CLI walk the forward read to its end and keep only its tail, the same
 newest turns the window would answer; the CLI asks the window once per thread
-and starts each later walk at the page its shown tail began on. A fresh newest
+and starts each later walk at the page its shown tail began on. A walk cut off
+by its 100-page bound never passes an older run off as the newest: the phone
+refuses the read, and the CLI shows nothing and continues the walk on its next
+read. A fresh newest
 window joins what the client holds when its first turn is already loaded;
 otherwise it replaces it, so the client never holds two runs with a gap
 between them. Row keys name the turn and never its position, which keeps the

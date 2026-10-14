@@ -317,7 +317,8 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
       readonly turns: ReadonlyArray<CodeConversationTurn>;
     }> = [];
     let cursor = forward.tailFrom;
-    for (let count = 1; ; count += 1) {
+    let reachedEnd = false;
+    for (let count = 1; count <= MAX_CODE_FORWARD_PAGES; count += 1) {
       const response = await session.send({
         path: `${path}?afterCursor=${cursor}&limit=${MAX_CODE_CONVERSATION_PAGE_SIZE}`,
         method: "GET",
@@ -325,7 +326,11 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
       if (response.status !== 200) return undefined;
       const page = decodeHostAnswer(CodeConversationPage)(response.body);
       pages.push({ from: cursor, turns: page.turns });
-      if (!page.hasMore || page.nextCursor <= cursor || count >= MAX_CODE_FORWARD_PAGES) break;
+      if (!page.hasMore) {
+        reachedEnd = true;
+        break;
+      }
+      if (page.nextCursor <= cursor) return undefined;
       cursor = page.nextCursor;
     }
     let first = pages.length;
@@ -334,6 +339,10 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
       counted += pages[first]?.turns.length ?? 0;
     }
     forward.tailFrom = pages[first]?.from ?? forward.tailFrom;
+    // A walk cut off by the page bound has not seen the newest turns, so it
+    // shows nothing rather than an older run as the newest; the next read
+    // continues from where this one got to.
+    if (!reachedEnd) return undefined;
     const held = pages.slice(first).flatMap((page) => page.turns);
     return {
       turns: held.slice(-CODE_THREAD_TURNS),
@@ -361,8 +370,10 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
     threadId,
     read: async () => {
       const [current, page] = await Promise.all([view(), conversation()]);
-      if (current === undefined) return undefined;
-      const turns = page?.turns ?? [];
+      // Without its turns the snapshot would show an empty or older thread as
+      // current, and a branch would start from the wrong turn.
+      if (current === undefined || page === undefined) return undefined;
+      const turns = page.turns;
       const wanted = turns.flatMap((turn) => [
         { operationId: String(turn.operationId), contentId: String(turn.prompt.contentId) },
         ...turn.assistant.map((ref) => ({
@@ -393,7 +404,7 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
         providerInstanceId: String(current.thread.providerInstanceId),
         modelId: String(current.thread.modelId),
         version: current.thread.version,
-        ...(page?.hasEarlier === true ? { hasEarlier: true } : {}),
+        ...(page.hasEarlier ? { hasEarlier: true } : {}),
         turns: turns.map((turn) => ({
           id: String(turn.operationId),
           at: turn.startedAt,

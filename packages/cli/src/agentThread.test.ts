@@ -244,7 +244,12 @@ describe("reading a long Code thread in the terminal", () => {
       windowId: "11111111-1111-4111-8111-111111111111",
       send: async (request) => {
         paths.push(request.path);
-        const turns = Array.from({ length: count() }, (_, index) => turn(index + 1));
+        const total = count();
+        // Only the asked-for run is built, so a very long thread stays cheap.
+        const turns = (from: number, to: number) =>
+          Array.from({ length: Math.max(0, Math.min(to, total) - from) }, (_, index) =>
+            turn(from + index + 1),
+          );
         const [path = "", query = ""] = request.path.split("?");
         const params = new URLSearchParams(query);
         if (path === `/api/code/threads/${threadId}`) return { status: 200, body: threadView };
@@ -255,15 +260,15 @@ describe("reading a long Code thread in the terminal", () => {
             body: {
               version: 1,
               threadId,
-              turns: turns.slice(-limit),
-              hasEarlier: turns.length > limit,
+              turns: turns(Math.max(0, total - limit), total),
+              hasEarlier: total > limit,
               hasLater: false,
             },
           };
         }
         if (path === conversation) {
           const after = Number(params.get("afterCursor"));
-          const page = turns.slice(after, after + Number(params.get("limit")));
+          const page = turns(after, after + Number(params.get("limit")));
           return {
             status: 200,
             body: {
@@ -271,7 +276,7 @@ describe("reading a long Code thread in the terminal", () => {
               threadId,
               turns: page,
               nextCursor: after + page.length,
-              hasMore: after + page.length < turns.length,
+              hasMore: after + page.length < total,
             },
           };
         }
@@ -337,5 +342,18 @@ describe("reading a long Code thread in the terminal", () => {
     expect(second?.turns.map((entry) => entry.prompt)).toEqual(expectedPrompts(251));
     expect(fake.paths.some((path) => path.includes("/window"))).toBe(false);
     expect(fake.paths.some((path) => path.includes("afterCursor=0&"))).toBe(false);
+  });
+
+  it("shows nothing rather than an older run when the forward walk stops at its page bound", async () => {
+    // One hundred forward pages of 100 turns stop short of the newest 50.
+    const fake = longThreadHost(() => 10_050, false);
+    const port = agentThreadPort(fake.session, "code", threadId);
+
+    await expect(port.read()).resolves.toBeUndefined();
+
+    // The next read continues from where the cut-off walk got to.
+    const next = await port.read();
+    expect(next?.turns.map((entry) => entry.prompt)).toEqual(expectedPrompts(10_050));
+    expect(next?.hasEarlier).toBe(true);
   });
 });

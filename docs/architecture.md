@@ -1759,7 +1759,9 @@ flowchart LR
   whole, and its window read starts from the newest turns without scanning the
   thread; a fork's earlier pages continue into its source at the fork point.
   The forward Code conversation read is unchanged for export, forks, hand-off,
-  mentions, the phone, and the CLI.
+  mentions, and the CLI's live feed. The phone and the CLI open a Code thread
+  on its newest window without Load earlier, and read the tail of the forward
+  read from a host without the window route.
   The older whole-transcript route answers with the newest 64 turns of a longer
   thread, oldest first; export and `#thread` mentions read the whole thread on
   the host. One post-commit Machine change feed invalidates mode
