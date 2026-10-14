@@ -493,6 +493,171 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  describe("an in-place restore beside a turn that is still preparing to start", () => {
+    const restoringThreadId = decodeCodeThreadId("90000000-0000-4000-8000-0000000000a1");
+
+    /**
+     * A writing turn on the thread under test, held in credential resolution:
+     * its checkpoint is captured and the runtime has not yet taken it on.
+     */
+    async function preparingTurn(restoringProjectId?: string) {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const entered = Promise.withResolvers<void>();
+      const credential = Promise.withResolvers<string | undefined>();
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        gitObservation: readyGitObservation([]),
+        gitTreeChanges: [],
+        credentialReferences: [{ environmentName: "TOKEN", reference: "token" }],
+        credentialResolver: {
+          resolve: () => {
+            entered.resolve();
+            return credential.promise;
+          },
+        },
+      });
+      fixture.setOtherThread(
+        decodeCodeThread({
+          ...thread(),
+          id: restoringThreadId,
+          title: "Restoring thread",
+          ...(restoringProjectId === undefined ? {} : { projectId: restoringProjectId }),
+        }),
+      );
+      const starting = fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(31),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await entered.promise;
+      const restore = (id: number) =>
+        fixture.runtime.execute(windowId, {
+          kind: "restore-git-checkpoint",
+          operationId: operationId(id),
+          gitOperationId: operationId(id + 1) as never,
+          threadId: restoringThreadId,
+          checkoutId,
+          checkpoint: { worktree: "c".repeat(40), index: "d".repeat(40) } as never,
+        });
+      return { fixture, connection, starting, credential, restore };
+    }
+
+    it.each([
+      {
+        from: "the same Project",
+        projectId: undefined,
+        message:
+          'Another thread is writing in this checkout: "Runtime". Wait for its turn to finish or stop it, then restore.',
+      },
+      {
+        from: "another Project on the same folder",
+        projectId: "abababab-abab-4bab-8bab-abababababab",
+        message:
+          "A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then restore.",
+      },
+    ])(
+      "refuses a restore from $from and leaves the files alone until the turn has run",
+      async ({ projectId, message }) => {
+        const { fixture, starting, credential, restore } = await preparingTurn(projectId);
+
+        await expect(restore(32)).resolves.toMatchObject({
+          kind: "operation-failed",
+          failure: { category: "conflict", message },
+        });
+        expect(fixture.restoredTrees()).toBe(0);
+
+        credential.resolve("secret");
+        await expect(starting).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "running",
+        });
+        await fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(34),
+          threadId,
+          checkoutId,
+        });
+
+        // The fixture's Git fails every overwrite; what matters is that the
+        // restore reached it once the turn no longer held the checkout.
+        await expect(restore(35)).resolves.toMatchObject({
+          kind: "git-mutation-state",
+          mutation: "restore-checkpoint",
+        });
+        expect(fixture.restoredTrees()).toBe(1);
+        fixture.close();
+      },
+    );
+
+    it("releases the checkout when a turn is stopped while its preparation never returns", async () => {
+      const { fixture, connection, starting, credential, restore } = await preparingTurn();
+      await expect(restore(32)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "conflict" },
+      });
+
+      await expect(
+        fixture.runtime.execute(windowId, {
+          kind: "cancel-provider-turn",
+          operationId: operationId(34),
+          threadId,
+          checkoutId,
+        }),
+      ).resolves.toMatchObject({ kind: "provider-turn-state", state: "interrupted" });
+      // The credential read is still outstanding; the restore no longer waits on it.
+      await expect(restore(35)).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        mutation: "restore-checkpoint",
+      });
+      expect(fixture.restoredTrees()).toBe(1);
+
+      // When the read finally returns, the stopped turn never reaches its provider.
+      credential.resolve("secret");
+      await expect(starting).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "interrupted",
+      });
+      expect(connection.start).not.toHaveBeenCalled();
+      expect(connection.send).not.toHaveBeenCalled();
+      fixture.close();
+    });
+
+    it.each([
+      {
+        exit: "is refused",
+        settle: (credential: PromiseWithResolvers<string | undefined>) =>
+          credential.resolve(undefined),
+        outcome: { kind: "provider-turn-state", state: "failed" },
+      },
+      {
+        exit: "fails",
+        settle: (credential: PromiseWithResolvers<string | undefined>) =>
+          credential.reject(new Error("Keychain read failed.")),
+        outcome: { kind: "operation-failed", failure: { category: "failed" } },
+      },
+    ])("lets a restore through once a preparing turn $exit", async ({ settle, outcome }) => {
+      const { fixture, starting, credential, restore } = await preparingTurn();
+      await expect(restore(32)).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: { category: "conflict" },
+      });
+
+      settle(credential);
+      await expect(starting).resolves.toMatchObject(outcome);
+
+      await expect(restore(35)).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        mutation: "restore-checkpoint",
+      });
+      expect(fixture.restoredTrees()).toBe(1);
+      fixture.close();
+    });
+  });
+
   it("releases the spend reservation when a Code turn fails to start", async () => {
     const settle = vi.fn();
     const admit = vi.fn().mockReturnValue({
@@ -5278,6 +5443,7 @@ function runtimeFixture(options: {
   }
   let activeThread = thread();
   const snapshotPolicies: Array<string | undefined> = [];
+  let restoredTrees = 0;
   const checkout = decodeCodeCheckoutIdentity({
     id: checkoutId,
     repositoryId: activeThread.repositoryId,
@@ -5598,7 +5764,10 @@ function runtimeFixture(options: {
               anchorId: "3f1b0c9a-5d42-4e77-9a1c-6b2e8f0d4c31",
             };
       },
-      restoreWorkingTree: async () => ({ status: "failed" as const }),
+      restoreWorkingTree: async () => {
+        restoredTrees += 1;
+        return { status: "failed" as const };
+      },
       releaseCheckpoint: async () => {},
     },
   });
@@ -5623,6 +5792,8 @@ function runtimeFixture(options: {
       otherThreads.set(String(next.id), next);
     },
     snapshotPolicies,
+    /** How many times Git was asked to overwrite the working tree. */
+    restoredTrees: () => restoredTrees,
     /** Fire the shell's own exit, the way a `exit` typed into it would. */
     exitTerminal: () => exitTerminal?.(),
     /** Every runtime work state this runtime journalled, oldest first. */

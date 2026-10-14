@@ -57,6 +57,7 @@ import {
   clampTurnAccessPosture,
   inPlaceRestoreRefusalText,
   mayWriteToRepository,
+  turnBlocksInPlaceRestore,
   type CodeOperation,
 } from "@octant/domain/code-policy";
 import {
@@ -881,6 +882,17 @@ export interface CodeOperationServiceOptions {
   };
 }
 
+/**
+ * A turn holding its checkout root while it starts. Stopping it marks it
+ * cancelled and releases the root at once: a preparation step that never
+ * returns (a stuck credential read) must not block restores until a restart.
+ */
+interface StartingTurn {
+  readonly thread: CodeThread;
+  readonly checkoutRoot: string;
+  cancelled: boolean;
+}
+
 export class CodeOperationService {
   readonly #options: CodeOperationServiceOptions;
   readonly #terminalOwners = new Map<string, TerminalOwner>();
@@ -893,6 +905,23 @@ export class CodeOperationService {
       readonly done: Promise<void>;
     }
   >();
+  /**
+   * Turns between their checkpoint capture and the runtime taking them on.
+   * The runtime reports a turn as live only once credentials, session seeding
+   * and fork preparation are done; a restore that landed before then passed
+   * its check, and the turn then started on the overwritten files.
+   */
+  readonly #startingTurns = new Set<StartingTurn>();
+  /**
+   * In-place restores past their check and still overwriting files. Git
+   * queues work per checkout id, and two Projects on one folder have two ids,
+   * so a turn starting in the other Project would not wait for the overwrite;
+   * nor would a recovered start, which captures no checkpoint.
+   */
+  readonly #restoresInFlight = new Set<{
+    readonly checkoutRoot: string;
+    readonly settled: Promise<unknown>;
+  }>();
 
   async cancelPendingRepositoryTests(): Promise<void> {
     const pending = [...this.#pendingTests.values()];
@@ -1090,80 +1119,112 @@ export class CodeOperationService {
                     turnAccessPosture(scope.thread, command, recordedStart?.event.executionPolicy),
                   )
                 : scope.thread;
-            let turnRefusal =
+            // A writing turn holds its checkout against an in-place restore
+            // from before its checkpoint is captured until the runtime has
+            // either taken it on, and so reports it live, or let it go.
+            const startingTurn: StartingTurn | undefined =
               command.kind === "start-provider-turn"
-                ? this.#refuseInvalidAgentRunDelivery(command)
+                ? { thread: turnThread, checkoutRoot: root.checkoutRoot, cancelled: false }
                 : undefined;
-            if (
-              command.kind === "start-provider-turn" &&
-              recordedStart === undefined &&
-              turnRefusal === undefined
-            ) {
-              const checkpoint = await this.#checkpoint(
-                turnThread,
-                scope.checkout.id,
-                root.checkoutRoot,
-              );
-              // Check again after the asynchronous checkpoint so a changed generation or
-              // an intervening parent admission cannot acquire a stale delivery mark.
-              const afterCheckpoint = this.#agentResultDelivery(command);
-              if (afterCheckpoint !== undefined) return afterCheckpoint;
-              if (options.admissionCurrent?.() === false) {
-                turnRefusal = this.#failed(
-                  command.operationId,
-                  "unauthorized",
-                  "Code turn admission is no longer current.",
-                  "refused",
-                );
-              } else {
-                this.#options.events.append({
-                  threadId: command.threadId,
-                  operationId: command.operationId,
-                  expectedCursor: resultCursor,
-                  event: {
-                    kind: "conversation-turn-started",
-                    providerInstanceId: scope.thread.providerInstanceId,
-                    modelId: scope.thread.modelId,
-                    sessionId: command.sessionId,
-                    prompt: command.prompt,
-                    ...(command.extensionSelections === undefined ||
-                    command.extensionSelections.length === 0
-                      ? {}
-                      : { extensionSelections: command.extensionSelections }),
-                    executionPolicy: turnThread.executionPolicy,
-                    ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
-                    ...(starting.attachments.length === 0
-                      ? {}
-                      : { attachments: starting.attachments }),
-                    ...(checkpoint === undefined ? {} : { checkpoint }),
-                  },
-                });
-                resultCursor += 1;
-              }
-            }
+            if (startingTurn !== undefined) this.#startingTurns.add(startingTurn);
+            // A start stopped while it prepares is refused at its next
+            // admission check, at the latest just before the runtime takes it on.
+            const admissionCurrent =
+              startingTurn === undefined
+                ? options.admissionCurrent
+                : () => !startingTurn.cancelled && options.admissionCurrent?.() !== false;
             try {
-              result =
-                turnRefusal !== undefined
-                  ? turnRefusal
-                  : await this.#execute(
-                      command,
-                      windowId,
-                      turnThread,
-                      scope.checkout,
-                      root,
-                      starting.attachments,
-                      options.admissionCurrent,
-                      initiator,
-                    );
-            } catch (error) {
-              const category =
-                error instanceof ReviewFindingServiceError ? error.failure : ("failed" as const);
-              // The renderer sees only the category. Without the reason in the
-              // host log, a refused result and a thrown one read the same.
-              console.warn(
-                `Octant code operation ${command.kind} failed unexpectedly: ${(error instanceof Error ? error.message : String(error)).slice(0, 400)}`,
-              );
-              result = this.#failed(command.operationId, category, "Code operation failed.");
+              // Held first, so no restore starts after this; one already
+              // overwriting the files finishes before the checkpoint is taken.
+              const restoring =
+                startingTurn === undefined ? undefined : this.#restoreInFlight(root.checkoutRoot);
+              if (restoring !== undefined) await restoring;
+              let turnRefusal =
+                command.kind === "start-provider-turn"
+                  ? this.#refuseInvalidAgentRunDelivery(command)
+                  : undefined;
+              if (
+                command.kind === "start-provider-turn" &&
+                recordedStart === undefined &&
+                turnRefusal === undefined
+              ) {
+                const checkpoint = await this.#checkpoint(
+                  turnThread,
+                  scope.checkout.id,
+                  root.checkoutRoot,
+                );
+                // Check again after the asynchronous checkpoint so a changed generation or
+                // an intervening parent admission cannot acquire a stale delivery mark.
+                const afterCheckpoint = this.#agentResultDelivery(command);
+                if (afterCheckpoint !== undefined) return afterCheckpoint;
+                if (admissionCurrent?.() === false) {
+                  turnRefusal = this.#failed(
+                    command.operationId,
+                    "unauthorized",
+                    "Code turn admission is no longer current.",
+                    "refused",
+                  );
+                } else {
+                  this.#options.events.append({
+                    threadId: command.threadId,
+                    operationId: command.operationId,
+                    expectedCursor: resultCursor,
+                    event: {
+                      kind: "conversation-turn-started",
+                      providerInstanceId: scope.thread.providerInstanceId,
+                      modelId: scope.thread.modelId,
+                      sessionId: command.sessionId,
+                      prompt: command.prompt,
+                      ...(command.extensionSelections === undefined ||
+                      command.extensionSelections.length === 0
+                        ? {}
+                        : { extensionSelections: command.extensionSelections }),
+                      executionPolicy: turnThread.executionPolicy,
+                      ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
+                      ...(starting.attachments.length === 0
+                        ? {}
+                        : { attachments: starting.attachments }),
+                      ...(checkpoint === undefined ? {} : { checkpoint }),
+                    },
+                  });
+                  resultCursor += 1;
+                }
+              }
+              try {
+                result =
+                  turnRefusal !== undefined
+                    ? turnRefusal
+                    : await this.#execute(
+                        command,
+                        windowId,
+                        turnThread,
+                        scope.checkout,
+                        root,
+                        starting.attachments,
+                        admissionCurrent,
+                        initiator,
+                      );
+              } catch (error) {
+                const category =
+                  error instanceof ReviewFindingServiceError ? error.failure : ("failed" as const);
+                // The renderer sees only the category. Without the reason in the
+                // host log, a refused result and a thrown one read the same.
+                console.warn(
+                  `Octant code operation ${command.kind} failed unexpectedly: ${(error instanceof Error ? error.message : String(error)).slice(0, 400)}`,
+                );
+                result = this.#failed(command.operationId, category, "Code operation failed.");
+              }
+              // The refusal came from the person stopping the turn, not from
+              // lost authority, so the start reads as a stopped turn.
+              if (
+                startingTurn?.cancelled === true &&
+                "admission" in result &&
+                result.admission === "refused"
+              ) {
+                result = this.#providerResult(command.operationId, { state: "interrupted" });
+              }
+            } finally {
+              if (startingTurn !== undefined) this.#startingTurns.delete(startingTurn);
             }
           }
         }
@@ -1231,25 +1292,42 @@ export class CodeOperationService {
           : "Code operation is unauthorized.",
       );
     }
+    // A recovered start prepares in the runtime like a new one, so it holds
+    // its checkout against an in-place restore the same way.
+    let startingTurn: StartingTurn | undefined;
     try {
       const frames = this.#replay(command.threadId, command.operationId, 0, 256).frames;
+      const turnThread = threadForTurn(
+        thread,
+        turnAccessPosture(thread, command, recordedTurnAccessPosture(frames)),
+      );
+      const held: StartingTurn = {
+        thread: turnThread,
+        checkoutRoot: root.checkoutRoot,
+        cancelled: false,
+      };
+      startingTurn = held;
+      this.#startingTurns.add(held);
+      const restoring = this.#restoreInFlight(root.checkoutRoot);
+      if (restoring !== undefined) await restoring;
       const recovered = await this.#providerTurn(
         command,
         windowId,
-        threadForTurn(
-          thread,
-          turnAccessPosture(thread, command, recordedTurnAccessPosture(frames)),
-        ),
+        turnThread,
         root.checkoutRoot,
         recordedTurnAttachments(frames),
-        admissionCurrent,
+        () => !held.cancelled && admissionCurrent?.() !== false,
       );
+      if (held.cancelled && "admission" in recovered && recovered.admission === "refused")
+        return this.#providerResult(command.operationId, { state: "interrupted" });
       return recovered.kind === "provider-turn-state" ||
         (recovered.kind === "operation-failed" && recovered.failure.category === "unauthorized")
         ? recovered
         : cached;
     } catch {
       return this.#failed(command.operationId, "failed", "Code provider turn recovery failed.");
+    } finally {
+      if (startingTurn !== undefined) this.#startingTurns.delete(startingTurn);
     }
   }
 
@@ -2217,8 +2295,7 @@ export class CodeOperationService {
             "unavailable",
             "Restoring a checkpoint is unavailable.",
           );
-        const writers = this.#options.turns.threadsWritingIn?.(root.checkoutRoot, thread.id) ?? [];
-        const writer = writers[0];
+        const writer = this.#threadsWritingIn(root.checkoutRoot, thread.id)[0];
         if (writer !== undefined) {
           return this.#failed(
             command.operationId,
@@ -2228,17 +2305,35 @@ export class CodeOperationService {
             ),
           );
         }
-        return this.#gitMutation(
-          command.operationId,
-          command.gitOperationId,
-          "restore-checkpoint",
-          await restore({
-            checkoutId: checkout.id,
-            checkoutRoot: root.checkoutRoot,
-            snapshot: command.checkpoint,
-            executionPolicy: thread.executionPolicy,
-          }),
-        );
+        // Git queues per checkout id, so two Projects on one folder would
+        // otherwise overwrite it at the same time.
+        if (this.#restoreInFlight(root.checkoutRoot) !== undefined) {
+          return this.#failed(
+            command.operationId,
+            "conflict",
+            "Another restore is overwriting this checkout. Wait for it to finish, then restore.",
+          );
+        }
+        // Registered in the same step as the check above, with nothing
+        // awaited between them, so a turn either was refused here or waits.
+        const restoring = restore({
+          checkoutId: checkout.id,
+          checkoutRoot: root.checkoutRoot,
+          snapshot: command.checkpoint,
+          executionPolicy: thread.executionPolicy,
+        });
+        const inFlight = { checkoutRoot: root.checkoutRoot, settled: restoring };
+        this.#restoresInFlight.add(inFlight);
+        try {
+          return this.#gitMutation(
+            command.operationId,
+            command.gitOperationId,
+            "restore-checkpoint",
+            await restoring,
+          );
+        } finally {
+          this.#restoresInFlight.delete(inFlight);
+        }
       }
       case "create-pull-request":
         return this.#pullRequest(command, root.checkoutRoot);
@@ -2297,11 +2392,30 @@ export class CodeOperationService {
             decision: command.decision,
           }),
         );
-      case "cancel-provider-turn":
+      case "cancel-provider-turn": {
+        // A turn still preparing is not the runtime's yet, so the runtime
+        // cannot stop it; releasing it here is what lets a refused restore
+        // through, as the refusal promised.
+        let stoppedStart = false;
+        for (const starting of this.#startingTurns) {
+          if (
+            String(starting.thread.id) === String(thread.id) &&
+            starting.checkoutRoot === root.checkoutRoot
+          ) {
+            starting.cancelled = true;
+            this.#startingTurns.delete(starting);
+            stoppedStart = true;
+          }
+        }
+        const cancelled = await this.#options.turns.cancel({
+          thread,
+          checkoutRoot: root.checkoutRoot,
+        });
         return this.#providerResult(
           command.operationId,
-          await this.#options.turns.cancel({ thread, checkoutRoot: root.checkoutRoot }),
+          stoppedStart && cancelled.state === "failed" ? { state: "interrupted" } : cancelled,
         );
+      }
     }
   }
 
@@ -2794,6 +2908,40 @@ export class CodeOperationService {
         ? { title: result.title, ...(result.body === undefined ? {} : { body: result.body }) }
         : {}),
     });
+  }
+
+  /**
+   * The other threads whose turn would race an in-place restore of this
+   * checkout root: those the runtime reports live, and those still starting.
+   * A starting turn's thread carries its clamped posture, so a Plan turn
+   * holds nothing back.
+   */
+  #threadsWritingIn(checkoutRoot: string, exceptThreadId: CodeThreadId): ReadonlyArray<CodeThread> {
+    const starting = [...this.#startingTurns]
+      .filter((turn) =>
+        turnBlocksInPlaceRestore(
+          {
+            threadId: String(turn.thread.id),
+            checkoutRoot: turn.checkoutRoot,
+            state: "running",
+            posture: turn.thread.executionPolicy,
+          },
+          { threadId: String(exceptThreadId), checkoutRoot },
+        ),
+      )
+      .map((turn) => turn.thread);
+    return [
+      ...(this.#options.turns.threadsWritingIn?.(checkoutRoot, exceptThreadId) ?? []),
+      ...starting,
+    ];
+  }
+
+  /** Settles once every in-place restore of this checkout root has; none, nothing to wait on. */
+  #restoreInFlight(checkoutRoot: string): Promise<unknown> | undefined {
+    const restoring = [...this.#restoresInFlight]
+      .filter((restore) => restore.checkoutRoot === checkoutRoot)
+      .map((restore) => restore.settled);
+    return restoring.length === 0 ? undefined : Promise.allSettled(restoring);
   }
 
   /**
