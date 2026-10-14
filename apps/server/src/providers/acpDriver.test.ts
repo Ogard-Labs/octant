@@ -8,8 +8,11 @@ import {
 } from "@octant/contracts";
 import { cacheHitRate, deriveTurnMetrics } from "@octant/domain";
 import { ACP_CLIENT_TOOL_NAMES } from "@octant/provider-sdk";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { Effect, Fiber, Stream } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { makeAcpDriver, type AcpClientPort, type AcpDriverOptions } from "./acpDriver";
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
 import { sanitizeAcpEnvironment } from "./acpProcess";
@@ -2657,5 +2660,104 @@ describe("Devin model configuration", () => {
     expect(result._tag).toBe("Failure");
     expect(client.setConfigOption.mock.calls.at(-1)?.slice(1)).toEqual(["speed", "fast"]);
     expect(client.prompt).not.toHaveBeenCalled();
+  });
+});
+
+describe("Gemini CLI and Qwen Code Project tools", () => {
+  const scratch = mkdtempSync(join(realpathSync(tmpdir()), "octant-acp-project-tools-"));
+  afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+
+  let counter = 0;
+  const projectWith = (...files: ReadonlyArray<string>) => {
+    const root = join(scratch, `project-${++counter}`);
+    mkdirSync(root, { recursive: true });
+    for (const file of files) {
+      mkdirSync(join(root, dirname(file)), { recursive: true });
+      writeFileSync(join(root, file), "{}");
+    }
+    return root;
+  };
+
+  const startIn = (profile: AcpProviderProfile, root: string, mode: "code" | "chat" = "code") => {
+    const { driver, starts } = fixture(profile);
+    const outcome = Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot: root, mode });
+          const result = yield* Effect.either(
+            connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+          );
+          if (result._tag === "Right") yield* connection.stop(sessionId);
+          return result;
+        }),
+      ),
+    );
+    return { outcome, starts };
+  };
+
+  it.each([
+    ["gemini", ".gemini/settings.json"],
+    ["gemini", ".gemini/agents/reviewer.md"],
+    ["gemini", ".gemini/extensions/tools/gemini-extension.json"],
+    ["qwen", ".qwen/settings.json"],
+    ["qwen", ".qwen/agents/reviewer.md"],
+    ["qwen", ".qwen/extensions/tools/qwen-extension.json"],
+    ["qwen", ".mcp.json"],
+  ] as const)(
+    "refuses to start %s in a Project that holds %s and names the file",
+    async (kind, file) => {
+      const { outcome, starts } = startIn(acpProviderProfiles[kind], projectWith(file));
+      const result = await outcome;
+      expect(result._tag).toBe("Left");
+      if (result._tag !== "Left") return;
+      expect(result.left).toMatchObject({ category: "incompatible" });
+      const entry = file.startsWith(".mcp") ? file : file.split("/").slice(0, 2).join("/");
+      expect(result.left.message).toContain(`\`${entry}\``);
+      expect(result.left.message).toMatch(/without Octant's approval/);
+      expect(result.left.message).toMatch(/Remove or rename/);
+      expect(starts).toEqual([]);
+    },
+  );
+
+  it.each(["gemini", "qwen"] as const)(
+    "starts %s in a Project without those files, even with an empty settings folder",
+    async (kind) => {
+      const root = projectWith(`.${kind === "gemini" ? "gemini" : "qwen"}/GEMINI.md`, "AGENTS.md");
+      mkdirSync(join(root, `.${kind === "gemini" ? "gemini" : "qwen"}/agents`));
+      const { outcome, starts } = startIn(acpProviderProfiles[kind], root);
+      expect((await outcome)._tag).toBe("Right");
+      expect(starts).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    ["gemini", ".gemini/settings.json"],
+    ["qwen", ".qwen/settings.json"],
+    ["qwen", ".mcp.json"],
+  ] as const)(
+    "does not look above the Project root for %s, which reads settings from its own folder only (%s)",
+    async (kind, file) => {
+      const parent = projectWith(file);
+      const root = join(parent, "packages/app");
+      mkdirSync(root, { recursive: true });
+      const { outcome } = startIn(acpProviderProfiles[kind], root);
+      expect((await outcome)._tag).toBe("Right");
+    },
+  );
+
+  it("starts a Gemini CLI Chat in its managed home whatever the Project holds", async () => {
+    const { outcome } = startIn(
+      acpProviderProfiles.gemini,
+      projectWith(".gemini/settings.json"),
+      "chat",
+    );
+    expect((await outcome)._tag).toBe("Right");
+  });
+
+  it("leaves every other ACP runtime without a Project refusal", () => {
+    const refusing = Object.values(acpProviderProfiles)
+      .filter((profile) => profile.refusesProject !== undefined)
+      .map((profile) => profile.kind);
+    expect(refusing.sort()).toEqual(["gemini", "qwen"]);
   });
 });

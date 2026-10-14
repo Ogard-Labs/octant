@@ -1251,6 +1251,9 @@ function makeConnection(
             }
             const refusal = profile.refuses?.(mode, input.executionPolicy);
             if (refusal !== undefined) throw failure("incompatible", refusal);
+            const projectRefusal =
+              runtimeRoot === projectRoot ? profile.refusesProject?.(projectRoot) : undefined;
+            if (projectRefusal !== undefined) throw failure("incompatible", projectRefusal);
             const { bridgeTools } = partitionTools(input.tools);
             if (bridgeTools.length > 0 && process.platform !== "darwin") {
               throw failure(
