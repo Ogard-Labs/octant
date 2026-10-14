@@ -815,10 +815,13 @@ before the host captures its checkpoint, through the runtime's preparation
 (credentials, session seeding, fork preparation), until the runtime has taken
 it on, so a restore cannot land between the capture and the launch. A start
 that is refused or fails while preparing stops counting at once and never holds
-restores back. A turn whose checkpoint capture begins after a restore has
-passed this check queues behind it for the same checkout id, so it starts from
-the restored files; a turn in another Project on the same folder has a
-different checkout id and does not queue. Restore from here and
+restores back. The other order is serialized by root too: a turn that starts
+while a restore that passed this check is still overwriting the same root holds
+the root, so no further restore starts, and waits for the overwrite to finish
+before it captures its checkpoint, so it starts from the restored files. Git
+alone queues only per checkout id, which would let a turn in another Project on
+the same folder, or a recovered start that captures nothing, run on a
+half-restored tree. Restore from here and
 Fork from here create a thread on its own worktree and are not subject to the
 check. Discard and revert also overwrite files and are not yet covered.
 

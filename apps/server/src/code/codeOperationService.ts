@@ -904,6 +904,16 @@ export class CodeOperationService {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
   }>();
+  /**
+   * In-place restores past their check and still overwriting files. Git
+   * queues work per checkout id, and two Projects on one folder have two ids,
+   * so a turn starting in the other Project would not wait for the overwrite;
+   * nor would a recovered start, which captures no checkpoint.
+   */
+  readonly #restoresInFlight = new Set<{
+    readonly checkoutRoot: string;
+    readonly settled: Promise<unknown>;
+  }>();
 
   async cancelPendingRepositoryTests(): Promise<void> {
     const pending = [...this.#pendingTests.values()];
@@ -1110,6 +1120,11 @@ export class CodeOperationService {
                 : undefined;
             if (startingTurn !== undefined) this.#startingTurns.add(startingTurn);
             try {
+              // Held first, so no restore starts after this; one already
+              // overwriting the files finishes before the checkpoint is taken.
+              const restoring =
+                startingTurn === undefined ? undefined : this.#restoreInFlight(root.checkoutRoot);
+              if (restoring !== undefined) await restoring;
               let turnRefusal =
                 command.kind === "start-provider-turn"
                   ? this.#refuseInvalidAgentRunDelivery(command)
@@ -1265,6 +1280,8 @@ export class CodeOperationService {
       );
       startingTurn = { thread: turnThread, checkoutRoot: root.checkoutRoot };
       this.#startingTurns.add(startingTurn);
+      const restoring = this.#restoreInFlight(root.checkoutRoot);
+      if (restoring !== undefined) await restoring;
       const recovered = await this.#providerTurn(
         command,
         windowId,
@@ -2258,17 +2275,26 @@ export class CodeOperationService {
             ),
           );
         }
-        return this.#gitMutation(
-          command.operationId,
-          command.gitOperationId,
-          "restore-checkpoint",
-          await restore({
-            checkoutId: checkout.id,
-            checkoutRoot: root.checkoutRoot,
-            snapshot: command.checkpoint,
-            executionPolicy: thread.executionPolicy,
-          }),
-        );
+        // Registered in the same step as the check above, with nothing
+        // awaited between them, so a turn either was refused here or waits.
+        const restoring = restore({
+          checkoutId: checkout.id,
+          checkoutRoot: root.checkoutRoot,
+          snapshot: command.checkpoint,
+          executionPolicy: thread.executionPolicy,
+        });
+        const inFlight = { checkoutRoot: root.checkoutRoot, settled: restoring };
+        this.#restoresInFlight.add(inFlight);
+        try {
+          return this.#gitMutation(
+            command.operationId,
+            command.gitOperationId,
+            "restore-checkpoint",
+            await restoring,
+          );
+        } finally {
+          this.#restoresInFlight.delete(inFlight);
+        }
       }
       case "create-pull-request":
         return this.#pullRequest(command, root.checkoutRoot);
@@ -2850,6 +2876,14 @@ export class CodeOperationService {
       ...(this.#options.turns.threadsWritingIn?.(checkoutRoot, exceptThreadId) ?? []),
       ...starting,
     ];
+  }
+
+  /** Settles once every in-place restore of this checkout root has; none, nothing to wait on. */
+  #restoreInFlight(checkoutRoot: string): Promise<unknown> | undefined {
+    const restoring = [...this.#restoresInFlight]
+      .filter((restore) => restore.checkoutRoot === checkoutRoot)
+      .map((restore) => restore.settled);
+    return restoring.length === 0 ? undefined : Promise.allSettled(restoring);
   }
 
   /**
