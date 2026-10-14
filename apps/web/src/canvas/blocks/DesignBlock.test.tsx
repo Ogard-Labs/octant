@@ -442,7 +442,6 @@ describe("running prototype", () => {
     fireEvent.click(within(region).getByRole("button", { name: "Run" }));
     const frame = await within(region).findByTitle("Checkout, running prototype");
     expect(start).toHaveBeenCalledWith("checkout");
-    // Pressed by the person, so the frame may take focus.
     expect(frame).not.toHaveAttribute("tabindex");
     expect(within(region).getByRole("status")).toHaveTextContent("Running");
     expect(within(region).queryByText(/not network-contained/)).toBeNull();
@@ -452,7 +451,7 @@ describe("running prototype", () => {
     expect(within(region).getByRole("button", { name: "Run again" })).toBeVisible();
   });
 
-  it("runs on open in the sidebar without taking focus, and in the desktop app says it has no network and what still leaves", async () => {
+  it("runs on open in the sidebar without taking focus, reachable by Tab, and in the desktop app says it has no network and what still leaves", async () => {
     installDesktopBridge({ prepareCanvasPrototypeSurface: async () => ({ status: "ready" }) });
     const { start, runtime } = runRuntime({
       runsOnOpen: true,
@@ -468,13 +467,34 @@ describe("running prototype", () => {
     const view = await screen.findByTitle("Checkout, running prototype");
     expect(start).toHaveBeenCalledOnce();
     expect(view.tagName).toBe("WEBVIEW");
-    expect(view).toHaveAttribute("tabindex", "-1");
+    // Reachable by Tab, but opening did not move focus into it.
+    expect(view).toHaveAttribute("tabindex", "0");
+    expect(document.activeElement).toBe(document.body);
     // The desktop draws it in a surface of its own, never in a frame.
     expect(frames(document)).toHaveLength(0);
     expect(screen.queryByText(/not network-contained/)).toBeNull();
     expect(screen.queryByText(/can still connect to another computer/)).toBeNull();
     expect(screen.getByText(/no network connection/)).toBeVisible();
     expect(screen.getByText(/look up host names/)).toBeVisible();
+  });
+
+  it("leaves a prototype that started by itself in the tab order, right after Stop, without opening it there", async () => {
+    const { runtime } = runRuntime({ runsOnOpen: true });
+    render(
+      <CanvasDocument
+        definition={{ ...canvasFixture, blocks: [prototype()] }}
+        designRunRuntime={runtime}
+      />,
+    );
+    const frame = await screen.findByTitle("Checkout, running prototype");
+    expect(frame.tagName).toBe("IFRAME");
+    expect(document.activeElement).toBe(document.body);
+    // An iframe is focusable by default; jsdom cannot move Tab into one, so the
+    // contract is that nothing takes it out of the order (a negative tabindex
+    // did), and that Stop is the control just before it.
+    expect(frame.tabIndex).toBeGreaterThanOrEqual(0);
+    const stop = screen.getByRole("button", { name: "Stop" });
+    expect(stop.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("cannot run where the host serves no prototypes, and shows why a refused run stopped", async () => {
@@ -664,7 +684,6 @@ describe("running prototype in the desktop app", () => {
     }
     expect(view).not.toHaveAttribute("sandbox");
     expect(frames(document)).toHaveLength(0);
-    // Pressed by the person, so the surface may take focus.
     expect(view).toHaveAttribute("tabindex", "0");
   });
 
@@ -778,6 +797,26 @@ describe("running prototype in the desktop app", () => {
     runDesktop();
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
     const view = await screen.findByTitle("Checkout, running prototype");
+    (view as HTMLElement).focus();
+    expect(document.activeElement).toBe(view);
+    act(() => escape?.());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Stop" }));
+  });
+
+  it("hands focus to Stop from a prototype that started by itself once the person has tabbed into it", async () => {
+    let escape: (() => void) | undefined;
+    installDesktopBridge({
+      prepareCanvasPrototypeSurface: async () => ({ status: "ready" }),
+      subscribeCanvasFrameFocusEscape: (listener: () => void) => {
+        escape = listener;
+        return () => {
+          escape = undefined;
+        };
+      },
+    });
+    runDesktop({ runsOnOpen: true });
+    const view = await screen.findByTitle("Checkout, running prototype");
+    expect(document.activeElement).toBe(document.body);
     (view as HTMLElement).focus();
     expect(document.activeElement).toBe(view);
     act(() => escape?.());

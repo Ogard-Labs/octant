@@ -324,8 +324,9 @@ shows a **Running** label and **Stop** while it runs, and **Run again** with
 the reason once it stops (stopped responding, loaded another page, kept
 taking the keyboard back, or, on desktop, could not be started in its contained
 surface). In the thread it starts only when the person
-presses **Run**; the sidebar runs it when it is shown, and the prototype takes no
-focus until the person presses Run or clicks into it. On desktop,
+presses **Run**; the sidebar runs it when it is shown. A running prototype never takes
+focus by itself, however it started; it is in the tab order, so the person
+reaches it with Tab or a click. On desktop,
 Command-Escape (Control-Escape elsewhere) moves focus from a running prototype
 to its Stop. In a browser the Run control says the prototype is not
 network-contained. An

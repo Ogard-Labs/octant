@@ -559,13 +559,8 @@ type RunStopReason =
 
 type RunState =
   | { readonly kind: "idle" }
-  | { readonly kind: "starting"; readonly byPerson: boolean }
-  | {
-      readonly kind: "running";
-      readonly url: string;
-      /** Whether the person asked for this run, which lets the frame take focus. */
-      readonly byPerson: boolean;
-    }
+  | { readonly kind: "starting" }
+  | { readonly kind: "running"; readonly url: string }
   | { readonly kind: "stopped"; readonly why: RunStopReason };
 
 const STOPPED_TEXT: Record<Exclude<RunStopReason["kind"], "refused">, string> = {
@@ -606,39 +601,36 @@ function RunningDesignBlock({
   // never replaces what the person did since.
   const generation = useRef(0);
 
-  const run = useCallback(
-    async (byPerson: boolean) => {
-      if (runtime === undefined) return;
-      generation.current += 1;
-      const asked = generation.current;
-      setErrors([]);
-      setState({ kind: "starting", byPerson });
-      let next: RunState;
-      try {
-        // On the desktop's own surface a prototype is asked for only after the
-        // desktop has closed that surface's network, whoever built the runtime.
-        const prepared =
-          runtime.drawnIn === "desktop-surface"
-            ? await prepareDesktopSurface()
-            : ({ status: "ready" } as const);
-        const started =
-          prepared.status === "ready"
-            ? await runtime.start(String(block.blockId))
-            : ({ kind: "refused", reason: prepared.reason } as const);
-        next =
-          started.kind === "ready"
-            ? { kind: "running", url: started.url, byPerson }
-            : { kind: "stopped", why: { kind: "refused", reason: started.reason } };
-      } catch {
-        next = {
-          kind: "stopped",
-          why: { kind: "refused", reason: "Octant could not reach the host to run this." },
-        };
-      }
-      if (asked === generation.current) setState(next);
-    },
-    [block.blockId, runtime],
-  );
+  const run = useCallback(async () => {
+    if (runtime === undefined) return;
+    generation.current += 1;
+    const asked = generation.current;
+    setErrors([]);
+    setState({ kind: "starting" });
+    let next: RunState;
+    try {
+      // On the desktop's own surface a prototype is asked for only after the
+      // desktop has closed that surface's network, whoever built the runtime.
+      const prepared =
+        runtime.drawnIn === "desktop-surface"
+          ? await prepareDesktopSurface()
+          : ({ status: "ready" } as const);
+      const started =
+        prepared.status === "ready"
+          ? await runtime.start(String(block.blockId))
+          : ({ kind: "refused", reason: prepared.reason } as const);
+      next =
+        started.kind === "ready"
+          ? { kind: "running", url: started.url }
+          : { kind: "stopped", why: { kind: "refused", reason: started.reason } };
+    } catch {
+      next = {
+        kind: "stopped",
+        why: { kind: "refused", reason: "Octant could not reach the host to run this." },
+      };
+    }
+    if (asked === generation.current) setState(next);
+  }, [block.blockId, runtime]);
 
   // A new version is a new page; the sidebar starts it again on its own. The
   // page is what the design says, not which object says it: the same version
@@ -649,7 +641,7 @@ function RunningDesignBlock({
     generation.current += 1;
     setState({ kind: "idle" });
     setErrors([]);
-    if (runsOnOpen) void run(false);
+    if (runsOnOpen) void run();
   }, [page, run, runsOnOpen]);
 
   const stop = useCallback((why: RunStopReason) => {
@@ -746,7 +738,7 @@ function RunningDesignBlock({
           ) : runtime === undefined ? null : (
             <OctantButton
               disabled={state.kind === "starting"}
-              onClick={() => void run(true)}
+              onClick={() => void run()}
               ref={runButton}
               size="sm"
               type="button"
@@ -800,7 +792,6 @@ function RunningDesignBlock({
         <RunningFrame
           block={block}
           onDesktopSurface={onDesktopSurface}
-          focusable={state.byPerson}
           frameRef={frameRef}
           key={state.url}
           onError={reportError}
@@ -894,7 +885,6 @@ function RunningFrame({
   block,
   url,
   onDesktopSurface,
-  focusable,
   frameRef,
   onStop,
   onError,
@@ -902,7 +892,6 @@ function RunningFrame({
   readonly block: CanvasDesignBlock;
   readonly url: string;
   readonly onDesktopSurface: boolean;
-  readonly focusable: boolean;
   readonly frameRef: RefObject<HTMLElement | null>;
   readonly onStop: (why: RunStopReason) => void;
   readonly onError: (message: string) => void;
@@ -974,7 +963,7 @@ function RunningFrame({
         ref={attach}
         src={url}
         style={style}
-        tabIndex={focusable ? 0 : -1}
+        tabIndex={0}
         title={`${block.title}, running prototype`}
       />
     ) : (
@@ -986,7 +975,6 @@ function RunningFrame({
         sandbox={RUNNING_DESIGN_SANDBOX}
         src={url}
         style={style}
-        tabIndex={focusable ? undefined : -1}
         title={`${block.title}, running prototype`}
       />
     );
