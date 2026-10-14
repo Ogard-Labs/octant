@@ -492,6 +492,8 @@ describe("the public-block visual language", () => {
     expect(legend).toMatch(/float:\s*left/);
     expect(legend).toMatch(/border-bottom:\s*1px solid var\(--oct-hairline\)/);
     expect(legend).toMatch(/font-size:\s*var\(--oct-text-sm\)/);
+    expect(legend).toMatch(/color:\s*var\(--octant-text-secondary\)/);
+    expect(legend).toMatch(/font-weight:\s*var\(--oct-weight-strong\)/);
   });
 
   it("uses the open layout for Settings groups and inline editors", () => {
@@ -508,9 +510,31 @@ describe("the public-block visual language", () => {
     // page, and the card is the group inside it (see sectionObject.test.ts).
     expect(settings).toMatch(/\.settings-card-section\s*\{[^}]*border:\s*0/);
     expect(settings).not.toMatch(/border-inline:\s*1px solid var\(--oct-hairline\)/);
-    expect(settings).toMatch(
-      /\.settings-card-section\s*>\s*h2,[\s\S]*?\.settings-card-section\s*>\s*legend\s*\{[\s\S]*?text-transform:\s*none/,
-    );
+    const baseSectionLabel =
+      settings.match(
+        /\.settings-card-section\s*>\s*h2,[\s\S]*?\.settings-card-section\s*>\s*legend\s*\{[^}]+\}/,
+      )?.[0] ?? "";
+    expect(baseSectionLabel).toMatch(/color:\s*var\(--octant-text-secondary\)/);
+    expect(baseSectionLabel).toMatch(/font-weight:\s*var\(--oct-weight-strong\)/);
+    expect(baseSectionLabel).toMatch(/text-transform:\s*none/);
+    const openSectionHeading =
+      settings.match(
+        /\.settings-view\s+\.settings-card-section\.settings-card-section--open\s*>\s*h2,[\s\S]*?\.settings-section-head\s*>\s*h2\s*\{[^}]+\}/,
+      )?.[0] ?? "";
+    expect(openSectionHeading).toMatch(/color:\s*var\(--octant-text-secondary\)/);
+    expect(openSectionHeading).toMatch(/font-weight:\s*var\(--oct-weight-strong\)/);
+    const openSectionDisclosure =
+      settings.match(
+        /\.settings-view\s+\.settings-card-section\.settings-card-section--open\s*>\s*:is\(legend,\s*summary\)\s*\{[^}]+\}/,
+      )?.[0] ?? "";
+    expect(openSectionDisclosure).toMatch(/color:\s*var\(--octant-text-secondary\)/);
+    expect(openSectionDisclosure).toMatch(/font-weight:\s*var\(--oct-weight-strong\)/);
+    const providerLimitsLabel =
+      settings.match(
+        /\.settings-view\s+\.provider-limits\s*>\s*\.oct-section-label,[\s\S]*?\.surface-section__head\s*>\s*\.oct-section-label\s*\{[^}]+\}/,
+      )?.[0] ?? "";
+    expect(providerLimitsLabel).toMatch(/color:\s*var\(--octant-text-secondary\)/);
+    expect(providerLimitsLabel).toMatch(/font-weight:\s*var\(--oct-weight-strong\)/);
     expect(settings).not.toMatch(
       /\.settings-theme-editor__disclosure,\n\.settings-theme-editor__accessibility \{\n(?:.*\n)*?background:\s*none/,
     );
