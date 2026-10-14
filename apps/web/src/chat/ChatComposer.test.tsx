@@ -5,7 +5,8 @@ import {
   decodePreviewContextSelectionId,
   decodePreviewTargetId,
 } from "@octant/contracts/previews";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
+import { CompactingThread } from "../context/compactionTestSupport";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatComposer, type ChatComposerProps } from "./ChatComposer";
 import { OctantCommandProvider } from "../palette/CommandRegistry";
@@ -19,7 +20,10 @@ import {
   uninstallFakeMicrophone,
 } from "../voice/speechTestSupport";
 
-function renderComposer(overrides: Partial<ChatComposerProps> = {}) {
+function renderComposer(
+  overrides: Partial<ChatComposerProps> = {},
+  wrapper?: (props: { readonly children: ReactNode }) => ReactNode,
+) {
   const props: ChatComposerProps = {
     draft: "",
     isSending: false,
@@ -45,10 +49,26 @@ function renderComposer(overrides: Partial<ChatComposerProps> = {}) {
     },
     ...overrides,
   };
-  return { props, ...render(<ChatComposer {...props} />) };
+  return {
+    props,
+    ...render(<ChatComposer {...props} />, wrapper === undefined ? {} : { wrapper }),
+  };
 }
 
 describe("ChatComposer", () => {
+  it("holds a send while the host compacts the session, from Enter and from the button", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(async () => true);
+    renderComposer({ draft: "Reply", onSend }, CompactingThread);
+
+    const send = screen.getByRole("button", { name: "Send message" });
+    expect(send).toBeDisabled();
+    expect(send).toHaveAccessibleDescription("Compacting session");
+    await user.click(screen.getByLabelText("Message"));
+    await user.keyboard("{Enter}");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("offers dictation beside the attach control only when transcription is ready, and appends the words to the draft", async () => {
     const user = userEvent.setup();
     renderComposer({ draft: "Please" });

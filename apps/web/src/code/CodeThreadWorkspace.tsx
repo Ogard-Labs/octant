@@ -1,3 +1,4 @@
+import { useComposerCompacting } from "../context/composerContextMeterScope";
 import type { ProviderModelOptionValues } from "@octant/contracts";
 import {
   ApplicationMentionTypeahead,
@@ -270,6 +271,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     threadId: props.threadId,
   });
   const [draft, setDraft] = useState(props.controller.pendingDraft);
+  const compacting = useComposerCompacting();
   // User edits are counted separately from the internal clear performed when
   // an acknowledged message leaves the composer, so an async mention lookup cannot
   // erase a newer draft typed while that lookup is pending.
@@ -663,10 +665,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             threadId: thread.id,
             expectedVersion: thread.version,
           });
-  // The host owns follow-ups while a turn or queue is active. Draft editing
-  // remains available while the queue's acknowledgment is pending.
+  // The host owns follow-ups while a turn or queue is active, and refuses a
+  // turn while the session compacts. Draft editing remains available while
+  // the queue's acknowledgment is pending.
   const canSend =
     trimmed.length > 0 &&
+    !compacting &&
     !attachments.busy &&
     !slash.resolving &&
     !queuePreparing &&

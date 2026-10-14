@@ -1,8 +1,10 @@
 import {
+  decodeContextCompactionState,
   decodeContextInspectorSnapshot,
+  type ContextCompactionState,
   type ContextInspectorSnapshot,
 } from "@octant/contracts/context-rpc";
-import type { ContextHealth } from "@octant/contracts/context";
+import type { ContextHealth, ContextSubjectRef } from "@octant/contracts/context";
 
 export interface ContextFixtureOptions {
   readonly health?: ContextHealth;
@@ -182,4 +184,16 @@ export function contextReplayFixture(): ContextInspectorSnapshot {
 
 export function contextReconnectFixture(): ContextInspectorSnapshot {
   return contextFixture({ sequence: 12, snapshotAt: "2026-07-18T20:00:04.000Z" });
+}
+
+/** A thread's compaction state as the host answers it; nothing to compact by default. */
+export function compactionStateFixture(
+  subject: ContextSubjectRef,
+  overrides: Partial<Record<keyof ContextCompactionState, unknown>> = {},
+): ContextCompactionState {
+  return decodeContextCompactionState({
+    subject,
+    compaction: { status: "refused", reason: "no-session" },
+    ...overrides,
+  });
 }

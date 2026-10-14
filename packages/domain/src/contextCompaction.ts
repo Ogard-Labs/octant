@@ -406,6 +406,15 @@ export interface SessionCompactionFacts {
   readonly owner: "host" | "runtime";
   /** The runtime's own compaction, reported by its adapter. Ignored for the host. */
   readonly runtimeCompaction: "supported" | "unsupported" | "unavailable";
+  /**
+   * Whether a turn on the thread would be admitted, as far as the thread and
+   * its Project decide it. A compaction refuses where the next turn would.
+   */
+  readonly turnAdmission:
+    | "admitted"
+    | "project-unavailable"
+    | "model-options-unsupported"
+    | "thread-paused";
   readonly hasSession: boolean;
   readonly compactionRunning: boolean;
   readonly turnRunning: boolean;
@@ -431,6 +440,7 @@ export function decideSessionCompaction(
     if (facts.runtimeCompaction === "unsupported") return refuse("runtime-cannot-compact");
     if (facts.runtimeCompaction === "unavailable") return refuse("runtime-version-unsupported");
   }
+  if (facts.turnAdmission !== "admitted") return refuse(facts.turnAdmission);
   if (!facts.hasSession) return refuse("no-session");
   if (facts.compactionRunning) return refuse("compaction-running");
   if (facts.turnRunning) return refuse("turn-running");

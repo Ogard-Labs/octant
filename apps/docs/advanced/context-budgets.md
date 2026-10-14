@@ -94,6 +94,18 @@ maintenance model is the active provider and model; a cheaper or local model
 can be configured, and cross-vendor maintenance is opt-in with bounded
 material.
 
+You can also compact a session yourself: **Compact session** in the context
+popover, or beside **Rebuild context plan** in the context inspector. After you
+confirm, the earlier conversation is replaced by a summary for what the model
+sees next; the thread keeps every message. Octant summarizes where it keeps the
+conversation, and asks the runtime (Codex, Claude Code, or Octant Harness in
+Code) where the runtime keeps it. While it runs the popover reads
+**Compacting…** and the composer holds send. Afterwards the popover says how
+much was freed and who wrote the summary, or why it could not compact. The
+button is disabled, with the reason, while something you can wait out stands
+in the way, such as a reply that is still running, and is left out where the
+runtime cannot compact at all or on a paired device.
+
 ## Watching usage
 
 The active thread's composer shows a circular used-versus-available meter.
@@ -119,8 +131,9 @@ auto-compact**. That figure is the runtime's own compaction point, which
 Claude Code states when the session opens, less what the latest request put in
 the window. It appears only while the runtime says compaction is on and has
 given a point, so a thread whose runtime says nothing, such as one on Codex CLI,
-shows no line rather than a guess. The popover does not compact the session;
-Claude Code does that itself when the session reaches the point.
+shows no line rather than a guess. Claude Code compacts the session by itself
+when it reaches that point; **Compact session** (see Compaction) does it when
+you ask.
 When no setting, provider, refusal, or profile has named the model's context window,
 the meter shows what the window holds and nothing to divide it by: the figure
 has no maximum and no percentage, the ring stays empty rather than full, and the

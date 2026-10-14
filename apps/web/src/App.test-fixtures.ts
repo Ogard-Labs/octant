@@ -36,7 +36,7 @@ import { resolve } from "node:path";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
-import { contextFixture } from "./context/contextFixtures";
+import { compactionStateFixture, contextFixture } from "./context/contextFixtures";
 import { type SplitWorkspaceProps } from "./shell/SplitWorkspace";
 import type { WorkspaceSurfaceDragHandle } from "./shell/useWorkspaceTabDrag";
 import {
@@ -852,6 +852,7 @@ export function contextClient(): ContextClient {
       } as never;
     }),
     execute: vi.fn(),
+    readCompaction: vi.fn(async (subject) => compactionStateFixture(subject)),
     externalContentAvailable: false,
     readExternalContent: vi.fn(),
     clearExternalContent: vi.fn(),

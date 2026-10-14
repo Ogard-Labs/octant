@@ -33,6 +33,7 @@ import {
   SessionCompactionService,
   type SessionCompactionStart,
   type SessionCompactionThread,
+  type SessionCompactionTurnRefusal,
 } from "./sessionCompaction";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -530,6 +531,40 @@ describe("compacting a session on request", () => {
         if (world.state.thread !== undefined) {
           world.state.thread = { ...world.state.thread, modelId: decodeProviderModelId("model-b") };
         }
+      },
+    },
+    {
+      name: "a thread whose Project is archived, as its turns are refused",
+      reason: "project-unavailable",
+      arrange: (world) => {
+        planSession(world);
+        world.state.standing = "project-unavailable";
+      },
+    },
+    {
+      name: "a thread whose folder binding moved, so no turn can carry its session on",
+      reason: "no-session",
+      arrange: (world) => {
+        planSession(world);
+        world.state.standing = "binding-changed";
+      },
+    },
+    {
+      name: "a thread whose saved model options its model no longer offers",
+      reason: "model-options-unsupported",
+      arrange: (world) => {
+        planSession(world);
+        if (world.state.thread !== undefined) {
+          world.state.thread = { ...world.state.thread, modelOptionValues: { effort: "max" } };
+        }
+      },
+    },
+    {
+      name: "a thread whose harness session the advisor paused",
+      reason: "thread-paused",
+      arrange: (world) => {
+        planSession(world);
+        world.state.harnessPaused = true;
       },
     },
     {
@@ -1272,11 +1307,46 @@ describe("compacting a session a runtime keeps", () => {
       world.close();
     });
 
+    it("tells a window whether its Code thread compacts, who would compact it, and how the latest one went", async () => {
+      const world = createRuntimeWorld({ hang: true }, "code-thread");
+      world.state.thread = { mode: "code", projectId, providerInstanceId, modelId };
+
+      expect(world.service.state(codeSubject, "local-window")).toEqual({
+        subject: codeSubject,
+        compaction: { status: "available" },
+        executor: { kind: "runtime", driverKind: "codex", providerInstanceId, modelId },
+      });
+      // A paired device is refused, and is not told who would compact.
+      expect(world.service.state(codeSubject, "remote-device")).toEqual({
+        subject: codeSubject,
+        compaction: { status: "refused", reason: "remote-client" },
+      });
+
+      world.service.start(command(codeSubject), "local-window", windowId);
+      expect(world.service.state(codeSubject, "local-window")).toMatchObject({
+        compaction: { status: "refused", reason: "compaction-running" },
+        latestCompaction: { status: "running", executor: { kind: "runtime" } },
+      });
+      expect(world.service.state(codeSubject, "local-window")).not.toHaveProperty("executor");
+
+      await world.service.settled();
+      expect(world.service.state(codeSubject, "local-window").latestCompaction).toMatchObject({
+        status: "failed",
+        reason: "timed-out",
+        sessionMayHaveChanged: true,
+      });
+      world.close();
+    });
+
     it("refuses where Code has no compaction support", () => {
       const world = createWorld();
       expect(refusalOf(() => world.service.start(command(codeSubject), "local-window"))).toBe(
         "runtime-cannot-compact",
       );
+      expect(world.service.state(codeSubject, "local-window").compaction).toEqual({
+        status: "refused",
+        reason: "runtime-cannot-compact",
+      });
       world.close();
     });
   });
@@ -1317,6 +1387,9 @@ function createFixture(existingPath?: string) {
 
 interface WorldState {
   thread: SessionCompactionThread | undefined;
+  /** What the thread kind's own turn decision says of the thread. */
+  standing: SessionCompactionTurnRefusal | undefined;
+  harnessPaused: boolean;
   turnRunning: boolean;
   modeEnabled: boolean;
   providerAvailable: boolean;
@@ -1357,6 +1430,8 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
   const provider = fakeProvider(providerOptions);
   const state: WorldState = {
     thread: { mode: "chat", providerInstanceId, modelId },
+    standing: undefined,
+    harnessPaused: false,
     turnRunning: false,
     modeEnabled: true,
     providerAvailable: true,
@@ -1388,6 +1463,7 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
       return state.thread;
     },
     turnRunning: () => state.turnRunning,
+    turnRefusal: () => state.standing,
     conversation: () => {
       reads.conversations += 1;
       return state.conversation;
@@ -1403,6 +1479,7 @@ function createWorld(providerOptions: FakeProviderOptions = {}) {
     modeEnabled: () => state.modeEnabled,
     conversationOwner: () => (state.ownership === "provider" ? "runtime" : "host"),
     providerFacts: () => ({ provider: state.provider }),
+    harnessAdmission: () => (state.harnessPaused ? "paused" : "admitted"),
     availableDriver: () => {
       reads.drivers += 1;
       if (state.driverThrows) throw new Error("Provider driver is not effective.");

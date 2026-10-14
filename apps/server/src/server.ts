@@ -8371,11 +8371,16 @@ export function startOctantServer(
                     : { projectId: String(thread.projectId) }),
                   providerInstanceId: thread.providerInstanceId,
                   modelId: thread.modelId,
+                  ...(thread.modelOptionValues === undefined
+                    ? {}
+                    : { modelOptionValues: thread.modelOptionValues }),
                 };
           },
           turnRunning: (threadId) =>
             chatService.isTurnActive(decodeChatThreadId(threadId)) ||
             chatService.isTurnStarting(decodeChatThreadId(threadId)),
+          // The check every Chat turn makes first: the thread must be active.
+          turnRefusal: (threadId) => chatService.turnStandingRefusal(decodeChatThreadId(threadId)),
           conversation: (threadId) =>
             chatService.sessionCompactionConversation(decodeChatThreadId(threadId)),
           scratchRoot: (threadId) => chatService.scratchRoot(decodeChatThreadId(threadId)),
@@ -8431,7 +8436,15 @@ export function startOctantServer(
               providerInstanceId: thread.providerInstanceId,
               modelId: thread.modelId,
               ...(providerPolicy === undefined ? {} : { providerPolicy }),
+              ...(thread.modelOptionValues === undefined
+                ? {}
+                : { modelOptionValues: thread.modelOptionValues }),
             };
+          },
+          // The decision a Work turn passes for its Project and binding.
+          turnRefusal: (threadId) => {
+            const thread = workThreadProjection.read(decodeWorkThreadId(threadId));
+            return thread === undefined ? undefined : workTurnService.turnStandingRefusal(thread);
           },
           turnRunning: (threadId) =>
             workTurnService.isTurnActive(decodeWorkThreadId(threadId)) ||
@@ -8505,10 +8518,22 @@ export function startOctantServer(
                     providerInstanceId: thread.providerInstanceId,
                     modelId: thread.modelId,
                     ...(providerPolicy === undefined ? {} : { providerPolicy }),
+                    ...(thread.modelOptionValues === undefined
+                      ? {}
+                      : { modelOptionValues: thread.modelOptionValues }),
                   };
                 },
                 turnRunning: (threadId) =>
                   codeOperationRuntime?.turnInProgress?.(threadId) === true,
+                // A Code turn's Project access holds only for an active Code
+                // Project, the rule its window check applies.
+                turnRefusal: (threadId) => {
+                  const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+                  return thread !== undefined &&
+                    !projectService.hasActiveProject(thread.projectId, "code")
+                    ? "project-unavailable"
+                    : undefined;
+                },
                 runtimeSessions: {
                   exists: codeCompactionSessions.exists,
                   occupancy: codeCompactionSessions.occupancy,
@@ -8518,6 +8543,17 @@ export function startOctantServer(
             }),
       },
       modeEnabled,
+      // The admission every Chat, Work and Code turn asks of the harness.
+      harnessAdmission: (scope) =>
+        nativeHarnessHooks.admitTurn({
+          threadId: scope.threadId,
+          mode: scope.mode,
+          providerInstanceId: scope.providerInstanceId,
+          modelId: scope.modelId,
+          ...(scope.projectId === undefined ? {} : { projectId: decodeProjectId(scope.projectId) }),
+        }).kind === "paused"
+          ? "paused"
+          : "admitted",
       conversationOwner: (providerInstanceId) => {
         const instance = persistence.readProviderInstance(providerInstanceId);
         if (instance === undefined) return undefined;
@@ -8567,6 +8603,7 @@ export function startOctantServer(
           command.kind === "compact-session"
             ? sessionCompaction.start(command, principal, windowId)
             : contextHarness.execute(command),
+        compactionState: (subject, principal) => sessionCompaction.state(subject, principal),
       },
       windowCanOpenThread,
       windowAuthorityStore,

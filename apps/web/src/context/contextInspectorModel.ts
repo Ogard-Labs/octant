@@ -368,6 +368,11 @@ export function contextCompositionEntries(
   });
 }
 
+/** A token count as the window figure writes it (41.2K), in every locale. */
+export function compactTokenCount(value: number): string {
+  return compact(value);
+}
+
 function compact(value: number): string {
   if (value < 1_000) return String(value);
   if (value < 1_000_000) return `${Number((value / 1_000).toFixed(value >= 100_000 ? 0 : 1))}K`;

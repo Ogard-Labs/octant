@@ -374,6 +374,15 @@ describe("authenticated product route dispatch", () => {
         new Request("https://octant.example/api/context/inspect", { method: "POST" }),
       ),
     ).toBe("project.overview.read");
+    // A thread's compaction state is a read; the route itself refuses a paired
+    // device anything it could act on.
+    expect(
+      classifyProductAction(
+        new Request(
+          "https://octant.example/api/context/compaction?aggregateType=code-thread&aggregateId=x",
+        ),
+      ),
+    ).toBe("project.overview.read");
     for (const path of [
       "/api/context/commands",
       "/api/extensions/lifecycle",

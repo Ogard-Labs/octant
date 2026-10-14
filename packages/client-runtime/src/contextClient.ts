@@ -3,6 +3,7 @@ import {
   decodeContextInspectorRequest,
   type ContextCommand,
   ContextCommandResult,
+  ContextCompactionState,
   ContextFailure,
   type ContextInspectorRequest,
   ContextInspectorResult,
@@ -29,6 +30,14 @@ export interface ContextClient {
     signal?: AbortSignal,
   ): Promise<ContextInspectorSnapshot>;
   execute(command: ContextCommand, signal?: AbortSignal): Promise<ContextCommandResult>;
+  /**
+   * Whether the host offers to compact a thread now, its latest compaction,
+   * and who would compact it. Answers for every thread kind, Code included.
+   */
+  readCompaction(
+    subject: ContextInspectorRequest["subject"],
+    signal?: AbortSignal,
+  ): Promise<ContextCompactionState>;
   /**
    * Whether this client may read and clear a thread's outside-content mark.
    * True for a local window; the host refuses a paired device, so the client
@@ -63,11 +72,18 @@ export type ContextClientFailureCategory = ContextFailure["category"] | "interru
 
 export class ContextClientFailure extends Error {
   readonly category: ContextClientFailureCategory;
+  /** Why the host refused a compaction; only a `compaction-refused` failure has one. */
+  readonly reason: ContextFailure["reason"];
 
-  constructor(category: ContextClientFailureCategory, message: string) {
+  constructor(
+    category: ContextClientFailureCategory,
+    message: string,
+    reason?: ContextFailure["reason"],
+  ) {
     super(message);
     this.name = "ContextClientFailure";
     this.category = category;
+    this.reason = reason;
   }
 }
 
@@ -149,6 +165,31 @@ export function createContextClient(options: ContextClientOptions): ContextClien
       acceptSequence(result.snapshot);
       return result;
     },
+    async readCompaction(subject, signal) {
+      let request: ContextInspectorRequest;
+      try {
+        request = decodeContextInspectorRequest({ subject });
+      } catch {
+        throw protocol("Context request is invalid.");
+      }
+      const query = new URLSearchParams({
+        aggregateType: String(request.subject.aggregateType),
+        aggregateId: String(request.subject.aggregateId),
+      });
+      const path = "/api/context/compaction";
+      const state = await send(
+        resolved,
+        `${path}?${query.toString()}`,
+        undefined,
+        signal,
+        decodeHostAnswer(ContextCompactionState),
+        { "x-octant-window-capability": options.windowCapability },
+      );
+      if (!sameSubject(state.subject, request.subject)) {
+        throw protocol("Context service returned an invalid response.");
+      }
+      return state;
+    },
     async readExternalContent(thread, signal) {
       if (!externalContentAvailable) throw notOnThisHost();
       return post(
@@ -218,12 +259,24 @@ async function post<T>(
   decodeSuccess: (input: unknown) => T,
   headers: Readonly<Record<string, string>>,
 ): Promise<T> {
+  return send(options, path, { body }, signal, decodeSuccess, headers);
+}
+
+/** A POST when `request` carries a body, otherwise a GET. */
+async function send<T>(
+  options: ContextClientOptions,
+  path: string,
+  request: { readonly body: unknown } | undefined,
+  signal: AbortSignal | undefined,
+  decodeSuccess: (input: unknown) => T,
+  headers: Readonly<Record<string, string>>,
+): Promise<T> {
   let response: Response;
   try {
     response = await options.fetch(new URL(path, options.baseUrl), {
-      method: "POST",
+      method: request === undefined ? "GET" : "POST",
       headers,
-      body: JSON.stringify(body),
+      ...(request === undefined ? {} : { body: JSON.stringify(request.body) }),
       ...(signal === undefined ? {} : { signal }),
     });
   } catch (error) {
@@ -242,7 +295,7 @@ async function post<T>(
   if (!response.ok) {
     try {
       const failure = decodeHostAnswer(ContextFailure)(payload);
-      throw new ContextClientFailure(failure.category, failure.message);
+      throw new ContextClientFailure(failure.category, failure.message, failure.reason);
     } catch (error) {
       if (error instanceof ContextClientFailure) throw error;
       throw protocol("Context service returned an invalid response.");

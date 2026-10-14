@@ -4617,8 +4617,13 @@ input.switch:checked::after {
   overflow: auto;
 }
 .thread-composer__feedback:empty,
-.thread-composer__feedback:has(> .composer-status:empty) {
+.thread-composer__feedback:has(> .composer-status:empty):not(:has(> .thread-composer__compacting)) {
   display: none;
+}
+.thread-composer__compacting {
+  flex: none;
+  margin: 0 12px 0 0;
+  white-space: nowrap;
 }
 .thread-composer__feedback > .composer-status {
   flex: 1 0 auto;

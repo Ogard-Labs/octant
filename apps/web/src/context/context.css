@@ -340,9 +340,27 @@
 
 .context-window-popover__limits,
 .context-window-popover__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
   padding-top: 8px;
   margin-top: 8px;
   border-top: 1px solid var(--oct-hairline);
+}
+
+/* How the latest compaction went reads above the footer's actions. */
+.context-window-popover__compaction {
+  order: -1;
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.context-window-popover__compact {
+  flex: none;
+  margin-left: auto;
 }
 
 .context-window-popover__limits {
@@ -463,12 +481,17 @@
    pulling it out by the same amount keeps the label on the content edge and
    lets the hover fill overhang it. */
 .context-window-popover__footer-action {
-  width: calc(100% + 16px);
+  flex: 1 1 auto;
+  min-width: 0;
   justify-content: space-between;
   margin: 0 -8px;
   padding: 0 8px;
   font-size: var(--oct-text-xs);
   font-weight: 400;
+}
+
+.context-window-popover__footer-action:has(~ .context-window-popover__compact) {
+  margin-right: 0;
 }
 
 .octant-dialog__popup.context-inspector-dialog {
@@ -545,6 +568,10 @@
 .context-inspector__header h2 {
   margin-top: 2px;
   font-size: var(--oct-text-sm);
+}
+
+.context-inspector__compaction {
+  margin: 2px 0 0;
 }
 
 .context-inspector button {

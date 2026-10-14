@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -12,9 +12,14 @@ import {
   useComposerContextMeterScope,
   type ComposerContextUsageFallback,
 } from "./composerContextMeterScope";
-import { contextFixture } from "./contextFixtures";
+import { compactionStateFixture, contextFixture } from "./contextFixtures";
+import type { SessionCompactionController } from "./useSessionCompaction";
+import { ThreadComposer } from "../composer/ThreadComposer";
 import type { ContextControllerStatus } from "./useContextController";
-import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
+import type {
+  ContextCompactionState,
+  ContextInspectorSnapshot,
+} from "@octant/contracts/context-rpc";
 
 function Harness(props: {
   readonly children?: ReactNode;
@@ -978,4 +983,345 @@ describe("ComposerContextMeter", () => {
     expect(onOpenUsage).toHaveBeenCalledOnce();
     expect(screen.queryByRole("dialog", { name: "Context window" })).not.toBeInTheDocument();
   });
+});
+
+describe("Compact session", () => {
+  const subject = contextFixture().subject;
+  const providerInstanceId = contextFixture().modelLimits.providerInstanceId;
+  const compactionId = "60000000-0000-4000-8000-000000000001";
+  const runtimeExecutor = {
+    kind: "runtime",
+    driverKind: "codex",
+    providerInstanceId,
+    modelId: "gpt-test",
+  } as const;
+  const names = {
+    provider: () => "Codex at home",
+    model: () => "GPT Test",
+  };
+
+  function controllerFor(
+    state: Partial<Record<keyof ContextCompactionState, unknown>>,
+    overrides: Partial<SessionCompactionController> = {},
+  ): SessionCompactionController {
+    return {
+      state: compactionStateFixture(subject, state),
+      starting: false,
+      stateUnknown: false,
+      compact: vi.fn(async () => undefined),
+      ...overrides,
+    };
+  }
+
+  function CompactionHarness(props: {
+    readonly controller: SessionCompactionController;
+    readonly fallback?: ComposerContextUsageFallback;
+    readonly children?: ReactNode;
+    /** A thread composer brings its own meter. */
+    readonly meter?: boolean;
+    readonly onOpenUsage?: () => void;
+    readonly snapshot?: ContextInspectorSnapshot;
+  }) {
+    return (
+      <ComposerContextMeterProvider
+        compaction={{ controller: props.controller, names }}
+        {...(props.onOpenUsage === undefined ? {} : { onOpenUsage: props.onOpenUsage })}
+        {...(props.fallback === undefined
+          ? { snapshot: props.snapshot ?? contextFixture() }
+          : { fallback: props.fallback })}
+        status={props.fallback === undefined ? "ready" : "not-planned"}
+        subjectKey="chat-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          {props.meter === false ? null : <ComposerContextMeter />}
+          {props.children}
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>
+    );
+  }
+
+  async function openPopover(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: /Show context usage/i }));
+  }
+
+  it("confirms before compacting, naming where the conversation goes and who writes the summary", async () => {
+    const user = userEvent.setup();
+    const controller = controllerFor({
+      compaction: { status: "available" },
+      executor: runtimeExecutor,
+    });
+    render(<CompactionHarness controller={controller} />);
+    await openPopover(user);
+
+    await user.click(screen.getByRole("button", { name: "Compact session" }));
+
+    expect(screen.queryByRole("dialog", { name: "Context window" })).not.toBeInTheDocument();
+    const confirm = screen.getByRole("dialog", { name: "Compact this session?" });
+    expect(confirm).toHaveTextContent(
+      "The earlier conversation is replaced by a summary. From the next message the model sees the summary and the most recent messages. The full history stays in this thread. This sends the conversation to Codex at home · GPT Test and uses tokens. Codex writes the summary; Octant can't show it.",
+    );
+    expect(controller.compact).not.toHaveBeenCalled();
+    await user.click(within(confirm).getByRole("button", { name: "Compact" }));
+    expect(controller.compact).toHaveBeenCalledOnce();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Compact this session?" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("does not mention a hidden summary when the host writes it", async () => {
+    const user = userEvent.setup();
+    render(
+      <CompactionHarness
+        controller={controllerFor({
+          compaction: { status: "available" },
+          executor: { kind: "host", providerInstanceId, modelId: "gpt-test" },
+        })}
+      />,
+    );
+    await openPopover(user);
+    await user.click(screen.getByRole("button", { name: "Compact session" }));
+
+    const confirm = screen.getByRole("dialog", { name: "Compact this session?" });
+    expect(confirm).toHaveTextContent("to Codex at home · GPT Test and uses tokens.");
+    expect(confirm).not.toHaveTextContent("can't show it");
+    await user.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Compact this session?" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the button for a refusal the person can wait out, disabled with the host's reason", async () => {
+    const user = userEvent.setup();
+    const controller = controllerFor({ compaction: { status: "refused", reason: "turn-running" } });
+    render(<CompactionHarness controller={controller} />);
+    await openPopover(user);
+
+    const button = screen.getByRole("button", { name: "Compact session" });
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAttribute("title", "A reply is running.");
+    expect(button).toHaveAccessibleDescription("A reply is running.");
+    await user.click(button);
+    expect(screen.queryByRole("dialog", { name: "Compact this session?" })).not.toBeInTheDocument();
+  });
+
+  it.each(["runtime-cannot-compact", "runtime-version-unsupported", "remote-client"] as const)(
+    "leaves the button out when the host will never compact for this window (%s)",
+    async (reason) => {
+      const user = userEvent.setup();
+      render(
+        <CompactionHarness
+          controller={controllerFor({ compaction: { status: "refused", reason } })}
+        />,
+      );
+      await openPopover(user);
+
+      expect(screen.getByRole("button", { name: "Inspect context" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Compact session" })).not.toBeInTheDocument();
+    },
+  );
+
+  it("reads Compacting… while the host compacts, and holds the composer's send", async () => {
+    const user = userEvent.setup();
+    render(
+      <CompactionHarness
+        controller={controllerFor({
+          compaction: { status: "refused", reason: "compaction-running" },
+          latestCompaction: {
+            status: "running",
+            compactionId,
+            executor: runtimeExecutor,
+            requestedAt: "2026-07-18T20:00:00.000Z",
+          },
+        })}
+        meter={false}
+      >
+        <ThreadComposer
+          presentation="follow-up"
+          input={<textarea aria-label="Message" className="composer-input" />}
+          row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+        />
+      </CompactionHarness>,
+    );
+
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.getByText("Compacting session")).toBeVisible();
+    expect(document.querySelector(".composer-context-meter [aria-live]")).toHaveTextContent(
+      "Compacting session.",
+    );
+    await openPopover(user);
+    const popover = screen.getByRole("dialog", { name: "Context window" });
+    expect(popover).toHaveTextContent("Compacting…");
+    expect(within(popover).getByRole("button", { name: "Compact session" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("says how much a completed compaction freed and who wrote the summary", async () => {
+    const user = userEvent.setup();
+    render(
+      <CompactionHarness
+        controller={controllerFor(
+          {
+            compaction: { status: "available" },
+            executor: runtimeExecutor,
+            latestCompaction: { status: "completed", receipt: receipt(41_200) },
+          },
+          { settledId: compactionId },
+        )}
+      />,
+    );
+    await openPopover(user);
+
+    expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
+      "Compacted · 41.2K freed · summary by Codex",
+    );
+    // This window watched it end, so the result is announced.
+    expect(document.querySelector(".composer-context-meter [aria-live]")).toHaveTextContent(
+      "Compacted · 41.2K freed · summary by Codex",
+    );
+  });
+
+  it("says a failure may have changed the session when the runtime cannot vouch for it", async () => {
+    const user = userEvent.setup();
+    render(
+      <CompactionHarness
+        controller={controllerFor({
+          compaction: { status: "available" },
+          executor: runtimeExecutor,
+          latestCompaction: {
+            status: "failed",
+            compactionId,
+            executor: runtimeExecutor,
+            reason: "runtime-failed",
+            sessionMayHaveChanged: true,
+            failedAt: "2026-07-18T20:00:00.000Z",
+          },
+        })}
+      />,
+    );
+    await openPopover(user);
+
+    expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
+      "Couldn't compact: Codex reported a failure. The session may have changed; the next reply shows what it holds.",
+    );
+    // An outcome that was already there when the thread opened is shown, not announced.
+    expect(document.querySelector(".composer-context-meter [aria-live]")).not.toHaveTextContent(
+      "Couldn't compact",
+    );
+  });
+
+  it("says why the host refused the person's request", async () => {
+    const user = userEvent.setup();
+    render(
+      <CompactionHarness
+        controller={controllerFor(
+          { compaction: { status: "refused", reason: "turn-running" } },
+          { refusal: "turn-running" },
+        )}
+      />,
+    );
+    await openPopover(user);
+
+    expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
+      "Couldn't compact: a reply is running.",
+    );
+  });
+
+  it("says the state is unknown once the window stops following a compaction", async () => {
+    const user = userEvent.setup();
+    const controller: SessionCompactionController = {
+      starting: false,
+      stateUnknown: true,
+      compact: vi.fn(async () => undefined),
+    };
+    render(
+      <CompactionHarness controller={controller} meter={false}>
+        <ThreadComposer
+          presentation="follow-up"
+          input={<textarea aria-label="Message" className="composer-input" />}
+          row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+        />
+      </CompactionHarness>,
+    );
+
+    // Send is no longer held on the window's account; the host still refuses
+    // a turn while it compacts.
+    expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+    await openPopover(user);
+    expect(screen.getByRole("dialog", { name: "Context window" })).toHaveTextContent(
+      "Compaction state unknown: the host stopped answering.",
+    );
+    expect(screen.queryByRole("button", { name: "Compact session" })).not.toBeInTheDocument();
+  });
+
+  it("offers compaction on a thread the host never plans, beside View usage", async () => {
+    const user = userEvent.setup();
+    render(
+      <CompactionHarness
+        controller={controllerFor({
+          compaction: { status: "available" },
+          executor: runtimeExecutor,
+        })}
+        fallback={{ contextWindow: 200_000, contextTokens: 50_000, limits: [] }}
+        onOpenUsage={vi.fn()}
+      />,
+    );
+    await openPopover(user);
+
+    const popover = screen.getByRole("dialog", { name: "Context window" });
+    const footer = popover.querySelector(".context-window-popover__footer");
+    expect(footer).toContainElement(
+      within(popover).getByRole("button", { name: "Compact session" }),
+    );
+    expect(footer).toContainElement(within(popover).getByRole("button", { name: "View usage" }));
+  });
+
+  it("runs the same command from the inspector, beside Rebuild and as the compact remedy", async () => {
+    const user = userEvent.setup();
+    const controller = controllerFor({
+      compaction: { status: "available" },
+      executor: runtimeExecutor,
+    });
+    const fixture = contextFixture();
+    const snapshot = {
+      ...fixture,
+      next: {
+        ...fixture.next,
+        plan: { ...fixture.next.plan, remedies: [{ kind: "compact-range" as const }] },
+      },
+    };
+    render(<CompactionHarness controller={controller} snapshot={snapshot} />);
+    await openPopover(user);
+    await user.click(screen.getByRole("button", { name: "Inspect context" }));
+
+    const inspector = screen.getByRole("complementary", { name: "Context inspector" });
+    const header = inspector.querySelector(".context-inspector__header-actions");
+    const [beside, remedy] = within(inspector).getAllByRole("button", { name: "Compact session" });
+    if (beside === undefined || remedy === undefined) throw new Error("Both controls are offered");
+    expect(header).toContainElement(beside);
+    expect(header).toContainElement(
+      within(inspector).getByRole("button", { name: "Rebuild context plan" }),
+    );
+    expect(inspector.querySelector(".context-inspector__section ul")).toContainElement(remedy);
+    await user.click(remedy);
+    const confirm = screen.getByRole("dialog", { name: "Compact this session?" });
+    await user.click(within(confirm).getByRole("button", { name: "Compact" }));
+    expect(controller.compact).toHaveBeenCalledOnce();
+  });
+
+  function receipt(freed: number) {
+    return {
+      compactionId,
+      subject,
+      executor: runtimeExecutor,
+      trigger: "requested",
+      tokensBefore: { kind: "known", tokens: freed + 1_000, accuracy: "provider-reported" },
+      tokensAfter: { kind: "known", tokens: 1_000, accuracy: "provider-reported" },
+      tokensFreed: { kind: "measured", tokens: freed, accuracy: "provider-reported" },
+      summary: { visibility: "runtime-only" },
+      usage: { kind: "unreported" },
+      completedAt: "2026-07-18T20:00:00.000Z",
+    };
+  }
 });

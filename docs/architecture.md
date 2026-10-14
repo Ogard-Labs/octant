@@ -2486,13 +2486,14 @@ and the server's send block while a compaction runs; the provider seam with the
 Codex, Claude Code and Octant Harness adapters; and the server's use of that
 seam, so a runtime-owned Chat or Work conversation and a Code thread compact
 through their runtime where its adapter claims `sessionCompaction`, with the
-same send block on Code turns. Not built yet: journaling a runtime's automatic
-compactions; replacing the `windowCompacted` flags, which still drive
-`promptRetention`, so the turn after a requested compaction still counts
-Octant's earlier per-turn context as held in a window breakdown it estimates;
-the `compaction` answer for a Code thread, whose context the host never plans,
-so its inspector read answers `not-planned`; and the UI, so `compact-range`
-stays a listed remedy with no action behind it. **Compact session** replaces
+same send block on Code turns; and the window: the **Compact session** button in
+the context popover and the inspector, its confirm, the running state, the
+result line, and the composer's held send, read from a per-thread compaction
+state every thread kind answers, Code included. Not built yet: journaling a
+runtime's automatic compactions; replacing the `windowCompacted` flags, which
+still drive `promptRetention`, so the turn after a requested compaction still
+counts Octant's earlier per-turn context as held in a window breakdown it
+estimates; and the compaction divider on the thread's timeline. **Compact session** replaces
 what the model sees from the next turn on with a summary of the earlier
 conversation and a recent tail, when the person asks, outside a turn. It never
 deletes or rewrites the journal: the thread keeps every message, tool call and
@@ -2622,6 +2623,31 @@ server checks it before any side effect:
   before anything is journaled, reserved, or sent, and the thread's
   `compaction` status reports the same refusal. A Chat Project is a virtual
   container with no provider policy, so a Chat thread has none to pass.
+- It refuses wherever the thread's next turn would be refused for the
+  thread's own standing, because a summary nobody can send next is not worth
+  paying for:
+  - A Work thread is judged by the decision every Work turn passes
+    (`decideWorkTurnAuthority`), given the authority a window showing the thread
+    now would send: its last turn's, on the Project's current binding, with the
+    thread's own folder, provider and model. A Project that is archived, gone,
+    or unbound, or a thread that is no longer active, refuses
+    `project-unavailable`. A binding that moved since the thread was made
+    leaves the thread unable to take a turn, so it has no session to carry on
+    and refuses `no-session`, as the runtime path already did.
+  - A Chat thread that is not active (archived) refuses `project-unavailable`
+    through the check every Chat send, edit, retry and resume makes first. A
+    Code thread whose Project is no longer an active Code Project refuses
+    `project-unavailable` by the rule a Code turn's Project access applies
+    (`hasActiveProject`). Neither has a folder binding to move.
+  - Saved model options the model no longer offers refuse
+    `model-options-unsupported` in every mode, judged by the same
+    `unsupportedModelOptionValues` a turn uses. A Work turn checks the stored
+    catalog; Chat and Code turns check a live provider probe, and the
+    compaction checks the stored catalog for them too, because reading a
+    thread's compaction state must not probe the provider.
+  - A harness session that is paused (by the advisor, by the person, or for
+    recovery) refuses `thread-paused` in every mode, through the same harness
+    admission every Chat, Work and Code turn asks before it starts.
 - The summarizer is always the thread's own provider instance and model. The
   command carries no summarizer choice, and the domain's
   `cross-vendor-opt-in-required` refusal stays the guard on the host path.
@@ -2797,16 +2823,32 @@ compacts the plan, and the next turn's fresh session receives it.
 
 _UI._ The server says per thread whether compaction is offered
 (`compaction: { status: "available" } | { status: "refused", reason }` on the
-context answer), and the renderer never decides it.
+context answer), and the renderer never decides it. A Code thread has no
+context plan, so its inspector read answers `not-planned`; the window instead
+reads `GET /api/context/compaction?aggregateType=…&aggregateId=…`, which answers
+every thread kind with the same `compaction` decision `compact-session` makes,
+the thread's `latestCompaction`, and, only while compaction is offered, the
+`executor` that would compact, so the confirm can name where the conversation
+goes before the person agrees. It authenticates the window and answers only one
+that can open the thread, as the command does; a paired device is passed
+through and refused `remote-client`. The window reads it when the thread opens,
+when its mode's navigation feed moves (turns starting and ending), and every
+1.5 seconds while a compaction runs, because the Work and Code streams do not
+carry the outcome to the meter; it asks the inspector again once a compaction it
+watched has ended.
 
 - The context popover's footer gets a secondary **Compact session** button
   beside its existing action. The inspector gets the same button beside
   Rebuild, and its `compact-range` remedy runs the same command, labelled
   Compact session; choosing a range is not offered.
 - A permanent refusal (`runtime-cannot-compact`,
-  `runtime-version-unsupported`) hides the button; a transient one
-  (`turn-running`, `compaction-running`, `provider-unavailable`) disables it with
-  the reason as its tooltip.
+  `runtime-version-unsupported`, and `remote-client`, which no window on a
+  paired device can change) hides the button, and the inspector leaves the
+  `compact-range` remedy out; every other refusal (`turn-running`,
+  `compaction-running`, `provider-unavailable`, `no-session`,
+  `nothing-to-compact`, `spend-ceiling-reached`, `mode-disabled`,
+  `project-unavailable`, `model-options-unsupported`, `thread-paused`) disables
+  it with the reason as its tooltip and its accessible description.
 - The confirm uses the shared alert recipe. Title: "Compact this session?" Body:
   "The earlier conversation is replaced by a summary. From the next message the
   model sees the summary and the most recent messages. The full history stays in
@@ -2832,10 +2874,25 @@ context answer), and the renderer never decides it.
   while it is prepared (a Chat turn journals its plan before its attempt), so a
   compaction can neither be planned over nor commit a summary the turn never
   read, and a runtime is never asked to compact a session a turn is resuming.
-- The result line, in the popover and on the timeline divider:
-  "Compacted · 41.2k freed · summary by Codex", "Compacted · freed amount shows
-  after the next reply", "Compacted · nothing freed", or "Couldn't compact:
-  {reason}". It is announced through the existing live region.
+  The held send points to the "Compacting session" note as its description.
+  If the compaction-state read fails while a compaction runs, the window keeps
+  the running answer and asks again, more slowly each time; after five failed
+  reads in a row (a host that went away, or a window that lost the thread) it
+  stops holding send and reads "Compaction state unknown: the host stopped
+  answering. It may still be compacting, and refuses a send until it ends."
+- The result line, in the popover and the inspector (and, once built, on the
+  timeline divider): "Compacted · 41.2K freed · summary by Codex", "Compacted ·
+  freed amount shows after the next reply · summary by Codex", "Compacted ·
+  freed amount not reported · summary by Codex", "Compacted · nothing freed ·
+  summary by Codex", or "Couldn't compact: {reason}." A completed line names
+  who wrote the summary and ends without a full stop; a failure is a sentence
+  and ends with one, and one that may have changed the session adds "The
+  session may have changed; the next reply shows what it holds." A refused
+  request reads "Couldn't compact: {reason}." until the server offers
+  compaction again. It is
+  announced through the meter's live region, only for a compaction the window
+  watched end, so a result already there when the thread opens is shown, not
+  announced.
 
 _Failures._
 

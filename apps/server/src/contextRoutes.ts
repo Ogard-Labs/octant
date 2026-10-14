@@ -1,8 +1,10 @@
 import {
   decodeContextCommand,
   decodeContextInspectorRequest,
+  decodeContextSubjectRef,
   type ContextCommand,
   type ContextCommandResult,
+  type ContextCompactionState,
   type ContextFailure,
   type ContextInspectorSnapshot,
   type ContextSubjectRef,
@@ -16,7 +18,7 @@ import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
 const DEFAULT_BODY_LIMIT = 1_048_576;
-const METHODS = "POST, OPTIONS";
+const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 
 /** Who is asking: a local window, or a paired device the dispatch boundary forwarded. */
@@ -37,6 +39,11 @@ export interface ContextRouteService {
     principal: ContextRoutePrincipal,
     windowId: WindowId,
   ) => ContextCommandResult | ContextCompactionRefusal;
+  /** Whether the caller may compact the thread now, and its latest compaction. */
+  readonly compactionState: (
+    subject: ContextSubjectRef,
+    principal: ContextRoutePrincipal,
+  ) => ContextCompactionState;
 }
 
 export interface ContextRouteDependencies {
@@ -69,11 +76,66 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
       ? dependencies.windowCanOpenThread(windowId, threadKind, String(subject.aggregateId))
       : false;
   };
+  /**
+   * A read, so it is a GET naming its thread in the query. It answers only a
+   * window that can open the thread, the rule a compaction command passes, and
+   * passes a paired device through so the service refuses it `remote-client`.
+   */
+  const compactionState = async (
+    request: Request,
+    url: URL,
+    origin: string | null,
+  ): Promise<Response> => {
+    if (request.method !== "GET") {
+      return failure("invalid", "HTTP method is not supported for this route.", 400, origin);
+    }
+    const subject = readSubjectQuery(url);
+    if (subject === undefined) {
+      return failure("invalid", "Context request is invalid.", 400, origin);
+    }
+    let windowId: WindowId;
+    try {
+      windowId = authenticateProjectRequest({
+        request,
+        body: undefined,
+        store: dependencies.windowAuthorityStore,
+        now: now(),
+      });
+    } catch (error) {
+      if (error instanceof WindowAuthorityError) {
+        return failure("unauthorized", "Context request is unauthorized.", 401, origin);
+      }
+      return failure("invalid", "Context request is invalid.", 400, origin);
+    }
+    if (!(await windowCanOpenSubject(windowId, subject))) {
+      return failure(
+        "unauthorized",
+        "Context subject is not available to this window.",
+        403,
+        origin,
+      );
+    }
+    try {
+      const answer = response(
+        dependencies.service.compactionState(subject, requestPrincipal(request)),
+        200,
+        origin,
+      );
+      // A GET may otherwise be kept by a cache, and this answer changes with
+      // every turn and compaction.
+      answer.headers.set("cache-control", "no-store");
+      return answer;
+    } catch (error) {
+      if (error instanceof ContextHarnessError) return harnessFailure(error, origin);
+      return failure("unavailable", "Octant Context service is unavailable.", 503, origin);
+    }
+  };
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     const isInspect = url.pathname === "/api/context/inspect";
     const isCommand = url.pathname === "/api/context/commands";
-    if (!isInspect && !isCommand) return undefined;
+    const isCompaction = url.pathname === "/api/context/compaction";
+    if (!isInspect && !isCommand && !isCompaction) return undefined;
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname)) {
       return failure("invalid", "Context API requests must use loopback.", 400, null);
@@ -81,11 +143,14 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
     if (origin !== null && !isAllowedOrigin(origin)) {
       return failure("invalid", "Renderer origin is not allowed.", 400, null);
     }
-    if (url.search !== "") {
-      return failure("invalid", "Context request is invalid.", 400, origin);
-    }
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    }
+    if (isCompaction) {
+      return compactionState(request, url, origin);
+    }
+    if (url.search !== "") {
+      return failure("invalid", "Context request is invalid.", 400, origin);
     }
     if (request.method !== "POST") {
       return failure("invalid", "HTTP method is not supported for this route.", 400, origin);
@@ -112,10 +177,7 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
       }
       return failure("invalid", "Context request is invalid.", 400, origin);
     }
-    const principal: ContextRoutePrincipal =
-      readPrincipalRouteContext(request)?.principal.kind === "remote-device"
-        ? "remote-device"
-        : "local-window";
+    const principal = requestPrincipal(request);
 
     try {
       if (isInspect) {
@@ -167,6 +229,32 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
       return failure("unavailable", "Octant Context service is unavailable.", 503, origin);
     }
   };
+}
+
+function requestPrincipal(request: Request): ContextRoutePrincipal {
+  return readPrincipalRouteContext(request)?.principal.kind === "remote-device"
+    ? "remote-device"
+    : "local-window";
+}
+
+/** The thread a compaction read names, from exactly two query parameters. */
+function readSubjectQuery(url: URL): ContextSubjectRef | undefined {
+  const keys = [...url.searchParams.keys()];
+  if (
+    keys.length !== 2 ||
+    url.searchParams.getAll("aggregateType").length !== 1 ||
+    url.searchParams.getAll("aggregateId").length !== 1
+  ) {
+    return undefined;
+  }
+  try {
+    return decodeContextSubjectRef({
+      aggregateType: url.searchParams.get("aggregateType"),
+      aggregateId: url.searchParams.get("aggregateId"),
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 function harnessFailure(error: ContextHarnessError, origin: string | null): Response {

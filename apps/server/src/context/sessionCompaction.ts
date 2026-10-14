@@ -9,6 +9,7 @@ import {
   type ContextCompactionRecord,
   type ContextCompactionRefusalReason,
   type ContextCompactionSettledRecord,
+  type ContextCompactionState,
   type ContextInspectorSnapshot,
   type ContextSubjectRef,
   type KnownTokenMeasurement,
@@ -17,9 +18,11 @@ import {
   type ProviderInstanceId,
   type ProviderModel,
   type ProviderModelId,
+  type ProviderModelOptionValues,
   type WindowId,
 } from "@octant/contracts";
 import { isProviderAllowedByProjectPolicy } from "@octant/domain";
+import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import {
   decideSessionCompaction,
   type SessionCompactionFacts,
@@ -95,7 +98,16 @@ export interface SessionCompactionThread {
    * allow-all there, as a turn reads it.
    */
   readonly providerPolicy?: ProjectProviderPolicy;
+  /** The model options the thread's next turn would send. */
+  readonly modelOptionValues?: ProviderModelOptionValues;
 }
+
+/**
+ * Why a turn on the thread would be refused for its own standing: its Project
+ * or the thread is archived or gone, or the folder binding the thread was made
+ * on has moved. Judged by the decision the thread kind's turns pass.
+ */
+export type SessionCompactionTurnRefusal = "project-unavailable" | "binding-changed";
 
 /**
  * The session a runtime keeps for a thread, opened as the thread's next turn
@@ -152,6 +164,12 @@ export interface SessionCompactionThreads {
   readonly settled?: (threadId: string, compaction: ContextCompactionSettledRecord) => void;
   /** Absent for a kind whose runtime sessions cannot be compacted here. */
   readonly runtimeSessions?: RuntimeCompactionSessions;
+  /**
+   * Whether a turn on the thread would be refused for its own standing.
+   * Absent for a kind whose turns judge nothing beyond what the window's
+   * access to the thread already decides.
+   */
+  readonly turnRefusal?: (threadId: string) => SessionCompactionTurnRefusal | undefined;
 }
 
 export interface SessionCompactionOptions {
@@ -187,6 +205,18 @@ export interface SessionCompactionOptions {
     providerInstanceId: ProviderInstanceId,
     modelId: ProviderModelId,
   ) => { readonly provider: ProviderInstance; readonly model?: ProviderModel } | undefined;
+  /**
+   * Whether the thread's harness session admits a turn: the same admission
+   * every Chat, Work and Code turn asks before it starts. Absent means every
+   * turn is admitted.
+   */
+  readonly harnessAdmission?: (scope: {
+    readonly threadId: string;
+    readonly mode: "chat" | "work" | "code";
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+    readonly projectId?: string;
+  }) => "admitted" | "paused";
   /** The instance's driver; undefined when it is disabled, signed out or unreachable. */
   readonly availableDriver: (providerInstanceId: ProviderInstanceId) => ProviderDriver | undefined;
   readonly capacity: Pick<
@@ -259,6 +289,28 @@ export class SessionCompactionService {
   ): ContextInspectorSnapshot {
     const snapshot = this.#options.harness.inspect(subject, afterSequence);
     return { ...snapshot, compaction: this.#admission(subject, principal).availability };
+  }
+
+  /**
+   * Whether this caller may compact the thread now, its latest compaction, and
+   * who would compact it. A Code thread has no context plan, so this is the
+   * only read that tells its window; it decides exactly as {@link start} does.
+   */
+  state(subject: ContextSubjectRef, principal: Principal): ContextCompactionState {
+    const admission = this.#admission(subject, principal);
+    const latestCompaction = this.#options.harness.latestCompaction(subject);
+    const executor = admission.run === undefined ? undefined : this.#executor(admission.run);
+    // `start` refuses a run it cannot name an executor for, so this does too.
+    const compaction: ContextCompactionAvailability =
+      admission.availability.status === "available" && executor === undefined
+        ? { status: "refused", reason: "provider-unavailable" }
+        : admission.availability;
+    return {
+      subject,
+      compaction,
+      ...(latestCompaction === undefined ? {} : { latestCompaction }),
+      ...(compaction.status === "available" && executor !== undefined ? { executor } : {}),
+    };
   }
 
   /**
@@ -805,11 +857,23 @@ export class SessionCompactionService {
       owner === "runtime" && thread !== undefined && threads?.runtimeSessions !== undefined
         ? this.#runtimeSupport(thread)
         : "unsupported";
+    // Stored facts only, and none of them for a paired device, which is
+    // refused before any of this matters.
+    const standing =
+      principal === "local-window" && thread !== undefined
+        ? threads?.turnRefusal?.(threadId)
+        : undefined;
     const facts = {
       principal,
       modeEnabled: thread === undefined || this.#modeEnabled(thread),
       owner,
       runtimeCompaction: support ?? "supported",
+      turnAdmission:
+        principal !== "local-window" || thread === undefined
+          ? "admitted"
+          : standing === "project-unavailable"
+            ? "project-unavailable"
+            : this.#turnAdmission(threadId, thread),
       compactionRunning: false,
       turnRunning: false,
       hasSession: true,
@@ -834,12 +898,16 @@ export class SessionCompactionService {
           })
         : undefined;
     const planned = owner === "runtime" ? this.#planned(subject) : undefined;
+    // A thread whose binding moved can take no turn, so it has no session a
+    // turn would carry on.
     const hasSession =
-      owner === "runtime"
-        ? thread !== undefined &&
-          threads?.runtimeSessions?.exists(threadId) === true &&
-          this.#occupancy(threads, subject, planned) !== undefined
-        : preview !== undefined && preview.kind !== "no-session";
+      standing === "binding-changed"
+        ? false
+        : owner === "runtime"
+          ? thread !== undefined &&
+            threads?.runtimeSessions?.exists(threadId) === true &&
+            this.#occupancy(threads, subject, planned) !== undefined
+          : preview !== undefined && preview.kind !== "no-session";
     // The provider policy is judged before a driver is built for the provider:
     // a driver for a provider the Project excludes must never exist to be
     // asked, and the policy needs only stored facts.
@@ -1010,6 +1078,30 @@ export class SessionCompactionService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Whether the thread's next turn would be admitted for its saved model
+   * options and its harness session, judged as that turn judges them. The
+   * options are checked against the catalog the host stored, since inspecting
+   * must not probe the provider.
+   */
+  #turnAdmission(
+    threadId: string,
+    thread: SessionCompactionThread,
+  ): "admitted" | "model-options-unsupported" | "thread-paused" {
+    const model = this.#options.providerFacts(thread.providerInstanceId, thread.modelId)?.model;
+    if (unsupportedModelOptionValues(thread.modelOptionValues, model?.options ?? []).length > 0) {
+      return "model-options-unsupported";
+    }
+    const admission = this.#options.harnessAdmission?.({
+      threadId,
+      mode: thread.mode,
+      providerInstanceId: thread.providerInstanceId,
+      modelId: thread.modelId,
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+    });
+    return admission === "paused" ? "thread-paused" : "admitted";
   }
 
   #modeEnabled(thread: SessionCompactionThread): boolean {

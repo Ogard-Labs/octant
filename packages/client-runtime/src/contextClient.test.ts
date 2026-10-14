@@ -102,6 +102,56 @@ describe("ContextClient", () => {
     });
   });
 
+  it("reads a thread's compaction state with a GET naming the thread, and keeps a refusal's reason", async () => {
+    const compactionId = "60000000-0000-4000-8000-000000000001";
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) =>
+      String(input).includes("/api/context/compaction")
+        ? Response.json({ subject, compaction: { status: "refused", reason: "turn-running" } })
+        : Response.json(
+            {
+              category: "compaction-refused",
+              message: "Octant cannot compact this session now.",
+              reason: "compaction-running",
+            },
+            { status: 409 },
+          ),
+    );
+    const client = createContextClient({
+      baseUrl: "http://127.0.0.1:13773",
+      fetch,
+      windowCapability: capability,
+    });
+
+    await expect(client.readCompaction(request.subject)).resolves.toEqual({
+      subject,
+      compaction: { status: "refused", reason: "turn-running" },
+    });
+    const [url, init] = fetch.mock.calls[0] ?? [];
+    expect(String(url)).toBe(
+      `http://127.0.0.1:13773/api/context/compaction?aggregateType=context-subject&aggregateId=${subject.aggregateId}`,
+    );
+    expect(init?.method).toBe("GET");
+    expect(init?.body).toBeUndefined();
+    expect(init?.headers).toMatchObject({ "x-octant-window-capability": capability });
+
+    await expect(
+      client.execute(decodeContextCommand({ kind: "compact-session", subject, compactionId })),
+    ).rejects.toMatchObject({ category: "compaction-refused", reason: "compaction-running" });
+
+    const otherThread = createContextClient({
+      baseUrl: "http://127.0.0.1:13773",
+      windowCapability: capability,
+      fetch: async () =>
+        Response.json({
+          subject: { ...subject, aggregateId: "10000000-0000-4000-8000-000000000002" },
+          compaction: { status: "refused", reason: "no-session" },
+        }),
+    });
+    await expect(otherThread.readCompaction(request.subject)).rejects.toMatchObject({
+      category: "protocol",
+    });
+  });
+
   it("drops unknown answer fields, refuses wrong types, and decodes closed server failures", async () => {
     const newer = createContextClient({
       baseUrl: "http://localhost",

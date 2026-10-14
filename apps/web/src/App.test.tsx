@@ -80,7 +80,7 @@ import {
   workShellBootstrap,
   workThreadId,
 } from "./App.test-fixtures";
-import { contextFixture } from "./context/contextFixtures";
+import { compactionStateFixture, contextFixture } from "./context/contextFixtures";
 
 const automationGate = vi.hoisted(() => ({ enabled: false }));
 vi.mock("./automation/automationCenterGate", () => ({
@@ -2346,9 +2346,20 @@ describe("App", () => {
         ...(capacity === undefined ? {} : { capacity: { ...capacity, subject } }),
       };
     });
+    const readCompaction = vi.fn<ContextClient["readCompaction"]>(async (subject) =>
+      compactionStateFixture(subject, {
+        compaction: { status: "available" },
+        executor: {
+          kind: "host",
+          providerInstanceId: contextFixture().modelLimits.providerInstanceId,
+          modelId: "model-a",
+        },
+      }),
+    );
     const contextApi: ContextClient = {
       inspect,
       execute: vi.fn(),
+      readCompaction,
       externalContentAvailable: false,
       readExternalContent: vi.fn(),
       clearExternalContent: vi.fn(),
@@ -2399,6 +2410,12 @@ describe("App", () => {
     expect(popover).toHaveTextContent("Free space79680%");
     expect(popover).toHaveTextContent(/Tools2 loaded · 6 deferred/);
     expect(inspect.mock.calls.length).toBe(inspectCalls);
+    // The focused thread's compaction state is read from the host for its subject.
+    expect(readCompaction).toHaveBeenCalledWith(
+      { aggregateType: "chat-thread", aggregateId: String(createdChatThreadId) },
+      expect.any(AbortSignal),
+    );
+    expect(within(popover).getByRole("button", { name: "Compact session" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "Inspect context" }));
     expect(await screen.findByRole("dialog", { name: "Context inspector" })).toBeVisible();
@@ -2445,6 +2462,7 @@ describe("App", () => {
         };
       }),
       execute: vi.fn(),
+      readCompaction: vi.fn(async (subject) => compactionStateFixture(subject)),
       externalContentAvailable: false,
       readExternalContent: vi.fn(),
       clearExternalContent: vi.fn(),

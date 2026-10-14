@@ -119,6 +119,32 @@ export const ContextInspectorResult = Schema.Union(
 );
 export type ContextInspectorResult = typeof ContextInspectorResult.Type;
 
+/**
+ * What a window shows about compacting a thread: whether the server offers it
+ * now, the thread's latest compaction, and who would compact it. Every thread
+ * kind answers, including a Code thread, whose context the host never plans
+ * and whose inspector read therefore answers `not-planned`.
+ */
+export const ContextCompactionState = Schema.Struct({
+  subject: ContextSubjectRef,
+  compaction: ContextCompactionAvailability,
+  latestCompaction: Schema.optional(ContextCompactionRecord),
+  // Named only while the server offers compaction, so the confirm can say
+  // where the conversation goes before the person agrees.
+  executor: Schema.optional(ContextCompactionExecutor),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (state) =>
+        (state.executor !== undefined) === (state.compaction.status === "available") &&
+        (state.latestCompaction?.status !== "completed" ||
+          (state.latestCompaction.receipt.subject.aggregateType === state.subject.aggregateType &&
+            state.latestCompaction.receipt.subject.aggregateId === state.subject.aggregateId)),
+    ),
+  );
+export type ContextCompactionState = typeof ContextCompactionState.Type;
+
 export const ContextCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("update-context-overrides"),
@@ -204,5 +230,6 @@ export function decodeContextInspectorResult(input: unknown): ContextInspectorRe
 export const decodeContextCommand = Schema.decodeUnknownSync(ContextCommand);
 export const decodeContextCommandResult = Schema.decodeUnknownSync(ContextCommandResult);
 export const decodeContextFailure = Schema.decodeUnknownSync(ContextFailure);
+export const decodeContextCompactionState = Schema.decodeUnknownSync(ContextCompactionState);
 
 export { ContextCapabilityCounts } from "./context";
