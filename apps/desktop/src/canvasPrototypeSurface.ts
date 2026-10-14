@@ -7,7 +7,7 @@ import type { Protocol, Session, WebContents, WebPreferences } from "electron";
  *
  * A prototype is agent-written script. In a sandboxed frame of the app window
  * the page's content policy stops fetch, sockets, images, and forms, but not
- * WebRTC, and the renderer's WebRTC policy stops UDP only: on Electron 43.1.0 a
+ * WebRTC, and the renderer's WebRTC policy stops UDP only: on Electron 43.5.0 a
  * peer connection naming a TURN server over TCP still reached a local listener
  * (see the Canvas frames threat model). So a running prototype is drawn in a
  * `<webview>` whose guest lives in a session of its own:
