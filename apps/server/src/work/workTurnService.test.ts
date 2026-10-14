@@ -1938,6 +1938,117 @@ describe("WorkTurnService", () => {
       });
     });
 
+    it("opens a long Work thread on its newest turns", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 65);
+
+      const window = await fixture.service.transcriptWindow(ids.window, ids.thread, { limit: 30 });
+
+      expect(window.version).toBe(1);
+      expect(window.turns.map((turn) => turn.prompt)).toEqual(
+        Array.from({ length: 30 }, (_, index) => `Prompt ${index + 36}`),
+      );
+      expect(window.hasEarlier).toBe(true);
+      expect(window.hasLater).toBe(false);
+    });
+
+    it("returns the turns before a named turn and says whether more remain", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 65);
+      const newest = await fixture.service.transcriptWindow(ids.window, ids.thread, { limit: 30 });
+
+      const middle = await fixture.service.transcriptWindow(ids.window, ids.thread, {
+        limit: 30,
+        before: newest.turns[0]!.requestId,
+      });
+      expect(middle.turns.map((turn) => turn.prompt)).toEqual(
+        Array.from({ length: 30 }, (_, index) => `Prompt ${index + 6}`),
+      );
+      expect(middle.hasEarlier).toBe(true);
+      expect(middle.hasLater).toBe(true);
+
+      const oldest = await fixture.service.transcriptWindow(ids.window, ids.thread, {
+        limit: 30,
+        before: middle.turns[0]!.requestId,
+      });
+      expect(oldest.turns.map((turn) => turn.prompt)).toEqual([
+        "Prompt 1",
+        "Prompt 2",
+        "Prompt 3",
+        "Prompt 4",
+        "Prompt 5",
+      ]);
+      expect(oldest.hasEarlier).toBe(false);
+      expect(oldest.hasLater).toBe(true);
+    });
+
+    it("refuses a window anchored on a turn the thread does not hold", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 3);
+
+      await expect(
+        fixture.service.transcriptWindow(ids.window, ids.thread, {
+          limit: 30,
+          before: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-ffffffffffff"),
+        }),
+      ).rejects.toMatchObject({ failure: { category: "stale" } });
+    });
+
+    it("refuses a Work window for a window that cannot read the thread", async () => {
+      const fixture = serviceFixture();
+      await settleTurns(fixture, 2);
+      fixture.threads.read.mockResolvedValue(undefined as never);
+
+      await expect(
+        fixture.service.transcriptWindow(ids.window, ids.thread, { limit: 30 }),
+      ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    });
+
+    it("stops a window short of its limit once its encoded turns pass the page budget", async () => {
+      const fixture = serviceFixture();
+      // Projected directly: a provider turn this size would not pass the
+      // input budget, but a thread can still hold many large turns.
+      const long = "x".repeat(60_000);
+      const command = startCommand();
+      for (let n = 1; n <= 40; n += 1) {
+        const suffix = n.toString(16).padStart(12, "0");
+        fixture.projection.apply(
+          decodeWorkTurnAccepted({
+            kind: "turn-accepted",
+            requestId: `aaaaaaaa-aaaa-4aaa-8aaa-${suffix}`,
+            threadId: ids.thread,
+            turnId: `bbbbbbbb-bbbb-4bbb-8bbb-${suffix}`,
+            projectId: command.authority.projectId,
+            authority: command.authority,
+            providerSessionId: `cccccccc-cccc-4ccc-8ccc-${suffix}`,
+            prompt: `${String(n)} ${long}`,
+            capabilities: {
+              workspace: "project-backed",
+              confinement: "project-root-confined",
+              shell: "denied",
+              git: "denied",
+              worktree: "denied",
+              pullRequest: "denied",
+              code: "denied",
+            },
+            acceptedAt: "2026-10-14T08:00:00.000Z",
+          }),
+        );
+      }
+
+      const window = await fixture.service.transcriptWindow(ids.window, ids.thread, { limit: 64 });
+
+      expect(window.turns.length).toBeGreaterThan(0);
+      expect(window.turns.length).toBeLessThan(40);
+      expect(window.turns.at(-1)?.prompt.startsWith("40 ")).toBe(true);
+      expect(window.hasEarlier).toBe(true);
+      const bytes = window.turns.reduce(
+        (total, turn) => total + new TextEncoder().encode(JSON.stringify(turn)).byteLength,
+        0,
+      );
+      expect(bytes).toBeLessThanOrEqual(2 * 1024 * 1024);
+    });
+
     it("serves a 64-turn thread whole from both reads", async () => {
       const fixture = serviceFixture();
       await settleTurns(fixture, 64);

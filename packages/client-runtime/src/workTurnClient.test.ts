@@ -205,6 +205,45 @@ describe("createWorkTurnClient", () => {
     });
   });
 
+  it("reads a transcript window with its page size and anchor in the query", async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({
+        version: 1,
+        threadId: ids.thread,
+        turns: [],
+        liveCursor: 4,
+        hasEarlier: true,
+        hasLater: true,
+      }),
+    );
+    const client = createWorkTurnClient({
+      baseUrl: "http://127.0.0.1:3773",
+      fetch,
+      windowCapability: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    });
+
+    const window = await client.transcriptWindow(ids.thread, { limit: 30, before: ids.request });
+
+    expect(window.hasEarlier).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      `http://127.0.0.1:3773/api/work/turns/window/${ids.thread}?limit=30&before=${ids.request}`,
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("reports the host's status when it has no transcript window route", async () => {
+    const fetch = vi.fn(async () => new Response("Not found", { status: 404 }));
+    const client = createWorkTurnClient({
+      baseUrl: "http://127.0.0.1:3773",
+      fetch,
+      windowCapability: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    });
+
+    await expect(client.transcriptWindow(ids.thread, { limit: 30 })).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
   it("rejects non-loopback base URLs", () => {
     expect(() =>
       createWorkTurnClient({

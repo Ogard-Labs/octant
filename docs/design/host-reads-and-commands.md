@@ -62,6 +62,31 @@ nothing when there is none. Code has no turn to name: its host cancels only the
 turn it is running for that thread and answers a cancel it had no turn for with
 a failed turn state and no reason, which counts as nothing running.
 
+## Thread windows
+
+A thread opens on its newest turns and loads earlier ones on request. Each
+window read answers one contiguous run of whole turns, oldest first, with
+`hasEarlier` and `hasLater`, as a new `version: 1` response with
+`cache-control: no-store`. A request names at most one anchor turn; a client
+walks back by asking for the page `before` its oldest loaded turn, so there is
+no cursor field. An anchor the thread does not hold answers 409 with the
+failure category `stale`, and the client drops its earlier pages and reads the
+newest window again. Each read is a GET, runs the same authority check as the
+whole-thread read beside it before reading anything, and is a
+`project.overview.read` for a paired device.
+
+| Mode | Route                                  | Anchor                         | Page                                                                                                                                        |
+| ---- | -------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Work | `GET /api/work/turns/window/:threadId` | `before=<requestId>` (or none) | `limit` 1 to 64 (the client asks 30), at most 2 MiB of encoded turns (a paired device's response is cut at 8 MiB), always at least one turn |
+
+A host without a window route answers 404, and the client reads the thread's
+whole-transcript route instead and shows it as fully loaded. A fresh newest
+window joins what the client holds when its first turn is already loaded;
+otherwise it replaces it, so the client never holds two runs with a gap
+between them. Row keys name the turn and never its position, which keeps the
+reader's row in place when an earlier page arrives above it. Find in page
+searches the loaded turns only, with **Load earlier messages** in view.
+
 ## Hand off
 
 Hand off is `POST /api/threads/hand-off`. The behavior rule is in

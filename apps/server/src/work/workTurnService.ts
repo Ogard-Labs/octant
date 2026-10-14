@@ -23,6 +23,7 @@ import {
   decodeCancelWorkTurnCommand,
   decodeContextSubjectRef,
   decodeWorkThreadTranscript,
+  decodeWorkThreadTranscriptWindow,
   decodeWorkTurnCancelResult,
   decodeWorkTurnFailure,
   decodeWorkTurnLookupResult,
@@ -39,6 +40,8 @@ import {
   type WorkThread,
   type WorkThreadId,
   type WorkThreadTranscript,
+  type WorkThreadTranscriptWindow,
+  type WorkThreadTranscriptWindowRequest,
   type WorkTurnCancelResult,
   type WorkTurnFailure,
   type WorkTurnLookupResult,
@@ -145,6 +148,15 @@ function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>):
     .join(", and ");
   return `${standing}\n\nTake stock first: ${why}. Before starting the request, briefly summarize where this work stands from ${WORK_STATUS_FILE_NAME} — current status, open follow-ups, and deadlines with their dates — then ask the person what has happened since and what they need to follow up on. Update ${WORK_STATUS_FILE_NAME} with their answer before continuing with the request.`;
 }
+
+/**
+ * How many bytes of encoded turns one transcript window may carry before it
+ * stops adding turns. A Work turn can hold a 200 000-character prompt, its
+ * reply twice (as `response` and in `transcript`), a task list, and child
+ * observations, so a page of the maximum 64 turns could otherwise pass the
+ * 8 MiB a paired device's response is cut at and fail to decode there.
+ */
+export const WORK_TRANSCRIPT_WINDOW_BYTES = 2 * 1024 * 1024;
 
 export class WorkTurnServiceError extends Error {
   override readonly name = "WorkTurnServiceError";
@@ -983,6 +995,56 @@ export class WorkTurnService {
         .slice(-MAX_WORK_TRANSCRIPT_TURNS)
         .map((turn) => this.#withLive(turn)),
       liveCursor: this.#liveUpdates.head(threadId),
+    });
+  }
+
+  /**
+   * One page of the thread for a client that opens on its newest turns and
+   * loads earlier ones on request. The page walks back from the newest turn,
+   * or from just before `before`, until it holds `limit` turns or its encoded
+   * turns would pass `WORK_TRANSCRIPT_WINDOW_BYTES`; it
+   * always holds at least one turn when the thread has one. A `before` the
+   * thread does not hold is `stale`: the client re-reads the newest page.
+   */
+  async transcriptWindow(
+    authenticatedWindowId: WindowId,
+    threadId: WorkThreadId,
+    request: WorkThreadTranscriptWindowRequest,
+  ): Promise<WorkThreadTranscriptWindow> {
+    this.#assertReady();
+    const thread = await this.#threads.read(authenticatedWindowId, threadId);
+    if (thread === undefined) {
+      throw this.#failure("unauthorized", "Work thread is unavailable for this window.");
+    }
+    const all = this.#projection.listForThread(threadId);
+    let end = all.length;
+    if (request.before !== undefined) {
+      const before = String(request.before);
+      end = all.findIndex((turn) => String(turn.requestId) === before);
+      if (end === -1) {
+        throw this.#failure("stale", "That Work turn is no longer in this thread.");
+      }
+    }
+    const turns: WorkTurnState[] = [];
+    let bytes = 0;
+    let start = end;
+    while (start > 0 && turns.length < request.limit) {
+      const candidate = all[start - 1];
+      if (candidate === undefined) break;
+      const turn = this.#withLive(candidate);
+      const size = Buffer.byteLength(JSON.stringify(turn), "utf8");
+      if (turns.length > 0 && bytes + size > WORK_TRANSCRIPT_WINDOW_BYTES) break;
+      bytes += size;
+      turns.unshift(turn);
+      start -= 1;
+    }
+    return decodeWorkThreadTranscriptWindow({
+      version: 1,
+      threadId,
+      turns,
+      liveCursor: this.#liveUpdates.head(threadId),
+      hasEarlier: start > 0,
+      hasLater: end < all.length,
     });
   }
 

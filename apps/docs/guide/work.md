@@ -73,6 +73,14 @@ back to the composer — unless you have already typed something newer, which is
 kept instead. The waiting message lives on this client only; a restart drops it
 rather than sending it behind your back.
 
+## Long threads
+
+A long Work thread opens on its newest messages, so it is ready to read and
+reply to straight away. **Load earlier messages** at the top of the thread adds
+the messages before the oldest one shown; the message you were reading stays
+where it is. Find in page searches the messages loaded so far. Export and purge
+always cover the whole thread.
+
 ## Unsent drafts
 
 New-task text stays with its mode and pane while you visit Settings or switch
