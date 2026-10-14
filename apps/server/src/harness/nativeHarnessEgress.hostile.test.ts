@@ -35,6 +35,7 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import { erasePurgedProjectData } from "../persistence/threadPurge";
 import {
   makeAnthropicCompatibleEndpoint,
   requestAnthropicGeneration,
@@ -2851,6 +2852,117 @@ describe("native harness tool egress grants and learn mode", () => {
           threadTainted: true,
         }),
       );
+    });
+  });
+
+  describe("taint that arrives with the launch", () => {
+    it("marks a host a tainted child asked for, and refuses it a standing rule on a clean parent", async () => {
+      const host = egressHost();
+      const origin = await tcpFixture();
+      expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+      const child = await startLaunch(host, {
+        origin: origin.port,
+        launch: { ...launchFor(childThread), parentThreadId: egressThread },
+      });
+      const tunnel = await openTunnel(child.proxy, "registry.example.com:443", child.authorization);
+      expect(await roundTrip(tunnel.socket, "payload", 7)).toBe("payload");
+      expect(await ask(child, "mirror.example.com:443")).toBe(
+        "octant-egress-refused: no-rule mirror.example.com:443",
+      );
+      expect(await child.finish()).toMatchObject({ status: "summarized" });
+      expect(host.tainted(String(childThread))).toBe(true);
+      expect(host.tainted(String(egressThread))).toBe(false);
+      expect(host.rules.view(String(egressThread), "local-window")?.proposals).toEqual([
+        expect.objectContaining({ host: "mirror.example.com", threadTainted: true }),
+      ]);
+      for (const scope of [eightHours, { kind: "project", lifetime: "7d" } as const]) {
+        expect(
+          host.rules.answer({
+            threadId: String(egressThread),
+            principal: person,
+            grants: [{ host: "mirror.example.com", port: 443, scope }],
+          }),
+        ).toEqual({ kind: "refused", reason: "thread-tainted" });
+      }
+      expect(
+        host.rules.answer({
+          threadId: String(egressThread),
+          principal: person,
+          grants: [
+            {
+              host: "mirror.example.com",
+              port: 443,
+              scope: { kind: "call", launchId: randomUUID() },
+            },
+          ],
+        }),
+      ).toMatchObject({ kind: "answered" });
+    });
+
+    it("retires a call rule when its launch settles, here and after a restart", async () => {
+      const base = taintJournal();
+      const host = egressHost({ base });
+      const origin = await tcpFixture();
+      host.taint(String(egressThread));
+      const launch = launchFor();
+      const started = await startLaunch(host, { origin: origin.port, launch });
+      expect(
+        host.rules.answer({
+          threadId: String(egressThread),
+          principal: person,
+          grants: [
+            {
+              host: "registry.example.com",
+              port: 443,
+              scope: { kind: "call", launchId: String(launch.launchId) },
+            },
+          ],
+        }),
+      ).toMatchObject({ kind: "answered" });
+      expect(host.rules.view(String(egressThread), "local-window")?.threadRules).toEqual([
+        expect.objectContaining({ scope: "call" }),
+      ]);
+      expect(await ask(started, "registry.example.com:443")).toBe("connected");
+      await started.finish();
+      expect(host.rules.view(String(egressThread), "local-window")?.threadRules).toEqual([]);
+      expect(
+        egressHost({ base }).rules.view(String(egressThread), "local-window")?.threadRules,
+      ).toEqual([]);
+    });
+
+    it("forgets a Project's rules the moment a Project erase removes them", async () => {
+      const host = egressHost();
+      const projectRule = {
+        host: "registry.example.com",
+        port: 443,
+        scope: { kind: "project", lifetime: "7d" },
+      } as const;
+      expect(
+        host.rules.answer({
+          threadId: String(egressThread),
+          principal: person,
+          grants: [projectRule],
+        }),
+      ).toMatchObject({ kind: "answered" });
+      erasePurgedProjectData({
+        connection: host.connection,
+        projectId: String(egressProject),
+        canvasIds: [],
+      });
+      host.rules.forgetProject(String(egressProject));
+      expect(host.events(TOOL_EGRESS_PROJECT_AGGREGATE)).toEqual([]);
+      expect(host.rules.view(String(egressThread), "local-window")?.projectRules).toEqual([]);
+      const launch = await startLaunch(host);
+      expect(await ask(launch, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+      expect(
+        host.rules.answer({
+          threadId: String(egressThread),
+          principal: person,
+          grants: [projectRule],
+        }),
+      ).toMatchObject({ kind: "answered" });
     });
   });
 

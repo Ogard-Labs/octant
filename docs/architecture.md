@@ -4072,8 +4072,15 @@ where it was or narrows it:
   and the tainted thread's single-use confirmation, both of which phase 4
   wires to the `bash` prompt. The proposal card and the rules list offer the
   thread lifetimes (1 hour, 8 hours, 7 days) and the Project lifetimes. A
-  `call` rule expires at most 8 hours after it is granted, which bounds a
-  launch that never ends.
+  `call` rule leaves the lists and stops counting toward the 64-rule limit when
+  its launch is summarized or marked incomplete; its expiry, at most 8 hours
+  after it is granted, bounds a launch that never ends.
+- _Which proposals count as tainted._ A proposal is marked tainted when the
+  thread it surfaces on or the launch's own thread is tainted, so a child that
+  took in outside bytes on a clean parent proposes as tainted; the launch's
+  taint is recorded before its proposals are raised. The host refuses a thread
+  or Project rule for the host and port of any open tainted proposal, whatever
+  the answering surface sends.
 - _One answer, two aggregates._ An answer that grants thread and Project rules
   appends to `thread-egress` and then `project-egress`. When the second append
   fails the answer reports `unavailable`; what the rules lists show is what is
@@ -4088,7 +4095,7 @@ where it was or narrows it:
 - _Purge._ A thread purge erases the thread's `thread-egress` aggregate. Project
   rules are the Project's: a thread purge leaves `project-egress` in place,
   including the id of the thread a rule was granted from, and a Project erase
-  removes it.
+  removes it and drops the host's live copy of those rules at once.
 - _Where the lists show._ A Code thread's Agents tab shows Network access once
   its commands run through these rules, or once the thread holds a rule or a
   proposal. Until phase 4 routes commands to the proxy, the card says that

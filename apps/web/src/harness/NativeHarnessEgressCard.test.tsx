@@ -6,6 +6,7 @@ import type {
   ToolEgressCommandResult,
   ToolEgressThreadView,
 } from "@octant/contracts";
+import { NativeHarnessClientFailure } from "@octant/client-runtime/native-harness-client";
 import { NativeHarnessEgressCard } from "./NativeHarnessEgressCard";
 
 const threadId = "00000000-0000-4000-8000-000000000020";
@@ -170,6 +171,53 @@ describe("NativeHarnessEgressCard", () => {
       grants: [{ host: "pypi.org", port: 443, choice: { kind: "thread", lifetime: "8h" } }],
       declineProposalIds: [],
     });
+  });
+
+  it("offers a host a tainted subagent asked for no standing rule, even on a clean thread", async () => {
+    const user = userEvent.setup();
+    const [clean, tainted] = view().proposals;
+    const fake = client(
+      view({
+        proposals: [
+          clean,
+          { ...tainted, threadTainted: true },
+        ] as ToolEgressThreadView["proposals"],
+      }),
+    );
+    renderCard(fake);
+    expect(await screen.findByText(/one command only/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Allow collector.example.com:8443")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => expect(fake.sent).toHaveLength(1));
+    expect(fake.sent[0]).toEqual({
+      kind: "grant-rules",
+      grants: [
+        { host: "registry.npmjs.org", port: 443, choice: { kind: "thread", lifetime: "8h" } },
+      ],
+      declineProposalIds: [],
+    });
+  });
+
+  it("drops a failed read's warning once a later read succeeds", async () => {
+    const fake = client(view({ proposals: [] }));
+    fake.egress.mockRejectedValueOnce(
+      new NativeHarnessClientFailure("The native harness service is unavailable.", 0),
+    );
+    render(
+      <NativeHarnessEgressCard
+        client={fake}
+        now={() => now}
+        refreshIntervalMs={50}
+        threadId={threadId}
+      />,
+    );
+    expect(
+      await screen.findByText("The native harness service is unavailable."),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("*.githubusercontent.com")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText("The native harness service is unavailable.")).toBeNull(),
+    );
   });
 
   it("shows a refusal the host gave in its own words", async () => {

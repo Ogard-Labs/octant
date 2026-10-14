@@ -310,6 +310,13 @@ export class ToolEgressRules {
     this.recheck();
   }
 
+  /** A Project's erased rules are gone from the journal; so is everything held for it. */
+  forgetProject(projectId: string): void {
+    this.#projectRules.delete(projectId);
+    this.#versions.delete(aggregateKey(TOOL_EGRESS_PROJECT_AGGREGATE, projectId));
+    this.recheck();
+  }
+
   /**
    * Starts the proxy for one launch. Its rules are the launch's own thread's,
    * or its parent's for a child, plus its Project's, read afresh for every
@@ -368,13 +375,15 @@ export class ToolEgressRules {
       closed = { status: "unavailable" };
     }
     this.#live.delete(String(state.launch.launchId));
+    this.#retireCallRules(state.launch);
+    // The launch's own taint is recorded before its proposals are raised, so
+    // a child that took in outside bytes marks what it asked for as tainted.
+    const marked =
+      closed.status === "summarized" && closed.summary.bytesReceived > 0
+        ? this.#markLaunch(String(state.launch.threadId), String(state.launch.launchId))
+        : "recorded";
     this.#raiseProposals(state);
-    if (closed.status !== "summarized") return { status: "unavailable" };
-    if (closed.summary.bytesReceived > 0) {
-      const threadId = String(state.launch.threadId);
-      const launchId = String(state.launch.launchId);
-      if (this.#markLaunch(threadId, launchId) !== "recorded") return { status: "unavailable" };
-    }
+    if (closed.status !== "summarized" || marked !== "recorded") return { status: "unavailable" };
     return closed;
   }
 
@@ -401,12 +410,6 @@ export class ToolEgressRules {
     const ruleIds: ToolEgressRuleId[] = [];
 
     for (const grant of input.grants) {
-      const decision = decideToolEgressGrant({
-        principal: input.principal.kind,
-        scope: grant.scope.kind,
-        threadTainted: tainted,
-      });
-      if (decision.kind === "refuse") return { kind: "refused", reason: decision.reason };
       const host = Option.getOrUndefined(
         decodeRuleHostOption(canonicalToolEgressRuleHost(grant.host)),
       );
@@ -414,6 +417,14 @@ export class ToolEgressRules {
         return { kind: "refused", reason: "invalid-host" };
       }
       if (grant.port > 65_535) return { kind: "refused", reason: "invalid-host" };
+      // A host a tainted launch asked for, a child's on a clean parent
+      // included, is granted as if the thread were tainted: one launch only.
+      const decision = decideToolEgressGrant({
+        principal: input.principal.kind,
+        scope: grant.scope.kind,
+        threadTainted: tainted || this.#proposedWhileTainted(input.threadId, host, grant.port),
+      });
+      if (decision.kind === "refuse") return { kind: "refused", reason: decision.reason };
       const lifetime = grant.scope.kind === "call" ? "call" : grant.scope.lifetime;
       const expiresAt = toolEgressRuleExpiresAt(lifetime, now);
       if (expiresAt === undefined) return { kind: "refused", reason: "unavailable" };
@@ -688,7 +699,9 @@ export class ToolEgressRules {
     const openHosts = new Set(
       [...open.values()].map(({ payload }) => `${payload.host} ${String(payload.port)}`),
     );
-    const tainted = this.#tainted(threadId);
+    // The launch's own thread counts too: a child tainted on a clean parent
+    // proposes as tainted.
+    const tainted = this.#tainted(threadId) || this.#tainted(String(state.launch.threadId));
     const events: AppendEvent[] = [];
     for (const [key, refusal] of state.proposals) {
       if (open.size + events.length >= MAX_OPEN_TOOL_EGRESS_PROPOSALS) break;
@@ -957,6 +970,7 @@ export class ToolEgressRules {
         const summary = payload as ThreadEgressLaunchSummarizedPayload;
         const launchId = String(summary.launch.launchId);
         this.#openLaunches.delete(launchId);
+        this.#retireCallRules(summary.launch);
         if (
           summary.bytesReceived > 0 &&
           !this.#live.has(launchId) &&
@@ -970,6 +984,7 @@ export class ToolEgressRules {
         const incomplete = payload as ThreadEgressLaunchIncompletePayload;
         const launchId = String(incomplete.launch.launchId);
         this.#openLaunches.delete(launchId);
+        this.#retireCallRules(incomplete.launch);
         // The tail is unknown, so whatever the batches show, the launch may
         // have received bytes after them.
         if (!this.#markedLaunches.has(launchId)) {
@@ -991,6 +1006,27 @@ export class ToolEgressRules {
     const launchId = reference.slice(LAUNCH_TAINT_REFERENCE_PREFIX.length);
     this.#markedLaunches.add(launchId);
     this.#unmarkedLaunches.delete(launchId);
+  }
+
+  /**
+   * A `call` rule is its launch's alone, so it ends when the launch settles:
+   * it leaves the lists and stops counting against the thread's limit.
+   */
+  #retireCallRules(launch: ToolEgressLaunch): void {
+    const rules = this.#threadRules.get(String(launch.parentThreadId ?? launch.threadId));
+    if (rules === undefined) return;
+    for (const [ruleId, rule] of rules) {
+      if (rule.scope.kind === "call" && String(rule.scope.launchId) === String(launch.launchId)) {
+        rules.delete(ruleId);
+      }
+    }
+  }
+
+  #proposedWhileTainted(threadId: string, host: string, port: number): boolean {
+    for (const { payload } of this.#proposals.get(threadId)?.values() ?? []) {
+      if (payload.threadTainted && payload.host === host && payload.port === port) return true;
+    }
+    return false;
   }
 
   /** A rule granted for a proposal's host and port answers it. */

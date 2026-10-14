@@ -91,7 +91,10 @@ function destination(entry: { readonly host: string; readonly port: number }): s
  */
 export function NativeHarnessEgressCard(props: NativeHarnessEgressCardProps) {
   const [view, setView] = useState<ToolEgressThreadView | null>();
+  /** A refusal or a failed answer; it stays until the next answer. */
   const [error, setError] = useState<string>();
+  /** A failed read; the next read that succeeds clears it. */
+  const [loadError, setLoadError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [choices, setChoices] = useState<Readonly<Record<string, string>>>({});
   const [draftHost, setDraftHost] = useState("");
@@ -106,9 +109,10 @@ export function NativeHarnessEgressCard(props: NativeHarnessEgressCardProps) {
       const next = await props.client.egress(props.threadId);
       if (generation.current !== asked) return;
       setView(next);
+      setLoadError(undefined);
     } catch (failure) {
       if (generation.current !== asked) return;
-      setError(
+      setLoadError(
         failure instanceof NativeHarnessClientFailure
           ? failure.message
           : "Network rules are unavailable.",
@@ -165,8 +169,9 @@ export function NativeHarnessEgressCard(props: NativeHarnessEgressCardProps) {
     [busy, props.client, props.threadId, load],
   );
 
+  const shownError = error ?? loadError;
   if (view === undefined || view === null) {
-    return error === undefined ? null : <OctantAlert tone="warning">{error}</OctantAlert>;
+    return loadError === undefined ? null : <OctantAlert tone="warning">{loadError}</OctantAlert>;
   }
   if (
     !view.enforced &&
@@ -181,6 +186,8 @@ export function NativeHarnessEgressCard(props: NativeHarnessEgressCardProps) {
     const grants: Array<{ host: string; port: number; choice: ToolEgressGrantChoice }> = [];
     const declineProposalIds: Array<ToolEgressProposalView["proposalId"]> = [];
     for (const proposal of proposals) {
+      // A host a tainted launch asked for can only be allowed for one confirmed command.
+      if (proposal.threadTainted) continue;
       const choice = grantChoice(choices[String(proposal.proposalId)] ?? DEFAULT_CHOICE);
       if (choice === undefined) declineProposalIds.push(proposal.proposalId);
       else grants.push({ host: proposal.host, port: proposal.port, choice });
@@ -281,6 +288,11 @@ export function NativeHarnessEgressCard(props: NativeHarnessEgressCardProps) {
               This thread read outside content, so a host can be allowed only for one command you
               confirm.
             </p>
+          ) : view.proposals.some((proposal) => proposal.threadTainted) ? (
+            <p className="native-harness-card__detail">
+              A host asked for after reading outside content can be allowed only for one command you
+              confirm.
+            </p>
           ) : null}
           <ul className="native-harness-egress__rules">
             {view.proposals.map((proposal) => (
@@ -296,9 +308,10 @@ export function NativeHarnessEgressCard(props: NativeHarnessEgressCardProps) {
                     {proposal.childThreadId === undefined
                       ? ""
                       : ` · subagent ${String(proposal.childThreadId).slice(0, 8)}`}
+                    {proposal.threadTainted && !view.threadTainted ? " · one command only" : ""}
                   </span>
                 </span>
-                {view.threadTainted ? null : (
+                {view.threadTainted || proposal.threadTainted ? null : (
                   <OctantSelectField
                     aria-label={`Allow ${destination(proposal)}`}
                     className="native-harness-egress__choice"
@@ -317,7 +330,8 @@ export function NativeHarnessEgressCard(props: NativeHarnessEgressCardProps) {
             ))}
           </ul>
           <div className="native-harness-chips">
-            {view.threadTainted ? null : (
+            {view.threadTainted ||
+            view.proposals.every((proposal) => proposal.threadTainted) ? null : (
               <OctantButton
                 disabled={busy}
                 onClick={() => answerProposals(view.proposals)}
@@ -397,9 +411,9 @@ export function NativeHarnessEgressCard(props: NativeHarnessEgressCardProps) {
         "No hosts allowed for the Project.",
         "Hosts the Project may reach",
       )}
-      {error === undefined ? null : (
+      {shownError === undefined ? null : (
         <OctantAlert className="native-harness-panel__error" tone="warning">
-          {error}
+          {shownError}
         </OctantAlert>
       )}
     </section>

@@ -10875,6 +10875,7 @@ export function startOctantServer(
         persistence.replicaArtifactProjection.evict(canvasIds);
       },
       purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
+      forgetProjectData: (projectId) => toolEgressRules.forgetProject(projectId),
       purgeThreadArtifacts: async ({ mode, threadId }) => {
         const released = await threadMessageQueue.purgeThread(
           decodeThreadMessageQueueScope({ mode, threadId }),
