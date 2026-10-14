@@ -106,7 +106,7 @@ describe("desktop packaging boundary", () => {
       arch: "arm64",
       asar: false,
       dir: "/tmp/octant-stage",
-      electronVersion: "43.1.0",
+      electronVersion: "43.5.0",
       extendInfo: {
         NSMicrophoneUsageDescription:
           "Octant uses the microphone to dictate a message when you press the microphone button.",
@@ -132,7 +132,7 @@ describe("desktop packaging boundary", () => {
       arch: "x64",
       asar: false,
       dir: "/tmp/octant-stage",
-      electronVersion: "43.1.0",
+      electronVersion: "43.5.0",
       icon: "/tmp/octant-stage/apps/desktop/resources/icon.png",
       name: "Octant",
       out: "/tmp/octant-out",
@@ -639,7 +639,7 @@ describe("desktop packaging boundary", () => {
     expect(createNativeRebuildOptions("/tmp/octant-stage")).toEqual({
       arch: "arm64",
       buildPath: "/tmp/octant-stage/apps/server",
-      electronVersion: "43.1.0",
+      electronVersion: "43.5.0",
       force: true,
       onlyModules: ["better-sqlite3", "node-pty"],
     });
@@ -648,7 +648,7 @@ describe("desktop packaging boundary", () => {
     ).toEqual({
       arch: "x64",
       buildPath: "/tmp/octant-stage/apps/server",
-      electronVersion: "43.1.0",
+      electronVersion: "43.5.0",
       force: true,
       onlyModules: ["better-sqlite3", "node-pty"],
     });

@@ -156,7 +156,7 @@ export function resolveReleaseVersion(
   return configured;
 }
 
-const ELECTRON_VERSION = "43.1.0";
+const ELECTRON_VERSION = "43.5.0";
 const STAGE_DIRECTORY = ".desktop-stage";
 const PACKAGER_DIRECTORY = ".packager";
 /** Server dependencies the server bundle leaves external; packaging copies them beside it. */
