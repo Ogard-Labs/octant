@@ -4673,6 +4673,21 @@ describe("compacting a Claude session", () => {
     await session.close();
   });
 
+  it("answers a compaction the session is stopped in the middle of as one that may have changed it", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "work");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const compact = acquired.connection.compact;
+    if (compact === undefined) throw new Error("The Claude connection compacts.");
+    const result = Effect.runPromise(compact({ sessionId, compactionId }));
+    await settle();
+    await Effect.runPromise(acquired.connection.stop(sessionId));
+    await expect(result).resolves.toMatchObject({ kind: "failed", sessionMayHaveChanged: true });
+    await acquired.close();
+  });
+
   it("refuses an install that does not announce the command, without sending it", async () => {
     const session = await compactingSession({ compactAnnounced: false });
     await expect(session.compact()).resolves.toEqual({

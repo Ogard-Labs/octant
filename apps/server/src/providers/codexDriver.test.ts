@@ -2865,6 +2865,25 @@ describe("compacting a Codex session", () => {
     await acquired.close();
   });
 
+  it("answers a compaction whose session is stopped or whose connection closes as one that may have changed it", async () => {
+    const stopped = fixture({ version: "0.162.1" });
+    const first = await compacting(stopped);
+    await Effect.runPromise(first.acquired.connection.stop(sessionId));
+    await expect(first.result).resolves.toMatchObject({
+      kind: "failed",
+      sessionMayHaveChanged: true,
+    });
+    await first.acquired.close();
+
+    const closed = fixture({ version: "0.162.1" });
+    const second = await compacting(closed);
+    await second.acquired.close();
+    await expect(second.result).resolves.toMatchObject({
+      kind: "failed",
+      sessionMayHaveChanged: true,
+    });
+  });
+
   it("refuses while a turn runs on the session", async () => {
     const f = fixture({ version: "0.162.1" });
     const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");

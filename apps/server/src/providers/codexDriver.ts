@@ -1203,7 +1203,10 @@ function makeConnection(
         removeInvalidation();
         unsubscribe?.();
         unsubscribe = undefined;
-        for (const state of sessions.values()) deactivate(state);
+        for (const state of sessions.values()) {
+          settleCompaction(state, false);
+          deactivate(state);
+        }
         sessions.clear();
         sessionsByThread.clear();
         pendingApprovalOwners.clear();

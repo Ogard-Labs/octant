@@ -1079,6 +1079,9 @@ function makeConnection(
       if (state.released) return;
       state.releasePromise ??= (async () => {
         state.releasing = true;
+        // A stop or teardown mid-compaction ends the request with it; the
+        // runtime may already have rewritten the session.
+        settleCompaction(state);
         clearAuthorityState(state);
         let releaseFailure: unknown;
         try {
