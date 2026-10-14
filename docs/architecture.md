@@ -3793,8 +3793,16 @@ native harness in `apps/server/src/harness`:
   what it asked for, ok/refused/failed, duration), noted live on the session
   while the turn runs and journaled with the record when it ends. `NativeHarnessQuestionStore` blocks an `ask-user` call until an
   answer arrives from any surface (`POST /api/native-harness/sessions/:thread/questions`,
-  or the Code thread's own inline question path), or until it expires or the
-  turn is interrupted. `NativeHarnessTurnObserver` puts the stable
+  or the Code thread's own inline question path), or until the turn is
+  interrupted or ten minutes pass. Expiry ends the call as
+  `question-expired` and is journaled as `expired`, the same way whether the
+  timer or the clock caught it: the host checks the clock whenever a question
+  is asked, answered, or listed (including a read of the session view), so a
+  question whose timer fired late (a busy host, a machine that slept) is
+  never still shown as pending, answerable, or holding a slot. At most 32
+  questions wait at once across the whole host; one past that is refused at
+  once as `question-too-many-waiting`, journals no question, and tells the
+  lead nobody was asked. `NativeHarnessTurnObserver` puts the stable
   instructions block in front of every harness turn, records the completed
   reply, and asks the `advisor` slot for a review. An advisor with no model of
   its own is off: unlike other jobs, its unconfigured slot does not fall back

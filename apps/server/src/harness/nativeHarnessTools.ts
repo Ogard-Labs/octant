@@ -203,6 +203,7 @@ export interface NativeHarnessToolPorts {
     | { readonly status: "answered"; readonly answer: string }
     | { readonly status: "expired" }
     | { readonly status: "cancelled" }
+    | { readonly status: "too-many-waiting" }
   >;
 }
 
@@ -586,6 +587,12 @@ async function execute(
         ...(signal === undefined ? {} : { signal }),
       });
       if (outcome.status === "answered") return ok({ answer: outcome.answer });
+      if (outcome.status === "too-many-waiting") {
+        return refused(
+          "question-too-many-waiting",
+          "Too many questions are already waiting for a person, so this one was not asked. Continue with your best judgment and say what you assumed.",
+        );
+      }
       return refused(
         outcome.status === "expired" ? "question-expired" : "question-cancelled",
         outcome.status === "expired"
