@@ -164,8 +164,14 @@ This admission ends on cancellation or dispatch completion. Local windows retain
 their selected-Project restriction (ADR 0148). A killed start can leave the
 control secret with no receipt and no socket; the next acquire quarantines
 that file and continues, and it checks the socket is still absent before the
-move so a peer that bound in the meantime keeps the secret it just wrote. An
-ownership failure names the code, the artifact path, and the next step.
+move so a peer that bound in the meantime keeps the secret it just wrote. A start
+takes over from a recorded owner only when its control socket does not answer
+and its process is gone: the pid no longer exists, is an unreaped zombie (an
+aborted owner whose parent has not collected it yet), or belongs to a process
+with a different start time (a recycled pid, including one now held by another
+user). If the process cannot be inspected, the owner counts as live and the
+start refuses. An ownership failure names the code, the artifact path, and the
+next step.
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
