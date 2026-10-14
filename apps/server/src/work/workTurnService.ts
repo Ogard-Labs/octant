@@ -160,6 +160,10 @@ function statusUpkeepInstruction(reasons: ReadonlyArray<WorkResumeBriefReason>):
  */
 export const WORK_TRANSCRIPT_WINDOW_BYTES = 2 * 1024 * 1024;
 
+/** Why the host refuses a turn on a Work thread a person marked Done. */
+export const WORK_THREAD_MARKED_DONE_TURN_REFUSAL =
+  "This task is marked Done. Archive and reactivate it before sending more.";
+
 export class WorkTurnServiceError extends Error {
   override readonly name = "WorkTurnServiceError";
   constructor(readonly failure: WorkTurnFailure) {
@@ -603,6 +607,14 @@ export class WorkTurnService {
     if (!accessible) {
       throw this.#failure("unauthorized", "Work Project is unavailable for this window.");
     }
+    // A person's Done mark locks the thread for every turn: a typed message,
+    // a queued follow-up, a usage-limit continuation, a child's result, a
+    // routine or goal round. The window's lock alone let all of these
+    // through. Checked before the turn request, so a refused turn never
+    // wakes a snooze or reopens a put-away thread.
+    if (thread?.completionConfirmed === true) {
+      throw this.#failure("invalid", WORK_THREAD_MARKED_DONE_TURN_REFUSAL);
+    }
     if (thread !== undefined) {
       const model = this.#persistence.readProviderModel?.(
         thread.providerInstanceId,
@@ -847,12 +859,20 @@ export class WorkTurnService {
       throw this.#failure("invalid", planned.message);
     }
 
+    // The turn journals on its own aggregate, so a Done mark committed while
+    // the turn was prepared raises no version conflict. Reread the thread
+    // last: nothing after this awaits before the acceptance is journaled.
+    const markedWhilePreparing =
+      thread !== undefined &&
+      (await this.#threads.read(authenticatedWindowId, command.threadId))?.completionConfirmed ===
+        true;
+
     // Preparation awaits filesystem and provider context; recheck the journal before admission.
     const afterPreparation = this.#agentResultDelivery(command);
     if (afterPreparation !== undefined) return afterPreparation;
 
     // Context and attachment reads can outlive the host's queue admission.
-    if (options?.admissionCurrent?.() === false) {
+    if (markedWhilePreparing || options?.admissionCurrent?.() === false) {
       await Effect.runPromise(
         Effect.promise(async () => {
           await extensionTools?.close?.();
@@ -861,6 +881,9 @@ export class WorkTurnService {
           Effect.catchAllCause(() => Effect.logWarning("Prepared Work tool cleanup failed.")),
         ),
       );
+      if (markedWhilePreparing) {
+        throw this.#failure("invalid", WORK_THREAD_MARKED_DONE_TURN_REFUSAL);
+      }
       throw this.#failure("unauthorized", "Work turn admission is no longer current.");
     }
 

@@ -80,8 +80,13 @@ have to describe what was delivered. The card moves to **Done** and stays
 there: stale citations, a renamed thread, or child runs still going do not
 move it back to **Waiting**. Agents cannot mark a thread Done.
 
-Once a thread is marked Done, its composer and provider lock. To work in it
-again, archive it and reactivate it, which clears the mark.
+Once a thread is marked Done, its composer and provider lock, from every
+window and from your phone. Nothing starts a new turn in it: queued messages
+stay in the queue, held, and a subagent's result waits on its run. A
+continuation you scheduled for a usage-limit reset ends with a note when the reset comes.
+To work in the thread again, archive it and reactivate it, which clears the
+mark; the waiting result then arrives, and you can resume or remove the
+queued messages.
 
 ## Out of scope
 

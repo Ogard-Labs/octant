@@ -956,6 +956,43 @@ describe("WorkThreadService", () => {
     });
   });
 
+  it("refuses a provider or model change on a thread a person marked Done until it is reactivated", async () => {
+    const fixture = serviceFixture({ threads: [thread({ completionConfirmed: true })] });
+    const change = (expectedVersion: number) =>
+      fixture.service.execute(ids.window, {
+        kind: "change-work-thread-provider",
+        threadId: ids.thread,
+        expectedVersion,
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+      });
+
+    await expect(change(1)).rejects.toEqual(
+      new WorkThreadServiceError({
+        category: "invalid",
+        message:
+          "This task is marked Done. Archive and reactivate it before changing its provider.",
+      }),
+    );
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+
+    for (const [expectedVersion, lifecycle] of [
+      [1, "archived"],
+      [2, "active"],
+    ] as const) {
+      await fixture.service.execute(ids.window, {
+        kind: "change-work-thread-lifecycle",
+        threadId: ids.thread,
+        expectedVersion,
+        lifecycle,
+      });
+    }
+    await expect(change(3)).resolves.toMatchObject({
+      kind: "thread-updated",
+      thread: { modelId: "model-b", version: 4 },
+    });
+  });
+
   it("rejects lifecycle commands that do not make a real transition", async () => {
     const fixture = serviceFixture({ threads: [thread()] });
 
@@ -1517,6 +1554,43 @@ describe("scheduling a Work thread's usage-limit resume", () => {
         ],
       }),
     );
+  });
+
+  it("refuses to schedule a resume on a thread a person marked Done until it is reactivated", async () => {
+    const turn = usageLimitTurn();
+    const fixture = serviceFixture({
+      threads: [thread({ completionConfirmed: true })],
+      turns: [turn],
+    });
+    const schedule = (expectedVersion: number) =>
+      fixture.service.execute(ids.window, {
+        kind: "schedule-work-usage-resume",
+        threadId: ids.thread,
+        expectedVersion,
+        turnId: turn.turnId,
+      });
+
+    await expect(schedule(1)).rejects.toEqual(
+      new WorkThreadServiceError({
+        category: "invalid",
+        message: "This task is marked Done. Archive and reactivate it before resuming it.",
+      }),
+    );
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+
+    for (const [expectedVersion, lifecycle] of [
+      [1, "archived"],
+      [2, "active"],
+    ] as const) {
+      await fixture.service.execute(ids.window, {
+        kind: "change-work-thread-lifecycle",
+        threadId: ids.thread,
+        expectedVersion,
+        lifecycle,
+      });
+    }
+    await expect(schedule(3)).resolves.toMatchObject({ kind: "thread-updated" });
+    expect(fixture.projection.read(ids.thread)?.usageResume?.status).toBe("scheduled");
   });
 
   it("withdraws the scheduled resume when the person cancels it", async () => {
