@@ -1648,7 +1648,16 @@ flowchart LR
   native harness. The thread-lifetime taint
   projection rebuilds from the journal; session, turn, and restart boundaries
   never clear it. Irreversible or authority-bearing actions on a tainted thread
-  still require fresh confirmation after replay.
+  still require fresh confirmation after replay. One gate enforces that:
+  `resolveThreadElevation` in `packages/domain/src/toolCallPolicy.ts` asks
+  afresh, under every posture that allows the tool at all, Full access
+  included, for each closed-catalog entry marked `irreversibleUnderTaint`
+  (MCP tools, computer-use, the harness's `web-fetch`, `bash`, `edit`,
+  `write`, and `goal-check`); Plan refuses all of these but `web-fetch`
+  before that check. A contract test refuses a catalog entry in a
+  destructive, credential, outside-Project, or privilege-expansion class
+  without that flag. A Code Git action a person takes from a window is that
+  person's own per-action act, and no agent tool issues one.
 - **Clearing taint.** Taint keeps its thread lifetime, and a person at a local
   window may clear it. A clear records that they reviewed what the thread read.
   - It appends `thread.external-content-cleared@1` on the thread's
