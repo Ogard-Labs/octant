@@ -1895,7 +1895,7 @@ describe("native harness tool egress proxy", () => {
         expect(tunnel.status).toBe(200);
       }
       void openTunnel(harness.proxy, "slow.example.com:443", harness.authorization);
-      await waitFor(() => harness.resolved.includes("slow.example.com"));
+      await waitFor(() => harness.resolved.some((host) => host === "slow.example.com"));
       const over = await openTunnel(harness.proxy, "fast.example.com:443", harness.authorization);
       expect(refusal(over.answer).line).toBe("octant-egress-refused: limit fast.example.com:443");
     });
