@@ -118,6 +118,7 @@ describe("bounded standalone skill discovery", () => {
     await mkdir(join(projectRoot, ".agents", "skills", "shared"), { recursive: true });
     await writeFile(join(projectRoot, ".agents", "skills", "shared", "SKILL.md"), "# agents\n");
 
+    const projectScope = { mode: "code" as const, projectId: "project-fixture" as never };
     const baselineService = new SkillDiscoveryService({
       roots: {
         resolve: async () => [
@@ -126,6 +127,7 @@ describe("bounded standalone skill discovery", () => {
             projectRoot,
             projectRef: "project:fixture",
             userGlobalSkillsRoot: globalRoot,
+            projectScope,
           },
         ],
       },
@@ -147,8 +149,8 @@ describe("bounded standalone skill discovery", () => {
     await writeFile(join(root, "outside-root", "escaped-skill", "SKILL.md"), "# escaped\n");
     await mkdir(join(projectRoot, "packages", ".claude"), { recursive: true });
     await symlink(join(root, "outside-root"), join(projectRoot, "packages", ".claude", "skills"));
-    await mkdir(join(projectRoot, ".cursor", "skills", "unlisted"), { recursive: true });
-    await writeFile(join(projectRoot, ".cursor", "skills", "unlisted", "SKILL.md"), "# no\n");
+    await mkdir(join(projectRoot, ".other-tool", "skills", "unlisted"), { recursive: true });
+    await writeFile(join(projectRoot, ".other-tool", "skills", "unlisted", "SKILL.md"), "# no\n");
     await mkdir(join(root, "global", ".claude", "skills", "global-claude"), { recursive: true });
     await writeFile(
       join(root, "global", ".claude", "skills", "global-claude", "SKILL.md"),
@@ -175,6 +177,10 @@ describe("bounded standalone skill discovery", () => {
     expect(claudeShared).toBeDefined();
     expect(claudeShared?.skill.qualifiedId).not.toBe(baselineAgentsKey);
     expect(claudeShared?.desiredEnabled).toBe(false);
+    // A .claude/skills package at the Project root belongs to that Project, as
+    // an .agents/skills one does.
+    expect(claudeShared?.projectScope).toEqual(projectScope);
+    expect(agentsShared?.projectScope).toEqual(projectScope);
     expect(claudeShared?.effectiveState).toEqual({ kind: "blocked", reason: "review-required" });
     expect(claudeLocal?.source).toEqual({
       kind: "agents-skills-directory",
@@ -192,6 +198,40 @@ describe("bounded standalone skill discovery", () => {
         candidates: [claudeShared?.skill.qualifiedId, agentsShared?.skill.qualifiedId],
       },
     ]);
+  });
+  it("never reads the home folder's .claude, even when the home folder is the root it walks", async () => {
+    const home = await mkdtemp(join(tmpdir(), "octant-skill-discovery-home-"));
+    directories.push(home);
+    await mkdir(join(home, ".claude", "skills", "home-claude"), { recursive: true });
+    await writeFile(join(home, ".claude", "skills", "home-claude", "SKILL.md"), "# no\n");
+    await mkdir(join(home, "work", ".claude", "skills", "nested-claude"), { recursive: true });
+    await writeFile(
+      join(home, "work", ".claude", "skills", "nested-claude", "SKILL.md"),
+      "# yes\n",
+    );
+    await mkdir(join(home, ".agents", "skills", "home-agents"), { recursive: true });
+    await writeFile(join(home, ".agents", "skills", "home-agents", "SKILL.md"), "# yes\n");
+
+    // The host's Project-less fallback walks its own working directory, which
+    // is the home folder when the host is started from there.
+    const service = new SkillDiscoveryService({
+      homeDirectory: home,
+      roots: {
+        resolve: async () => [
+          {
+            workingDirectory: join(home, "work"),
+            projectRoot: home,
+            projectRef: "server-working-directory",
+            userGlobalSkillsRoot: join(home, ".agents", "skills"),
+          },
+        ],
+      },
+    });
+
+    const names = (await service.reconcile()).skills.map((entry) => entry.skill.name);
+    expect(names).not.toContain("home-claude");
+    expect(names).toContain("nested-claude");
+    expect(names).toContain("home-agents");
   });
 });
 
