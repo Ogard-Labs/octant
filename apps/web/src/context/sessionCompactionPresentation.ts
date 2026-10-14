@@ -7,6 +7,7 @@ import type {
 import type { ContextCompactionState } from "@octant/contracts/context-rpc";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import { driverLabel, isModelEndpointDriverKind } from "../providers/providerSettingsPresentation";
+import { compactTokenCount } from "./contextInspectorModel";
 
 /**
  * The names the window knows for a provider instance and its models. Absent
@@ -141,20 +142,11 @@ export function compactionResultLine(
       : `Compacted · freed amount not reported · ${by}`;
   }
   if (freed.tokens === 0) return `Compacted · nothing freed · ${by}`;
-  return `Compacted · ${compactTokens(freed.tokens)} freed · ${by}`;
+  return `Compacted · ${compactTokenCount(freed.tokens)} freed · ${by}`;
 }
 
 export function refusalLine(reason: ContextCompactionRefusalReason): string {
   return `Couldn't compact: ${refusalClause(reason)}.`;
-}
-
-const tokenNumber = new Intl.NumberFormat(undefined, {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-
-function compactTokens(tokens: number): string {
-  return tokenNumber.format(tokens);
 }
 
 function sentence(clause: string): string {

@@ -34,8 +34,8 @@ export function CompactSessionButton(props: {
         aria-describedby={reason === undefined ? undefined : reasonId}
         className={
           props.className === undefined
-            ? "compact-session-button"
-            : `compact-session-button ${props.className}`
+            ? "compact-session-button aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            : `compact-session-button aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ${props.className}`
         }
         disabled={reason !== undefined || props.starting}
         focusableWhenDisabled
