@@ -92,6 +92,7 @@ import {
   readChatContent,
   readChatSettings,
   readChatThreadView,
+  ChatProjection,
   readChatThreadWindow,
   readPendingChatPurges,
   searchChatThreads,
@@ -8054,6 +8055,68 @@ describe("ChatService", () => {
       expect(planned?.entries.filter((entry) => entry.category === "conversation")).toEqual([]);
       expect(planned?.entries.map((entry) => entry.label)).toContain("First question, revised");
       expect(activeChatTurns(afterEdit.turns).map((turn) => turn.id)).toEqual([edited.turn.id]);
+    });
+
+    it("finds an edited message by its current text and no longer by the text it replaced", async () => {
+      const { service, persistence } = openFixture();
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Edit search",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      const first = await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        prompt: "zebra original wording",
+      });
+      if (first.kind !== "turn-created") throw new Error("Expected turn-created result.");
+      await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        prompt: "walrus follow up",
+      });
+      expect(service.searchTranscript("zebra").hits).toHaveLength(1);
+      expect(service.searchTranscript("walrus").hits).toHaveLength(1);
+
+      const edited = await service.execute({
+        kind: "edit-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: service.read(created.thread.id).thread.version,
+        turnId: first.turn.id,
+        prompt: "zebra revised wording",
+      });
+      if (edited.kind !== "turn-created") throw new Error("Expected turn-created result.");
+
+      // The superseded turn and the turn that followed it are no longer shown.
+      expect(service.searchTranscript("original").hits).toEqual([]);
+      expect(service.searchTranscript("walrus").hits).toEqual([]);
+      const found = service.searchTranscript("revised").hits;
+      expect(found.map((hit) => hit.turnId)).toEqual([edited.turn.id]);
+      expect(service.searchTranscript("zebra").hits.map((hit) => hit.turnId)).toEqual([
+        edited.turn.id,
+      ]);
+      // Every hit can be revealed: the thread window holds the turn it names.
+      const revealed = persistence.readChatThreadWindow(created.thread.id, {
+        limit: 10,
+        anchor: { kind: "through", turnId: found[0]!.turnId },
+      });
+      expect(revealed.kind).toBe("window");
+
+      // A replay of the journal rebuilds the same index.
+      rebuildProjection({
+        connection: persistence.connection,
+        journal: persistence.journal,
+        projection: new ChatProjection(),
+        clock: () => new Date().toISOString(),
+      });
+      expect(service.searchTranscript("original").hits).toEqual([]);
+      expect(service.searchTranscript("walrus").hits).toEqual([]);
+      expect(service.searchTranscript("revised").hits.map((hit) => hit.turnId)).toEqual([
+        edited.turn.id,
+      ]);
     });
 
     it("pages a window over the conversation as it stands and refuses one anchored on a superseded turn", async () => {
