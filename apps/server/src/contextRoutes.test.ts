@@ -261,6 +261,146 @@ describe("context routes", () => {
     });
   });
 
+  describe("inspect", () => {
+    const refusal = {
+      category: "unauthorized",
+      message: "Context subject is not available to this window.",
+    };
+
+    it.each(["chat-thread", "work-thread", "code-thread"] as const)(
+      "answers a window that can open its %s",
+      async (aggregateType) => {
+        const threadSubject = subjectOf(aggregateType);
+        const inspect = vi.fn(() => ({ subject: threadSubject, sequence: 2 }) as never);
+        const windowCanOpenThread = vi.fn(async () => true);
+        const route = handler({ inspect }, windowCanOpenThread);
+
+        const response = await route(
+          request("/api/context/inspect", { subject: threadSubject, afterSequence: 1 }),
+        );
+
+        expect(response?.status).toBe(200);
+        expect(windowCanOpenThread).toHaveBeenCalledWith(windowId, aggregateType, subjectId);
+        expect(inspect).toHaveBeenCalledWith(threadSubject, 1, "local-window");
+      },
+    );
+
+    it.each(["chat-thread", "work-thread", "code-thread"] as const)(
+      "refuses a %s in a Project this window cannot open before the service reads it",
+      async (aggregateType) => {
+        const inspect = vi.fn(() => ({ subject, sequence: 1 }) as never);
+        const windowCanOpenThread = vi.fn(async () => false);
+        const route = handler({ inspect }, windowCanOpenThread);
+
+        const response = await route(
+          request("/api/context/inspect", { subject: subjectOf(aggregateType) }),
+        );
+
+        expect(response?.status).toBe(403);
+        await expect(response?.json()).resolves.toEqual(refusal);
+        expect(windowCanOpenThread).toHaveBeenCalledWith(windowId, aggregateType, subjectId);
+        expect(inspect).not.toHaveBeenCalled();
+      },
+    );
+
+    it("answers a Project subject only for a window that can open the Project", async () => {
+      const projectSubject = subjectOf("project");
+      const inspect = vi.fn(() => {
+        throw new ContextHarnessError("not-planned", "private subject detail");
+      });
+      const windowCanOpenThread = vi.fn(async () => true);
+      const opens = vi.fn(async () => true);
+      const opened = await handler(
+        { inspect },
+        windowCanOpenThread,
+        opens,
+      )(request("/api/context/inspect", { subject: projectSubject }));
+      expect(opened?.status).toBe(200);
+      await expect(opened?.json()).resolves.toEqual({
+        kind: "not-planned",
+        subject: projectSubject,
+      });
+      expect(opens).toHaveBeenCalledWith(windowId, subjectId);
+      expect(windowCanOpenThread).not.toHaveBeenCalled();
+
+      const refuses = vi.fn(async () => false);
+      const refused = await handler(
+        { inspect },
+        windowCanOpenThread,
+        refuses,
+      )(request("/api/context/inspect", { subject: projectSubject }));
+      expect(refused?.status).toBe(403);
+      await expect(refused?.json()).resolves.toEqual(refusal);
+      expect(refuses).toHaveBeenCalledWith(windowId, subjectId);
+      expect(inspect).toHaveBeenCalledTimes(1);
+    });
+
+    it("answers a paired device only for what its own scope can read", async () => {
+      const deviceScope = decodeWindowId("82000000-0000-4000-8000-0000000000d1");
+      const readable = "82000000-0000-4000-8000-0000000000d2";
+      const inspect = vi.fn((threadSubject: ContextSubjectRef) => ({
+        subject: threadSubject,
+        sequence: 1,
+      })) as never;
+      const windowCanOpenThread = vi.fn(
+        async (scope: WindowId, _kind: string, threadId: string) =>
+          String(scope) === String(deviceScope) && threadId === readable,
+      );
+      const route = handler({ inspect }, windowCanOpenThread);
+      const fromDevice = (threadId: string) => {
+        const remote = request("/api/context/inspect", {
+          subject: decodeContextSubjectRef({ aggregateType: "work-thread", aggregateId: threadId }),
+        });
+        bindPrincipalRouteContext(remote, {
+          principal: { kind: "remote-device" } as never,
+          scopeId: deviceScope,
+        });
+        return remote;
+      };
+
+      const inScope = await route(fromDevice(readable));
+      expect(inScope?.status).toBe(200);
+      expect(inspect).toHaveBeenCalledWith(
+        expect.objectContaining({ aggregateId: readable }),
+        undefined,
+        "remote-device",
+      );
+
+      const outOfScope = await route(fromDevice(subjectId));
+      expect(outOfScope?.status).toBe(403);
+      await expect(outOfScope?.json()).resolves.toEqual(refusal);
+      expect(windowCanOpenThread).toHaveBeenCalledWith(deviceScope, "work-thread", subjectId);
+      expect(inspect).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses an unknown subject in the same words as one it may not read", async () => {
+      const unknownId = "82000000-0000-4000-8000-0000000000e1";
+      const inspect = vi.fn(() => ({ subject, sequence: 1 }) as never);
+      // The thread rule finds the known thread in a Project this window cannot
+      // open, and no thread at all for the unknown id; both answer false.
+      const route = handler(
+        { inspect },
+        async () => false,
+        async () => false,
+      );
+      const answer = async (aggregateType: string, aggregateId: string) => {
+        const response = await route(
+          request("/api/context/inspect", {
+            subject: decodeContextSubjectRef({ aggregateType, aggregateId }),
+          }),
+        );
+        return { status: response?.status, body: await response?.json() };
+      };
+
+      const notReadable = await answer("chat-thread", subjectId);
+      expect(notReadable).toEqual({ status: 403, body: refusal });
+      expect(await answer("chat-thread", unknownId)).toEqual(notReadable);
+      expect(await answer("project", unknownId)).toEqual(notReadable);
+      expect(await answer("context-subject", unknownId)).toEqual(notReadable);
+      expect(inspect).not.toHaveBeenCalled();
+    });
+  });
+
   describe("compaction state", () => {
     const codeSubject = subjectOf("code-thread");
     const query = (threadSubject: ContextSubjectRef) =>
@@ -356,6 +496,8 @@ function handler(
     threadKind: "chat-thread" | "work-thread" | "code-thread",
     threadId: string,
   ) => Promise<boolean> = async () => true,
+  windowCanOpenProject: (windowId: WindowId, projectId: string) => Promise<boolean> = async () =>
+    true,
 ) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 1 });
@@ -372,6 +514,7 @@ function handler(
         })),
     },
     windowCanOpenThread,
+    windowCanOpenProject,
     windowAuthorityStore: store,
     now: () => 2,
   });

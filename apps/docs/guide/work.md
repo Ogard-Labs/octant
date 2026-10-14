@@ -93,13 +93,13 @@ thread or restarting the app restores the text and caret. Sending or clearing
 the composer removes it. Mentions that are part of the typed text persist;
 staged attachments do not. Deleting or purging the thread removes its draft.
 
-## Complete and snooze threads
+## Put away and snooze threads
 
 A thread you are done with can be put away without archiving it. Choose
-**Complete** from the row's menu (right-click, or the ⋯ control on hover) and
-the thread moves to the collapsed **Completed** shelf at the foot of the
+**Put away** from the row's menu (right-click, or the ⋯ control on hover) and
+the thread moves to the collapsed **Put away** shelf at the foot of the
 sidebar. Everything about it stays. **Reopen** brings it back, and so does
-sending it a new message. Octant refuses to complete a thread while a turn is
+sending it a new message. Octant refuses to put a thread away while a turn is
 still running or while the agent is waiting on an approval or an answer from
 you.
 
@@ -109,8 +109,8 @@ if the turn that was running when you snoozed it finishes. When a snooze ends
 the row reappears marked **Woke** until you open it; **Wake** ends a snooze by
 hand. A thread that is waiting on you cannot be snoozed.
 
-Completed threads move to the archive on their own after a week. Change that
-window, or turn it off, under **Settings › General › Archive completed
+Put-away threads move to the archive on their own after a week. Change that
+window, or turn it off, under **Settings › General › Archive put-away
 threads**. Archiving keeps every thread; only a confirmed purge deletes.
 
 ## Export

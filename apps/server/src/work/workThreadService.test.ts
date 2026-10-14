@@ -1339,7 +1339,7 @@ describe("completing and snoozing a Work thread", () => {
     expect(fixture.projection.read(ids.thread)).not.toHaveProperty("completedAt");
   });
 
-  it("refuses to complete a thread while its turn runs or waits on the person", async () => {
+  it("refuses to put a thread away while its turn runs or waits on the person", async () => {
     const running = serviceFixture({
       threads: [thread()],
       observeRuntime: () => ({ executing: true, awaitingInput: false }),
@@ -1350,7 +1350,9 @@ describe("completing and snoozing a Work thread", () => {
         threadId: ids.thread,
         expectedVersion: 1,
       }),
-    ).rejects.toMatchObject({ failure: { category: "invalid", message: /running turn/ } });
+    ).rejects.toMatchObject({
+      failure: { category: "invalid", message: /before putting this thread away/ },
+    });
 
     const waiting = serviceFixture({
       threads: [thread()],

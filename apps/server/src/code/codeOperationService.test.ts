@@ -1478,14 +1478,21 @@ describe("CodeOperationService", () => {
     function restoreFixture(
       live: ReadonlyArray<ReturnType<typeof liveTurn>>,
       requester: CodeThread = thread(),
+      /** Other threads on the same checkout, which may start turns of their own. */
+      others: ReadonlyArray<CodeThread> = [],
     ) {
       const restoreCheckpoint = vi.fn(async () => ({
         status: "applied" as const,
         undo: { worktree: "e".repeat(40), index: "f".repeat(40) },
       }));
+      const checkpoint = vi.fn(async () => ({ status: "unavailable" as const }));
+      const start = vi.fn(async () => ({ state: "running" as const }));
       const service = new CodeOperationService({
         authority: {
-          readThread: vi.fn(() => requester),
+          readThread: vi.fn(
+            (id: CodeThread["id"]) =>
+              others.find((other) => String(other.id) === String(id)) ?? requester,
+          ),
           readCheckout: vi.fn(() =>
             decodeCodeCheckoutIdentity({
               id: ids.checkout,
@@ -1506,11 +1513,11 @@ describe("CodeOperationService", () => {
         approvals: { validate: vi.fn(async () => true) },
         terminals: {} as never,
         repositoryTests: {} as never,
-        git: { restoreCheckpoint } as never,
+        git: { restoreCheckpoint, checkpoint } as never,
         pullRequests: {} as never,
         reviewFindings: {} as never,
         turns: {
-          start: vi.fn(),
+          start,
           answerInput: vi.fn(),
           answerApproval: vi.fn(),
           cancel: vi.fn(),
@@ -1529,14 +1536,103 @@ describe("CodeOperationService", () => {
               )
               .map((turn) => turn.thread),
         },
-        evidence: { put: vi.fn(), read: vi.fn() } as never,
+        evidence: { put: vi.fn(), read: vi.fn(async () => "Implement this.") } as never,
         events: {
           replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
           append: vi.fn(),
         } as never,
       });
-      return { service, restoreCheckpoint };
+      return { service, restoreCheckpoint, checkpoint, start };
     }
+
+    it("refuses a restore while another Project's restore is overwriting the same folder", async () => {
+      const otherRestorer = decodeCodeThread({
+        ...thread(),
+        id: decodeCodeThreadId("13131313-1313-4313-8313-131313131313"),
+        projectId: otherProject,
+      });
+      const { service, restoreCheckpoint } = restoreFixture([], thread(), [otherRestorer]);
+      const entered = Promise.withResolvers<void>();
+      const overwrite = Promise.withResolvers<void>();
+      restoreCheckpoint.mockImplementationOnce(async () => {
+        entered.resolve();
+        await overwrite.promise;
+        return { status: "applied", undo: { worktree: "e".repeat(40), index: "f".repeat(40) } };
+      });
+
+      const first = service.execute(ids.window, restoreCommand);
+      await entered.promise;
+      await expect(
+        service.execute(ids.window, {
+          ...restoreCommand,
+          operationId: decodeCodeOperationId("54545454-5454-4545-8545-545454545454"),
+          threadId: otherRestorer.id,
+        }),
+      ).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message:
+            "Another restore is overwriting this checkout. Wait for it to finish, then restore.",
+        },
+      });
+      expect(restoreCheckpoint).toHaveBeenCalledOnce();
+
+      overwrite.resolve();
+      await expect(first).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        state: "completed",
+      });
+    });
+
+    it("makes a turn that starts while another Project restores the same folder wait for the files", async () => {
+      const writer = liveTurn({}).thread;
+      const restorer = decodeCodeThread({ ...thread(), projectId: otherProject });
+      const { service, restoreCheckpoint, checkpoint, start } = restoreFixture([], restorer, [
+        writer,
+      ]);
+      const entered = Promise.withResolvers<void>();
+      const overwrite = Promise.withResolvers<void>();
+      restoreCheckpoint.mockImplementationOnce(async () => {
+        entered.resolve();
+        await overwrite.promise;
+        return { status: "applied", undo: { worktree: "e".repeat(40), index: "f".repeat(40) } };
+      });
+
+      const restoring = service.execute(ids.window, restoreCommand);
+      await entered.promise;
+      const starting = service.execute(ids.window, { ...startProviderTurn, threadId: writer.id });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(checkpoint).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+      // The waiting turn already holds the folder, so no second overwrite starts.
+      await expect(
+        service.execute(ids.window, {
+          ...restoreCommand,
+          operationId: decodeCodeOperationId("54545454-5454-4545-8545-545454545454"),
+        }),
+      ).resolves.toMatchObject({
+        kind: "operation-failed",
+        failure: {
+          category: "conflict",
+          message:
+            "A thread in another Project is writing in this checkout. Wait for its turn to finish or stop it, then restore.",
+        },
+      });
+
+      overwrite.resolve();
+      await expect(restoring).resolves.toMatchObject({
+        kind: "git-mutation-state",
+        state: "completed",
+      });
+      await expect(starting).resolves.toMatchObject({
+        kind: "provider-turn-state",
+        state: "running",
+      });
+      expect(checkpoint).toHaveBeenCalledOnce();
+      expect(restoreCheckpoint).toHaveBeenCalledOnce();
+    });
 
     it("refuses to restore while another thread is writing in the same checkout and names it", async () => {
       const { service, restoreCheckpoint } = restoreFixture([liveTurn({})]);
@@ -2440,6 +2536,8 @@ describe("CodeOperationService", () => {
       sessionId: startProviderTurn.sessionId,
       checkoutRoot: "/private/exact-checkout",
       prompt: "does this still hold?",
+      // Always present: stopping a turn that is still preparing refuses it here.
+      admissionCurrent: expect.any(Function),
     });
   });
 

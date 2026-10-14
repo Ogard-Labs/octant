@@ -872,34 +872,48 @@ describe("CodeTerminalPane Browser switch", () => {
     );
   });
 
-  it("says why the host refused, and does not pretend the terminal has the Browser", async () => {
-    const client = codeClient({ evidence: "ready" });
-    vi.mocked(client.executeOperation).mockImplementation(
-      async (command) =>
-        (command.kind === "start-terminal"
-          ? {
-              kind: "terminal-state",
-              operationId: command.operationId,
-              terminalId: command.terminalId,
-              state: "unavailable",
-              browserGrant: { status: "refused", reason: "not-local-window" },
-            }
-          : { ...terminalResult, operationId: command.operationId, state: "interrupted" }) as never,
-    );
-    renderSwitch(client);
-
-    fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Let this terminal use the Browser…" }),
-    );
-    fireEvent.click(await screen.findByRole("button", { name: "Restart with the Browser" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+  it.each([
+    [
+      "not-local-window",
       "Only the person at a window on the host can let a terminal use the Browser.",
-    );
-    expect(screen.queryByText("Browser on")).not.toBeInTheDocument();
-    expect(screen.getByText("Unavailable")).toBeVisible();
-  });
+    ],
+    [
+      "thread-not-active",
+      "This thread is archived or put away, so its terminal cannot use the Browser.",
+    ],
+  ] as const)(
+    "says why the host refused with %s, and does not pretend the terminal has the Browser",
+    async (reason, sentence) => {
+      const client = codeClient({ evidence: "ready" });
+      vi.mocked(client.executeOperation).mockImplementation(
+        async (command) =>
+          (command.kind === "start-terminal"
+            ? {
+                kind: "terminal-state",
+                operationId: command.operationId,
+                terminalId: command.terminalId,
+                state: "unavailable",
+                browserGrant: { status: "refused", reason },
+              }
+            : {
+                ...terminalResult,
+                operationId: command.operationId,
+                state: "interrupted",
+              }) as never,
+      );
+      renderSwitch(client);
+
+      fireEvent.contextMenu(screen.getByRole("region", { name: "Terminal pane" }));
+      fireEvent.click(
+        await screen.findByRole("menuitem", { name: "Let this terminal use the Browser…" }),
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Restart with the Browser" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(sentence);
+      expect(screen.queryByText("Browser on")).not.toBeInTheDocument();
+      expect(screen.getByText("Unavailable")).toBeVisible();
+    },
+  );
 
   it("offers no Browser in Plan or on a terminal this window cannot restart", async () => {
     const plan = renderSwitch(codeClient(), {

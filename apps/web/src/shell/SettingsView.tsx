@@ -1527,7 +1527,7 @@ interface SectionProps {
 const COMPLETED_THREAD_ARCHIVE_CHOICES: ReadonlyArray<number> = [1, 3, 7, 14, 30, 90];
 
 /**
- * The window before a completed thread is archived, as a short list of
+ * The window before a put-away thread is archived, as a short list of
  * choices plus Never. A value chosen elsewhere that the list lacks is still
  * shown as itself rather than snapping to the nearest choice.
  */
@@ -1541,7 +1541,7 @@ function CompletedThreadArchiveSelect(props: {
       : [...COMPLETED_THREAD_ARCHIVE_CHOICES, props.afterDays].sort((left, right) => left - right);
   return (
     <OctantSelectField
-      aria-label="Archive completed threads"
+      aria-label="Archive put-away threads"
       id="completed-thread-archive"
       onValueChange={(value) => props.onChange(value === "never" ? null : Number(value))}
       options={[
@@ -1654,9 +1654,9 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
       <SettingsSection title="Threads">
         <div className="setgroup">
           <SettingRow
-            description="A completed thread rests in its shelf, then moves to the archive. Archiving keeps everything."
+            description="A put-away thread rests in its shelf, then moves to the archive. Archiving keeps everything."
             focused={focusedSetting === settingId("completed-thread-archive")}
-            label="Archive completed threads"
+            label="Archive put-away threads"
             scope="host"
             settingId="completed-thread-archive"
           >

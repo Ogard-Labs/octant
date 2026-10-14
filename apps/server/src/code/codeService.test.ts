@@ -4429,7 +4429,7 @@ describe("completing and snoozing a Code thread", () => {
     expect("snooze" in recorded).toBe(false);
   });
 
-  it("refuses to complete a thread while its turn runs or while it waits on the person", async () => {
+  it("refuses to put a thread away while its turn runs or while it waits on the person", async () => {
     const running = serviceFixture();
     running.persistence.readCodeRuntimeWorks.mockReturnValue(providerTurn("running"));
     await expect(
@@ -4438,7 +4438,9 @@ describe("completing and snoozing a Code thread", () => {
         threadId: ids.thread,
         expectedVersion: 1,
       }),
-    ).rejects.toMatchObject({ failure: { category: "invalid", message: /running turn/ } });
+    ).rejects.toMatchObject({
+      failure: { category: "invalid", message: /before putting this thread away/ },
+    });
 
     const waiting = serviceFixture();
     waiting.persistence.readCodeRuntimeWorks.mockReturnValue(providerTurn("waiting"));
@@ -4448,7 +4450,9 @@ describe("completing and snoozing a Code thread", () => {
         threadId: ids.thread,
         expectedVersion: 1,
       }),
-    ).rejects.toMatchObject({ failure: { category: "invalid", message: /waiting on you/ } });
+    ).rejects.toMatchObject({
+      failure: { category: "invalid", message: /answer it before putting it away/ },
+    });
     expect(running.persistence.journal.append).not.toHaveBeenCalled();
     expect(waiting.persistence.journal.append).not.toHaveBeenCalled();
   });

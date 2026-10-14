@@ -318,7 +318,7 @@ export interface ProjectSidebarSectionProps {
   readonly searchQuery?: string;
   /**
    * Asks the list to show a view from outside it: a sidebar tile opening the
-   * Activity feed, or the Completed shelf. A new sequence repeats the ask.
+   * Activity feed, or the Put away shelf. A new sequence repeats the ask.
    */
   readonly listRequest?: Readonly<{
     readonly view: "activity" | "completed";
@@ -358,7 +358,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const rowProperties = props.rowProperties ?? DEFAULT_SIDEBAR_ROW_PROPERTIES;
   const searchQuery = props.searchQuery ?? "";
   const searching = searchQuery.trim() !== "";
-  // Snoozed and completed threads leave the Project groups for their own
+  // Snoozed and put-away threads leave the Project groups for their own
   // shelves at the foot of the list; search and view filters never reach
   // them, so a rested thread is exactly where the person put it.
   const everyListedThread = props.threadGroups?.all ?? props.threads;
@@ -824,21 +824,20 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           ? null
           : (
               [
-                { label: "Snoozed", threads: snoozedThreads },
-                { label: "Completed", threads: completedThreads },
+                { key: "snoozed", label: "Snoozed", threads: snoozedThreads },
+                { key: "completed", label: "Put away", threads: completedThreads },
               ] as const
             ).map((shelf) =>
               shelf.threads.length === 0 ? null : (
                 <details
                   className="project-archive project-shelf"
-                  data-shelf={shelf.label.toLowerCase()}
-                  key={shelf.label}
+                  data-shelf={shelf.key}
+                  key={shelf.key}
                   onToggle={(event) => {
-                    if (shelf.label === "Completed")
-                      setCompletedShelfOpen(event.currentTarget.open);
+                    if (shelf.key === "completed") setCompletedShelfOpen(event.currentTarget.open);
                   }}
                   open={
-                    (shelf.label === "Completed" && completedShelfOpen) ||
+                    (shelf.key === "completed" && completedShelfOpen) ||
                     (props.activeThreadId !== undefined &&
                       shelf.threads.some(
                         (thread) =>

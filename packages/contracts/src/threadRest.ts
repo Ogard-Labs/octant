@@ -29,8 +29,8 @@ export type ThreadSnooze = typeof ThreadSnooze.Type;
  * archive. Both are optional so a journal written before they existed
  * replays as "in play"; absent means the same.
  *
- * `completedAt` is when the person completed the thread: put away in the
- * Completed shelf, still readable, not archived. `snooze` is the thread's
+ * `completedAt` is when the person put the thread away: in the
+ * Put away shelf, still readable, not archived. `snooze` is the thread's
  * current snooze, if any; absent means the thread is awake.
  */
 export const ThreadRestFields = {

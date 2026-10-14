@@ -22,7 +22,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "General",
       scope: "app",
       keywords:
-        "general enabled modes startup default chat work updates version release threads completed archive snooze",
+        "general enabled modes startup default chat work updates version release threads completed put away archive snooze",
       settings: [
         {
           id: settingId("enable-chat"),
@@ -52,10 +52,10 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("completed-thread-archive"),
-          label: "Archive completed threads",
+          label: "Archive put-away threads",
           scope: "host",
           keywords:
-            "complete completed threads archive automatically days never snooze snoozed shelf sidebar",
+            "put away complete completed threads archive automatically days never snooze snoozed shelf sidebar",
         },
       ],
     },
