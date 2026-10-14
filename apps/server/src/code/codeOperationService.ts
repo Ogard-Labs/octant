@@ -57,6 +57,7 @@ import {
   clampTurnAccessPosture,
   inPlaceRestoreRefusalText,
   mayWriteToRepository,
+  turnBlocksInPlaceRestore,
   type CodeOperation,
 } from "@octant/domain/code-policy";
 import {
@@ -893,6 +894,16 @@ export class CodeOperationService {
       readonly done: Promise<void>;
     }
   >();
+  /**
+   * Turns between their checkpoint capture and the runtime taking them on.
+   * The runtime reports a turn as live only once credentials, session seeding
+   * and fork preparation are done; a restore that landed before then passed
+   * its check, and the turn then started on the overwritten files.
+   */
+  readonly #startingTurns = new Set<{
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+  }>();
 
   async cancelPendingRepositoryTests(): Promise<void> {
     const pending = [...this.#pendingTests.values()];
@@ -1090,80 +1101,92 @@ export class CodeOperationService {
                     turnAccessPosture(scope.thread, command, recordedStart?.event.executionPolicy),
                   )
                 : scope.thread;
-            let turnRefusal =
+            // A writing turn holds its checkout against an in-place restore
+            // from before its checkpoint is captured until the runtime has
+            // either taken it on, and so reports it live, or let it go.
+            const startingTurn =
               command.kind === "start-provider-turn"
-                ? this.#refuseInvalidAgentRunDelivery(command)
+                ? { thread: turnThread, checkoutRoot: root.checkoutRoot }
                 : undefined;
-            if (
-              command.kind === "start-provider-turn" &&
-              recordedStart === undefined &&
-              turnRefusal === undefined
-            ) {
-              const checkpoint = await this.#checkpoint(
-                turnThread,
-                scope.checkout.id,
-                root.checkoutRoot,
-              );
-              // Check again after the asynchronous checkpoint so a changed generation or
-              // an intervening parent admission cannot acquire a stale delivery mark.
-              const afterCheckpoint = this.#agentResultDelivery(command);
-              if (afterCheckpoint !== undefined) return afterCheckpoint;
-              if (options.admissionCurrent?.() === false) {
-                turnRefusal = this.#failed(
-                  command.operationId,
-                  "unauthorized",
-                  "Code turn admission is no longer current.",
-                  "refused",
-                );
-              } else {
-                this.#options.events.append({
-                  threadId: command.threadId,
-                  operationId: command.operationId,
-                  expectedCursor: resultCursor,
-                  event: {
-                    kind: "conversation-turn-started",
-                    providerInstanceId: scope.thread.providerInstanceId,
-                    modelId: scope.thread.modelId,
-                    sessionId: command.sessionId,
-                    prompt: command.prompt,
-                    ...(command.extensionSelections === undefined ||
-                    command.extensionSelections.length === 0
-                      ? {}
-                      : { extensionSelections: command.extensionSelections }),
-                    executionPolicy: turnThread.executionPolicy,
-                    ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
-                    ...(starting.attachments.length === 0
-                      ? {}
-                      : { attachments: starting.attachments }),
-                    ...(checkpoint === undefined ? {} : { checkpoint }),
-                  },
-                });
-                resultCursor += 1;
-              }
-            }
+            if (startingTurn !== undefined) this.#startingTurns.add(startingTurn);
             try {
-              result =
-                turnRefusal !== undefined
-                  ? turnRefusal
-                  : await this.#execute(
-                      command,
-                      windowId,
-                      turnThread,
-                      scope.checkout,
-                      root,
-                      starting.attachments,
-                      options.admissionCurrent,
-                      initiator,
-                    );
-            } catch (error) {
-              const category =
-                error instanceof ReviewFindingServiceError ? error.failure : ("failed" as const);
-              // The renderer sees only the category. Without the reason in the
-              // host log, a refused result and a thrown one read the same.
-              console.warn(
-                `Octant code operation ${command.kind} failed unexpectedly: ${(error instanceof Error ? error.message : String(error)).slice(0, 400)}`,
-              );
-              result = this.#failed(command.operationId, category, "Code operation failed.");
+              let turnRefusal =
+                command.kind === "start-provider-turn"
+                  ? this.#refuseInvalidAgentRunDelivery(command)
+                  : undefined;
+              if (
+                command.kind === "start-provider-turn" &&
+                recordedStart === undefined &&
+                turnRefusal === undefined
+              ) {
+                const checkpoint = await this.#checkpoint(
+                  turnThread,
+                  scope.checkout.id,
+                  root.checkoutRoot,
+                );
+                // Check again after the asynchronous checkpoint so a changed generation or
+                // an intervening parent admission cannot acquire a stale delivery mark.
+                const afterCheckpoint = this.#agentResultDelivery(command);
+                if (afterCheckpoint !== undefined) return afterCheckpoint;
+                if (options.admissionCurrent?.() === false) {
+                  turnRefusal = this.#failed(
+                    command.operationId,
+                    "unauthorized",
+                    "Code turn admission is no longer current.",
+                    "refused",
+                  );
+                } else {
+                  this.#options.events.append({
+                    threadId: command.threadId,
+                    operationId: command.operationId,
+                    expectedCursor: resultCursor,
+                    event: {
+                      kind: "conversation-turn-started",
+                      providerInstanceId: scope.thread.providerInstanceId,
+                      modelId: scope.thread.modelId,
+                      sessionId: command.sessionId,
+                      prompt: command.prompt,
+                      ...(command.extensionSelections === undefined ||
+                      command.extensionSelections.length === 0
+                        ? {}
+                        : { extensionSelections: command.extensionSelections }),
+                      executionPolicy: turnThread.executionPolicy,
+                      ...(command.delivery === undefined ? {} : { delivery: command.delivery }),
+                      ...(starting.attachments.length === 0
+                        ? {}
+                        : { attachments: starting.attachments }),
+                      ...(checkpoint === undefined ? {} : { checkpoint }),
+                    },
+                  });
+                  resultCursor += 1;
+                }
+              }
+              try {
+                result =
+                  turnRefusal !== undefined
+                    ? turnRefusal
+                    : await this.#execute(
+                        command,
+                        windowId,
+                        turnThread,
+                        scope.checkout,
+                        root,
+                        starting.attachments,
+                        options.admissionCurrent,
+                        initiator,
+                      );
+              } catch (error) {
+                const category =
+                  error instanceof ReviewFindingServiceError ? error.failure : ("failed" as const);
+                // The renderer sees only the category. Without the reason in the
+                // host log, a refused result and a thrown one read the same.
+                console.warn(
+                  `Octant code operation ${command.kind} failed unexpectedly: ${(error instanceof Error ? error.message : String(error)).slice(0, 400)}`,
+                );
+                result = this.#failed(command.operationId, category, "Code operation failed.");
+              }
+            } finally {
+              if (startingTurn !== undefined) this.#startingTurns.delete(startingTurn);
             }
           }
         }
@@ -1231,15 +1254,21 @@ export class CodeOperationService {
           : "Code operation is unauthorized.",
       );
     }
+    // A recovered start prepares in the runtime like a new one, so it holds
+    // its checkout against an in-place restore the same way.
+    let startingTurn: { readonly thread: CodeThread; readonly checkoutRoot: string } | undefined;
     try {
       const frames = this.#replay(command.threadId, command.operationId, 0, 256).frames;
+      const turnThread = threadForTurn(
+        thread,
+        turnAccessPosture(thread, command, recordedTurnAccessPosture(frames)),
+      );
+      startingTurn = { thread: turnThread, checkoutRoot: root.checkoutRoot };
+      this.#startingTurns.add(startingTurn);
       const recovered = await this.#providerTurn(
         command,
         windowId,
-        threadForTurn(
-          thread,
-          turnAccessPosture(thread, command, recordedTurnAccessPosture(frames)),
-        ),
+        turnThread,
         root.checkoutRoot,
         recordedTurnAttachments(frames),
         admissionCurrent,
@@ -1250,6 +1279,8 @@ export class CodeOperationService {
         : cached;
     } catch {
       return this.#failed(command.operationId, "failed", "Code provider turn recovery failed.");
+    } finally {
+      if (startingTurn !== undefined) this.#startingTurns.delete(startingTurn);
     }
   }
 
@@ -2217,8 +2248,7 @@ export class CodeOperationService {
             "unavailable",
             "Restoring a checkpoint is unavailable.",
           );
-        const writers = this.#options.turns.threadsWritingIn?.(root.checkoutRoot, thread.id) ?? [];
-        const writer = writers[0];
+        const writer = this.#threadsWritingIn(root.checkoutRoot, thread.id)[0];
         if (writer !== undefined) {
           return this.#failed(
             command.operationId,
@@ -2794,6 +2824,32 @@ export class CodeOperationService {
         ? { title: result.title, ...(result.body === undefined ? {} : { body: result.body }) }
         : {}),
     });
+  }
+
+  /**
+   * The other threads whose turn would race an in-place restore of this
+   * checkout root: those the runtime reports live, and those still starting.
+   * A starting turn's thread carries its clamped posture, so a Plan turn
+   * holds nothing back.
+   */
+  #threadsWritingIn(checkoutRoot: string, exceptThreadId: CodeThreadId): ReadonlyArray<CodeThread> {
+    const starting = [...this.#startingTurns]
+      .filter((turn) =>
+        turnBlocksInPlaceRestore(
+          {
+            threadId: String(turn.thread.id),
+            checkoutRoot: turn.checkoutRoot,
+            state: "running",
+            posture: turn.thread.executionPolicy,
+          },
+          { threadId: String(exceptThreadId), checkoutRoot },
+        ),
+      )
+      .map((turn) => turn.thread);
+    return [
+      ...(this.#options.turns.threadsWritingIn?.(checkoutRoot, exceptThreadId) ?? []),
+      ...starting,
+    ];
   }
 
   /**
