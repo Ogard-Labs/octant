@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { CodeCheckoutId, CodeThreadId } from "./code";
+import { DeviceHostCapabilities, DeviceOpenUrl } from "./deviceHost";
 import { CorrelationId, EventActor, UtcTimestamp } from "./events";
 import { ToolActionApproval, ToolActionAuthority, ToolActionId } from "./toolActions";
 
@@ -64,6 +65,7 @@ export const AndroidEmulatorActionKind = Schema.Literal(
   "key-press",
   "install",
   "launch",
+  "open-url",
 );
 export type AndroidEmulatorActionKind = typeof AndroidEmulatorActionKind.Type;
 
@@ -112,6 +114,8 @@ export const AndroidEmulatorRequest = Schema.Struct({
       Schema.pattern(/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/),
     ),
   ),
+  /** The address `open-url` opens. Shown whole in its confirmation; evidence keeps the origin. */
+  url: Schema.optional(DeviceOpenUrl),
   timeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(10 * 60 * 1000)),
   approval: ToolActionApproval,
 })
@@ -141,6 +145,9 @@ export const AndroidEmulatorRequest = Schema.Struct({
       }
       if (request.kind === "install") return request.apkPath !== undefined;
       if (request.kind === "launch") return request.packageName !== undefined;
+      if (request.kind === "open-url") {
+        return request.requestedBy !== undefined && request.url !== undefined;
+      }
       return true;
     }),
   );
@@ -205,7 +212,8 @@ export const AndroidEmulatorEvidence = Schema.Struct({
         evidence.kind === "tap" ||
         evidence.kind === "swipe" ||
         evidence.kind === "type-text" ||
-        evidence.kind === "key-press"
+        evidence.kind === "key-press" ||
+        evidence.kind === "open-url"
       ) {
         return evidence.requestedBy !== undefined;
       }
@@ -255,6 +263,7 @@ export const AndroidRuntimeSnapshot = Schema.Struct({
       requestedAt: UtcTimestamp,
     }).annotations(strict),
   ),
+  capabilities: Schema.optional(DeviceHostCapabilities),
 }).annotations(strict);
 export type AndroidRuntimeSnapshot = typeof AndroidRuntimeSnapshot.Type;
 

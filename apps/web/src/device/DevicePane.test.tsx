@@ -239,6 +239,48 @@ describe("DevicePane", () => {
     expect(screen.queryByRole("menuitem", { name: "Lock" })).not.toBeInTheDocument();
   });
 
+  it("offers Open URL in More once the host reports it, even before input is allowed", async () => {
+    const user = userEvent.setup();
+    const { onAction } = pane({ canOpenUrl: true, inputAllowed: false, needsApproval: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Open URL…" }));
+    const field = await screen.findByRole("textbox", { name: "Address to open on iPhone 17" });
+    await user.type(field, "example.com/welcome?from=octant");
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    // The surface above confirms the whole address before the device opens it.
+    expect(onAction).toHaveBeenCalledExactlyOnceWith({
+      kind: "open-url",
+      url: "https://example.com/welcome?from=octant",
+    });
+    expect(screen.queryByRole("textbox", { name: /Address to open/ })).not.toBeInTheDocument();
+  });
+
+  it("says in the line when an address is not one the host opens, and sends nothing", async () => {
+    const user = userEvent.setup();
+    const { onAction } = pane({ canOpenUrl: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Open URL…" }));
+    const field = await screen.findByRole("textbox", { name: "Address to open on iPhone 17" });
+    for (const refused of ["javascript:alert(1)", "file:///etc/hosts", "myapp://settings"]) {
+      await user.clear(field);
+      await user.type(field, refused);
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      expect(screen.getByRole("alert")).toHaveTextContent("Use an http or https address.");
+    }
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("leaves Open URL out of More on a host that has not reported it", async () => {
+    const user = userEvent.setup();
+    pane({ canOpenUrl: false });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Open URL/ })).not.toBeInTheDocument();
+  });
+
   it("types text from More through the same queue", async () => {
     const user = userEvent.setup();
     const { onInput } = pane();

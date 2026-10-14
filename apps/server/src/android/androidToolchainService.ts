@@ -23,6 +23,7 @@ import {
   type ToolActionCancellation,
 } from "@octant/contracts";
 import {
+  deviceOpenUrlDiagnostic,
   evaluateAndroidEmulatorRequest,
   isAndroidEmulatorInputKind,
   isAndroidEmulatorOpenInputKind,
@@ -323,6 +324,9 @@ export class AndroidToolchainService {
       snapshotAt: this.#options.now(),
       sdk: this.#sdk,
       emulators: this.#emulators,
+      // What this host can do beyond the original actions; the pane offers
+      // an item only once it is listed here.
+      capabilities: { openUrl: true },
       active: [...this.#active.values()]
         .filter((entry) => androidContextMatches(entry.context, context))
         .map((entry) => entry.progress),
@@ -629,6 +633,44 @@ export class AndroidToolchainService {
         outcomeFor(result),
         startedAt,
         [note],
+        result.cleanupUncertain ? "uncertain" : "complete",
+      );
+    }
+    if (request.kind === "open-url") {
+      if (request.url === undefined) {
+        return deniedEvidence(request, "url-required", startedAt, this.#options.now());
+      }
+      const result = await this.#command(
+        [
+          adb,
+          "-s",
+          serial,
+          "shell",
+          "am",
+          "start",
+          "-a",
+          "android.intent.action.VIEW",
+          "-d",
+          deviceShellWord(request.url),
+        ],
+        context,
+        request.timeoutMs,
+        signal,
+      );
+      // `am start` can exit 0 after printing `Error: Activity not started,
+      // unable to resolve Intent`, so its own error line decides as well.
+      const outcome = lostServerMidCommand(result)
+        ? "interrupted"
+        : succeeded(result) && reportsActivityError(result)
+          ? "failed"
+          : outcomeFor(result);
+      // The device's own output can quote the address, so only the note,
+      // which names the origin, is kept.
+      return await this.#logged(
+        request,
+        outcome,
+        startedAt,
+        [deviceOpenUrlDiagnostic(request.url, outcome === "succeeded" ? "completed" : outcome)],
         result.cleanupUncertain ? "uncertain" : "complete",
       );
     }
@@ -1279,6 +1321,20 @@ function adbText(value: string): string {
   // adb joins argv into a command that the device shell parses again.
   // Quote the whole token so typed punctuation cannot become shell syntax.
   return `'${value.replaceAll(" ", "%s").replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * One word for the device shell: adb joins argv into a command line the
+ * device parses again, so the whole value is single-quoted.
+ */
+function deviceShellWord(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function reportsActivityError(result: AndroidProcessResult): boolean {
+  return `${text(result.stdout)}\n${text(result.stderr)}`
+    .split(/\r?\n/)
+    .some((line) => line.trimStart().startsWith("Error:"));
 }
 
 function androidKey(key: string): string | undefined {

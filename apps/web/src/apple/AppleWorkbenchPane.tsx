@@ -60,7 +60,8 @@ export type AppleWorkbenchIntent =
       readonly simulatorId: AppleSimulatorId;
       readonly key: string;
     }
-  | { readonly kind: "repair-input"; readonly simulatorId: AppleSimulatorId };
+  | { readonly kind: "repair-input"; readonly simulatorId: AppleSimulatorId }
+  | { readonly kind: "open-url"; readonly simulatorId: AppleSimulatorId; readonly url: string };
 
 export interface AppleWorkbenchPaneProps {
   readonly status: AppleWorkbenchStatus;
