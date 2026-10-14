@@ -299,9 +299,17 @@ guidance instead.
   actions, credential/secret access, access outside the selected Project, and privilege expansion
   or sandbox changes (design section 8.4) — require a fresh explicit per-action confirmation.
   Standing session grants and remembered Full access do not silently satisfy these classes on a
-  tainted thread; the confirmation prompt names the ingested sources. Enforcement: the policy
-  engine's step 7 — module `packages/domain/src/toolCallPolicy.ts` with the taint projection in
-  `apps/server`. In the native harness only results that bring in outside content mark the thread
+  tainted thread. Enforcement: the policy engine's thread-elevation step,
+  `resolveThreadElevation` in `packages/domain/src/toolCallPolicy.ts`, fed by the taint projection
+  in `apps/server`. It asks afresh, under every posture, for each closed-catalog entry marked
+  `irreversibleUnderTaint`, and a catalog test refuses an entry in any of the four classes without
+  that flag. Today `mcp-tool` (privilege expansion) is the only entry in one of the four classes;
+  the flag also covers `computer-use`, `web-fetch`, and the harness `bash`, `edit`, `write`, and
+  `goal-check`. A Code Git action a person takes from a window (discard, restore, push, create a
+  pull request, bring a run home) is that person's own per-action act, and no agent tool issues
+  one. Residual gaps: the prompt does not yet name the ingested sources or say that the mark is
+  why it asks, and a provider runtime's own tools sit outside this gate (below). In the native
+  harness only results that bring in outside content mark the thread
   (`web-fetch`, `web-search`, a child's collected or delivered reply); local reads, searches, edits, and
   commands do not. On a tainted thread a harness "always" approval stops covering its class, and
   `web-fetch` itself needs the per-action confirmation because a GET can carry data out in its
