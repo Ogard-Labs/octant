@@ -1581,6 +1581,18 @@ describe.each([
   },
 );
 
+describe("Cline session backend", () => {
+  it("keeps the session in the confined process instead of a running Cline hub", () => {
+    const managedHome = "/tmp/managed-cline";
+    const environment = sanitizeAcpEnvironment(
+      cline,
+      { PATH: "/usr/bin", CLINE_SESSION_BACKEND_MODE: "hub" },
+      { managedHome, executionPolicy: "approval-gated" },
+    );
+    expect(environment.CLINE_SESSION_BACKEND_MODE).toBe("local");
+  });
+});
+
 describe("Linux deny paths below Full access", () => {
   it.each([
     ["approval-gated", "a writable"],

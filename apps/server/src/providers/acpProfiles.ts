@@ -966,7 +966,16 @@ const clineProfile: AcpProviderProfile = {
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
     minimumVersion: [3, 0, 61],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
-    guards: { NO_COLOR: "1" },
+    guards: {
+      NO_COLOR: "1",
+      // Left on "auto", Cline hands the ACP session to a compatible Cline hub
+      // daemon that is already running, outside this process's sandbox and
+      // its Project denies, and otherwise starts one in the background.
+      // "local" keeps the session in this confined process
+      // (`resolveConfiguredBackendMode` in its source, 3.0.61 and 3.0.71;
+      // its ACP agent sets no mode of its own).
+      CLINE_SESSION_BACKEND_MODE: "local",
+    },
     environment: ({ managedHome, apiKey }) => ({
       HOME: managedHome,
       XDG_CONFIG_HOME: join(managedHome, ".config"),
