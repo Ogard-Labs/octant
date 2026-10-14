@@ -82,10 +82,24 @@ export function evaluateAndroidEmulatorRequest(
   }
   if (request.approval.kind === "denied") return { kind: "denied", reason: "approval-denied" };
   if (
-    (isAndroidEmulatorInputKind(request.kind) || isAndroidEmulatorOpenInputKind(request.kind)) &&
+    (isAndroidEmulatorInputKind(request.kind) ||
+      isAndroidEmulatorOpenInputKind(request.kind) ||
+      request.kind === "open-url") &&
     request.requestedBy === undefined
   ) {
     return { kind: "denied", reason: "actor-required" };
+  }
+  if (request.kind === "open-url" && request.url === undefined) {
+    return { kind: "denied", reason: "url-required" };
+  }
+  // Open URL is offered only in the pane: a person asks for it, never an
+  // agent or the host on their behalf.
+  if (
+    request.kind === "open-url" &&
+    request.requestedBy?.kind !== "local-user" &&
+    request.requestedBy?.kind !== "remote-device"
+  ) {
+    return { kind: "denied", reason: "person-required" };
   }
   if (!sdk.available) return { kind: "denied", reason: "toolchain-unavailable" };
   const emulator = emulators.find((candidate) => candidate.emulatorId === request.emulatorId);
@@ -101,6 +115,7 @@ export function evaluateAndroidEmulatorRequest(
       request.kind === "screenshot" ||
       request.kind === "install" ||
       request.kind === "launch" ||
+      request.kind === "open-url" ||
       isAndroidEmulatorInputKind(request.kind) ||
       isAndroidEmulatorOpenInputKind(request.kind)) &&
     emulator.state !== "booted"

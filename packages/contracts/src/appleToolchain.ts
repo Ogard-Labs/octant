@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { CodeCheckoutId, CodeThreadId } from "./code";
+import { DeviceHostCapabilities, DeviceOpenUrl } from "./deviceHost";
 import { CorrelationId, EventActor, UtcTimestamp } from "./events";
 import { ToolActionApproval, ToolActionAuthority, ToolActionId } from "./toolActions";
 
@@ -98,6 +99,7 @@ export const AppleSimulatorActionKind = Schema.Literal(
   "type-text",
   "key-press",
   "repair-input",
+  "open-url",
 );
 export type AppleSimulatorActionKind = typeof AppleSimulatorActionKind.Type;
 
@@ -118,6 +120,7 @@ export const AppleActionKind = Schema.Literal(
   "type-text",
   "key-press",
   "repair-input",
+  "open-url",
 );
 export type AppleActionKind = typeof AppleActionKind.Type;
 
@@ -186,6 +189,8 @@ export const AppleSimulatorRequest = Schema.Struct({
   text: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096))),
   /** Hardware or named key for `key-press` (for example `return`, `escape`, `home`). */
   key: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+  /** The address `open-url` opens. Shown whole in its confirmation; evidence keeps the origin. */
+  url: Schema.optional(DeviceOpenUrl),
   timeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(10 * 60 * 1000)),
   approval: ToolActionApproval,
 })
@@ -226,6 +231,9 @@ export const AppleSimulatorRequest = Schema.Struct({
       }
       if (request.kind === "repair-input") {
         return request.requestedBy !== undefined;
+      }
+      if (request.kind === "open-url") {
+        return request.requestedBy !== undefined && request.url !== undefined;
       }
       return true;
     }),
@@ -317,7 +325,8 @@ export const AppleBuildEvidence = Schema.Struct({
         evidence.kind === "swipe" ||
         evidence.kind === "type-text" ||
         evidence.kind === "key-press" ||
-        evidence.kind === "repair-input"
+        evidence.kind === "repair-input" ||
+        evidence.kind === "open-url"
       ) {
         return evidence.requestedBy !== undefined;
       }
@@ -382,6 +391,7 @@ export const AppleRuntimeSnapshot = Schema.Struct({
       requestedAt: UtcTimestamp,
     }).annotations(strict),
   ),
+  capabilities: Schema.optional(DeviceHostCapabilities),
 }).annotations(strict);
 export type AppleRuntimeSnapshot = typeof AppleRuntimeSnapshot.Type;
 

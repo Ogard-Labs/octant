@@ -81,4 +81,14 @@ describe("AndroidEmulatorRequest", () => {
       decodeAndroidEmulatorRequest({ ...base, kind: "install", apkPath: "/tmp/app.apk" }),
     ).toThrow();
   });
+
+  it("decodes Open URL only with an http(s) address and the person who asked", () => {
+    const openUrl = { ...base, kind: "open-url", url: "https://example.com/welcome" };
+    expect(decodeAndroidEmulatorRequest(openUrl).url).toBe("https://example.com/welcome");
+    expect(() => decodeAndroidEmulatorRequest({ ...openUrl, url: undefined })).toThrow();
+    expect(() => decodeAndroidEmulatorRequest({ ...openUrl, requestedBy: undefined })).toThrow();
+    expect(() =>
+      decodeAndroidEmulatorRequest({ ...openUrl, url: "content://contacts/people/1" }),
+    ).toThrow();
+  });
 });

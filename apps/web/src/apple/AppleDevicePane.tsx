@@ -42,6 +42,11 @@ export function AppleDevicePane(props: AppleWorkbenchPaneProps) {
             case "shutdown":
               if (live !== undefined) onRun({ kind: "shutdown", simulatorId: live.simulatorId });
               return;
+            case "open-url":
+              if (live !== undefined) {
+                onRun({ kind: "open-url", simulatorId: live.simulatorId, url: action.url });
+              }
+              return;
             case "boot":
             case "select": {
               const simulator = simulatorFor(action.deviceId);
@@ -110,6 +115,7 @@ export function AppleDevicePane(props: AppleWorkbenchPaneProps) {
   return (
     <DevicePane
       busy={props.busy === true}
+      canOpenUrl={props.runtime?.capabilities?.openUrl === true}
       devices={devices}
       diagnostics={appleDiagnostics(props)}
       inputAllowed={props.inputAllowed !== false}

@@ -7,6 +7,7 @@ import {
   EyeOff,
   House,
   Keyboard,
+  Link,
   Lock,
   Power,
   Smartphone,
@@ -28,6 +29,8 @@ export interface DeviceToolbarControls {
   readonly back: boolean;
   readonly screenshot: boolean;
   readonly typeText: boolean;
+  /** Only once the host reports that it can open an address on this device. */
+  readonly openUrl: boolean;
   readonly switchDevice: boolean;
   readonly stopLiveView: boolean;
   readonly shutdown: boolean;
@@ -126,6 +129,7 @@ export function DeviceToolbar(props: {
 
 export type DeviceMenuItem =
   | "type-text"
+  | "open-url"
   | "lock"
   | "switch-device"
   | "diagnostics"
@@ -143,6 +147,9 @@ function deviceMenuItems(props: {
   const items: DeviceMenuEntry[] = [];
   if (controls.typeText) {
     items.push({ value: "type-text", label: "Type text…", icon: <Keyboard size={16} /> });
+  }
+  if (controls.openUrl) {
+    items.push({ value: "open-url", label: "Open URL…", icon: <Link size={16} /> });
   }
   if (controls.hardware && !props.wide) {
     items.push({ value: "lock", label: "Lock", icon: <Lock size={16} /> });
