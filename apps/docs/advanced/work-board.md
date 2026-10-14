@@ -80,8 +80,8 @@ have to describe what was delivered. The card moves to **Done** and stays
 there: stale citations, a renamed thread, or child runs still going do not
 move it back to **Waiting**. Agents cannot mark a thread Done.
 
-A thread marked Done takes no new messages, files, or provider changes. To
-work in it again, archive it and reactivate it, which clears the mark.
+Once a thread is marked Done, its composer and provider lock. To work in it
+again, archive it and reactivate it, which clears the mark.
 
 ## Out of scope
 

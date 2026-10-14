@@ -1648,8 +1648,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           pending={completing}
           title="Mark this task Done?"
         >
-          {thread.title} moves to Done on the board. It takes no new messages, files, or provider
-          changes until you archive and reactivate it.
+          {thread.title} moves to Done on the board. Its composer and provider lock until you
+          archive and reactivate it.
         </OctantConfirmDialog>
       ) : null}
 
