@@ -5607,10 +5607,11 @@ mechanisms are:
     client takes or checks a pin, and a client that relies on platform trust
     refuses the certificate, so only a pasted certificate can be reached by
     a client today. Settings still asks for a certificate and key, and
-    `octant listener`'s usage line still names them. Settings also still
-    offers a browser pairing link for any ready listener; for a self-made one
-    the browser shows its own certificate warning, and the pairing-code slice
-    of the plan removes that link.
+    `octant listener`'s usage line still names them.
+  - **No browser link.** A browser decides whether to trust the listener
+    before any Octant page loads and cannot check a certificate the host made
+    itself, so Settings offers no browser pairing link for a self-made
+    listener and says why; a browser pairs only with a pasted certificate.
 - **Adding a computer in one step.** Partly built: the host certificate above.
   The pairing code that carries the pin, the client pin rule, and the rest are
   planned in [the plan](plans/one-step-pairing.md).

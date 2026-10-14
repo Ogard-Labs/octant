@@ -265,6 +265,10 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
   };
 
   const ticketLive = ticket !== undefined && ticket.expiresAt > clock();
+  // A browser decides whether to trust the listener before any Octant page
+  // loads, and it cannot check a certificate the host made itself, so a
+  // browser pairing link is never offered for one.
+  const browserCannotVerify = status?.certificateSource === "self-made";
   const activeDevices = devices.filter((device) => device.state === "active");
 
   return (
@@ -473,7 +477,7 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
                 value={ticketSource}
               />
               <div className="host-settings__controls">
-                {status?.state === "ready" ? (
+                {status?.state === "ready" && !browserCannotVerify ? (
                   <OctantButton
                     onClick={() => void mintTicket()}
                     size="sm"
@@ -488,11 +492,19 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
                 <p className="settings-section-line">
                   Enable the remote listener before pairing a device.
                 </p>
+              ) : browserCannotVerify ? (
+                <p className="settings-section-line">
+                  A browser can't check this computer's own certificate, so there is no pairing link
+                  for it. To pair a browser, give the listener a Tailscale certificate or your own.
+                </p>
               ) : null}
             </div>
           </SettingRow>
         </div>
-        {ticket !== undefined && status?.origin !== null && status?.origin !== undefined ? (
+        {ticket !== undefined &&
+        !browserCannotVerify &&
+        status?.origin !== null &&
+        status?.origin !== undefined ? (
           ticketLive ? (
             <SettingsFactList
               facts={[

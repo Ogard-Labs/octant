@@ -98,7 +98,7 @@ anything.
     A browser therefore pairs only with a listener that serves a pasted
     certificate (a Tailscale certificate or the person's own), as today. For
     a self-made listener, Settings and `octant pair` offer no browser link
-    and say why. A browser that opens the listener's address anyway shows
+    and say why (Settings already does, with the host certificate). A browser that opens the listener's address anyway shows
     its own certificate warning, before Octant can show anything; the guide
     says to stop there. Once a browser has seen the listener's HSTS header
     over a trusted certificate, it does not let the person continue past
@@ -252,8 +252,8 @@ and the plan shrinks accordingly.
    log line, journal event, and diagnostics export; a key file another
    user can read is refused; a restart and a renewal keep the pin.
 2. _Pairing code._ Building and parsing the code, Settings and `octant pair`
-   output, QR code, no browser link or human-entry code for a self-made
-   listener. Tests: the code round-trips; a code with a missing or
+   output, QR code, no human-entry code for a self-made listener (Settings
+   already offers it no browser link). Tests: the code round-trips; a code with a missing or
    unknown pin is refused with its copy.
 3. _Client pin rule._ The pin and trust mode in device-key metadata and the
    host registry, and a pinned transport port in the client runtime.

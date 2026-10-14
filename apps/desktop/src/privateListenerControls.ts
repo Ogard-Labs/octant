@@ -3,6 +3,9 @@ import { classifyRemoteListenerAddress } from "@octant/domain";
 
 export type PrivateListenerExposureClass = "lan-private" | "tailscale";
 
+/** Whether the listener serves the certificate the host made or one the person pasted. */
+export type PrivateListenerCertificateSource = "self-made" | "pasted";
+
 export type PrivateListenerControlFailureCode =
   | "local-confirmation-required"
   | "invalid-bind"
@@ -75,6 +78,7 @@ export interface PrivateListenerPublicStatus {
   readonly exposureClass: PrivateListenerExposureClass | null;
   readonly certificateFingerprint: string | null;
   readonly certificateReady: boolean;
+  readonly certificateSource: PrivateListenerCertificateSource | null;
   readonly errorCode?: PrivateListenerControlFailureCode;
 }
 
@@ -85,6 +89,7 @@ export interface PrivateListenerRuntimeStartResult {
   readonly exposureClass: PrivateListenerExposureClass;
   readonly certificateFingerprint: string;
   readonly certificateReady: boolean;
+  readonly certificateSource: PrivateListenerCertificateSource | null;
 }
 
 export interface PrivateListenerRuntimeStartInput {
@@ -208,6 +213,7 @@ export function createPrivateListenerControlService(
         exposureClass: started.exposureClass,
         certificateFingerprint: started.certificateFingerprint,
         certificateReady: started.certificateReady,
+        certificateSource: started.certificateSource,
       };
       return getStatus();
     } catch (error) {
@@ -274,6 +280,7 @@ function normalizeStatus(status: PrivateListenerPublicStatus): PrivateListenerPu
       exposureClass: status.exposureClass,
       certificateFingerprint: status.certificateFingerprint,
       certificateReady: status.certificateReady,
+      certificateSource: status.certificateSource,
     };
   }
   if (status.state === "failed") {
@@ -296,6 +303,7 @@ function disabledStatus(): PrivateListenerPublicStatus {
     exposureClass: null,
     certificateFingerprint: null,
     certificateReady: false,
+    certificateSource: null,
   };
 }
 
@@ -447,6 +455,7 @@ function requireReady(status: PrivateListenerPublicStatus): PrivateListenerRunti
     exposureClass: status.exposureClass,
     certificateFingerprint: status.certificateFingerprint,
     certificateReady: status.certificateReady,
+    certificateSource: status.certificateSource,
   };
 }
 
@@ -502,6 +511,7 @@ function decodeStatus(value: unknown): PrivateListenerPublicStatus {
     !nullableExposureClass(record.exposureClass) ||
     !nullableString(record.certificateFingerprint) ||
     typeof record.certificateReady !== "boolean" ||
+    !certificateSourceOrAbsent(record.certificateSource) ||
     (record.errorCode !== undefined && !FAILURE_CODES.has(String(record.errorCode)))
   ) {
     throw new PrivateListenerControlFailure("unavailable");
@@ -515,6 +525,10 @@ function decodeStatus(value: unknown): PrivateListenerPublicStatus {
     exposureClass: record.exposureClass as PrivateListenerExposureClass | null,
     certificateFingerprint: record.certificateFingerprint as string | null,
     certificateReady: record.certificateReady,
+    // A host from before self-made certificates sends no source; it can only
+    // serve a pasted one.
+    certificateSource: (record.certificateSource ??
+      null) as PrivateListenerCertificateSource | null,
     ...(record.errorCode === undefined
       ? {}
       : { errorCode: record.errorCode as PrivateListenerControlFailureCode }),
@@ -543,4 +557,8 @@ function nullableInteger(value: unknown): boolean {
 
 function nullableExposureClass(value: unknown): boolean {
   return value === null || value === "lan-private" || value === "tailscale";
+}
+
+function certificateSourceOrAbsent(value: unknown): boolean {
+  return value === undefined || value === null || value === "self-made" || value === "pasted";
 }
