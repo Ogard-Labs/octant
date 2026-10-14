@@ -50,6 +50,16 @@ function HostsBody(props: {
     placementHostId,
     setPlacementHostId,
   } = useMobileSession();
+  const [keyNotDeleted, setKeyNotDeleted] = useState(false);
+  const removeHost = useCallback(
+    (hostId: string) => {
+      void removeMobileHost({ hostId, registry, hub, deviceKeyStore }).then((result) => {
+        if (!result.localCredentialRemoved) setKeyNotDeleted(true);
+        return refreshHosts();
+      });
+    },
+    [deviceKeyStore, hub, refreshHosts, registry],
+  );
   const authenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
   const notificationPermission = useMemo(() => createUnavailableNotificationPermissionPort(), []);
   const deviceIntegrity = useMemo(() => createUnavailableDeviceIntegrityPort(), []);
@@ -184,6 +194,11 @@ function HostsBody(props: {
                 </Text>
               </View>
             ) : null}
+            {keyNotDeleted ? (
+              <Text style={styles.sectionBody} testID="mobile-host-key-not-deleted">
+                {MOBILE_COPY.hostKeyNotDeleted}
+              </Text>
+            ) : null}
             {hosts.length === 0 ? (
               <Text style={styles.sectionBody}>{MOBILE_COPY.hostsEmpty}</Text>
             ) : (
@@ -227,12 +242,7 @@ function HostsBody(props: {
                           bridge={hub.bridgeForOrigin(host.origin) ?? bridge}
                           transport={transportForHost(host.hostId)}
                           onRevoked={() => {
-                            void removeMobileHost({
-                              hostId: host.hostId,
-                              registry,
-                              hub,
-                              deviceKeyStore,
-                            }).then(() => refreshHosts());
+                            removeHost(host.hostId);
                           }}
                         />
                       </>
@@ -243,12 +253,7 @@ function HostsBody(props: {
                         bridge={hub.bridgeForOrigin(host.origin) ?? bridge}
                         transport={transportForHost(host.hostId)}
                         onRevoked={() => {
-                          void removeMobileHost({
-                            hostId: host.hostId,
-                            registry,
-                            hub,
-                            deviceKeyStore,
-                          }).then(() => refreshHosts());
+                          removeHost(host.hostId);
                         }}
                       />
                     ) : null}

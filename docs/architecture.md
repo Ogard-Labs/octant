@@ -1736,7 +1736,7 @@ flowchart LR
   Removing a host, from the desktop's federated hosts or the phone's host list,
   stops that host's session and deletes its device key from secure storage;
   other hosts' keys stay. The host leaves the list even when the key cannot be
-  deleted.
+  deleted, and the phone says so.
   Reopened Code terminals retain their runtime-work identity and resume at the
   persisted aggregate version, including restart interruption events. Live
   recorders keep their expected version so conflicting writes remain refused.
