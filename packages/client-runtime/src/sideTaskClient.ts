@@ -1,9 +1,4 @@
-import {
-  decodeSideTaskResult,
-  decodeThreadSideTasks,
-  type SideTaskResult,
-  type ThreadSideTasks,
-} from "@octant/contracts";
+import { SideTaskResult, ThreadSideTasks, decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface SideTaskClientOptions {
@@ -40,7 +35,7 @@ export function createSideTaskClient(options: SideTaskClientOptions): SideTaskCl
       options.baseUrl,
     ).toString();
   const post = async (threadId: string, action: string, body: unknown, signal?: AbortSignal) =>
-    decodeSideTaskResult(
+    decodeHostAnswer(SideTaskResult)(
       await send(fetch, url(threadId, action), {
         method: "POST",
         headers: { ...headers, "content-type": "application/json" },
@@ -56,7 +51,7 @@ export function createSideTaskClient(options: SideTaskClientOptions): SideTaskCl
         headers,
         ...(signal === undefined ? {} : { signal }),
       });
-      return decodeThreadSideTasks((body as { sideTasks?: unknown }).sideTasks);
+      return decodeHostAnswer(ThreadSideTasks)((body as { sideTasks?: unknown }).sideTasks);
     },
     start: (threadId, sideTaskId, signal) =>
       post(threadId, "start", { sideTaskId, confirmed: true }, signal),

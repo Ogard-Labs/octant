@@ -320,6 +320,76 @@ describe("mobileInboxClient", () => {
     );
   });
 
+  function chatViewAnswer(attemptExtras: Record<string, unknown>, viewExtras = {}) {
+    const turnId = "22222222-2222-4222-8222-222222222222";
+    return {
+      thread: chatThread,
+      turns: [
+        {
+          id: turnId,
+          threadId: chatThread.id,
+          sequence: 1,
+          userMessageRef: {
+            contentId: "44444444-4444-4444-8444-444444444444",
+            digest: "a".repeat(64),
+            byteLength: 4,
+          },
+          attachmentIds: [],
+          attempts: [
+            {
+              id: "33333333-3333-4333-8333-333333333333",
+              turnId,
+              threadId: chatThread.id,
+              providerInstanceId: chatThread.providerInstanceId,
+              providerSessionId: "66666666-6666-4666-8666-666666666666",
+              modelId: chatThread.modelId,
+              contextManifestId: "77777777-7777-4777-8777-777777777777",
+              outcome: "completed",
+              responseRefs: [],
+              citationIds: [],
+              createdAt: now,
+              updatedAt: now,
+              ...attemptExtras,
+            },
+          ],
+          createdAt: now,
+        },
+      ],
+      lastSequence: 1,
+      contents: [],
+      attachments: [],
+      citations: [],
+      workItems: [],
+      workListVersion: 1,
+      followUpVersion: 1,
+      ...viewExtras,
+    };
+  }
+
+  function transportAnswering(answer: unknown): MobileRemoteTransport {
+    const fetch = vi.fn(async () => Response.json(answer));
+    return { hostId, authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"] };
+  }
+
+  it("shows a chat thread whose answer carries fields this build does not know", async () => {
+    const answer = chatViewAnswer(
+      { toolSteps: [{ id: "step-1", name: "search", state: "succeeded" }] },
+      { pagination: { before: null } },
+    );
+    const view = await loadMobileChatThread(transportAnswering(answer), chatThread.id);
+    expect(view.thread.id).toBe(chatThread.id);
+    expect(view.turns[0]?.attempts[0]?.outcome).toBe("completed");
+    expect(view.turns[0]?.attempts[0]).not.toHaveProperty("toolSteps");
+    expect(view).not.toHaveProperty("pagination");
+  });
+
+  it("still refuses a chat thread whose known field has the wrong type", async () => {
+    const answer = chatViewAnswer({ outcome: 7 });
+    await expect(
+      loadMobileChatThread(transportAnswering(answer), chatThread.id),
+    ).rejects.toMatchObject({ category: "incompatible" });
+  });
+
   it("interrupts and retries chat turns through host commands", async () => {
     const fetch = vi.fn(async ({ method, path }: { method: string; path: string }) => {
       if (method === "POST" && path === "/api/chat/commands") {

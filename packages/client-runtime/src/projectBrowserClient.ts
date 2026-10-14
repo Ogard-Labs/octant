@@ -1,8 +1,8 @@
 import {
-  decodeProjectBrowserResult,
   type ProjectBrowserCommand,
-  type ProjectBrowserResult,
+  ProjectBrowserResult,
 } from "@octant/contracts/project-browser";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ProjectBrowserClientOptions {
@@ -67,7 +67,7 @@ export function createProjectBrowserClient(
             : "Project browsers are unavailable.";
         throw new ProjectBrowserClientFailure(message, response.status);
       }
-      return decodeProjectBrowserResult(body);
+      return decodeHostAnswer(ProjectBrowserResult)(body);
     },
   };
 }

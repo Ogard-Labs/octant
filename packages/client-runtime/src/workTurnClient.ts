@@ -3,25 +3,21 @@ import {
   decodeCancelWorkTurnCommand,
   decodeWorkAttachmentId,
   decodeWorkAttachmentMediaType,
-  decodeWorkAttachmentReference,
   decodeWorkThreadId,
-  decodeWorkThreadTranscript,
-  decodeWorkTurnCancelResult,
-  decodeWorkTurnLookupResult,
   decodeWorkTurnRequestId,
-  decodeWorkTurnStreamFrame,
   decodeStartWorkThreadTurnCommand,
   type CancelWorkTurnCommand,
   type WorkAttachmentId,
   type WorkAttachmentMediaType,
-  type WorkAttachmentReference,
+  WorkAttachmentReference,
   type WorkThreadId,
-  type WorkThreadTranscript,
-  type WorkTurnCancelResult,
-  type WorkTurnLookupResult,
+  WorkThreadTranscript,
+  WorkTurnCancelResult,
+  WorkTurnLookupResult,
   type WorkTurnRequestId,
-  type WorkTurnStreamFrame,
+  WorkTurnStreamFrame,
   type StartWorkThreadTurnCommand,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -83,7 +79,7 @@ export function createWorkTurnClient(options: WorkTurnClientOptions): WorkTurnCl
         options,
         "/api/work/turns",
         validated,
-        decodeWorkTurnLookupResult,
+        decodeHostAnswer(WorkTurnLookupResult),
         "Work turn start failed.",
       );
     },
@@ -98,7 +94,7 @@ export function createWorkTurnClient(options: WorkTurnClientOptions): WorkTurnCl
         fetch,
         options,
         `/api/work/turns/${validated}`,
-        decodeWorkTurnLookupResult,
+        decodeHostAnswer(WorkTurnLookupResult),
         "Work turn lookup failed.",
       );
     },
@@ -114,7 +110,7 @@ export function createWorkTurnClient(options: WorkTurnClientOptions): WorkTurnCl
         options,
         "/api/work/turns/cancel",
         validated,
-        decodeWorkTurnCancelResult,
+        decodeHostAnswer(WorkTurnCancelResult),
         "Work turn cancel failed.",
       );
     },
@@ -123,7 +119,7 @@ export function createWorkTurnClient(options: WorkTurnClientOptions): WorkTurnCl
         fetch,
         options,
         `/api/work/turns/transcript/${threadId}`,
-        decodeWorkThreadTranscript,
+        decodeHostAnswer(WorkThreadTranscript),
         "Work transcript lookup failed.",
         signal,
       );
@@ -189,7 +185,7 @@ export function createWorkTurnClient(options: WorkTurnClientOptions): WorkTurnCl
         );
       }
       try {
-        return decodeWorkAttachmentReference(payload);
+        return decodeHostAnswer(WorkAttachmentReference)(payload);
       } catch {
         throw new WorkTurnClientFailure("Work turn service returned an invalid response.", 0);
       }
@@ -255,7 +251,7 @@ async function* parseWorkTurnStream(
     }
     let frame: WorkTurnStreamFrame;
     try {
-      frame = decodeWorkTurnStreamFrame(JSON.parse(line));
+      frame = decodeHostAnswer(WorkTurnStreamFrame)(JSON.parse(line));
     } catch {
       throw new WorkTurnClientFailure("Work turn stream frame is invalid.", 0);
     }

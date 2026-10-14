@@ -1,14 +1,10 @@
 import {
-  decodeNativeHarnessFollowUpActivationResult,
-  decodeNativeHarnessApprovalDecisionResult,
-  decodeNativeHarnessQuestionAnswerResult,
-  decodeNativeHarnessFollowUpPreview,
-  decodeNativeHarnessSessionView,
-  type NativeHarnessFollowUpActivationResult,
-  type NativeHarnessFollowUpPreview,
-  type NativeHarnessApprovalDecisionResult,
-  type NativeHarnessQuestionAnswerResult,
-  type NativeHarnessSessionView,
+  NativeHarnessFollowUpActivationResult,
+  NativeHarnessFollowUpPreview,
+  NativeHarnessApprovalDecisionResult,
+  NativeHarnessQuestionAnswerResult,
+  NativeHarnessSessionView,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import type { MobileRemoteTransport } from "./mobileInboxClient";
 
@@ -31,7 +27,7 @@ export async function loadMobileNativeHarnessSession(input: {
   const body = (await response.json()) as { view?: unknown };
   return body.view === null || body.view === undefined
     ? null
-    : decodeNativeHarnessSessionView(body.view);
+    : decodeHostAnswer(NativeHarnessSessionView)(body.view);
 }
 
 export async function previewMobileNativeHarnessFollowUp(input: {
@@ -47,7 +43,9 @@ export async function previewMobileNativeHarnessFollowUp(input: {
   });
   if (!response.ok) return undefined;
   const body = (await response.json()) as { preview?: unknown };
-  return body.preview === undefined ? undefined : decodeNativeHarnessFollowUpPreview(body.preview);
+  return body.preview === undefined
+    ? undefined
+    : decodeHostAnswer(NativeHarnessFollowUpPreview)(body.preview);
 }
 
 export async function activateMobileNativeHarnessFollowUp(input: {
@@ -67,7 +65,7 @@ export async function activateMobileNativeHarnessFollowUp(input: {
     contentType: "application/json",
   });
   try {
-    return decodeNativeHarnessFollowUpActivationResult(await response.json());
+    return decodeHostAnswer(NativeHarnessFollowUpActivationResult)(await response.json());
   } catch {
     return undefined;
   }
@@ -86,7 +84,7 @@ export async function answerMobileNativeHarnessQuestion(input: {
     contentType: "application/json",
   });
   try {
-    return decodeNativeHarnessQuestionAnswerResult(await response.json());
+    return decodeHostAnswer(NativeHarnessQuestionAnswerResult)(await response.json());
   } catch {
     return undefined;
   }
@@ -131,7 +129,7 @@ export async function decideMobileNativeHarnessApproval(input: {
     contentType: "application/json",
   });
   try {
-    return decodeNativeHarnessApprovalDecisionResult(await response.json());
+    return decodeHostAnswer(NativeHarnessApprovalDecisionResult)(await response.json());
   } catch {
     return undefined;
   }

@@ -1,45 +1,35 @@
 import {
   decodeZenCommand,
-  decodeZenBootstrapResponse,
-  decodeZenResult,
   decodeZenCanvasPinRequest,
-  decodeZenCanvasPinResult,
   decodeZenResearchDockRequest,
-  decodeZenResearchDockResult,
   decodeZenTerminalPinRequest,
   decodeZenProjectTerminalPinRequest,
-  decodeZenTerminalPinResult,
   decodeZenThreadPinRequest,
-  decodeZenThreadPinResult,
   decodeZenThreadCatalogRef,
-  decodeZenThreadCatalogResponse,
-  decodeZenThreadContinuationTarget,
-  decodeZenAssistantSnapshot,
-  decodeZenSpace,
   decodeZenFocusZoneCommand,
-  decodeZenFocusZoneResult,
   type ZenCommand,
-  type ZenBootstrapResponse,
-  type ZenResult,
+  ZenBootstrapResponse,
+  ZenResult,
   type ZenCanvasPinRequest,
-  type ZenCanvasPinResult,
+  ZenCanvasPinResult,
   type ZenResearchDockRequest,
-  type ZenResearchDockResult,
+  ZenResearchDockResult,
   type ZenTerminalPinRequest,
   type ZenProjectTerminalPinRequest,
-  type ZenTerminalPinResult,
+  ZenTerminalPinResult,
   type ZenThreadPinRequest,
-  type ZenThreadPinResult,
+  ZenThreadPinResult,
   type ZenThreadCatalogRef,
-  type ZenThreadCatalogResponse,
-  type ZenThreadContinuationTarget,
-  type ZenAssistantSnapshot,
+  ZenThreadCatalogResponse,
+  ZenThreadContinuationTarget,
+  ZenAssistantSnapshot,
   type ZenBackgroundAssetId,
-  type ZenSpace,
+  ZenSpace,
   type ZenSpaceId,
   type ZenFocusZoneCommand,
-  type ZenFocusZoneResult,
+  ZenFocusZoneResult,
 } from "@octant/contracts/zen";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ZenClientOptions {
@@ -116,7 +106,7 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
         throw new ZenClientFailure(zenErrorMessage(body), response.status);
       }
 
-      return decodeZenBootstrapResponse(body);
+      return decodeHostAnswer(ZenBootstrapResponse)(body);
     },
 
     async command(cmd: ZenCommand): Promise<ZenResult> {
@@ -141,7 +131,7 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
         throw new ZenClientFailure(zenErrorMessage(body), response.status);
       }
 
-      return decodeZenResult(body);
+      return decodeHostAnswer(ZenResult)(body);
     },
 
     async space(cmd: ZenFocusZoneCommand): Promise<ZenFocusZoneResult> {
@@ -152,14 +142,14 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
         body: JSON.stringify(command),
         contentType: true,
       });
-      return decodeZenFocusZoneResult(body);
+      return decodeHostAnswer(ZenFocusZoneResult)(body);
     },
 
     async searchThreads(query = ""): Promise<ZenThreadCatalogResponse> {
       const url = new URL("/api/zen/threads", options.baseUrl);
       if (query.trim().length > 0) url.searchParams.set("q", query.trim());
       const body = await zenRequest(fetch, url, options.windowCapability, { method: "GET" });
-      return decodeZenThreadCatalogResponse(body);
+      return decodeHostAnswer(ZenThreadCatalogResponse)(body);
     },
 
     async pinThread(request: ZenThreadPinRequest): Promise<ZenThreadPinResult> {
@@ -170,7 +160,7 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
         body: JSON.stringify(input),
         contentType: true,
       });
-      return decodeZenThreadPinResult(body);
+      return decodeHostAnswer(ZenThreadPinResult)(body);
     },
 
     async pinTerminal(request: ZenTerminalPinRequest): Promise<ZenTerminalPinResult> {
@@ -181,7 +171,7 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
         body: JSON.stringify(input),
         contentType: true,
       });
-      return decodeZenTerminalPinResult(body);
+      return decodeHostAnswer(ZenTerminalPinResult)(body);
     },
 
     async pinProjectTerminal(request: ZenProjectTerminalPinRequest): Promise<ZenTerminalPinResult> {
@@ -192,7 +182,7 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
         body: JSON.stringify(input),
         contentType: true,
       });
-      return decodeZenTerminalPinResult(body);
+      return decodeHostAnswer(ZenTerminalPinResult)(body);
     },
 
     async pinCanvas(request: ZenCanvasPinRequest): Promise<ZenCanvasPinResult> {
@@ -203,7 +193,7 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
         body: JSON.stringify(input),
         contentType: true,
       });
-      return decodeZenCanvasPinResult(body);
+      return decodeHostAnswer(ZenCanvasPinResult)(body);
     },
 
     async dockResearch(request: ZenResearchDockRequest): Promise<ZenResearchDockResult> {
@@ -214,7 +204,7 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
         body: JSON.stringify(input),
         contentType: true,
       });
-      return decodeZenResearchDockResult(body);
+      return decodeHostAnswer(ZenResearchDockResult)(body);
     },
 
     async continueThread(catalogRef: ZenThreadCatalogRef): Promise<ZenThreadContinuationTarget> {
@@ -222,19 +212,19 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
       const url = new URL("/api/zen/threads/continue", options.baseUrl);
       url.searchParams.set("ref", exact);
       const body = await zenRequest(fetch, url, options.windowCapability, { method: "GET" });
-      return decodeZenThreadContinuationTarget(body);
+      return decodeHostAnswer(ZenThreadContinuationTarget)(body);
     },
 
     async assistant(): Promise<ZenAssistantSnapshot> {
       const url = new URL("/api/zen/assistant", options.baseUrl);
       const body = await zenRequest(fetch, url, options.windowCapability, { method: "GET" });
-      return decodeZenAssistantSnapshot(body);
+      return decodeHostAnswer(ZenAssistantSnapshot)(body);
     },
 
     async ensureAssistant(): Promise<ZenAssistantSnapshot> {
       const url = new URL("/api/zen/assistant", options.baseUrl);
       const body = await zenRequest(fetch, url, options.windowCapability, { method: "POST" });
-      return decodeZenAssistantSnapshot(body);
+      return decodeHostAnswer(ZenAssistantSnapshot)(body);
     },
 
     async uploadBackground(input): Promise<ZenSpace> {
@@ -260,7 +250,7 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
       if (typeof body !== "object" || body === null || !("space" in body)) {
         throw new ZenClientFailure("Zen background response is invalid.", response.status);
       }
-      return decodeZenSpace(body.space);
+      return decodeHostAnswer(ZenSpace)(body.space);
     },
 
     async readBackground(assetId: ZenBackgroundAssetId): Promise<Blob> {

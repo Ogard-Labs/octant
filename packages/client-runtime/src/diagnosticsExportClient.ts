@@ -1,8 +1,8 @@
 import {
-  decodeDiagnosticsExportOutcome,
-  type DiagnosticsExportOutcome,
+  DiagnosticsExportOutcome,
   type DiagnosticsExportRequest,
 } from "@octant/contracts/diagnostics";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface DiagnosticsExportClientOptions {
@@ -70,7 +70,7 @@ export function createDiagnosticsExportClient(
       }
 
       try {
-        return decodeDiagnosticsExportOutcome(body);
+        return decodeHostAnswer(DiagnosticsExportOutcome)(body);
       } catch {
         throw new DiagnosticsExportClientError("Diagnostics export returned an invalid response.");
       }

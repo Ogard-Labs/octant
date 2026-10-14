@@ -1,10 +1,9 @@
 import {
-  decodeHostHelloV1,
-  decodePairingStatusResultV1,
-  type HostHelloV1,
-  type PairingStatusResultV1,
+  HostHelloV1,
+  PairingStatusResultV1,
   type StableHostId,
 } from "@octant/contracts/remote-access";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 const CLIENT_SUPPORTED_PROTOCOL_RANGE = { min: 1, max: 1 } as const;
@@ -188,7 +187,7 @@ export function createRemotePairingClient(
     }
     let hello: HostHelloV1;
     try {
-      hello = decodeHostHelloV1(body);
+      hello = decodeHostAnswer(HostHelloV1)(body);
     } catch {
       throw new RemotePairingFailure("invalid", "Host hello response was invalid.");
     }
@@ -341,7 +340,7 @@ export function createRemotePairingClient(
     }
     let result: PairingStatusResultV1;
     try {
-      result = decodePairingStatusResultV1(body);
+      result = decodeHostAnswer(PairingStatusResultV1)(body);
     } catch {
       return failedStatus("unavailable", "Pairing status response was invalid.");
     }

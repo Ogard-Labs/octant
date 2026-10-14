@@ -1,8 +1,5 @@
-import {
-  decodeThreadHandOffOutcome,
-  type ThreadHandOffOutcome,
-  type ThreadHandOffRequest,
-} from "@octant/contracts/thread-hand-off";
+import { ThreadHandOffOutcome, type ThreadHandOffRequest } from "@octant/contracts/thread-hand-off";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ThreadHandOffClientOptions {
@@ -69,7 +66,7 @@ export function createThreadHandOffClient(
         }
 
         try {
-          return decodeThreadHandOffOutcome(body);
+          return decodeHostAnswer(ThreadHandOffOutcome)(body);
         } catch {
           throw new ThreadHandOffClientError("Thread hand-off returned an invalid response.");
         }

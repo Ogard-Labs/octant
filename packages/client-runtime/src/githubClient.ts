@@ -1,14 +1,13 @@
 import {
   decodeGithubAuthenticationCommand,
-  decodeGithubAuthenticationSnapshot,
   decodeGithubCatalogueReadRequest,
-  decodeGithubCatalogueReadResponse,
   decodeGithubRecentRepositoryCommand,
   type GithubAuthenticationCommand,
-  type GithubAuthenticationSnapshot,
+  GithubAuthenticationSnapshot,
   type GithubCatalogueReadRequest,
-  type GithubCatalogueReadResponse,
+  GithubCatalogueReadResponse,
   type GithubRecentRepositoryCommand,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -83,22 +82,22 @@ export function createGithubClient(options: GithubClientOptions): GithubClient {
   return {
     async authenticationSnapshot() {
       const body = await send("/api/github/authentication", { method: "GET", headers });
-      return decodeResponse(body, decodeGithubAuthenticationSnapshot);
+      return decodeResponse(body, decodeHostAnswer(GithubAuthenticationSnapshot));
     },
     async executeAuthenticationCommand(command) {
       const validated = decodeRequest(command, decodeGithubAuthenticationCommand);
       const body = await post("/api/github/authentication/commands", validated);
-      return decodeResponse(body, decodeGithubAuthenticationSnapshot);
+      return decodeResponse(body, decodeHostAnswer(GithubAuthenticationSnapshot));
     },
     async readCatalogue(request) {
       const validated = decodeRequest(request, decodeGithubCatalogueReadRequest);
       const body = await post("/api/github/catalogue/reads", validated);
-      return decodeResponse(body, decodeGithubCatalogueReadResponse);
+      return decodeResponse(body, decodeHostAnswer(GithubCatalogueReadResponse));
     },
     async recordRecentRepository(command) {
       const validated = decodeRequest(command, decodeGithubRecentRepositoryCommand);
       const body = await post("/api/github/catalogue/recents", validated);
-      return decodeResponse(body, decodeGithubCatalogueReadResponse);
+      return decodeResponse(body, decodeHostAnswer(GithubCatalogueReadResponse));
     },
   };
 }

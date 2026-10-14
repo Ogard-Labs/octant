@@ -1,21 +1,21 @@
 import {
-  decodeCodeBootstrap,
-  decodeCodeCommandResult,
   decodeCodeDeliveryTarget,
-  decodeCodeEvidenceReference,
-  decodeCodeOperationEventFrame,
-  decodeCodeOperationResult,
   decodeCodeThread,
-  decodeCodeThreadView,
   MAX_CODE_OPERATION_TEXT_BYTES,
-  decodeProjectBootstrap,
   type CodeDeliveryOutcomeKind,
   type CodeDeliveryTarget,
   type CodeCheckoutIdentity,
   type CodeNewThreadWorkspace,
-  type CodeOperationResult,
+  CodeOperationResult,
   type CodeThread,
   type ProjectSummary,
+  CodeBootstrap,
+  CodeCommandResult,
+  CodeEvidenceReference,
+  CodeOperationEventFrame,
+  CodeThreadView,
+  ProjectBootstrap,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { resolveCodeNewThreadWorkspace, suggestCodeDeliveryOutcome } from "@octant/domain";
 import {
@@ -123,7 +123,7 @@ export async function fetchMobileCodeProjects(
 ): Promise<ReadonlyArray<MobileCodeProjectOption>> {
   const bootstrap = await requireJson(
     await transport.authenticatedFetch({ method: "GET", path: "/api/projects/bootstrap" }),
-    decodeProjectBootstrap,
+    decodeHostAnswer(ProjectBootstrap),
     "Could not load Code projects from the host.",
   );
   const unavailable = new Set(
@@ -146,7 +146,7 @@ async function executeCodeCommand(
       path: "/api/code/commands",
       body: JSON.stringify(command),
     }),
-    decodeCodeCommandResult,
+    decodeHostAnswer(CodeCommandResult),
     "Could not create the Code task on the host.",
   );
 }
@@ -208,7 +208,7 @@ async function findCodeThreadForRetry(
         method: "GET",
         path: `/api/code/threads/${encodeURIComponent(threadId)}`,
       }),
-      decodeCodeThreadView,
+      decodeHostAnswer(CodeThreadView),
       "Could not reconcile the existing Code task.",
     );
   } catch (cause) {
@@ -241,7 +241,7 @@ async function findCodeOperationResultForRetry(input: {
     if (trimmed.length === 0) continue;
     let frame;
     try {
-      frame = decodeCodeOperationEventFrame(JSON.parse(trimmed));
+      frame = decodeHostAnswer(CodeOperationEventFrame)(JSON.parse(trimmed));
     } catch {
       throw new MobileInboxFailure(
         "unavailable",
@@ -308,7 +308,7 @@ export async function createMobileCodeFromPrompt(input: {
   const sessionId = input.retry?.sessionId ?? uuid();
   await requireJson(
     await input.transport.authenticatedFetch({ method: "GET", path: "/api/code/bootstrap" }),
-    decodeCodeBootstrap,
+    decodeHostAnswer(CodeBootstrap),
     "Could not load Code settings from the host.",
   );
   let thread: CodeThread | undefined;
@@ -501,7 +501,7 @@ export async function createMobileCodeFromPrompt(input: {
         },
         contentType: "text/plain; charset=utf-8",
       }),
-      decodeCodeEvidenceReference,
+      decodeHostAnswer(CodeEvidenceReference),
       "The Code task was created, but its prompt could not be staged.",
     );
     const started = await requireJson(
@@ -517,7 +517,7 @@ export async function createMobileCodeFromPrompt(input: {
           prompt: evidence,
         }),
       }),
-      decodeCodeOperationResult,
+      decodeHostAnswer(CodeOperationResult),
       "The Code task was created, but its first turn could not start.",
     );
     if (started.kind !== "provider-turn-state" || started.state !== "running") {

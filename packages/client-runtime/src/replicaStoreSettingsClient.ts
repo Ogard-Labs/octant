@@ -1,10 +1,9 @@
 import {
-  decodeReplicaStoreSettingsResult,
-  decodeReplicaStoreSettingsView,
   type ReplicaStoreSettingsCommand,
-  type ReplicaStoreSettingsResult,
-  type ReplicaStoreSettingsView,
+  ReplicaStoreSettingsResult,
+  ReplicaStoreSettingsView,
 } from "@octant/contracts/replica-store-settings";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ReplicaStoreSettingsClientOptions {
@@ -79,11 +78,11 @@ export function createReplicaStoreSettingsClient(
         method: "GET",
         ...(signal === undefined ? {} : { signal }),
       });
-      return decodeReplicaStoreSettingsView(body);
+      return decodeHostAnswer(ReplicaStoreSettingsView)(body);
     },
     async execute(command) {
       const body = await send(commandsUrl, { method: "POST", body: JSON.stringify(command) });
-      return decodeReplicaStoreSettingsResult(body);
+      return decodeHostAnswer(ReplicaStoreSettingsResult)(body);
     },
   };
 }

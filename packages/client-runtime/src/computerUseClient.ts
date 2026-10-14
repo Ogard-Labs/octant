@@ -1,18 +1,16 @@
 import {
   decodeComputerUseApprovalDecisionRequest,
-  decodeComputerUseFailure,
   decodeComputerUseSessionScope,
-  decodeComputerUseSessionList,
-  decodeComputerUseSessionView,
   decodeComputerUseStopRequest,
-  type ComputerUseFailure,
+  ComputerUseFailure,
   type ComputerUseApprovalDecisionRequest,
   type ComputerUseSessionScope,
-  type ComputerUseSessionList,
-  type ComputerUseSessionView,
+  ComputerUseSessionList,
+  ComputerUseSessionView,
   type ComputerUseStopRequest,
 } from "@octant/contracts/computer-use";
 import { sameToolActionAuthority } from "@octant/contracts/tool-actions";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ComputerUseClientOptions {
@@ -58,7 +56,7 @@ export function createComputerUseClient(options: ComputerUseClientOptions): Comp
     list: async (signal) => {
       const payload = await postJson(resolved, "/api/computer-use/sessions", {}, headers, signal);
       try {
-        return decodeComputerUseSessionList(payload);
+        return decodeHostAnswer(ComputerUseSessionList)(payload);
       } catch {
         throw new ComputerUseClientFailure(
           "protocol",
@@ -112,7 +110,7 @@ async function post(
   const payload = await postJson(options, path, body, headers, signal);
   let view: ComputerUseSessionView;
   try {
-    view = decodeComputerUseSessionView(payload);
+    view = decodeHostAnswer(ComputerUseSessionView)(payload);
   } catch {
     throw new ComputerUseClientFailure(
       "protocol",
@@ -174,7 +172,7 @@ async function postJson(
   if (!response.ok) {
     let failure: ComputerUseFailure;
     try {
-      failure = decodeComputerUseFailure(payload);
+      failure = decodeHostAnswer(ComputerUseFailure)(payload);
     } catch {
       throw new ComputerUseClientFailure(
         "protocol",

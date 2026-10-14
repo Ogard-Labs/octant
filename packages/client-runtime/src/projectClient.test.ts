@@ -91,14 +91,13 @@ describe("ProjectClient", () => {
     const success = createProjectClient({
       baseUrl: "http://localhost",
       windowCapability: capability,
-      fetch: async () => Response.json({ ...bootstrap, extra: true }),
+      fetch: async () => Response.json({ ...bootstrap, active: "none" }),
     });
     await expect(success.bootstrap()).rejects.toMatchObject({ category: "unavailable" });
     const failure = createProjectClient({
       baseUrl: "http://localhost",
       windowCapability: capability,
-      fetch: async () =>
-        Response.json({ category: "invalid", message: "No", extra: true }, { status: 400 }),
+      fetch: async () => Response.json({ category: "invalid", message: false }, { status: 400 }),
     });
     await expect(failure.bootstrap()).rejects.toMatchObject({ category: "unavailable" });
   });
@@ -132,11 +131,11 @@ describe("ProjectClient", () => {
     }
   });
 
-  it("strictly decodes memory successes and typed failures", async () => {
+  it("decodes memory successes and typed failures, refusing wrong types", async () => {
     const malformed = createProjectClient({
       baseUrl: "http://localhost",
       windowCapability: capability,
-      fetch: async () => Response.json({ projectId, active: [], history: [], extra: true }),
+      fetch: async () => Response.json({ projectId, active: [], history: {} }),
     });
     await expect(malformed.memory(projectId)).rejects.toMatchObject({ category: "unavailable" });
 
@@ -164,7 +163,7 @@ describe("ProjectClient", () => {
     });
   });
 
-  it("loads a strictly decoded code environment from the encoded scoped route", async () => {
+  it("loads a decoded code environment from the encoded scoped route", async () => {
     const observation = {
       status: "ready",
       projectId,
@@ -198,7 +197,7 @@ describe("ProjectClient", () => {
     const malformed = createProjectClient({
       baseUrl: "http://localhost",
       windowCapability: capability,
-      fetch: async () => Response.json({ ...observation, extra: true }),
+      fetch: async () => Response.json({ ...observation, projectId: 42 }),
     });
     await expect(malformed.environment(projectId)).rejects.toMatchObject({
       category: "unavailable",

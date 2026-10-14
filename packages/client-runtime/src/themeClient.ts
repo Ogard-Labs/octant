@@ -1,13 +1,11 @@
 import {
-  decodeThemeBootstrap,
   decodeThemeCommand,
-  decodeThemeCommandResult,
-  decodeThemeFailure,
-  type ThemeBootstrap,
+  ThemeBootstrap,
   type ThemeCommand,
-  type ThemeCommandResult,
-  type ThemeFailure,
+  ThemeCommandResult,
+  ThemeFailure,
 } from "@octant/contracts/theme";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ThemeClientOptions {
@@ -46,7 +44,7 @@ export function createThemeClient(options: ThemeClientOptions): ThemeClient {
         fetch,
         new URL("/api/theme/bootstrap", options.baseUrl).toString(),
         { method: "GET", headers },
-        decodeThemeBootstrap,
+        decodeHostAnswer(ThemeBootstrap),
       );
     },
     execute(command) {
@@ -64,7 +62,7 @@ export function createThemeClient(options: ThemeClientOptions): ThemeClient {
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeThemeCommandResult,
+        decodeHostAnswer(ThemeCommandResult),
       );
     },
   };
@@ -90,7 +88,7 @@ async function request<T>(
   }
   if (!response.ok) {
     try {
-      throw new ThemeClientFailure(decodeThemeFailure(body));
+      throw new ThemeClientFailure(decodeHostAnswer(ThemeFailure)(body));
     } catch (error) {
       if (error instanceof ThemeClientFailure) throw error;
       throw unavailable();

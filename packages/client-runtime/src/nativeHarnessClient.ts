@@ -1,26 +1,18 @@
 import {
-  decodeNativeHarnessFollowUpActivationResult,
-  decodeNativeHarnessApprovalDecisionResult,
-  decodeNativeHarnessQuestionAnswerResult,
-  decodeNativeHarnessFollowUpPreview,
-  decodeNativeHarnessProjectRoutingOverride,
-  decodeNativeHarnessRoutingCommandResult,
-  decodeNativeHarnessRoutingSettings,
-  decodeNativeHarnessSessionCommandResult,
-  decodeNativeHarnessSessionView,
   type ActivateNativeHarnessFollowUp,
-  type NativeHarnessFollowUpActivationResult,
-  type NativeHarnessFollowUpPreview,
-  type NativeHarnessProjectRoutingOverride,
-  type NativeHarnessApprovalDecisionResult,
-  type NativeHarnessQuestionAnswerResult,
+  NativeHarnessFollowUpActivationResult,
+  NativeHarnessFollowUpPreview,
+  NativeHarnessProjectRoutingOverride,
+  NativeHarnessApprovalDecisionResult,
+  NativeHarnessQuestionAnswerResult,
   type SteerNativeHarnessSession,
-  type NativeHarnessRoutingCommandResult,
+  NativeHarnessRoutingCommandResult,
   type NativeHarnessRoutingConfiguration,
-  type NativeHarnessRoutingSettings,
+  NativeHarnessRoutingSettings,
   type NativeHarnessSessionCommand,
-  type NativeHarnessSessionCommandResult,
-  type NativeHarnessSessionView,
+  NativeHarnessSessionCommandResult,
+  NativeHarnessSessionView,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -136,10 +128,12 @@ export function createNativeHarnessClient(
   return {
     async routing(signal) {
       const body = await get(ROUTING_PATH, signal);
-      return decodeNativeHarnessRoutingSettings((body as { settings: unknown }).settings);
+      return decodeHostAnswer(NativeHarnessRoutingSettings)(
+        (body as { settings: unknown }).settings,
+      );
     },
     async updateRouting(input, signal) {
-      return decodeNativeHarnessRoutingCommandResult(
+      return decodeHostAnswer(NativeHarnessRoutingCommandResult)(
         await write("PUT", ROUTING_PATH, input, signal),
       );
     },
@@ -151,10 +145,10 @@ export function createNativeHarnessClient(
       const override = (body as { override: unknown }).override;
       return override === null || override === undefined
         ? null
-        : decodeNativeHarnessProjectRoutingOverride(override);
+        : decodeHostAnswer(NativeHarnessProjectRoutingOverride)(override);
     },
     async setProjectRouting(projectId, input, signal) {
-      return decodeNativeHarnessRoutingCommandResult(
+      return decodeHostAnswer(NativeHarnessRoutingCommandResult)(
         await write(
           "PUT",
           `/api/native-harness/routing/projects/${encodeURIComponent(projectId)}`,
@@ -164,7 +158,7 @@ export function createNativeHarnessClient(
       );
     },
     async clearProjectRouting(projectId, expectedVersion, signal) {
-      return decodeNativeHarnessRoutingCommandResult(
+      return decodeHostAnswer(NativeHarnessRoutingCommandResult)(
         await write(
           "DELETE",
           `${PROJECT_ROUTING_PATH}/${encodeURIComponent(projectId)}?expectedVersion=${expectedVersion}`,
@@ -179,10 +173,12 @@ export function createNativeHarnessClient(
         signal,
       );
       const view = (body as { view: unknown }).view;
-      return view === null || view === undefined ? null : decodeNativeHarnessSessionView(view);
+      return view === null || view === undefined
+        ? null
+        : decodeHostAnswer(NativeHarnessSessionView)(view);
     },
     async command(threadId, command, signal) {
-      return decodeNativeHarnessSessionCommandResult(
+      return decodeHostAnswer(NativeHarnessSessionCommandResult)(
         await write(
           "POST",
           `/api/native-harness/sessions/${encodeURIComponent(threadId)}/commands`,
@@ -200,11 +196,11 @@ export function createNativeHarnessClient(
       );
       const preview = (body as { preview?: unknown }).preview;
       return preview === undefined
-        ? decodeNativeHarnessFollowUpActivationResult(body)
-        : decodeNativeHarnessFollowUpPreview(preview);
+        ? decodeHostAnswer(NativeHarnessFollowUpActivationResult)(body)
+        : decodeHostAnswer(NativeHarnessFollowUpPreview)(preview);
     },
     async decideApproval(threadId, input, signal) {
-      return decodeNativeHarnessApprovalDecisionResult(
+      return decodeHostAnswer(NativeHarnessApprovalDecisionResult)(
         await write(
           "POST",
           `${SESSIONS_PATH}/${encodeURIComponent(threadId)}/approvals`,
@@ -221,10 +217,12 @@ export function createNativeHarnessClient(
         signal,
       );
       const view = (body as { view?: unknown }).view;
-      return view === null || view === undefined ? null : decodeNativeHarnessSessionView(view);
+      return view === null || view === undefined
+        ? null
+        : decodeHostAnswer(NativeHarnessSessionView)(view);
     },
     async answerQuestion(threadId, input, signal) {
-      return decodeNativeHarnessQuestionAnswerResult(
+      return decodeHostAnswer(NativeHarnessQuestionAnswerResult)(
         await write(
           "POST",
           `${SESSIONS_PATH}/${encodeURIComponent(threadId)}/questions`,
@@ -234,7 +232,7 @@ export function createNativeHarnessClient(
       );
     },
     async activateFollowUp(threadId, activation, signal) {
-      return decodeNativeHarnessFollowUpActivationResult(
+      return decodeHostAnswer(NativeHarnessFollowUpActivationResult)(
         await write(
           "POST",
           `${SESSIONS_PATH}/${encodeURIComponent(threadId)}/follow-ups/activate`,

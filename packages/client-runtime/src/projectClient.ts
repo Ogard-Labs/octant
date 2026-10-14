@@ -1,22 +1,16 @@
 import {
-  decodeCodeEnvironmentObservation,
-  decodeMemoryCommandResult,
-  decodeProjectBootstrap,
-  decodeProjectCommandResult,
-  decodeProjectFailure,
-  decodeProjectSummary,
-  decodeProjectMemoryView,
-  type CodeEnvironmentObservation,
+  CodeEnvironmentObservation,
   type CodeThreadId,
   type MemoryCommand,
-  type MemoryCommandResult,
-  type ProjectBootstrap,
+  MemoryCommandResult,
+  ProjectBootstrap,
   type ProjectCommand,
-  type ProjectCommandResult,
-  type ProjectFailure,
+  ProjectCommandResult,
+  ProjectFailure,
   type ProjectId,
-  type ProjectMemoryView,
-  type ProjectSummary,
+  ProjectMemoryView,
+  ProjectSummary,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export interface ProjectClientOptions {
@@ -63,7 +57,7 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
         options.fetch,
         new URL("/api/projects/bootstrap", options.baseUrl).toString(),
         { method: "GET", headers },
-        decodeProjectBootstrap,
+        decodeHostAnswer(ProjectBootstrap),
       );
     },
     search(query) {
@@ -80,7 +74,7 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(command),
         },
-        decodeProjectCommandResult,
+        decodeHostAnswer(ProjectCommandResult),
       );
     },
     memory(projectId) {
@@ -91,7 +85,7 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
           options.baseUrl,
         ).toString(),
         { method: "GET", headers },
-        decodeProjectMemoryView,
+        decodeHostAnswer(ProjectMemoryView),
       );
     },
     environment(projectId, signal, fresh = false) {
@@ -104,7 +98,7 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
         options.fetch,
         url.toString(),
         { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
-        decodeCodeEnvironmentObservation,
+        decodeHostAnswer(CodeEnvironmentObservation),
       );
     },
     environmentForThread(projectId, threadId, signal, fresh = false) {
@@ -118,7 +112,7 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
         options.fetch,
         url.toString(),
         { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
-        decodeCodeEnvironmentObservation,
+        decodeHostAnswer(CodeEnvironmentObservation),
       );
     },
     executeMemory(command) {
@@ -130,7 +124,7 @@ export function createProjectClient(options: ProjectClientOptions): ProjectClien
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(command),
         },
-        decodeMemoryCommandResult,
+        decodeHostAnswer(MemoryCommandResult),
       );
     },
   };
@@ -156,7 +150,7 @@ async function request<T>(
   }
   if (!response.ok) {
     try {
-      throw new ProjectClientFailure(decodeProjectFailure(body));
+      throw new ProjectClientFailure(decodeHostAnswer(ProjectFailure)(body));
     } catch (error) {
       if (error instanceof ProjectClientFailure) throw error;
       throw unavailable("Project service returned an invalid response.");
@@ -171,7 +165,7 @@ async function request<T>(
 
 function decodeSummaryArray(value: unknown): ReadonlyArray<ProjectSummary> {
   if (!Array.isArray(value)) throw new Error("invalid");
-  return value.map((item) => decodeProjectSummary(item));
+  return value.map((item) => decodeHostAnswer(ProjectSummary)(item));
 }
 
 function unavailable(message: string): ProjectClientFailure {

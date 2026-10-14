@@ -1,8 +1,5 @@
-import {
-  decodeThreadExportOutcome,
-  type ThreadExportOutcome,
-  type ThreadExportRequest,
-} from "@octant/contracts/thread-export";
+import { ThreadExportOutcome, type ThreadExportRequest } from "@octant/contracts/thread-export";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ThreadExportClientOptions {
@@ -59,7 +56,7 @@ export function createThreadExportClient(options: ThreadExportClientOptions): Th
       }
 
       try {
-        return decodeThreadExportOutcome(body);
+        return decodeHostAnswer(ThreadExportOutcome)(body);
       } catch {
         throw new ThreadExportClientError("Thread export returned an invalid response.");
       }

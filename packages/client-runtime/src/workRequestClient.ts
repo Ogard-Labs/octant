@@ -1,15 +1,13 @@
 import {
   decodeWorkRequestCommand,
-  decodeWorkRequestCommandResult,
-  decodeWorkRequestFailure,
-  decodeWorkRequestList,
   decodeProjectId,
   type WorkRequestCommand,
-  type WorkRequestCommandResult,
-  type WorkRequestFailure,
-  type WorkRequestList,
+  WorkRequestCommandResult,
+  WorkRequestFailure,
+  WorkRequestList,
   type WorkThreadId,
   type ProjectId,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export interface WorkRequestClientOptions {
@@ -51,7 +49,7 @@ export function createWorkRequestClient(options: WorkRequestClientOptions): Work
         options.fetch,
         url.toString(),
         { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
-        decodeWorkRequestList,
+        decodeHostAnswer(WorkRequestList),
       );
     },
     async execute(command) {
@@ -69,7 +67,7 @@ export function createWorkRequestClient(options: WorkRequestClientOptions): Work
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(validated),
         },
-        decodeWorkRequestCommandResult,
+        decodeHostAnswer(WorkRequestCommandResult),
       );
     },
   };
@@ -96,7 +94,7 @@ async function request<T>(
   }
   if (!response.ok) {
     try {
-      throw new WorkRequestClientFailure(decodeWorkRequestFailure(body));
+      throw new WorkRequestClientFailure(decodeHostAnswer(WorkRequestFailure)(body));
     } catch (error) {
       if (error instanceof WorkRequestClientFailure) throw error;
       throw malformedResponse();

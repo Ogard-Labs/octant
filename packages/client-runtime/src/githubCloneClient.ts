@@ -1,10 +1,9 @@
 import {
   decodeGithubCloneCommand,
-  decodeGithubCloneCommandResponse,
-  decodeGithubCloneOperationList,
   type GithubCloneCommand,
-  type GithubCloneCommandResponse,
-  type GithubCloneOperationList,
+  GithubCloneCommandResponse,
+  GithubCloneOperationList,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -71,11 +70,11 @@ export function createGithubCloneClient(options: GithubCloneClientOptions): Gith
         headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify(validated),
       });
-      return decodeResponse(body, decodeGithubCloneCommandResponse);
+      return decodeResponse(body, decodeHostAnswer(GithubCloneCommandResponse));
     },
     async listOperations() {
       const body = await send("/api/github/clone/operations", { method: "GET", headers });
-      return decodeResponse(body, decodeGithubCloneOperationList);
+      return decodeResponse(body, decodeHostAnswer(GithubCloneOperationList));
     },
   };
 }

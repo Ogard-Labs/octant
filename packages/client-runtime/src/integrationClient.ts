@@ -1,26 +1,22 @@
 import {
   decodeIntegrationAuthenticationCommand,
-  decodeIntegrationAuthenticationSnapshot,
-  decodeIntegrationExecutionResult,
   type IntegrationAuthenticationCommand,
-  type IntegrationAuthenticationSnapshot,
-  type IntegrationExecutionResult,
+  IntegrationAuthenticationSnapshot,
+  IntegrationExecutionResult,
 } from "@octant/contracts/integration";
 import {
-  decodeLinearIssueDetail,
-  decodeLinearIssueFilterOptions,
   decodeLinearIssueGetInput,
   decodeLinearIssueListInput,
-  decodeLinearIssueListPage,
   LINEAR_ISSUE_FILTERS_OPERATION,
   LINEAR_ISSUE_GET_OPERATION,
   LINEAR_ISSUE_LIST_OPERATION,
-  type LinearIssueDetail,
-  type LinearIssueFilterOptions,
+  LinearIssueDetail,
+  LinearIssueFilterOptions,
   type LinearIssueGetInput,
   type LinearIssueListInput,
-  type LinearIssueListPage,
+  LinearIssueListPage,
 } from "@octant/contracts/linear-issues";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface IntegrationClientOptions {
@@ -107,38 +103,38 @@ export function createIntegrationClient(options: IntegrationClientOptions): Inte
       operationId,
       input,
     });
-    return decodeResponse(body, decodeIntegrationExecutionResult);
+    return decodeResponse(body, decodeHostAnswer(IntegrationExecutionResult));
   }
 
   return {
     async authenticationSnapshot() {
       const body = await send(snapshotPath, { method: "GET", headers });
-      return decodeResponse(body, decodeIntegrationAuthenticationSnapshot);
+      return decodeResponse(body, decodeHostAnswer(IntegrationAuthenticationSnapshot));
     },
     async executeAuthenticationCommand(command) {
       const validated = decodeRequest(command, decodeIntegrationAuthenticationCommand);
       const body = await post(commandsPath, validated);
-      return decodeResponse(body, decodeIntegrationAuthenticationSnapshot);
+      return decodeResponse(body, decodeHostAnswer(IntegrationAuthenticationSnapshot));
     },
     executeOperation,
     async listIssues(input = {}) {
       const validated = decodeRequest(input, decodeLinearIssueListInput);
       return readOperationValue(
         await executeOperation(LINEAR_ISSUE_LIST_OPERATION, validated),
-        decodeLinearIssueListPage,
+        decodeHostAnswer(LinearIssueListPage),
       );
     },
     async getIssue(input) {
       const validated = decodeRequest(input, decodeLinearIssueGetInput);
       return readOperationValue(
         await executeOperation(LINEAR_ISSUE_GET_OPERATION, validated),
-        decodeLinearIssueDetail,
+        decodeHostAnswer(LinearIssueDetail),
       );
     },
     async listIssueFilters() {
       return readOperationValue(
         await executeOperation(LINEAR_ISSUE_FILTERS_OPERATION, {}),
-        decodeLinearIssueFilterOptions,
+        decodeHostAnswer(LinearIssueFilterOptions),
       );
     },
     async storePersonalCredential(credential) {

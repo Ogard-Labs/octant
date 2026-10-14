@@ -1,10 +1,9 @@
 import {
-  decodeWorkspacePresetApplied,
-  decodeWorkspacePresetCatalogListing,
-  type WorkspacePresetApplied,
+  WorkspacePresetApplied,
   type WorkspacePresetApplyRequest,
-  type WorkspacePresetCatalogListing,
+  WorkspacePresetCatalogListing,
 } from "@octant/contracts/workspace-presets";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface WorkspacePresetClientOptions {
@@ -28,7 +27,7 @@ export async function loadWorkspacePresetCatalog(
   options: WorkspacePresetClientOptions,
   signal?: AbortSignal,
 ): Promise<WorkspacePresetCatalogListing> {
-  return decodeWorkspacePresetCatalogListing(
+  return decodeHostAnswer(WorkspacePresetCatalogListing)(
     await send(options, "/api/workspace-presets", { method: "GET" }, signal),
   );
 }
@@ -46,7 +45,7 @@ export async function applyWorkspacePreset(
   request: WorkspacePresetApplyRequest,
   signal?: AbortSignal,
 ): Promise<WorkspacePresetApplied> {
-  return decodeWorkspacePresetApplied(
+  return decodeHostAnswer(WorkspacePresetApplied)(
     await send(
       options,
       "/api/workspace-presets/apply",

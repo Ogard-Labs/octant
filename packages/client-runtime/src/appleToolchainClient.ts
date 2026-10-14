@@ -1,10 +1,10 @@
 import {
-  decodeAppleRpcEnvelope,
   type AppleArtifactRequest,
   type AppleScreenStreamRequest,
   type AppleCancelRequest,
   type AppleDiscoverySnapshot,
   type AppleSnapshotRequest,
+  AppleRpcEnvelope,
 } from "@octant/contracts/apple-toolchain-rpc";
 import { bindFetchPort } from "./bindFetchPort";
 import type {
@@ -15,6 +15,7 @@ import type {
   AppleRuntimeSnapshot,
   AppleToolchainFailure,
 } from "@octant/contracts/apple-toolchain";
+import { decodeHostAnswer } from "@octant/contracts";
 
 export interface AppleToolchainClientOptions {
   readonly baseUrl: string;
@@ -151,7 +152,7 @@ async function watchScreen(
     await response.body?.cancel().catch(() => undefined);
   } else {
     try {
-      const reply = decodeAppleRpcEnvelope(await response.json());
+      const reply = decodeHostAnswer(AppleRpcEnvelope)(await response.json());
       if (reply.kind === "apple-failure") {
         return { status: "failed", kind: reply.failure.category, message: reply.failure.message };
       }
@@ -240,7 +241,7 @@ async function readPng(
   }
   let reply;
   try {
-    reply = decodeAppleRpcEnvelope(await response.json());
+    reply = decodeHostAnswer(AppleRpcEnvelope)(await response.json());
   } catch {
     return {
       status: "failed",
@@ -285,7 +286,7 @@ async function post(options: AppleToolchainClientOptions, body: unknown, signal?
   }
   let reply;
   try {
-    reply = decodeAppleRpcEnvelope(await response.json());
+    reply = decodeHostAnswer(AppleRpcEnvelope)(await response.json());
   } catch {
     throw protocol();
   }

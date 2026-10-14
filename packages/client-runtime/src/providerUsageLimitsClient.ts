@@ -1,7 +1,5 @@
-import {
-  decodeProviderUsageLimitsSnapshot,
-  type ProviderUsageLimitsSnapshot,
-} from "@octant/contracts/provider-usage-limits";
+import { ProviderUsageLimitsSnapshot } from "@octant/contracts/provider-usage-limits";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ProviderUsageLimitsClient {
@@ -53,7 +51,7 @@ export function createProviderUsageLimitsClient(options: {
     if (!response.ok)
       throw new ProviderUsageLimitsClientFailure("Provider usage limits request failed.");
     try {
-      return decodeProviderUsageLimitsSnapshot(await response.json());
+      return decodeHostAnswer(ProviderUsageLimitsSnapshot)(await response.json());
     } catch {
       throw new ProviderUsageLimitsClientFailure("Provider usage limits response is invalid.");
     }

@@ -1,12 +1,12 @@
 import {
-  decodeAutomationCommandResult,
-  decodeAutomationQueryResponse,
   type AutomationCommand,
-  type AutomationCommandResult,
+  AutomationCommandResult,
   type AutomationDetailResponse,
   type AutomationHistoryResponse,
   type AutomationId,
   type AutomationListResponse,
+  AutomationQueryResponse,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 /**
@@ -145,7 +145,7 @@ function decodeQueryKind<K extends "automation-list" | "automation-detail" | "au
 > {
   let decoded;
   try {
-    decoded = decodeAutomationQueryResponse(value);
+    decoded = decodeHostAnswer(AutomationQueryResponse)(value);
   } catch {
     throw new AutomationClientFailure(
       "contract",
@@ -163,7 +163,7 @@ function decodeQueryKind<K extends "automation-list" | "automation-detail" | "au
 
 function decodeCommandResult(value: unknown): AutomationCommandResult {
   try {
-    return decodeAutomationCommandResult(value);
+    return decodeHostAnswer(AutomationCommandResult)(value);
   } catch {
     throw new AutomationClientFailure(
       "contract",

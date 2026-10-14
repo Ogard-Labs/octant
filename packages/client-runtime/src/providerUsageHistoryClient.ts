@@ -1,8 +1,8 @@
 import {
   decodeLocalUsageHistoryRequest,
-  decodeLocalUsageHistoryResponse,
   type LocalUsageHistoryRequest,
-  type LocalUsageHistoryResponse,
+  LocalUsageHistoryResponse,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -62,7 +62,7 @@ export function createLocalUsageHistoryClient(
         if (!response.ok)
           throw new LocalUsageHistoryClientFailure(response.status, failureMessage(body));
         try {
-          const decoded = decodeLocalUsageHistoryResponse(body);
+          const decoded = decodeHostAnswer(LocalUsageHistoryResponse)(body);
           // A preferLastRead answer is the last completed reading of this view,
           // so its instants are that reading's rather than the ones just asked
           // for. The view is the window's length and the time zone - the same

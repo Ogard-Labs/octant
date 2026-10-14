@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
-  decodeThreadCheckpointCommandResult,
-  decodeThreadCheckpointList,
   type OctantMode,
   type ThreadCheckpoint,
   type ThreadCheckpointRefusalReason,
+  ThreadCheckpointCommandResult,
+  ThreadCheckpointList,
+  decodeHostAnswer,
 } from "@octant/contracts";
 import { refusalMessage, type HostRefusal } from "./agentHost";
 import type { AgentThreadSnapshot, AgentThreadTurn } from "./agentThread";
@@ -101,7 +102,7 @@ export async function markAgentCheckpoint(
   if (response.status !== 200) {
     return { kind: "refused", message: refusalMessage(response, "The checkpoint was not marked.") };
   }
-  const result = decodeThreadCheckpointCommandResult(response.body);
+  const result = decodeHostAnswer(ThreadCheckpointCommandResult)(response.body);
   if (result.kind === "checkpoint-marked") return { kind: "marked", checkpoint: result.checkpoint };
   return {
     kind: "refused",
@@ -128,7 +129,7 @@ export async function listAgentCheckpoints(
   }
   return {
     kind: "listed",
-    checkpoints: decodeThreadCheckpointList(response.body).checkpoints.filter(
+    checkpoints: decodeHostAnswer(ThreadCheckpointList)(response.body).checkpoints.filter(
       (checkpoint) => checkpoint.lifecycle === "marked",
     ),
   };
@@ -159,7 +160,7 @@ export async function restoreAgentCheckpoint(
       message: refusalMessage(response, "The checkpoint was not restored."),
     };
   }
-  const result = decodeThreadCheckpointCommandResult(response.body);
+  const result = decodeHostAnswer(ThreadCheckpointCommandResult)(response.body);
   if (result.kind === "checkpoint-restored") {
     return {
       kind: "created",

@@ -1,11 +1,9 @@
 import {
-  decodeAutomationNotificationDeliveryQueryResponse,
-  decodeAutomationNotificationDeliveryStatus,
-  decodeAutomationNotificationPreferences,
-  type AutomationNotificationDeliveryQueryResponse,
-  type AutomationNotificationDeliveryStatus,
-  type AutomationNotificationPreferences,
+  AutomationNotificationDeliveryQueryResponse,
+  AutomationNotificationDeliveryStatus,
+  AutomationNotificationPreferences,
   type UpdateAutomationNotificationPreferences,
+  decodeHostAnswer,
 } from "@octant/contracts";
 
 export interface AutomationNotificationClientOptions {
@@ -70,7 +68,7 @@ export function createAutomationNotificationClient(
         { method: "GET", headers: headers() },
         (body) => {
           const value = body as { readonly preferences?: unknown };
-          return decodeAutomationNotificationPreferences(value.preferences);
+          return decodeHostAnswer(AutomationNotificationPreferences)(value.preferences);
         },
         "preferences",
         maxAttempts,
@@ -83,7 +81,7 @@ export function createAutomationNotificationClient(
         { method: "GET", headers: headers() },
         (body) => {
           const value = body as { readonly status?: unknown };
-          return decodeAutomationNotificationDeliveryStatus(value.status);
+          return decodeHostAnswer(AutomationNotificationDeliveryStatus)(value.status);
         },
         "status",
         maxAttempts,
@@ -99,7 +97,7 @@ export function createAutomationNotificationClient(
         fetchImpl,
         url.toString(),
         { method: "GET", headers: headers() },
-        (body) => decodeAutomationNotificationDeliveryQueryResponse(body),
+        (body) => decodeHostAnswer(AutomationNotificationDeliveryQueryResponse)(body),
         "deliveries",
         maxAttempts,
       );
@@ -115,7 +113,7 @@ export function createAutomationNotificationClient(
         },
         (body) => {
           const value = body as { readonly preferences?: unknown };
-          return decodeAutomationNotificationPreferences(value.preferences);
+          return decodeHostAnswer(AutomationNotificationPreferences)(value.preferences);
         },
         "update",
         maxAttempts,

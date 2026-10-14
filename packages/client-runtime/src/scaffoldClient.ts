@@ -1,7 +1,5 @@
-import {
-  decodeScaffoldCatalogListing,
-  type ScaffoldCatalogListing,
-} from "@octant/contracts/scaffolds";
+import { ScaffoldCatalogListing } from "@octant/contracts/scaffolds";
+import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ScaffoldClientOptions {
@@ -58,7 +56,7 @@ export async function loadScaffoldCatalog(
       response.status,
     );
   }
-  return decodeScaffoldCatalogListing(body);
+  return decodeHostAnswer(ScaffoldCatalogListing)(body);
 }
 
 function readString(body: unknown, key: string): string | undefined {
