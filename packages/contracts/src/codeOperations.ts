@@ -1,3 +1,4 @@
+import { personDecides } from "./hostAnswer";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ProviderChildActivityEvent } from "./providers";
 import { Schema } from "effect";
@@ -1238,7 +1239,7 @@ const ApprovalEvent = Schema.Struct({
     "provider-tool",
   ),
   summary: CodeApprovalSummaryText,
-}).annotations(strict);
+}).annotations({ ...strict, ...personDecides });
 const QuestionEvent = Schema.Struct({
   kind: Schema.Literal("input-requested"),
   requestId: ProviderRequestId,
@@ -1246,7 +1247,7 @@ const QuestionEvent = Schema.Struct({
   options: Schema.Array(CodeQuestionOptionText).pipe(
     Schema.filter((options) => options.length <= MAX_CODE_QUESTION_OPTIONS),
   ),
-}).annotations(strict);
+}).annotations({ ...strict, ...personDecides });
 /**
  * Journaled once, just before a turn's terminal state, on every settled
  * outcome: a turn that failed or was interrupted may still have changed files,
@@ -2311,7 +2312,7 @@ export const CodeOperationApprovalChallenge = Schema.Struct({
   message: boundedNonEmptyText(512),
   // A challenge includes the full bounded effect plus authoritative scope metadata.
   detail: boundedNonEmptyText(MAX_CODE_OPERATION_TEXT_BYTES + 4_096),
-}).annotations(strict);
+}).annotations({ ...strict, ...personDecides });
 export type CodeOperationApprovalChallenge = typeof CodeOperationApprovalChallenge.Type;
 
 export const CodeOperationApprovalConfirmation = Schema.Struct({

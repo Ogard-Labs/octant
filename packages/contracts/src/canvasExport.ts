@@ -1,3 +1,4 @@
+import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { CanvasId, CanvasVersionId } from "./canvas";
 import { isCanvasShareSafeText, isExportCredentialFreeText } from "./canvasShare";
@@ -348,7 +349,8 @@ export const CanvasExportApprovalCard = Schema.Struct({
         message: () => "Only a card that names a destination path can say it replaces one.",
       },
     ),
-  );
+  )
+  .annotations(personDecides);
 export type CanvasExportApprovalCard = typeof CanvasExportApprovalCard.Type;
 
 /**

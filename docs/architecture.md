@@ -51,6 +51,17 @@ The design rests on a small set of invariants that every package obeys:
 - **Contracts are schema-only, domain is pure.** `@octant/contracts` holds
   Effect Schema definitions and nothing else. `@octant/domain` holds pure
   policy and state transitions with no I/O.
+- **The host reads strictly; a client ignores what it does not know.**
+  Everything the host decodes refuses unknown fields: requests and commands
+  from any client, the journal, projections it rebuilds, provider and extension
+  payloads, and plugin manifests. A client reading a host answer (a response
+  body or a stream frame) decodes it with `decodeHostAnswer`, which drops fields
+  it does not know, so a newer host can add an optional field without an older
+  phone, browser, or CLI losing the thread. A known field with the wrong type
+  still fails. Asks a person decides on (approvals, questions, and proposals,
+  marked `personDecides` in the contracts) stay strict inside an answer: an
+  unknown field there refuses the whole answer, so a person is never shown less
+  than the ask authorizes. Versions are not negotiated per field.
 - **Dependencies point inward.** Apps consume packages; contracts and domain
   never import apps. Provider-specific payloads stop at the provider adapter.
 - **A provider question has one answer identity.** Each question in a provider

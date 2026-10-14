@@ -2,6 +2,7 @@ import { Schema, SchemaAST } from "effect";
 import { describe, expect, it } from "vitest";
 import * as contracts from "./index";
 import { CodeRuntimeWork, decodeCodeRuntimeWork } from "./code";
+import { CodeOperationStreamFrame } from "./codeOperations";
 import { decodeHostAnswer } from "./hostAnswer";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -48,6 +49,41 @@ describe("decodeHostAnswer", () => {
     };
     expect(decodeCodeRuntimeWork(work)).toMatchObject({ byteLength: 12 });
     expect(decodeHostAnswer(CodeRuntimeWork)(work)).toMatchObject({ byteLength: 12 });
+  });
+
+  const frame = (event: Record<string, unknown>, extras: Record<string, unknown> = {}) => ({
+    threadId: "84000000-0000-4000-8000-000000000001",
+    operationId: "86000000-0000-4000-8000-000000000001",
+    cursor: 3,
+    occurredAt: "2026-10-14T10:00:00.000Z",
+    event,
+    ...extras,
+  });
+  const approvalAsk = {
+    kind: "approval-requested",
+    approvalId: "89000000-0000-4000-8000-000000000001",
+    action: "provider-tool",
+    summary: "Open example.com",
+  };
+
+  it("still refuses an ask a person decides on that carries a field this build does not know", () => {
+    const answer = frame({ ...approvalAsk, browserOrigin: "https://example.com" });
+    expect(() => decodeHostAnswer(CodeOperationStreamFrame)(answer)).toThrow(/is unexpected/);
+  });
+
+  it("reads the answer around an ask leniently when the ask itself is whole", () => {
+    const answer = frame(approvalAsk, { replayHint: "newer hosts add this" });
+    expect(decodeHostAnswer(CodeOperationStreamFrame)(answer)).toEqual(frame(approvalAsk));
+  });
+
+  it("reads an answer leniently where no ask is present", () => {
+    const answer = frame(
+      { kind: "operation-state", state: "running", stage: "tools" },
+      { hint: 1 },
+    );
+    expect(decodeHostAnswer(CodeOperationStreamFrame)(answer)).toEqual(
+      frame({ kind: "operation-state", state: "running" }),
+    );
   });
 
   it("has no contract union whose earlier member would swallow a later member's fields", () => {

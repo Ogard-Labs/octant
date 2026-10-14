@@ -13,10 +13,24 @@ import { Option, Schema, SchemaAST } from "effect";
  * never changed: everything the host decodes (requests, commands, the journal,
  * projections, provider and extension payloads) keeps refusing unknown
  * fields. Use this only where the input is an answer from a host.
+ *
+ * An ask a person decides on (marked with {@link personDecides}) stays strict
+ * inside a lenient answer: an unknown field there refuses the whole answer.
  */
 export function decodeHostAnswer<A, I>(schema: Schema.Schema<A, I, never>): (input: unknown) => A {
   return Schema.decodeUnknownSync(Schema.make<A, I, never>(ignoringUnknownFields(schema.ast)));
 }
+
+const PersonDecidesAnnotationId: unique symbol = Symbol.for("@octant/contracts/person-decides");
+
+/**
+ * Marks an ask a person decides on: an approval, a question, or a proposal
+ * whose answer grants, approves, or answers on the person's behalf. A client
+ * keeps refusing unknown fields inside it, because a field this build cannot
+ * show may qualify what the answer authorizes (as `browserOrigin` qualifies a
+ * Code approval), and a person must never be shown less than the ask means.
+ */
+export const personDecides = { [PersonDecidesAnnotationId]: true } as const;
 
 const answerAsts = new WeakMap<SchemaAST.AST, SchemaAST.AST>();
 
@@ -39,6 +53,19 @@ function ignoringAnnotations(ast: SchemaAST.AST): SchemaAST.Annotations | undefi
   };
 }
 
+// Effect hands a node's merged parse options down to every node beneath it,
+// so forcing the ask's own node strict keeps its whole subtree strict too.
+function keepingStrict(ast: SchemaAST.AST): SchemaAST.AST {
+  const parseOptions = SchemaAST.getParseOptionsAnnotation(ast);
+  if (Option.isSome(parseOptions) && parseOptions.value.onExcessProperty === "error") return ast;
+  return SchemaAST.annotations(ast, {
+    [SchemaAST.ParseOptionsAnnotationId]: {
+      ...Option.getOrUndefined(parseOptions),
+      onExcessProperty: "error",
+    },
+  });
+}
+
 function sameMembers(before: ReadonlyArray<SchemaAST.AST>, after: ReadonlyArray<SchemaAST.AST>) {
   return before.every((member, index) => member === after[index]);
 }
@@ -46,6 +73,7 @@ function sameMembers(before: ReadonlyArray<SchemaAST.AST>, after: ReadonlyArray<
 // Rebuilds only the nodes on a path to a strict annotation, so unrelated
 // subtrees keep their identity and Effect's per-node parser cache.
 function rewrite(ast: SchemaAST.AST): SchemaAST.AST {
+  if (ast.annotations[PersonDecidesAnnotationId] === true) return keepingStrict(ast);
   const annotations = ignoringAnnotations(ast);
   switch (ast._tag) {
     case "TypeLiteral": {

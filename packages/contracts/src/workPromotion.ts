@@ -1,3 +1,4 @@
+import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { ProjectId } from "./projects";
 import { AggregateVersion, EventActor, UtcTimestamp } from "./events";
@@ -96,7 +97,8 @@ export const WorkPromotionProposal = Schema.Struct({
       },
       { jsonSchema: {} },
     ),
-  );
+  )
+  .annotations(personDecides);
 export type WorkPromotionProposal = typeof WorkPromotionProposal.Type;
 
 const ProposalTransitionFields = {
