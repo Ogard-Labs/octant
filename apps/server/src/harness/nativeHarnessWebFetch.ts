@@ -235,7 +235,9 @@ export function isPrivateAddress(address: string): boolean {
  * Every block the IANA IPv4 special-purpose registry marks not globally
  * reachable, plus multicast. 192.0.0.0/24 is refused whole: its two
  * reachable exceptions are PCP and TURN anycast, which answer from the
- * nearest server, often the local gateway.
+ * nearest server, often the local gateway. 192.88.99.0/24 is refused whole
+ * for the same reason: deprecated 6to4 relay anycast around the 6a44 relay
+ * address 192.88.99.2, which is not globally reachable.
  */
 function isPrivateIpv4(address: string): boolean {
   const [a = 0, b = 0, c = 0] = address.split(".").map(Number);
@@ -249,6 +251,7 @@ function isPrivateIpv4(address: string): boolean {
     (a === 100 && b >= 64 && b <= 127) ||
     (a === 192 && b === 0 && c === 0) || // IETF protocol assignments
     (a === 192 && b === 0 && c === 2) || // documentation
+    (a === 192 && b === 88 && c === 99) || // 6to4 and 6a44 relay anycast
     (a === 198 && (b === 18 || b === 19)) || // benchmarking
     (a === 198 && b === 51 && c === 100) || // documentation
     (a === 203 && b === 0 && c === 113) || // documentation

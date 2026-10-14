@@ -3455,15 +3455,17 @@ native harness in `apps/server/src/harness`:
   inference host sees an anonymous GET and a local one (Ollama, LM Studio) is a
   private destination it refuses. Private means loopback, unspecified, RFC 1918,
   CGNAT, link-local (including cloud metadata), multicast, and reserved IPv4,
-  plus the IETF protocol assignments `192.0.0.0/24`, benchmarking
-  `198.18.0.0/15`, and the three documentation blocks; in IPv6 all of `::/64`
+  plus the IETF protocol assignments `192.0.0.0/24`, the 6to4 and 6a44 relay
+  anycast block `192.88.99.0/24`, benchmarking `198.18.0.0/15`, and the three
+  documentation blocks; in IPv6 all of `::/64`
   other than IPv4-mapped, `100::/64` and `100:0:0:1::/64`, the IETF protocol
   assignments `2001::/23` other than Teredo, documentation `2001:db8::/32`
   and `3fff::/20`, segment-routing `5f00::/16`, unique-local, link-local
   `fe80::/10`, site-local, and multicast. That is every block the IANA
   special-purpose registries mark not globally reachable; the two IETF
-  protocol-assignment blocks are refused whole, including their reachable
-  anycast exceptions, which answer from the nearest server. An IPv6 address is
+  protocol-assignment blocks and the relay anycast block are refused whole,
+  including their reachable anycast addresses, which answer from the nearest
+  server. An IPv6 address is
   judged by its value rather than its spelling, and mapped, NAT64
   (`64:ff9b::/96`), 6to4, and Teredo (server and client) addresses by the IPv4
   address they carry. Every redirect hop is checked
