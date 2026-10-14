@@ -1741,8 +1741,10 @@ flowchart LR
   the local registry entry.
   Removing a host, from the desktop's federated hosts or the phone's host list,
   stops that host's session and deletes its device key from secure storage;
-  other hosts' keys stay. The host leaves the list even when the key cannot be
-  deleted, and the phone says so.
+  other hosts' keys stay. On the phone, Remove works with no connection to the
+  host, asks first, and sends nothing to the host, so it does not revoke: the
+  host keeps listing the device until it is revoked from the desktop. The host
+  leaves the list even when the key cannot be deleted, and the phone says so.
   Reopened Code terminals retain their runtime-work identity and resume at the
   persisted aggregate version, including restart interruption events. Live
   recorders keep their expected version so conflicting writes remain refused.
