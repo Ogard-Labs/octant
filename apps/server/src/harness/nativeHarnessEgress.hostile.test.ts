@@ -2942,7 +2942,7 @@ describe("native harness tool egress grants and learn mode", () => {
       });
     });
 
-    it("closes a tunnel the moment its rule is revoked", async () => {
+    it("shuts a tunnel the moment its rule is revoked", async () => {
       const host = egressHost();
       const origin = await tcpFixture();
       const granted = grantThreadRule(host, "registry.example.com");
