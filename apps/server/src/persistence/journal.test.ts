@@ -767,8 +767,7 @@ describe("Journal", () => {
       );
     prepare.mockRestore();
 
-    // The thread replay, the anchored replay, and the last report per turn.
-    expect(threadReplays).toHaveLength(3);
+    expect(threadReplays).toHaveLength(2);
     for (const sql of threadReplays) {
       const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
       const plan = JSON.stringify(

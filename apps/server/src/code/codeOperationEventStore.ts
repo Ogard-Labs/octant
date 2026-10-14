@@ -931,7 +931,8 @@ export class CodeOperationEventStore {
 
   /**
    * The usage of every turn that started before `firstStart`, folded as the
-   * client totals it: each turn's last report once, in journal order.
+   * client totals it: each turn's last report once, in the order the turns
+   * started.
    */
   #earlierUsage(
     threadId: CodeThreadId,
@@ -939,20 +940,22 @@ export class CodeOperationEventStore {
     decode: (envelope: EventEnvelope) => typeof CodeOperationEventFrame.Type | undefined,
   ): CodeConversationUsageTotals | undefined {
     const usages: Array<CodeConversationTurnUsage> = [];
-    let afterSequence = 0;
+    let afterAnchorSequence = 0;
     for (;;) {
+      // In turn order, so the window figures are the newest older turn's
+      // even when its report landed before an older turn's last one.
       const batch = this.#journal.latestThreadEventPerAggregate({
         aggregateType: "code-operation",
         threadId: String(threadId),
         kind: "usage",
         anchorKind: "conversation-turn-started",
         anchorBeforeSequence: firstStart,
-        afterSequence,
+        afterAnchorSequence,
         limit: JOURNAL_REPLAY_BATCH_SIZE,
       });
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        const frame = decode(envelope);
+      for (const { anchorSequence, event } of batch) {
+        afterAnchorSequence = anchorSequence;
+        const frame = decode(event);
         if (frame?.event.kind !== "usage") continue;
         usages.push(turnUsage(frame.event));
       }

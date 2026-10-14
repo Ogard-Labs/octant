@@ -1091,6 +1091,43 @@ describe("CodeOperationEventStore conversation window", () => {
     fixture.connection.close();
   });
 
+  it("folds the turns before a window in the order they started, whatever order their reports landed in", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const [older, newer, newest] = [turnOperation(700), turnOperation(701), turnOperation(702)];
+    for (const turn of [older, newer]) {
+      store.append({
+        threadId,
+        operationId: turn,
+        expectedCursor: 0,
+        event: turnStarted(firstProvider),
+      });
+    }
+    const usage = (contextTokens: number) =>
+      decodeCodeOperationEvent({ kind: "usage", inputTokens: 10, outputTokens: 1, contextTokens });
+    // The newer turn reports first; the older turn's last report lands after it.
+    store.append({ threadId, operationId: newer, expectedCursor: 1, event: usage(200) });
+    store.append({ threadId, operationId: older, expectedCursor: 1, event: usage(100) });
+    store.append({
+      threadId,
+      operationId: newest,
+      expectedCursor: 0,
+      event: turnStarted(firstProvider),
+    });
+
+    const forward = store.conversation({ threadId, afterCursor: 0, limit: 10 });
+    const read = store.conversationWindow({ threadId, limit: 1 });
+    if (read.status !== "ok") throw new Error("window refused");
+    expect(read.window.earlierUsage).toEqual(
+      foldCodeTurnUsage(
+        undefined,
+        forward.turns.flatMap((turn) => (turn.usage === undefined ? [] : [turn.usage])),
+      ),
+    );
+    expect(read.window.earlierUsage?.contextTokens).toBe(200);
+    fixture.connection.close();
+  });
+
   it("answers the page that ends with a turn, and says the thread goes on after it", () => {
     const fixture = openJournal();
     const store = createStore(fixture.journal);

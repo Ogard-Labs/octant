@@ -220,32 +220,37 @@ export class Journal {
       ORDER BY global_sequence DESC LIMIT ?
     `);
     // The last event of one kind of each aggregate that recorded an anchor
-    // event of the thread before a sequence: a Code turn's own usage figure
-    // is its last report, and the turns are the operations that started one.
-    // Membership is by the anchor, not by where the report landed, so a turn
-    // whose report was journaled after a later turn started still counts.
-    // Both halves read the thread-kind index; only the chosen rows decode.
+    // event of the thread before a sequence, in the order the anchors were
+    // journaled: a Code turn's own usage figure is its last report, the turns
+    // are the operations that started one, and a fold over them must run in
+    // turn order even when an older turn's report landed after a newer one's.
+    // Membership is by the anchor, not by where the report landed. Both
+    // groupings read the thread-kind index; only the chosen rows decode.
     this.#latestThreadKindPerAggregateRows = options.connection.prepare(`
-      SELECT global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
-        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
-        actor_id, ${actorJsonSelect}, occurred_at, payload_json
-      FROM event_journal
-      WHERE global_sequence IN (
-        SELECT max(global_sequence) FROM event_journal
+      SELECT anchors.anchor_sequence AS anchor_sequence,
+        event.global_sequence, event.event_id, event.aggregate_type, event.aggregate_id,
+        event.aggregate_version, event.event_name, event.event_version, event.host_id,
+        event.correlation_id, event.causation_id, event.actor_kind, event.actor_id,
+        ${this.#hasActorJson ? "event.actor_json" : "NULL AS actor_json"}, event.occurred_at,
+        event.payload_json
+      FROM (
+        SELECT aggregate_id, min(global_sequence) AS anchor_sequence FROM event_journal
         WHERE aggregate_type = ?
           AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
           AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
-          AND aggregate_id IN (
-            SELECT aggregate_id FROM event_journal
-            WHERE aggregate_type = ?
-              AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
-              AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
-              AND global_sequence < ?
-          )
+          AND global_sequence < ?
         GROUP BY aggregate_id
-      )
-        AND global_sequence > ?
-      ORDER BY global_sequence ASC
+      ) AS anchors
+      JOIN (
+        SELECT aggregate_id, max(global_sequence) AS last_sequence FROM event_journal
+        WHERE aggregate_type = ?
+          AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+          AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
+        GROUP BY aggregate_id
+      ) AS latest ON latest.aggregate_id = anchors.aggregate_id
+      JOIN event_journal AS event ON event.global_sequence = latest.last_sequence
+      WHERE anchors.anchor_sequence > ?
+      ORDER BY anchors.anchor_sequence ASC
       LIMIT ?
     `);
     // One aggregate's first event of a kind, walking its own unique index in
@@ -782,8 +787,9 @@ export class Journal {
 
   /**
    * The last event of `kind` of every aggregate that recorded an `anchorKind`
-   * event of the thread below `anchorBeforeSequence`, in journal order, a
-   * batch at a time after `afterSequence`.
+   * event of the thread below `anchorBeforeSequence`, each with the sequence
+   * of that anchor, in anchor order, a batch at a time after
+   * `afterAnchorSequence`. An aggregate with no event of `kind` is left out.
    */
   latestThreadEventPerAggregate(input: {
     readonly aggregateType: string;
@@ -791,17 +797,17 @@ export class Journal {
     readonly kind: string;
     readonly anchorKind: string;
     readonly anchorBeforeSequence: number;
-    readonly afterSequence: number;
+    readonly afterAnchorSequence: number;
     readonly limit: number;
-  }): ReadonlyArray<EventEnvelope> {
+  }): ReadonlyArray<{ readonly anchorSequence: number; readonly event: EventEnvelope }> {
     if (
       input.aggregateType.trim().length === 0 ||
       input.threadId.trim().length === 0 ||
       input.kind.trim().length === 0 ||
       input.anchorKind.trim().length === 0 ||
       !validBound(input.anchorBeforeSequence) ||
-      !Number.isSafeInteger(input.afterSequence) ||
-      input.afterSequence < 0 ||
+      !Number.isSafeInteger(input.afterAnchorSequence) ||
+      input.afterAnchorSequence < 0 ||
       !Number.isSafeInteger(input.limit) ||
       input.limit < 1 ||
       input.limit > 1_000
@@ -811,15 +817,15 @@ export class Journal {
       this.#latestThreadKindPerAggregateRows.all(
         input.aggregateType,
         input.threadId,
-        input.kind,
-        input.aggregateType,
-        input.threadId,
         input.anchorKind,
         input.anchorBeforeSequence,
-        input.afterSequence,
+        input.aggregateType,
+        input.threadId,
+        input.kind,
+        input.afterAnchorSequence,
         input.limit,
-      ) as Array<JournalRow>
-    ).map((row) => this.#decodeRow(row));
+      ) as Array<JournalRow & { readonly anchor_sequence: number }>
+    ).map((row) => ({ anchorSequence: row.anchor_sequence, event: this.#decodeRow(row) }));
   }
 
   /** One aggregate's first event of a kind, or undefined when it recorded none. */
