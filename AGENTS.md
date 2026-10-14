@@ -148,7 +148,8 @@ test count.
   elevate, or bypass policy. Discover skills only from valid `.agents/skills/`
   and `.claude/skills/` packages in the permitted repository ancestry (the
   closed `PROJECT_SKILL_ROOTS` allow-list) and from the user-global
-  `~/.agents/skills/` directory under the same activation ladder.
+  `~/.agents/skills/` directory under the same activation ladder, never from
+  the home folder's own `.claude`.
 - Use the unified real-thread hierarchy and server-authoritative Work/Code
   boards. Chat has no board.
 - A Code thread is Done only when its user-confirmed delivery target is
