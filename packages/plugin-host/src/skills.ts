@@ -42,26 +42,45 @@ function sameReference(left: string | null | undefined, right: string | null | u
   return String(left) === String(right);
 }
 
+/**
+ * The skills one thread, or one new-task draft (`threadRef: null`), may see.
+ *
+ * A thread-scoped skill reaches only its exact thread, a Project-scoped skill
+ * reaches every thread of that Project and mode, and an unscoped skill (the
+ * user-global directory, bundled skills) reaches every thread. A Chat thread
+ * matches no Project scope: Chat Projects have no filesystem, so a skill found
+ * at a Work or Code Project root never reaches Chat.
+ */
 export function filterSkillCatalogForScope(
   catalog: SkillCatalog,
   scope: {
     readonly mode: OctantMode;
     readonly projectId: string | null;
-    readonly threadRef: string;
+    readonly threadRef: string | null;
   },
 ): SkillCatalog {
   const exact: StandaloneSkillRecord[] = [];
+  const project: StandaloneSkillRecord[] = [];
   const shared: StandaloneSkillRecord[] = [];
   for (const record of catalog.skills) {
-    if (record.scope === undefined) {
+    if (record.scope !== undefined) {
+      if (
+        record.scope.mode === scope.mode &&
+        sameReference(record.scope.projectId, scope.projectId) &&
+        sameReference(record.scope.threadRef, scope.threadRef)
+      ) {
+        exact.push(record);
+      }
+    } else if (record.projectScope !== undefined) {
+      if (
+        record.projectScope.mode === scope.mode &&
+        sameReference(record.projectScope.projectId, scope.projectId)
+      ) {
+        project.push(record);
+      }
+    } else {
       shared.push(record);
-    } else if (
-      record.scope.mode === scope.mode &&
-      sameReference(record.scope.projectId, scope.projectId) &&
-      sameReference(record.scope.threadRef, scope.threadRef)
-    ) {
-      exact.push(record);
     }
   }
-  return buildSkillCatalog([...exact, ...shared]);
+  return buildSkillCatalog([...exact, ...project, ...shared]);
 }

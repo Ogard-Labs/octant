@@ -592,6 +592,19 @@ export const StandaloneSkillScope = Schema.Struct({
 }).annotations(strict);
 export type StandaloneSkillScope = typeof StandaloneSkillScope.Type;
 
+/**
+ * The Project a skill found at a Project root belongs to: every thread of that
+ * Project shares it, and no other Project or Chat thread sees it. It is a field
+ * of its own rather than a `scope` without `threadRef`, because a client that
+ * predates it requires `threadRef` in `scope` and would refuse the whole
+ * snapshot, while it drops an unknown field.
+ */
+export const StandaloneSkillProjectScope = Schema.Struct({
+  mode: Schema.Literal("work", "code"),
+  projectId: ProjectId,
+}).annotations(strict);
+export type StandaloneSkillProjectScope = typeof StandaloneSkillProjectScope.Type;
+
 export const StandaloneSkillRecord = Schema.Struct({
   skill: SourceQualifiedSkill,
   source: ExtensionSource,
@@ -603,7 +616,10 @@ export const StandaloneSkillRecord = Schema.Struct({
   reviewed: Schema.Boolean,
   desiredEnabled: Schema.Boolean,
   effectiveState: ExtensionEffectiveState,
+  /** A skill found below a Project root, for the one thread whose directory reaches it. */
   scope: Schema.optional(StandaloneSkillScope),
+  /** A skill found at a Project root. A record carries `scope` or this, never both. */
+  projectScope: Schema.optional(StandaloneSkillProjectScope),
   /**
    * Raw skill instructions text, carried only for discovered/bundled skills
    * that the host has already read from disk. Trust is still enforced by the

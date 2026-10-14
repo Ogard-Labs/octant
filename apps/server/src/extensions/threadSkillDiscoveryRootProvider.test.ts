@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createThreadSkillDiscoveryRootProvider } from "./threadSkillDiscoveryRootProvider";
 
 describe("thread skill-discovery root provider", () => {
-  it("returns one shared Project root plus exact active nested thread scopes", async () => {
+  it("returns one Project root shared by its threads plus exact active nested thread scopes", async () => {
     const projectId = decodeProjectId("11111111-1111-4111-8111-111111111111");
     const revisionId = decodeBindingRevisionId("22222222-2222-4222-8222-222222222222");
     const codeThreadId = decodeCodeThreadId("33333333-3333-4333-8333-333333333333");
@@ -54,6 +54,7 @@ describe("thread skill-discovery root provider", () => {
         projectRoot: "/repo",
         projectRef: String(projectId),
         userGlobalSkillsRoot: "/home/user/.agents/skills",
+        projectScope: { mode: "code", projectId },
         scope: { mode: "code", projectId, threadRef: String(codeThreadId) },
       },
       {
@@ -61,6 +62,7 @@ describe("thread skill-discovery root provider", () => {
         projectRoot: "/repo",
         projectRef: String(projectId),
         userGlobalSkillsRoot: "/home/user/.agents/skills",
+        projectScope: { mode: "code", projectId },
       },
     ]);
     expect(resolveWorkingDirectory).toHaveBeenCalledOnce();

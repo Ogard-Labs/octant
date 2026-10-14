@@ -75,7 +75,7 @@ import {
   type WorkAccess,
   type WorkThreadId,
 } from "@octant/contracts";
-import { ExtensionProviderFamily, type StandaloneSkillScope } from "@octant/contracts/extensions";
+import { ExtensionProviderFamily, type StandaloneSkillRecord } from "@octant/contracts/extensions";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import type { ProviderDriver, ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
 import {
@@ -9456,7 +9456,7 @@ export function startOctantServer(
                 record.effectiveState.kind === "effective" &&
                 // The record's own scope is what a client would echo back, so
                 // the eligibility test is the admission test run against it.
-                sameCanvasSkillScope(record.scope, record.scope, scopeContext),
+                sameCanvasSkillScope(record, record.scope, scopeContext),
             )
             .map((record) => ({
               skill: {
@@ -9481,7 +9481,7 @@ export function startOctantServer(
             (record.version === undefined ||
               skill.version === undefined ||
               String(record.version) === String(skill.version)) &&
-            sameCanvasSkillScope(record.scope, skill.scope, request)
+            sameCanvasSkillScope(record, skill.scope, request)
           );
         },
         // Resolve trusted skill layout/presentation contributions during
@@ -9502,10 +9502,7 @@ export function startOctantServer(
                 .skills?.find(
                   (candidate) => String(candidate.skill.qualifiedId) === String(skill.qualifiedId),
                 );
-              if (
-                record === undefined ||
-                !sameCanvasSkillScope(record.scope, skill.scope, request)
-              ) {
+              if (record === undefined || !sameCanvasSkillScope(record, skill.scope, request)) {
                 return undefined;
               }
               return record;
@@ -11916,11 +11913,28 @@ function isPathWithin(root: string, candidate: string): boolean {
   );
 }
 
-function sameCanvasSkillScope(
-  recordScope: StandaloneSkillScope | undefined,
+/**
+ * Does a Canvas's refresh request stand in the scope of this skill record?
+ *
+ * A Project-root skill carries no thread scope for a client to echo, so its
+ * Project is checked against the Canvas itself: another Project's Canvas, or
+ * a Chat Canvas, never sees it.
+ */
+export function sameCanvasSkillScope(
+  record: Pick<StandaloneSkillRecord, "scope" | "projectScope">,
   recipeScope: CanvasRefreshSkill["scope"],
   request: Pick<CanvasRefreshRequest, "mode" | "workspace" | "originThreadId">,
 ): boolean {
+  const projectScope = record.projectScope;
+  if (
+    projectScope !== undefined &&
+    (projectScope.mode !== request.mode ||
+      request.workspace.projectId === null ||
+      String(projectScope.projectId) !== String(request.workspace.projectId))
+  ) {
+    return false;
+  }
+  const recordScope = record.scope;
   if (recordScope === undefined) return recipeScope === undefined;
   if (recipeScope === undefined || recipeScope.mode !== request.mode) return false;
   return (
