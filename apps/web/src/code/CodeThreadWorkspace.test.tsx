@@ -565,6 +565,28 @@ describe("CodeThreadWorkspace", () => {
     expect(container.querySelector(".composer-status")).toBeEmptyDOMElement();
   });
 
+  it("offers earlier messages above a transcript that opened on its newest turns", () => {
+    const loadEarlierConversation = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            { id: "turn-1:user", role: "user", text: "Newest prompt" },
+            { id: "turn-1:assistant", role: "assistant", text: "Newest reply" },
+          ],
+          conversationHistory: "loaded",
+          earlierConversation: "idle",
+          loadEarlierConversation,
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+    expect(loadEarlierConversation).toHaveBeenCalledOnce();
+  });
+
   it("keeps new-thread setup hidden while an existing transcript is loading", () => {
     render(
       <CodeThreadWorkspace

@@ -1691,6 +1691,8 @@ function withCodeOperationRuntime(
     },
     conversation: (windowId, threadId, afterCursor, limit) =>
       runtime.conversation(windowId, threadId, afterCursor, limit),
+    conversationWindow: (windowId, threadId, request) =>
+      runtime.conversationWindow(windowId, threadId, request),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
     readOperationContent: (windowId, threadId, operationId, contentId) =>
       runtime.readEvidence(windowId, threadId, operationId, decodeCodeEvidenceContentId(contentId)),
@@ -1815,6 +1817,9 @@ function withCodeBoard(
     ...(service.conversation === undefined
       ? {}
       : { conversation: service.conversation.bind(service) }),
+    ...(service.conversationWindow === undefined
+      ? {}
+      : { conversationWindow: service.conversationWindow.bind(service) }),
     ...(service.readOperationContent === undefined
       ? {}
       : { readOperationContent: service.readOperationContent.bind(service) }),

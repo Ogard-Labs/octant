@@ -2611,6 +2611,29 @@ describe("CodeOperationRuntime", () => {
         autoCompactThreshold: 167_000,
         contextBreakdown: usage.contextBreakdown,
       });
+      // The newest window carries the same turns as the forward read, and the
+      // forward read still answers its own version.
+      expect(page.version).toBe(3);
+      const window = await fixture.runtime.conversationWindow(windowId, threadId, { limit: 20 });
+      expect(window.status === "ok" ? window.window.turns : undefined).toEqual(page.turns);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("refuses a conversation window for a Project the window cannot access, before reading it", async () => {
+    const fixture = runtimeFixture({ projectAccess: false });
+    try {
+      await expect(
+        fixture.runtime.conversationWindow(windowId, threadId, { limit: 20 }),
+      ).rejects.toMatchObject({ category: "unauthorized" });
+      await expect(
+        fixture.runtime.conversationWindow(
+          windowId,
+          decodeCodeThreadId("70000000-0000-4000-8000-0000000000ff"),
+          { limit: 20 },
+        ),
+      ).rejects.toMatchObject({ category: "invalid" });
     } finally {
       fixture.close();
     }

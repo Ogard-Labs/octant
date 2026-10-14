@@ -13,6 +13,8 @@ import {
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
   type CodeConversationTurn,
   type CodeConversationTurnHandoff,
+  type CodeConversationTurnUsage,
+  type CodeConversationUsageTotals,
   type CodeForkMergeBack,
   type CodeEvidenceContentId,
   type CodeOperationEvent,
@@ -25,6 +27,7 @@ import {
   type ProviderContextBreakdown,
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
+import { foldCodeTurnUsage } from "@octant/domain";
 import { appendReasoning, applyActivityEvent } from "./transcriptActivity";
 import { EMPTY_TURN_ACTIVITY, type TurnActivity } from "../transcript/turnActivity";
 import { samePollingData } from "../polling/samePollingData";
@@ -168,28 +171,24 @@ export interface CodeCacheCoverage {
   readonly write: { readonly measuredTurns: number; readonly measuredTokens: number };
 }
 
-export interface CodeTurnUsage {
-  readonly inputTokens: number;
-  readonly cacheReadInputTokens?: number | undefined;
-  readonly cacheWriteInputTokens?: number | undefined;
-  readonly outputTokens: number;
-  readonly costUsd?: number | undefined;
-  readonly contextWindow?: number | undefined;
-  readonly contextTokens?: number | undefined;
-  readonly autoCompactThreshold?: number | undefined;
-  readonly contextBreakdown?: ProviderContextBreakdown | undefined;
-}
+/** What one turn reported, as its own total. */
+export type CodeTurnUsage = CodeConversationTurnUsage;
 
 /**
- * Add up what each turn reported.
+ * Add up what each turn reported, onto what the turns before them reported.
  *
  * The thread's figure is the sum over turns, never the sum over reports: a
  * provider may report a turn's usage repeatedly as it runs, and each report is
  * that turn's total so far, not an amount to add to the one before it. Keeping
  * a figure per turn is what makes the live number agree with the one the
- * journal projects when the thread is reopened.
+ * journal projects when the thread is reopened. `earlier` is the host's fold
+ * of every turn older than the loaded ones, so a thread opened on its newest
+ * turns still totals all of them; the fold is the host's own function.
  */
-export function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
+export function totalTurnUsage(
+  byOperation: ReadonlyMap<string, CodeTurnUsage>,
+  earlier?: CodeConversationUsageTotals,
+): {
   readonly cacheCoverage?: CodeCacheCoverage;
   readonly inputTokens?: number;
   readonly cacheReadInputTokens?: number;
@@ -201,59 +200,33 @@ export function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>):
   readonly autoCompactThreshold?: number;
   readonly contextBreakdown?: ProviderContextBreakdown;
 } {
-  if (byOperation.size === 0) return {};
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let cacheReadInputTokens: number | undefined;
-  let cacheReadTurns = 0;
-  let cacheWriteTurns = 0;
-  let cacheWriteInputTokens: number | undefined;
-  let costUsd: number | undefined;
-  let contextWindow: number | undefined;
-  let contextTokens: number | undefined;
-  let autoCompactThreshold: number | undefined;
-  let contextBreakdown: ProviderContextBreakdown | undefined;
-  for (const usage of byOperation.values()) {
-    inputTokens += usage.inputTokens;
-    outputTokens += usage.outputTokens;
-    if (usage.cacheReadInputTokens !== undefined) {
-      cacheReadTurns += 1;
-      cacheReadInputTokens = (cacheReadInputTokens ?? 0) + usage.cacheReadInputTokens;
-    }
-    if (usage.cacheWriteInputTokens !== undefined) {
-      cacheWriteTurns += 1;
-      cacheWriteInputTokens = (cacheWriteInputTokens ?? 0) + usage.cacheWriteInputTokens;
-    }
-    if (usage.costUsd !== undefined) costUsd = (costUsd ?? 0) + usage.costUsd;
-    if (usage.contextWindow !== undefined) contextWindow = usage.contextWindow;
-    if (usage.contextTokens !== undefined) contextTokens = usage.contextTokens;
-    // Unlike the window, a promise to compact ends when the runtime stops
-    // making it, so the latest turn's report stands even when it names none.
-    autoCompactThreshold = usage.autoCompactThreshold;
-    // A turn still running has reported usage but not yet its make-up, so the
-    // latest breakdown that was reported stands; the reader accounts for what
-    // the window has gained since as the remainder.
-    if (usage.contextBreakdown !== undefined) contextBreakdown = usage.contextBreakdown;
-  }
+  const totals = foldCodeTurnUsage(earlier, byOperation.values());
+  if (totals === undefined) return {};
+  // A cache figure is shown only when every reporting turn measured it; the
+  // coverage says how many did.
+  const everyTurn = (measured: CodeConversationUsageTotals["cacheRead"]) =>
+    measured.measuredTurns > 0 && measured.measuredTurns === totals.reportedTurns;
   return {
-    inputTokens,
-    outputTokens,
-    ...(costUsd === undefined ? {} : { costUsd }),
-    ...(cacheReadTurns !== byOperation.size || cacheReadInputTokens === undefined
-      ? {}
-      : { cacheReadInputTokens }),
-    ...(cacheWriteTurns !== byOperation.size || cacheWriteInputTokens === undefined
-      ? {}
-      : { cacheWriteInputTokens }),
+    inputTokens: totals.inputTokens,
+    outputTokens: totals.outputTokens,
+    ...(totals.costUsd === undefined ? {} : { costUsd: totals.costUsd }),
+    ...(everyTurn(totals.cacheRead)
+      ? { cacheReadInputTokens: totals.cacheRead.measuredTokens }
+      : {}),
+    ...(everyTurn(totals.cacheWrite)
+      ? { cacheWriteInputTokens: totals.cacheWrite.measuredTokens }
+      : {}),
     cacheCoverage: {
-      reportedTurns: byOperation.size,
-      read: { measuredTurns: cacheReadTurns, measuredTokens: cacheReadInputTokens ?? 0 },
-      write: { measuredTurns: cacheWriteTurns, measuredTokens: cacheWriteInputTokens ?? 0 },
+      reportedTurns: totals.reportedTurns,
+      read: { ...totals.cacheRead },
+      write: { ...totals.cacheWrite },
     },
-    ...(contextWindow === undefined ? {} : { contextWindow }),
-    ...(contextTokens === undefined ? {} : { contextTokens }),
-    ...(autoCompactThreshold === undefined ? {} : { autoCompactThreshold }),
-    ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
+    ...(totals.contextWindow === undefined ? {} : { contextWindow: totals.contextWindow }),
+    ...(totals.contextTokens === undefined ? {} : { contextTokens: totals.contextTokens }),
+    ...(totals.autoCompactThreshold === undefined
+      ? {}
+      : { autoCompactThreshold: totals.autoCompactThreshold }),
+    ...(totals.contextBreakdown === undefined ? {} : { contextBreakdown: totals.contextBreakdown }),
   };
 }
 

@@ -60,8 +60,8 @@ export interface TranscriptWindowProps<T> {
    */
   readonly pinnedKeys?: ReadonlyArray<string>;
   /**
-   * Chat follows new output at the bottom. Code opens a nonempty transcript at
-   * the top and stays there until the reader scrolls.
+   * Chat, Work, and Code open at the end and follow new output there. `start`
+   * opens a nonempty list at the top and stays there until the reader scrolls.
    */
   readonly align?: "start" | "end";
   /**
@@ -92,6 +92,9 @@ interface TranscriptScrollMemory {
 }
 
 const scrollMemory = new Map<string, TranscriptScrollMemory>();
+
+/** Frames a restored offset is applied for while the rows lay out before it can hold. */
+const RESTORE_ATTEMPT_FRAMES = 30;
 
 /** How close to the end still counts as following new output. Matches Chat's previous threshold. */
 const FOLLOW_THRESHOLD_PX = 72;
@@ -240,6 +243,42 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   useLayoutEffect(() => {
     firstKeyRef.current = firstKey;
   }, [firstKey]);
+
+  // The virtualizer starts from a remembered offset, but the frame itself
+  // mounts at the top, and its rows lay out a frame or two later, so until
+  // then it cannot scroll that far. Left there, the restored rows were drawn
+  // where the reader had been while the frame showed the empty space above
+  // them, and a thread came back blank until it was scrolled. The offset is
+  // applied again each frame until it holds, and never after the reader moves.
+  useLayoutEffect(() => {
+    const scroll = scrollElementRef.current;
+    if (scroll === null || restored === undefined || restored.following) return;
+    const offset = restored.offset;
+    const inputs = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    let handle: number | undefined;
+    let attempts = 0;
+    const stop = () => {
+      if (handle !== undefined) cancelAnimationFrame(handle);
+      handle = undefined;
+      for (const type of inputs) scroll.removeEventListener(type, stop);
+    };
+    const apply = () => {
+      handle = undefined;
+      scroll.scrollTop = offset;
+      if (Math.abs(scroll.scrollTop - offset) <= 1 || (attempts += 1) >= RESTORE_ATTEMPT_FRAMES) {
+        stop();
+        return;
+      }
+      handle = requestAnimationFrame(apply);
+    };
+    if (typeof requestAnimationFrame !== "function") {
+      scroll.scrollTop = offset;
+      return;
+    }
+    for (const type of inputs) scroll.addEventListener(type, stop, { passive: true });
+    apply();
+    return stop;
+  }, [restoreKey]);
 
   useLayoutEffect(() => {
     followingRef.current = follows && (restored?.following === true || restored === undefined);

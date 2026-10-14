@@ -20,6 +20,7 @@ import {
   decodeCodeAttachmentId,
   decodeCodeAttachmentMediaType,
   decodeCodeThreadId,
+  decodeCodeConversationWindowRequest,
   type CodeAttachmentId,
   type CodeAttachmentMediaType,
   CodeAttachmentReference,
@@ -55,6 +56,8 @@ import {
   type ProjectId,
   type CodeOperationCommand,
   CodeConversationPage,
+  CodeConversationWindow,
+  type CodeConversationWindowRequest,
   CodeOperationStreamFrame,
   type CodeOperationId,
   CodeOperationResult,
@@ -131,6 +134,17 @@ export interface CodeClient {
     limit: number,
     signal?: AbortSignal,
   ): Promise<CodeConversationPage>;
+  /**
+   * One page of the thread's own turns: the newest, or the page before or
+   * ending with one turn. A host without the route answers 404, which arrives
+   * as a failure whose `status` is 404; the caller then walks `conversation`.
+   * An anchor the thread no longer holds answers `stale` (409).
+   */
+  conversationWindow?(
+    threadId: CodeThreadId,
+    request: CodeConversationWindowRequest,
+    signal?: AbortSignal,
+  ): Promise<CodeConversationWindow>;
   queryBoard(query: CodeBoardQuery): Promise<CodeBoardView>;
   queryProjectPullRequests(query: CodeProjectPullRequestQuery): Promise<CodeProjectPullRequestView>;
   refreshProjectPullRequests(
@@ -237,11 +251,14 @@ export interface CodeClient {
 
 export class CodeClientFailure extends Error {
   readonly category: CodeFailure["category"];
+  /** The HTTP status when the host answered one the client reads as more than a category. */
+  readonly status: number | undefined;
 
-  constructor(failure: CodeFailure) {
+  constructor(failure: CodeFailure, status?: number) {
     super(failure.message);
     this.name = "CodeClientFailure";
     this.category = failure.category;
+    this.status = status;
   }
 }
 
@@ -574,6 +591,54 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
         { method: "GET", headers, ...(signal === undefined ? {} : { signal }) },
         decodeHostAnswer(CodeConversationPage),
       );
+    },
+    async conversationWindow(threadId, windowRequest, signal) {
+      let validated: CodeConversationWindowRequest;
+      try {
+        decodeCodeThreadId(threadId);
+        validated = decodeCodeConversationWindowRequest(windowRequest);
+      } catch {
+        throw invalidCommand();
+      }
+      const url = new URL(
+        `/api/code/threads/${encodeURIComponent(threadId)}/conversation/window`,
+        options.baseUrl,
+      );
+      url.searchParams.set("limit", String(validated.limit));
+      if (validated.before !== undefined) url.searchParams.set("before", validated.before);
+      if (validated.through !== undefined) url.searchParams.set("through", validated.through);
+      const response = await requestRaw(fetch, url.toString(), {
+        method: "GET",
+        headers,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      // An older host has no window route and answers its plain 404.
+      if (response.status === 404) {
+        throw new CodeClientFailure(
+          { category: "unsupported", message: "This host has no Code conversation window read." },
+          404,
+        );
+      }
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        throw malformedResponse();
+      }
+      if (!response.ok) {
+        let failure: CodeFailure;
+        try {
+          failure = decodeHostAnswer(CodeFailure)(body);
+        } catch {
+          throw malformedResponse();
+        }
+        throw new CodeClientFailure(failure, response.status);
+      }
+      try {
+        return decodeHostAnswer(CodeConversationWindow)(body);
+      } catch {
+        throw malformedResponse();
+      }
     },
     async putEvidence(threadId, text) {
       try {

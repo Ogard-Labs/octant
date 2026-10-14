@@ -27,6 +27,7 @@ import {
   type CodeOperationCommand,
   type CodeOperationFailure,
   type CodeConversationPage,
+  type CodeConversationWindowRequest,
   type CodeForkMergeBackOutcome,
   type ProviderSessionId,
   type CodeEvidenceBatchRequest,
@@ -73,6 +74,7 @@ import { GitService } from "./gitService";
 import {
   CodeOperationEventStore,
   MAX_CODE_OPERATION_REPLAY_LIMIT,
+  type CodeConversationWindowRead,
 } from "./codeOperationEventStore";
 import { chooseCodeForkPoint, codeThreadTurns } from "./codeForkPoint";
 import {
@@ -576,6 +578,16 @@ export interface CodeOperationRuntime {
     afterCursor: number,
     limit: number,
   ): Promise<CodeConversationPage>;
+  /**
+   * One page of the thread's own turns, newest first in reading order, under
+   * the same two checks as the forward read. A refused anchor is a value: the
+   * client starts again from the newest page.
+   */
+  conversationWindow(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+    request: CodeConversationWindowRequest,
+  ): Promise<CodeConversationWindowRead>;
   /**
    * Merge a fork's conversation back into the thread it was forked from, for
    * that thread's next turn to carry. Refusals are values.
@@ -1412,6 +1424,22 @@ export function createCodeOperationRuntime(
         threadId,
         afterCursor,
         limit,
+        providerInstanceId: thread.providerInstanceId,
+      });
+    },
+    conversationWindow: async (windowId, threadId, request) => {
+      const thread = options.persistence.readCodeThread(threadId);
+      if (thread === undefined || thread.id !== threadId) {
+        throw new CodeOperationServiceError("invalid");
+      }
+      if (!(await options.windowAccess.canAccessProject(windowId, thread.projectId))) {
+        throw new CodeOperationServiceError("unauthorized");
+      }
+      return events.conversationWindow({
+        threadId,
+        limit: request.limit,
+        ...(request.before === undefined ? {} : { before: request.before }),
+        ...(request.through === undefined ? {} : { through: request.through }),
         providerInstanceId: thread.providerInstanceId,
       });
     },

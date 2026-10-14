@@ -123,6 +123,9 @@ export class Journal {
   readonly #replayThreadAnchoredRows: SqliteStatement;
   readonly #replayAggregateRows: SqliteStatement;
   readonly #latestThreadKindRows: SqliteStatement;
+  readonly #latestThreadResultRows: SqliteStatement;
+  readonly #latestThreadKindPerAggregateRows: SqliteStatement;
+  readonly #firstAggregateKindRow: SqliteStatement;
 
   constructor(options: JournalOptions) {
     this.#connection = options.connection;
@@ -201,7 +204,62 @@ export class Journal {
       FROM event_journal
       WHERE aggregate_type = ? AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
         AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
+        AND global_sequence < ?
       ORDER BY global_sequence DESC LIMIT ?
+    `);
+    // The same newest-first thread read keyed on an operation result's kind,
+    // through the result-kind index (migration 63).
+    this.#latestThreadResultRows = options.connection.prepare(`
+      SELECT global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
+        actor_id, ${actorJsonSelect}, occurred_at, payload_json
+      FROM event_journal
+      WHERE aggregate_type = ? AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.result.kind') END = ?
+        AND global_sequence < ?
+      ORDER BY global_sequence DESC LIMIT ?
+    `);
+    // The last event of one kind of each aggregate that recorded an anchor
+    // event of the thread before a sequence: a Code turn's own usage figure
+    // is its last report, and the turns are the operations that started one.
+    // Membership is by the anchor, not by where the report landed, so a turn
+    // whose report was journaled after a later turn started still counts.
+    // Both halves read the thread-kind index; only the chosen rows decode.
+    this.#latestThreadKindPerAggregateRows = options.connection.prepare(`
+      SELECT global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
+        actor_id, ${actorJsonSelect}, occurred_at, payload_json
+      FROM event_journal
+      WHERE global_sequence IN (
+        SELECT max(global_sequence) FROM event_journal
+        WHERE aggregate_type = ?
+          AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+          AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
+          AND aggregate_id IN (
+            SELECT aggregate_id FROM event_journal
+            WHERE aggregate_type = ?
+              AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+              AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
+              AND global_sequence < ?
+          )
+        GROUP BY aggregate_id
+      )
+        AND global_sequence > ?
+      ORDER BY global_sequence ASC
+      LIMIT ?
+    `);
+    // One aggregate's first event of a kind, walking its own unique index in
+    // version order so the read stops at the match instead of parsing every
+    // event the aggregate recorded after it.
+    this.#firstAggregateKindRow = options.connection.prepare(`
+      SELECT global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
+        actor_id, ${actorJsonSelect}, occurred_at, payload_json
+      FROM event_journal
+      WHERE aggregate_type = ? AND aggregate_id = ?
+        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
+      ORDER BY aggregate_version ASC
+      LIMIT 1
     `);
     // The thread predicate is spelled exactly as the expression in
     // `event_journal_thread_kind_sequence`, because SQLite only uses an
@@ -660,16 +718,23 @@ export class Journal {
     ).map((row) => this.#decodeRow(row));
   }
 
+  /**
+   * A thread's newest events of one kind, newest first. `beforeSequence`, when
+   * given, is exclusive: a reader that walks back asks below the oldest row it
+   * already holds.
+   */
   latestThreadEvents(input: {
     readonly aggregateType: string;
     readonly threadId: string;
     readonly kind: string;
     readonly limit: number;
+    readonly beforeSequence?: number;
   }): ReadonlyArray<EventEnvelope> {
     if (
       input.aggregateType.trim().length === 0 ||
       input.threadId.trim().length === 0 ||
       input.kind.trim().length === 0 ||
+      !validBound(input.beforeSequence) ||
       !Number.isSafeInteger(input.limit) ||
       input.limit < 1 ||
       input.limit > 1_000
@@ -680,9 +745,101 @@ export class Journal {
         input.aggregateType,
         input.threadId,
         input.kind,
+        input.beforeSequence ?? Number.MAX_SAFE_INTEGER,
         input.limit,
       ) as Array<JournalRow>
     ).map((row) => this.#decodeRow(row));
+  }
+
+  /** A thread's newest events carrying a result of one kind, newest first, below an exclusive sequence. */
+  latestThreadResults(input: {
+    readonly aggregateType: string;
+    readonly threadId: string;
+    readonly resultKind: string;
+    readonly limit: number;
+    readonly beforeSequence?: number;
+  }): ReadonlyArray<EventEnvelope> {
+    if (
+      input.aggregateType.trim().length === 0 ||
+      input.threadId.trim().length === 0 ||
+      input.resultKind.trim().length === 0 ||
+      !validBound(input.beforeSequence) ||
+      !Number.isSafeInteger(input.limit) ||
+      input.limit < 1 ||
+      input.limit > 1_000
+    )
+      throw new JournalInputInvalid({ operation: "replay" });
+    return (
+      this.#latestThreadResultRows.all(
+        input.aggregateType,
+        input.threadId,
+        input.resultKind,
+        input.beforeSequence ?? Number.MAX_SAFE_INTEGER,
+        input.limit,
+      ) as Array<JournalRow>
+    ).map((row) => this.#decodeRow(row));
+  }
+
+  /**
+   * The last event of `kind` of every aggregate that recorded an `anchorKind`
+   * event of the thread below `anchorBeforeSequence`, in journal order, a
+   * batch at a time after `afterSequence`.
+   */
+  latestThreadEventPerAggregate(input: {
+    readonly aggregateType: string;
+    readonly threadId: string;
+    readonly kind: string;
+    readonly anchorKind: string;
+    readonly anchorBeforeSequence: number;
+    readonly afterSequence: number;
+    readonly limit: number;
+  }): ReadonlyArray<EventEnvelope> {
+    if (
+      input.aggregateType.trim().length === 0 ||
+      input.threadId.trim().length === 0 ||
+      input.kind.trim().length === 0 ||
+      input.anchorKind.trim().length === 0 ||
+      !validBound(input.anchorBeforeSequence) ||
+      !Number.isSafeInteger(input.afterSequence) ||
+      input.afterSequence < 0 ||
+      !Number.isSafeInteger(input.limit) ||
+      input.limit < 1 ||
+      input.limit > 1_000
+    )
+      throw new JournalInputInvalid({ operation: "replay" });
+    return (
+      this.#latestThreadKindPerAggregateRows.all(
+        input.aggregateType,
+        input.threadId,
+        input.kind,
+        input.aggregateType,
+        input.threadId,
+        input.anchorKind,
+        input.anchorBeforeSequence,
+        input.afterSequence,
+        input.limit,
+      ) as Array<JournalRow>
+    ).map((row) => this.#decodeRow(row));
+  }
+
+  /** One aggregate's first event of a kind, or undefined when it recorded none. */
+  firstAggregateEvent(input: {
+    readonly aggregateType: string;
+    readonly aggregateId: string;
+    readonly kind: string;
+  }): EventEnvelope | undefined {
+    if (
+      input.aggregateType.trim().length === 0 ||
+      input.aggregateId.trim().length === 0 ||
+      input.kind.trim().length === 0
+    )
+      throw new JournalInputInvalid({ operation: "replay" });
+    const row = this.#firstAggregateKindRow.get(
+      input.aggregateType,
+      input.aggregateId,
+      input.kind,
+    ) as JournalRow | undefined;
+    return row === undefined ? undefined : this.#decodeRow(row);
   }
 
   replayAggregate(cursor: AggregateReplayCursor): ReadonlyArray<EventEnvelope> {
@@ -860,4 +1017,9 @@ function findDuplicate(values: ReadonlyArray<string>): string | undefined {
     seen.add(value);
   }
   return undefined;
+}
+
+/** An optional exclusive sequence bound: absent, or a positive safe integer. */
+function validBound(sequence: number | undefined): boolean {
+  return sequence === undefined || (Number.isSafeInteger(sequence) && sequence > 0);
 }

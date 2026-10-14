@@ -4,7 +4,7 @@ import { decodeProjectId } from "@octant/contracts/projects";
 import { decodeWorkThreadId, type WorkThread, type WorkTurnState } from "@octant/contracts";
 import { THREAD_EXPORT_FORMAT } from "@octant/contracts/thread-export";
 import { describe, expect, it } from "vitest";
-import { ThreadExportService } from "./threadExportService";
+import { ThreadExportService, type ThreadExportCodePort } from "./threadExportService";
 
 const now = "2026-08-19T12:00:00.000Z";
 const windowId = "70000000-0000-4000-8000-000000000001";
@@ -111,6 +111,7 @@ function service(
     readonly browserCaptures?: {
       readonly list: (threadId: string) => ReadonlyArray<unknown>;
     };
+    readonly code?: ThreadExportCodePort;
   } = {},
 ) {
   return new ThreadExportService({
@@ -118,7 +119,7 @@ function service(
     clock: () => now,
     chat: { read: () => options.chat },
     work: { read: async () => options.work },
-    code: {
+    code: options.code ?? {
       readThread: async () => undefined,
       conversation: async () => {
         throw new Error("Code conversation is unused in this test.");
@@ -402,6 +403,79 @@ describe("ThreadExportService", () => {
       "Here is the brief.",
     ]);
     expect(outcome.bundle.evidence.completion?.satisfactionEvidence).toBe("The brief is on disk.");
+  });
+
+  it("exports every turn of a Code thread longer than one conversation page", async () => {
+    const codeThreadId = "00000000-0000-4000-8000-000000000903";
+    const uuid = (kind: string, index: number) =>
+      `${kind}0000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+    const turns = Array.from({ length: 130 }, (_, index) => ({
+      operationId: uuid("1", index),
+      providerInstanceId: "50000000-0000-4000-8000-000000000001",
+      modelId: "model",
+      sessionId: "60000000-0000-4000-8000-000000000001",
+      prompt: { contentId: uuid("2", index), digest: "a".repeat(64), byteLength: 1 },
+      assistant: [{ contentId: uuid("3", index), digest: "b".repeat(64), byteLength: 1 }],
+      status: "completed",
+      startedAt: now,
+      updatedAt: now,
+    }));
+    const pages: Array<number> = [];
+    const code = {
+      readThread: async () => ({
+        threadId: codeThreadId,
+        title: "Long Code thread",
+        projectId: decodeProjectId(projectId),
+        version: 1,
+        lastSequence: 1,
+        providerInstanceId: "50000000-0000-4000-8000-000000000001",
+        modelId: "model",
+        createdAt: now,
+        updatedAt: now,
+      }),
+      // The forward read, a page at a time from the oldest turn.
+      conversation: async (
+        _windowId: unknown,
+        _threadId: unknown,
+        afterCursor: number,
+        limit: number,
+      ) => {
+        pages.push(afterCursor);
+        const page = turns.slice(afterCursor, afterCursor + limit);
+        return {
+          version: 3,
+          threadId: codeThreadId,
+          turns: page,
+          nextCursor: afterCursor + page.length,
+          hasMore: afterCursor + page.length < turns.length,
+        };
+      },
+      readEvidence: async (
+        _windowId: unknown,
+        _threadId: unknown,
+        _operationId: unknown,
+        contentId: string,
+      ) => {
+        const index = Number(contentId.slice(-12));
+        return {
+          bytes: new TextEncoder().encode(
+            `${contentId.startsWith("2") ? "Prompt" : "Reply"} ${index}`,
+          ),
+        };
+      },
+    } as unknown as ThreadExportCodePort;
+
+    const outcome = await service({ code }).exportThread(windowId as never, "local-window", {
+      mode: "code",
+      threadId: codeThreadId,
+    });
+
+    expect(outcome.kind).toBe("exported");
+    if (outcome.kind !== "exported") return;
+    expect(pages).toEqual([0, 100]);
+    expect(outcome.bundle.transcript.entries).toHaveLength(260);
+    expect(outcome.bundle.transcript.entries.at(0)?.text).toBe("Prompt 1");
+    expect(outcome.bundle.transcript.entries.at(-1)?.text).toBe("Reply 130");
   });
 
   it("exports every turn of a Work thread longer than one transcript answer carries", async () => {

@@ -1123,6 +1123,16 @@ describe("startOctantServer", () => {
         nextCursor: 0,
         hasMore: false,
       })),
+      conversationWindow: vi.fn(async (_windowId, threadId) => ({
+        status: "ok" as const,
+        window: {
+          version: 1 as const,
+          threadId,
+          turns: [],
+          hasEarlier: false,
+          hasLater: false,
+        },
+      })),
       readEvidence: vi.fn(),
       readEvidenceBatch: vi.fn(async (_windowId, input) => ({
         threadId: input.threadId,

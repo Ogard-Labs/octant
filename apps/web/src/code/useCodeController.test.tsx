@@ -1,4 +1,5 @@
 import {
+  CodeClientFailure,
   CodeClientSnapshotRequiredError,
   type CodeClient,
 } from "@octant/client-runtime/code-client";
@@ -10,7 +11,12 @@ import type {
   CodeThreadId,
   CodeThreadView,
 } from "@octant/contracts/code";
-import type { CodeConversationPage, CodeEvidenceBatchRequest } from "@octant/contracts";
+import type {
+  CodeConversationPage,
+  CodeConversationWindowRequest,
+  CodeEvidenceBatchRequest,
+} from "@octant/contracts";
+import { foldCodeTurnUsage } from "@octant/domain";
 import { decodeProjectId } from "@octant/contracts/projects";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -3615,6 +3621,268 @@ describe("useCodeController", () => {
     expect(executeFollowUp).not.toHaveBeenCalled();
   });
 });
+
+describe("useCodeController conversation window", () => {
+  it("opens a long Code thread on its newest turns with one conversation read", async () => {
+    const host = windowedHost({ [ids.thread]: { turns: turnsOf("own", 60) } });
+    const client = fakeClient(host.client);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() => expect(result.current.conversation).toHaveLength(40));
+    expect(result.current.conversation[0]?.text).toBe("own prompt 40");
+    expect(result.current.conversation.at(-1)?.text).toBe("own reply 59");
+    expect(host.client.conversationWindow).toHaveBeenCalledOnce();
+    expect(host.client.conversationWindow).toHaveBeenCalledWith(
+      ids.thread,
+      { limit: 20 },
+      expect.anything(),
+    );
+    expect(client.conversation).not.toHaveBeenCalled();
+    expect(result.current.earlierConversation).toBe("idle");
+    unmount();
+  });
+
+  it("reports the thread's whole usage when only the newest turns are loaded, and keeps it exact as earlier turns load", async () => {
+    const turns = turnsOf("own", 50);
+    const host = windowedHost({ [ids.thread]: { turns } });
+    const client = fakeClient(host.client);
+    const whole = foldCodeTurnUsage(
+      undefined,
+      turns.flatMap((turn) => (turn.usage === undefined ? [] : [turn.usage])),
+    );
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() => expect(result.current.conversation).toHaveLength(40));
+    expect(result.current.threadUsage).toMatchObject({
+      inputTokens: whole?.inputTokens,
+      outputTokens: whole?.outputTokens,
+      cacheCoverage: { reportedTurns: whole?.reportedTurns },
+    });
+    for (const loaded of [80, 100]) {
+      act(() => result.current.loadEarlierConversation());
+      await waitFor(() => expect(result.current.conversation).toHaveLength(loaded));
+      expect(result.current.threadUsage).toMatchObject({
+        inputTokens: whole?.inputTokens,
+        outputTokens: whole?.outputTokens,
+        contextTokens: whole?.contextTokens,
+      });
+    }
+    expect(result.current.conversation[0]?.text).toBe("own prompt 0");
+    await waitFor(() => expect(result.current.earlierConversation).toBe("none-left"));
+    unmount();
+  });
+
+  it("re-reads only the newest turns when the thread changes and keeps the earlier pages", async () => {
+    const host = windowedHost({ [ids.thread]: { turns: turnsOf("own", 30) } });
+    const refresh = deferred<void>();
+    async function* refreshStream(signal: AbortSignal) {
+      await refresh.promise;
+      yield {
+        threadId: ids.thread,
+        sequence: 2,
+        event: { kind: "thread-updated", thread: thread(2) },
+      } as never;
+      yield* idleStream(signal);
+    }
+    const client = fakeClient({
+      ...host.client,
+      subscribe: vi.fn((_id, _cursor, signal) => refreshStream(signal)),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.conversation).toHaveLength(40));
+    act(() => result.current.loadEarlierConversation());
+    await waitFor(() => expect(result.current.conversation).toHaveLength(60));
+
+    host.threads[ids.thread]?.turns.push(...turnsOf("own", 31).slice(30));
+    refresh.resolve();
+    await waitFor(() => expect(result.current.conversation).toHaveLength(62));
+    expect(result.current.conversation[0]?.text).toBe("own prompt 0");
+    expect(result.current.conversation.at(-1)?.text).toBe("own reply 30");
+    expect(vi.mocked(host.client.conversationWindow).mock.calls.at(-1)?.[1]).toEqual({ limit: 20 });
+    expect(client.conversation).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("shows a new fork's inherited turns at open and continues into its source at the fork point", async () => {
+    const sourceId = "10000000-0000-4000-8000-000000000077" as CodeThreadId;
+    const source = turnsOf("source", 50);
+    const forkPoint = source[29];
+    if (forkPoint === undefined) throw new Error("fixture");
+    const host = windowedHost({
+      [ids.thread]: {
+        turns: turnsOf("fork", 3),
+        forkedFrom: { threadId: sourceId, throughOperationId: forkPoint.operationId },
+      },
+      [sourceId]: { turns: source },
+    });
+    const client = fakeClient(host.client);
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    // The fork's own three turns, and the source's page that ends at the fork point.
+    await waitFor(() => expect(result.current.conversation).toHaveLength(46));
+    expect(result.current.conversation[0]).toMatchObject({
+      text: "source prompt 10",
+      sourceThreadId: sourceId,
+    });
+    expect(result.current.conversation[39]?.text).toBe("source reply 29");
+    expect(result.current.conversation[40]).toMatchObject({ text: "fork prompt 0" });
+    expect(result.current.conversation[40]).not.toHaveProperty("sourceThreadId");
+    expect(host.client.conversationWindow).toHaveBeenCalledWith(
+      sourceId,
+      { limit: 20, through: forkPoint.operationId },
+      expect.anything(),
+    );
+
+    act(() => result.current.loadEarlierConversation());
+    await waitFor(() => expect(result.current.conversation).toHaveLength(66));
+    expect(result.current.conversation[0]).toMatchObject({
+      text: "source prompt 0",
+      sourceThreadId: sourceId,
+    });
+    await waitFor(() => expect(result.current.earlierConversation).toBe("none-left"));
+    // The source's turns after the fork point are never shown in the fork.
+    expect(result.current.conversation.some((message) => message.text === "source prompt 30")).toBe(
+      false,
+    );
+    unmount();
+  });
+
+  it("falls back to the whole forward read when the host has no window route", async () => {
+    const conversationWindow = vi.fn(async () => {
+      throw new CodeClientFailure(
+        { category: "unsupported", message: "This host has no Code conversation window read." },
+        404,
+      );
+    });
+    const client = fakeClient({
+      conversationWindow,
+      conversation: vi.fn(async () => ({
+        version: 3 as const,
+        threadId: ids.thread,
+        turns: [conversationTurn("70000000-0000-4000-8000-000000000041", "p-1")],
+        nextCursor: 1,
+        hasMore: false,
+      })),
+      operationContents: vi.fn(async (request: CodeEvidenceBatchRequest) => ({
+        threadId: request.threadId,
+        items: request.items.map((item) => ({ ...item, text: "older host" })),
+      })) as never,
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() => expect(result.current.conversation).toHaveLength(2));
+    expect(conversationWindow).toHaveBeenCalledOnce();
+    expect(client.conversation).toHaveBeenCalled();
+    expect(result.current.earlierConversation).toBeUndefined();
+    unmount();
+  });
+});
+
+/**
+ * A host holding whole threads in memory that answers the window read the way
+ * the real one does: newest pages, `before` and `through` anchors, and the
+ * usage of every turn older than the page.
+ */
+function windowedHost(
+  threads: Record<
+    string,
+    {
+      readonly turns: Array<CodeConversationPage["turns"][number]>;
+      readonly forkedFrom?: {
+        readonly threadId: CodeThreadId;
+        readonly throughOperationId: string;
+      };
+    }
+  >,
+) {
+  const conversationWindow = vi.fn(
+    async (threadId: CodeThreadId, request: CodeConversationWindowRequest) => {
+      const stored = threads[String(threadId)];
+      if (stored === undefined) throw new Error("unknown thread");
+      const all = stored.turns;
+      const anchor = request.before ?? request.through;
+      let end = all.length;
+      if (anchor !== undefined) {
+        const at = all.findIndex((turn) => String(turn.operationId) === String(anchor));
+        if (at === -1) {
+          throw new CodeClientFailure({ category: "stale", message: "Gone." }, 409);
+        }
+        end = request.before !== undefined ? at : at + 1;
+      }
+      const start = Math.max(0, end - request.limit);
+      const earlier = foldCodeTurnUsage(
+        undefined,
+        all.slice(0, start).flatMap((turn) => (turn.usage === undefined ? [] : [turn.usage])),
+      );
+      return {
+        version: 1 as const,
+        threadId,
+        turns: all.slice(start, end),
+        hasEarlier: start > 0,
+        hasLater: end < all.length,
+        ...(earlier === undefined ? {} : { earlierUsage: earlier }),
+      };
+    },
+  );
+  const client = {
+    conversationWindow,
+    thread: vi.fn(async (threadId: CodeThreadId) => {
+      const stored = threads[String(threadId)];
+      return {
+        ...view(1),
+        thread: {
+          ...view(1).thread,
+          id: threadId,
+          ...(stored?.forkedFrom === undefined ? {} : { forkedFrom: stored.forkedFrom }),
+        },
+      };
+    }),
+    operationContents: vi.fn(async (request: CodeEvidenceBatchRequest) => ({
+      threadId: request.threadId,
+      items: request.items.map((item) => ({
+        ...item,
+        text: evidenceText(String(item.contentId)),
+      })),
+    })),
+  } as unknown as Partial<CodeClient> & Required<Pick<CodeClient, "conversationWindow" | "thread">>;
+  return { client, threads };
+}
+
+/** `count` completed turns of one thread, each with a reply and its own usage figure. */
+function turnsOf(label: string, count: number): Array<CodeConversationPage["turns"][number]> {
+  const prefix = { own: "71", fork: "72", source: "73" }[label] ?? "79";
+  return Array.from({ length: count }, (_, index) => {
+    const id = (kind: string) =>
+      `${prefix}000000-0000-4000-8${kind}00-${index.toString().padStart(12, "0")}`;
+    return {
+      ...conversationTurn(id("0"), id("1")),
+      assistant: [{ contentId: id("2") as never, digest: "b".repeat(64) as never, byteLength: 9 }],
+      usage: {
+        inputTokens: 100 + index,
+        outputTokens: 10 + index,
+        contextTokens: 1_000 + index,
+      },
+    };
+  });
+}
+
+/** The text behind a `turnsOf` evidence id: whose turn, prompt or reply, and which. */
+function evidenceText(contentId: string): string {
+  const prefix = contentId.slice(0, 2);
+  const label = prefix === "71" ? "own" : prefix === "72" ? "fork" : "source";
+  const part = contentId.charAt(20) === "1" ? "prompt" : "reply";
+  return `${label} ${part} ${String(Number(contentId.slice(-12)))}`;
+}
 
 function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
   const bootstrapFn = overrides.bootstrap ?? vi.fn(async () => bootstrap());

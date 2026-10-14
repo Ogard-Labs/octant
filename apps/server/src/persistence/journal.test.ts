@@ -767,7 +767,8 @@ describe("Journal", () => {
       );
     prepare.mockRestore();
 
-    expect(threadReplays).toHaveLength(2);
+    // The thread replay, the anchored replay, and the last report per turn.
+    expect(threadReplays).toHaveLength(3);
     for (const sql of threadReplays) {
       const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
       const plan = JSON.stringify(
@@ -778,6 +779,33 @@ describe("Journal", () => {
       expect(plan).toMatch(
         /event_journal_thread_(?:result_)?kind_sequence \(aggregate_type=\? AND <expr>=\?/,
       );
+      expect(plan).not.toMatch(/SCAN event_journal\b/);
+    }
+    connection.close();
+  });
+
+  it("reads a thread's newest rows and one aggregate's first row of a kind through indexes", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    const sqls = prepare.mock.calls.map(([sql]) => sql);
+    prepare.mockRestore();
+    const newest = sqls.filter(
+      (sql) => sql.includes("'$.threadId'") && sql.includes("ORDER BY global_sequence DESC"),
+    );
+    const first = sqls.filter((sql) =>
+      sql.includes("ORDER BY aggregate_version ASC\n      LIMIT 1"),
+    );
+
+    // The newest events of a kind and the newest results of a kind.
+    expect(newest).toHaveLength(2);
+    expect(first).toHaveLength(1);
+    for (const sql of [...newest, ...first]) {
+      const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
+      const plan = JSON.stringify(
+        connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters),
+      );
+      expect(plan).toMatch(/USING INDEX/);
       expect(plan).not.toMatch(/SCAN event_journal\b/);
     }
     connection.close();

@@ -1,5 +1,6 @@
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import {
+  CodeClientFailure,
   CodeClientSnapshotRequiredError,
   createCodeClient,
   type CodeClient,
@@ -17,7 +18,13 @@ import type {
   CodeThreadView,
 } from "@octant/contracts/code";
 import { decodeCodeThreadId } from "@octant/contracts/code";
-import { decodeUtcTimestamp, type ProviderContextBreakdown } from "@octant/contracts";
+import {
+  decodeUtcTimestamp,
+  type CodeConversationUsageTotals,
+  type CodeConversationWindow,
+  type ProviderContextBreakdown,
+} from "@octant/contracts";
+import { prependEarlierTurns } from "@octant/domain";
 import { waitForReconnect } from "../lib/waitForReconnect";
 import { forkMergeBackSummary, handoffSummary } from "./providerSwitchHandoff";
 import {
@@ -80,6 +87,18 @@ import type {
   CodeReadCursorStore,
   CodeTurnUsage,
 } from "./codeControllerState";
+import {
+  CODE_CONVERSATION_PAGE_TURNS,
+  MAX_CODE_FORK_LINEAGE,
+  NO_EARLIER_CONVERSATION,
+  earlierRowState,
+  joinNewestWindow,
+  loadedTurnUsage,
+  nextEarlierRead,
+  oldestOwnOperation,
+  type CodeEarlierConversation,
+  type CodeInheritedCursor,
+} from "./codeConversationWindow";
 import {
   archiveCodeThread,
   completeCodeThread,
@@ -206,6 +225,21 @@ export interface CodeThreadUsage {
 const EMPTY_THREAD_USAGE: CodeThreadUsage = { limits: [] };
 
 /**
+ * Clients whose host answered 404 for the conversation window: an older host
+ * that only has the forward read. Asked once per client, then the thread is
+ * read whole as before and shown as fully loaded.
+ */
+const clientsWithoutConversationWindow = new WeakSet<CodeClient>();
+
+function readsConversationWindow(
+  client: CodeClient,
+): client is CodeClient & Required<Pick<CodeClient, "conversationWindow">> {
+  return (
+    typeof client.conversationWindow === "function" && !clientsWithoutConversationWindow.has(client)
+  );
+}
+
+/**
  * Add up what each turn reported.
  *
  * The thread's figure is the sum over turns, never the sum over reports: a
@@ -285,7 +319,39 @@ export function useCodeController(options: CodeControllerOptions) {
     knownDraftThreads.current = new Set(threadIds);
   }, []);
   const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
+  // The transcript as last set, and whose it is, for the window reads that
+  // join a page onto it. A render keeps it level with live updates.
+  const conversationRef = useRef(conversation);
+  conversationRef.current = conversation;
+  const conversationThreadKey = useRef<string | undefined>(undefined);
+  const showConversation = useCallback(
+    (threadId: CodeThreadId, messages: ReadonlyArray<CodeConversationMessage>) => {
+      conversationRef.current = messages;
+      conversationThreadKey.current = String(threadId);
+      setConversation(messages);
+    },
+    [],
+  );
+  // The whole-history fallback's inherited turns, read before the thread's own.
   const inheritedConversation = useRef<ReadonlyArray<CodeConversationMessage>>([]);
+  /*
+   * What the open thread holds beyond its newest page: whether its own turns
+   * go on, and where a fork's inherited history continues. Mirrored in a ref
+   * for the page reads, which run outside render.
+   */
+  const [earlierConversation, setEarlierConversationState] =
+    useState<CodeEarlierConversation>(NO_EARLIER_CONVERSATION);
+  const earlierConversationRef = useRef(earlierConversation);
+  const setEarlierConversation = useCallback(
+    (update: (current: CodeEarlierConversation) => CodeEarlierConversation) => {
+      const next = update(earlierConversationRef.current);
+      earlierConversationRef.current = next;
+      setEarlierConversationState(next);
+    },
+    [],
+  );
+  const forkedFrom = useRef<CodeThread["forkedFrom"]>(undefined);
+  const earlierAbort = useRef<AbortController | undefined>(undefined);
   /*
    * Whether an empty transcript is still loading, authoritatively empty, or
    * unavailable. Only the loaded state is an invitation to start something.
@@ -407,6 +473,8 @@ export function useCodeController(options: CodeControllerOptions) {
     setRestoreUndo(checkpoint);
   }, []);
   const usageByOperation = useRef(new Map<string, CodeTurnUsage>());
+  // The host's fold of every own turn older than the oldest loaded one.
+  const earlierUsage = useRef<CodeConversationUsageTotals | undefined>(undefined);
   const noteUsage = useCallback((operationId: CodeOperationId, event: CodeOperationEvent) => {
     if (event.kind === "usage") {
       const {
@@ -433,7 +501,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(contextBreakdown === undefined ? {} : { contextBreakdown }),
       });
       setThreadUsage((current) => ({
-        ...totalTurnUsage(usageByOperation.current),
+        ...totalTurnUsage(usageByOperation.current, earlierUsage.current),
         limits: current.limits,
       }));
       return;
@@ -786,53 +854,12 @@ export function useCodeController(options: CodeControllerOptions) {
     [clearFailure],
   );
 
-  const hydrateConversation = useCallback(
-    async (threadId: CodeThreadId, request: number, signal: AbortSignal) => {
-      let cursor = 0;
-      let nextCursor = 0;
-      let pageCount = 0;
-      const turns: CodeConversationTurn[] = [];
-      const messages: CodeConversationMessage[] = [];
-      let pageLimits: ReadonlyArray<CodeProviderLimit> = [];
-      let pageRestoreUndo: CodeCheckpoint | undefined;
-      usageByOperation.current = new Map();
-      for (;;) {
-        const page = await client.conversation(threadId, cursor, 50, signal);
-        if (!isActive(request, threadGeneration, mounted) || page.threadId !== threadId)
-          return undefined;
-        const evidence = await readConversationEvidence(client, threadId, page.turns, signal);
-        if (!isActive(request, threadGeneration, mounted)) return undefined;
-        const projected = await projectConversationTurns(
-          client,
-          threadId,
-          page.turns,
-          evidence,
-          signal,
-        );
-        if (!isActive(request, threadGeneration, mounted)) return undefined;
-        turns.push(...page.turns);
-        messages.push(...projected.messages);
-        for (const turn of page.turns) {
-          if (turn.usage !== undefined) {
-            usageByOperation.current.set(String(turn.operationId), turn.usage);
-          }
-        }
-        if (page.limits !== undefined) pageLimits = page.limits;
-        pageRestoreUndo = page.restoreUndo;
-        nextCursor = page.nextCursor;
-        setThreadUsage({ ...totalTurnUsage(usageByOperation.current), limits: pageLimits });
-        setRestoreUndo(pageRestoreUndo);
-        setConversation([...inheritedConversation.current, ...messages]);
-        if (projected.activity.size > 0) {
-          setTurnActivity((current) => new Map([...current, ...projected.activity]));
-        }
-        if (!page.hasMore) break;
-        if (page.nextCursor <= cursor || (pageCount += 1) >= 100) {
-          throw new Error("Code conversation pagination did not advance.");
-        }
-        cursor = page.nextCursor;
-      }
-      const latestTurn = turns.at(-1);
+  /**
+   * Take the newest turn's state as the thread's: whether a turn is still
+   * running or waiting, and the usage limit the tail stopped on.
+   */
+  const settleLatestTurn = useCallback(
+    (threadId: CodeThreadId, latestTurn: CodeConversationTurn | undefined) => {
       // The journal is the only authority a reopen can trust for a limit: a
       // completed later turn carries none, so this also clears a stale one.
       setTurnUsageLimit(latestTurn?.failure?.usageLimit);
@@ -865,25 +892,379 @@ export function useCodeController(options: CodeControllerOptions) {
       return {
         incomplete,
         activeOperationId: incomplete || waiting ? latestTurn?.operationId : undefined,
-        nextCursor,
       };
     },
-    [client],
+    [],
   );
+
+  /**
+   * Read the whole thread page by page, for a host that has no window read.
+   * The thread then shows as fully loaded, as it always did there.
+   */
+  const hydrateWholeConversation = useCallback(
+    async (threadId: CodeThreadId, request: number, signal: AbortSignal) => {
+      let cursor = 0;
+      let nextCursor = 0;
+      let pageCount = 0;
+      const turns: CodeConversationTurn[] = [];
+      const messages: CodeConversationMessage[] = [];
+      let pageLimits: ReadonlyArray<CodeProviderLimit> = [];
+      let pageRestoreUndo: CodeCheckpoint | undefined;
+      usageByOperation.current = new Map();
+      earlierUsage.current = undefined;
+      for (;;) {
+        const page = await client.conversation(threadId, cursor, 50, signal);
+        if (!isActive(request, threadGeneration, mounted) || page.threadId !== threadId)
+          return undefined;
+        const evidence = await readConversationEvidence(client, threadId, page.turns, signal);
+        if (!isActive(request, threadGeneration, mounted)) return undefined;
+        const projected = await projectConversationTurns(
+          client,
+          threadId,
+          page.turns,
+          evidence,
+          signal,
+        );
+        if (!isActive(request, threadGeneration, mounted)) return undefined;
+        turns.push(...page.turns);
+        messages.push(...projected.messages);
+        for (const turn of page.turns) {
+          if (turn.usage !== undefined) {
+            usageByOperation.current.set(String(turn.operationId), turn.usage);
+          }
+        }
+        if (page.limits !== undefined) pageLimits = page.limits;
+        pageRestoreUndo = page.restoreUndo;
+        nextCursor = page.nextCursor;
+        setThreadUsage({ ...totalTurnUsage(usageByOperation.current), limits: pageLimits });
+        setRestoreUndo(pageRestoreUndo);
+        showConversation(threadId, [...inheritedConversation.current, ...messages]);
+        if (projected.activity.size > 0) {
+          setTurnActivity((current) => new Map([...current, ...projected.activity]));
+        }
+        if (!page.hasMore) break;
+        if (page.nextCursor <= cursor || (pageCount += 1) >= 100) {
+          throw new Error("Code conversation pagination did not advance.");
+        }
+        cursor = page.nextCursor;
+      }
+      // Everything is loaded, the inherited turns included, so nothing earlier is offered.
+      setEarlierConversation(() => ({
+        ...NO_EARLIER_CONVERSATION,
+        threadKey: String(threadId),
+        inherited: "complete",
+      }));
+      return { ...settleLatestTurn(threadId, turns.at(-1)), nextCursor };
+    },
+    [client, setEarlierConversation, settleLatestTurn, showConversation],
+  );
+
+  /**
+   * Show the thread's newest turns and join them onto what is loaded: one
+   * window read, its evidence, and its activity. Earlier pages stay while the
+   * window still touches them. A host without the window read is read whole.
+   */
+  const hydrateConversation = useCallback(
+    async (
+      threadId: CodeThreadId,
+      request: number,
+      signal: AbortSignal,
+    ): Promise<
+      | {
+          readonly incomplete: boolean;
+          readonly activeOperationId: CodeOperationId | undefined;
+          /** The forward cursor, only on a host read whole. */
+          readonly nextCursor?: number;
+        }
+      | undefined
+    > => {
+      if (!readsConversationWindow(client)) {
+        return hydrateWholeConversation(threadId, request, signal);
+      }
+      let window: CodeConversationWindow;
+      try {
+        window = await client.conversationWindow(
+          threadId,
+          { limit: CODE_CONVERSATION_PAGE_TURNS },
+          signal,
+        );
+      } catch (error) {
+        if (!(error instanceof CodeClientFailure && error.status === 404)) throw error;
+        clientsWithoutConversationWindow.add(client);
+        return hydrateWholeConversation(threadId, request, signal);
+      }
+      if (!isActive(request, threadGeneration, mounted) || window.threadId !== threadId)
+        return undefined;
+      const evidence = await readConversationEvidence(client, threadId, window.turns, signal);
+      if (!isActive(request, threadGeneration, mounted)) return undefined;
+      const projected = await projectConversationTurns(
+        client,
+        threadId,
+        window.turns,
+        evidence,
+        signal,
+      );
+      if (!isActive(request, threadGeneration, mounted)) return undefined;
+      const threadKey = String(threadId);
+      const sameThread = conversationThreadKey.current === threadKey;
+      const joined = joinNewestWindow(
+        sameThread ? conversationRef.current : [],
+        projected.messages,
+        window.hasEarlier,
+      );
+      if (joined.kind === "replaced" || !sameThread) {
+        earlierUsage.current = window.earlierUsage;
+        setEarlierConversation((current) => {
+          const kept = current.threadKey === threadKey;
+          return {
+            threadKey,
+            ownHasEarlier: window.hasEarlier,
+            // The inherited turns still touch only a window that reaches the
+            // thread's first turn.
+            inherited: kept && !window.hasEarlier ? current.inherited : undefined,
+            offered: (kept && current.offered) || window.hasEarlier,
+            loading: kept ? current.loading : "idle",
+          };
+        });
+      }
+      usageByOperation.current = loadedTurnUsage(
+        joined.messages,
+        window.turns,
+        sameThread ? usageByOperation.current : new Map(),
+      );
+      setThreadUsage({
+        ...totalTurnUsage(usageByOperation.current, earlierUsage.current),
+        limits: window.limits ?? [],
+      });
+      setRestoreUndo(window.restoreUndo);
+      showConversation(threadId, joined.messages);
+      if (projected.activity.size > 0) {
+        setTurnActivity((current) => new Map([...current, ...projected.activity]));
+      }
+      return settleLatestTurn(threadId, window.turns.at(-1));
+    },
+    [client, hydrateWholeConversation, setEarlierConversation, settleLatestTurn, showConversation],
+  );
+
+  /**
+   * Add the page before the oldest loaded turn: the thread's own, then, for a
+   * fork, its source's at the fork point and up the lineage. Answers whether
+   * a page arrived. A page read for a run that has since been replaced is
+   * dropped; an own anchor the host no longer holds starts the thread again
+   * from its newest page.
+   */
+  const readEarlierPage = useCallback(
+    async (threadId: CodeThreadId): Promise<boolean> => {
+      const request = threadGeneration.current;
+      const threadKey = String(threadId);
+      const state = earlierConversationRef.current;
+      if (
+        state.threadKey !== threadKey ||
+        state.loading === "loading" ||
+        conversationThreadKey.current !== threadKey ||
+        !readsConversationWindow(client)
+      ) {
+        return false;
+      }
+      const next = nextEarlierRead(state, conversationRef.current, forkedFrom.current);
+      if (next.kind === "none") return false;
+      earlierAbort.current?.abort();
+      const abort = new AbortController();
+      earlierAbort.current = abort;
+      const current = () =>
+        isActive(request, threadGeneration, mounted) &&
+        !abort.signal.aborted &&
+        conversationThreadKey.current === threadKey;
+      // A page that no longer belongs on screen leaves the row ready again,
+      // unless a later read of this thread has taken it over.
+      const abandoned = () => {
+        if (mounted.current && earlierAbort.current === abort) {
+          setEarlierConversation((value) =>
+            value.threadKey === threadKey && value.loading === "loading"
+              ? { ...value, loading: "idle" }
+              : value,
+          );
+        }
+        return false;
+      };
+      setEarlierConversation((value) => ({ ...value, loading: "loading", offered: true }));
+      try {
+        if (next.kind === "own") {
+          const page = await client.conversationWindow(
+            threadId,
+            { limit: CODE_CONVERSATION_PAGE_TURNS, before: next.before },
+            abort.signal,
+          );
+          if (!current() || page.threadId !== threadId) return abandoned();
+          const evidence = await readConversationEvidence(
+            client,
+            threadId,
+            page.turns,
+            abort.signal,
+          );
+          const projected = await projectConversationTurns(
+            client,
+            threadId,
+            page.turns,
+            evidence,
+            abort.signal,
+          );
+          if (!current()) return abandoned();
+          const loaded = conversationRef.current;
+          // A newest read that could not prove it touched this run replaced
+          // it while the page loaded; the page belongs to a run that is gone.
+          if (oldestOwnOperation(loaded) !== next.before) {
+            setEarlierConversation((value) => ({ ...value, loading: "idle" }));
+            return false;
+          }
+          const at = loaded.findIndex(
+            (message) => message.sourceThreadId === undefined && message.operationId !== undefined,
+          );
+          const held = new Set(loaded.map((message) => message.id));
+          const messages = [
+            ...loaded.slice(0, at),
+            ...projected.messages.filter((message) => !held.has(message.id)),
+            ...loaded.slice(at),
+          ];
+          earlierUsage.current = page.earlierUsage;
+          usageByOperation.current = loadedTurnUsage(
+            messages,
+            page.turns,
+            usageByOperation.current,
+          );
+          setThreadUsage((usage) => ({
+            ...totalTurnUsage(usageByOperation.current, earlierUsage.current),
+            limits: usage.limits,
+          }));
+          showConversation(threadId, messages);
+          if (projected.activity.size > 0) {
+            setTurnActivity((activity) => new Map([...projected.activity, ...activity]));
+          }
+          setEarlierConversation((value) => ({
+            ...value,
+            ownHasEarlier: page.hasEarlier,
+            loading: "idle",
+          }));
+          return true;
+        }
+        const cursor = next.cursor;
+        const page = await client.conversationWindow(
+          cursor.threadId,
+          { limit: CODE_CONVERSATION_PAGE_TURNS, ...cursor.anchor },
+          abort.signal,
+        );
+        if (!current() || page.threadId !== cursor.threadId) return abandoned();
+        const evidence = await readConversationEvidence(
+          client,
+          cursor.threadId,
+          page.turns,
+          abort.signal,
+        );
+        const projected = await projectConversationTurns(
+          client,
+          cursor.threadId,
+          page.turns,
+          evidence,
+          abort.signal,
+        );
+        const first = page.turns[0];
+        let continued: CodeInheritedCursor | "complete";
+        if (page.hasEarlier && first !== undefined) {
+          continued = { ...cursor, anchor: { before: first.operationId } };
+        } else {
+          // The source's own turns are all loaded; its own source, if any,
+          // continues at the point it was forked from.
+          const source = await client.thread(cursor.threadId, abort.signal);
+          const origin = source.thread.forkedFrom;
+          const lineage = [...cursor.lineage, String(cursor.threadId)];
+          if (origin === undefined) continued = "complete";
+          else if (
+            lineage.includes(String(origin.threadId)) ||
+            lineage.length >= MAX_CODE_FORK_LINEAGE
+          ) {
+            throw new Error("Fork history contains an invalid lineage.");
+          } else {
+            continued = {
+              threadId: origin.threadId,
+              anchor: { through: decodeCodeOperationId(origin.throughOperationId) },
+              lineage,
+            };
+          }
+        }
+        if (!current()) return abandoned();
+        // Rows from a source keep their source thread, which their evidence
+        // and attachments are read through.
+        const inherited = projected.messages.map((message) => ({
+          ...message,
+          sourceThreadId: cursor.threadId,
+        }));
+        showConversation(
+          threadId,
+          prependEarlierTurns(conversationRef.current, inherited, (message) => message.id),
+        );
+        if (projected.activity.size > 0) {
+          setTurnActivity((activity) => new Map([...projected.activity, ...activity]));
+        }
+        setEarlierConversation((value) => ({
+          ...value,
+          inherited: continued,
+          loading: "idle",
+        }));
+        return true;
+      } catch (error) {
+        if (abort.signal.aborted || !isActive(request, threadGeneration, mounted)) return false;
+        if (
+          next.kind === "own" &&
+          error instanceof CodeClientFailure &&
+          error.category === "stale"
+        ) {
+          // The turn this page was anchored on is gone, so the loaded run
+          // cannot be extended: start again from the newest page.
+          showConversation(threadId, []);
+          setEarlierConversation(() => NO_EARLIER_CONVERSATION);
+          try {
+            await hydrateConversation(threadId, request, abort.signal);
+            return false;
+          } catch {
+            if (abort.signal.aborted) return false;
+          }
+        }
+        setEarlierConversation((value) => ({ ...value, loading: "failed" }));
+        return false;
+      }
+    },
+    [client, hydrateConversation, setEarlierConversation, showConversation],
+  );
+
+  const loadEarlierConversation = useCallback(() => {
+    const threadId = activeThreadId.current;
+    if (threadId !== undefined) void readEarlierPage(threadId);
+  }, [readEarlierPage]);
 
   const activateThread = useCallback(
     async (threadId: CodeThreadId) => {
       const request = ++threadGeneration.current;
       inheritedConversation.current = [];
       streamAbort.current?.abort();
+      earlierAbort.current?.abort();
       const controller = new AbortController();
       streamAbort.current = controller;
       clearFailure();
       // Usage belongs to the thread being left. Hydration may fail, so it is
       // cleared on the way in rather than replaced on the way out; otherwise the
       // new thread would keep showing the previous thread's totals and limits.
-      usageByOperation.current = new Map();
-      setThreadUsage(EMPTY_THREAD_USAGE);
+      // Activating the open thread again keeps the earlier pages it loaded,
+      // and with them the usage they carry.
+      if (conversationThreadKey.current !== String(threadId)) {
+        usageByOperation.current = new Map();
+        earlierUsage.current = undefined;
+        forkedFrom.current = undefined;
+        setEarlierConversation(() => NO_EARLIER_CONVERSATION);
+        setThreadUsage(EMPTY_THREAD_USAGE);
+      } else if (earlierConversationRef.current.loading === "loading") {
+        // The page read just aborted with the stream it belonged to.
+        setEarlierConversation((value) => ({ ...value, loading: "idle" }));
+      }
       // The restore point belongs to the thread being left, for the same
       // reason: hydration may fail, and offering one thread's way back on
       // another thread's checkout would overwrite files nobody asked about.
@@ -895,6 +1276,7 @@ export function useCodeController(options: CodeControllerOptions) {
         const initial = await client.thread(threadId, controller.signal);
         if (!isActive(request, threadGeneration, mounted)) return;
         installView(initial);
+        forkedFrom.current = initial.thread.forkedFrom;
         void refreshFollowUp(threadId);
         let conversationCursor = 0;
         let conversationIncomplete = false;
@@ -920,7 +1302,7 @@ export function useCodeController(options: CodeControllerOptions) {
           setConversationHistory("unavailable");
           setTurnError(HISTORY_UNAVAILABLE_MESSAGE);
         }
-        if (initial.thread.forkedFrom !== undefined) {
+        if (initial.thread.forkedFrom !== undefined && !readsConversationWindow(client)) {
           try {
             const inherited = await readForkConversation(
               client,
@@ -933,6 +1315,21 @@ export function useCodeController(options: CodeControllerOptions) {
             setTurnActivity((current) => new Map([...inherited.activity, ...current]));
           } catch {
             if (!isActive(request, threadGeneration, mounted)) return;
+            setTurnError((current) => current ?? INHERITED_HISTORY_UNAVAILABLE_MESSAGE);
+          }
+        } else if (
+          initial.thread.forkedFrom !== undefined &&
+          conversationThreadKey.current === String(threadId) &&
+          !earlierConversationRef.current.ownHasEarlier &&
+          earlierConversationRef.current.inherited === undefined &&
+          conversationRef.current.filter((message) => message.role === "user").length <
+            CODE_CONVERSATION_PAGE_TURNS
+        ) {
+          // A new fork has few turns of its own, so its first inherited page
+          // is read at open rather than leaving the fork nearly empty.
+          const loaded = await readEarlierPage(threadId);
+          if (!isActive(request, threadGeneration, mounted)) return;
+          if (!loaded && earlierConversationRef.current.loading === "failed") {
             setTurnError((current) => current ?? INHERITED_HISTORY_UNAVAILABLE_MESSAGE);
           }
         }
@@ -1164,12 +1561,16 @@ export function useCodeController(options: CodeControllerOptions) {
               if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
                 return;
               try {
-                const latest = await client.conversation(
-                  threadId,
-                  Math.max(0, conversationCursor - 1),
-                  1,
-                  controller.signal,
-                );
+                // Only whether the newest turn is still running: one turn,
+                // or on a host without the window read, the last one loaded.
+                const latest = readsConversationWindow(client)
+                  ? await client.conversationWindow(threadId, { limit: 1 }, controller.signal)
+                  : await client.conversation(
+                      threadId,
+                      Math.max(0, conversationCursor - 1),
+                      1,
+                      controller.signal,
+                    );
                 if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
                   return;
                 if (latest.threadId !== threadId || latest.turns.at(-1)?.status === "incomplete") {
@@ -1189,7 +1590,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   );
                   return;
                 }
-                conversationCursor = hydrated.nextCursor;
+                conversationCursor = hydrated.nextCursor ?? conversationCursor;
               } catch {
                 if (!isActive(request, threadGeneration, mounted)) return;
                 setTurnError("Conversation history could not be refreshed.");
@@ -1310,9 +1711,11 @@ export function useCodeController(options: CodeControllerOptions) {
       hydrateConversation,
       installView,
       markRenderedActivity,
+      readEarlierPage,
       reconnectDelayMs,
       recordSeenActivity,
       refreshFollowUp,
+      setEarlierConversation,
     ],
   );
 
@@ -1374,6 +1777,9 @@ export function useCodeController(options: CodeControllerOptions) {
     streamAbort.current = undefined;
     turnAbort.current?.abort();
     turnAbort.current = undefined;
+    earlierAbort.current?.abort();
+    conversationThreadKey.current = undefined;
+    conversationRef.current = [];
     setConversation([]);
     setConversationHistory("loading");
     setProviderRequests([]);
@@ -2461,6 +2867,13 @@ export function useCodeController(options: CodeControllerOptions) {
     bootstrap,
     client,
     conversation,
+    /** The Load earlier row's state, or undefined for a thread with nothing earlier. */
+    earlierConversation: earlierRowState(
+      earlierConversation,
+      conversation,
+      activeView?.thread.id === options.activeThreadId ? activeView?.thread.forkedFrom : undefined,
+    ),
+    loadEarlierConversation,
     completeFollowUp,
     errorCategory,
     errorMessage,
