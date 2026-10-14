@@ -12,12 +12,15 @@ import { Schema } from "effect";
 import {
   ActorId,
   CorrelationId,
+  CONTEXT_COMPACTION_EVENT_NAMES,
   decodeAgentRunStatusChanged,
   decodeChatAttemptUpdated,
   decodeChatThreadUpdated,
   decodeChatTurnCreated,
   decodeCodeOperationEventFrame,
   decodeCodeThreadUpdated,
+  decodeContextCompactionCompleted,
+  decodeContextCompactionFailed,
   decodeUsageResumeScheduled,
   decodeWorkTurnAccepted,
   decodeWorkTurnUpdated,
@@ -60,10 +63,14 @@ export interface UsageResumeModePort {
   readonly inspect: (
     record: UsageResumeRecord,
   ) => Promise<{ readonly kind: "ready" } | { readonly kind: "invalid"; readonly detail: string }>;
-  readonly dispatch: (
-    record: UsageResumeRecord,
-  ) => Promise<
-    { readonly kind: "dispatched" } | { readonly kind: "refused"; readonly detail: string }
+  readonly dispatch: (record: UsageResumeRecord) => Promise<
+    | { readonly kind: "dispatched" }
+    | { readonly kind: "refused"; readonly detail: string }
+    /**
+     * The thread cannot take the continuation yet but will (its session is
+     * being compacted), so the opt-in stays armed and is offered again.
+     */
+    | { readonly kind: "deferred"; readonly detail: string }
   >;
   /**
    * The thread row clients refresh through, rebuilt with the settle's
@@ -177,6 +184,7 @@ export class UsageResumeService {
   }
 
   #onCommittedEvent(event: EventEnvelope): void {
+    this.#wakeAfterCompaction(event);
     const aggregateType = asUsageResumeAggregateType(event.aggregateType);
     if (event.eventName === USAGE_RESUME_SCHEDULED) {
       if (aggregateType === undefined) return;
@@ -340,6 +348,38 @@ export class UsageResumeService {
     }
   }
 
+  /**
+   * A continuation deferred by a compaction is offered again as soon as the
+   * compaction ends, on the thread's context ledger, rather than on the next
+   * retry. A resume whose reset has not come yet just re-arms for it.
+   */
+  #wakeAfterCompaction(event: EventEnvelope): void {
+    if (
+      event.aggregateType !== "context-ledger" ||
+      (event.eventName !== CONTEXT_COMPACTION_EVENT_NAMES.completed &&
+        event.eventName !== CONTEXT_COMPACTION_EVENT_NAMES.failed)
+    ) {
+      return;
+    }
+    let subject: { readonly aggregateType: string; readonly aggregateId: string };
+    try {
+      subject =
+        event.eventName === CONTEXT_COMPACTION_EVENT_NAMES.completed
+          ? decodeContextCompactionCompleted(event.payload).receipt.subject
+          : decodeContextCompactionFailed(event.payload).subject;
+    } catch (error) {
+      this.#options.onError?.("Usage-resume could not decode a compaction.", error);
+      return;
+    }
+    const aggregateType = asUsageResumeAggregateType(String(subject.aggregateType));
+    if (aggregateType === undefined) return;
+    const key = pendingKey(aggregateType, String(subject.aggregateId));
+    const pending = this.#pending.get(key);
+    if (pending === undefined || pending.dispatching) return;
+    this.#clearTimer(pending);
+    queueMicrotask(() => void this.#evaluate(key));
+  }
+
   #arm(input: {
     readonly aggregateType: UsageResumeAggregateType;
     readonly aggregateId: string;
@@ -424,6 +464,8 @@ export class UsageResumeService {
       const result = await port.dispatch(pending.record);
       if (result.kind === "dispatched") {
         await this.#settle(pending, "dispatched");
+      } else if (result.kind === "deferred") {
+        this.#armTimer(pending, this.#options.clock().getTime() + this.#retryAfterMs());
       } else {
         await this.#settle(pending, "failed", result.detail);
       }

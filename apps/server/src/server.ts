@@ -38,6 +38,7 @@ import {
   decodeAgentRunParentThreadId,
   decodeAgentRunId,
   decodeChatThreadId,
+  decodeContextSubjectRef,
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceContentId,
@@ -7813,8 +7814,16 @@ export function startOctantServer(
           readThread: (threadId) => persistence.readChatThread(threadId),
           readThreadView: (threadId) => persistence.readChatThreadView(threadId),
           execute: (input, executionContext) => chatService.execute(input, executionContext),
+          compacting: (threadId) =>
+            contextHarness.compactionRunning(
+              decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: threadId }),
+            ),
         },
         work: {
+          compacting: (threadId) =>
+            contextHarness.compactionRunning(
+              decodeContextSubjectRef({ aggregateType: "work-thread", aggregateId: threadId }),
+            ),
           isEnabled: () =>
             enabledModes(
               persistence.readShellSettings()?.settings ?? defaultShellSettings(),

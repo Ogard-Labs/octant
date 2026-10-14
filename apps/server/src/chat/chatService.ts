@@ -796,7 +796,7 @@ export class ChatService {
   readonly #activeAttempts = new Map<string, AbortController>();
   readonly #activeThreadExecutions = new Set<string>();
   readonly #threadAdmissions = new Map<string, Promise<void>>();
-  /** Admissions of a new turn, queued or being prepared, per thread. */
+  /** Admissions of a turn or a resumed attempt, queued or being prepared, per thread. */
   readonly #startingTurns = new Map<string, number>();
 
   constructor(options: ChatServiceOptions) {
@@ -3177,11 +3177,12 @@ export class ChatService {
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "resume-chat-turn" }>,
     executionContext?: ChatServiceExecutionContext,
   ): Promise<ChatCommandResult> {
-    const accepted = await this.#withThreadAdmission(command.threadId, async () => {
+    const accepted = await this.#withTurnAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
       this.#assertExpectedThreadVersion(thread, command.expectedVersion);
       const view = this.#requireThreadView(command.threadId);
       this.#assertNoActiveTurn(view, thread.id);
+      this.#assertNotCompacting(thread.id);
       const turn = view.turns.find((candidate) => String(candidate.id) === String(command.turnId));
       const attempt = turn?.attempts.find(
         (candidate) => String(candidate.id) === String(command.attemptId),

@@ -362,13 +362,13 @@ export interface WorkTurnServiceDependencies {
 }
 
 export class WorkTurnService {
+  /** Turns being prepared, per thread, until they are accepted or refused. */
+  readonly #startingTurns = new Map<string, number>();
   /**
    * The access each running turn holds, by thread. The native harness checks
    * edits against this rather than the thread's own access, so a goal-loop
    * round held ask-first stays ask-first for every provider.
    */
-  /** Turns being prepared, per thread, until they are accepted or refused. */
-  readonly #startingTurns = new Map<string, number>();
   readonly #runningAccess = new Map<
     string,
     { readonly requestId: string; readonly access: WorkAccess }

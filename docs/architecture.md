@@ -2689,12 +2689,13 @@ context answer), and the renderer never decides it.
   can't show it." Actions: **Compact** and Cancel.
 - While it runs, the popover reads "Compacting…", the composer's send is
   disabled with "Compacting session" as the reason, and no new turn starts.
-  The server enforces the last part, not the window: a Chat send, edit, retry
-  or delivered subagent result is refused `waiting`, and a Work turn `stale`,
-  with "This session is being compacted. Send again when it finishes.", and a
-  subagent result waits the compaction out as it waits out a running turn
-  and is offered again as soon as the compaction ends. The two cannot
-  interleave the other way either: a turn counts as running for compaction
+  The server enforces the last part, not the window: a Chat send, edit, retry,
+  resume or delivered subagent result is refused `waiting`, and a Work turn
+  `stale`, with "This session is being compacted. Send again when it
+  finishes." A subagent result, and a usage-limit continuation the person
+  opted into, wait the compaction out instead of being spent: each is offered
+  again as soon as the compaction ends. The two cannot interleave the other
+  way either: a turn or a resumed attempt counts as running for compaction
   from the moment it is queued until it is accepted, because it reads the
   conversation it plans from while it is prepared (a Chat turn journals its
   plan before its attempt), so a compaction can neither be planned over nor

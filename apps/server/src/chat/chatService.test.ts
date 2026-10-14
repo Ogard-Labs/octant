@@ -9018,6 +9018,82 @@ describe("compacting a Chat session", () => {
   });
 });
 
+describe("resuming a Chat attempt around a compaction", () => {
+  async function interruptedAttempt() {
+    const fixture = openFixture({ turnOutcome: "interrupted" });
+    const { service } = fixture;
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Resume around compaction",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Continue this",
+    });
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "interrupted",
+    );
+    const view = service.read(created.thread.id);
+    const attempt = view.turns[0]?.attempts[0];
+    if (attempt === undefined) throw new Error("Expected an interrupted attempt.");
+    const resume = {
+      kind: "resume-chat-turn" as const,
+      threadId: created.thread.id,
+      expectedVersion: view.thread.version,
+      turnId: sent.turn.id,
+      attemptId: attempt.id,
+    };
+    return { ...fixture, created, resume };
+  }
+
+  it("holds a resume while the session is compacted", async () => {
+    const { service, contextHarness, fakeDriver, created, resume } = await interruptedAttempt();
+    contextHarness.requestCompaction({
+      subject: decodeContextSubjectRef({
+        aggregateType: "chat-thread",
+        aggregateId: String(created.thread.id),
+      }),
+      compactionId: decodeContextCompactionId("84000000-0000-4000-8000-0000000000c2"),
+      executor: {
+        kind: "host",
+        providerInstanceId: created.thread.providerInstanceId,
+        modelId: created.thread.modelId,
+      },
+    });
+
+    await expect(service.execute(resume)).rejects.toMatchObject({
+      failure: {
+        category: "waiting",
+        message: "This session is being compacted. Send again when it finishes.",
+      },
+    });
+    expect(fakeDriver.resumeInputs).toEqual([]);
+  });
+
+  it("counts a resume as starting while it is prepared, so a compaction cannot slip in", async () => {
+    const { service, fakeDriver, created, resume } = await interruptedAttempt();
+    const probing = Promise.withResolvers<void>();
+    const probe = Promise.withResolvers<ProviderProbeResult>();
+    vi.spyOn(fakeDriver.driver, "probe").mockImplementation(() =>
+      Effect.promise(async () => {
+        probing.resolve();
+        return probe.promise;
+      }),
+    );
+    const resumed = service.execute(resume);
+    await probing.promise;
+    expect(service.isTurnStarting(created.thread.id)).toBe(true);
+    probe.resolve(probeFixture());
+    await resumed;
+    expect(service.isTurnStarting(created.thread.id)).toBe(false);
+  });
+});
+
 describe("a Chat turn being prepared", () => {
   it("counts as starting until its attempt is journaled, so a compaction cannot slip in before its plan", async () => {
     const { service, fakeDriver } = openFixture();
