@@ -240,10 +240,11 @@ describe("PersistenceLive", () => {
       ),
     );
 
-    // The default folder is filled in on read as a host fact; it is not persisted.
+    // The default folder is filled in on read as a host fact; it is not
+    // persisted, so a store that never named one follows the host default.
     expect(result.bootstrap.settings).toEqual({
       ...decodePersistedShellSettings(legacySettings),
-      defaultFolder: "/Users/ada/Documents/Octant",
+      defaultFolder: "/Users/ada/Octant",
     });
     // A store written before row properties shipped keeps showing what each
     // view's rows already carried: nothing disappears on the upgrade.

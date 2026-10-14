@@ -78,7 +78,7 @@ describe("a thread started without a Project", () => {
     const fixture = fixtureService({
       defaultFolder: () => folder,
       ensureDirectory: async () => {},
-      codeSettings: { allowDefaultFolderThreads: true },
+      codeSettings: { requireGitRepository: false },
     });
     const ensure = (projectType: "work" | "code", suffix: string) =>
       fixture.service.executeProject(windowId, {
@@ -98,10 +98,10 @@ describe("a thread started without a Project", () => {
       project: { type: "work", binding: { canonicalRoot: "/home/ada/Documents/Octant/Work" } },
     });
 
-    folder = "/home/ada/Elsewhere";
+    folder = "/home/ada/Octant";
     await expect(ensure("work", "32")).resolves.toMatchObject({
       created: true,
-      project: { binding: { canonicalRoot: "/home/ada/Elsewhere/Work" } },
+      project: { binding: { canonicalRoot: "/home/ada/Octant/Work" } },
     });
     const bootstrap = await fixture.service.bootstrap(windowId);
     expect(bootstrap.active.map((project) => project.name)).toEqual([
@@ -111,9 +111,9 @@ describe("a thread started without a Project", () => {
     ]);
   });
 
-  it("refuses a Code default Project until Code settings allow threads without a Project", async () => {
+  it("refuses a Code default Project while Code still needs a Git repository", async () => {
     const ensureDirectory = vi.fn(async () => undefined);
-    for (const codeSettings of [undefined, { allowDefaultFolderThreads: false }]) {
+    for (const codeSettings of [undefined, { requireGitRepository: true }]) {
       const fixture = fixtureService({
         defaultFolder: () => "/home/ada/Documents/Octant",
         ensureDirectory,
@@ -1401,7 +1401,7 @@ function fixtureService(
     >;
     defaultFolder?: () => string;
     ensureDirectory?: (path: string) => Promise<void>;
-    codeSettings?: { allowDefaultFolderThreads: boolean };
+    codeSettings?: { requireGitRepository: boolean };
     seedWorkProjectStatusFile?: (
       canonicalRoot: string,
       projectName: string,

@@ -175,12 +175,28 @@ describe("Code aggregate contracts", () => {
     expect(decodeCodeSettings(settings)).toEqual({
       ...settings,
       requireGitRepository: true,
-      allowDefaultFolderThreads: false,
       defaultDiffLayout: "unified",
     });
     expect(decodeCodeSettings({ ...settings, requireGitRepository: false })).toMatchObject({
       requireGitRepository: false,
     });
+    // Rows and events written while threads without a Project had their own
+    // switch still decode. The Git requirement alone is the choice now, so
+    // every stored pair keeps the requirement it had and the old switch is
+    // dropped rather than reported.
+    for (const [requireGitRepository, allowDefaultFolderThreads] of [
+      [true, false],
+      [false, false],
+      [false, true],
+    ] as const) {
+      const decoded = decodeCodeSettings({
+        ...settings,
+        requireGitRepository,
+        allowDefaultFolderThreads,
+      });
+      expect(decoded.requireGitRepository).toBe(requireGitRepository);
+      expect(decoded).not.toHaveProperty("allowDefaultFolderThreads");
+    }
     expect(() =>
       decodeCodeSettings({
         ...settings,
@@ -286,6 +302,18 @@ describe("Code aggregate contracts", () => {
         },
       }).kind,
     ).toBe("update-code-settings");
+    // A window loaded before the switches folded into one may still send the
+    // old one. The host accepts the command and the old switch carries nothing.
+    const fromOlderWindow = decodeCodeCommand({
+      kind: "update-code-settings",
+      expectedVersion: 1,
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      requireGitRepository: false,
+      allowDefaultFolderThreads: true,
+    });
+    expect(fromOlderWindow).toMatchObject({ requireGitRepository: false });
+    expect(fromOlderWindow).not.toHaveProperty("allowDefaultFolderThreads");
     expect(() =>
       decodeCodeCommand({
         kind: "prepare-code-project-checkout",
@@ -348,7 +376,6 @@ describe("Code aggregate contracts", () => {
       defaultExecutionPolicy: "approval-gated",
       defaultPermissionPersistence: "current-session",
       requireGitRepository: true,
-      allowDefaultFolderThreads: false,
       defaultDiffLayout: "unified",
       version: 1,
       updatedAt: now,
