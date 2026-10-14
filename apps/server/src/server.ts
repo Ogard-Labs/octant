@@ -3617,6 +3617,10 @@ export function startOctantServer(
     const codeProjectAccess = new CodeProjectAccess({
       readWorkspace: (scopeId) => persistence.readWindowWorkspace(scopeId)?.workspace,
       hasActiveCodeProject: (id) => projectService.hasActiveProject(id, "code"),
+      // A renderer reload keeps its registration; a crashed or closed primary
+      // window that reopens registers the same window id again.
+      isWindowLive: (scopeId) =>
+        windowAuthorityStore.listWindowIds().some((id) => String(id) === String(scopeId)),
     });
     const canAccessCodeProject = (scopeId: WindowId, projectId: ProjectId) =>
       codeProjectAccess.canAccessProject(scopeId, projectId);

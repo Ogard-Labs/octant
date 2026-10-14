@@ -1446,9 +1446,8 @@ or stops a thread.
   has never run; a turn parked on an approval keeps its running record, so
   its time is when that turn last moved. `read` takes its transcript from
   the Code `#thread` mention read for the window the turn runs for, judged on
-  that window's standing authority (its persisted Project binding when the
-  call runs). The request that started the turn has ended by the time a tool
-  is called, and its admission is never carried into the read.
+  that window's standing authority like every Project check in a turn's tool
+  call (see [Security and authority](#security-and-authority)).
 
 ## Agent task display
 
@@ -4088,10 +4087,15 @@ mechanisms are:
   before anything executes. Tool results and external content are data with
   provenance, never instructions.
   Every Project check inside a Code turn's tool call is judged on the turn's
-  window as it stands when the call runs (its persisted Project binding),
-  never on the admission of the request that started the turn, whether that
-  request has ended or is still open; a paired device's scope holds no
-  binding, so its wider in-request reach never carries into those checks.
+  window as it stands when the call runs (its persisted Project binding, and
+  only while the window is still live), never on the admission of the
+  request that started the turn, whether that request has ended or is still
+  open. A closed window's turn keeps running but its tool calls reach no
+  Project until the same window registers again, as a reopened primary
+  window does; a renderer reload keeps the window live. A paired device's
+  scope holds no binding, so its wider in-request reach never carries into
+  those checks, and the routine host scope passes for any active Code Project
+  as before.
   Tools that act on the turn's admitted checkout without a window check (the
   provider's own tools, ACP client file and terminal access) are bounded by
   the turn's admission, posture, and confinement instead. Other work a request
