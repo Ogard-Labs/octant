@@ -79,7 +79,7 @@ whole-thread read beside it before reading anything, and is a
 | ---- | ----------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | Work | `GET /api/work/turns/window/:threadId`                | `before=<requestId>` (or none)                         | `limit` 1 to 64 (the client asks 30), at most 2 MiB of encoded turns (a paired device's response is cut at 8 MiB), always at least one turn |
 | Chat | `GET /api/chat/threads/:threadId/window`              | one of `before`, `after`, `through=<turnId>` (or none) | `limit` 1 to 50 (the client asks 30), at most 2 MiB of encoded turns with their bodies, always at least one turn                            |
-| Code | `GET /api/code/threads/:threadId/conversation/window` | one of `before`, `through=<operationId>` (or none)     | `limit` 1 to 100 (the client asks 20), at most 2 MiB of encoded turns, always at least one turn                                             |
+| Code | `GET /api/code/threads/:threadId/conversation/window` | one of `before`, `through=<operationId>` (or none)     | `limit` 1 to 100 (the client asks 20, the CLI 50), at most 2 MiB of encoded turns, always at least one turn                                 |
 
 A Chat window answers `ChatThreadWindow`: the unchanged `ChatThreadView` shape
 holding only the page, plus the bounds and `supersededTurnCount`. It pages over
@@ -135,13 +135,27 @@ Inherited rows keep their source thread, and only the fork's own turns count
 toward its usage. A new fork with fewer turns of its own than one page reads
 its first inherited page when it opens. The forward conversation read
 (`CodeConversationPage` version 3) is unchanged, and export, fork points,
-hand-off, mentions, merge back, the phone, and the CLI still read it. The
+hand-off, mentions, merge back, and the CLI's live feed still read it. The
 Review page reads a Code thread's last turn as a one-turn newest window, so its
 cost does not walk the forward pages; against a host with no window route it
 walks them as before.
 
+The phone and the CLI open a Code thread on its newest window and offer no
+Load earlier. The phone asks 20 turns and resolves their text in one evidence
+batch, keeping turns newest first while their references fit it, so the
+newest turn always shows (a very long one its first parts) and an older turn
+is left out rather than shown blank; it says when earlier turns exist. The CLI
+asks 50, and while earlier turns exist its footer counts the turns shown as
+`newest 50 turns`.
+
 A host without a window route answers 404, and the client reads the thread's
-whole-transcript route instead and shows it as fully loaded. A fresh newest
+whole-transcript route instead and shows it as fully loaded. For Code the phone
+and the CLI walk the forward read to its end and keep only its tail, the same
+newest turns the window would answer; the CLI asks the window once per thread
+and starts each later walk at the page its shown tail began on. A walk cut off
+by its 100-page bound never passes an older run off as the newest: the phone
+refuses the read, and the CLI shows nothing and continues the walk on its next
+read. A fresh newest
 window joins what the client holds when its first turn is already loaded;
 otherwise it replaces it, so the client never holds two runs with a gap
 between them. Row keys name the turn and never its position, which keeps the

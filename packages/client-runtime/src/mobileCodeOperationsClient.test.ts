@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MAX_CODE_EVIDENCE_BATCH_ITEMS } from "@octant/contracts";
 import {
+  MOBILE_CODE_CONVERSATION_TURNS,
   loadMobileCodeConversation,
   observeMobilePullRequest,
   sendMobileCodeTurn,
@@ -95,9 +96,9 @@ describe("mobile Code follow-through", () => {
             activity: [],
           });
         }
-        if (method === "GET" && path === `/api/code/threads/${threadId}/conversation`) {
+        if (method === "GET" && path === `/api/code/threads/${threadId}/conversation/window`) {
           return jsonResponse({
-            version: 3,
+            version: 1,
             threadId,
             turns: [
               {
@@ -112,8 +113,8 @@ describe("mobile Code follow-through", () => {
                 updatedAt: now,
               },
             ],
-            nextCursor: 1,
-            hasMore: false,
+            hasEarlier: false,
+            hasLater: false,
           });
         }
         if (method === "POST" && path === "/api/code/evidence/batch") {
@@ -151,15 +152,18 @@ describe("mobile Code follow-through", () => {
   it("reads a Code thread's conversation with the text behind each prompt and reply", async () => {
     const requests: Array<{ method: string; path: string }> = [];
     const conversation = await loadMobileCodeConversation(transport(requests), threadId);
-    expect(conversation).toEqual([
-      {
-        operationId,
-        status: "completed",
-        prompt: "Fix the test",
-        assistant: ["Done: the test now passes."],
-        updatedAt: now,
-      },
-    ]);
+    expect(conversation).toEqual({
+      turns: [
+        {
+          operationId,
+          status: "completed",
+          prompt: "Fix the test",
+          assistant: ["Done: the test now passes."],
+          updatedAt: now,
+        },
+      ],
+      hasEarlier: false,
+    });
   });
 
   it("reads a Code conversation whose answer carries fields this build does not know", async () => {
@@ -169,7 +173,7 @@ describe("mobile Code follow-through", () => {
         hostId: port.hostId,
         authenticatedFetch: async (input) => {
           const response = await port.authenticatedFetch(input);
-          if (input.path !== `/api/code/threads/${threadId}/conversation`) return response;
+          if (input.path !== `/api/code/threads/${threadId}/conversation/window`) return response;
           const page = (await response.json()) as { turns: Array<Record<string, unknown>> };
           return jsonResponse({
             ...page,
@@ -183,27 +187,30 @@ describe("mobile Code follow-through", () => {
       },
       threadId,
     );
-    expect(conversation).toEqual([
-      {
-        operationId,
-        status: "completed",
-        prompt: "Fix the test",
-        assistant: ["Done: the test now passes."],
-        updatedAt: now,
-      },
-    ]);
+    expect(conversation).toEqual({
+      turns: [
+        {
+          operationId,
+          status: "completed",
+          prompt: "Fix the test",
+          assistant: ["Done: the test now passes."],
+          updatedAt: now,
+        },
+      ],
+      hasEarlier: false,
+    });
   });
 
   it("refuses a Code conversation whose threadId does not match the request", async () => {
     const otherThreadId = "84000000-0000-4000-8000-000000000099";
     const fetch = vi.fn(async ({ path }: { path: string }) => {
-      if (path === `/api/code/threads/${threadId}/conversation`) {
+      if (path === `/api/code/threads/${threadId}/conversation/window`) {
         return jsonResponse({
-          version: 3,
+          version: 1,
           threadId: otherThreadId,
           turns: [],
-          nextCursor: 0,
-          hasMore: false,
+          hasEarlier: false,
+          hasLater: false,
         });
       }
       return jsonResponse({ category: "unavailable" }, 404);
@@ -221,9 +228,9 @@ describe("mobile Code follow-through", () => {
   it("refuses a Code evidence batch whose threadId does not match the request", async () => {
     const otherThreadId = "84000000-0000-4000-8000-000000000099";
     const fetch = vi.fn(async ({ method, path }: { method: string; path: string }) => {
-      if (method === "GET" && path === `/api/code/threads/${threadId}/conversation`) {
+      if (method === "GET" && path === `/api/code/threads/${threadId}/conversation/window`) {
         return jsonResponse({
-          version: 3,
+          version: 1,
           threadId,
           turns: [
             {
@@ -238,8 +245,8 @@ describe("mobile Code follow-through", () => {
               updatedAt: now,
             },
           ],
-          nextCursor: 1,
-          hasMore: false,
+          hasEarlier: false,
+          hasLater: false,
         });
       }
       if (method === "POST" && path === "/api/code/evidence/batch") {
@@ -265,9 +272,9 @@ describe("mobile Code follow-through", () => {
     const requested: Array<{ operationId: string; contentId: string }> = [];
     const fetch = vi.fn(
       async ({ method, path, body }: { method: string; path: string; body?: string }) => {
-        if (method === "GET" && path === `/api/code/threads/${threadId}/conversation`) {
+        if (method === "GET" && path === `/api/code/threads/${threadId}/conversation/window`) {
           return jsonResponse({
-            version: 3,
+            version: 1,
             threadId,
             turns: [
               {
@@ -282,8 +289,8 @@ describe("mobile Code follow-through", () => {
                 updatedAt: now,
               },
             ],
-            nextCursor: 1,
-            hasMore: false,
+            hasEarlier: false,
+            hasLater: false,
           });
         }
         if (method === "POST" && path === "/api/code/evidence/batch") {
@@ -316,15 +323,152 @@ describe("mobile Code follow-through", () => {
     expect(requested.at(-1)?.contentId).toBe(
       assistant[MAX_CODE_EVIDENCE_BATCH_ITEMS - 2]?.contentId,
     );
-    expect(conversation).toEqual([
-      {
-        operationId,
-        status: "completed",
-        prompt: "Fix the test",
-        assistant: assistant.slice(0, MAX_CODE_EVIDENCE_BATCH_ITEMS - 1).map((part) => part.text),
-        updatedAt: now,
+    expect(conversation).toEqual({
+      turns: [
+        {
+          operationId,
+          status: "completed",
+          prompt: "Fix the test",
+          assistant: assistant.slice(0, MAX_CODE_EVIDENCE_BATCH_ITEMS - 1).map((part) => part.text),
+          updatedAt: now,
+        },
+      ],
+      hasEarlier: false,
+    });
+  });
+
+  /** A turn numbered `index`, whose prompt text is `prompt-<index>`. */
+  const numberedTurn = (index: number) => ({
+    operationId: `86000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    providerInstanceId,
+    modelId: "model-a",
+    sessionId: "89000000-0000-4000-8000-000000000001",
+    prompt: reference(`87000000-0000-4000-8000-${String(index).padStart(12, "0")}`, 8),
+    assistant: [],
+    status: "completed",
+    startedAt: now,
+    updatedAt: now,
+  });
+  const promptsByContent = (body: string | undefined) => {
+    const payload = JSON.parse(body ?? "{}") as {
+      items: Array<{ operationId: string; contentId: string }>;
+    };
+    return jsonResponse({
+      threadId,
+      items: payload.items.map((item) => ({
+        ...item,
+        text: `prompt-${Number(item.contentId.slice(-12))}`,
+      })),
+    });
+  };
+
+  it("opens a thread longer than one page on its newest turns", async () => {
+    const thread = Array.from({ length: 130 }, (_, index) => numberedTurn(index + 1));
+    const requests: Array<{ path: string; query?: string }> = [];
+    const fetch = vi.fn(
+      async (input: { method: string; path: string; query?: string; body?: string }) => {
+        requests.push(input);
+        if (input.path === `/api/code/threads/${threadId}/conversation/window`) {
+          const limit = Number(new URLSearchParams(input.query).get("limit"));
+          return jsonResponse({
+            version: 1,
+            threadId,
+            turns: thread.slice(-limit),
+            hasEarlier: true,
+            hasLater: false,
+          });
+        }
+        if (input.path === "/api/code/evidence/batch") return promptsByContent(input.body);
+        return jsonResponse({ category: "unavailable" }, 404);
       },
-    ]);
+    );
+    const conversation = await loadMobileCodeConversation(
+      {
+        hostId: "host-1",
+        authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+      },
+      threadId,
+    );
+    expect(conversation.hasEarlier).toBe(true);
+    expect(conversation.turns.map((turn) => turn.prompt)).toEqual(
+      Array.from(
+        { length: MOBILE_CODE_CONVERSATION_TURNS },
+        (_, index) => `prompt-${130 - MOBILE_CODE_CONVERSATION_TURNS + index + 1}`,
+      ),
+    );
+    expect(requests[0]?.query).toBe(`?limit=${MOBILE_CODE_CONVERSATION_TURNS}`);
+    expect(requests.some((request) => request.path.endsWith("/conversation"))).toBe(false);
+  });
+
+  it("shows the tail of the forward read on a host without the window read", async () => {
+    const thread = Array.from({ length: 130 }, (_, index) => numberedTurn(index + 1));
+    const fetch = vi.fn(
+      async (input: { method: string; path: string; query?: string; body?: string }) => {
+        if (input.path === `/api/code/threads/${threadId}/conversation`) {
+          const query = new URLSearchParams(input.query);
+          const after = Number(query.get("afterCursor"));
+          const limit = Number(query.get("limit"));
+          const turns = thread.slice(after, after + limit);
+          return jsonResponse({
+            version: 3,
+            threadId,
+            turns,
+            nextCursor: after + turns.length,
+            hasMore: after + turns.length < thread.length,
+          });
+        }
+        if (input.path === "/api/code/evidence/batch") return promptsByContent(input.body);
+        // An older host has no window route.
+        return jsonResponse({ category: "unavailable" }, 404);
+      },
+    );
+    const conversation = await loadMobileCodeConversation(
+      {
+        hostId: "host-1",
+        authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+      },
+      threadId,
+    );
+    expect(conversation.hasEarlier).toBe(true);
+    expect(conversation.turns.at(0)?.prompt).toBe(
+      `prompt-${130 - MOBILE_CODE_CONVERSATION_TURNS + 1}`,
+    );
+    expect(conversation.turns.at(-1)?.prompt).toBe("prompt-130");
+    expect(conversation.turns).toHaveLength(MOBILE_CODE_CONVERSATION_TURNS);
+  });
+
+  it("leaves out an older turn whose text no longer fits the one evidence batch", async () => {
+    const older = numberedTurn(1);
+    const newest = {
+      ...numberedTurn(2),
+      assistant: Array.from({ length: MAX_CODE_EVIDENCE_BATCH_ITEMS - 1 }, (_, index) =>
+        reference(`87000000-0000-4000-8000-${String(100 + index).padStart(12, "0")}`, 8),
+      ),
+    };
+    const fetch = vi.fn(
+      async (input: { method: string; path: string; query?: string; body?: string }) => {
+        if (input.path === `/api/code/threads/${threadId}/conversation/window`) {
+          return jsonResponse({
+            version: 1,
+            threadId,
+            turns: [older, newest],
+            hasEarlier: false,
+            hasLater: false,
+          });
+        }
+        if (input.path === "/api/code/evidence/batch") return promptsByContent(input.body);
+        return jsonResponse({ category: "unavailable" }, 404);
+      },
+    );
+    const conversation = await loadMobileCodeConversation(
+      {
+        hostId: "host-1",
+        authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+      },
+      threadId,
+    );
+    expect(conversation.turns.map((turn) => turn.prompt)).toEqual(["prompt-2"]);
+    expect(conversation.hasEarlier).toBe(true);
   });
 
   it("stages a follow-up prompt as evidence and starts a provider turn on the thread's checkout", async () => {

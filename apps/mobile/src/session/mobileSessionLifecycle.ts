@@ -69,3 +69,19 @@ export async function removeMobileHost(input: {
   }
   return { localCredentialRemoved: true };
 }
+
+/**
+ * Removals one after another. The host registry and the device key catalog each
+ * read the whole list, drop one entry, and write it back, so two removals that
+ * overlap can each write from the old list and bring the other host back.
+ */
+export function createMobileHostRemover(
+  input: Omit<Parameters<typeof removeMobileHost>[0], "hostId">,
+): (hostId: string) => Promise<RemoveMobileHostResult> {
+  let last: Promise<unknown> = Promise.resolve();
+  return (hostId) => {
+    const run = last.then(() => removeMobileHost({ ...input, hostId }));
+    last = run.catch(() => undefined);
+    return run;
+  };
+}
