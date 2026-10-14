@@ -3822,7 +3822,18 @@ native harness in `apps/server/src/harness`:
   while the turn runs and journaled with the record when it ends. `NativeHarnessQuestionStore` blocks an `ask-user` call until an
   answer arrives from any surface (`POST /api/native-harness/sessions/:thread/questions`,
   or the Code thread's own inline question path), or until it expires or the
-  turn is interrupted. `NativeHarnessTurnObserver` puts the stable
+  turn is interrupted. `NativeHarnessApprovalStore` likewise blocks a tool
+  call that needs a person until a decision arrives
+  (`POST /api/native-harness/sessions/:thread/approvals`), the turn is
+  interrupted, or ten minutes pass. Expiry denies the call and is journaled as
+  `expired`, the same way whether the timer or the clock caught it: the host
+  checks the clock whenever an approval is asked, answered, or listed
+  (including a read of the session view), so an approval whose timer fired
+  late (a busy host, a machine that slept) is never still shown as pending,
+  approvable, or holding a slot. At most 32 approvals wait at once across the
+  whole host, the cap MCP and browser tool approvals use; a call past it is
+  refused at once as `approval-too-many-waiting`, journals no approval, and
+  tells the lead nobody was asked. `NativeHarnessTurnObserver` puts the stable
   instructions block in front of every harness turn, records the completed
   reply, and asks the `advisor` slot for a review. An advisor with no model of
   its own is off: unlike other jobs, its unconfigured slot does not fall back
