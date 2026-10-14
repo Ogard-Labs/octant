@@ -166,7 +166,7 @@ export interface ToolEgressLiveLaunch {
 }
 
 export interface ToolEgressRulesOptions {
-  readonly journal: Pick<Journal, "append" | "replayAggregateType">;
+  readonly journal: Pick<Journal, "append" | "replayAggregateType" | "transaction">;
   /** The Code thread rules may be granted on, or nothing for any other thread. */
   readonly readCodeThread: (threadId: string) => { readonly projectId: string } | undefined;
   /** Whether the thread has taken in outside content. A read that throws counts as tainted. */
@@ -236,6 +236,19 @@ export class ToolEgressRules {
   readonly #unmarkedLaunches = new Map<string, string>();
   /** Launches whose taint the journal holds; a mark a person later cleared stays cleared. */
   readonly #markedLaunches = new Set<string>();
+  /**
+   * Host and port pairs a tainted launch asked for, per thread and per
+   * Project. They stay after the proposal is declined or answered with a
+   * `call` rule, so a standing rule typed in later is still refused.
+   */
+  readonly #taintedHostsByThread = new Map<string, Set<string>>();
+  readonly #taintedHostsByProject = new Map<string, Set<string>>();
+  /**
+   * Aggregates holding a revocation this host could not read. Their rules are
+   * not applied and no rule is granted on them: a revoked rule must not come
+   * back because its record no longer decodes. Launch records still land.
+   */
+  readonly #unreadableAggregates = new Set<string>();
   readonly #live = new Map<string, LiveLaunchState>();
 
   constructor(options: ToolEgressRulesOptions) {
@@ -298,6 +311,8 @@ export class ToolEgressRules {
   /** A purged thread's events are gone from the journal; so is everything held for it. */
   forgetThread(threadId: string): void {
     this.#threadRules.delete(threadId);
+    this.#taintedHostsByThread.delete(threadId);
+    this.#unreadableAggregates.delete(aggregateKey(TOOL_EGRESS_THREAD_AGGREGATE, threadId));
     this.#proposals.delete(threadId);
     this.#learnModeOff.delete(threadId);
     this.#versions.delete(aggregateKey(TOOL_EGRESS_THREAD_AGGREGATE, threadId));
@@ -313,6 +328,7 @@ export class ToolEgressRules {
   /** A Project's erased rules are gone from the journal; so is everything held for it. */
   forgetProject(projectId: string): void {
     this.#projectRules.delete(projectId);
+    this.#unreadableAggregates.delete(aggregateKey(TOOL_EGRESS_PROJECT_AGGREGATE, projectId));
     this.#versions.delete(aggregateKey(TOOL_EGRESS_PROJECT_AGGREGATE, projectId));
     this.recheck();
   }
@@ -378,8 +394,10 @@ export class ToolEgressRules {
     this.#retireCallRules(state.launch);
     // The launch's own taint is recorded before its proposals are raised, so
     // a child that took in outside bytes marks what it asked for as tainted.
+    // A launch whose summary is not recorded has an unknown byte count, so it
+    // taints its thread as recovery would.
     const marked =
-      closed.status === "summarized" && closed.summary.bytesReceived > 0
+      closed.status !== "summarized" || closed.summary.bytesReceived > 0
         ? this.#markLaunch(String(state.launch.threadId), String(state.launch.launchId))
         : "recorded";
     this.#raiseProposals(state);
@@ -419,10 +437,16 @@ export class ToolEgressRules {
       if (grant.port > 65_535) return { kind: "refused", reason: "invalid-host" };
       // A host a tainted launch asked for, a child's on a clean parent
       // included, is granted as if the thread were tainted: one launch only.
+      // A Project rule reaches every thread of the Project, so it is checked
+      // against what any of them asked for while tainted.
+      const askedWhileTainted =
+        matchesTaintedHost(this.#taintedHostsByThread.get(input.threadId), host, grant.port) ||
+        (grant.scope.kind === "project" &&
+          matchesTaintedHost(this.#taintedHostsByProject.get(thread.projectId), host, grant.port));
       const decision = decideToolEgressGrant({
         principal: input.principal.kind,
         scope: grant.scope.kind,
-        threadTainted: tainted || this.#proposedWhileTainted(input.threadId, host, grant.port),
+        threadTainted: tainted || askedWhileTainted,
       });
       if (decision.kind === "refuse") return { kind: "refused", reason: decision.reason };
       const lifetime = grant.scope.kind === "call" ? "call" : grant.scope.lifetime;
@@ -489,20 +513,25 @@ export class ToolEgressRules {
       }
     }
     const actor = this.#actorFor(input.principal);
-    if (
-      threadEvents.length > 0 &&
-      this.#append(TOOL_EGRESS_THREAD_AGGREGATE, input.threadId, threadEvents, actor) !== "appended"
-    ) {
-      return { kind: "refused", reason: "unavailable" };
-    }
-    if (
-      projectEvents.length > 0 &&
-      this.#append(TOOL_EGRESS_PROJECT_AGGREGATE, thread.projectId, projectEvents, actor) !==
-        "appended"
-    ) {
-      return { kind: "refused", reason: "unavailable" };
-    }
-    return { kind: "answered", ruleIds };
+    // Both aggregates commit together or not at all, so an answer never lands in part.
+    const appended = this.#appendAll(
+      [
+        {
+          aggregateType: TOOL_EGRESS_THREAD_AGGREGATE,
+          aggregateId: input.threadId,
+          events: threadEvents,
+        },
+        {
+          aggregateType: TOOL_EGRESS_PROJECT_AGGREGATE,
+          aggregateId: thread.projectId,
+          events: projectEvents,
+        },
+      ],
+      actor,
+    );
+    return appended === "appended"
+      ? { kind: "answered", ruleIds }
+      : { kind: "refused", reason: "unavailable" };
   }
 
   decline(input: {
@@ -657,11 +686,17 @@ export class ToolEgressRules {
         : caller === "local-window"
           ? "allowed"
           : "needs-local-window",
-      threadRules: live(this.#threadRules.get(threadId)).slice(0, MAX_LIVE_TOOL_EGRESS_RULES),
-      projectRules: live(this.#projectRules.get(thread.projectId)).slice(
-        0,
-        MAX_LIVE_TOOL_EGRESS_RULES,
-      ),
+      // An aggregate whose revocations cannot be read shows, and allows, nothing.
+      threadRules: this.#unreadableAggregates.has(
+        aggregateKey(TOOL_EGRESS_THREAD_AGGREGATE, threadId),
+      )
+        ? []
+        : live(this.#threadRules.get(threadId)).slice(0, MAX_LIVE_TOOL_EGRESS_RULES),
+      projectRules: this.#unreadableAggregates.has(
+        aggregateKey(TOOL_EGRESS_PROJECT_AGGREGATE, thread.projectId),
+      )
+        ? []
+        : live(this.#projectRules.get(thread.projectId)).slice(0, MAX_LIVE_TOOL_EGRESS_RULES),
       proposals: proposals.slice(0, MAX_OPEN_TOOL_EGRESS_PROPOSALS),
     };
   }
@@ -673,9 +708,15 @@ export class ToolEgressRules {
    */
   #rulesFor(launch: ToolEgressLaunch): ReadonlyArray<ToolEgressRule> {
     const ruleThread = String(launch.parentThreadId ?? launch.threadId);
+    const readable = (aggregateType: string, id: string) =>
+      !this.#unreadableAggregates.has(aggregateKey(aggregateType, id));
     return [
-      ...(this.#threadRules.get(ruleThread)?.values() ?? []),
-      ...(this.#projectRules.get(String(launch.projectId))?.values() ?? []),
+      ...(readable(TOOL_EGRESS_THREAD_AGGREGATE, ruleThread)
+        ? (this.#threadRules.get(ruleThread)?.values() ?? [])
+        : []),
+      ...(readable(TOOL_EGRESS_PROJECT_AGGREGATE, String(launch.projectId))
+        ? (this.#projectRules.get(String(launch.projectId))?.values() ?? [])
+        : []),
     ].map((rule) => ({
       id: rule.ruleId,
       scope: rule.scope,
@@ -696,17 +737,27 @@ export class ToolEgressRules {
     const threadId = String(state.launch.parentThreadId ?? state.launch.threadId);
     if (this.#learnModeOff.has(threadId)) return;
     const open = this.#proposals.get(threadId) ?? new Map<string, StoredProposal>();
-    const openHosts = new Set(
-      [...open.values()].map(({ payload }) => `${payload.host} ${String(payload.port)}`),
-    );
+    const openTaint = new Map<string, boolean>();
+    for (const { payload } of open.values()) {
+      const key = hostKey(payload.host, payload.port);
+      openTaint.set(key, openTaint.get(key) === true || payload.threadTainted);
+    }
     // The launch's own thread counts too: a child tainted on a clean parent
     // proposes as tainted.
     const tainted = this.#tainted(threadId) || this.#tainted(String(state.launch.threadId));
     const events: AppendEvent[] = [];
+    let added = 0;
     for (const [key, refusal] of state.proposals) {
-      if (open.size + events.length >= MAX_OPEN_TOOL_EGRESS_PROPOSALS) break;
       const host = Option.getOrUndefined(decodeProposalHostOption(refusal.host));
-      if (host === undefined || openHosts.has(key)) continue;
+      if (host === undefined) continue;
+      // A host already open is proposed again only to mark it tainted; the
+      // tainted proposal replaces the clean one.
+      const openWasTainted = openTaint.get(key);
+      if (openWasTainted !== undefined && (openWasTainted || !tainted)) continue;
+      if (openWasTainted === undefined) {
+        if (open.size + added >= MAX_OPEN_TOOL_EGRESS_PROPOSALS) continue;
+        added += 1;
+      }
       events.push({
         eventName: TOOL_EGRESS_EVENT_NAMES.proposalRaised,
         payload: {
@@ -821,25 +872,51 @@ export class ToolEgressRules {
     events: ReadonlyArray<AppendEvent>,
     actor: typeof EventActor.Type,
   ): "appended" | "unavailable" {
-    const key = aggregateKey(aggregateType, aggregateId);
+    return this.#appendAll([{ aggregateType, aggregateId, events }], actor);
+  }
+
+  /**
+   * Appends to each aggregate in one journal unit and applies what was
+   * appended only once the whole unit commits. Nothing is in force before
+   * the journal holds it: a payload that does not decode, a conflict, an
+   * aggregate whose revocations cannot be read, or a journal that throws
+   * leaves the journal and the state as they were.
+   */
+  #appendAll(
+    batches: ReadonlyArray<{
+      readonly aggregateType: string;
+      readonly aggregateId: string;
+      readonly events: ReadonlyArray<AppendEvent>;
+    }>,
+    actor: typeof EventActor.Type,
+  ): "appended" | "unavailable" {
+    const writes = batches.filter((batch) => batch.events.length > 0);
+    if (writes.length === 0) return "appended";
     const occurredAt = this.#timestamp();
     if (occurredAt === undefined) return "unavailable";
     let committed: ReadonlyArray<EventEnvelope>;
     try {
-      const pending = events.map((event) => ({
-        eventId: decodeEventId(this.#options.uuid()),
-        eventName: event.eventName,
-        eventVersion: 1,
-        correlationId: decodeCorrelationId(this.#options.uuid()),
-        actor,
-        occurredAt,
-        payload: decodePayload(event.eventName, event.payload),
-      }));
-      committed = this.#options.journal.append({
-        aggregate: { aggregateType, aggregateId: decodeAggregateId(aggregateId) },
-        expectedVersion: decodeAggregateVersion(this.#versions.get(key) ?? 0),
-        events: pending,
-      }).events;
+      committed = this.#options.journal.transaction(() =>
+        writes.flatMap(({ aggregateType, aggregateId, events }) => {
+          const key = aggregateKey(aggregateType, aggregateId);
+          if (this.#unreadableAggregates.has(key) && events.some(grantsRule)) {
+            throw new Error("A rule cannot be granted where a revocation is unreadable.");
+          }
+          return this.#options.journal.append({
+            aggregate: { aggregateType, aggregateId: decodeAggregateId(aggregateId) },
+            expectedVersion: decodeAggregateVersion(this.#versions.get(key) ?? 0),
+            events: events.map((event) => ({
+              eventId: decodeEventId(this.#options.uuid()),
+              eventName: event.eventName,
+              eventVersion: 1,
+              correlationId: decodeCorrelationId(this.#options.uuid()),
+              actor,
+              occurredAt,
+              payload: decodePayload(event.eventName, event.payload),
+            })),
+          }).events;
+        }),
+      );
     } catch {
       return "unavailable";
     }
@@ -873,6 +950,7 @@ export class ToolEgressRules {
           aggregateKey(envelope.aggregateType, String(envelope.aggregateId)),
           envelope.aggregateVersion,
         );
+        this.#failClosedOnUnreadable(envelope);
       }
     }
   }
@@ -935,6 +1013,14 @@ export class ToolEgressRules {
       case names.proposalRaised: {
         const raised = payload as ThreadEgressProposalRaisedPayload;
         const open = this.#proposals.get(String(raised.threadId)) ?? new Map();
+        if (raised.threadTainted) {
+          for (const [id, { payload: earlier }] of open) {
+            if (earlier.host === raised.host && earlier.port === raised.port) open.delete(id);
+          }
+          const key = hostKey(raised.host, raised.port);
+          setOf(this.#taintedHostsByThread, String(raised.threadId)).add(key);
+          setOf(this.#taintedHostsByProject, String(raised.launch.projectId)).add(key);
+        }
         open.set(String(raised.proposalId), { payload: raised, raisedAt: at });
         this.#proposals.set(String(raised.threadId), open);
         return;
@@ -995,6 +1081,30 @@ export class ToolEgressRules {
     }
   }
 
+  /**
+   * A revocation that no longer decodes still revokes: its rule is dropped
+   * when its id can be read, and otherwise the whole aggregate's rules stop
+   * applying and it takes no more grants.
+   */
+  #failClosedOnUnreadable(envelope: EventEnvelope): void {
+    const names = TOOL_EGRESS_EVENT_NAMES;
+    const rules =
+      envelope.eventName === names.threadRuleRevoked
+        ? this.#threadRules
+        : envelope.eventName === names.projectRuleRevoked
+          ? this.#projectRules
+          : undefined;
+    if (rules === undefined) return;
+    const aggregateId = String(envelope.aggregateId);
+    const ruleId = (envelope.payload as { readonly ruleId?: unknown } | null)?.ruleId;
+    if (typeof ruleId === "string" && ruleId.length > 0) {
+      rules.get(aggregateId)?.delete(ruleId);
+      return;
+    }
+    rules.delete(aggregateId);
+    this.#unreadableAggregates.add(aggregateKey(envelope.aggregateType, aggregateId));
+  }
+
   /** Notes, while replaying, which launches the journal already shows marking their thread. */
   #applyTaint(envelope: EventEnvelope): void {
     if (envelope.eventName !== THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested) return;
@@ -1020,13 +1130,6 @@ export class ToolEgressRules {
         rules.delete(ruleId);
       }
     }
-  }
-
-  #proposedWhileTainted(threadId: string, host: string, port: number): boolean {
-    for (const { payload } of this.#proposals.get(threadId)?.values() ?? []) {
-      if (payload.threadTainted && payload.host === host && payload.port === port) return true;
-    }
-    return false;
   }
 
   /** A rule granted for a proposal's host and port answers it. */
@@ -1085,6 +1188,42 @@ function rulesOf(map: Map<string, Map<string, StoredRule>>, key: string): Map<st
   const existing = map.get(key);
   if (existing !== undefined) return existing;
   const created = new Map<string, StoredRule>();
+  map.set(key, created);
+  return created;
+}
+
+function grantsRule(event: AppendEvent): boolean {
+  return (
+    event.eventName === TOOL_EGRESS_EVENT_NAMES.threadRuleGranted ||
+    event.eventName === TOOL_EGRESS_EVENT_NAMES.projectRuleGranted
+  );
+}
+
+function hostKey(host: string, port: number): string {
+  return `${host} ${String(port)}`;
+}
+
+/** Whether a rule host, exact or `*.name`, covers a host a tainted launch asked for on its port. */
+function matchesTaintedHost(
+  tainted: ReadonlySet<string> | undefined,
+  ruleHost: string,
+  port: number,
+): boolean {
+  if (tainted === undefined) return false;
+  for (const key of tainted) {
+    const [host = "", taintedPort = ""] = key.split(" ");
+    if (taintedPort !== String(port)) continue;
+    if (ruleHost.startsWith("*.") ? host.endsWith(ruleHost.slice(1)) : host === ruleHost) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function setOf(map: Map<string, Set<string>>, key: string): Set<string> {
+  const existing = map.get(key);
+  if (existing !== undefined) return existing;
+  const created = new Set<string>();
   map.set(key, created);
   return created;
 }

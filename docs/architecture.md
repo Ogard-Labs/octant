@@ -4078,13 +4078,22 @@ where it was or narrows it:
 - _Which proposals count as tainted._ A proposal is marked tainted when the
   thread it surfaces on or the launch's own thread is tainted, so a child that
   took in outside bytes on a clean parent proposes as tainted; the launch's
-  taint is recorded before its proposals are raised. The host refuses a thread
-  or Project rule for the host and port of any open tainted proposal, whatever
-  the answering surface sends.
+  taint is recorded before its proposals are raised. A launch whose summary
+  cannot be recorded has an unknown byte count, so it taints its thread as
+  recovery would, and its proposals are tainted too. When a tainted launch asks
+  for a host that already has an open clean proposal, a tainted proposal
+  replaces it. The host remembers every host and port a tainted launch asked
+  for, per thread and per Project, after the proposal is declined or answered
+  with a `call` rule, and refuses a thread rule (exact or a wildcard covering
+  it) on that thread and a Project rule anywhere in that Project, whatever the
+  answering surface sends.
 - _One answer, two aggregates._ An answer that grants thread and Project rules
-  appends to `thread-egress` and then `project-egress`. When the second append
-  fails the answer reports `unavailable`; what the rules lists show is what is
-  in force.
+  appends to `thread-egress` and `project-egress` in one journal transaction,
+  so it lands all or nothing; when it cannot, the answer reports
+  `unavailable` and nothing it asked for is in force.
+- _Unreadable revocations._ A revocation that no longer decodes still revokes:
+  replay drops its rule when the rule id can be read, and otherwise stops
+  applying every rule on that aggregate and refuses new grants there.
 - _Who reaches the surface._ The rules lists and answers are served at
   `/api/native-harness/egress/threads/<thread id>` with the same thread check
   as the harness session's approvals. Like those approvals the route is not in
@@ -4095,7 +4104,15 @@ where it was or narrows it:
 - _Purge._ A thread purge erases the thread's `thread-egress` aggregate. Project
   rules are the Project's: a thread purge leaves `project-egress` in place,
   including the id of the thread a rule was granted from, and a Project erase
-  removes it and drops the host's live copy of those rules at once.
+  removes it and drops the host's live copy of those rules at once. A child's
+  proposals live on its parent's aggregate, so purging the child leaves its
+  opaque thread id, tool call id, and the hosts it asked for in the parent's
+  proposal records until the parent is purged.
+- _What phase 4 inherits._ A launch's taint lands when `finish()` runs, not
+  when its first bytes arrive, so another launch of the same thread running at
+  the same time is not suspended mid-run by it. A rule granted while a launch
+  runs reaches that launch at its next request, even if that launch has
+  already fetched outside content its thread is not yet marked for.
 - _Where the lists show._ A Code thread's Agents tab shows Network access once
   its commands run through these rules, or once the thread holds a rule or a
   proposal. Until phase 4 routes commands to the proxy, the card says that

@@ -100,7 +100,12 @@ export function createNativeHarnessEgressRouteHandler(
       }
       return failure("Tool egress request is invalid.", 400, origin);
     }
-    const threadId = decodeURIComponent(url.pathname.slice(PREFIX.length));
+    let threadId: string;
+    try {
+      threadId = decodeURIComponent(url.pathname.slice(PREFIX.length));
+    } catch {
+      return failure("Thread id is invalid.", 400, origin);
+    }
     if (threadId.length === 0 || threadId.includes("/")) {
       return failure("Thread id is required.", 400, origin);
     }

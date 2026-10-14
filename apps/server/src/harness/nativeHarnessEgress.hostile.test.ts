@@ -2484,6 +2484,19 @@ describe("native harness tool egress grants and learn mode", () => {
   }
   type EgressHost = ReturnType<typeof egressHost>;
 
+  /** The real journal, refusing any append that carries one of these event names. */
+  const refusing =
+    (...eventNames: ReadonlyArray<string>) =>
+    (journal: Journal): JournalPort => ({
+      append: (input, options) => {
+        const text = JSON.stringify(input);
+        if (eventNames.some((name) => text.includes(name))) throw new Error("journal unavailable");
+        return journal.append(input, options);
+      },
+      replayAggregateType: (cursor) => journal.replayAggregateType(cursor),
+      transaction: (body) => journal.transaction(body),
+    });
+
   async function startLaunch(
     host: EgressHost,
     options: {
@@ -2744,6 +2757,12 @@ describe("native harness tool egress grants and learn mode", () => {
           body: projectGrant,
           headers: { "x-octant-window-capability": capability },
         });
+      const malformed = await handler(
+        new Request("http://127.0.0.1/api/native-harness/egress/threads/%E0%A4%A", {
+          headers: { "x-octant-window-capability": capability },
+        }),
+      );
+      expect(malformed?.status).toBe(400);
       authorized = false;
       expect((await handler(local()))?.status).toBe(403);
       authorized = true;
@@ -2966,6 +2985,183 @@ describe("native harness tool egress grants and learn mode", () => {
     });
   });
 
+  describe("taint and revocations that must hold", () => {
+    async function taintedChildAsks(host: EgressHost, name: string) {
+      const origin = await tcpFixture();
+      const child = await startLaunch(host, {
+        origin: origin.port,
+        launch: { ...launchFor(childThread), parentThreadId: egressThread },
+      });
+      const tunnel = await openTunnel(child.proxy, "registry.example.com:443", child.authorization);
+      expect(await roundTrip(tunnel.socket, "payload", 7)).toBe("payload");
+      await ask(child, `${name}:443`);
+      await child.finish();
+    }
+    const standing = (host: EgressHost, name: string, threadId = egressThread) =>
+      host.rules.answer({
+        threadId: String(threadId),
+        principal: person,
+        grants: [{ host: name, port: 443, scope: eightHours }],
+      });
+    const projectWide = (host: EgressHost, name: string, threadId = egressThread) =>
+      host.rules.answer({
+        threadId: String(threadId),
+        principal: person,
+        grants: [{ host: name, port: 443, scope: { kind: "project", lifetime: "7d" } }],
+      });
+
+    it("taints the thread and its proposals when a launch's summary cannot be recorded", async () => {
+      const host = egressHost({ journal: refusing(TOOL_EGRESS_EVENT_NAMES.launchSummarized) });
+      const launch = await startLaunch(host);
+      await ask(launch, "mirror.example.com:443");
+      expect(await launch.finish()).toEqual({ status: "unavailable" });
+      expect(host.tainted(String(egressThread))).toBe(true);
+      expect(host.rules.view(String(egressThread), "local-window")?.proposals).toEqual([
+        expect.objectContaining({ host: "mirror.example.com", threadTainted: true }),
+      ]);
+    });
+
+    it("refuses a wildcard standing rule that covers a host a tainted launch asked for", async () => {
+      const host = egressHost();
+      expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+      await taintedChildAsks(host, "cdn.mirror.example.com");
+      expect(standing(host, "*.mirror.example.com")).toEqual({
+        kind: "refused",
+        reason: "thread-tainted",
+      });
+      expect(standing(host, "*.other.example.com")).toMatchObject({ kind: "answered" });
+    });
+
+    it("marks an open clean proposal tainted when a tainted launch asks for the same host", async () => {
+      const host = egressHost();
+      expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+      const clean = await startLaunch(host);
+      await ask(clean, "mirror.example.com:443");
+      await clean.finish();
+      expect(host.rules.view(String(egressThread), "local-window")?.proposals).toEqual([
+        expect.objectContaining({ host: "mirror.example.com", threadTainted: false }),
+      ]);
+      await taintedChildAsks(host, "mirror.example.com");
+      expect(host.rules.view(String(egressThread), "local-window")?.proposals).toEqual([
+        expect.objectContaining({ host: "mirror.example.com", threadTainted: true }),
+      ]);
+      expect(standing(host, "mirror.example.com")).toEqual({
+        kind: "refused",
+        reason: "thread-tainted",
+      });
+    });
+
+    it("keeps refusing a standing rule for a tainted host after its proposal is declined, here and from a sibling thread", async () => {
+      const host = egressHost();
+      expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+      await taintedChildAsks(host, "mirror.example.com");
+      const [proposal] = host.rules.view(String(egressThread), "local-window")?.proposals ?? [];
+      expect(
+        host.rules.decline({
+          threadId: String(egressThread),
+          principal: person,
+          proposalIds: [String(proposal?.proposalId)],
+        }),
+      ).toEqual({ kind: "answered", ruleIds: [] });
+      expect(standing(host, "mirror.example.com")).toEqual({
+        kind: "refused",
+        reason: "thread-tainted",
+      });
+      expect(projectWide(host, "mirror.example.com", egressOtherThread)).toEqual({
+        kind: "refused",
+        reason: "thread-tainted",
+      });
+      // A thread rule on the sibling reaches only the sibling, which asked for nothing.
+      expect(standing(host, "mirror.example.com", egressOtherThread)).toMatchObject({
+        kind: "answered",
+      });
+      // The clamp survives a restart.
+      expect(
+        egressHost({
+          base: {
+            connection: host.connection,
+            journal: host.journal,
+            store: host.store,
+            clears: host.clears,
+          },
+        }).rules.answer({
+          threadId: String(egressThread),
+          principal: person,
+          grants: [{ host: "mirror.example.com", port: 443, scope: eightHours }],
+        }),
+      ).toEqual({ kind: "refused", reason: "thread-tainted" });
+    });
+
+    it("lands nothing of an answer whose Project half cannot be journaled", () => {
+      const host = egressHost({ journal: refusing(TOOL_EGRESS_EVENT_NAMES.projectRuleGranted) });
+      expect(
+        host.rules.answer({
+          threadId: String(egressThread),
+          principal: person,
+          grants: [
+            { host: "registry.example.com", port: 443, scope: eightHours },
+            { host: "pypi.example.com", port: 443, scope: { kind: "project", lifetime: "7d" } },
+          ],
+        }),
+      ).toEqual({ kind: "refused", reason: "unavailable" });
+      expect(host.events(TOOL_EGRESS_THREAD_AGGREGATE)).toEqual([]);
+      expect(host.rules.view(String(egressThread), "local-window")?.threadRules).toEqual([]);
+      expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+    });
+
+    it.each([
+      {
+        name: "its rule id",
+        corrupt: (payload: object) => ({ ...payload, extra: true }),
+        unreadable: false,
+      },
+      { name: "nothing", corrupt: () => ({ unreadable: true }), unreadable: true },
+    ])(
+      "keeps a revoked rule revoked after a restart when its revocation no longer decodes and shows $name",
+      async ({ corrupt, unreadable }) => {
+        const host = egressHost();
+        const origin = await tcpFixture();
+        const granted = grantThreadRule(host, "registry.example.com");
+        const ruleId = granted.kind === "answered" ? String(granted.ruleIds[0]) : "";
+        expect(
+          host.rules.revoke({ threadId: String(egressThread), principal: person, ruleId }),
+        ).toEqual({ kind: "answered", ruleIds: [] });
+        const restarted = egressHost({
+          base: {
+            connection: host.connection,
+            journal: host.journal,
+            store: host.store,
+            clears: host.clears,
+          },
+          journal: (journal) => ({
+            append: (input, options) => journal.append(input, options),
+            transaction: (body) => journal.transaction(body),
+            replayAggregateType: (cursor) =>
+              journal
+                .replayAggregateType(cursor)
+                .map((envelope) =>
+                  envelope.eventName === TOOL_EGRESS_EVENT_NAMES.threadRuleRevoked
+                    ? { ...envelope, payload: corrupt(envelope.payload as object) }
+                    : envelope,
+                ),
+          }),
+        });
+        expect(restarted.rules.view(String(egressThread), "local-window")?.threadRules).toEqual([]);
+        const launch = await startLaunch(restarted, { origin: origin.port });
+        expect(await ask(launch, "registry.example.com:443")).toBe(
+          "octant-egress-refused: no-rule registry.example.com:443",
+        );
+        if (unreadable) {
+          // No rule is granted on an aggregate whose revocations cannot be read.
+          expect(grantThreadRule(restarted, "registry.example.com")).toEqual({
+            kind: "refused",
+            reason: "unavailable",
+          });
+        }
+      },
+    );
+  });
+
   describe("records", () => {
     it("puts nothing in force when a grant cannot be journaled", async () => {
       const host = egressHost({
@@ -2977,6 +3173,7 @@ describe("native harness tool egress grants and learn mode", () => {
             return journal.append(input, options);
           },
           replayAggregateType: (cursor) => journal.replayAggregateType(cursor),
+          transaction: (body) => journal.transaction(body),
         }),
       });
       const origin = await tcpFixture();
@@ -3092,6 +3289,7 @@ describe("native harness tool egress grants and learn mode", () => {
             return journal.append(input, options);
           },
           replayAggregateType: (cursor) => journal.replayAggregateType(cursor),
+          transaction: (body) => journal.transaction(body),
         }),
       });
       const launch = await startLaunch(dying);
