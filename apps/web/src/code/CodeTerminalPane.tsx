@@ -539,8 +539,8 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           confirmLabel="Restart with the Browser"
           details={
             <p>
-              The CLI reaches it through the octant command, which must be on this terminal's PATH.
-              A headless install has it; the desktop app does not include it yet.
+              The CLI reaches it through the octant mcp command. The Octant app for macOS adds
+              octant to this terminal's PATH; with a headless install, use the install's own.
             </p>
           }
           onCancel={() => setConfirmingBrowser(false)}

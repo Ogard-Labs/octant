@@ -22,6 +22,7 @@ import {
   CANVAS_PROTOTYPE_PRELOAD_FILENAME,
   CODE_APPROVAL_PRELOAD_FILENAME,
   DESKTOP_PRELOAD_FILENAME,
+  TERMINAL_LAUNCHER_DIRECTORY_NAME,
 } from "../apps/desktop/src/runtimePaths";
 import { buildCodeFileHelper } from "./build-code-file-helper";
 import { buildDeviceHelper } from "./build-device-helper";
@@ -230,12 +231,24 @@ export const REQUIRED_DARWIN_MANAGED_TOOL_FILES = [
   "Octant.app/Contents/Resources/managed-tools/serve-avd/dist/serve-avd.js",
 ] as const;
 
+/**
+ * The terminal's `octant` (only `octant mcp`): a shell launcher and the one-file
+ * bundle it runs with the app's own runtime in Node mode. The host puts this
+ * folder on a Code thread terminal's `PATH` while the terminal holds a Browser
+ * grant, so nothing else may be added to it.
+ */
+export const REQUIRED_DARWIN_TERMINAL_LAUNCHER_FILES = [
+  `Octant.app/Contents/Resources/${TERMINAL_LAUNCHER_DIRECTORY_NAME}/octant`,
+  `Octant.app/Contents/Resources/${TERMINAL_LAUNCHER_DIRECTORY_NAME}/octant.mjs`,
+] as const;
+
 /** Full darwin-arm64 checklist (staged payload + PTY helper + Keychain/code-file helpers). */
 export const REQUIRED_PACKAGED_FILES = [
   ...REQUIRED_STAGED_PACKAGED_FILES,
   REQUIRED_DARWIN_PTY_HELPER_FILE,
   ...REQUIRED_DARWIN_HELPER_FILES,
   ...REQUIRED_DARWIN_MANAGED_TOOL_FILES,
+  ...REQUIRED_DARWIN_TERMINAL_LAUNCHER_FILES,
 ] as const;
 
 export const PACKAGED_EXECUTABLE_FILES = [
@@ -244,7 +257,48 @@ export const PACKAGED_EXECUTABLE_FILES = [
   "native/octant-device-helper",
   "native/cua-driver",
   "app/apps/server/node_modules/node-pty/build/Release/spawn-helper",
+  `${TERMINAL_LAUNCHER_DIRECTORY_NAME}/octant`,
 ] as const;
+
+/**
+ * The terminal launcher. A terminal's own `octant mcp` cannot rely on a
+ * JavaScript runtime the person installed, and a Bun started inside the
+ * terminal's confinement failed before loading anything (it lists the home
+ * directory, which the profile denies). The app's executable in Node mode is
+ * the runtime the packaged host already runs on, and it starts there once the
+ * terminal may read it. The paths are relative to this script, because the app
+ * can be moved or translocated; the host grants the terminal read access to the
+ * same folder and runtime.
+ */
+export function terminalLauncherScript(productName: string): string {
+  return [
+    "#!/bin/sh",
+    "# The Octant app's `octant` for a Code thread terminal that may use the Browser.",
+    "# It runs `octant mcp` with the app's own runtime in Node mode.",
+    'launcher_directory=$(dirname -- "$0")',
+    "export ELECTRON_RUN_AS_NODE=1",
+    `exec "$launcher_directory/../../MacOS/${productName}" "$launcher_directory/octant.mjs" "$@"`,
+    "",
+  ].join("\n");
+}
+
+/** Writes the launcher folder; its whole content is these two files. */
+export async function installTerminalLauncher(
+  repositoryRoot: string,
+  directory: string,
+  productName: string = DESKTOP_PACKAGE_IDENTITY.productName,
+): Promise<void> {
+  const bundle = "packages/cli/dist/terminal-launcher.mjs";
+  if (!existsSync(resolve(repositoryRoot, bundle))) {
+    throw new Error(`Required built output is missing: ${bundle}. Run bun run build first.`);
+  }
+  await rm(directory, { recursive: true, force: true });
+  await mkdir(directory, { recursive: true });
+  await cp(resolve(repositoryRoot, bundle), join(directory, "octant.mjs"));
+  await chmod(join(directory, "octant.mjs"), 0o644);
+  await writeFile(join(directory, "octant"), terminalLauncherScript(productName), { mode: 0o755 });
+  await chmod(join(directory, "octant"), 0o755);
+}
 export const PACKAGED_LINUX_EXECUTABLE_FILES = [] as const;
 export const PACKAGED_ARM64_FILES = [
   "native/octant-keychain-helper",
@@ -918,6 +972,10 @@ async function packageDarwinDesktop(
     repositoryRoot,
     join(finalApp, "Contents/Resources/managed-tools"),
     "darwin",
+  );
+  await installTerminalLauncher(
+    repositoryRoot,
+    join(finalApp, "Contents/Resources", TERMINAL_LAUNCHER_DIRECTORY_NAME),
   );
   const keychainHelper = join(nativeResources, "octant-keychain-helper");
   await buildKeychainHelper(
