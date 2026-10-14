@@ -72,6 +72,10 @@ export function useSessionCompaction(
   // Compactions this window saw running or asked for, so the end of one is
   // told apart from a result that was already there.
   const watched = useRef(new Set<string>());
+  // The compaction this window last asked for. Its answer can be lost on the
+  // way back while the host still journaled it; the host's record then
+  // replaces the window's own "did not answer".
+  const asked = useRef<string | undefined>(undefined);
   const onSettled = useRef(options.onSettled);
   onSettled.current = options.onSettled;
   const newCompactionId = options.newCompactionId ?? randomId;
@@ -88,6 +92,7 @@ export function useSessionCompaction(
       const latest = next.latestCompaction;
       if (latest !== undefined) {
         const id = latestId(latest);
+        if (id === asked.current) setErrorMessage(undefined);
         if (latest.status === "running") watched.current.add(id);
         else if (watched.current.delete(id)) {
           setSettledId(id);
@@ -100,13 +105,19 @@ export function useSessionCompaction(
     } catch (error) {
       if (controller.signal.aborted) return;
       if (error instanceof ContextClientFailure && error.category === "interrupted") return;
-      // A host that cannot say is not offering anything.
-      setState(undefined);
+      // A host that cannot say is not offering anything. A compaction it last
+      // reported running still holds the thread, so that answer stands and is
+      // asked about again rather than releasing the composer on a missed read.
+      setState((current) =>
+        current?.latestCompaction?.status === "running" ? current : undefined,
+      );
+      setAnswers((count) => count + 1);
     }
   }, [client, subject]);
 
   useEffect(() => {
     watched.current.clear();
+    asked.current = undefined;
     setState(undefined);
     setStarting(false);
     setRefusal(undefined);
@@ -139,15 +150,17 @@ export function useSessionCompaction(
     setErrorMessage(undefined);
     const compactionId = decodeContextCompactionId(newCompactionId());
     watched.current.add(String(compactionId));
+    asked.current = String(compactionId);
     try {
       await client.execute({ kind: "compact-session", subject, compactionId });
     } catch (error) {
-      watched.current.delete(String(compactionId));
       if (
         error instanceof ContextClientFailure &&
         error.category === "compaction-refused" &&
         error.reason !== undefined
       ) {
+        // A refusal is decided before anything is journaled.
+        watched.current.delete(String(compactionId));
         setRefusal(error.reason);
       } else {
         setErrorMessage("Couldn't compact: the host did not answer. Try again.");

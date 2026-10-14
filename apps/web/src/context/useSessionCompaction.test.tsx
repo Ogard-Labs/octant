@@ -133,6 +133,49 @@ describe("useSessionCompaction", () => {
     await waitFor(() => expect(result.current.refusal).toBeUndefined());
   });
 
+  it("keeps a running compaction, and keeps asking, when one read fails", async () => {
+    let release: (state: ContextCompactionState) => void = () => undefined;
+    const third = new Promise<ContextCompactionState>((resolve) => {
+      release = resolve;
+    });
+    const readCompaction = vi
+      .fn<ContextClient["readCompaction"]>()
+      .mockResolvedValueOnce(running)
+      .mockRejectedValueOnce(new ContextClientFailure("unavailable", "Down."))
+      .mockReturnValueOnce(third)
+      .mockResolvedValue(failed);
+    const client = fakeClient({ readCompaction });
+    const { result } = renderHook(() => useSessionCompaction({ client, pollMs: 5, subject }));
+
+    // The read after the failed one is under way, so polling went on.
+    await waitFor(() => expect(readCompaction).toHaveBeenCalledTimes(3));
+    expect(result.current.state?.latestCompaction?.status).toBe("running");
+    release(failed);
+    await waitFor(() => expect(result.current.state?.latestCompaction?.status).toBe("failed"));
+    expect(result.current.settledId).toBe(compactionId);
+  });
+
+  it("takes the host's record over a request whose answer was lost", async () => {
+    const answers: Array<ContextCompactionState> = [available, running, failed];
+    const readCompaction = vi.fn<ContextClient["readCompaction"]>(
+      async () => answers.shift() ?? failed,
+    );
+    const execute = vi.fn<ContextClient["execute"]>(async () => {
+      throw new ContextClientFailure("unavailable", "Lost.");
+    });
+    const client = fakeClient({ execute, readCompaction });
+    const { result } = renderHook(() =>
+      useSessionCompaction({ client, newCompactionId, pollMs: 5, subject }),
+    );
+    await waitFor(() => expect(result.current.state).toEqual(available));
+
+    await act(() => result.current.compact());
+
+    expect(result.current.errorMessage).toBeUndefined();
+    await waitFor(() => expect(result.current.state?.latestCompaction?.status).toBe("failed"));
+    expect(result.current.settledId).toBe(compactionId);
+  });
+
   it("offers nothing when the host cannot say", async () => {
     const client = fakeClient({
       readCompaction: vi.fn(async () => {
