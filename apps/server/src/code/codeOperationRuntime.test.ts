@@ -1392,7 +1392,7 @@ describe("CodeOperationRuntime", () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
     const recorded: Array<unknown> = [];
-    const compactedSince: Array<string> = [];
+    const compactedAfter: Array<number> = [];
     let ledgerCompacted = false;
     const fixture = runtimeFixture({
       provider: { ...providerDriver(connection), kind: "codex" },
@@ -1400,8 +1400,8 @@ describe("CodeOperationRuntime", () => {
         record: (input) => {
           recorded.push(input);
         },
-        compactedSince: (_, since) => {
-          compactedSince.push(since);
+        compactedAfter: (_, globalSequence) => {
+          compactedAfter.push(globalSequence);
           return ledgerCompacted;
         },
       },
@@ -1471,7 +1471,9 @@ describe("CodeOperationRuntime", () => {
         { status: "uncounted", reason: "compacted" },
         { status: "uncounted", reason: "compacted" },
       ]);
-      expect(compactedSince).toEqual([now]);
+      // Asked after the first turn's report, by its place in the journal.
+      expect(compactedAfter).toEqual([expect.any(Number)]);
+      expect(compactedAfter[0]).toBeGreaterThan(0);
       expect(recorded).toEqual([
         {
           threadId,

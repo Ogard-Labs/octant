@@ -1491,25 +1491,33 @@ describe("journaling a runtime's own compactions", () => {
     fixture.connection.close();
   });
 
-  it("tells a later turn the session was compacted after a report, until a newer report", () => {
+  it("tells a later turn the session was compacted after a report, by journal order", () => {
     const fixture = createFixture();
     planSession(fixture);
-    const earlier = "2026-07-18T20:00:00.000Z";
-    expect(fixture.harness.sessionCompactedSince(subject, earlier)).toBeUndefined();
+    // Every event here carries the same clock reading; only the journal
+    // says which came first.
+    const report = fixture.journal.headSequence();
+    expect(fixture.harness.sessionCompactedAfter(subject, report)).toBe(false);
+    fixture.harness.requestCompaction({
+      subject,
+      compactionId,
+      executor: { kind: "host", providerInstanceId, modelId },
+    });
+    fixture.harness.failCompaction(subject, compactionId, "summary-failed");
+    // A request that ended without touching the session changed nothing.
+    expect(fixture.harness.sessionCompactedAfter(subject, report)).toBe(false);
     fixture.harness.recordAutomaticCompaction({
       subject,
       turnKey: "attempt-1",
       sighting,
       executor,
     });
-    expect(fixture.harness.sessionCompactedSince(subject, earlier)).toEqual({
-      kind: "known",
-      tokens: 300,
-      accuracy: "provider-reported",
-    });
-    // A report made with or after the compaction already describes the
+    expect(fixture.harness.sessionCompactedAfter(subject, report)).toBe(true);
+    // A report journaled after the compaction already describes the
     // compacted window.
-    expect(fixture.harness.sessionCompactedSince(subject, now)).toBeUndefined();
+    expect(fixture.harness.sessionCompactedAfter(subject, fixture.journal.headSequence())).toBe(
+      false,
+    );
     fixture.connection.close();
   });
 
@@ -1540,7 +1548,7 @@ describe("journaling a runtime's own compactions", () => {
 
     const restarted = createFixture(fixture.path);
     expect(restarted.harness.latestCompaction(subject)).toBeUndefined();
-    expect(restarted.harness.sessionCompactedSince(subject, undefined)).toBeUndefined();
+    expect(restarted.harness.sessionCompactedAfter(subject, 0)).toBe(false);
     restarted.connection.close();
   });
 });

@@ -2810,8 +2810,9 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   a turn, the runner that sees `context-compacted` reports the turn's later
   usage as `compacted`. Across turns, a Code turn that resumes a session stops
   carrying the previous turn's counted copies when the ledger records a
-  compaction after that turn's last usage report: a completed one, or a failed
-  one that may have changed the session.
+  compaction after that turn's last usage report in journal order (not by the
+  events' clocks, which can tie): a completed one, or a failed one that may
+  have changed the session.
 - A request with no terminal event when the host starts is closed as
   `context.compaction-failed@1` with `interrupted`; for a runtime executor the
   session may have changed, and the next usage report shows what it holds.

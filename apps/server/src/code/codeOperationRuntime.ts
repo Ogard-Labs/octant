@@ -374,7 +374,8 @@ export interface CodeOperationRuntimeOptions {
       readonly executor: Extract<ContextCompactionExecutor, { readonly kind: "runtime" }>;
       readonly priorOccupancy?: { readonly tokens: number; readonly observedAt: string };
     }) => void;
-    readonly compactedSince: (threadId: CodeThreadId, since: string) => boolean;
+    /** Whether the ledger records a compaction after this journal position. */
+    readonly compactedAfter: (threadId: CodeThreadId, globalSequence: number) => boolean;
   };
   /**
    * Reads the thread's own earlier conversation for a provider-switch handoff,
@@ -2332,10 +2333,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         priorTurn,
         previousBreakdown: recovered.priorTurnBreakdown,
         compactedSinceReport:
-          recovered.priorTurnReportedAt !== undefined &&
-          this.#options.sessionCompactions?.compactedSince(
+          recovered.priorTurnReportSequence !== undefined &&
+          this.#options.sessionCompactions?.compactedAfter(
             input.thread.id,
-            recovered.priorTurnReportedAt,
+            recovered.priorTurnReportSequence,
           ) === true,
       }),
       ...(input.sentContext === undefined ? {} : { sentContext: input.sentContext }),

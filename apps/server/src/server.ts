@@ -5133,11 +5133,11 @@ export function startOctantServer(
               ...input,
             });
           },
-          compactedSince: (threadId, since) =>
-            contextHarness.sessionCompactedSince(
+          compactedAfter: (threadId, globalSequence) =>
+            contextHarness.sessionCompactedAfter(
               decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
-              since,
-            ) !== undefined,
+              globalSequence,
+            ),
         },
         providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom }) =>
           selectCodeConversation(thread.id, {

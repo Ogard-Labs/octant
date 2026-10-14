@@ -435,12 +435,15 @@ export class CodeOperationEventStore {
          * Absent when that turn reported none or the report said nothing of it.
          */
         readonly priorTurnBreakdown?: ProviderContextBreakdown;
-        /** When that report was recorded; present with the breakdown. */
-        readonly priorTurnReportedAt?: string;
+        /**
+         * Where that report sits in the journal; present with the breakdown.
+         * A compaction journaled after it is ordered by this, not by clocks.
+         */
+        readonly priorTurnReportSequence?: number;
       }
     | { readonly status: "rebuild-required" } {
     try {
-      const read = (kind: string, limit: number) =>
+      const recorded = (kind: string, limit: number) =>
         this.#journal
           .latestThreadEvents({
             aggregateType: "code-operation",
@@ -463,8 +466,10 @@ export class CodeOperationEventStore {
                 "journal-mismatch",
                 "Session event ownership differs.",
               );
-            return frame;
+            return { frame, globalSequence: envelope.globalSequence };
           });
+      const read = (kind: string, limit: number) =>
+        recorded(kind, limit).map((entry) => entry.frame);
       const session = read("provider-session-ready", 1)[0]?.event;
       const priorStart = read("conversation-turn-started", 2).find(
         (frame) => String(frame.operationId) !== String(operationId),
@@ -482,7 +487,8 @@ export class CodeOperationEventStore {
             (frame.event.result.kind !== "provider-turn-state" ||
               (frame.event.result.state !== "running" && frame.event.result.state !== "waiting")),
         );
-      const priorUsage = read("usage", 1)[0];
+      const priorUsageRecord = recorded("usage", 1)[0];
+      const priorUsage = priorUsageRecord?.frame;
       const priorTurnBreakdown =
         priorStart !== undefined &&
         priorUsage !== undefined &&
@@ -495,9 +501,9 @@ export class CodeOperationEventStore {
         priorTurn: priorStart !== undefined,
         priorTurnSettled,
         ...(session?.kind === "provider-session-ready" ? { session } : {}),
-        ...(priorTurnBreakdown === undefined || priorUsage === undefined
+        ...(priorTurnBreakdown === undefined || priorUsageRecord === undefined
           ? {}
-          : { priorTurnBreakdown, priorTurnReportedAt: priorUsage.occurredAt }),
+          : { priorTurnBreakdown, priorTurnReportSequence: priorUsageRecord.globalSequence }),
       };
     } catch {
       return { status: "rebuild-required" };

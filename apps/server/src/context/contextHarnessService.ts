@@ -60,6 +60,7 @@ import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
+  contextCompactionEndedAfter,
   listRunningContextCompactions,
   readContextCompaction,
   readContextCompactions,
@@ -1213,16 +1214,26 @@ export class ContextHarnessService {
   }
 
   /**
+   * Whether the ledger records a compaction that may have changed the
+   * subject's session after a journal position, such as the usage report a
+   * turn's window breakdown was counted from.
+   */
+  sessionCompactedAfter(subject: ContextSubjectRef, globalSequence: number): boolean {
+    this.#assertReady();
+    return contextCompactionEndedAfter(this.#persistence.connection, subject, globalSequence);
+  }
+
+  /**
    * What the newest compaction of the subject's session after `since` left in
    * its window: its own figure after, or `pending` when it gave none or may
    * have changed the session without saying how. Undefined when nothing has
-   * compacted the session since; with no `since`, any compaction counts.
+   * compacted the session since; with no `since`, any compaction counts. A
+   * usage report carries only its time, so this compares clocks.
    */
-  sessionCompactedSince(
+  #compactedSince(
     subject: ContextSubjectRef,
     since: string | undefined,
   ): KnownTokenMeasurement | { readonly kind: "pending" } | undefined {
-    this.#assertReady();
     const after = since === undefined ? undefined : Date.parse(since);
     const latest = readContextCompactions(this.#persistence.connection, subject)
       .filter((record) => {
@@ -1264,7 +1275,7 @@ export class ContextHarnessService {
             tokens: planned.next.plan.plannedInputTokens,
             accuracy: "conservative-heuristic",
           };
-    const changedSince = this.sessionCompactedSince(subject, report?.observedAt);
+    const changedSince = this.#compactedSince(subject, report?.observedAt);
     if (changedSince !== undefined) {
       if (changedSince.kind === "known") return changedSince;
       return report === undefined
