@@ -114,6 +114,22 @@ export const decodeThreadStartResult = decode(ThreadResult);
 export const decodeThreadResumeResult = decode(ThreadResult);
 
 /**
+ * Of `skills/list` only paths and scopes are read: a thread switches the
+ * skills Codex found in the Project off by their paths, and every package it
+ * could not load as well, which carries a path but no scope.
+ */
+const SkillsListResult = Schema.Struct({
+  data: Schema.Array(
+    Schema.Struct({
+      skills: Schema.Array(Schema.Struct({ path: Schema.NonEmptyString, scope: Schema.String })),
+      errors: Schema.Array(Schema.Struct({ path: Schema.NonEmptyString })),
+    }),
+  ),
+});
+export type CodexSkillsListResult = typeof SkillsListResult.Type;
+export const decodeSkillsListResult = decode(SkillsListResult);
+
+/**
  * Of the effective config only the configured MCP server names are read: a
  * Chat thread switches each one off by name.
  */

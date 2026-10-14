@@ -4098,8 +4098,32 @@ prompt, schema, tool, route, model, or capability.
   A runtime that loads Project skill folders by itself is denied each such
   folder in the OS profile (`forbiddenRootEntries`, read and write, in every
   posture including Full access) unless a switch of its own is proven to turn
-  that loading off. Codex is the exception: it has no Octant OS profile, so
-  its `.agents/skills` loading is not handled yet. Only the skill folder is
+  that loading off. Codex is the exception: it has no Octant OS profile and no
+  switch, so before every `thread/start` and `thread/resume`, in every mode,
+  the driver lists Codex's skills at the Project root (`skills/list` with
+  `forceReload`) and sends a `skills.config` rule with the thread that
+  disables each Project skill by its `SKILL.md` path, and each package Codex
+  reported it could not load, which carries a path but no scope. A path, not a
+  name, because a name rule would also disable a user skill of that name.
+  Every scope other than `user`, `system`, and `admin` counts as the
+  Project's, so a scope a later release adds is disabled too. A thread whose
+  skills cannot be listed does not start. Older releases were read at their
+  source tags. Codex loads Project skills by itself from 0.66.0
+  (`.codex/skills` at the repository root, on by default from 0.79.0;
+  `.agents/skills` from 0.94.0), and reads `skills.config` rules from a
+  thread's `config` only from 0.108.0. Before that they came from the user's
+  own config file alone. So a release from 0.66.0 up to 0.108.0 refuses every
+  thread and asks for an update. A release older than 0.66.0 loads no Project
+  skill: when it answers `skills/list` with method-not-found, the thread runs
+  without rules. The rules hold for the thread as started or resumed: Codex
+  still lists those skills, as disabled, and a skill created in the Project
+  during a thread is enabled from the next turn until the thread is resumed.
+  Codex also loads the user's own `~/.agents/skills` and `$CODEX_HOME/skills`
+  (`scope: user`) by itself; those are not handled. Measured against codex-cli
+  0.162.1, nothing stops the discovery itself: the app-server ignores
+  `features.skip_host_skill_discovery`, `project_root_markers = []` still
+  scans the Project root, and a `skills.config` rule matches one skill's exact
+  name or `SKILL.md` path, never a folder. Only the skill folder is
   denied; the folder around it (`.claude`, `.github`, `.grok`, and so on)
   stays readable, because it holds the runtime's own settings or the
   Project's other content. fx and Kimi Code deny all of `.agents`. Because the
@@ -4141,7 +4165,7 @@ prompt, schema, tool, route, model, or capability.
   | Kilo (ACP)                    | None: switched off                                                                                                                                                                  | `KILO_DISABLE_EXTERNAL_SKILLS=1`, `KILO_DISABLE_PROJECT_CONFIG=1`, `KILO_PURE=1`                                                                                |
   | Mistral Vibe (ACP)            | None: switched off                                                                                                                                                                  | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`                                                                 |
   | Pi, Oh My Pi                  | None: switched off                                                                                                                                                                  | `--no-skills`                                                                                                                                                   |
-  | Codex                         | `.agents/skills`, in the Project and up to the repository root (app-server `skills/list`, 0.162.1); not `.claude/skills`                                                            | Not handled yet: Codex runs without an Octant OS profile, so a root deny does not apply                                                                         |
+  | Codex                         | `.agents/skills`, in the Project and up to the repository root (app-server `skills/list`, 0.162.1); not `.claude/skills`                                                            | Disabled by path at each thread start and resume; refused if unlisted. Still listed, as disabled; one made mid-thread stays on until resume                     |
   | Direct HTTP and image drivers | None: no runtime of their own                                                                                                                                                       | n/a                                                                                                                                                             |
 
   Where a skill is found decides who sees it, in the catalog, the palette, the
