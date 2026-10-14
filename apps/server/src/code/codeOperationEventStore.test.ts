@@ -8,6 +8,7 @@ import {
   ReplayCursor,
   decodeCodeEvidenceReference,
   decodeCodeOperationEvent,
+  decodeProviderSessionId,
   decodeProviderRuntimeEvent,
   decodeCodeOperationId,
   decodeCodeThreadId,
@@ -257,6 +258,47 @@ describe("CodeOperationEventStore", () => {
     expect(
       store.providerSessionForThread(threadId, "89000000-0000-4000-8000-000000000099" as never),
     ).not.toHaveProperty("priorTurnBreakdown");
+    fixture.connection.close();
+  });
+
+  it("reads a session's window occupancy only from a usage report of a turn on that session", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const ready = (sessionId: string) =>
+      decodeCodeOperationEvent({
+        kind: "provider-session-ready",
+        sessionId,
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        checkoutId: "89000000-0000-4000-8000-000000000060",
+        resumeCursor: { driverKind: "codex", value: `native-${sessionId}` },
+      });
+    const first = decodeProviderSessionId("89000000-0000-4000-8000-000000000050");
+    const second = decodeProviderSessionId("89000000-0000-4000-8000-000000000051");
+    expect(store.latestWindowOccupancy(threadId, first)).toBeUndefined();
+    store.append({ threadId, operationId, expectedCursor: 0, event: ready(first) });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "usage",
+        inputTokens: 40_000,
+        outputTokens: 300,
+        contextTokens: 27_600,
+      }),
+    });
+    expect(store.latestWindowOccupancy(threadId, first)).toMatchObject({ tokens: 27_600 });
+
+    // A fresh session whose turn reported nothing has no figure of its own;
+    // the earlier session's report says nothing about it.
+    store.append({
+      threadId,
+      operationId: otherOperationId,
+      expectedCursor: 0,
+      event: ready(second),
+    });
+    expect(store.latestWindowOccupancy(threadId, second)).toBeUndefined();
     fixture.connection.close();
   });
 

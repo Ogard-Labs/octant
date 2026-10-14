@@ -49,6 +49,7 @@ import { effectiveAgentRunExecutionTarget } from "@octant/domain";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import type { ChatServiceExecutionContext } from "../chat/chatService";
 import type { CodeOperationExecuteOptions } from "../code/codeOperationService";
+import { CodeServiceError } from "../code/codeService";
 import type { Journal } from "../persistence/journal";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
@@ -143,6 +144,8 @@ export interface UsageResumePortDependencies {
   };
   readonly code: {
     readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
+    /** Whether the thread's session is being compacted, which holds every new turn. */
+    readonly compacting?: (threadId: CodeThreadId) => boolean;
     readonly readRuntimeWorks: (threadId: CodeThreadId) => ReadonlyArray<ProjectedCodeRuntimeWork>;
     readonly readOperationContents?: (
       windowId: WindowId,
@@ -498,6 +501,9 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
       ) {
         return refused("The recorded stop's preserved prompt is unavailable.");
       }
+      // Checked before the prompt is staged: a turn the compaction would
+      // refuse must not leave staged evidence behind it.
+      if (deps.code.compacting?.(threadId) === true) return COMPACTION_DEFERRAL;
       try {
         const batch = await deps.code.readOperationContents(scopeId, {
           threadId,
@@ -531,6 +537,12 @@ function codePort(deps: UsageResumePortDependencies): UsageResumeModePort {
                 : "The continuation was not admitted.",
             );
       } catch (error) {
+        // A compaction that began while the prompt was being staged refuses the
+        // turn as `waiting`; the continuation waits it out. The refusal says so
+        // itself: by now the compaction may already have ended.
+        if (error instanceof CodeServiceError && error.failure.category === "waiting") {
+          return { kind: "deferred", detail: error.failure.message };
+        }
         return refused(refusalDetail(error));
       }
     },

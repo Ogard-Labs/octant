@@ -654,6 +654,19 @@ describe("queued turn admission", () => {
     ).toEqual({ status: "refused", reason: "authority-revoked" });
     expect(execute).not.toHaveBeenCalled();
   });
+  it("holds a queued message back while the thread's session compacts, and releases it after", async () => {
+    const { deps } = setup();
+    let compacting = true;
+    const port = createThreadMessageQueuePort({ ...deps, compacting: () => compacting });
+    const input = { scope: { mode: "chat", threadId }, windowId, intent: "dispatch" } as const;
+
+    // Busy, not held: the queue waits as it waits for a running turn, and
+    // nothing asks the person to resume it.
+    expect(await port.inspect(input)).toMatchObject({ status: "busy" });
+    compacting = false;
+    expect(await port.inspect(input)).toMatchObject({ status: "ready" });
+  });
+
   it("requires the original live window and refuses a disabled mode", async () => {
     const { deps } = setup();
     const input = { scope: { mode: "chat", threadId }, windowId, intent: "enqueue" } as const;
