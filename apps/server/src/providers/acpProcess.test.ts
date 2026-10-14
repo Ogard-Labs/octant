@@ -597,6 +597,7 @@ describe("ACP child-server profiles", () => {
       OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
       OPENCODE_DISABLE_DEFAULT_PLUGINS: "1",
       OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
+      OPENCODE_DISABLE_PROJECT_CONFIG: "1",
       OPENCODE_PURE: "1",
     });
     expect(JSON.parse(environment.OPENCODE_CONFIG_CONTENT ?? "{}")).toMatchObject({
@@ -760,23 +761,29 @@ describe.each(denyDefaultProfiles)("ACP deny-default confinement ($displayName)"
         environment: { PATH: "/usr/bin" },
       }),
     );
-    if ((profile.process.forbiddenRootEntries ?? []).length === 0) {
+    const deniedPaths = [
+      ...(profile.process.forbiddenRootEntries ?? []).map((entry) =>
+        join(target.canonicalRoot, entry),
+      ),
+      ...(hostAuthentication?.kind === "directory"
+        ? (profile.process.hostDeniedEntries ?? []).map((entry) =>
+            join(target.canonicalRoot, "host-auth", entry),
+          )
+        : []),
+    ];
+    if (deniedPaths.length === 0) {
       expect(fullAccess).toMatchObject({ command: target.binaryPath, args });
     } else {
       // 0006's static extension denials outlive Full access: a workspace
-      // instruction, project config, skill root, or project MCP server the
-      // agent would otherwise load on its own stays denied even when the rest
-      // of the sandbox is opened.
+      // instruction, project config, skill root, project MCP server, or the
+      // runtime's own folder-trust list stays denied even when the rest of
+      // the sandbox is opened.
       expect(fullAccess.command).toBe(target.sandboxPath);
       const fullAccessProfile = fullAccess.args[1]!;
       expect(fullAccessProfile).toContain("(allow default)");
-      for (const entry of profile.process.forbiddenRootEntries ?? []) {
-        expect(fullAccessProfile).toContain(
-          `(deny file-read* (subpath "${join(target.canonicalRoot, entry)}"))`,
-        );
-        expect(fullAccessProfile).toContain(
-          `(deny file-write* (subpath "${join(target.canonicalRoot, entry)}"))`,
-        );
+      for (const path of deniedPaths) {
+        expect(fullAccessProfile).toContain(`(deny file-read* (subpath "${path}"))`);
+        expect(fullAccessProfile).toContain(`(deny file-write* (subpath "${path}"))`);
       }
     }
     for (const file of profile.process.managedFiles({
@@ -1143,6 +1150,56 @@ describe("Grok Build consumed configuration", () => {
     });
     expect(existsSync(join(managedHome, "config.toml"))).toBe(false);
   });
+
+  it.each(["approval-gated", "full-access"] as const)(
+    "hides the person's folder-trust list so no Project is trusted (%s)",
+    async (executionPolicy) => {
+      const target = fixture(grok);
+      const managedHome = join(target.canonicalRoot, "managed-grok");
+      const hostHome = realpathSync(mkdtempSync(join(tmpdir(), "octant-acp-host-")));
+      directories.push(hostHome);
+      const hostAuthenticationPath = join(hostHome, ".grok");
+      mkdirSync(hostAuthenticationPath, { recursive: true });
+      writeFileSync(join(hostAuthenticationPath, "trusted_folders.toml"), "");
+      writeFileSync(join(hostAuthenticationPath, "config.toml"), "");
+      const canonicalHostPath = realpathSync(hostAuthenticationPath);
+      const launch = await Effect.runPromise(
+        makeAcpConfinementLive({
+          platform: "darwin",
+          sandboxPath: target.sandboxPath,
+          temporaryDirectory: join(target.canonicalRoot, "tmp"),
+          hostAuthenticationPath: canonicalHostPath,
+        }).prepare({
+          profile: grok,
+          binaryPath: target.binaryPath,
+          root: target.canonicalRoot,
+          managedHome,
+          mode: "code",
+          executionPolicy,
+          environment: sanitizeAcpEnvironment(
+            grok,
+            { PATH: "/usr/bin", HOME: "/Users/octant-test" },
+            { managedHome, executionPolicy },
+          ),
+        }),
+      );
+
+      expect(launch.command).toBe(target.sandboxPath);
+      const profileText = seatbeltProfile(launch);
+      const trustList = join(canonicalHostPath, "trusted_folders.toml");
+      const denyRead = profileText.lastIndexOf(`(deny file-read* (subpath "${trustList}"))`);
+      expect(denyRead).toBeGreaterThan(-1);
+      expect(profileText).toContain(`(deny file-write* (subpath "${trustList}"))`);
+      if (executionPolicy === "approval-gated") {
+        expect(denyRead).toBeGreaterThan(
+          profileText.lastIndexOf(`(allow file-read* (subpath "${canonicalHostPath}"))`),
+        );
+      }
+      expect(profileText).not.toContain(
+        `(deny file-read* (subpath "${join(canonicalHostPath, "config.toml")}"))`,
+      );
+    },
+  );
 });
 
 describe("Kimi Code host-profile extension surfaces", () => {
@@ -1361,37 +1418,70 @@ describe("Kimi Code host-profile extension surfaces", () => {
   });
 });
 
-// Each row lists the Project skill folders a runtime loads by itself, from its
-// installed bundle, source, or documentation, and the folders around them that
-// stay readable because they hold the runtime's own settings or other content.
+// Each row lists the Project skill folders, plugins, hooks, and MCP or agent
+// config a runtime loads by itself, from its installed bundle, source, or
+// documentation, and the folders around them that stay readable because they
+// hold the runtime's own settings or other content.
 describe.each([
   { profile: fx, denied: [".agents", ".claude/skills"], readable: [".claude"] },
   {
     profile: copilot,
-    denied: [".agents/skills", ".claude/skills", ".github/skills"],
-    readable: [".agents", ".claude", ".github"],
+    denied: [
+      ".agents/skills",
+      ".claude/skills",
+      ".github/agents",
+      ".github/copilot/settings.json",
+      ".github/copilot/settings.local.json",
+      ".github/extensions",
+      ".github/hooks",
+      ".github/lsp.json",
+      ".github/mcp.json",
+      ".github/skills",
+      ".mcp.json",
+    ],
+    readable: [
+      ".agents",
+      ".claude",
+      ".github",
+      ".github/copilot",
+      ".github/instructions",
+      ".github/workflows",
+    ],
   },
   {
+    // Grok's own folder trust keeps all of these out (see its trust-list
+    // test), so none is denied at the root and its git keeps working there.
     profile: grok,
-    denied: [
-      ".agents/commands",
+    denied: [],
+    readable: [
       ".agents/skills",
-      ".claude/commands",
+      ".claude",
+      ".claude/plugins",
       ".claude/skills",
-      ".cursor/skills",
-      ".grok/commands",
+      ".cursor",
+      ".grok",
+      ".grok/hooks",
+      ".grok/plugins",
       ".grok/skills",
+      ".mcp.json",
     ],
-    readable: [".agents", ".claude", ".cursor", ".grok"],
   },
   {
     profile: goose,
-    denied: [".agents/skills", ".claude/skills", ".goose/skills"],
+    denied: [".agents/plugins", ".agents/skills", ".claude/skills", ".goose/skills"],
     readable: [".agents", ".claude", ".goose"],
   },
   {
     profile: cline,
-    denied: [".agents/skills", ".claude/skills", ".cline/skills", ".clinerules/skills"],
+    denied: [
+      ".agents/skills",
+      ".claude/skills",
+      ".cline/hooks",
+      ".cline/plugins",
+      ".cline/skills",
+      ".clinerules/hooks",
+      ".clinerules/skills",
+    ],
     readable: [".agents", ".claude", ".cline", ".clinerules"],
   },
   {
@@ -1407,13 +1497,45 @@ describe.each([
   { profile: glm, denied: [".claude/skills"], readable: [".claude"] },
   {
     profile: devin,
-    denied: [".agents/skills", ".cognition/skills", ".devin/skills"],
-    readable: [".agents", ".cognition", ".devin"],
+    denied: [
+      ".agents/skills",
+      ".cognition/skills",
+      ".devin/config.json",
+      ".devin/config.local.json",
+      ".devin/hooks.json",
+      ".devin/hooks.v1.json",
+      ".devin/mcp_config.json",
+      ".devin/mcp_config.local.json",
+      ".devin/skills",
+    ],
+    // Devin writes its plans to .devin/plans, so the folder stays writable.
+    readable: [".agents", ".cognition", ".devin", ".devin/plans"],
+  },
+  {
+    profile: kimi,
+    denied: [".agents", ".kimi-code", ".mcp.json"],
+    readable: [".claude/skills"],
+  },
+  {
+    profile: vibe,
+    denied: [
+      ".vibe/agents",
+      ".vibe/config.toml",
+      ".vibe/hooks.toml",
+      ".vibe/plugins",
+      ".vibe/tools",
+    ],
+    readable: [".vibe", ".vibe/prompts"],
+  },
+  {
+    profile: kilo,
+    denied: [".kilo/mcp.json", ".kilocode/mcp.json"],
+    readable: [".kilo", ".kilocode"],
   },
 ])(
-  "Project skill folders a runtime loads by itself ($profile.displayName)",
+  "Project skills, plugins, hooks, and MCP config a runtime loads by itself ($profile.displayName)",
   ({ profile, denied, readable }) => {
-    it("denies each such folder and leaves the folders around it readable", async () => {
+    it("denies each such entry and leaves the folders around it readable", async () => {
       const target = fixture(profile);
       const managedHome = join(target.canonicalRoot, "managed-home");
       const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
