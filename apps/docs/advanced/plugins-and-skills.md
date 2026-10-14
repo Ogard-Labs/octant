@@ -224,9 +224,11 @@ provenance, and diagnostic state. New or changed skills are indexed
 **disabled** until review and desired-enabled state allow use. Only one
 same-named skill can be on where a thread could see it: turning one on turns
 off the others with that name in the same Project, plus your user-global and
-built-in ones, and leaves other Projects' skills alone. If an older version
-left two on, Octant turns both off and lists the name under **Name
-collisions** so you choose. `$skill-name` resolves to the single enabled skill
+built-in ones, and leaves other Projects' skills alone. If two such skills are
+ever on together (left by an older version, or because one came back after a
+branch switch or an archived worktree while you turned the other on), Octant
+turns both off and lists the name under **Name collisions** so you choose
+again. `$skill-name` resolves to the single enabled skill
 (or `@plugin-name/skill-name` for a plugin-contributed skill). Unambiguous
 discovery must hold; an ambiguous unqualified invocation opens a chooser or
 fails closed. A skill installed from the marketplace is switched on and off

@@ -3912,18 +3912,34 @@ prompt, schema, tool, route, model, or capability.
   turns off every same-named skill that shares a thread with it: built-in and
   user-global skills, the same Project's root skills, and a thread's own. It
   never changes another Project's skill, and another Project's skill is never
-  shown as given way. An activation file that left two such skills on is read
-  fail-closed: both are turned off, the collision is listed, and the person
-  chooses. A collision is listed only where one thread would see several
-  sources without exactly one in use. Installed marketplace skills are
-  switched with their package, not here.
+  shown as given way. Every reconcile of the skill service (start-up, a
+  thread's working-directory change, each resolution of a turn's selected
+  extensions, Settings' reconcile) turns off both of any two same-named skills
+  that are on and share a thread, and lists the collision for the person to
+  choose. That normalises an activation file written before this rule. It also
+  fires when a skill whose stored "on" was briefly not discovered (an archived
+  worktree, a branch switch, a missing root) comes back after another
+  same-named skill was turned on: both stay off, a user-global or built-in one
+  for every Project, until the person chooses again. The rule fails safe;
+  between reconciles the catalog shows neither as effective. A collision is
+  listed only where one thread would see several sources without exactly one
+  in use. Installed marketplace skills are switched with their package, not
+  here.
   Runtimes that load `<project>/.claude/skills` by themselves are denied that
   one folder in the OS profile (`forbiddenRootEntries`, read and write, in
   every posture including Full access); the rest of `<project>/.claude` stays
-  readable. The deny covers the Project root only: a runtime that also walks
-  from a working directory below the root (Copilot, Grok) can still read a
-  nested `<dir>/.claude/skills`. Loading of `.agents/skills` and
-  runtime-specific folders by these runtimes is a separate gap.
+  readable. The deny covers the Project root only. Copilot and Grok also walk
+  upward from the session folder (the Project root) to the repository root,
+  Copilot to the home folder when there is none, so when a Project is a
+  subfolder of a repository a `.claude/skills` in a folder above the Project
+  root is not covered. Below Full access the profile hides such a folder only
+  when it lies inside the home folder. Loading of `.agents/skills` and
+  runtime-specific folders by these runtimes is a separate gap. On Linux a
+  deny path the Project does not have is skipped in every posture, because
+  Bubblewrap would create it as a mount point (an empty folder, or a failed
+  start on a read-only root); a denied folder that appears mid-session is
+  therefore not masked until the runtime restarts, while macOS Seatbelt
+  `subpath` denies cover a missing path.
 
   | Runtime                       | `<project>/.claude/skills`                                                                                   | How                                                                                                                                                      |
   | ----------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -4448,9 +4464,9 @@ mechanisms are:
   extension or host-auth paths to deny (Kimi, for example) launches Full access
   under an allow-default `sandbox-exec` profile or a Bubblewrap host-root bind
   that denies only those paths (`makeAcpConfinementLive`). That wrapper
-  confines nothing else. Under the Bubblewrap host-root bind a deny path that
-  does not exist is skipped, because mounting over it would create an empty
-  folder (`.agents`, `.claude/skills`) in the person's own Project.
+  confines nothing else. On Linux a deny path that does not exist is skipped,
+  because Bubblewrap would create it in the person's own Project (see
+  [Extensions and skills](#extensions-and-skills)).
 
   | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                         |
   | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------ |
