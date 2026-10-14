@@ -2,8 +2,8 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { connect as netConnect, createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
+import { Option, Schema } from "effect";
 import {
-  decodeUtcTimestamp,
   MAX_TOOL_EGRESS_DECISION_BATCH_ENTRIES,
   MAX_TOOL_EGRESS_SUMMARY_ENTRIES,
   type ThreadEgressDecisionsRecordedPayload,
@@ -13,6 +13,7 @@ import {
   type ToolEgressLaunch,
   type ToolEgressRefusalReason,
   type ToolEgressRuleId,
+  UtcTimestamp,
 } from "@octant/contracts";
 import {
   canonicalToolEgressHost,
@@ -56,6 +57,7 @@ export const TOOL_EGRESS_PROXY_LIMITS = {
   resolveTimeoutMs: 10_000,
   connectTimeoutMs: 10_000,
   flushIntervalMs: 5_000,
+  recordTimeoutMs: 10_000,
 } as const;
 
 export interface ToolEgressProxyLimits {
@@ -70,6 +72,8 @@ export interface ToolEgressProxyLimits {
   readonly resolveTimeoutMs: number;
   readonly connectTimeoutMs: number;
   readonly flushIntervalMs: number;
+  /** A record append that has not answered by then counts as `unavailable`. */
+  readonly recordTimeoutMs: number;
 }
 
 export type ToolEgressRecordAppend =
@@ -169,8 +173,29 @@ const STATUS_TEXT: Readonly<Record<ProxyFailureStatus, string>> = {
 };
 
 const PROXY_USER = "octant";
+const decodeUtcTimestampOption = Schema.decodeUnknownOption(UtcTimestamp);
 const HEAD_END = Buffer.from("\r\n\r\n", "latin1");
 const MAX_TIMER_MS = 2_147_483_647;
+
+/**
+ * Distinct destinations one launch records by name. Past these, a decision
+ * still counts, under one overflow entry per decision and reason, so a
+ * command cannot grow the journal or push real destinations out of its
+ * summary with junk names. Allowed and refused destinations are capped
+ * apart so refusals cannot crowd out what the command actually reached.
+ * With one overflow entry for allowed and one per refusal reason (eleven),
+ * a summary holds at most 24 + 28 + 12 = 64 entries and is never truncated.
+ */
+const MAX_ALLOWED_DESTINATIONS = 24;
+const MAX_REFUSED_DESTINATIONS = 28;
+/** Under the reserved `.invalid` name, which no recorded request can carry. */
+const OVERFLOW_DESTINATION = { host: "overflow.invalid", port: 0 } as const;
+/**
+ * A request without the launch token names nothing the proxy may trust, and
+ * anyone on the machine can send one, so every such refusal counts under one
+ * entry rather than the host it claimed.
+ */
+const UNAUTHENTICATED_DESTINATION = { host: "invalid", port: 0 } as const;
 
 export class ToolEgressProxy {
   readonly #options: ToolEgressProxyOptions;
@@ -182,6 +207,10 @@ export class ToolEgressProxy {
   readonly #tunnels = new Set<Tunnel>();
   readonly #tallies = new Map<string, Tally>();
   readonly #dirty = new Set<string>();
+  /** Dirty entries decided for the first time since the last batch. */
+  readonly #fresh = new Set<string>();
+  #allowedDestinations = 0;
+  #refusedDestinations = 0;
   #endpoint: ToolEgressProxyEndpoint | undefined;
   #directory: string | undefined;
   #pending = 0;
@@ -213,13 +242,17 @@ export class ToolEgressProxy {
       await proxy.#shutdown();
       return { status: "refused", reason: "listener-unavailable" };
     }
-    const started = await appendRecord(() =>
-      options.records.launchStarted({
-        launch: options.launch,
-        startedAt: decodeUtcTimestamp(options.clock()),
-        threadTainted: proxy.#facts().threadTainted,
-      }),
-    );
+    const startedAt = proxy.#timestamp();
+    const started =
+      startedAt === undefined
+        ? ({ status: "unavailable" } as const)
+        : await proxy.#append(() =>
+            options.records.launchStarted({
+              launch: options.launch,
+              startedAt,
+              threadTainted: proxy.#facts().threadTainted,
+            }),
+          );
     if (started.status !== "appended") {
       await proxy.#shutdown();
       return { status: "refused", reason: "audit-unavailable" };
@@ -261,17 +294,19 @@ export class ToolEgressProxy {
   async #summarize(): Promise<ToolEgressProxyClose> {
     await this.#shutdown();
     await this.#flushing;
+    const endedAt = this.#timestamp();
+    if (endedAt === undefined) return { status: "unavailable" };
     const tallies = [...this.#tallies.values()];
     const summary: ThreadEgressLaunchSummarizedPayload = {
       launch: this.#options.launch,
-      endedAt: decodeUtcTimestamp(this.#options.clock()),
+      endedAt,
       bytesSent: this.#bytesSent,
       bytesReceived: this.#bytesReceived,
       entries: tallies.slice(0, MAX_TOOL_EGRESS_SUMMARY_ENTRIES).map(decisionEntry),
       truncated: tallies.length > MAX_TOOL_EGRESS_SUMMARY_ENTRIES,
       threadTainted: this.#facts().threadTainted,
     };
-    const appended = await appendRecord(() => this.#options.records.launchSummarized(summary));
+    const appended = await this.#append(() => this.#options.records.launchSummarized(summary));
     return appended.status === "appended"
       ? { status: "summarized", summary }
       : { status: "unavailable" };
@@ -364,7 +399,11 @@ export class ToolEgressProxy {
           respond(socket, 400, `octant-egress-refused: malformed-request (${read.detail})`);
           return;
         case "read":
-          void this.#handle(socket, read.head, buffer.subarray(read.headBytes));
+          // A failure the proxy did not foresee shuts the connection; it never
+          // escapes as an unhandled rejection or leaves the request half-decided.
+          this.#handle(socket, read.head, buffer.subarray(read.headBytes)).catch(() =>
+            socket.destroy(),
+          );
       }
     };
     socket.on("data", onData);
@@ -376,11 +415,11 @@ export class ToolEgressProxy {
    * resolution, then the private check on every answer, then connect.
    */
   async #handle(socket: Socket, head: ProxyRequestHead, leftover: Buffer): Promise<void> {
-    const requested = { host: recordedHost(head.host), port: recordedPort(head.port) };
     if (!this.#tokenMatches(fieldValue(head.headers, "proxy-authorization"))) {
-      this.#refuse(socket, "token", requested);
+      this.#refuse(socket, "token", UNAUTHENTICATED_DESTINATION);
       return;
     }
+    const requested = { host: recordedHost(head.host), port: recordedPort(head.port) };
     if (this.#auditUnavailable) {
       this.#refuse(socket, "audit-unavailable", requested);
       return;
@@ -421,6 +460,20 @@ export class ToolEgressProxy {
       expiry: undefined,
       closed: false,
     };
+    try {
+      this.#openTunnel(tunnel, head, leftover, ruleId);
+    } catch {
+      this.#closeTunnel(tunnel);
+    }
+  }
+
+  #openTunnel(
+    tunnel: Tunnel,
+    head: ProxyRequestHead,
+    leftover: Buffer,
+    ruleId: ToolEgressRuleId,
+  ): void {
+    const { client: socket, upstream } = tunnel;
     this.#tunnels.add(tunnel);
     this.#scheduleExpiry(tunnel, ruleId);
     upstream.on("error", () => this.#closeTunnel(tunnel));
@@ -511,14 +564,17 @@ export class ToolEgressProxy {
       return;
     }
     this.#send(tunnel, Buffer.concat([forwardedRequestHead(head), first]));
-    tunnel.client.on("data", (chunk: Buffer) => {
-      const part = take(chunk);
-      if (part === undefined) {
-        this.#closeTunnel(tunnel);
-        return;
-      }
-      this.#send(tunnel, part);
-    });
+    tunnel.client.on(
+      "data",
+      this.#guarded(tunnel, (chunk: Buffer) => {
+        const part = take(chunk);
+        if (part === undefined) {
+          this.#closeTunnel(tunnel);
+          return;
+        }
+        this.#send(tunnel, part);
+      }),
+    );
     tunnel.client.on("end", () => tunnel.upstream.end());
   }
 
@@ -535,12 +591,12 @@ export class ToolEgressProxy {
     let heldBytes = leftover.length;
     let needed = 1;
     let checked = false;
-    const onData = (chunk: Buffer) => {
+    const onData = this.#guarded(tunnel, (chunk: Buffer) => {
       if (checked) return;
       held.push(chunk);
       heldBytes += chunk.length;
       inspect();
-    };
+    });
     const inspect = () => {
       if (heldBytes < needed) return;
       const buffer = Buffer.concat(held, heldBytes);
@@ -591,18 +647,21 @@ export class ToolEgressProxy {
   }
 
   #relay(tunnel: Tunnel, from: Socket, to: Socket, direction: "sent" | "received"): void {
-    from.on("data", (chunk: Buffer) => {
-      if (direction === "sent") {
-        this.#send(tunnel, chunk);
-        return;
-      }
-      if (!this.#recheckTunnel(tunnel)) return;
-      this.#addBytes(tunnel.tally, 0, chunk.length);
-      if (!to.write(chunk)) {
-        from.pause();
-        to.once("drain", () => from.resume());
-      }
-    });
+    from.on(
+      "data",
+      this.#guarded(tunnel, (chunk: Buffer) => {
+        if (direction === "sent") {
+          this.#send(tunnel, chunk);
+          return;
+        }
+        if (!this.#recheckTunnel(tunnel)) return;
+        this.#addBytes(tunnel.tally, 0, chunk.length);
+        if (!to.write(chunk)) {
+          from.pause();
+          to.once("drain", () => from.resume());
+        }
+      }),
+    );
     from.on("end", () => to.end());
   }
 
@@ -635,15 +694,35 @@ export class ToolEgressProxy {
   /** Wakes an idle tunnel at its rule's expiry; the per-chunk decision stays the authority. */
   #scheduleExpiry(tunnel: Tunnel, ruleId: ToolEgressRuleId): void {
     const rule = this.#rules().find((candidate) => String(candidate.id) === String(ruleId));
-    const remaining =
-      rule === undefined ? 0 : Date.parse(rule.expiresAt) - Date.parse(this.#options.clock());
+    const remaining = rule === undefined ? 0 : Date.parse(rule.expiresAt) - Date.parse(this.#now());
     const delay = Number.isFinite(remaining) ? Math.min(Math.max(remaining, 0), MAX_TIMER_MS) : 0;
-    tunnel.expiry = setTimeout(() => {
-      if (!this.#recheckTunnel(tunnel)) return;
-      const decision = this.#decide(tunnel.host, tunnel.port);
-      if (decision.kind === "allow") this.#scheduleExpiry(tunnel, decision.ruleId);
-    }, delay);
+    tunnel.expiry = setTimeout(
+      this.#guarded(tunnel, () => {
+        if (!this.#recheckTunnel(tunnel)) return;
+        const decision = this.#decide(tunnel.host, tunnel.port);
+        if (decision.kind === "allow") this.#scheduleExpiry(tunnel, decision.ruleId);
+      }),
+      delay,
+    );
     tunnel.expiry.unref();
+  }
+
+  /**
+   * Runs a tunnel's event handler so that anything it throws shuts the
+   * tunnel. An exception escaping a socket or timer callback would otherwise
+   * take down the server, or leave the tunnel relaying undecided bytes.
+   */
+  #guarded<A extends ReadonlyArray<unknown>>(
+    tunnel: Tunnel,
+    handler: (...args: A) => void,
+  ): (...args: A) => void {
+    return (...args) => {
+      try {
+        handler(...args);
+      } catch {
+        this.#closeTunnel(tunnel);
+      }
+    };
   }
 
   /** A policy close: both sides go at once, nothing buffered is delivered. */
@@ -673,8 +752,49 @@ export class ToolEgressProxy {
       launch: this.#facts(),
       destination: { host, port },
       rules: this.#rules(),
-      now: this.#options.clock(),
+      now: this.#now(),
     });
+  }
+
+  /**
+   * The clock as the decision reads it. A clock that throws reads as no time
+   * at all, which the decision treats as expired, never as live.
+   */
+  #now(): string {
+    try {
+      return this.#options.clock();
+    } catch {
+      return "";
+    }
+  }
+
+  /** A journal timestamp, or `undefined` when the clock cannot give one. */
+  #timestamp(): UtcTimestamp | undefined {
+    return Option.getOrUndefined(decodeUtcTimestampOption(this.#now()));
+  }
+
+  /**
+   * An append that throws, rejects, or does not answer in time is
+   * `unavailable`, so a hung journal cannot hold a batch in flight forever
+   * (requests flowing unrecorded) or hold the launch's close.
+   */
+  async #append(append: () => Promise<ToolEgressRecordAppend>): Promise<ToolEgressRecordAppend> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        append(),
+        new Promise<ToolEgressRecordAppend>((resolve) => {
+          timer = setTimeout(
+            () => resolve({ status: "unavailable" }),
+            this.#limits.recordTimeoutMs,
+          );
+        }),
+      ]);
+    } catch {
+      return { status: "unavailable" };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   #facts(): ToolEgressLaunchFacts {
@@ -796,20 +916,34 @@ export class ToolEgressProxy {
     },
     change: { readonly requests: number },
   ): Tally {
-    const key = `${entry.decision} ${entry.reason ?? ""} ${entry.host} ${String(entry.port)}`;
+    const keyOf = (host: string, port: number) =>
+      `${entry.decision} ${entry.reason ?? ""} ${host} ${String(port)}`;
+    let key = keyOf(entry.host, entry.port);
     let tally = this.#tallies.get(key);
     if (tally === undefined) {
-      tally = {
-        key,
-        host: entry.host,
-        port: entry.port,
-        decision: entry.decision,
-        reason: entry.reason,
-        requests: 0,
-        bytesSent: 0,
-        bytesReceived: 0,
-      };
-      this.#tallies.set(key, tally);
+      const allowed = entry.decision === "allowed";
+      const full = allowed
+        ? this.#allowedDestinations >= MAX_ALLOWED_DESTINATIONS
+        : this.#refusedDestinations >= MAX_REFUSED_DESTINATIONS;
+      const destination = full ? OVERFLOW_DESTINATION : entry;
+      key = keyOf(destination.host, destination.port);
+      tally = this.#tallies.get(key);
+      if (tally === undefined) {
+        tally = {
+          key,
+          host: destination.host,
+          port: destination.port,
+          decision: entry.decision,
+          reason: entry.reason,
+          requests: 0,
+          bytesSent: 0,
+          bytesReceived: 0,
+        };
+        this.#tallies.set(key, tally);
+        this.#fresh.add(key);
+        if (!full && allowed) this.#allowedDestinations += 1;
+        if (!full && !allowed) this.#refusedDestinations += 1;
+      }
     }
     tally.requests += change.requests;
     this.#markDirty(tally);
@@ -830,13 +964,16 @@ export class ToolEgressProxy {
   }
 
   /**
-   * Records changed entries at 16, or on the interval whatever their number.
-   * A batch that cannot be recorded stops new requests (`audit-unavailable`);
-   * tunnels already open run to their end.
+   * Records once 16 entries are decided for the first time, and every changed
+   * entry on the interval. Count changes wait for the interval, so with at
+   * most 64 entries a launch writes at most four batches beyond one per
+   * interval, however many requests it makes. A batch that cannot be recorded
+   * stops new requests (`audit-unavailable`); tunnels already open run to
+   * their end.
    */
   #flush(onInterval: boolean): void {
     if (this.#flushing !== undefined || this.#auditUnavailable || this.#dirty.size === 0) return;
-    if (!onInterval && this.#dirty.size < MAX_TOOL_EGRESS_DECISION_BATCH_ENTRIES) return;
+    if (!onInterval && this.#fresh.size < MAX_TOOL_EGRESS_DECISION_BATCH_ENTRIES) return;
     this.#flushing = this.#writeBatches().finally(() => {
       this.#flushing = undefined;
     });
@@ -844,14 +981,21 @@ export class ToolEgressProxy {
 
   async #writeBatches(): Promise<void> {
     do {
-      const keys = [...this.#dirty].slice(0, MAX_TOOL_EGRESS_DECISION_BATCH_ENTRIES);
-      for (const key of keys) this.#dirty.delete(key);
+      // First decisions go first, so a batch triggered by them carries them.
+      const keys = [...new Set([...this.#fresh, ...this.#dirty])].slice(
+        0,
+        MAX_TOOL_EGRESS_DECISION_BATCH_ENTRIES,
+      );
+      for (const key of keys) {
+        this.#dirty.delete(key);
+        this.#fresh.delete(key);
+      }
       const entries = keys.flatMap((key) => {
         const tally = this.#tallies.get(key);
         return tally === undefined ? [] : [decisionEntry(tally)];
       });
       if (entries.length === 0) return;
-      const appended = await appendRecord(() =>
+      const appended = await this.#append(() =>
         this.#options.records.decisionsRecorded({
           launch: this.#options.launch,
           entries,
@@ -862,7 +1006,7 @@ export class ToolEgressProxy {
         this.#auditUnavailable = true;
         return;
       }
-    } while (this.#dirty.size >= MAX_TOOL_EGRESS_DECISION_BATCH_ENTRIES);
+    } while (this.#fresh.size >= MAX_TOOL_EGRESS_DECISION_BATCH_ENTRIES);
   }
 }
 
@@ -884,16 +1028,6 @@ function decisionEntry(tally: Tally): ToolEgressDecisionEntry {
     reason: tally.reason,
     requests: tally.requests,
   };
-}
-
-async function appendRecord(
-  append: () => Promise<ToolEgressRecordAppend>,
-): Promise<ToolEgressRecordAppend> {
-  try {
-    return await append();
-  } catch {
-    return { status: "unavailable" };
-  }
 }
 
 function listen(
@@ -961,6 +1095,8 @@ function recordedHost(raw: string): string {
     .toLowerCase()
     .replace(/^\[(.*)\]$/, "$1")
     .replace(/\.$/, "");
+  // Names under `.invalid` are the proxy's own markers; a request never writes one.
+  if (host === "invalid" || host.endsWith(".invalid")) return "invalid";
   return /^[a-z0-9._:-]{1,253}$/.test(host) ? host : "invalid";
 }
 

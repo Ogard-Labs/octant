@@ -78,6 +78,9 @@ export interface EgressHarnessOptions {
   readonly failStart?: boolean;
   readonly failBatches?: () => boolean;
   readonly failSummary?: boolean;
+  /** Appends that never answer, as a hung journal would. */
+  readonly hangBatches?: boolean;
+  readonly hangSummary?: boolean;
   readonly taint?: () => { readonly threadTainted: boolean; readonly parentTainted: boolean };
   readonly rulesRead?: () => ReadonlyArray<ToolEgressRule>;
   readonly clock?: () => string;
@@ -146,11 +149,13 @@ export async function startEgressHarness(
         return appended(false);
       },
       decisionsRecorded: async (payload) => {
+        if (options.hangBatches === true) return new Promise(() => undefined);
         if (options.failBatches?.() === true) return appended(true);
         records.batches.push(decodeThreadEgressDecisionsRecordedPayload(payload));
         return appended(false);
       },
       launchSummarized: async (payload) => {
+        if (options.hangSummary === true) return new Promise(() => undefined);
         if (options.failSummary === true) return appended(true);
         records.summaries.push(decodeThreadEgressLaunchSummarizedPayload(payload));
         return appended(false);

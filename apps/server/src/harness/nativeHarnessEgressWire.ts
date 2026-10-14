@@ -123,6 +123,10 @@ export function readProxyRequestHead(buffer: Buffer, maxBytes: number): ProxyHea
   if (contentLength !== undefined && transferEncoding !== undefined) {
     return malformed("both content-length and transfer-encoding");
   }
+  // HTTP/1.0 has no chunked coding; RFC 9112 §6.1 says to treat its framing as faulty.
+  if (transferEncoding !== undefined && version === "1.0") {
+    return malformed("transfer-encoding on HTTP/1.0");
+  }
   for (const named of connectionOptions(headers)) {
     if (!TOKEN.test(named)) return malformed("unreadable connection option");
     if (UNSTRIPPABLE_FIELDS.has(named)) return malformed(`connection names ${named}`);

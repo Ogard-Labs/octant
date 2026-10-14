@@ -3671,17 +3671,24 @@ listener per confined launch:
   connection carries exactly one request: the proxy forwards its head and the
   content its `Content-Length` or `chunked` framing declares, drops anything
   after it, and shuts a connection whose content does not frame. A second
-  request on the same connection would otherwise reach the origin undecided,
-  under whatever `Host` it named, which a shared front end routes on. The one
+  plain request on the same proxied connection would otherwise reach the
+  origin undecided, under whatever `Host` it named, which a shared front end
+  routes on. The rule covers absolute-form requests only: bytes inside a
+  `CONNECT` tunnel are opaque, so plain HTTP a client sends through a tunnel
+  (Node, for one, tunnels `http://` through `CONNECT`) can carry further
+  requests with any `Host` to the tunnel's destination. That is a residual
+  risk alongside fronting inside TLS and Encrypted Client Hello below. The one
   header the proxy writes is `Connection: close` in place of the client's
   own, so the client opens a new connection for its next request. Every request must carry
   `Proxy-Authorization: Basic` with user `octant` and the launch token; a
-  missing or wrong token gets `407` and is recorded. A client that asks
+  missing or wrong token gets `407` and is recorded under one fixed entry
+  (host `invalid`, port 0), never the host it named, because anyone on the
+  machine can send such a request. A client that asks
   without credentials first and answers the `407` (Git's default) leaves one
   `token` refusal per connection it opens that way. A head the proxy cannot
   read one way only (a repeated `Host`, `Content-Length`, `Transfer-Encoding`,
   or `Proxy-Authorization`; both framing headers; a `Transfer-Encoding` other
-  than `chunked`; a folded line; a line break that is not CRLF; a
+  than `chunked`, or any `Transfer-Encoding` on HTTP/1.0; a folded line; a line break that is not CRLF; a
   `Connection` option naming `Host` or a framing header; a `Host` that names
   another host than the target; an origin-form or `https://` target) gets
   `400` before any decision and is not a decision record, because it names no
@@ -3692,8 +3699,9 @@ listener per confined launch:
   ClientHello with a server name, that name must equal the `CONNECT` host or
   the tunnel closes (`sni-mismatch`). That stops a client naming an allowed
   host to the proxy and a different one to a shared front end; fronting by a
-  Host header inside TLS, and Encrypted Client Hello, remain a residual risk
-  stated in the approval copy for wildcard and CDN-hosted rules.
+  Host header inside TLS, plain requests inside a tunnel (above), and
+  Encrypted Client Hello remain a residual risk stated in the approval copy
+  for wildcard and CDN-hosted rules.
 - **Decision order per request.** Token, then destination syntax (an IP
   literal, a port outside 1–65535, or a name that is not a valid DNS name
   refuses), then the rule match, then resolution, then the private-destination
@@ -3846,11 +3854,18 @@ or body:
   the launch refuses before the command runs.
 - `thread.egress-decisions-recorded@1` while the launch runs: each distinct
   host and port first decided, or whose counts changed, with its decision,
-  reason, request count, and bytes each way. The proxy flushes a batch at 16
-  entries or every 5 seconds, whichever comes first, so a crash loses at most
-  that tail of decisions and counts, never more. When a batch cannot be
-  appended the proxy refuses new requests for that launch
-  (`audit-unavailable`) and keeps existing tunnels until they end.
+  reason, request count, and bytes each way. The proxy flushes a batch once 16
+  entries are first decided, and every changed entry every 5 seconds, so a
+  crash loses at most that tail of decisions and counts, never more. A launch
+  names at most 24 allowed and 28 refused destinations; past those a decision
+  still counts, under one overflow entry (host `overflow.invalid`, port 0) for
+  allowed and one per refusal reason, so its records hold at most 64 entries,
+  its summary is never truncated, and it writes at most four batches beyond
+  one per 5 seconds however many requests it makes. When a batch cannot be
+  appended, or its append has not answered within 10 seconds, the proxy
+  refuses new requests for that launch (`audit-unavailable`) and keeps
+  existing tunnels until they end. A launch start or summary append that has
+  not answered within 10 seconds counts as not appended.
 - `thread.egress-launch-summarized@1` when the launch ends: the final totals,
   including the bytes received that taint the thread, and each distinct host
   and port, at most 64 entries with a `truncated` flag. It is appended before

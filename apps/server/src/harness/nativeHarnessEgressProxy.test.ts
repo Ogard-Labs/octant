@@ -198,7 +198,7 @@ describe("native harness tool egress proxy", () => {
     });
   });
 
-  it("caps the summary at 64 entries and still counts every byte received", async () => {
+  it("summarizes every refusal past the named ones under one entry and still counts every byte received", async () => {
     const origin = await tcpFixture();
     const harness = await startEgressHarness({
       rules: [threadRule("registry.example.com", 443)],
@@ -219,9 +219,20 @@ describe("native harness tool egress proxy", () => {
     expect(await roundTrip(tunnel.socket, "abcdef", 6)).toBe("abcdef");
     await harness.proxy.close();
     const summary = harness.records.summaries[0];
-    expect(summary?.truncated).toBe(true);
-    expect(summary?.entries).toHaveLength(64);
-    expect(summary?.entries.some((entry) => entry.decision === "allowed")).toBe(false);
+    expect(summary?.truncated).toBe(false);
+    expect(summary?.entries).toHaveLength(30);
+    expect(summary?.entries).toContainEqual({
+      host: "overflow.invalid",
+      port: 0,
+      decision: "refused",
+      reason: "no-rule",
+      requests: 42,
+    });
+    expect(summary?.entries.at(-1)).toMatchObject({
+      host: "registry.example.com",
+      decision: "allowed",
+      bytesReceived: 6,
+    });
     expect(summary?.bytesReceived).toBe(6);
   });
 });
