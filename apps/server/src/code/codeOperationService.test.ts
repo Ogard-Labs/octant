@@ -1960,11 +1960,16 @@ describe("CodeOperationService", () => {
   });
 
   it("resolves a Code turn's `#thread` mentions on the host and journals only what the user typed", async () => {
-    const asked: Array<{ threadMentionIds: ReadonlyArray<string>; windowId: string }> = [];
+    const asked: Array<{
+      threadMentionIds: ReadonlyArray<string>;
+      readerThreadId: string;
+      windowId: string;
+    }> = [];
     const fixture = providerTurnFixture({
       resolveThreadMentionContext: async (input) => {
         asked.push({
           threadMentionIds: input.threadMentionIds.map(String),
+          readerThreadId: input.readerThreadId,
           windowId: String(input.windowId),
         });
         return input.threadMentionIds.map((threadId) => ({
@@ -1983,8 +1988,14 @@ describe("CodeOperationService", () => {
     ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
 
     // Ids only: the transcript is read by the host on this send's own window,
-    // never taken from the command.
-    expect(asked).toEqual([{ threadMentionIds: ["release-notes-thread"], windowId: ids.window }]);
+    // never taken from the command, and the thread reading it is the turn's own.
+    expect(asked).toEqual([
+      {
+        threadMentionIds: ["release-notes-thread"],
+        readerThreadId: String(ids.thread),
+        windowId: ids.window,
+      },
+    ]);
     const started = fixture.turns.start.mock.calls[0]![0];
     expect((started.context ?? []).map((block) => block.text).join("\n")).toContain(
       "Referenced thread: Release notes",

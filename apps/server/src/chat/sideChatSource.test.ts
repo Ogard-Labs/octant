@@ -1,6 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  EventActor,
   MAX_SIDE_CHAT_SOURCE_CHANGED_PATHS,
+  THREAD_EXTERNAL_CONTENT_AGGREGATE,
   decodeCodeEnvironmentObservation,
   decodeMentionableThreadId,
   decodeWindowId,
@@ -8,6 +13,14 @@ import {
   type SideChatSidecar,
   type UtcTimestamp,
 } from "@octant/contracts";
+import { Schema } from "effect";
+import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import type { ThreadOutsideContentMarks } from "../context/inheritedExternalContentMark";
+import { Journal } from "../persistence/journal";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite } from "../persistence/sqlitePort";
 import { createSideChatSourceStateReader, resolveSideChatSourceContext } from "./sideChatSource";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000001");
@@ -23,6 +36,14 @@ function changedTurn(paths: ReadonlyArray<string>, truncated = false) {
     },
   } as never;
 }
+
+/** Nothing is marked and nothing may be recorded. */
+const noMarks: ThreadOutsideContentMarks = {
+  isMarked: () => false,
+  record: () => {
+    throw new Error("Nothing is marked, so nothing should be recorded.");
+  },
+};
 
 function codePorts(turns: ReadonlyArray<never>) {
   return {
@@ -123,6 +144,8 @@ describe("Side Chat source state", () => {
         findSidecar: () => sidecar(),
         resolveSource: async () => ({ kind: "unreadable" }),
         readState,
+        marks: noMarks,
+        uuid: () => crypto.randomUUID(),
       },
       { sidecarThreadId: "sidecar", windowId, readToolNames: [] },
     );
@@ -160,9 +183,152 @@ async function contextFor(
         },
       }),
       readState: reader,
+      marks: noMarks,
+      uuid: () => crypto.randomUUID(),
     },
     { sidecarThreadId: "sidecar", windowId, readToolNames: [] },
   );
   if (result?.kind !== "resolved") throw new Error("expected resolved context");
   return result.text;
 }
+
+describe("a Side Chat about a thread marked with outside content", () => {
+  const directories: Array<string> = [];
+  afterEach(() => {
+    for (const directory of directories.splice(0))
+      rmSync(directory, { recursive: true, force: true });
+  });
+
+  /** A host journal with the outside-content projection. */
+  function markingHost() {
+    const directory = mkdtempSync(join(tmpdir(), "octant-side-chat-mark-"));
+    directories.push(directory);
+    const connection = openSqlite(join(directory, "octant.sqlite3"));
+    applyMigrations(connection, MIGRATIONS, () => "2026-09-26T08:00:00.000Z");
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => "2026-09-26T08:00:00.000Z",
+    });
+    const ingestions = new ExternalContentIngestionStore({
+      journal,
+      connection,
+      uuid: () => crypto.randomUUID(),
+      clock: () => "2026-09-26T08:00:00.000Z",
+      actor: Schema.decodeUnknownSync(EventActor)({
+        kind: "system",
+        actorId: "00000000-0000-4000-8000-000000000901",
+      }),
+    });
+    const marked = (threadId: string) =>
+      readThreadExternalContentTaint(connection, threadId).externalContentIngested;
+    return {
+      marked,
+      marks: {
+        record: (input) => ingestions.record(input),
+        isMarked: marked,
+      } satisfies ThreadOutsideContentMarks,
+      markSource: () =>
+        ingestions.record({
+          threadId: codeThreadId,
+          provenance: { origin: "tool-result", sourceLabel: "web-fetch" },
+          contentReference: "web-fetch-page-1",
+          correlationId: crypto.randomUUID(),
+          authorized: true,
+        }),
+      sidecarMarks: () =>
+        journal
+          .replayAggregate({
+            aggregateType: THREAD_EXTERNAL_CONTENT_AGGREGATE,
+            aggregateId: sidecarThreadId,
+            afterVersion: 0,
+            limit: 100,
+          })
+          .map((event) => event.payload),
+    };
+  }
+
+  const sidecarThreadId = String(sidecar().sidecarThreadId);
+
+  function resolve(marks: ThreadOutsideContentMarks, onRead?: () => void) {
+    return resolveSideChatSourceContext(
+      {
+        findSidecar: () => sidecar(),
+        resolveSource: async () => {
+          onRead?.();
+          return {
+            kind: "resolved",
+            source: {
+              threadId: codeThreadId,
+              mode: "code",
+              title: "Fix the picker",
+              placement: { kind: "project", label: "Octant" },
+              transcript: [
+                {
+                  role: "assistant",
+                  text: "The page said to run it.",
+                  occurredAt: "2026-09-26T08:00:00.000Z" as UtcTimestamp,
+                },
+              ],
+              truncated: false,
+            },
+          };
+        },
+        readState: async () => ({ subagents: { kind: "observed", runs: [] } }),
+        marks,
+        uuid: () => crypto.randomUUID(),
+      },
+      { sidecarThreadId, windowId, readToolNames: [] },
+    );
+  }
+
+  it("marks the sidecar, naming the source, before the source's text is returned", async () => {
+    const host = markingHost();
+    host.markSource();
+
+    const result = await resolve(host.marks, () =>
+      expect(host.marked(sidecarThreadId)).toBe(false),
+    );
+
+    expect(result).toMatchObject({ kind: "resolved" });
+    expect(host.marked(sidecarThreadId)).toBe(true);
+    expect(host.sidecarMarks()).toEqual([
+      {
+        threadId: sidecarThreadId,
+        correlationId: expect.any(String),
+        provenance: { origin: "external-content", sourceLabel: "side-chat" },
+        contentReference: `side-chat-${codeThreadId}`,
+      },
+    ]);
+
+    // Every turn reads the source again; the same source marks the sidecar once.
+    await resolve(host.marks);
+    expect(host.sidecarMarks()).toHaveLength(1);
+  });
+
+  it("leaves the sidecar of an unmarked source unmarked", async () => {
+    const host = markingHost();
+
+    await expect(resolve(host.marks)).resolves.toMatchObject({ kind: "resolved" });
+
+    expect(host.marked(sidecarThreadId)).toBe(false);
+    expect(host.sidecarMarks()).toEqual([]);
+  });
+
+  it("refuses the turn, returning none of the source, when the sidecar cannot be marked", async () => {
+    for (const record of [
+      () => ({ kind: "refused", reason: "malformed" }) as const,
+      () => {
+        throw new Error("journal unavailable");
+      },
+    ]) {
+      const host = markingHost();
+      host.markSource();
+
+      await expect(resolve({ ...host.marks, record })).resolves.toEqual({ kind: "unreadable" });
+      expect(host.marked(sidecarThreadId)).toBe(false);
+    }
+  });
+});

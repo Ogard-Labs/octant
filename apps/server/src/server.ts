@@ -247,7 +247,7 @@ import {
 } from "./completedThreadArchiveSweep";
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
 import { LiveTurnRegistry } from "./liveTurn/liveTurnRegistry";
-import { CodePlannerService } from "./code/codePlannerService";
+import { CodePlannerService, type CodePlannerServiceOptions } from "./code/codePlannerService";
 import {
   createCodeProfileSkillResolver,
   createStoredCodeProfileSkillTextLoader,
@@ -596,6 +596,7 @@ import {
   createCodeThreadMentionDirectory,
   createWorkThreadMentionDirectory,
   createChatSideChatThreadFactory,
+  threadMentionContextResolver,
 } from "./chat/threadMentionService";
 import { ThreadDialogueService } from "./chat/threadDialogueService";
 import {
@@ -714,7 +715,10 @@ import { BrowserToolApprovalService } from "./browser/browserToolApprovalService
 import { ExternalContentClearStore } from "./context/externalContentClearStore";
 import { BrowserCaptureService } from "./browser/browserCaptureService";
 import { BrowserCaptureStore } from "./browser/browserCaptureStore";
-import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
+import {
+  ExternalContentIngestionStore,
+  type RecordExternalContentIngestionInput,
+} from "./context/externalContentIngestionStore";
 import {
   AgentMessageProjection,
   hydrateAgentMessageProjectionFromJournal,
@@ -826,11 +830,9 @@ import {
   type CodeProjectPullRequestRow,
   type CodeWorktreeRemoteFacts,
   type ImageGenerationSaveResult,
-  type MentionableThreadId,
   type MultiModelPoolCandidate,
   type ProviderContextBlock,
   type ProviderProbeResult,
-  type ThreadMentionCommandResult,
 } from "@octant/contracts";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import {
@@ -853,7 +855,6 @@ import {
   defaultShellSettings,
   effectiveClaudeAccountConfigDirectory,
   enabledModes,
-  formatThreadMentionContext,
   isAgentRunActiveStatus,
   claudePlanUsageStateDirectory,
   isImageProfileDriverKind,
@@ -1591,70 +1592,6 @@ function observedCheckoutHeadMatches(
   return expected.kind === "detached"
     ? observed.detached && observed.head === expected.oid
     : !observed.detached && observed.branch === `refs/heads/${expected.name}`;
-}
-
-/**
- * Read the `#thread` mentions a turn names, on the window the turn was sent
- * from.
- *
- * A chip names a thread; it never carries one. The renderer sends ids, and
- * this resolves them through the same mention resolution an Open would take —
- * so the sender's Open authority over every named thread is re-derived at send
- * time, and the transcript window stays the host's decision. The framing is
- * applied here, on the authoritative side, for the same reason. Chat and Code
- * share one resolver because a chip means the same thing in both, and neither
- * mode may read a thread on authority the other proved.
- *
- * The service is reached lazily so a mode wired before it exists can still
- * hold this: nothing is read until a turn actually runs.
- */
-function threadMentionContextResolver(threadMentions: () => ThreadMentionService) {
-  return async ({
-    threadMentionIds,
-    windowId,
-    dialogueEnabled,
-  }: {
-    readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
-    readonly windowId?: WindowId;
-    readonly dialogueEnabled?: boolean;
-  }): Promise<
-    ReadonlyArray<
-      | { readonly kind: "resolved"; readonly threadId: MentionableThreadId; readonly text: string }
-      | { readonly kind: "unreadable"; readonly threadId: MentionableThreadId }
-    >
-  > => {
-    const unreadable = () =>
-      threadMentionIds.map((threadId) => ({ kind: "unreadable" as const, threadId }));
-    // Without an authenticated window there is no principal to re-derive Open
-    // authority from, so nothing resolves rather than resolving on authority
-    // nobody proved.
-    if (windowId === undefined) return unreadable();
-    let resolved: ThreadMentionCommandResult;
-    try {
-      resolved = await threadMentions().execute(
-        { kind: "resolve-mentions", requestId: randomUUID(), threadIds: threadMentionIds },
-        { windowId },
-      );
-    } catch {
-      return unreadable();
-    }
-    if (resolved.kind !== "mentions-resolved") return unreadable();
-    const byThreadId = new Map(
-      resolved.mentions.map((mention) => [String(mention.threadId), mention]),
-    );
-    return threadMentionIds.map((threadId) => {
-      const mention = byThreadId.get(String(threadId));
-      return mention === undefined
-        ? { kind: "unreadable" as const, threadId }
-        : {
-            kind: "resolved" as const,
-            threadId,
-            text: formatThreadMentionContext([mention], {
-              dialogueEnabled: dialogueEnabled === true,
-            }),
-          };
-    });
-  };
 }
 
 function stableCodeFileId(threadId: string, checkoutId: string, relativePath: string) {
@@ -2845,6 +2782,14 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
+    // Where a mention or a Side Chat reads its source's mark and marks the
+    // thread reading that source's transcript.
+    const threadOutsideContentMarks = {
+      record: (input: RecordExternalContentIngestionInput) =>
+        externalContentIngestionStore.record(input),
+      isMarked: (threadId: string) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    };
     // Agent-to-agent messaging (decision 0063): the host owns admission,
     // clamping, journaling, and delivery. The endpoint resolver is composed
     // lazily from the thread authorities declared later in this startup; a
@@ -5326,7 +5271,10 @@ export function startOctantServer(
             }),
         },
         credentialResolver: { resolve: async () => undefined },
-        resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
+        resolveThreadMentionContext: threadMentionContextResolver(
+          () => threadMentionService,
+          threadOutsideContentMarks,
+        ),
         resolveFileMentionContext: async ({ fileMentionPaths, windowId, threadId, checkoutId }) =>
           fileMentionContextBlocks(fileMentionService, {
             windowId,
@@ -5576,14 +5524,23 @@ export function startOctantServer(
     // The Project planner: one designated Code thread per Code Project that
     // may read the Project's board and propose work. A confirmed proposal
     // creates its thread through the ordinary creation command path below;
-    // the planner has no creation authority of its own.
+    // the planner has no creation authority of its own. The Code service is
+    // called directly, as the follow-up creator does, because only it takes
+    // the host-only mark a thread confirmed from a marked planner starts with.
+    const markingCodeService: {
+      readonly execute: (
+        ...input: Parameters<CodePlannerServiceOptions["createThread"]>
+      ) => ReturnType<CodeRouteService["execute"]>;
+    } = codeService;
     const codePlannerService = new CodePlannerService({
       persistence,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       canAccessProject: canAccessCodeProject,
-      createThread: async (windowId, creation, signal) =>
-        baseRouteCodeService.execute(windowId, creation, signal),
+      createThread: async (windowId, creation, signal, executionContext) =>
+        markingCodeService.execute(windowId, creation, signal, executionContext),
+      isMarkedWithOutsideContent: (threadId) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     });
     // A linked pull request's checks turning red is a user obligation, not an
     // agent event: every snapshot refresh feeds the durable follow-up marker on
@@ -6751,6 +6708,8 @@ export function startOctantServer(
             resolveSource: (sourceWindowId, sourceThreadId) =>
               threadMentionService.resolveSideChatSource(sourceWindowId, sourceThreadId),
             readState: sideChatSourceState,
+            marks: threadOutsideContentMarks,
+            uuid: randomUUID,
           },
           {
             sidecarThreadId: String(sidecarThreadId),
@@ -6758,7 +6717,10 @@ export function startOctantServer(
             readToolNames: readToolNames ?? [],
           },
         ),
-      resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
+      resolveThreadMentionContext: threadMentionContextResolver(
+        () => threadMentionService,
+        threadOutsideContentMarks,
+      ),
       dataDirectory: chatDataDirectory,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
@@ -7325,9 +7287,13 @@ export function startOctantServer(
             String(model.id) === String(thread.modelId) && model.inputModalities.includes("image"),
         );
       },
-      resolveThreadMentionContext: async ({ threadMentionIds, windowId }) => {
-        const resolved = await threadMentionContextResolver(() => threadMentionService)({
+      resolveThreadMentionContext: async ({ threadMentionIds, readerThreadId, windowId }) => {
+        const resolved = await threadMentionContextResolver(
+          () => threadMentionService,
+          threadOutsideContentMarks,
+        )({
           threadMentionIds,
+          readerThreadId,
           windowId,
         });
         return resolved.map((mention) => ({

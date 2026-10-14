@@ -24,6 +24,10 @@ import {
   type SideChatUncommittedFilesState,
   type SideChatWorkFolderState,
 } from "@octant/domain";
+import {
+  markReaderOfMarkedThread,
+  type ThreadOutsideContentMarks,
+} from "../context/inheritedExternalContentMark";
 import type { SideChatSourceContext } from "./chatService";
 import { walkCodeConversation, type SideChatSourceResolution } from "./threadMentionService";
 
@@ -37,6 +41,12 @@ import { walkCodeConversation, type SideChatSourceResolution } from "./threadMen
  * do without: when it is unreadable the turn is refused. The state section is
  * supplementary, and each of its parts says "could not be read" on its own
  * rather than costing the whole turn.
+ *
+ * A source marked with outside content marks the sidecar
+ * (`markReaderOfMarkedThread`, label `side-chat`) before the framed text is
+ * returned, so the sidecar's provider never reads a marked transcript on an
+ * unmarked thread. A mark that cannot be recorded makes the source unreadable,
+ * which refuses the turn.
  */
 export async function resolveSideChatSourceContext(
   ports: {
@@ -46,6 +56,8 @@ export async function resolveSideChatSourceContext(
       sourceThreadId: MentionableThreadId,
     ) => Promise<SideChatSourceResolution>;
     readonly readState: SideChatSourceStateReader;
+    readonly marks: ThreadOutsideContentMarks;
+    readonly uuid: () => string;
   },
   input: {
     readonly sidecarThreadId: string;
@@ -75,6 +87,16 @@ export async function resolveSideChatSourceContext(
   } catch {
     state = undefined;
   }
+  // Read after everything taken from the source, so anything that marked it
+  // before those reads marks the sidecar too.
+  const marked = markReaderOfMarkedThread({
+    marks: ports.marks,
+    readerThreadId: input.sidecarThreadId,
+    sourceThreadId: String(resolved.source.threadId),
+    sourceLabel: "side-chat",
+    correlationId: ports.uuid,
+  });
+  if (marked.status === "refused") return { kind: "unreadable" };
   return {
     kind: "resolved",
     text: formatSideChatSourceContext({

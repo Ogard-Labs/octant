@@ -48,6 +48,7 @@ import {
   readCodePlannerProposals,
 } from "../persistence/codeProjection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import type { CodeServiceExecutionContext } from "./codeService";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -88,8 +89,11 @@ export interface CodePlannerServiceOptions {
   readonly createThread: (
     authenticatedWindowId: WindowId,
     creation: CodePlannerThreadCreation,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    executionContext: CodeServiceExecutionContext,
   ) => Promise<CodeCommandResult>;
+  /** Whether a thread is marked as having taken in outside content, as its mark reads now. */
+  readonly isMarkedWithOutsideContent: (threadId: string) => boolean;
 }
 
 export class CodePlannerServiceError extends Error {
@@ -115,6 +119,7 @@ export class CodePlannerService {
   readonly #clock: () => string;
   readonly #createThread: CodePlannerServiceOptions["createThread"];
   readonly #canAccessProject: CodePlannerServiceOptions["canAccessProject"];
+  readonly #isMarkedWithOutsideContent: CodePlannerServiceOptions["isMarkedWithOutsideContent"];
 
   constructor(options: CodePlannerServiceOptions) {
     this.#persistence = options.persistence;
@@ -122,6 +127,7 @@ export class CodePlannerService {
     this.#clock = options.clock;
     this.#createThread = options.createThread;
     this.#canAccessProject = options.canAccessProject;
+    this.#isMarkedWithOutsideContent = options.isMarkedWithOutsideContent;
   }
 
   readView(authenticatedWindowId: WindowId, projectIdInput: unknown): CodePlannerView {
@@ -349,8 +355,14 @@ export class CodePlannerService {
 
     // Creation runs first, through the ordinary command path with its own
     // journal events and failure modes. If it throws, the proposal stays
-    // pending and the user may confirm again once the cause is fixed.
-    const creation = await this.#createThread(authenticatedWindowId, command.creation, signal);
+    // pending and the user may confirm again once the cause is fixed; a mark
+    // that cannot be journaled is such a cause.
+    const creation = await this.#createThread(
+      authenticatedWindowId,
+      command.creation,
+      signal,
+      this.#inheritedMarkFor(decision.proposal),
+    );
     const confirmed: CodePlannerWorkProposal = {
       ...decision.proposal,
       status: "confirmed",
@@ -373,6 +385,24 @@ export class CodePlannerService {
       throw this.#unavailable();
     }
     return { status: "confirmed", proposal: this.#requireProposal(confirmed.id), creation };
+  }
+
+  /**
+   * The mark a thread confirmed from a proposal starts with. The planner agent
+   * wrote the proposal's intent, which becomes the new thread's opening
+   * prompt, after reading whatever marked its thread, so the text can carry
+   * it. Read when the thread is made, like a fork's: a planner a person
+   * cleared passes on nothing.
+   */
+  #inheritedMarkFor(proposal: CodePlannerWorkProposal): CodeServiceExecutionContext {
+    const plannerThreadId = String(proposal.plannerThreadId);
+    if (!this.#isMarkedWithOutsideContent(plannerThreadId)) return {};
+    return {
+      inheritedMark: {
+        sourceLabel: "planner-proposal",
+        contentReference: `planner-proposal-${plannerThreadId}-${String(proposal.id)}`,
+      },
+    };
   }
 
   #designation(projectId: ProjectId): CodePlannerDesignation {
