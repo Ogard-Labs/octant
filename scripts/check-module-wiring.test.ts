@@ -208,6 +208,28 @@ describe("collectReferencedPaths", () => {
 
     expect(referenced.has("apps/web/src/goal/GoalCard.tsx")).toBe(false);
   });
+
+  it("does not let shared test scaffolding make a module reachable", () => {
+    const referenced = collectReferencedPaths([
+      { path: "apps/server/src/egress/proxy.ts", content: "export const a = 1;" },
+      { path: "apps/server/src/egress/rules.ts", content: "export const a = 1;" },
+      { path: "apps/server/src/egress/faked.ts", content: "export const a = 1;" },
+      { path: "apps/server/src/egress/probe.ts", content: "export const a = 1;" },
+      {
+        path: "apps/server/src/egress/proxy.test-support.ts",
+        content: `import { a } from "./proxy";`,
+      },
+      { path: "apps/server/src/egress/fakeHost.ts", content: `import { a } from "./faked";` },
+      { path: "apps/server/src/egress/rules.smoke.ts", content: `import { a } from "./rules";` },
+      { path: "apps/server/src/egress/main.ts", content: `import { a } from "./probe";` },
+    ]);
+
+    expect(referenced.has("apps/server/src/egress/proxy.ts")).toBe(false);
+    expect(referenced.has("apps/server/src/egress/faked.ts")).toBe(false);
+    expect(referenced.has("apps/server/src/egress/rules.ts")).toBe(false);
+    // A process entry point is exempt as a candidate, but it is still real reach.
+    expect(referenced.has("apps/server/src/egress/probe.ts")).toBe(true);
+  });
 });
 
 describe("findUnreachableModules", () => {
@@ -223,6 +245,42 @@ describe("findUnreachableModules", () => {
     ]);
 
     expect(violations.map(({ path }) => path)).toEqual(["apps/web/src/example/ExampleWidget.tsx"]);
+  });
+
+  it("reports a module that only a shared test-support file imports", () => {
+    const violations = findUnreachableModules([
+      { path: "apps/server/src/egress/proxy.ts", content: "export const a = 1;" },
+      {
+        path: "apps/server/src/egress/proxy.test-support.ts",
+        content: `import { a } from "./proxy";`,
+      },
+      {
+        path: "apps/server/src/egress/proxy.test.ts",
+        content: `import { a } from "./proxy.test-support";`,
+      },
+    ]);
+
+    expect(violations.map(({ path }) => path)).toEqual(["apps/server/src/egress/proxy.ts"]);
+  });
+
+  it("reports a module that only a known island imports", () => {
+    const files = [
+      { path: "apps/server/src/egress/proxy.ts", content: `import { a } from "./wire";` },
+      { path: "apps/server/src/egress/wire.ts", content: "export const a = 1;" },
+    ];
+    const islands = new Map([["apps/server/src/egress/proxy.ts", "not started yet"]]);
+
+    // Listing the importer as an island exposes what only it depends on; the
+    // dependency is reported until it is listed too.
+    expect(findUnreachableModules(files, islands).map(({ path }) => path)).toEqual([
+      "apps/server/src/egress/wire.ts",
+    ]);
+    expect(
+      findUnreachableModules(
+        files,
+        new Map([...islands, ["apps/server/src/egress/wire.ts", "only the proxy imports it"]]),
+      ),
+    ).toEqual([]);
   });
 
   it("suppresses a module listed in KNOWN_ISLANDS", () => {
@@ -343,6 +401,36 @@ describe("findBarrelOnlyModules", () => {
     ]);
 
     expect(violations.map(({ path }) => path)).toEqual(["packages/domain/src/sharePolicy.ts"]);
+  });
+
+  it("does not let a shared test-support file keep a barrel-only module alive", () => {
+    const violations = findBarrelOnlyModules([
+      barrel,
+      { path: "packages/domain/src/sharePolicy.ts", content: "export function admitShare() {}" },
+      {
+        path: "apps/server/src/share.test-support.ts",
+        content: `import { admitShare } from "@octant/domain";\nadmitShare();`,
+      },
+    ]);
+
+    expect(violations.map(({ path }) => path)).toEqual(["packages/domain/src/sharePolicy.ts"]);
+  });
+
+  it("does not let an island keep a barrel-only module alive", () => {
+    const files = [
+      barrel,
+      { path: "packages/domain/src/sharePolicy.ts", content: "export function admitShare() {}" },
+      {
+        path: "apps/server/src/shareProxy.ts",
+        content: `import { admitShare } from "@octant/domain";\nadmitShare();`,
+      },
+    ];
+    const proxyIsland = new Map([["apps/server/src/shareProxy.ts", "not started yet"]]);
+
+    expect(findBarrelOnlyModules(files, new Map())).toEqual([]);
+    expect(findBarrelOnlyModules(files, proxyIsland).map(({ path }) => path)).toEqual([
+      "packages/domain/src/sharePolicy.ts",
+    ]);
   });
 
   it("does not let a coincidental bare word keep a barrel-only module alive", () => {
@@ -671,6 +759,25 @@ describe("findStaleIslandExemptions", () => {
         },
       ],
       new Map([["packages/contracts/src/routing.ts", "schema-first, nothing routes yet"]]),
+    );
+
+    expect(violations).toEqual([]);
+  });
+
+  it("keeps the exemptions of an island and of the module only it imports", () => {
+    const violations = findStaleIslandExemptions(
+      [
+        barrel,
+        { path: "packages/contracts/src/routing.ts", content: "export const Route = 1;" },
+        {
+          path: "apps/server/src/routerProxy.ts",
+          content: `import { Route } from "@octant/contracts";\nexport const r = Route;`,
+        },
+      ],
+      new Map([
+        ["apps/server/src/routerProxy.ts", "not started yet"],
+        ["packages/contracts/src/routing.ts", "only the proxy imports it"],
+      ]),
     );
 
     expect(violations).toEqual([]);

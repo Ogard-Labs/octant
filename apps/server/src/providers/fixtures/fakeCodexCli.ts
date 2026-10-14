@@ -145,25 +145,27 @@ if (process.argv.slice(2).join(" ") === "--version") {
                       ],
                       nextCursor: null,
                     }
-                  : message.method === "thread/start"
-                    ? {
-                        thread: { id: "thread-1" },
-                        model: params?.model ?? "gpt-5.4",
-                        modelProvider: "openai",
-                        serviceTier: null,
-                        cwd: params?.cwd ?? "/tmp/octant-codex-project",
-                      }
-                    : message.method === "thread/resume"
+                  : message.method === "skills/list"
+                    ? { data: [{ skills: [], errors: [] }] }
+                    : message.method === "thread/start"
                       ? {
-                          thread: { id: params?.threadId ?? "thread-1" },
-                          model: "gpt-5.4",
+                          thread: { id: "thread-1" },
+                          model: params?.model ?? "gpt-5.4",
                           modelProvider: "openai",
                           serviceTier: null,
-                          cwd: "/tmp/octant-codex-project",
+                          cwd: params?.cwd ?? "/tmp/octant-codex-project",
                         }
-                      : message.method === "turn/start"
-                        ? { turn: { id: "turn-1", status: "inProgress" } }
-                        : {};
+                      : message.method === "thread/resume"
+                        ? {
+                            thread: { id: params?.threadId ?? "thread-1" },
+                            model: "gpt-5.4",
+                            modelProvider: "openai",
+                            serviceTier: null,
+                            cwd: "/tmp/octant-codex-project",
+                          }
+                        : message.method === "turn/start"
+                          ? { turn: { id: "turn-1", status: "inProgress" } }
+                          : {};
           process.stdout.write(`${JSON.stringify({ id: message.id, result })}\n`);
         }
       } else {

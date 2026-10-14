@@ -69,6 +69,8 @@ export interface ThreadRetentionServiceOptions {
   readonly forgetCanvases?: (canvasIds: ReadonlyArray<string>) => void;
   /** Removes the files an erased Project's Canvases mirrored, while their receipts still exist. */
   readonly purgeCanvasFiles?: (canvasIds: ReadonlyArray<string>) => Promise<void> | void;
+  /** Drops what live services hold for an erased Project's data, such as its egress rules. */
+  readonly forgetProjectData?: (projectId: string) => void;
   readonly purgeThreadArtifacts?: (input: {
     readonly mode: OctantMode;
     readonly threadId: ThreadRetentionThreadId;
@@ -85,6 +87,7 @@ export class ThreadRetentionService {
   readonly #forgetCanvases: ThreadRetentionServiceOptions["forgetCanvases"];
   readonly #purgeCanvasFiles: ThreadRetentionServiceOptions["purgeCanvasFiles"];
   readonly #purgeThreadArtifacts: ThreadRetentionServiceOptions["purgeThreadArtifacts"];
+  readonly #forgetProjectData: ThreadRetentionServiceOptions["forgetProjectData"];
 
   constructor(options: ThreadRetentionServiceOptions) {
     this.#connection = options.connection;
@@ -96,6 +99,7 @@ export class ThreadRetentionService {
     this.#forgetCanvases = options.forgetCanvases;
     this.#purgeCanvasFiles = options.purgeCanvasFiles;
     this.#purgeThreadArtifacts = options.purgeThreadArtifacts;
+    this.#forgetProjectData = options.forgetProjectData;
   }
 
   readState(): ThreadRetentionState {
@@ -312,6 +316,7 @@ export class ThreadRetentionService {
       canvasIds,
     });
     if (canvasIds.length > 0) this.#forgetCanvases?.(canvasIds);
+    this.#forgetProjectData?.(projectId);
     return [
       ...(memoryErased ? (["project-memory"] as const) : []),
       ...(canvasIds.length > 0 ? (["project-canvases"] as const) : []),

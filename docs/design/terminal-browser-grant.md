@@ -7,13 +7,11 @@ authority ([Architecture: app-managed tool transport](../architecture.md#provide
 and [Architecture: security and authority](../architecture.md#security-and-authority)).
 
 **Delivery state.** Built: the grant, its loopback endpoint, its lifecycle, and
-its refusals; the `octant mcp` command that a CLI is pointed at; the switch in a
-local window, the approval card that names the terminal, and the user guide
-(`apps/docs/advanced/terminal-browser.md`).
-Not built: desktop packaging of the command. Until it lands the desktop app puts
-no `octant` on a terminal's `PATH`, so the feature works there only with a
-headless install's command, and the window says so before it restarts a
-terminal.
+its refusals; the `octant mcp` command that a CLI is pointed at; the launcher the
+macOS app puts on a granted terminal's `PATH`; the switch in a local window, the
+approval card that names the terminal, and the user guide
+(`apps/docs/advanced/terminal-browser.md`). The Linux desktop package ships no
+launcher, so there the command comes from a headless install.
 
 ## The problem
 
@@ -139,6 +137,44 @@ the grant is over.
   with a JSON-RPC parse error and does not reach the host. stdout carries
   protocol frames only; everything a person should read goes to stderr.
 
+## The launcher in the desktop app
+
+The packaged macOS app carries its own `octant`, so a person who installed only
+the app can point a CLI at `octant mcp`.
+
+- **What ships.** `Contents/Resources/terminal-launcher/` holds two files and
+  nothing else: `octant`, a `/bin/sh` script, and `octant.mjs`, a one-file
+  bundle of the command with every dependency inside it. This `octant` runs
+  `octant mcp` (and `octant mcp --help`); any other command prints what it is
+  and exits `1`. The full command's other verbs reach the data directory and
+  the desktop bridge secret, so they are not shipped to a terminal at all.
+- **The runtime.** The script runs the app's own executable in Node mode
+  (`ELECTRON_RUN_AS_NODE=1`), the runtime the packaged host already runs on. It
+  finds the executable relative to itself, because the app can be moved or
+  translocated. A runtime the person installed cannot be relied on, and Bun
+  started inside the terminal's profile failed before loading anything (it
+  lists the home folder, which the profile denies); the app's runtime started
+  there once it could be read (macOS 27, Electron 43.5, 2026-10-14). In this
+  mode Electron prints one line to stderr as it starts
+  (`task_name_for_pid: (os/kern) failure`), because the profile does not let it
+  look up its parent process; it then runs normally. stdout still carries
+  protocol frames only.
+- **Only a granted terminal gets it.** The desktop tells its packaged host where
+  the folder is; a development run and a headless host are given none. When the
+  host mints a grant it adds, for that terminal session only, the folder first
+  on `PATH` (the person's own rc files run after and can still put another
+  `octant` ahead of it) and three read-only grants to the terminal's
+  confinement: the launcher folder, the app's executable, and the app's
+  `Contents/Frameworks`, which the executable loads. All three sit inside the
+  app bundle and hold nothing private, and nothing becomes writable. Under
+  `/Applications` the profile could read them already; the grant is what lets a
+  terminal start the launcher from an app in the home folder or one macOS
+  translocated beneath `/private`. A terminal without a grant gets neither
+  `PATH` entry nor read grant, so `octant` is not found there; that is the
+  fail-closed answer, and a CLI reports its `octant` server as not started.
+- **A folder path that cannot be a `PATH` entry** (one holding `:`) gives no
+  launcher rather than a broken `PATH`.
+
 ## The window
 
 - **The switch.** A Code thread terminal's actions menu (the floating button
@@ -146,8 +182,9 @@ the grant is over.
   the terminal belongs to a Code thread this window can restart and the thread
   is not in Plan. A running shell cannot be given the variables, so a confirmation
   says first that the terminal restarts and anything running in it stops, and
-  that the `octant` command must be on the terminal's `PATH` (a headless install
-  has it; the desktop app does not yet). Confirming stops the shell and starts
+  that the CLI reaches the Browser through `octant mcp` (the macOS app adds
+  `octant` to the terminal's `PATH`; a headless install's own works too).
+  Confirming stops the shell and starts
   the same terminal with `browserGrant: "on"`. A refusal shows the host's reason
   and the terminal stays stopped, so a shell never looks as if it has what it
   lacks; the menu's **Restart terminal** goes on without it. The Zen terminal
@@ -218,11 +255,9 @@ rest of the thread.
   the host's loopback, which the endpoint listens on. A launch with
   `networkEgress` `none` would unshare the network and could not reach the
   endpoint; the terminal never uses it. Confinement is unchanged here.
-- The packaged form of the command is not decided. Run from a source checkout
-  with Bun inside the confined macOS terminal, the runtime fails to read the
-  person's home directory (`EPERM` listing it) before it loads anything; the
-  same pipe bundled into one file and run with Node worked there. The desktop
-  packaging slice must pick a runtime that starts inside the terminal's profile.
+- On Linux the desktop package ships no launcher. Electron there loads its
+  libraries from the install folder beside the executable, so a read grant for
+  it would be the whole install; that and a run under `bwrap` are unmeasured.
 - A call is bound to the window that switched the grant on. If that window's
   Project changes, calls answer `unauthorized` until it returns.
 
@@ -241,8 +276,20 @@ loopback endpoint: no grant (missing, empty, and every refused address, with no
 host call), relaying with the bearer token and session, the `unauthorized`,
 unreachable, and unexpected-failure endings, and that neither the token nor the
 address reaches stdout or stderr.
+`scripts/package-desktop.test.ts` covers the launcher folder's two files and
+their modes, and that the script runs the bundle with the app's executable in
+Node mode from an app moved to another folder; `packages/cli/src/terminalLauncher.test.ts`
+that the shipped `octant` runs `octant mcp` and nothing else;
+`apps/server/src/code/terminalService.test.ts`,
+`apps/server/src/code/terminalProcessPort.test.ts`, and
+`apps/server/src/serverConfig.test.ts` that only a launch carrying the launcher
+gets the `PATH` entry and the read-only grants, and which grants those are.
+The packaged-app run that proves it under the real profile is recorded in the
+pull request that shipped it: a Code thread terminal of the packaged app, started
+with the grant, ran `octant mcp` and listed the Browser tool; one started without
+it found no `octant`.
 `apps/server/src/code/codeOperationService.test.ts` covers the start and switch-off
-commands and the live grant an attach reports, `apps/server/src/codeRoutes.test.ts`
+commands, the launcher given only to a granted terminal, and the live grant an attach reports, `apps/server/src/codeRoutes.test.ts`
 that a paired device's start with a grant reaches the host as an agent (which the
 host refuses), and `apps/server/src/persistence/threadPurge.test.ts` the purge.
 `apps/web/src/code/CodeTerminalPane.test.tsx` covers the switch (confirmation,

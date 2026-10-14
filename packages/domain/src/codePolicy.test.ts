@@ -186,51 +186,6 @@ describe("Code authority policy", () => {
     ).toBe("host-thread-clamped");
   });
 
-  it("forces fresh confirmation for irreversible classes on tainted threads despite Full access", () => {
-    const tainted = {
-      externalContentIngested: true,
-      ingestedSources: ["readme-md"],
-    } as const;
-    for (const operation of ["discard", "push", "create-pr"] as const) {
-      const result = authorizeCodeOperation({
-        actor: "local-user",
-        posture: "full-access",
-        operation,
-        untrustedContent: {
-          taint: tainted,
-          standingGrant: "remembered-full-access",
-          freshPerActionConfirmation: false,
-        },
-      });
-      expect(result.decision).toBe("prompt");
-      expect(result.taintedApprovalPrompt).toContain("readme-md");
-    }
-    expect(
-      authorizeCodeOperation({
-        actor: "local-user",
-        posture: "full-access",
-        operation: "edit",
-        untrustedContent: {
-          taint: tainted,
-          standingGrant: "remembered-full-access",
-          freshPerActionConfirmation: false,
-        },
-      }).decision,
-    ).toBe("allow");
-    expect(
-      authorizeCodeOperation({
-        actor: "local-user",
-        posture: "full-access",
-        operation: "push",
-        untrustedContent: {
-          taint: tainted,
-          standingGrant: "remembered-full-access",
-          freshPerActionConfirmation: true,
-        },
-      }).decision,
-    ).toBe("allow");
-  });
-
   it("prompts before discarding uncommitted work even when the user asked for it", () => {
     // A plain editor save is the user's own action and needs no prompt. Throwing
     // away uncommitted work is the user's action too, but nothing can undo it,

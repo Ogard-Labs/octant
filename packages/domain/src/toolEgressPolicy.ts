@@ -197,3 +197,74 @@ function ruleHostMatches(ruleHost: string, host: string): boolean {
 function isPort(port: number): boolean {
   return Number.isInteger(port) && port >= 1 && port <= 65_535;
 }
+
+/** Who answered a `network-access` approval. */
+export type ToolEgressGrantPrincipalKind = "local-window" | "remote-device" | "reviewer";
+
+export type ToolEgressGrantDecision =
+  | { readonly kind: "grant" }
+  | {
+      readonly kind: "refuse";
+      readonly reason:
+        /** A tainted thread may be granted `call` rules only. */
+        | "thread-tainted"
+        /** Project rules need the person at a local window. */
+        | "needs-local-window"
+        /** A reviewer's answer yields `call` rules for one launch, nothing wider. */
+        | "reviewer-call-only"
+        /** A tainted thread's confirmation needs a person; a reviewer grants nothing there. */
+        | "needs-person";
+    };
+
+/**
+ * Whether this principal may grant a rule of this scope on a thread with
+ * this taint. Read with the taint at the moment of granting, never an older
+ * copy, so a thread tainted while a person looked at a proposal is refused
+ * the standing rule they picked.
+ */
+export function decideToolEgressGrant(input: {
+  readonly principal: ToolEgressGrantPrincipalKind;
+  readonly scope: ToolEgressRuleScope["kind"];
+  readonly threadTainted: boolean;
+}): ToolEgressGrantDecision {
+  if (input.principal === "reviewer") {
+    if (input.threadTainted) return { kind: "refuse", reason: "needs-person" };
+    if (input.scope !== "call") return { kind: "refuse", reason: "reviewer-call-only" };
+    return { kind: "grant" };
+  }
+  if (input.threadTainted && input.scope !== "call") {
+    return { kind: "refuse", reason: "thread-tainted" };
+  }
+  if (input.scope === "project" && input.principal !== "local-window") {
+    return { kind: "refuse", reason: "needs-local-window" };
+  }
+  return { kind: "grant" };
+}
+
+/**
+ * How long a rule lives from the moment it is granted. A `call` rule ends with
+ * its launch; its lifetime only bounds a launch that never ends.
+ */
+export const TOOL_EGRESS_RULE_LIFETIME_MS = {
+  call: 8 * 3_600_000,
+  "1h": 3_600_000,
+  "8h": 8 * 3_600_000,
+  "7d": 7 * 86_400_000,
+  "30d": 30 * 86_400_000,
+} as const;
+export type ToolEgressRuleLifetime = keyof typeof TOOL_EGRESS_RULE_LIFETIME_MS;
+
+/** The absolute expiry of a rule granted at `now`, or `undefined` when `now` is unreadable. */
+export function toolEgressRuleExpiresAt(
+  lifetime: ToolEgressRuleLifetime,
+  now: string,
+): string | undefined {
+  const nowMs = Date.parse(now);
+  if (!Number.isFinite(nowMs)) return undefined;
+  return new Date(nowMs + TOOL_EGRESS_RULE_LIFETIME_MS[lifetime]).toISOString();
+}
+
+/** Whether a rule is still in force at `now`. An unreadable time on either side is not live. */
+export function toolEgressRuleLive(expiresAt: string, now: string): boolean {
+  return Date.parse(now) < Date.parse(expiresAt);
+}

@@ -38,6 +38,7 @@ import {
   type AcpManagedToolsBridge,
 } from "../providers/acpManagedTools";
 import type { ManagedToolAnswer } from "../providers/managedMcpTools";
+import type { TerminalLauncher } from "./terminalService";
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -83,6 +84,12 @@ export interface TerminalBrowserGrantServiceOptions {
     readonly automation: BrowserAppManagedToolsOptions["browser"];
     readonly approvals: NonNullable<BrowserAppManagedToolsOptions["approvals"]>;
   };
+  /**
+   * The `octant` command the packaged desktop app ships. A granted terminal
+   * starts with it on `PATH`; without it (a development or headless host) the
+   * person's own `octant` is used.
+   */
+  readonly launcher?: TerminalLauncher;
   readonly journal: Pick<Journal, "append">;
   /** Speaks for the person who asked, and who switches a grant off. */
   readonly personActor: EventActorValue;
@@ -101,6 +108,8 @@ export type TerminalBrowserGrantOpening =
         readonly environmentName: string;
         readonly reference: string;
       }>;
+      /** Also for the terminal's launch; only a granted terminal is given it. */
+      readonly launcher?: TerminalLauncher;
     }
   | {
       readonly kind: "refused";
@@ -273,6 +282,7 @@ export class TerminalBrowserGrantService {
           reference: `${REFERENCE_PREFIX}${grantId}:token`,
         },
       ],
+      ...(this.#options.launcher === undefined ? {} : { launcher: this.#options.launcher }),
     };
   }
 

@@ -140,6 +140,50 @@ describe("extension tool approval service", () => {
     }
   });
 
+  it("refuses a prompt the clock has passed, though its timer has not fired yet", async () => {
+    // A timer fires late behind a busy event loop or across a machine's
+    // sleep, so the clock, not the timer, decides when a prompt's time is up.
+    let now = Date.parse("2026-08-09T06:00:00.000Z");
+    let minted = 0;
+    const service = new ExtensionToolApprovalService({
+      uuid: () => {
+        minted += 1;
+        return `44000000-0000-4000-8000-${String(minted).padStart(12, "0")}`;
+      },
+      now: () => now,
+      ttlMs: 1_000,
+    });
+    const stale = request(service);
+    now += 1_000;
+
+    expect(service.list(windowId)).toEqual([]);
+    await expect(stale).resolves.toBe(false);
+    expect(
+      service.decide(windowId, {
+        approvalId: "44000000-0000-4000-8000-000000000001",
+        decision: "approved",
+      }),
+    ).toBe(false);
+
+    const answeredLate = request(service);
+    now += 1_000;
+    expect(
+      service.decide(windowId, {
+        approvalId: "44000000-0000-4000-8000-000000000002",
+        decision: "approved",
+      }),
+    ).toBe(false);
+    await expect(answeredLate).resolves.toBe(false);
+
+    const held = Array.from({ length: MAX_PENDING_APPROVALS }, () => request(service));
+    now += 1_000;
+    const afterSleep = request(service);
+    expect(service.list(windowId)).toHaveLength(1);
+    await expect(Promise.all(held)).resolves.toEqual(Array(MAX_PENDING_APPROVALS).fill(false));
+    service.revokeWindow(windowId);
+    await expect(afterSleep).resolves.toBe(false);
+  });
+
   it("denies a tool approval past the waiting cap at once, and frees a slot when one is answered or expires", async () => {
     vi.useFakeTimers();
     const consoleMethods = ["debug", "error", "info", "log", "warn"] as const;

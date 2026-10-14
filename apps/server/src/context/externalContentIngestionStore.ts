@@ -46,7 +46,7 @@ export type ExternalContentIngestionResult =
   | { readonly kind: "ignored"; readonly reason: "not-tainting" }
   | {
       readonly kind: "refused";
-      readonly reason: "unauthorized" | "malformed" | "oversized";
+      readonly reason: "unauthorized" | "malformed" | "oversized" | "contended";
     };
 
 export interface RecordExternalContentIngestionInput {
@@ -167,10 +167,22 @@ export class ExternalContentIngestionStore {
         throw error;
       }
     }
-    return {
-      kind: "already-recorded",
-      taint: readThreadExternalContentTaint(this.#connection, String(payload.threadId)),
-    };
+    // Every attempt lost to another writer of the thread's mark. If one of them
+    // wrote this reference it is recorded; otherwise nothing was written, and
+    // a caller must not hand on text as though the thread were marked.
+    if (
+      hasThreadExternalContentReference(
+        this.#connection,
+        String(payload.threadId),
+        payload.contentReference,
+      )
+    ) {
+      return {
+        kind: "already-recorded",
+        taint: readThreadExternalContentTaint(this.#connection, String(payload.threadId)),
+      };
+    }
+    return { kind: "refused", reason: "contended" };
   }
 }
 

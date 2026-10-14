@@ -57,6 +57,11 @@ export interface ContextRouteDependencies {
     threadKind: "chat-thread" | "work-thread" | "code-thread",
     threadId: string,
   ) => Promise<boolean>;
+  /**
+   * Whether this window can open the Project, by the rule that decides which
+   * of its threads it can open. Only inspect reads a Project's own subject.
+   */
+  readonly windowCanOpenProject: (windowId: WindowId, projectId: string) => Promise<boolean>;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
@@ -76,6 +81,18 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
       ? dependencies.windowCanOpenThread(windowId, threadKind, String(subject.aggregateId))
       : false;
   };
+  /**
+   * Inspect reads what a window could read by opening the subject: a thread
+   * it can open, or a Project it can open. A paired device is judged the same
+   * way under its own scope, which reaches only what its overview reads do.
+   */
+  const windowCanInspectSubject = (
+    windowId: WindowId,
+    subject: ContextSubjectRef,
+  ): Promise<boolean> =>
+    String(subject.aggregateType) === "project"
+      ? dependencies.windowCanOpenProject(windowId, String(subject.aggregateId))
+      : windowCanOpenSubject(windowId, subject);
   /**
    * A read, so it is a GET naming its thread in the query. It answers only a
    * window that can open the thread, the rule a compaction command passes, and
@@ -182,6 +199,16 @@ export function createContextRouteHandler(dependencies: ContextRouteDependencies
     try {
       if (isInspect) {
         const input = decodeContextInspectorRequest(decoded.value);
+        // Refused in the same words whether the subject is unknown or only
+        // out of reach, so a refusal says nothing about what exists.
+        if (!(await windowCanInspectSubject(windowId, input.subject))) {
+          return failure(
+            "unauthorized",
+            "Context subject is not available to this window.",
+            403,
+            origin,
+          );
+        }
         try {
           return response(
             dependencies.service.inspect(input.subject, input.afterSequence, principal),

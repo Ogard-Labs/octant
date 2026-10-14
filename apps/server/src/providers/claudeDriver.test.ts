@@ -2176,7 +2176,7 @@ describe("Claude execution policy", () => {
     await acquired.close();
   });
 
-  it("keeps a turn running when Claude compacts its session, and says each later report follows a compaction", async () => {
+  it("keeps a turn running when Claude compacts its session, and reports the compaction as its own event", async () => {
     const f = harness("subscription", "current-session");
     const acquired = await acquire(f.driver);
     await Effect.runPromise(
@@ -2218,8 +2218,6 @@ describe("Claude execution policy", () => {
     await query.emit(request("message-2"));
     await query.emit(completed("sdk-session-1"));
     await settle();
-    // A compaction belongs to the turn it happened in; the next turn's prompt
-    // is kept until the runtime compacts again.
     await Effect.runPromise(
       acquired.connection.send({ sessionId, prompt: "second", attachments: [], tools: [] }),
     );
@@ -2229,9 +2227,24 @@ describe("Claude execution policy", () => {
 
     expect(events.filter((event) => event.kind === "failed")).toEqual([]);
     expect(events.filter((event) => event.kind === "completed")).toHaveLength(2);
+    // The usage reports say only what Claude does with each prompt; the turn
+    // runner that sees the compaction says the window no longer holds them all.
     expect(
-      events.flatMap((event) => (event.kind === "usage" ? [event.promptRetention] : [])),
-    ).toEqual(["kept", "compacted", "compacted", "kept", "kept"]);
+      events.flatMap((event) =>
+        event.kind === "usage"
+          ? [`usage ${event.promptRetention}`]
+          : event.kind === "context-compacted"
+            ? [`compacted ${event.trigger} ${event.tokensBefore}`]
+            : [],
+      ),
+    ).toEqual([
+      "usage kept",
+      "compacted automatic 150000",
+      "usage kept",
+      "usage kept",
+      "usage kept",
+      "usage kept",
+    ]);
     await Effect.runPromise(Fiber.interrupt(subscription));
     await acquired.close();
   });

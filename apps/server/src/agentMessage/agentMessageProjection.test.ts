@@ -11,6 +11,7 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   AgentMessageProjection,
+  MAX_EARLY_REFUSALS_PER_SENDER,
   hydrateAgentMessageProjectionFromJournal,
 } from "./agentMessageProjection";
 import { AgentMessageBodyStore } from "./agentMessageBodyStore";
@@ -99,6 +100,103 @@ describe("the agent message projection", () => {
       state: "refused",
       refuseReason: "unauthorized",
     });
+  });
+
+  it("keeps a message refused before admission, shows it to its sender's readers only, and rebuilds it from a replay", () => {
+    const early = {
+      kind: "message-refused",
+      messageId: "10000000-0000-4000-8000-0000000000e1",
+      correlationId: "20000000-0000-4000-8000-0000000000e1",
+      refuseReason: "unauthorized",
+      senderThreadId: "code-0000-0000-4000-8000-00000000000a",
+      recipientThreadId: "code-0000-0000-4000-8000-0000000000ff",
+      occurredAt: "2026-09-10T12:05:00.000Z",
+    } as AgentMessageRefused;
+    const withoutEndpoints = {
+      ...early,
+      messageId: "10000000-0000-4000-8000-0000000000e2",
+    } as AgentMessageRefused;
+    delete (withoutEndpoints as { senderThreadId?: unknown }).senderThreadId;
+    delete (withoutEndpoints as { recipientThreadId?: unknown }).recipientThreadId;
+
+    const projection = new AgentMessageProjection();
+    const status = hydrateAgentMessageProjectionFromJournal({
+      replay: () =>
+        [early, early, withoutEndpoints].map((payload, index) => ({
+          globalSequence: index + 1,
+          aggregateType: AGENT_MESSAGE_AGGREGATE,
+          eventName: "agent.message-refused@1",
+          eventVersion: 1,
+          payload,
+        })),
+      projection,
+    });
+
+    expect(status).toBe("ok");
+    // The replayed duplicate counts once, and a refusal an earlier host
+    // journaled without its endpoints has nobody to show it to.
+    const facts = projection.messagingFacts(8);
+    expect(facts.refused).toBe(1);
+    expect(facts.recent).toEqual([
+      {
+        messageId: early.messageId,
+        senderThreadId: early.senderThreadId,
+        recipientThreadId: early.recipientThreadId,
+        state: "refused",
+        refuseReason: "unauthorized",
+        occurredAt: early.occurredAt,
+      },
+    ]);
+    // A reader who may not open the sender sees nothing of it, not even a count.
+    const hidden = projection.messagingFacts(8, 20, () => false);
+    expect(hidden).toMatchObject({ refused: 0, recent: [] });
+    expect(projection.senderThreadIds()).toEqual(new Set([String(early.senderThreadId)]));
+    // Purging the thread it names forgets it.
+    projection.forgetForThread(String(early.senderThreadId));
+    expect(projection.messagingFacts(8).refused).toBe(0);
+  });
+
+  it("keeps only the newest refusals of a sender, and still counts the rest", () => {
+    const projection = new AgentMessageProjection();
+    const total = MAX_EARLY_REFUSALS_PER_SENDER + 25;
+    for (let index = 0; index < total; index += 1) {
+      projection.apply({
+        kind: "message-refused",
+        messageId: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        correlationId: "20000000-0000-4000-8000-0000000000e1",
+        refuseReason: "policy",
+        senderThreadId: "code-0000-0000-4000-8000-00000000000a",
+        recipientThreadId: `code-0000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        occurredAt: new Date(Date.UTC(2026, 8, 10, 12, 0, index)).toISOString(),
+      } as AgentMessageRefused);
+    }
+
+    const facts = projection.messagingFacts(8, 1000);
+    expect(facts.refused).toBe(total);
+    expect(facts.recent).toHaveLength(MAX_EARLY_REFUSALS_PER_SENDER);
+    // The newest are the ones kept.
+    expect(facts.recent[0]?.recipientThreadId).toBe(
+      `code-0000-0000-4000-8000-${String(total - 1).padStart(12, "0")}`,
+    );
+  });
+
+  it("orders settled messages and early refusals together, newest first", () => {
+    const projection = new AgentMessageProjection();
+    projection.apply(sent);
+    projection.apply(refusedEvent("recipient-terminal"));
+    projection.apply({
+      kind: "message-refused",
+      messageId: "10000000-0000-4000-8000-0000000000e3",
+      correlationId: "20000000-0000-4000-8000-0000000000e3",
+      refuseReason: "policy",
+      senderThreadId: sent.senderThreadId,
+      recipientThreadId: sent.recipientThreadId,
+      occurredAt: "2026-09-10T12:00:09.000Z",
+    } as AgentMessageRefused);
+    expect(projection.messagingFacts(8).recent.map((entry) => entry.refuseReason)).toEqual([
+      "policy",
+      "recipient-terminal",
+    ]);
   });
 
   it("forgets a purged thread's messages in both directions and names the bodies to purge", () => {

@@ -51,6 +51,7 @@ function openHarness() {
     clock: () => now,
   });
   const erasedCanvasFiles: Array<ReadonlyArray<string>> = [];
+  const forgottenProjects: string[] = [];
   const service = new ThreadRetentionService({
     connection,
     journal,
@@ -61,8 +62,11 @@ function openHarness() {
     purgeCanvasFiles: (canvasIds) => {
       erasedCanvasFiles.push(canvasIds);
     },
+    forgetProjectData: (projectId) => {
+      forgottenProjects.push(projectId);
+    },
   });
-  return { connection, journal, service, runtime, erasedCanvasFiles };
+  return { connection, journal, service, runtime, erasedCanvasFiles, forgottenProjects };
 }
 
 function pending(eventName: string, payload: unknown) {
@@ -223,6 +227,8 @@ describe("ThreadRetentionService", () => {
     if (!("deleted" in report) || "kind" in report) throw new Error("purge did not report scopes");
     expect(report.deleted).toContain("project-memory");
     expect(report.deleted).toContain("project-canvases");
+    // Live services drop what they held for the erased Project, such as its egress rules.
+    expect(harness.forgottenProjects).toEqual([projectId]);
     expect(
       count(
         connection,

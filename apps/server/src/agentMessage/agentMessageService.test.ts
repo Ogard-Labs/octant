@@ -14,7 +14,11 @@ import {
 } from "./agentMessageProjection";
 import { AgentMessageBodyStore } from "./agentMessageBodyStore";
 import {
-  AgentMessageDeliveryRefused,
+  AGENT_MESSAGE_TOOL_NAME,
+  MAX_JOURNALED_REFUSALS_PER_TURN,
+  createAgentMessageTools,
+} from "./agentMessageTools";
+import {
   AgentMessageService,
   type AgentMessageEndpointFacts,
   type AgentMessageEndpointResolver,
@@ -251,6 +255,21 @@ describe("the agent message delivery service", () => {
     // Nothing waits for the thread in the other Project, and its next turn
     // carries nothing and marks nothing.
     expect(projection.inFlight()).toEqual([]);
+    // Each refusal reaches the sender's facts with the reason and the thread
+    // it was addressed to, though no message was ever admitted.
+    const facts = projection.messagingFacts(MAX_OPEN_AGENT_MESSAGES_PER_SENDER);
+    expect(facts.refused).toBe(3);
+    expect(facts.recent).toHaveLength(3);
+    expect(facts.recent).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: "refused",
+          refuseReason: "unauthorized",
+          senderThreadId: String(senderThreadId),
+          recipientThreadId: String(otherProjectThreadId),
+        }),
+      ]),
+    );
     expect(await service.carryIntoTurn(String(otherProjectThreadId))).toEqual([]);
     expect(ingested).toHaveLength(0);
   });
@@ -488,6 +507,26 @@ describe("the agent message delivery service", () => {
     expect(ingested).toHaveLength(0);
   });
 
+  it("journals a refusal the tool made before admission, one per named recipient, with no body", async () => {
+    const { service, names, projection, root } = fixture();
+    await service.recordRefusedSend({
+      senderThreadId,
+      recipients: [{ threadId: recipientThreadId }, { threadId: otherProjectThreadId }],
+      reason: "policy",
+    });
+
+    expect(names()).toEqual(["agent.message-refused@1", "agent.message-refused@1"]);
+    const facts = projection.messagingFacts(MAX_OPEN_AGENT_MESSAGES_PER_SENDER);
+    expect(facts.refused).toBe(2);
+    expect(facts.recent.map((entry) => entry.recipientThreadId).sort()).toEqual(
+      [String(recipientThreadId), String(otherProjectThreadId)].sort(),
+    );
+    expect(facts.recent.every((entry) => entry.refuseReason === "policy")).toBe(true);
+    // Nothing was stored for a message that was never admitted.
+    expect(projection.inFlight()).toEqual([]);
+    expect(await new AgentMessageBodyStore(root).read("am-none")).toBeUndefined();
+  });
+
   it("refuses a petition that names no recipient", async () => {
     const { service } = fixture();
     await expect(
@@ -534,14 +573,55 @@ describe("the agent message delivery service", () => {
     expect(await bodyStore.read(record!.bodyReference.contentReference)).toBeUndefined();
   });
 
-  it("rejects more recipients than one petition may name before journaling anything", async () => {
-    const { service, events } = fixture();
+  it("refuses a petition naming too many recipients as a refusal, journaling the first few", async () => {
+    const { service, names, projection } = fixture();
     const recipients = Array.from({ length: 5 }, (_unused, index) => ({
       threadId: decodeEndpoint(`code-0000-0000-4000-8000-${String(index).padStart(12, "0")}`),
     }));
-    await expect(
-      service.send({ senderThreadId, recipients, body: "Any body." }),
-    ).rejects.toBeInstanceOf(AgentMessageDeliveryRefused);
-    expect(events).toHaveLength(0);
+    const outcomes = await service.send({ senderThreadId, recipients, body: "Any body." });
+
+    expect(outcomes).toHaveLength(4);
+    for (const outcome of outcomes) {
+      expect(outcome).toMatchObject({ status: "refused", reason: "policy" });
+    }
+    expect(names()).toEqual(Array(4).fill("agent.message-refused@1"));
+    expect(projection.messagingFacts(MAX_OPEN_AGENT_MESSAGES_PER_SENDER).refused).toBe(4);
+    expect(projection.inFlight()).toEqual([]);
+  });
+
+  it("answers a refusal the turn's budget will not journal without journaling it", async () => {
+    const { service, names } = fixture();
+    const outcomes = await service.send({
+      senderThreadId,
+      recipients: [{ threadId: otherProjectThreadId }],
+      body: handoff,
+      refusalBudget: { admit: () => false },
+    });
+    expect(outcomes[0]).toMatchObject({ status: "refused", reason: "unauthorized" });
+    expect(names()).toEqual([]);
+  });
+
+  it("journals no more refusals than a turn's cap when the model loops on refused and malformed calls", async () => {
+    const { service, names } = fixture();
+    const tools = createAgentMessageTools({
+      service,
+      senderThreadId: String(senderThreadId),
+      toolConstraints: [],
+      profileDisplayName: "Reviewer",
+      readPosture: () => "approval-gated",
+    });
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const unknown = `code-0000-0000-4000-8000-${String(attempt).padStart(12, "0")}`;
+      await tools.execute({
+        name: AGENT_MESSAGE_TOOL_NAME,
+        inputJson: JSON.stringify({ recipients: [{ threadId: unknown }], message: handoff }),
+      });
+      // A call that names a recipient but carries no message.
+      await tools.execute({
+        name: AGENT_MESSAGE_TOOL_NAME,
+        inputJson: JSON.stringify({ recipients: [{ threadId: unknown }] }),
+      });
+    }
+    expect(names().length).toBe(MAX_JOURNALED_REFUSALS_PER_TURN);
   });
 });

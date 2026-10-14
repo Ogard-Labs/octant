@@ -2081,7 +2081,7 @@ describe("ProjectSidebarSection context health", () => {
 });
 
 describe("snoozed and completed shelves", () => {
-  it("files snoozed and completed threads in collapsed shelves below the Projects", async () => {
+  it("files snoozed and put-away threads in collapsed shelves below the Projects", async () => {
     const user = userEvent.setup();
     const onSelectThread = vi.fn();
     render(
@@ -2122,19 +2122,20 @@ describe("snoozed and completed shelves", () => {
     expect(within(projects).queryByRole("button", { name: /Shipped the fix/ })).toBeNull();
 
     const snoozed = screen.getByText("Snoozed").closest("details");
-    const completed = screen.getByText("Completed").closest("details");
+    const completed = screen.getByText("Put away").closest("details");
+    expect(screen.queryByText("Completed")).toBeNull();
     expect(snoozed).toHaveAttribute("data-shelf", "snoozed");
     expect(completed).toHaveAttribute("data-shelf", "completed");
     expect(snoozed).not.toHaveAttribute("open");
     expect(within(snoozed!).getByText("1")).toBeInTheDocument();
     expect(within(completed!).getByText("1")).toBeInTheDocument();
 
-    await user.click(within(completed!).getByText("Completed"));
+    await user.click(within(completed!).getByText("Put away"));
     await user.click(within(completed!).getByRole("button", { name: /Shipped the fix/ }));
     expect(onSelectThread).toHaveBeenCalledWith("thread-c");
   });
 
-  it("opens the Completed shelf, or the Activity feed, when a sidebar tile asks for it", () => {
+  it("opens the Put away shelf, or the Activity feed, when a sidebar tile asks for it", () => {
     window.localStorage.clear();
     const section = (listRequest?: { view: "activity" | "completed"; sequence: number }) => (
       <ProjectSidebarSection
@@ -2161,10 +2162,10 @@ describe("snoozed and completed shelves", () => {
       />
     );
     const { rerender } = render(section());
-    expect(screen.getByText("Completed").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("Put away").closest("details")).not.toHaveAttribute("open");
 
     rerender(section({ view: "completed", sequence: 1 }));
-    expect(screen.getByText("Completed").closest("details")).toHaveAttribute("open");
+    expect(screen.getByText("Put away").closest("details")).toHaveAttribute("open");
     expect(screen.getByRole("button", { name: "Activity feed" })).toHaveAttribute(
       "aria-pressed",
       "false",
@@ -2202,7 +2203,7 @@ describe("snoozed and completed shelves", () => {
         ]}
       />,
     );
-    expect(screen.getByText("Completed").closest("details")).toHaveAttribute("open");
+    expect(screen.getByText("Put away").closest("details")).toHaveAttribute("open");
     expect(screen.getByRole("button", { name: /Shipped the fix/ })).toHaveAttribute(
       "aria-current",
       "page",

@@ -13,18 +13,37 @@ const sent = {
   occurredAt: "2026-09-10T12:00:00.000Z",
 };
 
-function handler(options: { readonly authorized: boolean } = { authorized: true }) {
+const refusedBeforeAdmission = {
+  kind: "message-refused",
+  messageId: "10000000-0000-4000-8000-000000000002",
+  correlationId: "20000000-0000-4000-8000-000000000002",
+  refuseReason: "unauthorized",
+  senderThreadId: "code-0000-0000-4000-8000-00000000000c",
+  recipientThreadId: "code-0000-0000-4000-8000-0000000000ff",
+  occurredAt: "2026-09-10T12:01:00.000Z",
+};
+
+function handler(
+  options: {
+    readonly authorized?: boolean;
+    readonly mayOpen?: (threadId: string) => boolean;
+  } = {},
+) {
+  const authorized = options.authorized ?? true;
   const projection = new AgentMessageProjection();
   projection.apply(sent as never);
+  projection.apply(refusedBeforeAdmission as never);
   return {
     handle: createAgentMessageRouteHandler({
       windowAuthorityStore: {
         authenticate: (capability: string) => {
-          if (!options.authorized || capability === "") throw new Error("unauthorized");
+          if (!authorized || capability === "") throw new Error("unauthorized");
           return "00000000-0000-4000-8000-000000000001" as never;
         },
       } as never,
       projection,
+      windowCanOpenThread: async (_windowId, threadId) =>
+        (options.mayOpen ?? (() => true))(threadId),
     }),
     projection,
   };
@@ -32,7 +51,7 @@ function handler(options: { readonly authorized: boolean } = { authorized: true 
 
 describe("the agent message facts route", () => {
   it("serves the messaging facts with no bodies for an authenticated window", async () => {
-    const { handle } = handler();
+    const { handle } = handler({ mayOpen: (threadId) => threadId === sent.senderThreadId });
     const response = await handle(
       new Request("http://127.0.0.1:52600/api/agent-messages", {
         method: "GET",
@@ -54,6 +73,38 @@ describe("the agent message facts route", () => {
       refused: 0,
       recent: [],
     });
+  });
+
+  it("shows a window a refusal, with its reason, only for a sender thread it may open", async () => {
+    const read = async (mayOpen: (threadId: string) => boolean) => {
+      const response = await handler({ mayOpen }).handle(
+        new Request("http://127.0.0.1:52600/api/agent-messages", {
+          method: "GET",
+          headers: { "x-octant-window-capability": "wc" },
+        }),
+      );
+      return (await response?.json()) as {
+        readonly refused: number;
+        readonly openInFlight: number;
+        readonly recent: ReadonlyArray<{
+          readonly refuseReason: string;
+          readonly recipientThreadId: string;
+        }>;
+      };
+    };
+
+    const opener = await read((threadId) => threadId === refusedBeforeAdmission.senderThreadId);
+    expect(opener.refused).toBe(1);
+    expect(opener.recent).toEqual([
+      expect.objectContaining({
+        refuseReason: "unauthorized",
+        recipientThreadId: refusedBeforeAdmission.recipientThreadId,
+      }),
+    ]);
+    expect(opener.openInFlight).toBe(0);
+
+    const stranger = await read(() => false);
+    expect(stranger).toMatchObject({ refused: 0, openInFlight: 0, recent: [] });
   });
 
   it("refuses an unauthenticated window", async () => {

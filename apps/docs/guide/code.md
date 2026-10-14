@@ -58,6 +58,22 @@ Code threads run in one of four server-enforced authority modes:
 
 Code starts approval-gated unless the user explicitly remembers Full access. A Work-to-Code promotion always starts approval-gated, never inheriting Work authority. The composer shows the posture the next turn will run under, defaulting to the thread's. A turn may only narrow what the thread already grants; Plan mode stays read-only and cannot be overridden from the composer. The transcript records the posture each turn actually ran under. Raising a thread to Full access still needs the native confirmation. The picker also offers **Lower thread** to durably return a thread to approval-gated access; this revokes a session-only Full-access grant for the current window without confirmation, while other windows keep their own grants. The confirmation leads with the action, thread title, and branch or checkout state. Project, thread, repository, and checkout identifiers remain in **Show authority details**, alongside the authority digests.
 
+## Long threads
+
+A long Code thread opens on its newest turns, at the end, and follows new
+output while you are there. **Load earlier messages** at the top adds the turns
+before the oldest one shown; the turn you were reading stays where it is. In a
+fork, once its own turns are all shown, Load earlier continues with the thread
+it was forked from, starting at the reply you forked from. The usage and
+context figures always cover the whole thread, and a restore's **Undo restore**
+stays offered however far back the restore was. Find in page searches the turns
+loaded so far. Export always covers the whole thread.
+
+The phone app opens a Code thread on its newest 20 turns and says so when
+earlier ones exist; it has no Load earlier, so read those on the desktop.
+`octant agent` shows a Code thread's newest 50 turns, and its footer then
+counts them as **newest 50 turns**.
+
 ## Export
 
 **Export thread** downloads a portable JSON cut of this Code thread: the
@@ -149,7 +165,8 @@ stays on the thread after a successful overwrite. Octant refuses the restore,
 and Undo restore, while another thread has a turn writing in the same
 checkout, and names that thread when it is in the same Project. Wait for its
 turn to finish or stop it, then restore; the Undo restore button stays after a
-refusal. A thread on its own worktree is not held up by other threads.
+refusal. A restore is also refused while another restore of the same folder is
+still running. A thread on its own worktree is not held up by other threads.
 
 A checkpoint marker stays on the turn only when that point is marked.
 
@@ -223,21 +240,21 @@ request named on a pane tab opens there too.
 The sidebar follows the pane that last received pointer or keyboard input.
 Each thread remembers its open tools and selected tool.
 
-## Complete and snooze threads
+## Put away and snooze threads
 
 The same actions exist for Chat and Work threads; this section describes
 them once, for Code.
 
 A thread you are done with can be put away without archiving it. Choose
-**Complete** from the row's menu (right-click, or the ⋯ control on hover) and
-the thread leaves its Project group for the collapsed **Completed** shelf at
+**Put away** from the row's menu (right-click, or the ⋯ control on hover) and
+the thread leaves its Project group for the collapsed **Put away** shelf at
 the foot of the sidebar. Everything about it stays: the transcript, the
 checkout, its pull request link, and search. **Reopen** brings it back to the
 top of its group, and so does sending it a new message.
 
-Octant refuses to complete a thread while its turn is still running or while
+Octant refuses to put a thread away while its turn is still running or while
 the agent is waiting on an approval or an answer from you, so a thread never
-disappears with work in flight. Completing a thread also clears its pin.
+disappears with work in flight. Putting a thread away also clears its pin.
 
 **Snooze** hides a thread until a time you pick — in an hour, in three hours,
 this evening, tomorrow morning, or next Monday morning. Snoozed threads sit in
@@ -248,8 +265,8 @@ When a snooze ends the row reappears where it was, marked **Woke** until you
 open it. **Wake** in the row menu ends a snooze by hand, and so does sending
 the thread a message. A thread that is waiting on you cannot be snoozed.
 
-Completed threads move to the archive on their own after a week. Change that
-window, or turn it off, under **Settings › General › Archive completed
+Put-away threads move to the archive on their own after a week. Change that
+window, or turn it off, under **Settings › General › Archive put-away
 threads**. Archiving keeps every thread and its history; only a confirmed purge
 in **Settings › Data & privacy** deletes anything.
 
@@ -268,7 +285,7 @@ It has three read-only actions:
   state only.
 
 An agent sees only the open Code threads of its own Project. Threads in other
-Projects, completed or archived threads, Chat and Work threads, and helper
+Projects, put-away or archived threads, Chat and Work threads, and helper
 agents started by a thread are never listed or readable, and asking for one
 gets the same refusal as asking for a thread that does not exist. Nothing the
 agent does here sends, changes, or stops another thread, so it works in Plan

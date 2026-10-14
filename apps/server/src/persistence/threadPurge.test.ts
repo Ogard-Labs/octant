@@ -19,10 +19,16 @@ import {
   decodeImageGenerationScopeId,
   decodeProjectId,
   decodeWorkThreadId,
+  ReplayCursor,
 } from "@octant/contracts";
 import { decodeHostExportUsageRow } from "@octant/contracts";
 import { decodeThreadRetentionThreadId } from "@octant/contracts/thread-retention";
+import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  AgentMessageProjection,
+  hydrateAgentMessageProjectionFromJournal,
+} from "../agentMessage/agentMessageProjection";
 import { BrowserCaptureStore } from "../browser/browserCaptureStore";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
@@ -159,6 +165,115 @@ describe("thread purge sweep", () => {
     expect(projectMemoryEntriesRemain(harness.connection)).toBeGreaterThan(0);
     expect(projectMemoryNamesThread(harness.connection, threads.code.id)).toBe(false);
   });
+
+  it.each([
+    { purged: "sender", threadId: threads.code.id },
+    { purged: "recipient", threadId: threads.chat.id },
+  ] as const)(
+    "does not bring a message or refusal back after a restart when its $purged was purged",
+    async ({ threadId }) => {
+      const harness = openHarness();
+      seedControlThread(harness);
+      seedCodeProjection(harness, threads.code.id);
+      seedChatProjection(harness, threads.chat.id, threads.chat.marker);
+      const message = (n: number) => ({
+        messageId: `c3630000-0000-4000-8000-0000000000b${n}`,
+        correlationId: `c3630000-0000-4000-8000-0000000000c${n}`,
+      });
+      const endpoints = { senderThreadId: threads.code.id, recipientThreadId: threads.chat.id };
+      const bodyReference = { contentReference: "am-fixture", byteLength: 4 };
+      // A message that waits, one that was refused before admission, and one
+      // refused after it: each is its own aggregate. A fourth between two
+      // threads nobody purged must survive.
+      insertEvent(
+        harness.connection,
+        "agent-message",
+        message(1).messageId,
+        { kind: "message-sent", ...message(1), ...endpoints, bodyReference, occurredAt: now },
+        "agent.message-sent@1",
+      );
+      insertEvent(
+        harness.connection,
+        "agent-message",
+        message(2).messageId,
+        {
+          kind: "message-refused",
+          ...message(2),
+          ...endpoints,
+          refuseReason: "unauthorized",
+          occurredAt: now,
+        },
+        "agent.message-refused@1",
+      );
+      insertEvent(
+        harness.connection,
+        "agent-message",
+        message(3).messageId,
+        { kind: "message-sent", ...message(3), ...endpoints, bodyReference, occurredAt: now },
+        "agent.message-sent@1",
+      );
+      insertEvent(
+        harness.connection,
+        "agent-message",
+        message(3).messageId,
+        {
+          kind: "message-refused",
+          ...message(3),
+          ...endpoints,
+          refuseReason: "recipient-terminal",
+          occurredAt: now,
+        },
+        "agent.message-refused@1",
+        2,
+      );
+      insertEvent(
+        harness.connection,
+        "agent-message",
+        message(4).messageId,
+        {
+          kind: "message-refused",
+          ...message(4),
+          senderThreadId: controlThreadId,
+          recipientThreadId: "c3630000-0000-4000-8000-0000000000ff",
+          refuseReason: "unauthorized",
+          occurredAt: now,
+        },
+        "agent.message-refused@1",
+      );
+      const mode = threadId === threads.code.id ? "code" : "chat";
+
+      await harness.service.purge(
+        {
+          scope: { kind: "thread", mode, threadId: decodeThreadRetentionThreadId(threadId) },
+          confirm: true,
+        },
+        "local-window",
+      );
+
+      // A restart replays the journal into a fresh projection.
+      const projection = new AgentMessageProjection();
+      expect(
+        hydrateAgentMessageProjectionFromJournal({
+          replay: (cursor) =>
+            harness.journal.replayAggregateType({
+              ...Schema.decodeUnknownSync(ReplayCursor)({
+                afterSequence: cursor.afterSequence,
+                limit: cursor.limit,
+              }),
+              aggregateType: cursor.aggregateType ?? "agent-message",
+            }),
+          projection,
+        }),
+      ).toBe("ok");
+      expect(projection.senderThreadIds()).toEqual(new Set([controlThreadId]));
+      expect(projection.messagingFacts(8)).toMatchObject({ refused: 1, openInFlight: 0 });
+      expect(
+        scanHost(harness.connection, harness.directory, [threadId]).filter((hit) =>
+          hit.where.startsWith("aggregate:agent-message"),
+        ),
+      ).toEqual([]);
+    },
+  );
 
   it("never erases another mode's thread that shares the purged thread's id", async () => {
     const harness = openHarness();
@@ -725,18 +840,20 @@ function insertEvent(
   aggregateId: string,
   payload: unknown,
   eventName = "fixture.planted@1",
+  aggregateVersion = 1,
 ): void {
   connection
     .prepare(
       `INSERT INTO event_journal (
         event_id, aggregate_type, aggregate_id, aggregate_version, event_name, event_version,
         correlation_id, actor_kind, actor_id, occurred_at, payload_json, host_id
-      ) VALUES (?, ?, ?, 1, ?, 1, ?, 'system', ?, ?, ?, 'local')`,
+      ) VALUES (?, ?, ?, ?, ?, 1, ?, 'system', ?, ?, ?, 'local')`,
     )
     .run(
       randomUUID(),
       aggregateType,
       aggregateId,
+      aggregateVersion,
       eventName,
       randomUUID(),
       actorId,

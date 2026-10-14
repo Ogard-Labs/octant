@@ -755,9 +755,9 @@ function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
 }
 
 const COMPLETE_REFUSALS = {
-  archived: "An archived thread cannot be completed.",
-  executing: "Wait for the running turn to finish before completing this thread.",
-  "awaiting-input": "This thread is waiting on you; answer it before completing it.",
+  archived: "An archived thread cannot be put away.",
+  executing: "Wait for the running turn to finish before putting this thread away.",
+  "awaiting-input": "This thread is waiting on you; answer it before putting it away.",
 } as const;
 
 const SNOOZE_REFUSALS = {
@@ -1603,21 +1603,10 @@ export class CodeService {
             ? {}
             : { externalEditor: command.externalEditor }),
           requireGitRepository: command.requireGitRepository ?? current.requireGitRepository,
-          allowDefaultFolderThreads:
-            command.allowDefaultFolderThreads ?? current.allowDefaultFolderThreads,
           defaultDiffLayout: command.defaultDiffLayout ?? current.defaultDiffLayout,
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        // The default folder is not a repository, so a thread there can only
-        // start while Git is not required. Refuse the pair rather than store a
-        // switch whose thread would never start.
-        if (settings.allowDefaultFolderThreads && settings.requireGitRepository) {
-          throw this.#failure(
-            "invalid",
-            "Threads without a Project need the Git requirement turned off first.",
-          );
-        }
         this.#append(
           "code-settings",
           CODE_SETTINGS_AGGREGATE_ID,
@@ -2064,7 +2053,7 @@ export class CodeService {
                 }
               : command.kind === "complete-code-thread"
                 ? // Completing is "I'm done here": the pin and any snooze
-                  // would keep the row out of the Completed shelf, so both go.
+                  // would keep the row out of the Put away shelf, so both go.
                   {
                     ...withoutPinned(withoutRest(current)),
                     completedAt: updatedAt,
@@ -3066,7 +3055,6 @@ export class CodeService {
       defaultExecutionPolicy: "approval-gated",
       defaultPermissionPersistence: "current-session",
       requireGitRepository: true,
-      allowDefaultFolderThreads: false,
       defaultDiffLayout: "unified",
       version: 0 as AggregateVersion,
       updatedAt: decodeTimestamp(this.#clock()),

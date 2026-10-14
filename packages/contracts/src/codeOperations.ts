@@ -51,6 +51,7 @@ import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention"
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
+import { ThreadWindowBoundsFields } from "./threadWindow";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -1765,6 +1766,67 @@ export const CodeConversationPage = Schema.Struct({
 }).annotations(strict);
 export type CodeConversationPage = typeof CodeConversationPage.Type;
 
+/**
+ * The usage of a run of turns, folded the way a client totals a thread: sums
+ * of what each turn reported (a turn's last report is its own total), how
+ * many of those turns measured cache use, and the window figures of the
+ * latest turn that named them. A windowed read carries the fold of every turn
+ * older than its first, so a client that holds only the newest turns still
+ * shows the thread's whole usage.
+ */
+export const CodeConversationUsageTotals = Schema.Struct({
+  /** Turns whose provider reported usage; never zero, the fold is absent then. */
+  reportedTurns: Schema.Int.pipe(Schema.positive()),
+  inputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  outputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  cacheRead: Schema.Struct({
+    measuredTurns: Schema.Int.pipe(Schema.nonNegative()),
+    measuredTokens: Schema.Int.pipe(Schema.nonNegative()),
+  }).annotations(strict),
+  cacheWrite: Schema.Struct({
+    measuredTurns: Schema.Int.pipe(Schema.nonNegative()),
+    measuredTokens: Schema.Int.pipe(Schema.nonNegative()),
+  }).annotations(strict),
+  /** Absent when no folded turn reported a price. */
+  costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+  contextWindow: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  contextTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  /** The latest reporting turn's figure, absent when that turn named none. */
+  autoCompactThreshold: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  contextBreakdown: Schema.optional(ProviderContextBreakdown),
+}).annotations(strict);
+export type CodeConversationUsageTotals = typeof CodeConversationUsageTotals.Type;
+
+/**
+ * One page of a Code thread for a client that opens on its newest turns: a
+ * contiguous run of the thread's own turns, oldest first. Without an anchor
+ * it is the newest turns; `before` is the page just before the named turn and
+ * `through` the page that ends with it. `earlierUsage` folds every turn of the
+ * thread older than the page's first, so totals stay whole while earlier
+ * pages are not loaded. `limits` and `restoreUndo` are thread state and come
+ * on the newest page only, as the forward page would report them.
+ */
+export const CodeConversationWindow = Schema.Struct({
+  version: Schema.Literal(1),
+  threadId: CodeThreadId,
+  turns: Schema.Array(CodeConversationTurn).pipe(Schema.maxItems(MAX_CODE_CONVERSATION_PAGE_SIZE)),
+  ...ThreadWindowBoundsFields,
+  earlierUsage: Schema.optional(CodeConversationUsageTotals),
+  limits: Schema.optional(Schema.Array(CodeProviderLimit).pipe(Schema.maxItems(8))),
+  restoreUndo: Schema.optional(CodeCheckpoint),
+}).annotations(strict);
+export type CodeConversationWindow = typeof CodeConversationWindow.Type;
+
+/** What a window read asks for: a page size and at most one anchor turn of the thread. */
+export const CodeConversationWindowRequest = Schema.Struct({
+  limit: Schema.Int.pipe(Schema.between(1, MAX_CODE_CONVERSATION_PAGE_SIZE)),
+  before: Schema.optional(CodeOperationId),
+  through: Schema.optional(CodeOperationId),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((request) => request.before === undefined || request.through === undefined));
+export type CodeConversationWindowRequest = typeof CodeConversationWindowRequest.Type;
+
 // At the per-item text ceiling, 64 items remain below the authenticated
 // remote route's 8 MiB response budget after JSON framing.
 export const MAX_CODE_EVIDENCE_BATCH_ITEMS = 64;
@@ -2339,6 +2401,13 @@ export const decodeCodeOperationEventFrame = Schema.decodeUnknownSync(CodeOperat
 export const decodeCodeOperationStreamFrame = Schema.decodeUnknownSync(CodeOperationStreamFrame);
 export const decodeCodeConversationTurn = Schema.decodeUnknownSync(CodeConversationTurn);
 export const decodeCodeConversationPage = Schema.decodeUnknownSync(CodeConversationPage);
+export const decodeCodeConversationWindow = Schema.decodeUnknownSync(CodeConversationWindow);
+export const decodeCodeConversationWindowRequest = Schema.decodeUnknownSync(
+  CodeConversationWindowRequest,
+);
+export const decodeCodeConversationUsageTotals = Schema.decodeUnknownSync(
+  CodeConversationUsageTotals,
+);
 export const decodeCodeEvidenceBatchRequest = Schema.decodeUnknownSync(CodeEvidenceBatchRequest);
 export const decodeCodeEvidenceBatchResponse = Schema.decodeUnknownSync(CodeEvidenceBatchResponse);
 export const decodeCodeOperationApprovalRequest = Schema.decodeUnknownSync(

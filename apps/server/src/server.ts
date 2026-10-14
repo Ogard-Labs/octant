@@ -42,11 +42,13 @@ import {
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceContentId,
+  decodeCodeFailure,
   decodeCodeFileId,
   decodeCodeRelativePath,
   decodeCodeRepositoryId,
   decodeCodeThreadId,
   decodeWorkThreadId,
+  THREAD_EXTERNAL_CONTENT_AGGREGATE,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadCreationRootId,
   decodeThreadWorkingDirectory,
@@ -235,6 +237,7 @@ import { resolveConnectedGitHubRepository } from "./code/connectedRepository";
 import { RepositoryTestDiscoveryService } from "./code/repositoryTestDiscoveryService";
 import {
   CodeService,
+  CodeServiceError,
   type CodeCheckoutObservationPort,
   type CodeFileRootAuthorityPort,
   type CodeWorktreeRefsPort,
@@ -248,6 +251,7 @@ import {
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
 import { LiveTurnRegistry } from "./liveTurn/liveTurnRegistry";
 import { CodePlannerService } from "./code/codePlannerService";
+import { INHERITED_MARK_REFUSAL } from "./context/inheritedExternalContentMark";
 import {
   createCodeProfileSkillResolver,
   createStoredCodeProfileSkillTextLoader,
@@ -280,6 +284,7 @@ import { CodeProjectPullRequestSnapshotStore } from "./code/codeProjectPullReque
 import { createGhCommandPort, GhPullRequestPort } from "./code/ghPullRequestPort";
 import { RepositoryTestProcessPort } from "./code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "./code/terminalProcessPort";
+import type { TerminalLauncher } from "./code/terminalService";
 import { defaultTerminalShell } from "./code/terminalShell";
 import { CodeOperationApprovalStore } from "./code/codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./code/codeSessionAuthorityStore";
@@ -436,6 +441,7 @@ import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
 import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { CodeProjectAccess } from "./codeProjectAccess";
+import { windowCanOpenProject } from "./projectOpenAuthority";
 import { isRoutineHostScope } from "./routineHostScope";
 import { ProjectRootPort } from "./projectRootPort";
 import { ProjectTerminalService } from "./code/projectTerminalService";
@@ -596,6 +602,7 @@ import {
   createCodeThreadMentionDirectory,
   createWorkThreadMentionDirectory,
   createChatSideChatThreadFactory,
+  threadMentionContextResolver,
 } from "./chat/threadMentionService";
 import { ThreadDialogueService } from "./chat/threadDialogueService";
 import {
@@ -714,7 +721,10 @@ import { BrowserToolApprovalService } from "./browser/browserToolApprovalService
 import { ExternalContentClearStore } from "./context/externalContentClearStore";
 import { BrowserCaptureService } from "./browser/browserCaptureService";
 import { BrowserCaptureStore } from "./browser/browserCaptureStore";
-import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
+import {
+  ExternalContentIngestionStore,
+  type RecordExternalContentIngestionInput,
+} from "./context/externalContentIngestionStore";
 import {
   AgentMessageProjection,
   hydrateAgentMessageProjectionFromJournal,
@@ -769,6 +779,11 @@ import { NativeHarnessQuestionStore } from "./harness/nativeHarnessQuestions";
 import { createAgentRunInteractions } from "./agentRun/agentRunInteractions";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
 import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
+import { createNativeHarnessEgressRouteHandler } from "./harness/nativeHarnessEgressRoutes";
+import {
+  ToolEgressRules,
+  toolEgressLaunchTaintReference,
+} from "./harness/nativeHarnessEgressRules";
 import { NativeHarnessTurnObserver } from "./harness/nativeHarnessTurnObserver";
 import { fetchPublicUrl, PublicFetchRefused } from "./harness/nativeHarnessWebFetch";
 import { searxngHarnessWebSearch } from "./harness/nativeHarnessWebSearch";
@@ -826,11 +841,9 @@ import {
   type CodeProjectPullRequestRow,
   type CodeWorktreeRemoteFacts,
   type ImageGenerationSaveResult,
-  type MentionableThreadId,
   type MultiModelPoolCandidate,
   type ProviderContextBlock,
   type ProviderProbeResult,
-  type ThreadMentionCommandResult,
 } from "@octant/contracts";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import {
@@ -853,7 +866,6 @@ import {
   defaultShellSettings,
   effectiveClaudeAccountConfigDirectory,
   enabledModes,
-  formatThreadMentionContext,
   isAgentRunActiveStatus,
   claudePlanUsageStateDirectory,
   isImageProfileDriverKind,
@@ -1219,6 +1231,8 @@ export interface StartOctantServerOptions {
   readonly githubAuthenticationPort?: GhAuthenticationPort;
   readonly ghExecutable?: string;
   readonly codeFileHelperPath?: string;
+  /** The packaged desktop's `octant` for a terminal with a Browser grant. */
+  readonly terminalLauncher?: TerminalLauncher;
   readonly createCodeFileHelperTransport?: (path: string) => FileHelperProcessTransport;
   readonly codeRepositoryPort?: ManagedWorktreeRepositoryPort;
   readonly webAssetsPath?: string;
@@ -1593,70 +1607,6 @@ function observedCheckoutHeadMatches(
     : !observed.detached && observed.branch === `refs/heads/${expected.name}`;
 }
 
-/**
- * Read the `#thread` mentions a turn names, on the window the turn was sent
- * from.
- *
- * A chip names a thread; it never carries one. The renderer sends ids, and
- * this resolves them through the same mention resolution an Open would take —
- * so the sender's Open authority over every named thread is re-derived at send
- * time, and the transcript window stays the host's decision. The framing is
- * applied here, on the authoritative side, for the same reason. Chat and Code
- * share one resolver because a chip means the same thing in both, and neither
- * mode may read a thread on authority the other proved.
- *
- * The service is reached lazily so a mode wired before it exists can still
- * hold this: nothing is read until a turn actually runs.
- */
-function threadMentionContextResolver(threadMentions: () => ThreadMentionService) {
-  return async ({
-    threadMentionIds,
-    windowId,
-    dialogueEnabled,
-  }: {
-    readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
-    readonly windowId?: WindowId;
-    readonly dialogueEnabled?: boolean;
-  }): Promise<
-    ReadonlyArray<
-      | { readonly kind: "resolved"; readonly threadId: MentionableThreadId; readonly text: string }
-      | { readonly kind: "unreadable"; readonly threadId: MentionableThreadId }
-    >
-  > => {
-    const unreadable = () =>
-      threadMentionIds.map((threadId) => ({ kind: "unreadable" as const, threadId }));
-    // Without an authenticated window there is no principal to re-derive Open
-    // authority from, so nothing resolves rather than resolving on authority
-    // nobody proved.
-    if (windowId === undefined) return unreadable();
-    let resolved: ThreadMentionCommandResult;
-    try {
-      resolved = await threadMentions().execute(
-        { kind: "resolve-mentions", requestId: randomUUID(), threadIds: threadMentionIds },
-        { windowId },
-      );
-    } catch {
-      return unreadable();
-    }
-    if (resolved.kind !== "mentions-resolved") return unreadable();
-    const byThreadId = new Map(
-      resolved.mentions.map((mention) => [String(mention.threadId), mention]),
-    );
-    return threadMentionIds.map((threadId) => {
-      const mention = byThreadId.get(String(threadId));
-      return mention === undefined
-        ? { kind: "unreadable" as const, threadId }
-        : {
-            kind: "resolved" as const,
-            threadId,
-            text: formatThreadMentionContext([mention], {
-              dialogueEnabled: dialogueEnabled === true,
-            }),
-          };
-    });
-  };
-}
-
 function stableCodeFileId(threadId: string, checkoutId: string, relativePath: string) {
   const digest = createHash("sha256")
     .update("octant.code-file.v1\0")
@@ -1691,6 +1641,8 @@ function withCodeOperationRuntime(
     },
     conversation: (windowId, threadId, afterCursor, limit) =>
       runtime.conversation(windowId, threadId, afterCursor, limit),
+    conversationWindow: (windowId, threadId, request) =>
+      runtime.conversationWindow(windowId, threadId, request),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
     readOperationContent: (windowId, threadId, operationId, contentId) =>
       runtime.readEvidence(windowId, threadId, operationId, decodeCodeEvidenceContentId(contentId)),
@@ -1815,6 +1767,9 @@ function withCodeBoard(
     ...(service.conversation === undefined
       ? {}
       : { conversation: service.conversation.bind(service) }),
+    ...(service.conversationWindow === undefined
+      ? {}
+      : { conversationWindow: service.conversationWindow.bind(service) }),
     ...(service.readOperationContent === undefined
       ? {}
       : { readOperationContent: service.readOperationContent.bind(service) }),
@@ -2845,6 +2800,61 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
+    // Harness tool egress rules, proposals, and launch records. Recovery runs
+    // here, before any route admits a turn: a launch the last run never
+    // summarized is marked incomplete, and every launch whose bytes taint its
+    // thread marks it now. No launch runs on the proxy yet; confinement routes
+    // commands there in a later change.
+    const toolEgressRules = new ToolEgressRules({
+      journal: persistence.journal,
+      readCodeThread: (threadId) => {
+        try {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          return thread === undefined ? undefined : { projectId: String(thread.projectId) };
+        } catch {
+          return undefined;
+        }
+      },
+      readThreadTaint: (threadId) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+      recordLaunchTaint: ({ threadId, launchId }) => {
+        const marked = externalContentIngestionStore.record({
+          threadId,
+          provenance: { origin: "external-content", sourceLabel: "tool-egress" },
+          contentReference: toolEgressLaunchTaintReference(launchId),
+          correlationId: launchId,
+          authorized: true,
+        });
+        return marked.kind === "recorded" || marked.kind === "already-recorded"
+          ? "recorded"
+          : "unavailable";
+      },
+      hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    toolEgressRules.recover();
+    const unsubscribeToolEgressRules = persistence.journal.subscribeCommitted((append) => {
+      for (const event of append.events) {
+        if (event.aggregateType === THREAD_EXTERNAL_CONTENT_AGGREGATE) {
+          // A thread tainted mid-launch stops its standing rules at once.
+          toolEgressRules.recheck();
+        } else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
+          const purged = event.payload as { readonly threadId?: unknown };
+          if (typeof purged.threadId === "string") toolEgressRules.forgetThread(purged.threadId);
+        }
+      }
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeToolEgressRules));
+    // Where a mention or a Side Chat reads its source's mark and marks the
+    // thread reading that source's transcript.
+    const threadOutsideContentMarks = {
+      record: (input: RecordExternalContentIngestionInput) =>
+        externalContentIngestionStore.record(input),
+      isMarked: (threadId: string) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    };
     // Agent-to-agent messaging (decision 0063): the host owns admission,
     // clamping, journaling, and delivery. The endpoint resolver is composed
     // lazily from the thread authorities declared later in this startup; a
@@ -3463,6 +3473,7 @@ export function startOctantServer(
     const agentMessageRoutes = createAgentMessageRouteHandler({
       windowAuthorityStore,
       projection: agentMessageProjection,
+      windowCanOpenThread: (windowId, threadId) => windowCanOpenThreadById(windowId, threadId),
     });
     const projectBindingRoutes = createProjectBindingRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
@@ -4952,6 +4963,7 @@ export function startOctantServer(
           },
           approvals: requireBrowserToolApprovalService(),
         },
+        ...(options.terminalLauncher === undefined ? {} : { launcher: options.terminalLauncher }),
         journal: persistence.journal,
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
@@ -5123,6 +5135,22 @@ export function startOctantServer(
           contextHarness.compactionRunning(
             decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
           ),
+        sessionCompactions: {
+          record: ({ threadId, ...input }) => {
+            contextHarness.recordAutomaticCompaction({
+              subject: decodeContextSubjectRef({
+                aggregateType: "code-thread",
+                aggregateId: threadId,
+              }),
+              ...input,
+            });
+          },
+          compactedAfter: (threadId, globalSequence) =>
+            contextHarness.sessionCompactedAfter(
+              decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+              globalSequence,
+            ),
+        },
         providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom }) =>
           selectCodeConversation(thread.id, {
             purpose: "provider-switch",
@@ -5326,7 +5354,10 @@ export function startOctantServer(
             }),
         },
         credentialResolver: { resolve: async () => undefined },
-        resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
+        resolveThreadMentionContext: threadMentionContextResolver(
+          () => threadMentionService,
+          threadOutsideContentMarks,
+        ),
         resolveFileMentionContext: async ({ fileMentionPaths, windowId, threadId, checkoutId }) =>
           fileMentionContextBlocks(fileMentionService, {
             windowId,
@@ -5576,14 +5607,29 @@ export function startOctantServer(
     // The Project planner: one designated Code thread per Code Project that
     // may read the Project's board and propose work. A confirmed proposal
     // creates its thread through the ordinary creation command path below;
-    // the planner has no creation authority of its own.
+    // the planner has no creation authority of its own. Only the host's own
+    // CodeService takes the host-only mark a thread confirmed from a marked
+    // planner starts with; a route service a host was given instead has no
+    // such input, so a confirm that needs the mark is refused there rather
+    // than creating the thread unmarked.
     const codePlannerService = new CodePlannerService({
       persistence,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       canAccessProject: canAccessCodeProject,
-      createThread: async (windowId, creation, signal) =>
-        baseRouteCodeService.execute(windowId, creation, signal),
+      createThread: async (windowId, creation, signal, executionContext) => {
+        if (codeService instanceof CodeService) {
+          return codeService.execute(windowId, creation, signal, executionContext);
+        }
+        if (executionContext.inheritedMark !== undefined) {
+          throw new CodeServiceError(
+            decodeCodeFailure({ category: "unavailable", message: INHERITED_MARK_REFUSAL }),
+          );
+        }
+        return codeService.execute(windowId, creation, signal);
+      },
+      isMarkedWithOutsideContent: (threadId) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     });
     // A linked pull request's checks turning red is a user obligation, not an
     // agent event: every snapshot refresh feeds the durable follow-up marker on
@@ -6352,10 +6398,16 @@ export function startOctantServer(
       sendFirstMessage: (input) => sideTaskFirstMessage.current?.(input) ?? Promise.resolve(false),
       clock: () => new Date().toISOString(),
     });
+    const nativeHarnessEgressRoutes = createNativeHarnessEgressRouteHandler({
+      windowAuthorityStore,
+      rules: toolEgressRules,
+      authorizeThread: authorizeFollowUpThread,
+    });
     const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
       windowAuthorityStore,
       store: {
         read: (threadId) => {
+          nativeHarnessApprovals.expireOverdue();
           const view = nativeHarnessSessionsLive.read(threadId);
           const suggestions = threadFollowUpSuggestions.read(threadId);
           return view === undefined || suggestions === undefined
@@ -6751,6 +6803,8 @@ export function startOctantServer(
             resolveSource: (sourceWindowId, sourceThreadId) =>
               threadMentionService.resolveSideChatSource(sourceWindowId, sourceThreadId),
             readState: sideChatSourceState,
+            marks: threadOutsideContentMarks,
+            uuid: randomUUID,
           },
           {
             sidecarThreadId: String(sidecarThreadId),
@@ -6758,7 +6812,10 @@ export function startOctantServer(
             readToolNames: readToolNames ?? [],
           },
         ),
-      resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
+      resolveThreadMentionContext: threadMentionContextResolver(
+        () => threadMentionService,
+        threadOutsideContentMarks,
+      ),
       dataDirectory: chatDataDirectory,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
@@ -7325,9 +7382,13 @@ export function startOctantServer(
             String(model.id) === String(thread.modelId) && model.inputModalities.includes("image"),
         );
       },
-      resolveThreadMentionContext: async ({ threadMentionIds, windowId }) => {
-        const resolved = await threadMentionContextResolver(() => threadMentionService)({
+      resolveThreadMentionContext: async ({ threadMentionIds, readerThreadId, windowId }) => {
+        const resolved = await threadMentionContextResolver(
+          () => threadMentionService,
+          threadOutsideContentMarks,
+        )({
           threadMentionIds,
+          readerThreadId,
           windowId,
         });
         return resolved.map((mention) => ({
@@ -8294,6 +8355,43 @@ export function startOctantServer(
         return false;
       }
     };
+    // The same rule for a caller that holds only a thread id (a capture, an
+    // agent message). The projections say which kind of thread it is, so one
+    // check runs instead of all three on every read.
+    const windowCanOpenThreadById = async (
+      windowId: WindowId,
+      threadId: string,
+    ): Promise<boolean> => {
+      const id = String(threadId);
+      let threadKind: "chat-thread" | "work-thread" | "code-thread" | undefined;
+      try {
+        if (persistence.readChatThread(decodeChatThreadId(id)) !== undefined) {
+          threadKind = "chat-thread";
+        } else if (persistence.readCodeThread(decodeCodeThreadId(id)) !== undefined) {
+          threadKind = "code-thread";
+        } else if (workThreadProjection.read(decodeWorkThreadId(id)) !== undefined) {
+          threadKind = "work-thread";
+        }
+      } catch {
+        return false;
+      }
+      return threadKind !== undefined && (await windowCanOpenThread(windowId, threadKind, id));
+    };
+    // Which Projects a window can open, by the rule its threads are opened by.
+    const windowCanOpenProjectById = async (
+      windowId: WindowId,
+      projectId: string,
+    ): Promise<boolean> => {
+      try {
+        return windowCanOpenProject({
+          project: persistence.readProject(decodeProjectId(projectId)),
+          chatContext: persistence.readWindowWorkspace(windowId)?.workspace.contextByMode.chat,
+          canAccessCodeProject: (id) => canAccessCodeProject(windowId, id),
+        });
+      } catch {
+        return false;
+      }
+    };
     // No route serves yet, so any compaction still running belongs to a host
     // process that has gone. A journal it cannot read must not keep the host
     // from starting: the compaction stays running, which refuses another one
@@ -8610,30 +8708,14 @@ export function startOctantServer(
         compactionState: (subject, principal) => sessionCompaction.state(subject, principal),
       },
       windowCanOpenThread,
+      windowCanOpenProject: windowCanOpenProjectById,
       windowAuthorityStore,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     const browserAutomationRoutes = createBrowserAutomationRouteHandler({
       service: browserAutomationService,
       captures: browserCaptures,
-      windowCanOpenThread: async (windowId, threadId) => {
-        const id = String(threadId);
-        // A capture names only its thread. The projections say which kind of
-        // thread it is, so one check runs instead of all three on every read.
-        let threadKind: "chat-thread" | "work-thread" | "code-thread" | undefined;
-        try {
-          if (persistence.readChatThread(decodeChatThreadId(id)) !== undefined) {
-            threadKind = "chat-thread";
-          } else if (persistence.readCodeThread(decodeCodeThreadId(id)) !== undefined) {
-            threadKind = "code-thread";
-          } else if (workThreadProjection.read(decodeWorkThreadId(id)) !== undefined) {
-            threadKind = "work-thread";
-          }
-        } catch {
-          return false;
-        }
-        return threadKind !== undefined && (await windowCanOpenThread(windowId, threadKind, id));
-      },
+      windowCanOpenThread: windowCanOpenThreadById,
       projectBrowsers: liveProjectBrowsers,
       authority: browserAuthority,
       approvals: requireBrowserToolApprovalService(),
@@ -10561,6 +10643,7 @@ export function startOctantServer(
       (await agentRunSettingsRoutes(request)) ??
       (await nativeHarnessRoutingRoutes(request)) ??
       (await nativeHarnessSessionRoutes(request)) ??
+      (await nativeHarnessEgressRoutes(request)) ??
       (await followUpSuggestionRoutes(request)) ??
       (await sideTaskRoutes(request)) ??
       (await githubRoutes(request)) ??
@@ -10804,6 +10887,7 @@ export function startOctantServer(
         persistence.replicaArtifactProjection.evict(canvasIds);
       },
       purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
+      forgetProjectData: (projectId) => toolEgressRules.forgetProject(projectId),
       purgeThreadArtifacts: async ({ mode, threadId }) => {
         const released = await threadMessageQueue.purgeThread(
           decodeThreadMessageQueueScope({ mode, threadId }),

@@ -41,6 +41,26 @@ export interface AgentMessageRecord {
 }
 
 /**
+ * How many refusals made before admission the projection keeps for one
+ * sender. Older ones are counted but no longer listed, so a thread that loops
+ * on a refused call cannot grow the host's memory or the cost of each read.
+ */
+export const MAX_EARLY_REFUSALS_PER_SENDER = 50;
+
+/**
+ * A message the host refused before admitting it: no `sent` event, no stored
+ * body, only the refusal and the endpoints it names. It is a settled fact for
+ * the sender, shown beside the messages that were admitted and refused later.
+ */
+export interface AgentMessageEarlyRefusal {
+  readonly messageId: AgentMessageId;
+  readonly senderThreadId: AgentMessageEndpointId;
+  readonly recipientThreadId: AgentMessageEndpointId;
+  readonly refuseReason: AgentMessageRefuseReason;
+  readonly occurredAt: string;
+}
+
+/**
  * Rebuildable in-memory projection of the `agent-message` aggregate.
  *
  * Duplicate or out-of-order journaled events apply idempotently: a repeated
@@ -51,6 +71,11 @@ export interface AgentMessageRecord {
  */
 export class AgentMessageProjection {
   readonly #byMessage = new Map<string, AgentMessageRecord>();
+  /** By sender, each sender's newest refusals in journal order. */
+  readonly #refusedBeforeAdmission = new Map<
+    string,
+    { readonly records: Map<string, AgentMessageEarlyRefusal>; evicted: number }
+  >();
 
   apply(
     event:
@@ -92,7 +117,35 @@ export class AgentMessageProjection {
     if (event.kind === "message-refused") {
       const refused = decodeAgentMessageRefused(event);
       const current = this.#byMessage.get(String(refused.messageId));
-      if (current === undefined) return;
+      if (current === undefined) {
+        // Refused before it was admitted. A refusal journaled without its
+        // endpoints (an earlier host's) has nobody to show it to and is
+        // left out; one that names them is a settled fact, kept once.
+        const key = String(refused.messageId);
+        if (refused.senderThreadId !== undefined && refused.recipientThreadId !== undefined) {
+          const sender = String(refused.senderThreadId);
+          let entry = this.#refusedBeforeAdmission.get(sender);
+          if (entry === undefined) {
+            entry = { records: new Map(), evicted: 0 };
+            this.#refusedBeforeAdmission.set(sender, entry);
+          }
+          if (!entry.records.has(key)) {
+            entry.records.set(key, {
+              messageId: refused.messageId,
+              senderThreadId: refused.senderThreadId,
+              recipientThreadId: refused.recipientThreadId,
+              refuseReason: refused.refuseReason,
+              occurredAt: refused.occurredAt,
+            });
+            if (entry.records.size > MAX_EARLY_REFUSALS_PER_SENDER) {
+              const oldest = entry.records.keys().next();
+              if (!oldest.done) entry.records.delete(oldest.value);
+              entry.evicted += 1;
+            }
+          }
+        }
+        return;
+      }
       if (current.state !== "in-flight" && current.state !== "refused") return;
       this.#byMessage.set(String(refused.messageId), {
         ...current,
@@ -142,13 +195,24 @@ export class AgentMessageProjection {
     return [...this.#byMessage.values()].filter((record) => record.state === "in-flight");
   }
 
+  /** Every thread that has sent a message the facts below could describe. */
+  senderThreadIds(): ReadonlySet<string> {
+    const senders = new Set<string>();
+    for (const record of this.#byMessage.values()) senders.add(String(record.senderThreadId));
+    for (const sender of this.#refusedBeforeAdmission.keys()) senders.add(sender);
+    return senders;
+  }
+
   /**
    * The host's messaging facts for the bounds view: statuses only, never
-   * bodies, newest first, bounded to what the view states.
+   * bodies, newest first, bounded to what the view states. `visibleSender`
+   * keeps the view to messages whose sender thread the reader may open, so a
+   * count never reaches past what the reader could already see.
    */
   messagingFacts(
     maxOpenInFlightPerSender: number,
     limit = 20,
+    visibleSender: (senderThreadId: string) => boolean = () => true,
   ): {
     readonly openInFlight: number;
     readonly maxOpenInFlightPerSender: number;
@@ -166,29 +230,58 @@ export class AgentMessageProjection {
     let openInFlight = 0;
     let delivered = 0;
     let refused = 0;
-    const records = [...this.#byMessage.values()];
-    for (const record of records) {
-      if (record.state === "in-flight") openInFlight += 1;
-      else if (record.state === "delivered" || record.state === "acknowledged") delivered += 1;
-      else if (record.state === "refused") refused += 1;
-    }
-    const withTime = records.filter((record) => record.state !== "in-flight");
-    // In-flight messages carry no occurredAt of their own beyond the send; the
-    // most recent statuses are the settled ones the bounds view can state.
-    const recent = withTime.slice(-limit).reverse();
-    return {
-      openInFlight,
-      maxOpenInFlightPerSender,
-      delivered,
-      refused,
-      recent: recent.map((record) => ({
+    const settled: Array<{
+      readonly messageId: string;
+      readonly senderThreadId: string;
+      readonly recipientThreadId: string;
+      readonly state: AgentMessageState;
+      readonly refuseReason?: AgentMessageRefuseReason;
+      readonly occurredAt?: string;
+    }> = [];
+    for (const record of this.#byMessage.values()) {
+      if (!visibleSender(String(record.senderThreadId))) continue;
+      if (record.state === "in-flight") {
+        openInFlight += 1;
+        continue;
+      }
+      if (record.state === "refused") refused += 1;
+      else delivered += 1;
+      settled.push({
         messageId: String(record.messageId),
         senderThreadId: String(record.senderThreadId),
         recipientThreadId: String(record.recipientThreadId),
         state: record.state,
         ...(record.refuseReason === undefined ? {} : { refuseReason: record.refuseReason }),
         ...(record.occurredAt === undefined ? {} : { occurredAt: record.occurredAt }),
-      })),
+      });
+    }
+    for (const [sender, entry] of this.#refusedBeforeAdmission) {
+      if (!visibleSender(sender)) continue;
+      // Refusals past the kept ones still count: the total stays what the host
+      // refused, though only the newest are listed.
+      refused += entry.evicted;
+      for (const refusal of entry.records.values()) {
+        refused += 1;
+        settled.push({
+          messageId: String(refusal.messageId),
+          senderThreadId: String(refusal.senderThreadId),
+          recipientThreadId: String(refusal.recipientThreadId),
+          state: "refused",
+          refuseReason: refusal.refuseReason,
+          occurredAt: refusal.occurredAt,
+        });
+      }
+    }
+    // In-flight messages carry no settled time of their own; the most recent
+    // settled statuses are what the bounds view can state. The sort is stable,
+    // so messages that settled in the same instant keep their journal order.
+    settled.sort((a, b) => (a.occurredAt ?? "").localeCompare(b.occurredAt ?? ""));
+    return {
+      openInFlight,
+      maxOpenInFlightPerSender,
+      delivered,
+      refused,
+      recent: settled.slice(-limit).reverse(),
     };
   }
 
@@ -207,6 +300,17 @@ export class AgentMessageProjection {
       ) {
         this.#byMessage.delete(key);
         forgotten.push(record);
+      }
+    }
+    // A refusal that never held a body has nothing to purge, but it names the
+    // thread, so it goes with it.
+    this.#refusedBeforeAdmission.delete(threadId);
+    for (const [sender, entry] of this.#refusedBeforeAdmission) {
+      for (const [key, refusal] of entry.records) {
+        if (String(refusal.recipientThreadId) === threadId) entry.records.delete(key);
+      }
+      if (entry.records.size === 0 && entry.evicted === 0) {
+        this.#refusedBeforeAdmission.delete(sender);
       }
     }
     return forgotten;

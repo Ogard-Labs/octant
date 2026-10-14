@@ -180,7 +180,9 @@ describe("Review request on a waiting subagent", () => {
 
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(await within(dock).findByRole("region", { name: "Subagent" })).toBeVisible();
-    expect(agentRunClient.conversation).toHaveBeenCalledWith(runId);
+    // The detail is on screen one commit before the effect that opens its
+    // transcript runs, so the read is awaited rather than assumed.
+    await waitFor(() => expect(agentRunClient.conversation).toHaveBeenCalledWith(runId));
   });
 
   it("reads the thread list once more and opens a parent that was not listed yet", async () => {

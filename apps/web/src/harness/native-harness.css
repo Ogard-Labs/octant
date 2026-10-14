@@ -275,3 +275,85 @@
 .native-harness-steering__status {
   color: color-mix(in srgb, CanvasText 55%, transparent);
 }
+
+/* Network access: the hosts a Code thread's commands may reach, and the hosts
+   a command was refused. Rows are separated by a hairline, never tinted. */
+.native-harness-egress__learn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  font-size: var(--oct-text-detail);
+  color: var(--oct-muted);
+}
+
+.native-harness-egress__rules {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.native-harness-egress__rule {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-3);
+  min-width: 0;
+  padding: var(--oct-space-2) 0;
+  border-top: 1px solid var(--oct-border);
+}
+
+.native-harness-egress__rule:first-child {
+  border-top: 0;
+}
+
+/* A proposal's chooser is wide; it drops under the host rather than squeezing it. */
+.native-harness-egress__rule--proposal {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.native-harness-egress__rule--proposal .native-harness-egress__label {
+  flex: 1 1 14rem;
+}
+
+.native-harness-egress__label {
+  display: grid;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.native-harness-egress__host {
+  font-family: var(--oct-font-mono);
+  overflow-wrap: anywhere;
+}
+
+.native-harness-egress__meta {
+  font-size: var(--oct-text-xs);
+  color: var(--oct-meta);
+}
+
+.native-harness-egress__choice {
+  width: 12.5rem;
+  max-width: 100%;
+}
+
+.native-harness-egress__add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.native-harness-egress__host-input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.native-harness-egress__port-input {
+  width: 5rem;
+}
+
+.native-harness-egress__empty {
+  margin: 0;
+}

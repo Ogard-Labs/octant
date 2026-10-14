@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WindowId } from "@octant/contracts";
 import type { FolderBrowseFailure } from "@octant/contracts/folder-browse";
 import type { BindingReceiptStore } from "./bindingReceiptStore";
@@ -469,26 +469,43 @@ describe("FolderBrowseService", () => {
     it("refuses a stalled link out of the root once its mount recovers", async () => {
       const { home, outside } = await makeTree();
       await symlink(outside, join(home, "escape"));
-      let stalled = true;
-      const service = makeService({
-        homeDir: home,
-        entryInspectionTimeoutMs: 25,
-        inspectEntry: (entryPath) =>
-          stalled && basename(entryPath) === "escape"
-            ? new Promise<FolderEntryInspection>(() => {})
-            : hostInspection(entryPath),
-      });
-      const listed = await service.browse(WINDOW_ID, HOST);
-      const escape = listed.candidates.find((candidate) => candidate.displayName === "escape");
-      expect(escape).toBeDefined();
-      if (escape === undefined) return;
+      // The entry budget is expired by hand, not by waiting. A wall-clock budget
+      // also bounds the re-measurement after the mount recovers, and a loaded
+      // runner can spend it on real filesystem calls and answer "unavailable"
+      // instead of the refusal this test is about.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        let stalled = true;
+        let markStallStarted: () => void = () => {};
+        const stallStarted = new Promise<void>((resolve) => {
+          markStallStarted = resolve;
+        });
+        const service = makeService({
+          homeDir: home,
+          entryInspectionTimeoutMs: 25,
+          inspectEntry: (entryPath) => {
+            if (!stalled || basename(entryPath) !== "escape") return hostInspection(entryPath);
+            markStallStarted();
+            return new Promise<FolderEntryInspection>(() => {});
+          },
+        });
+        const browsing = service.browse(WINDOW_ID, HOST);
+        await stallStarted;
+        await vi.advanceTimersByTimeAsync(25);
+        const listed = await browsing;
+        const escape = listed.candidates.find((candidate) => candidate.displayName === "escape");
+        expect(escape).toBeDefined();
+        if (escape === undefined) return;
 
-      stalled = false;
+        stalled = false;
 
-      await expectRefusal(
-        service.resolveCandidate(WINDOW_ID, { ...HOST, candidateId: escape.candidateId }),
-        "unauthorized",
-      );
+        await expectRefusal(
+          service.resolveCandidate(WINDOW_ID, { ...HOST, candidateId: escape.candidateId }),
+          "unauthorized",
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("refuses a candidate whose path still stalls when it is chosen", async () => {

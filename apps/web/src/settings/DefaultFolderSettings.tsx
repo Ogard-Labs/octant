@@ -81,7 +81,7 @@ export function DefaultFolderSettings(props: DefaultFolderSettingsProps) {
         autoFocus
         id={inputId}
         onChange={(event) => setDraft(event.target.value)}
-        placeholder="/Users/you/Documents/Octant"
+        placeholder="/Users/you/Octant"
         spellCheck={false}
         value={draft}
       />

@@ -637,6 +637,24 @@ function createMockTransport(input: {
       if (
         request.method === "GET" &&
         request.path.startsWith("/api/code/threads/") &&
+        request.path.endsWith("/conversation/window")
+      ) {
+        const threadId = decodeURIComponent(
+          request.path.slice("/api/code/threads/".length, -"/conversation/window".length),
+        );
+        const limit = Number(new URLSearchParams(request.query ?? "").get("limit") ?? "20");
+        const turns = codeTurns.get(threadId) ?? [];
+        return Response.json({
+          version: 1,
+          threadId,
+          turns: turns.slice(-limit),
+          hasEarlier: turns.length > limit,
+          hasLater: false,
+        });
+      }
+      if (
+        request.method === "GET" &&
+        request.path.startsWith("/api/code/threads/") &&
         request.path.endsWith("/conversation")
       ) {
         const threadId = decodeURIComponent(

@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
@@ -361,6 +361,19 @@ export type CodeExternalEditor = typeof CodeExternalEditor.Type;
 export const CodeDiffLayout = Schema.Literal("unified", "side-by-side");
 export type CodeDiffLayout = typeof CodeDiffLayout.Type;
 
+/**
+ * Threads without a Project once had their own Code switch beside the Git
+ * requirement. It folded into that requirement: a store, journal event, or
+ * window from before still carries it, so it is accepted on the way in and
+ * dropped, and nothing reads or reports it. Every pair the host ever stored
+ * keeps the Git requirement it had; the host refused the one pair (on with
+ * Git required) that would have meant something else.
+ */
+const RetiredDefaultFolderThreadsSwitch = Schema.optionalToOptional(Schema.Boolean, Schema.Never, {
+  decode: () => Option.none(),
+  encode: () => Option.none(),
+});
+
 export const CodeSettings = Schema.Struct({
   defaultExecutionPolicy: ProviderExecutionPolicy,
   defaultPermissionPersistence: PermissionPersistence,
@@ -369,18 +382,14 @@ export const CodeSettings = Schema.Struct({
    * Whether a Code thread may only start in a folder that is a Git repository.
    * On, a non-repository folder refuses thread start with the `git init`
    * advice; off, the thread starts on a plain-folder checkout and every
-   * Git-backed feature reports itself unavailable. A store persisted before
-   * the switch existed decodes to on, which is what it always did.
+   * Git-backed feature reports itself unavailable. Off also lets a Code thread
+   * start without a chosen Project, in the default Project the host provisions
+   * under `<default folder>/Code`, which is a plain folder too. A store
+   * persisted before the switch existed decodes to on, which is what it always
+   * did.
    */
   requireGitRepository: Schema.optionalWith(Schema.Boolean, { default: () => true }),
-  /**
-   * Whether a Code thread may start without a chosen Project, in the default
-   * Project the host provisions under `<default folder>/Code`. That folder is
-   * not a repository, so this can only be on while `requireGitRepository` is
-   * off; the host refuses the other combination instead of storing a switch
-   * whose thread could never start. Off for a store persisted before it existed.
-   */
-  allowDefaultFolderThreads: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  allowDefaultFolderThreads: RetiredDefaultFolderThreadsSwitch,
   /**
    * The Review layout a Code thread uses until this window stores one for it.
    * A store persisted before the choice existed decodes to unified.
@@ -591,7 +600,7 @@ export const CodeCommand = Schema.Union(
     defaultPermissionPersistence: PermissionPersistence,
     externalEditor: Schema.optional(CodeExternalEditor),
     requireGitRepository: Schema.optional(Schema.Boolean),
-    allowDefaultFolderThreads: Schema.optional(Schema.Boolean),
+    allowDefaultFolderThreads: RetiredDefaultFolderThreadsSwitch,
     defaultDiffLayout: Schema.optional(CodeDiffLayout),
   }).annotations(strict),
   CreateCodeThreadCommand,

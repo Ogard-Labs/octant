@@ -51,6 +51,32 @@ describe("native harness client", () => {
     );
   });
 
+  it("returns a refused network answer as a value the card can show", async () => {
+    let seen = "";
+    const subject = client(async (input, init) => {
+      seen = `${init?.method} ${String(input)}`;
+      return Response.json(
+        {
+          kind: "tool-egress-refused",
+          reason: "needs-local-window",
+          message: "A Project rule needs you at this computer.",
+        },
+        { status: 409 },
+      );
+    });
+    const result = await subject.egressCommand("00000000-0000-4000-8000-000000000020", {
+      kind: "grant-rules",
+      grants: [
+        { host: "registry.npmjs.org", port: 443, choice: { kind: "project", lifetime: "7d" } },
+      ],
+      declineProposalIds: [],
+    });
+    expect(result).toMatchObject({ kind: "tool-egress-refused", reason: "needs-local-window" });
+    expect(seen).toBe(
+      `POST ${baseUrl}/api/native-harness/egress/threads/00000000-0000-4000-8000-000000000020`,
+    );
+  });
+
   it("treats a thread without a session as null, not a decode failure", async () => {
     const subject = client(async () => Response.json({ view: null }));
     expect(await subject.session("00000000-0000-4000-8000-000000000020")).toBeNull();

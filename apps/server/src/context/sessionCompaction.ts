@@ -342,8 +342,7 @@ export class SessionCompactionService {
     if (run.owner === "host" && planned === undefined) return refused("no-session");
     const executor = this.#executor(run);
     if (executor === undefined) return refused("provider-unavailable");
-    const tokensBefore =
-      run.owner === "runtime" ? this.#occupancy(threads, subject, planned) : undefined;
+    const tokensBefore = run.owner === "runtime" ? this.#occupancy(threads, subject) : undefined;
     if (run.owner === "runtime" && tokensBefore === undefined) return refused("no-session");
 
     const reservation = this.#reserve(subject, thread, planned);
@@ -906,7 +905,7 @@ export class SessionCompactionService {
         : owner === "runtime"
           ? thread !== undefined &&
             threads?.runtimeSessions?.exists(threadId) === true &&
-            this.#occupancy(threads, subject, planned) !== undefined
+            this.#occupancy(threads, subject) !== undefined
           : preview !== undefined && preview.kind !== "no-session";
     // The provider policy is judged before a driver is built for the provider:
     // a driver for a provider the Project excludes must never exist to be
@@ -1011,61 +1010,18 @@ export class SessionCompactionService {
   }
 
   /**
-   * How full the runtime's window is before it compacts: what its latest usage
-   * report said, or, for a thread the host plans, the occupancy that report
-   * reconciled or the plan's own estimate. A session with no figure at all has
+   * How full the runtime's window is before it compacts, read by the harness
+   * as an automatic compaction reads it. A session with no figure at all has
    * never reported an exchange, so it has nothing to compact.
-   *
-   * A compaction since that report changed the window it describes. The
-   * figure that compaction reported after stands instead; without one, the
-   * older report is only an upper bound, and says so.
    */
   #occupancy(
     threads: SessionCompactionThreads,
     subject: ContextSubjectRef,
-    planned: ContextInspectorSnapshot | undefined,
   ): KnownTokenMeasurement | undefined {
-    const contextTokens = planned?.latestUsage?.contextTokens;
-    const report =
-      threads.runtimeSessions?.occupancy?.(String(subject.aggregateId)) ??
-      (planned?.latestUsage === undefined || contextTokens === undefined
-        ? undefined
-        : { tokens: contextTokens, observedAt: planned.latestUsage.observedAt });
-    const estimate: KnownTokenMeasurement | undefined =
-      planned === undefined
-        ? undefined
-        : {
-            kind: "known",
-            tokens: planned.next.plan.plannedInputTokens,
-            accuracy: "conservative-heuristic",
-          };
-    const changedSince = this.#compactedSince(subject, report?.observedAt);
-    if (changedSince !== undefined) {
-      if (changedSince.kind === "known") return changedSince;
-      return report === undefined
-        ? estimate
-        : { kind: "known", tokens: report.tokens, accuracy: "conservative-heuristic" };
-    }
-    return report === undefined
-      ? estimate
-      : { kind: "known", tokens: report.tokens, accuracy: "provider-reported" };
-  }
-
-  /**
-   * The occupancy a compaction newer than `since` left behind: its own figure
-   * after, or `pending` when it gave none or may have changed the session
-   * without saying how. Undefined when nothing has compacted the session since.
-   */
-  #compactedSince(
-    subject: ContextSubjectRef,
-    since: string | undefined,
-  ): KnownTokenMeasurement | { readonly kind: "pending" } | undefined {
-    const latest = this.#options.harness.latestCompaction(subject);
-    if (latest === undefined || latest.status === "running") return undefined;
-    if (latest.status === "failed" && !latest.sessionMayHaveChanged) return undefined;
-    const at = latest.status === "completed" ? latest.receipt.completedAt : latest.failedAt;
-    if (since !== undefined && Date.parse(at) <= Date.parse(since)) return undefined;
-    return latest.status === "completed" ? latest.receipt.tokensAfter : { kind: "pending" };
+    return this.#options.harness.occupancyBefore(
+      subject,
+      threads.runtimeSessions?.occupancy?.(String(subject.aggregateId)),
+    );
   }
 
   /** The subject's latest plan, or undefined for one the host never planned. */

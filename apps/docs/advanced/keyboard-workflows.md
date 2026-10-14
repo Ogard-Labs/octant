@@ -95,7 +95,7 @@ The remappable set:
 - **Find text across the repository** — **⌘/Ctrl+Shift+F**, in the active
   Code thread
 - On the Review page only: **Next** and **Previous finished thread** — **J**
-  and **K**; **Open the finished thread** — **Enter**; **Complete** — **C**;
+  and **K**; **Open the finished thread** — **Enter**; **Put away** — **C**;
   **Send back** — **S**; **Snooze** — **Z**; **Mark seen** — **E**
 
 If two actions share a chord, the first keeps it and the other is marked as

@@ -22,7 +22,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "General",
       scope: "app",
       keywords:
-        "general enabled modes startup default chat work updates version release threads completed archive snooze",
+        "general enabled modes startup default chat work updates version release threads completed put away archive snooze",
       settings: [
         {
           id: settingId("enable-chat"),
@@ -52,10 +52,10 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         },
         {
           id: settingId("completed-thread-archive"),
-          label: "Archive completed threads",
+          label: "Archive put-away threads",
           scope: "host",
           keywords:
-            "complete completed threads archive automatically days never snooze snoozed shelf sidebar",
+            "put away complete completed threads archive automatically days never snooze snoozed shelf sidebar",
         },
       ],
     },
@@ -362,10 +362,11 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
         "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads open in applications vscode cursor zed finder terminal ghostty xcode detected installed diff layout unified side by side review",
       settings: [
         {
-          id: settingId("code-default-folder-threads"),
-          label: "Threads without a Project",
+          id: settingId("code-require-git"),
+          label: "Code needs a Git repository",
           scope: "mode",
-          keywords: "default folder projectless no project git repository",
+          keywords:
+            "git repository require plain folder default folder projectless no project threads without a project",
         },
         {
           id: settingId("code-default-diff-layout"),

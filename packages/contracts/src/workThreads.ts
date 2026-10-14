@@ -23,7 +23,11 @@ const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.bran
 export const WorkThreadId = brandedUuid("WorkThreadId");
 export type WorkThreadId = typeof WorkThreadId.Type;
 
-/** Durable user evidence for a completed, named Work delivery target. */
+/**
+ * A note a person recorded with their Done mark on a named Work delivery
+ * target. Present only when they wrote one; the mark itself is
+ * `completionConfirmed`.
+ */
 export const WorkThreadCompletionEvidence = Schema.Struct({
   deliveryTarget: Schema.NonEmptyTrimmedString,
   satisfactionEvidence: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
@@ -153,13 +157,21 @@ export const SnoozeWorkThreadAtUsageResetCommand = Schema.Struct({
 }).annotations(strict);
 export type SnoozeWorkThreadAtUsageResetCommand = typeof SnoozeWorkThreadAtUsageResetCommand.Type;
 
+/**
+ * A person marks the Work thread Done. The mark is final; it needs no evidence
+ * text. Only a person may send it: the host refuses it from a routine or
+ * anything else acting as the host, and Code has no such command.
+ */
 export const ConfirmWorkThreadCompletionCommand = Schema.Struct({
   kind: Schema.Literal("confirm-work-thread-completion"),
   ...WorkThreadCommandFields,
   /** Must exactly identify the authoritative current delivery target. */
   deliveryTarget: Schema.NonEmptyTrimmedString,
-  /** User-supplied evidence that the named delivery target was satisfied. */
-  satisfactionEvidence: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
+  /**
+   * An optional note on what was delivered. Clients before the mark became
+   * final always sent one; the host records it when present.
+   */
+  satisfactionEvidence: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096))),
 }).annotations(strict);
 export type ConfirmWorkThreadCompletionCommand = typeof ConfirmWorkThreadCompletionCommand.Type;
 

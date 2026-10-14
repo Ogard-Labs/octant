@@ -539,8 +539,8 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           confirmLabel="Restart with the Browser"
           details={
             <p>
-              The CLI reaches it through the octant command, which must be on this terminal's PATH.
-              A headless install has it; the desktop app does not include it yet.
+              The CLI reaches it through the octant mcp command. The Octant app for macOS adds
+              octant to this terminal's PATH; with a headless install, use the install's own.
             </p>
           }
           onCancel={() => setConfirmingBrowser(false)}
@@ -576,7 +576,7 @@ const REFUSALS: Readonly<Record<TerminalBrowserGrantRefusalReason, string>> = {
   "not-local-window": "Only the person at a window on the host can let a terminal use the Browser.",
   "not-a-code-thread": "Only a Code thread's terminal can use the Browser.",
   "thread-not-active":
-    "This thread is archived or completed, so its terminal cannot use the Browser.",
+    "This thread is archived or put away, so its terminal cannot use the Browser.",
   "window-cannot-open-thread": "This window cannot open this thread's Project.",
   "browser-unavailable": "This thread has no Browser to lend.",
   "terminal-already-granted": "This terminal can already use the Browser.",
