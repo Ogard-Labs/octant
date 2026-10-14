@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   CODE_OPERATION_COMMAND_KINDS,
   decodeCodeConversationPage,
+  decodeCodeConversationWindow,
+  decodeCodeConversationWindowRequest,
+  MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_TURN_CHANGED_PATHS,
   decodeCodeOperationCommand,
   decodeCodeOperationEventFrame,
@@ -847,6 +850,57 @@ describe("Code operation contracts", () => {
     // access the turn actually ran under.
     expect(() => decodeCodeConversationPage({ ...page, version: 2 })).toThrow();
     expect(() => decodeCodeConversationPage({ ...page, version: 4 })).toThrow();
+  });
+
+  it("decodes a conversation window with its bounds and the usage of the turns before it", () => {
+    const window = {
+      version: 1,
+      threadId: ids.thread,
+      turns: [],
+      hasEarlier: true,
+      hasLater: false,
+      earlierUsage: {
+        reportedTurns: 2,
+        inputTokens: 30,
+        outputTokens: 7,
+        cacheRead: { measuredTurns: 1, measuredTokens: 5 },
+        cacheWrite: { measuredTurns: 0, measuredTokens: 0 },
+        costUsd: 0.25,
+      },
+    } as const;
+    expect(decodeCodeConversationWindow(window)).toEqual(window);
+    // Every wire struct is strict: an older client refuses a field it does not
+    // know, so the window carries no cursor and the forward page no bounds.
+    for (const excess of [{ nextCursor: 3 }, { hasMore: true }]) {
+      expect(() => decodeCodeConversationWindow({ ...window, ...excess })).toThrow();
+    }
+    expect(() =>
+      decodeCodeConversationWindow({
+        ...window,
+        earlierUsage: { ...window.earlierUsage, reportedTurns: 0 },
+      }),
+    ).toThrow();
+    expect(() => decodeCodeConversationWindow({ ...window, version: 2 })).toThrow();
+  });
+
+  it("bounds a conversation window request to one page and at most one anchor", () => {
+    expect(decodeCodeConversationWindowRequest({ limit: 20 })).toEqual({ limit: 20 });
+    expect(
+      decodeCodeConversationWindowRequest({
+        limit: MAX_CODE_CONVERSATION_PAGE_SIZE,
+        through: ids.operation,
+      }).through,
+    ).toBe(ids.operation);
+    for (const invalid of [
+      { limit: 0 },
+      { limit: MAX_CODE_CONVERSATION_PAGE_SIZE + 1 },
+      { limit: 2.5 },
+      { limit: 20, before: "not-an-operation" },
+      { limit: 20, before: ids.operation, through: ids.operation },
+      { limit: 20, after: ids.operation },
+    ]) {
+      expect(() => decodeCodeConversationWindowRequest(invalid)).toThrow();
+    }
   });
 
   it("carries what changed while a turn ran as a bounded, relative, honest record", () => {

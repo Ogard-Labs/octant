@@ -13,10 +13,17 @@ import {
   UtcTimestamp,
   decodeCodeOperationEventFrame,
   decodeCodeConversationPage,
+  decodeCodeConversationWindow,
+  decodeCodeConversationWindowRequest,
   decodeCodeOperationId,
   decodeCodeThreadId,
   type CodeOperationEvent,
+  type EventEnvelope,
   type CodeConversationPage,
+  type CodeConversationTurnUsage,
+  type CodeConversationUsageTotals,
+  type CodeConversationWindow,
+  type CodeConversationWindowRequest,
   type CodeConversationStep,
   type CodeConversationTurn,
   type CodeConversationTurnHandoff,
@@ -28,6 +35,7 @@ import {
   type ProviderInstanceId,
   type ProviderSessionId,
 } from "@octant/contracts";
+import { foldCodeTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 
@@ -61,6 +69,9 @@ type JournalPort = Pick<
   | "replayAggregateTypeForThread"
   | "replayThreadAnchoredRows"
   | "latestThreadEvents"
+  | "latestThreadResults"
+  | "latestThreadEventPerAggregate"
+  | "firstAggregateEvent"
 >;
 
 export class CodeOperationEventStoreError extends Error {
@@ -111,6 +122,32 @@ export interface ReadCodeConversationInput {
    */
   readonly providerInstanceId?: ProviderInstanceId;
 }
+
+export interface ReadCodeConversationWindowInput {
+  readonly threadId: CodeThreadId;
+  readonly limit: number;
+  readonly before?: CodeOperationId;
+  readonly through?: CodeOperationId;
+  /** As on the forward page: the provider the thread is bound to now. */
+  readonly providerInstanceId?: ProviderInstanceId;
+}
+
+/** A window, or the refusal of an anchor that is not a turn of this thread. */
+export type CodeConversationWindowRead =
+  | { readonly status: "ok"; readonly window: CodeConversationWindow }
+  | { readonly status: "anchor-not-found" };
+
+/**
+ * How many bytes of encoded turns one window may carry before it stops adding
+ * turns. A turn carries references rather than text, but up to 256 reply parts
+ * and 64 summarized steps, so a full page of 100 could otherwise near the
+ * 8 MiB a paired device's response is cut at.
+ */
+export const CODE_CONVERSATION_WINDOW_BYTES = 2 * 1024 * 1024;
+/** The newest usage-limit reports the newest window reads for the current provider's limits. */
+const MAX_WINDOW_LIMIT_REPORTS = 256;
+/** Restore results read per batch while looking for the newest one that ran. */
+const MAX_RESTORE_RESULTS_PER_READ = 64;
 
 export type CodeOperationEventReplay =
   | {
@@ -656,25 +693,10 @@ export class CodeOperationEventStore {
             hasMore = true;
             continue;
           }
-          const builder: CodeConversationBuilder = {
-            startCursor: envelope.globalSequence,
-            operationId: frame.operationId,
-            providerInstanceId: frame.event.providerInstanceId,
-            modelId: frame.event.modelId,
-            sessionId: frame.event.sessionId,
-            prompt: frame.event.prompt,
-            ...(frame.event.checkpoint === undefined ? {} : { checkpoint: frame.event.checkpoint }),
-            ...(frame.event.executionPolicy === undefined
-              ? {}
-              : { executionPolicy: frame.event.executionPolicy }),
-            assistant: [],
-            forkMergeBacks: [],
-            steps: [],
-            stepsTruncated: false,
-            status: "incomplete",
-            startedAt: frame.occurredAt,
-            updatedAt: frame.occurredAt,
-          };
+          const builder = startTurn(envelope.globalSequence, {
+            ...frame,
+            event: frame.event,
+          });
           turns.push(builder);
           byOperation.set(key, builder);
           continue;
@@ -700,92 +722,13 @@ export class CodeOperationEventStore {
         }
         const builder = byOperation.get(key);
         if (builder === undefined || frame.threadId !== threadId) continue;
-        builder.updatedAt = frame.occurredAt;
-        if (frame.event.kind === "provider-content" && frame.event.channel === "message") {
-          if (builder.assistant.length < MAX_CODE_CONVERSATION_ASSISTANT_PARTS) {
-            builder.assistant.push(frame.event.content);
-          }
-        } else if (frame.event.kind === "provider-content") {
-          appendStep(builder, { kind: "reasoning", content: frame.event.content });
-        } else if (frame.event.kind === "tool-activity") {
-          // One row per tool call: a later state for the same call replaces the
-          // earlier one instead of adding a step, exactly as the live
-          // transcript folds it.
-          const toolCallId = String(frame.event.toolCallId);
-          const existing = builder.steps.findIndex(
-            (step) => step.kind === "tool" && String(step.toolCallId) === toolCallId,
-          );
-          const step = {
-            kind: "tool" as const,
-            toolCallId: frame.event.toolCallId,
-            toolName: frame.event.toolName,
-            state: frame.event.state,
-            ...(frame.event.summary === undefined ? {} : { summary: frame.event.summary }),
-          };
-          if (existing === -1) appendStep(builder, step);
-          else builder.steps[existing] = step;
-        } else if (frame.event.kind === "usage") {
-          // A provider may report usage more than once in a turn; the last
-          // report is the turn's own figure, not a running sum to add to.
-          builder.usage = {
-            inputTokens: frame.event.inputTokens,
-            outputTokens: frame.event.outputTokens,
-            ...(frame.event.costUsd === undefined ? {} : { costUsd: frame.event.costUsd }),
-            ...(frame.event.cacheReadInputTokens === undefined
-              ? {}
-              : { cacheReadInputTokens: frame.event.cacheReadInputTokens }),
-            ...(frame.event.cacheWriteInputTokens === undefined
-              ? {}
-              : { cacheWriteInputTokens: frame.event.cacheWriteInputTokens }),
-
-            ...(frame.event.contextWindow === undefined
-              ? {}
-              : { contextWindow: frame.event.contextWindow }),
-            ...(frame.event.contextTokens === undefined
-              ? {}
-              : { contextTokens: frame.event.contextTokens }),
-            ...(frame.event.autoCompactThreshold === undefined
-              ? {}
-              : { autoCompactThreshold: frame.event.autoCompactThreshold }),
-            ...(frame.event.contextBreakdown === undefined
-              ? {}
-              : { contextBreakdown: frame.event.contextBreakdown }),
-          };
-        } else if (frame.event.kind === "provider-limit") {
+        const limit = foldTurnFrame(builder, frame);
+        if (limit !== undefined) {
           // Window names are the provider's own, so two providers routinely
           // report the same one. Keying by name alone lets a thread that
           // changed providers show the previous account's remaining quota as
           // the current one's, decided by nothing but journal order.
-          const providerInstanceId = String(builder.providerInstanceId);
-          limits.set(`${providerInstanceId}\n${frame.event.window}`, {
-            providerInstanceId,
-            limit: {
-              window: frame.event.window,
-              status: frame.event.status,
-              ...(frame.event.utilization === undefined
-                ? {}
-                : { utilization: frame.event.utilization }),
-              ...(frame.event.resetsAt === undefined ? {} : { resetsAt: frame.event.resetsAt }),
-            },
-          });
-        } else if (frame.event.kind === "context-handoff-attached") {
-          builder.handoff = conversationHandoff(frame.event);
-        } else if (frame.event.kind === "fork-context-delivered") {
-          const { kind: _kind, mergeOperationId: _merge, ...mergeBack } = frame.event;
-          if (builder.forkMergeBacks.length < MAX_CODE_FORK_MERGE_BACKS_PER_TURN)
-            builder.forkMergeBacks.push(mergeBack);
-        } else if (frame.event.kind === "conversation-turn-changed-files") {
-          builder.changedFiles = frame.event.changedFiles;
-        } else if (frame.event.kind === "operation-state") {
-          builder.status = conversationStatus(frame.event.state);
-          if (frame.event.failure !== undefined) builder.failure = frame.event.failure;
-        } else if (frame.event.kind === "operation-result") {
-          if (frame.event.result.kind === "provider-turn-state") {
-            builder.status = conversationStatus(frame.event.result.state);
-          } else if (frame.event.result.kind === "operation-failed") {
-            builder.status = "failed";
-            builder.failure = frame.event.result.failure;
-          }
+          limits.set(`${limit.providerInstanceId}\n${limit.limit.window}`, limit);
         }
       }
       if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
@@ -807,20 +750,490 @@ export class CodeOperationEventStore {
     return decodeCodeConversationPage({
       version: 3,
       threadId,
-      turns: turns.map(
-        ({ startCursor: _startCursor, steps, stepsTruncated, forkMergeBacks, ...turn }) => ({
-          ...turn,
-          ...(forkMergeBacks.length === 0 ? {} : { forkMergeBacks }),
-          ...(steps.length === 0 ? {} : { steps }),
-          ...(stepsTruncated ? { stepsTruncated: true } : {}),
-        }),
-      ),
+      turns: turns.map(finishTurn),
       nextCursor: turns.at(-1)?.startCursor ?? input.afterCursor,
       hasMore,
       ...(currentLimits.length === 0 ? {} : { limits: currentLimits.slice(0, 8) }),
       ...(restoreUndo === undefined ? {} : { restoreUndo }),
     });
   }
+
+  /**
+   * One page of a thread's own turns for a client that opens on its newest
+   * turns: the newest `limit`, or those just `before` a turn, or the page that
+   * ends `through` one. It never scans the thread from its start. The turn
+   * starts are read newest first from the thread-kind index, each page turn's
+   * own frames are read through its operation's index, and the usage of every
+   * older turn is folded from one read of each turn's last report. That read
+   * walks every usage report of the thread through the thread-kind index and
+   * decodes one per older turn that reported any, so a page costs its own
+   * turns plus that walk and those decodes. The
+   * newest page adds the current provider's limits from the thread's newest
+   * limit reports and the way back from its newest restore that ran.
+   */
+  conversationWindow(input: ReadCodeConversationWindowInput): CodeConversationWindowRead {
+    let threadId: CodeThreadId;
+    let request: CodeConversationWindowRequest;
+    try {
+      threadId = decodeCodeThreadId(input.threadId);
+      request = decodeCodeConversationWindowRequest({
+        limit: input.limit,
+        ...(input.before === undefined ? {} : { before: input.before }),
+        ...(input.through === undefined ? {} : { through: input.through }),
+      });
+    } catch {
+      throw new CodeOperationEventStoreError("invalid", "Code conversation request is invalid.");
+    }
+    const budget = { decoded: 0 };
+    const decode = (envelope: EventEnvelope) => {
+      budget.decoded += 1;
+      if (budget.decoded > MAX_STREAM_SCAN_EVENTS) {
+        throw new CodeOperationEventStoreError(
+          "invalid",
+          "Code conversation exceeds the bounded replay window.",
+        );
+      }
+      return ownFrame(envelope, threadId);
+    };
+
+    const anchorId = request.before ?? request.through;
+    let below: number | undefined;
+    let anchorSequence: number | undefined;
+    if (anchorId !== undefined) {
+      const anchor = this.#journal.firstAggregateEvent({
+        aggregateType: "code-operation",
+        aggregateId: String(anchorId),
+        kind: "conversation-turn-started",
+      });
+      const frame = anchor === undefined ? undefined : decode(anchor);
+      if (anchor === undefined || frame?.event.kind !== "conversation-turn-started") {
+        return { status: "anchor-not-found" };
+      }
+      anchorSequence = anchor.globalSequence;
+      below = request.before !== undefined ? anchorSequence : anchorSequence + 1;
+    }
+
+    // Newest first, one more than the page so the read knows whether the
+    // thread holds a turn before it.
+    const starts: Array<{
+      readonly envelope: EventEnvelope;
+      readonly builder: CodeConversationBuilder;
+    }> = [];
+    let cursor = below;
+    for (;;) {
+      const wanted = request.limit + 1 - starts.length;
+      if (wanted <= 0) break;
+      const batch = this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "conversation-turn-started",
+        limit: wanted,
+        ...(cursor === undefined ? {} : { beforeSequence: cursor }),
+      });
+      for (const envelope of batch) {
+        cursor = envelope.globalSequence;
+        const frame = decode(envelope);
+        if (frame?.event.kind !== "conversation-turn-started") continue;
+        starts.push({
+          envelope,
+          builder: startTurn(envelope.globalSequence, { ...frame, event: frame.event }),
+        });
+      }
+      if (batch.length < wanted) break;
+    }
+
+    // A page stops short of its limit rather than pass the byte budget, but
+    // always holds the newest turn it reached.
+    const turns: Array<CodeConversationTurn> = [];
+    let bytes = 0;
+    let included = 0;
+    for (const { envelope, builder } of starts.slice(0, request.limit)) {
+      this.#foldTurn(envelope, builder, decode);
+      const turn = finishTurn(builder);
+      const size = Buffer.byteLength(JSON.stringify(turn), "utf8");
+      if (included > 0 && bytes + size > CODE_CONVERSATION_WINDOW_BYTES) break;
+      bytes += size;
+      included += 1;
+      turns.unshift(turn);
+    }
+    const hasEarlier = starts.length > included;
+    const firstStart = starts[included - 1]?.envelope.globalSequence;
+
+    let hasLater = false;
+    if (request.before !== undefined) hasLater = true;
+    else if (anchorSequence !== undefined) {
+      const newest = this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "conversation-turn-started",
+        limit: 1,
+      })[0];
+      hasLater = newest !== undefined && newest.globalSequence > anchorSequence;
+    }
+
+    const earlierUsage =
+      hasEarlier && firstStart !== undefined
+        ? this.#earlierUsage(threadId, firstStart, decode)
+        : undefined;
+
+    let limits: ReadonlyArray<CodeProviderLimit> = [];
+    let restoreUndo: CodeConversationPage["restoreUndo"];
+    if (anchorId === undefined) {
+      // As on the forward page, the thread's selection decides whose limits
+      // are current; without it, the newest turn's provider.
+      const current = String(input.providerInstanceId ?? turns.at(-1)?.providerInstanceId ?? "");
+      limits = this.#currentLimits(threadId, current, starts, decode);
+      restoreUndo = this.#newestRestoreUndo(threadId, decode);
+    }
+
+    return {
+      status: "ok",
+      window: decodeCodeConversationWindow({
+        version: 1,
+        threadId,
+        turns,
+        hasEarlier,
+        hasLater,
+        ...(earlierUsage === undefined ? {} : { earlierUsage }),
+        ...(limits.length === 0 ? {} : { limits: limits.slice(0, 8) }),
+        ...(restoreUndo === undefined ? {} : { restoreUndo }),
+      }),
+    };
+  }
+
+  /**
+   * Fold a turn's own frames after its start, read through its operation's
+   * index. A second start in the same operation ends the turn, because the
+   * forward page gives every later frame to that newer start.
+   */
+  #foldTurn(
+    start: EventEnvelope,
+    builder: CodeConversationBuilder,
+    decode: (envelope: EventEnvelope) => typeof CodeOperationEventFrame.Type | undefined,
+  ): void {
+    let afterVersion = start.aggregateVersion;
+    for (;;) {
+      const batch = this.#journal.replayAggregate({
+        aggregateType: "code-operation",
+        aggregateId: start.aggregateId,
+        afterVersion,
+        limit: JOURNAL_REPLAY_BATCH_SIZE,
+      });
+      for (const envelope of batch) {
+        afterVersion = envelope.aggregateVersion;
+        const frame = decode(envelope);
+        if (frame === undefined) continue;
+        if (frame.event.kind === "conversation-turn-started") return;
+        // Limits are thread state the newest page reads on its own.
+        foldTurnFrame(builder, frame);
+      }
+      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) return;
+    }
+  }
+
+  /**
+   * The usage of every turn that started before `firstStart`, folded as the
+   * client totals it: each turn's last report once, in the order the turns
+   * started.
+   */
+  #earlierUsage(
+    threadId: CodeThreadId,
+    firstStart: number,
+    decode: (envelope: EventEnvelope) => typeof CodeOperationEventFrame.Type | undefined,
+  ): CodeConversationUsageTotals | undefined {
+    const usages: Array<CodeConversationTurnUsage> = [];
+    let afterAnchorSequence = 0;
+    for (;;) {
+      // In turn order, so the window figures are the newest older turn's
+      // even when its report landed before an older turn's last one.
+      const batch = this.#journal.latestThreadEventPerAggregate({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "usage",
+        anchorKind: "conversation-turn-started",
+        anchorBeforeSequence: firstStart,
+        afterAnchorSequence,
+        limit: JOURNAL_REPLAY_BATCH_SIZE,
+      });
+      for (const { anchorSequence, event } of batch) {
+        afterAnchorSequence = anchorSequence;
+        const frame = decode(event);
+        if (frame?.event.kind !== "usage") continue;
+        usages.push(turnUsage(frame.event));
+      }
+      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
+    }
+    return foldCodeTurnUsage(undefined, usages);
+  }
+
+  /**
+   * The newest report per usage window from the thread's newest limit
+   * reports, kept only where the turn that reported it ran on the current
+   * provider, in the order the windows were first reported. A turn the page
+   * already folded names its provider; any other is read from its start.
+   */
+  #currentLimits(
+    threadId: CodeThreadId,
+    currentProviderInstanceId: string,
+    starts: ReadonlyArray<{ readonly builder: CodeConversationBuilder }>,
+    decode: (envelope: EventEnvelope) => typeof CodeOperationEventFrame.Type | undefined,
+  ): ReadonlyArray<CodeProviderLimit> {
+    const providerOf = new Map<string, string>(
+      starts.map(({ builder }) => [
+        String(builder.operationId),
+        String(builder.providerInstanceId),
+      ]),
+    );
+    const reports = this.#journal
+      .latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "provider-limit",
+        limit: MAX_WINDOW_LIMIT_REPORTS,
+      })
+      .toReversed();
+    const limits = new Map<string, CodeProviderLimit>();
+    for (const envelope of reports) {
+      const frame = decode(envelope);
+      if (frame?.event.kind !== "provider-limit") continue;
+      const operation = String(frame.operationId);
+      let provider = providerOf.get(operation);
+      if (provider === undefined) {
+        const start = this.#journal.firstAggregateEvent({
+          aggregateType: "code-operation",
+          aggregateId: operation,
+          kind: "conversation-turn-started",
+        });
+        const started = start === undefined ? undefined : decode(start);
+        // A report from an operation that never started a turn of this
+        // thread belongs to no turn, and the forward page never shows it.
+        provider =
+          started?.event.kind === "conversation-turn-started" &&
+          start !== undefined &&
+          start.globalSequence < envelope.globalSequence
+            ? String(started.event.providerInstanceId)
+            : "";
+        providerOf.set(operation, provider);
+      }
+      if (provider !== currentProviderInstanceId || provider === "") continue;
+      limits.set(frame.event.window, {
+        window: frame.event.window,
+        status: frame.event.status,
+        ...(frame.event.utilization === undefined ? {} : { utilization: frame.event.utilization }),
+        ...(frame.event.resetsAt === undefined ? {} : { resetsAt: frame.event.resetsAt }),
+      });
+    }
+    return [...limits.values()];
+  }
+
+  /**
+   * The way back from the thread's newest restore that ran. A rejected
+   * restore never touched the checkout, so the read walks past it to the one
+   * before; a restore that ran and carried no way back retracts the offer.
+   * Only restore results are read, so a thread full of commits and pushes and
+   * no restore costs an index walk, not a decode of each of them.
+   */
+  #newestRestoreUndo(
+    threadId: CodeThreadId,
+    decode: (envelope: EventEnvelope) => typeof CodeOperationEventFrame.Type | undefined,
+  ): CodeConversationPage["restoreUndo"] {
+    let beforeSequence: number | undefined;
+    for (;;) {
+      const batch = this.#journal.latestThreadResults({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        resultKind: "git-mutation-state",
+        mutation: "restore-checkpoint",
+        limit: MAX_RESTORE_RESULTS_PER_READ,
+        ...(beforeSequence === undefined ? {} : { beforeSequence }),
+      });
+      for (const envelope of batch) {
+        beforeSequence = envelope.globalSequence;
+        const frame = decode(envelope);
+        if (
+          frame?.event.kind === "operation-result" &&
+          frame.event.result.kind === "git-mutation-state" &&
+          frame.event.result.mutation === "restore-checkpoint" &&
+          frame.event.result.state !== "rejected"
+        ) {
+          return frame.event.result.undo;
+        }
+      }
+      if (batch.length < MAX_RESTORE_RESULTS_PER_READ) return undefined;
+    }
+  }
+}
+
+/** A usage window a turn reported, under the provider the turn ran on. */
+interface TurnProviderLimit {
+  readonly providerInstanceId: string;
+  readonly limit: CodeProviderLimit;
+}
+
+/**
+ * Fold one of a turn's own frames, after its start, into the turn. The
+ * forward page and the window both fold through here, which is what keeps a
+ * turn the same whichever read returns it. A usage-window report is account
+ * state rather than turn state, so it is handed back to the caller instead.
+ */
+function foldTurnFrame(
+  builder: CodeConversationBuilder,
+  frame: typeof CodeOperationEventFrame.Type,
+): TurnProviderLimit | undefined {
+  builder.updatedAt = frame.occurredAt;
+  if (frame.event.kind === "provider-content" && frame.event.channel === "message") {
+    if (builder.assistant.length < MAX_CODE_CONVERSATION_ASSISTANT_PARTS) {
+      builder.assistant.push(frame.event.content);
+    }
+  } else if (frame.event.kind === "provider-content") {
+    appendStep(builder, { kind: "reasoning", content: frame.event.content });
+  } else if (frame.event.kind === "tool-activity") {
+    // One row per tool call: a later state for the same call replaces the
+    // earlier one instead of adding a step, exactly as the live
+    // transcript folds it.
+    const toolCallId = String(frame.event.toolCallId);
+    const existing = builder.steps.findIndex(
+      (step) => step.kind === "tool" && String(step.toolCallId) === toolCallId,
+    );
+    const step = {
+      kind: "tool" as const,
+      toolCallId: frame.event.toolCallId,
+      toolName: frame.event.toolName,
+      state: frame.event.state,
+      ...(frame.event.summary === undefined ? {} : { summary: frame.event.summary }),
+    };
+    if (existing === -1) appendStep(builder, step);
+    else builder.steps[existing] = step;
+  } else if (frame.event.kind === "usage") {
+    // A provider may report usage more than once in a turn; the last
+    // report is the turn's own figure, not a running sum to add to.
+    builder.usage = turnUsage(frame.event);
+  } else if (frame.event.kind === "provider-limit") {
+    return {
+      providerInstanceId: String(builder.providerInstanceId),
+      limit: {
+        window: frame.event.window,
+        status: frame.event.status,
+        ...(frame.event.utilization === undefined ? {} : { utilization: frame.event.utilization }),
+        ...(frame.event.resetsAt === undefined ? {} : { resetsAt: frame.event.resetsAt }),
+      },
+    };
+  } else if (frame.event.kind === "context-handoff-attached") {
+    builder.handoff = conversationHandoff(frame.event);
+  } else if (frame.event.kind === "fork-context-delivered") {
+    const { kind: _kind, mergeOperationId: _merge, ...mergeBack } = frame.event;
+    if (builder.forkMergeBacks.length < MAX_CODE_FORK_MERGE_BACKS_PER_TURN)
+      builder.forkMergeBacks.push(mergeBack);
+  } else if (frame.event.kind === "conversation-turn-changed-files") {
+    builder.changedFiles = frame.event.changedFiles;
+  } else if (frame.event.kind === "operation-state") {
+    builder.status = conversationStatus(frame.event.state);
+    if (frame.event.failure !== undefined) builder.failure = frame.event.failure;
+  } else if (frame.event.kind === "operation-result") {
+    if (frame.event.result.kind === "provider-turn-state") {
+      builder.status = conversationStatus(frame.event.result.state);
+    } else if (frame.event.result.kind === "operation-failed") {
+      builder.status = "failed";
+      builder.failure = frame.event.result.failure;
+    }
+  }
+  return undefined;
+}
+
+/** A usage report as the turn's own figure. */
+function turnUsage(
+  event: Extract<CodeOperationEvent, { readonly kind: "usage" }>,
+): CodeConversationTurnUsage {
+  return {
+    inputTokens: event.inputTokens,
+    outputTokens: event.outputTokens,
+    ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+    ...(event.cacheReadInputTokens === undefined
+      ? {}
+      : { cacheReadInputTokens: event.cacheReadInputTokens }),
+    ...(event.cacheWriteInputTokens === undefined
+      ? {}
+      : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
+    ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
+    ...(event.contextTokens === undefined ? {} : { contextTokens: event.contextTokens }),
+    ...(event.autoCompactThreshold === undefined
+      ? {}
+      : { autoCompactThreshold: event.autoCompactThreshold }),
+    ...(event.contextBreakdown === undefined ? {} : { contextBreakdown: event.contextBreakdown }),
+  };
+}
+
+/** A turn's builder from its start frame, before any of its later frames. */
+function startTurn(
+  startSequence: number,
+  frame: typeof CodeOperationEventFrame.Type & {
+    readonly event: Extract<CodeOperationEvent, { readonly kind: "conversation-turn-started" }>;
+  },
+): CodeConversationBuilder {
+  return {
+    startCursor: startSequence,
+    operationId: frame.operationId,
+    providerInstanceId: frame.event.providerInstanceId,
+    modelId: frame.event.modelId,
+    sessionId: frame.event.sessionId,
+    prompt: frame.event.prompt,
+    ...(frame.event.checkpoint === undefined ? {} : { checkpoint: frame.event.checkpoint }),
+    ...(frame.event.executionPolicy === undefined
+      ? {}
+      : { executionPolicy: frame.event.executionPolicy }),
+    assistant: [],
+    forkMergeBacks: [],
+    steps: [],
+    stepsTruncated: false,
+    status: "incomplete",
+    startedAt: frame.occurredAt,
+    updatedAt: frame.occurredAt,
+  };
+}
+
+/** The turn as a page or a window carries it. */
+function finishTurn({
+  startCursor: _startCursor,
+  steps,
+  stepsTruncated,
+  forkMergeBacks,
+  ...turn
+}: CodeConversationBuilder): CodeConversationTurn {
+  return {
+    ...turn,
+    ...(forkMergeBacks.length === 0 ? {} : { forkMergeBacks }),
+    ...(steps.length === 0 ? {} : { steps }),
+    ...(stepsTruncated ? { stepsTruncated: true } : {}),
+  };
+}
+
+/**
+ * The Code operation frame a journal row holds, when it is one this thread's
+ * reads may fold: a known record whose frame names the row's own operation
+ * and version and this thread. Any other row is left out, as the forward page
+ * has always left it out.
+ */
+function ownFrame(
+  envelope: EventEnvelope,
+  threadId: CodeThreadId,
+): typeof CodeOperationEventFrame.Type | undefined {
+  if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1) {
+    return undefined;
+  }
+  let frame: typeof CodeOperationEventFrame.Type;
+  try {
+    frame = decodeCodeOperationEventFrame(envelope.payload);
+  } catch {
+    return undefined;
+  }
+  if (
+    String(frame.operationId) !== String(envelope.aggregateId) ||
+    frame.cursor !== envelope.aggregateVersion ||
+    frame.threadId !== threadId
+  ) {
+    return undefined;
+  }
+  return frame;
 }
 
 /** The part of a journaled handoff the conversation page shows; the text stays in the content store. */

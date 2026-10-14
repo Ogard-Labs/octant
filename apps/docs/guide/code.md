@@ -58,6 +58,17 @@ Code threads run in one of four server-enforced authority modes:
 
 Code starts approval-gated unless the user explicitly remembers Full access. A Work-to-Code promotion always starts approval-gated, never inheriting Work authority. The composer shows the posture the next turn will run under, defaulting to the thread's. A turn may only narrow what the thread already grants; Plan mode stays read-only and cannot be overridden from the composer. The transcript records the posture each turn actually ran under. Raising a thread to Full access still needs the native confirmation. The picker also offers **Lower thread** to durably return a thread to approval-gated access; this revokes a session-only Full-access grant for the current window without confirmation, while other windows keep their own grants. The confirmation leads with the action, thread title, and branch or checkout state. Project, thread, repository, and checkout identifiers remain in **Show authority details**, alongside the authority digests.
 
+## Long threads
+
+A long Code thread opens on its newest turns, at the end, and follows new
+output while you are there. **Load earlier messages** at the top adds the turns
+before the oldest one shown; the turn you were reading stays where it is. In a
+fork, once its own turns are all shown, Load earlier continues with the thread
+it was forked from, starting at the reply you forked from. The usage and
+context figures always cover the whole thread, and a restore's **Undo restore**
+stays offered however far back the restore was. Find in page searches the turns
+loaded so far. Export always covers the whole thread.
+
 ## Export
 
 **Export thread** downloads a portable JSON cut of this Code thread: the

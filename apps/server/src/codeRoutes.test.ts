@@ -599,6 +599,55 @@ describe("Code routes", () => {
     ).toBe(400);
   });
 
+  it("reads a conversation window with a strict query, unstored, and refuses a foreign anchor as stale", async () => {
+    const window = {
+      version: 1 as const,
+      threadId,
+      turns: [],
+      hasEarlier: true,
+      hasLater: true,
+    };
+    const conversationWindow = vi.fn(
+      async (_windowId: unknown, _threadId: unknown, request: { readonly before?: string }) =>
+        request.before === anchor
+          ? ({ status: "anchor-not-found" } as const)
+          : ({ status: "ok", window } as const),
+    );
+    const anchor = "10000000-0000-4000-8000-0000000000aa";
+    const known = "10000000-0000-4000-8000-0000000000bb";
+    const route = routeFixture({ conversationWindow });
+    const path = `/api/code/threads/${threadId}/conversation/window`;
+
+    const response = await route(request(`${path}?limit=20&through=${known}`));
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("cache-control")).toBe("no-store");
+    await expect(response?.json()).resolves.toEqual(window);
+    expect(conversationWindow).toHaveBeenCalledWith(windowId, threadId, {
+      limit: 20,
+      through: known,
+    });
+
+    const stale = await route(request(`${path}?limit=20&before=${anchor}`));
+    expect(stale?.status).toBe(409);
+    await expect(stale?.json()).resolves.toMatchObject({ category: "stale" });
+
+    conversationWindow.mockClear();
+    for (const query of [
+      "",
+      "?limit=0",
+      "?limit=101",
+      "?limit=20&limit=20",
+      "?limit=20&afterCursor=0",
+      `?limit=20&before=${known}&through=${known}`,
+      `?limit=20&before=${known}&before=${known}`,
+      "?limit=20&before=not-a-turn",
+    ]) {
+      expect((await route(request(`${path}${query}`)))?.status, query).toBe(400);
+    }
+    expect(conversationWindow).not.toHaveBeenCalled();
+    expect((await routeFixture({})(request(`${path}?limit=20`)))?.status).toBe(503);
+  });
+
   it("rejects cursor gaps and overlong replay lines instead of skipping them", async () => {
     const gapRoute = routeFixture({
       subscribe: vi.fn(async function* () {

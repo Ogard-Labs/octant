@@ -783,6 +783,61 @@ describe("Journal", () => {
     connection.close();
   });
 
+  it("reads a thread's newest rows and one aggregate's first row of a kind through indexes", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    const sqls = prepare.mock.calls.map(([sql]) => sql);
+    prepare.mockRestore();
+    const newest = sqls.filter(
+      (sql) => sql.includes("'$.threadId'") && sql.includes("ORDER BY global_sequence DESC"),
+    );
+    const first = sqls.filter((sql) =>
+      sql.includes("ORDER BY aggregate_version ASC\n      LIMIT 1"),
+    );
+
+    // The newest events of a kind and the newest results of a kind.
+    expect(newest).toHaveLength(2);
+    expect(first).toHaveLength(1);
+    for (const sql of [...newest, ...first]) {
+      const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
+      const plan = JSON.stringify(
+        connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters),
+      );
+      expect(plan).toMatch(/USING INDEX/);
+      expect(plan).not.toMatch(/SCAN event_journal\b/);
+    }
+    connection.close();
+  });
+
+  it("finds each turn's last report through the thread index, never the aggregate's own index", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    const perTurn = prepare.mock.calls
+      .map(([sql]) => sql)
+      .filter((sql) => sql.includes("anchor_sequence"));
+    prepare.mockRestore();
+
+    expect(perTurn).toHaveLength(1);
+    const [sql] = perTurn;
+    const parameters = Array.from({ length: (sql ?? "").split("?").length - 1 }, () => "fixture");
+    const searches = (
+      connection.prepare(`EXPLAIN QUERY PLAN ${sql ?? ""}`).all(...parameters) as Array<{
+        readonly detail: string;
+      }>
+    )
+      .map((row) => row.detail)
+      .filter((detail) => /\bevent_journal\b/.test(detail));
+    // Both groupings, the anchors and the reports: grouping by aggregate made
+    // the planner walk every row of the type through the aggregate's index.
+    expect(searches).toEqual([
+      expect.stringMatching(/^SEARCH event_journal USING INDEX event_journal_thread_kind_sequence/),
+      expect.stringMatching(/^SEARCH event_journal USING INDEX event_journal_thread_kind_sequence/),
+    ]);
+    connection.close();
+  });
+
   it("reads a thread's turn operations and restore results without visiting its other rows", () => {
     const connection = openMigratedConnection();
     const prepare = vi.spyOn(connection, "prepare");

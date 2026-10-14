@@ -44,6 +44,8 @@ import {
   decodeProjectTerminalCommand,
   decodeProjectTerminalResult,
   decodeCodeConversationPage,
+  decodeCodeConversationWindow,
+  decodeCodeConversationWindowRequest,
   MAX_CODE_SEARCH_QUERY_LENGTH,
   decodeCodeFileChangeNotice,
   decodeCodeFileListingResult,
@@ -99,6 +101,8 @@ import {
   type CodeTerminalInspectionRequest,
   type ProjectTerminalCommand,
   type CodeConversationPage,
+  type CodeConversationWindow,
+  type CodeConversationWindowRequest,
   type CodeFileChangeNotice,
   type CodeSearchResult,
   type CodeSearchScope,
@@ -198,6 +202,11 @@ export interface CodeTestListingInput {
   readonly checkoutId: typeof CodeCheckoutId.Type;
 }
 
+/** A window read's answer: the page, or the refusal of an anchor the thread does not hold. */
+export type CodeConversationWindowAnswer =
+  | { readonly status: "ok"; readonly window: CodeConversationWindow }
+  | { readonly status: "anchor-not-found" };
+
 export interface CodeRouteService {
   readonly readGitHistory?: (
     windowId: WindowId,
@@ -245,6 +254,15 @@ export interface CodeRouteService {
     afterCursor: number,
     limit: number,
   ) => Promise<CodeConversationPage> | CodeConversationPage;
+  /**
+   * One page of a thread's own turns for a client that opens on its newest
+   * turns. An anchor the thread does not hold answers 409 `stale`.
+   */
+  readonly conversationWindow?: (
+    authenticatedWindowId: WindowId,
+    threadId: CodeThreadId,
+    request: CodeConversationWindowRequest,
+  ) => Promise<CodeConversationWindowAnswer> | CodeConversationWindowAnswer;
   readonly queryBoard?: (
     authenticatedWindowId: WindowId,
     query: CodeBoardQuery,
@@ -753,6 +771,29 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             200,
             origin,
           );
+        }
+        case "conversation-window": {
+          if (request.method !== "GET" || dependencies.service.conversationWindow === undefined) {
+            throw new CodeRouteRejected("Code conversation is unavailable.", 503);
+          }
+          const threadId = decodePathThreadId(route.threadId);
+          const windowRequest = decodeConversationWindowQuery(url);
+          const read = await dependencies.service.conversationWindow(
+            authenticatedWindowId,
+            threadId,
+            windowRequest,
+          );
+          if (read.status === "anchor-not-found") {
+            // The client drops its earlier pages and reads the newest again.
+            return failureResponse(
+              { category: "stale", message: "That Code turn is no longer in this thread." },
+              409,
+              origin,
+            );
+          }
+          return jsonResponse(decodeCodeConversationWindow(read.window), 200, origin, {
+            "cache-control": "no-store",
+          });
         }
         case "follow-up": {
           const threadId = decodePathThreadId(route.threadId);
@@ -1472,7 +1513,10 @@ type MatchedRoute =
         | "project-pull-requests-merge";
     }>
   | Readonly<{ kind: "planner"; projectId: string }>
-  | Readonly<{ kind: "thread" | "events" | "conversation" | "follow-up"; threadId: string }>
+  | Readonly<{
+      kind: "thread" | "events" | "conversation" | "conversation-window" | "follow-up";
+      threadId: string;
+    }>
   | Readonly<{ kind: "operation-events"; threadId: string; operationId: string }>
   | Readonly<{
       kind: "operation-content";
@@ -1616,6 +1660,10 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (events !== null) return { kind: "events", threadId: events[1]! };
   const conversation = /^\/api\/code\/threads\/([^/]+)\/conversation$/.exec(pathname);
   if (conversation !== null) return { kind: "conversation", threadId: conversation[1]! };
+  const conversationWindow = /^\/api\/code\/threads\/([^/]+)\/conversation\/window$/.exec(pathname);
+  if (conversationWindow?.[1] !== undefined) {
+    return { kind: "conversation-window", threadId: conversationWindow[1] };
+  }
   const followUp = /^\/api\/code\/threads\/([^/]+)\/follow-up$/.exec(pathname);
   if (followUp !== null) return { kind: "follow-up", threadId: followUp[1]! };
   const operationEvents = /^\/api\/code\/threads\/([^/]+)\/operations\/([^/]+)\/events$/.exec(
@@ -1741,6 +1789,38 @@ function decodeConversationPageQuery(url: URL): {
     throw new CodeRouteRejected("Code conversation cursor is invalid.", 400);
   }
   return { afterCursor, limit };
+}
+
+/**
+ * `limit` once, and at most one of `before` or `through`, once; nothing else.
+ * A malformed query is refused rather than read as the newest page, because a
+ * client that asked for an earlier page must never be handed the newest one
+ * in its place.
+ */
+function decodeConversationWindowQuery(url: URL): CodeConversationWindowRequest {
+  const anchors = ["before", "through"] as const;
+  const limit = url.searchParams.getAll("limit");
+  if (
+    [...url.searchParams.keys()].some(
+      (key) => key !== "limit" && !anchors.some((anchor) => anchor === key),
+    ) ||
+    limit.length !== 1 ||
+    !/^[1-9][0-9]{0,2}$/.test(limit[0] ?? "") ||
+    anchors.some((anchor) => url.searchParams.getAll(anchor).length > 1)
+  ) {
+    throw new CodeRouteRejected("Code conversation window query is invalid.", 400);
+  }
+  const before = url.searchParams.get("before");
+  const through = url.searchParams.get("through");
+  try {
+    return decodeCodeConversationWindowRequest({
+      limit: Number(limit[0]),
+      ...(before === null ? {} : { before }),
+      ...(through === null ? {} : { through }),
+    });
+  } catch {
+    throw new CodeRouteRejected("Code conversation window query is invalid.", 400);
+  }
 }
 
 /**
@@ -2066,8 +2146,15 @@ function failureResponse(
   return jsonResponse(decodeCodeFailure(failure), status, origin);
 }
 
-function jsonResponse(body: unknown, status: number, origin: string | null): Response {
-  return Response.json(body, { status, headers: corsHeaders(origin) });
+function jsonResponse(
+  body: unknown,
+  status: number,
+  origin: string | null,
+  extraHeaders: Record<string, string> = {},
+): Response {
+  const headers = corsHeaders(origin);
+  for (const [name, value] of Object.entries(extraHeaders)) headers.set(name, value);
+  return Response.json(body, { status, headers });
 }
 
 function isAllowedOrigin(origin: string): boolean {

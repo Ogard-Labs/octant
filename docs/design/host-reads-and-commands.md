@@ -75,10 +75,11 @@ newest window again. Each read is a GET, runs the same authority check as the
 whole-thread read beside it before reading anything, and is a
 `project.overview.read` for a paired device.
 
-| Mode | Route                                    | Anchor                                                 | Page                                                                                                                                        |
-| ---- | ---------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Work | `GET /api/work/turns/window/:threadId`   | `before=<requestId>` (or none)                         | `limit` 1 to 64 (the client asks 30), at most 2 MiB of encoded turns (a paired device's response is cut at 8 MiB), always at least one turn |
-| Chat | `GET /api/chat/threads/:threadId/window` | one of `before`, `after`, `through=<turnId>` (or none) | `limit` 1 to 50 (the client asks 30), at most 2 MiB of encoded turns with their bodies, always at least one turn                            |
+| Mode | Route                                                 | Anchor                                                 | Page                                                                                                                                        |
+| ---- | ----------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Work | `GET /api/work/turns/window/:threadId`                | `before=<requestId>` (or none)                         | `limit` 1 to 64 (the client asks 30), at most 2 MiB of encoded turns (a paired device's response is cut at 8 MiB), always at least one turn |
+| Chat | `GET /api/chat/threads/:threadId/window`              | one of `before`, `after`, `through=<turnId>` (or none) | `limit` 1 to 50 (the client asks 30), at most 2 MiB of encoded turns with their bodies, always at least one turn                            |
+| Code | `GET /api/code/threads/:threadId/conversation/window` | one of `before`, `through=<operationId>` (or none)     | `limit` 1 to 100 (the client asks 20), at most 2 MiB of encoded turns, always at least one turn                                             |
 
 A Chat window answers `ChatThreadWindow`: the unchanged `ChatThreadView` shape
 holding only the page, plus the bounds and `supersededTurnCount`. It pages over
@@ -106,6 +107,31 @@ never two runs with a gap shown as one.
 Readers that need the whole thread read the unchanged whole-thread route: the
 Markdown copy and save, and the thread's attachment, source, and turn counts
 in the Environment panel while it is open.
+
+A Code window answers `CodeConversationWindow`: the thread's own turns in the
+forward page's turn shape, the bounds, and `earlierUsage`, the fold of every
+turn of the thread older than the page's first, in the shape the client totals
+usage in; the host and the client fold with the same domain function, so the
+seed plus the loaded turns is the thread's whole total at every page. A turn
+counts by the operation that started it, not by where its last usage report
+landed in the journal. The newest window also carries `limits`, the newest
+report per usage window among the thread's newest limit reports for the
+provider the thread is on now, and `restoreUndo`, the way back from the newest
+restore that ran (a rejected restore is passed over); earlier windows carry
+neither. The read never scans the thread from its start: it reads the newest
+turn starts below the anchor from the thread-kind index, each page turn's own
+frames through its operation, and each older turn's last usage report; that
+last read walks every usage report the thread holds through the thread-kind
+index and decodes one per older turn. A turn is folded exactly as the forward
+page folds it. `through` is the page that
+ends with the named turn. A fork opens on its own newest turns; once those run
+out, **Load earlier messages** reads its source `through` the fork point, then
+`before` that page's first turn, and on up the lineage to at most 32 threads.
+Inherited rows keep their source thread, and only the fork's own turns count
+toward its usage. A new fork with fewer turns of its own than one page reads
+its first inherited page when it opens. The forward conversation read
+(`CodeConversationPage` version 3) is unchanged, and export, fork points,
+hand-off, mentions, merge back, the phone, and the CLI still read it.
 
 A host without a window route answers 404, and the client reads the thread's
 whole-transcript route instead and shows it as fully loaded. A fresh newest

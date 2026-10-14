@@ -1958,8 +1958,13 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   min-height: 0;
 }
 
+/* The frame is a flex column, and a windowed list holds only absolutely
+   placed rows, so it shrank to the frame's height. The scroll extent then
+   ended at the last mounted row rather than at the newest message, and
+   scrolling to the end stopped short until more rows mounted. */
 .code-thread-workspace__transcript {
   position: relative;
+  flex: none;
   margin: 0 auto;
 }
 

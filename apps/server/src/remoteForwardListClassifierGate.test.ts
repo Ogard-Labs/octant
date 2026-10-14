@@ -68,4 +68,20 @@ describe("remote forward list vs route classifier", () => {
     });
     expect(classifyProductAction(request)).toBe("project.overview.read");
   });
+
+  it("forwards the Code conversation window read as an overview read", () => {
+    const policy = createRemoteRoutePolicy({ origin });
+    const request = new Request(
+      `${origin}/api/code/threads/00000000-0000-4000-8000-000000000001/conversation/window?limit=20`,
+      {
+        method: "GET",
+        headers: { host: "octant.example:8443", origin, "sec-fetch-site": "same-origin" },
+      },
+    );
+    expect(policy.inspect(request)).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    expect(classifyProductAction(request)).toBe("project.overview.read");
+  });
 });

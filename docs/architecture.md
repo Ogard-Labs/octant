@@ -1748,13 +1748,18 @@ flowchart LR
   conversation evidence is read in bounded batches and page results paint as
   they arrive; live Code operation frames carry bounded display text beside
   their durable evidence references. Work uses a bounded delta feed over its
-  durable transcript. Work and Chat threads open on their newest turns through
-  a windowed read and load earlier pages on request; each page is one
+  durable transcript. Work, Chat, and Code threads open on their newest turns
+  through a windowed read and load earlier pages on request; each page is one
   contiguous run of whole turns, bounded by count and by text, and the
   journal and projection stay complete ([thread windows](design/host-reads-and-commands.md#thread-windows)).
   Chat pages over the active conversation only and counts the turns edits
   superseded, so nothing derived from the whole thread goes partial; the
-  Markdown copy and the thread's totals read the whole thread first.
+  Markdown copy and the thread's totals read the whole thread first. A Code
+  page carries the usage of every older turn, so the thread's totals stay
+  whole, and its window read starts from the newest turns without scanning the
+  thread; a fork's earlier pages continue into its source at the fork point.
+  The forward Code conversation read is unchanged for export, forks, hand-off,
+  mentions, the phone, and the CLI.
   The older whole-transcript route answers with the newest 64 turns of a longer
   thread, oldest first; export and `#thread` mentions read the whole thread on
   the host. One post-commit Machine change feed invalidates mode

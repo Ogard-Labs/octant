@@ -958,6 +958,48 @@ describe("code client", () => {
     );
   });
 
+  it("reads a conversation window with its page size and anchor, ignoring fields it does not know", async () => {
+    const window = {
+      version: 1,
+      threadId: ids.thread,
+      turns: [],
+      hasEarlier: true,
+      hasLater: true,
+    };
+    const fetch = vi.fn().mockResolvedValue(Response.json({ ...window, laterField: 1 }));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+    const anchor = "90000000-0000-4000-8000-0000000000aa";
+
+    await expect(
+      client.conversationWindow?.(ids.thread as never, { limit: 20, through: anchor as never }),
+    ).resolves.toEqual(window);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/threads/${ids.thread}/conversation/window?limit=20&through=${anchor}`,
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("reports a host without the window read, and a stale anchor, by status", async () => {
+    const missing = createCodeClient({
+      baseUrl,
+      fetch: vi.fn().mockResolvedValue(new Response("Not found", { status: 404 })),
+      windowCapability: capability,
+    });
+    await expect(
+      missing.conversationWindow?.(ids.thread as never, { limit: 20 }),
+    ).rejects.toMatchObject({ status: 404 });
+    const stale = createCodeClient({
+      baseUrl,
+      fetch: vi
+        .fn()
+        .mockResolvedValue(Response.json({ category: "stale", message: "Gone." }, { status: 409 })),
+      windowCapability: capability,
+    });
+    await expect(
+      stale.conversationWindow?.(ids.thread as never, { limit: 20 }),
+    ).rejects.toMatchObject({ status: 409, category: "stale" });
+  });
+
   it("opens a confined file and unwraps the strict open envelope", async () => {
     const result = {
       status: "editable",
