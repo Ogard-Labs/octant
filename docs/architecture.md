@@ -4999,6 +4999,264 @@ mechanisms are:
   and keys can still follow a link or submit a form within the context's
   approved origins; the host's navigation guards refuse any page outside them,
   so a paired client cannot take the host browser to a new origin.
+- **Adding a computer in one step.** _Design proposal — not approved, nothing
+  built._ Today the private listener serves only a certificate the person
+  brings: Settings → Remote access and `octant listener enable` take
+  certificate and private key PEMs, and Octant makes none, so a second,
+  always-on computer first needs a Tailscale certificate or the person's own
+  certificate authority. This proposal lets the host make its own certificate
+  and has the pairing link carry a fingerprint of its key, which Octant's own
+  clients pin. Nothing below is built; the rules above stay the current
+  behavior until the maintainer accepts this and the slices land.
+  - **What stays.** No public ingress, no relay, and no Octant-operated
+    service. The listener stays HTTPS-only and binds only a private LAN or
+    Tailscale address under the same address classifier. Pairing stays a
+    single-use ticket approved on the host, and every request still carries
+    the device-key proof, replay nonce, CSRF value, and exact-origin checks.
+    The pin is checked before any of those and replaces none of them.
+    Listener, pairing, and key administration stay on the loopback
+    administration channel. Revocation is unchanged: revoking a device bumps
+    its generation and ends its sessions and streams, whatever certificate the
+    listener serves.
+  - **Why the pin is required, not optional.** Today the certificate is the
+    only thing that authenticates the host on first contact. The host hello
+    names the host identity key's fingerprint and carries a signature, but a
+    client holds no public key to check that signature against: it records the
+    fingerprint as the host states it at pairing and compares it on later
+    connections. A self-made certificate without a pin would leave first
+    contact unauthenticated, so the self-made path exists only together with
+    a pin.
+  - **Key and certificate.** When the listener is enabled with no pasted
+    certificate, the host makes an ECDSA P-256 key and a self-signed X.509 v3
+    leaf certificate for it: SHA-256 signature, a random 128-bit serial,
+    basic constraints not a certificate authority, extended key usage server
+    authentication, a subject alternative name for the listener's address (an
+    IP entry for an address, a DNS entry for a name), valid for one year.
+    P-256 is the curve the host identity and device keys already use, and
+    every client TLS stack Octant runs on accepts it. When the host starts or
+    enables the listener within 30 days of expiry, it renews the certificate
+    with the same key, so renewal never changes the pin. The key is its own
+    key, not the host identity key (open decision 1).
+  - **Storage.** The key is `remote/private-listener-tls-key.pem` and the
+    certificate `remote/private-listener-tls-cert.pem` under the data
+    directory, the boundary that already holds the host identity key. The
+    directory is created `0700` and the files `0600`, each written to a staging
+    file and renamed, as the remembered listener setting is. The host refuses
+    to load a key file that another OS user owns or can read; the listener
+    then reports failed with that reason and serves nothing. The remembered
+    setting records that the certificate is self-made and holds no copy of the
+    key; a pasted certificate and key are remembered as today. The key never
+    appears in a route response, the status projection, a log line, the
+    journal, a diagnostics or data export, or an error message. Only the pin
+    and the certificate's public facts leave the host. Disabling the listener
+    keeps the key, so enabling it again needs no new pairing; replacing the
+    key or removing the host's data deletes it.
+  - **A pasted certificate wins.** When certificate and key PEMs are given,
+    the listener serves them exactly as today and the self-made key stays
+    unused on disk. Settings makes the PEM fields optional behind "Use my own
+    certificate". The status projection gains `certificateSource`
+    (`self-made` or `pasted`) and, for a self-made certificate, `tlsPin`. The
+    existing `certificateFingerprint` hashes the PEM text, not the key, so it
+    is not a pin and does not become one.
+  - **Pin format.** `sha256-` followed by the unpadded base64url SHA-256 of the
+    certificate's DER-encoded SubjectPublicKeyInfo, 43 characters after the
+    prefix. Pinning the key rather than the certificate lets renewal keep the
+    pin. The prefix names the algorithm: a client refuses a prefix it does not
+    know rather than skipping the check.
+  - **Link and QR code.** For a self-made listener the host mints an app link,
+    `octant://pair#origin=<listener origin>&ticketId=<id>&ticketProof=<proof>&pin=<pin>`,
+    with everything in the fragment as the ticket is today. The QR code
+    encodes the same link, so a phone's camera opens the Octant app and not a
+    browser that cannot use the pin. The 10-character human-entry code has no
+    room for a pin and is not offered for a self-made listener. The pin is
+    public. The link is only as trustworthy as the way it reaches the device:
+    scanned from the host's screen or terminal, or pasted by the person. The
+    host-side approval with the comparison code stays the check that the
+    person's own device made the claim. Another app on a phone can register
+    the `octant` scheme and claim the ticket; the host then shows a claim the
+    person's device never made, and the person denies it.
+  - **How each client pins.** A client takes a pin only from a pairing link,
+    or from the rotation route below, and records it with the device
+    registration for that exact origin (device-key metadata and the host
+    registry). On every connection to that origin, the first hello included,
+    it checks the served key against the recorded pins before it sends a
+    request, and on a mismatch it closes the connection without sending or
+    reading anything. For a pinned origin the pin check replaces platform
+    chain validation and never falls back to it, so a certificate a public
+    authority issued for the same name does not pass. An origin with no pin
+    uses platform trust only, so it never accepts a self-made certificate.
+    Validation is replaced for a pinned origin, never turned off.
+    - **Phone.** Requests to a pinned origin go through a small in-tree native
+      module that checks the pins in the platform's TLS trust callback on iOS
+      and Android; the app's ordinary fetch is not used for those origins. It
+      must work under the platform's transport security rules without an
+      arbitrary-loads exception. The pairing screen accepts the
+      `octant://pair` deep link and a pasted link; typing the origin and
+      ticket by hand stays for hosts with a pasted certificate.
+    - **Desktop to host.** The desktop app reaches another host through
+      Electron's network stack. The main process keeps the pins owner-only
+      under the app's data and checks them in the session's certificate
+      verification hook. The renderer can ask main to record a pin only while
+      completing a pairing link, and main records pins only for names and
+      addresses the listener address classifier calls private LAN or
+      Tailscale, never a public name, so a compromised renderer cannot pin a
+      public site. A pinned name whose key does not match is refused even when
+      its certificate is otherwise trusted.
+    - **CLI.** No `octant` command connects to another host as a paired device
+      today; the CLI talks only to its own host over loopback. A future one
+      pins through the TLS server-identity callback under the same rule, and
+      a test refuses any code path that turns off chain validation without
+      the pin check.
+    - **A plain browser cannot pin.** It decides trust before any Octant page
+      loads, and a page served over a connection it could not authenticate
+      may come from anyone, so no script on that page can check the pin.
+      A browser therefore pairs only with a listener that serves a pasted
+      certificate (a Tailscale certificate or the person's own), as today. For
+      a self-made listener, Settings and `octant pair` offer no browser link
+      and say why. A browser that opens the listener's address anyway shows
+      its own certificate warning, before Octant can show anything; the guide
+      says to stop there. Once a browser has seen the listener's HSTS header
+      over a trusted certificate, it does not let the person continue past
+      that warning at all. Octant installs no trust root and never asks the
+      person to.
+  - **One-line start on the new computer.** `octant server install --pair`,
+    and `octant server start --pair` from a checkout, install and start the
+    service as today, then, over the loopback administration channel:
+    1. find the address: an up interface with an address the classifier calls
+       Tailscale, else one private LAN address. More than one candidate of
+       that kind, or none, refuses and names what it found; `--hostname`
+       chooses instead;
+    2. enable the listener on port 8443 (`--port` overrides) with a self-made
+       certificate, or with `--cert` and `--key` when given;
+    3. mint a pairing ticket and print the app link and a QR code in the
+       terminal;
+    4. wait up to the ticket's five minutes for a claim, show the device
+       label, key fingerprint, and comparison code, and ask `Approve? [y/N]`.
+       That answer is the host-side approval; `octant pair approve` stays the
+       equivalent.
+  - **What `--pair` leaves alone.** It changes no firewall rule and runs no
+    Tailscale command. A LAN address that changes later changes the origin,
+    and the device pairs again, which is why Tailscale comes first. On a Mac
+    with the desktop app, Settings → Remote access does the same as the
+    command: enabling with no PEMs uses a self-made certificate and shows the
+    link and QR code.
+  - **Rotation.** Renewal keeps the key and needs nothing from clients.
+    Replacing the key is host-local, from Settings or
+    `octant listener replace-key`. The host makes the next key and
+    certificate and keeps serving the current one. For up to 30 days it
+    announces both pins on a new authenticated remote route that needs a
+    device session and request proof and joins the forward list and route
+    classifier like every product route. A device records the next pin only
+    from that route, on a connection that passed its current pin. When the
+    person switches, or the 30 days end, the host serves the new key and
+    deletes the old one; a device that did not connect in time sees the
+    mismatch and pairs again. Moving between a pasted and a self-made
+    certificate uses the same announcement, which then says `pinned` with
+    the pins or `platform`, and a device changes its trust mode only that
+    way. Because the announcement travels under the old key, it cannot recover
+    from a stolen key: for a suspected compromise the person replaces the key
+    and revokes every device, and each device pairs again. Rotating the host
+    identity key still revokes every device, unchanged.
+  - **Failure copy.** Each refusal is a typed failure with one line of copy:
+    - pin mismatch on any client: "This isn't the computer you paired with:
+      its security key has changed. Octant stopped before sending anything.
+      If its key was replaced on purpose, pair again from that computer.";
+    - platform trust fails for an origin with no pin: "Octant couldn't verify
+      this computer's certificate. Pair with the full link or QR code from
+      that computer.";
+    - unknown pin prefix: "This pairing link needs a newer version of
+      Octant.";
+    - a browser link asked for on a self-made listener: "A browser can't check
+      this computer's own certificate. Pair from the Octant app or the desktop
+      app, or give the listener a Tailscale certificate or your own to pair a
+      browser.";
+    - no address found: "No Tailscale or private network address found on
+      this computer. Connect it to Tailscale or your local network, or pass
+      --hostname.";
+    - several addresses: "This computer has more than one <Tailscale or
+      private network> address: <list>. Pass --hostname with the one your
+      other devices reach.";
+    - key file readable by others: "The listener's certificate key can be
+      read by other users on this computer, so Octant won't use it. Run
+      `octant listener replace-key` to make a new one.";
+    - no claim in time: "No device used the link within five minutes. Run the
+      command again for a new one."
+  - **Open decisions**, each with the recommended option:
+    1. _Separate TLS key or the host identity key._ Recommend separate. The
+       host identity key is meant to move behind keychain-brokered signing,
+       which a TLS server cannot use, and rotating it revokes every device;
+       a separate key keeps certificate work away from device trust.
+    2. _Pin encoding._ Recommend `sha256-` plus base64url over hex: it keeps
+       the link and QR code shorter and leaves room for another algorithm.
+    3. _Certificate generation._ Recommend a small in-tree DER writer for
+       this one certificate shape, tested by parsing the result with the
+       platform's X.509 reader and a real TLS handshake, over a new
+       dependency. The platform crypto API makes keys but not certificates.
+    4. _QR encoding._ Recommend one small, maintained, dependency-free QR
+       encoder package shared by Settings and the CLI; an in-tree encoder is
+       more code than the rest of this proposal.
+    5. _Key storage._ Recommend the owner-only file. The listener needs the
+       key in process at every start, a headless host's Secret Service can be
+       locked, and the host identity key and a pasted key already live there.
+    6. _Validity window on pinned clients._ Recommend clients do not enforce
+       it. Anyone holding the key can make a fresh certificate, so the date
+       adds no protection, and a phone with a wrong clock would be locked out.
+       The host still renews.
+    7. _Browsers and self-made certificates._ Recommend no browser link for a
+       self-made listener, rather than a link with a warning to click through.
+    8. _Fetching a Tailscale certificate during `--pair`._ Recommend not by
+       default: it needs the tailnet's HTTPS setting and publishes the
+       machine's name in public certificate logs. An explicit flag can come
+       later.
+    9. _Phone pinning._ Recommend the in-tree native module over a
+       third-party pinning library, because it is the one check that must be
+       right and is small.
+    10. _Command shape._ Recommend `--pair` on both `server install` and
+        `server start`, since `install` needs an artifact today.
+  - **Slices**, each with its tests:
+    1. _Host certificate._ Generation, storage, renewal, the self-made enable
+       variant on the administration routes and `octant listener`, and the
+       status fields. Tests: the served certificate's key hashes to `tlsPin`
+       over a real TLS connection; a pasted certificate wins when both exist;
+       the key is absent from every administration response, status read,
+       log line, journal event, and diagnostics export; a key file another
+       user can read is refused; a restart and a renewal keep the pin.
+    2. _Pinned link._ Link building and parsing, Settings and `octant pair`
+       output, QR code, no browser link or human-entry code for a self-made
+       listener. Tests: the link round-trips; a link with a missing or
+       unknown pin is refused with its copy.
+    3. _Client pin rule._ The pin and trust mode in device-key metadata and the
+       host registry, and a pinned transport port in the client runtime.
+       Tests: a client refuses a host whose key does not match the pin before
+       it sends a request; a pinned origin never falls back to platform trust,
+       and an unpinned one never accepts a self-made certificate.
+    4. _Desktop._ The main-process pin store and certificate verification
+       hook. Tests: against a local self-made listener, the right key passes
+       and any other is refused; a public name cannot be pinned; a trusted
+       certificate with the wrong key is refused for a pinned name; a
+       packaged-app smoke.
+    5. _Phone._ The native module, deep link, and pasted link. Tests: module
+       tests on both platforms and the device pass from the
+       [TestFlight runbook](mobile-testflight.md) against a self-made host,
+       including a refused mismatch.
+    6. _One-line start._ `--pair`. Tests: Tailscale is chosen over LAN,
+       several candidates refuse and list them, a public address is never
+       chosen, and approval needs a typed `y`. Live: pair a second machine over
+       Tailscale with only the command and the host approval.
+    7. _Rotation._ Replace key, the announcement route, switching. Tests: the
+       route refuses an unauthenticated caller and is not on the loopback-only
+       list; a device records the next pin only over a proven session that
+       passed its current pin; a device that missed the window sees the
+       mismatch; revocation is unchanged.
+  - **User guide when built.** `apps/docs/advanced/remote-access.md` (the
+    HTTPS and certificate rule, both enabling sections, and a new section for
+    adding a computer), `apps/docs/guide/linux-host.md` (the Tailscale pairing
+    steps become the one command), and `apps/docs/advanced/privacy-and-security.md`
+    (the remote transport paragraph). The
+    [mobile remote-control threat model](security/mobile-remote-control-threat-model.md)
+    gains the pin, the scheme claim, and the stolen-key limit. Until then
+    those pages keep describing a browser-trusted certificate, which is
+    still the only behavior.
 - **Provider keys on a host without the desktop app.** _Designed, not yet
   built._ The desktop saves an endpoint's API key or bearer token over
   native IPC from its own renderer, so a browser client — local or paired —
