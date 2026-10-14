@@ -1538,6 +1538,95 @@ describe("ChatTranscript", () => {
 
     expect(await screen.findByText("User turn 500")).toBeVisible();
   });
+
+  describe("a thread opened on its newest messages", () => {
+    const windowState = {
+      threadKey: ids.thread,
+      windowed: true,
+      hasEarlier: true,
+      offerEarlier: true,
+      supersededTurnCount: 0,
+      earlier: "idle" as const,
+    };
+    const controls = (state: Record<string, unknown> = {}) => ({
+      state: { ...windowState, ...state },
+      onLoadEarlier: vi.fn(),
+      onLoadLater: vi.fn(),
+      onJumpToLatest: vi.fn(),
+    });
+    /** Turns `from` up to, not including, `to` of a 20-turn thread. */
+    const run = (from: number, to: number) => {
+      const whole = longView(20);
+      return decodeChatThreadView({ ...whole, turns: whole.turns.slice(from, to) });
+    };
+
+    it("counts revised messages from the host when earlier turns are not loaded", () => {
+      render(
+        <ChatTranscript
+          transcriptWindow={controls({ supersededTurnCount: 4 })}
+          view={run(17, 20)}
+        />,
+      );
+
+      expect(screen.getByText(/^4 earlier messages were revised\./)).toBeVisible();
+    });
+
+    it("offers the messages before the oldest loaded one", () => {
+      const window = controls();
+      render(<ChatTranscript transcriptWindow={window} view={run(17, 20)} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+
+      expect(window.onLoadEarlier).toHaveBeenCalledOnce();
+    });
+
+    it("does not show a route receipt as orphaned while its turn is on an unloaded page", () => {
+      // The window carries a receipt only with its turn's page, so the newest
+      // page holds none for turn 2; a receipt it holds names a loaded turn.
+      const view = decodeChatThreadView({
+        ...run(17, 20),
+        routeDecisions: [
+          {
+            threadId: ids.thread,
+            turnId: run(17, 18).turns[0]!.id,
+            decision: waitingReceipt(),
+            decidedAt: now,
+          },
+        ],
+      });
+      render(<ChatTranscript transcriptWindow={controls()} view={view} />);
+
+      expect(
+        within(screen.getByRole("region")).getAllByLabelText("Turn route receipt"),
+      ).toHaveLength(1);
+      expect(
+        document.querySelector("[data-transcript-trail] [aria-label='Turn route receipt']"),
+      ).toBeNull();
+    });
+
+    it("shows a run jumped to in place of the newest messages, with the way back", () => {
+      const window = controls({
+        detached: {
+          view: run(2, 5),
+          hasEarlier: true,
+          hasLater: true,
+          earlier: "idle",
+          later: "idle",
+        },
+      });
+      render(<ChatTranscript transcriptWindow={window} view={run(17, 20)} />);
+
+      expect(screen.getByText("User turn 2")).toBeVisible();
+      expect(screen.queryByText("User turn 19")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Load later messages" }));
+      fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
+      fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+
+      expect(window.onLoadLater).toHaveBeenCalledOnce();
+      expect(window.onJumpToLatest).toHaveBeenCalledOnce();
+      expect(window.onLoadEarlier).toHaveBeenCalledOnce();
+    });
+  });
 });
 
 async function chooseTurnAction(name: string) {

@@ -175,6 +175,23 @@
   line-height: 1.45;
 }
 
+/* The row under a detached range: Load later beside Jump to latest. One
+   height in every state, like the Load earlier row, since a row that changed
+   size under the reader would move what they were reading. */
+.chat-transcript__range-end {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oct-space-2);
+  height: var(--oct-space-8);
+  margin-top: var(--oct-space-5);
+  overflow: hidden;
+}
+
+.chat-transcript__range-note {
+  white-space: nowrap;
+}
+
 /* A Chat row is one whole turn: the person's message, then each attempt.
    The pieces sit 20px apart, the same distance the window keeps between
    rows in every mode, so a message and its reply read at one rhythm. */

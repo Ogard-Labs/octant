@@ -18,7 +18,7 @@ import {
   type WorkspaceLayoutNode,
 } from "@octant/contracts";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
-import type { ChatClient } from "@octant/client-runtime/chat-client";
+import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { ContextClient } from "@octant/client-runtime/context-client";
@@ -304,6 +304,10 @@ export function chats(options: { readonly threadProjectId?: string } = {}): Chat
   const createdThread = { ...oldThread, id: createdChatThreadId, title: "Exact created chat" };
   let created = false;
   return {
+    // A host from before thread windows: the client falls back to the whole read.
+    threadWindow: vi.fn(async () => {
+      throw new ChatClientFailure({ category: "unsupported", message: "Not found." }, 404);
+    }),
     bootstrap: vi.fn(async () =>
       decodeChatBootstrap({
         settings: {

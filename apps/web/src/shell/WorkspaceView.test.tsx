@@ -1407,6 +1407,86 @@ describe("WorkspaceView subagent tray", () => {
     expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
   });
 
+  it("asks the Chat pane for the page that holds a search hit it has not loaded", async () => {
+    const now = "2026-07-28T16:00:00.000Z";
+    const providerId = "20000000-0000-4000-8000-000000000001";
+    const hitTurnId = "70000000-0000-4000-8000-000000000001";
+    const thread = {
+      id: ids.thread,
+      title: "Release plan",
+      lifecycle: "active" as const,
+      providerInstanceId: providerId,
+      modelId: "model-a",
+      researchEnabled: false,
+      researchRouting: "automatic" as const,
+      personalityInstructions: "Be concise.",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const view = decodeChatThreadView({
+      thread,
+      turns: [],
+      lastSequence: 0,
+      contents: [],
+      attachments: [],
+      citations: [],
+      workItems: [],
+      workListVersion: 0,
+      followUpVersion: 0,
+    });
+    const threadWindow = vi.fn(async () => ({
+      version: 1 as const,
+      view,
+      hasEarlier: true,
+      hasLater: false,
+      supersededTurnCount: 0,
+    }));
+    const chatClient = {
+      bootstrap: vi.fn(async () =>
+        decodeChatBootstrap({
+          settings: {
+            defaultProviderInstanceId: providerId,
+            defaultModelId: "model-a",
+            defaultResearchEnabled: false,
+            defaultResearchRouting: "automatic",
+            defaultPersonalityInstructions: "Be concise.",
+            version: 1,
+            updatedAt: now,
+          },
+          threads: [thread],
+        }),
+      ),
+      execute: vi.fn(),
+      search: vi.fn(async () => []),
+      subscribe: vi.fn(async function* () {}),
+      thread: vi.fn(async () => view),
+      threadWindow,
+      upload: vi.fn(),
+      discard: vi.fn(),
+    } as never;
+    const tab = {
+      id: ids.tab,
+      kind: "chat-thread",
+      mode: "chat",
+      threadId: ids.thread,
+      title: "Release plan",
+    } as WorkspaceTab;
+    render(
+      <WorkspaceView
+        {...propsFor(tab)}
+        chatClient={chatClient}
+        chatReadCursorStore={createChatReadCursorStore()}
+        mode="chat"
+        revealChatTurn={{ threadId: ids.thread as never, turnId: hitTurnId as never }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(threadWindow).toHaveBeenCalledWith(ids.thread, { limit: 30, through: hitTurnId }),
+    );
+  });
+
   it("shows a Work thread's working subagent in its composer", async () => {
     const tab = {
       id: ids.tab,

@@ -39,6 +39,11 @@ import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
 import { ChildResultCards } from "../agents/ChildResultCards";
 import { ChatTurnEditor } from "./ChatTurnEditor";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import {
+  LoadEarlierMessages,
+  type LoadEarlierMessagesState,
+} from "../transcript/LoadEarlierMessages";
+import type { ChatTranscriptWindowState, ChatWindowPageState } from "./chatTranscriptWindow";
 
 export interface ChatTranscriptProps {
   /** The decoded, authoritative transcript projection. */
@@ -107,6 +112,19 @@ export interface ChatTranscriptProps {
   readonly pendingUserMessage?: string;
   /** The picker's provider and model names, so a reply can say who answered. */
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
+  /**
+   * What else of the thread is loaded or offered beside `view`'s newest turns,
+   * and the controls that load more. Absent for a view that is the whole
+   * thread.
+   */
+  readonly transcriptWindow?: ChatTranscriptWindowControls;
+}
+
+export interface ChatTranscriptWindowControls {
+  readonly state: ChatTranscriptWindowState;
+  readonly onLoadEarlier: () => void;
+  readonly onLoadLater: () => void;
+  readonly onJumpToLatest: () => void;
 }
 
 export interface ChatTranscriptCheckpoints {
@@ -204,38 +222,57 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   const [checkpointDraft, setCheckpointDraft] = useState<
     { readonly turnId: string; readonly kind: "mark" | "restore" } | undefined
   >(undefined);
+  const windowState = props.transcriptWindow?.state;
+  // A jump to a turn far back shows the run that holds it in place of the
+  // newest turns; the newest turns keep receiving live updates meanwhile.
+  const detached = windowState?.detached;
+  const shown = detached?.view ?? props.view;
   // Revising a message appends a new turn rather than rewriting history, so the
   // transcript shows the conversation as it now stands and the superseded turns
   // stay in the journal behind it.
-  const turns = useMemo(() => activeChatTurns(props.view.turns), [props.view.turns]);
-  const revisedTurnCount = props.view.turns.length - turns.length;
+  const turns = useMemo(() => activeChatTurns(shown.turns), [shown.turns]);
+  // A windowed view holds active turns only, so the host counts the revised ones.
+  const revisedTurnCount =
+    windowState?.supersededTurnCount ?? props.view.turns.length - turns.length;
   const contentById = useMemo(
-    () => new Map(props.view.contents.map((content) => [String(content.contentId), content])),
-    [props.view.contents],
+    () => new Map(shown.contents.map((content) => [String(content.contentId), content])),
+    [shown.contents],
   );
   const attachmentById = useMemo(
-    () => new Map(props.view.attachments.map((attachment) => [String(attachment.id), attachment])),
-    [props.view.attachments],
+    () => new Map(shown.attachments.map((attachment) => [String(attachment.id), attachment])),
+    [shown.attachments],
   );
   const citationsByAttempt = useMemo(
-    () => groupCitationsByAttempt(props.view.citations),
-    [props.view.citations],
+    () => groupCitationsByAttempt(shown.citations),
+    [shown.citations],
   );
   const routeDecisionByTurn = useMemo(
     () =>
-      new Map(
-        (props.view.routeDecisions ?? []).map((decision) => [String(decision.turnId), decision]),
-      ),
-    [props.view.routeDecisions],
+      new Map((shown.routeDecisions ?? []).map((decision) => [String(decision.turnId), decision])),
+    [shown.routeDecisions],
   );
   // A Waiting decision is durable even though its turn was never accepted, so
   // it must stay visible without a matching transcript turn.
   // Route receipts for superseded turns are not orphans: their turn still
-  // exists in the thread's history, it is simply no longer displayed.
+  // exists in the thread's history, it is simply no longer displayed. A
+  // windowed read carries a receipt only with its turn's page, or, when the
+  // turn was never accepted, with the newest page, so a receipt for a turn on
+  // an unloaded page never arrives to be mistaken for an orphan.
   const turnIds = new Set(props.view.turns.map((turn) => String(turn.id)));
-  const orphanedRouteDecisions = (props.view.routeDecisions ?? []).filter(
-    (decision) => !turnIds.has(String(decision.turnId)),
-  );
+  const orphanedRouteDecisions =
+    detached === undefined
+      ? (props.view.routeDecisions ?? []).filter(
+          (decision) => !turnIds.has(String(decision.turnId)),
+        )
+      : [];
+  const earlierRow: LoadEarlierMessagesState | undefined =
+    props.transcriptWindow === undefined || windowState === undefined
+      ? undefined
+      : detached !== undefined
+        ? pageRowState(detached.earlier, detached.hasEarlier)
+        : windowState.offerEarlier
+          ? pageRowState(windowState.earlier, windowState.hasEarlier)
+          : undefined;
 
   // The scroll frame spans the pane so its scrollbar sits at the pane's edge,
   // as it does in Work and Code; each piece of content takes the thread
@@ -269,6 +306,11 @@ export function ChatTranscript(props: ChatTranscriptProps) {
             : `${revisedTurnCount} earlier messages were revised. This is the conversation as it now stands; the earlier versions stay in this thread's history.`}
         </p>
       )}
+      {earlierRow === undefined || props.transcriptWindow === undefined ? null : (
+        <div className="thread-column">
+          <LoadEarlierMessages onLoad={props.transcriptWindow.onLoadEarlier} state={earlierRow} />
+        </div>
+      )}
     </>
   );
 
@@ -283,14 +325,24 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       </div>
     );
 
-  const trail = (
-    <div className="thread-column">
-      {orphanedRouteDecisions.map((decision) => (
-        <RouteReceipt decision={decision} key={String(decision.turnId)} />
-      ))}
-      {pendingMessage}
-    </div>
-  );
+  const trail =
+    detached !== undefined && props.transcriptWindow !== undefined ? (
+      <div className="thread-column">
+        <ChatDetachedRangeEnd
+          hasLater={detached.hasLater}
+          later={detached.later}
+          onJumpToLatest={props.transcriptWindow.onJumpToLatest}
+          onLoadLater={props.transcriptWindow.onLoadLater}
+        />
+      </div>
+    ) : (
+      <div className="thread-column">
+        {orphanedRouteDecisions.map((decision) => (
+          <RouteReceipt decision={decision} key={String(decision.turnId)} />
+        ))}
+        {pendingMessage}
+      </div>
+    );
 
   if (turns.length === 0) {
     return (
@@ -315,7 +367,11 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       items={turns}
       {...(props.afterTurn === undefined ? {} : { afterItem: props.afterTurn })}
       itemTag="li"
-      key={String(props.view.thread.id)}
+      // Moving between the newest turns and a detached range is a different
+      // run of rows, so the list starts over: it opens on the jump target, or
+      // at the end on the way back.
+      key={`${String(props.view.thread.id)}${detached === undefined ? "" : ":detached"}`}
+      {...(detached === undefined ? {} : { followOutput: false })}
       lead={lead}
       listClassName="chat-transcript__turns thread-column"
       listLabel="Chat transcript"
@@ -481,6 +537,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                   providerGroups={props.providerGroups}
                   citations={citationsByAttempt.get(String(attempt.id)) ?? NO_CITATIONS}
                   tailAttempt={
+                    detached === undefined &&
                     String(turn.id) === String(turns.at(-1)?.id) &&
                     index === turn.attempts.length - 1
                   }
@@ -496,6 +553,53 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       role="region"
       trail={trail}
     />
+  );
+}
+
+function pageRowState(state: ChatWindowPageState, hasMore: boolean): LoadEarlierMessagesState {
+  if (state === "loading" || state === "failed") return state;
+  return hasMore ? "idle" : "none-left";
+}
+
+/**
+ * The row under a detached range: the page after it, and the way back to the
+ * newest messages. It keeps one height in every state, like the row above.
+ */
+function ChatDetachedRangeEnd(props: {
+  readonly hasLater: boolean;
+  readonly later: ChatWindowPageState;
+  readonly onLoadLater: () => void;
+  readonly onJumpToLatest: () => void;
+}) {
+  const loading = props.later === "loading";
+  return (
+    <div className="chat-transcript__range-end" data-state={props.later}>
+      {props.later === "failed" ? (
+        <>
+          <span className="oct-meta chat-transcript__range-note">
+            Later messages could not be loaded.
+          </span>
+          <OctantButton onClick={props.onLoadLater} size="sm" type="button" variant="ghost">
+            Try again
+          </OctantButton>
+        </>
+      ) : props.hasLater ? (
+        <OctantButton
+          aria-busy={loading ? true : undefined}
+          disabled={loading}
+          focusableWhenDisabled
+          onClick={props.onLoadLater}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {loading ? "Loading later messages" : "Load later messages"}
+        </OctantButton>
+      ) : null}
+      <OctantButton onClick={props.onJumpToLatest} size="sm" type="button" variant="ghost">
+        Jump to latest
+      </OctantButton>
+    </div>
   );
 }
 

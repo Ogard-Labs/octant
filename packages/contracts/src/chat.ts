@@ -32,6 +32,7 @@ import { GithubIssueContextRequest } from "./githubIssueContext";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadTaskProgressList } from "./threadTasks";
+import { ThreadWindowBoundsFields } from "./threadWindow";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -937,6 +938,50 @@ export const ChatThreadView = Schema.Struct({
 }).annotations(strict);
 export type ChatThreadView = typeof ChatThreadView.Type;
 
+/** The most active turns one Chat window read answers; the client asks for fewer. */
+export const MAX_CHAT_THREAD_WINDOW_TURNS = 50;
+
+/**
+ * One page of a Chat thread for a client that opens on its newest turns: a
+ * contiguous run of the thread's active turns, oldest first, inside the same
+ * view shape the whole-thread read answers. Superseded turns are never paged;
+ * `supersededTurnCount` says how many the thread holds, so the revised-message
+ * notice stays exact while earlier pages are not loaded. The view's
+ * attachments, sources, contents, and route receipts are the page's own, plus,
+ * on the newest page, what belongs to no turn yet.
+ */
+export const ChatThreadWindow = Schema.Struct({
+  version: Schema.Literal(1),
+  view: ChatThreadView,
+  ...ThreadWindowBoundsFields,
+  supersededTurnCount: NonNegativeInt,
+})
+  .annotations(strict)
+  .pipe(Schema.filter((window) => window.view.turns.length <= MAX_CHAT_THREAD_WINDOW_TURNS));
+export type ChatThreadWindow = typeof ChatThreadWindow.Type;
+
+/**
+ * What a window read asks for: a page size and at most one anchor, an active
+ * turn of the thread. Without one it is the newest turns; `before` is the page
+ * just before the anchor, `after` the page just after it, and `through` the
+ * page that ends with it.
+ */
+export const ChatThreadWindowRequest = Schema.Struct({
+  limit: Schema.Int.pipe(Schema.between(1, MAX_CHAT_THREAD_WINDOW_TURNS)),
+  before: Schema.optional(ChatTurnId),
+  after: Schema.optional(ChatTurnId),
+  through: Schema.optional(ChatTurnId),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (request) =>
+        [request.before, request.after, request.through].filter((anchor) => anchor !== undefined)
+          .length <= 1,
+    ),
+  );
+export type ChatThreadWindowRequest = typeof ChatThreadWindowRequest.Type;
+
 export const ChatBootstrap = Schema.Struct({
   settings: ChatSettings,
   threads: Schema.Array(ChatThread),
@@ -1191,6 +1236,8 @@ export const decodeChatTurn = Schema.decodeUnknownSync(ChatTurn);
 export const decodeChatThread = Schema.decodeUnknownSync(ChatThread);
 export const decodeChatThreadBranchOrigin = Schema.decodeUnknownSync(ChatThreadBranchOrigin);
 export const decodeChatThreadView = Schema.decodeUnknownSync(ChatThreadView);
+export const decodeChatThreadWindow = Schema.decodeUnknownSync(ChatThreadWindow);
+export const decodeChatThreadWindowRequest = Schema.decodeUnknownSync(ChatThreadWindowRequest);
 export const decodeChatBootstrap = Schema.decodeUnknownSync(ChatBootstrap);
 export const decodeChatTranscriptSearchMatchRange = Schema.decodeUnknownSync(
   ChatTranscriptSearchMatchRange,

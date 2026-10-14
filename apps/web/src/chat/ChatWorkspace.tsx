@@ -227,6 +227,17 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   // open Chat thread kept two requests a second going for as long as it was
   // on screen.
   const turnActive = view !== undefined && latestActiveAttempt(view) !== undefined;
+  const transcriptWindow = props.controller.transcriptWindow;
+  const revealTurn = props.controller.revealTurn;
+  // A jump target on a page that is not loaded asks the controller for that
+  // page; one already loaded is revealed by the transcript without a read.
+  useEffect(() => {
+    const target = props.revealTurnId;
+    if (target === undefined || transcriptWindow?.windowed !== true) return;
+    void revealTurn(target);
+    // Keyed on the thread and the target, not the window object: a page
+    // arriving must not ask for the same target again.
+  }, [props.revealTurnId, revealTurn, transcriptWindow?.threadKey, transcriptWindow?.windowed]);
   const pendingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
   // Attachments captured by a queue submission stay visible in the composer,
   // but their cleanup ownership moves here until that message is accepted or
@@ -861,6 +872,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                       props.onThreadHandedOff?.(String(view.thread.id), outcome),
                   })}
               view={view}
+              {...(transcriptWindow === undefined
+                ? {}
+                : { readWholeView: () => props.controller.readWholeThread(view.thread.id) })}
               {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
               {...(props.windowCapability === undefined
                 ? {}
@@ -1023,6 +1037,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 })}
             busy={isSending || branchPending}
             {...(props.revealTurnId === undefined ? {} : { revealTurnId: props.revealTurnId })}
+            {...(transcriptWindow === undefined
+              ? {}
+              : {
+                  transcriptWindow: {
+                    state: transcriptWindow,
+                    onLoadEarlier: () => void props.controller.loadEarlier(),
+                    onLoadLater: () => void props.controller.loadLater(),
+                    onJumpToLatest: props.controller.jumpToLatest,
+                  },
+                })}
             {...(checkpoints.available
               ? {
                   checkpoints: {

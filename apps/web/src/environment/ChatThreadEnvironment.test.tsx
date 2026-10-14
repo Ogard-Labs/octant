@@ -157,4 +157,43 @@ describe("the Chat thread environment summary", () => {
     expect(screen.queryByText("Git")).not.toBeInTheDocument();
     expect(screen.queryByText("Approvals")).not.toBeInTheDocument();
   });
+
+  it("counts the whole thread's attachments when only its newest messages are loaded", async () => {
+    const windowed = controller();
+    const loaded = windowed.activeView!;
+    const attachment = loaded.attachments[0]!;
+    const whole = decodeChatThreadView({
+      ...loaded,
+      attachments: [
+        attachment,
+        { ...attachment, id: "10000000-0000-4000-8000-000000000002", displayName: "older.txt" },
+      ],
+    });
+    const readWholeThread = vi.fn(async () => whole);
+    render(
+      <ChatThreadEnvironment
+        controller={{
+          ...windowed,
+          readWholeThread,
+          transcriptWindow: {
+            threadKey: threadId,
+            windowed: true,
+            hasEarlier: true,
+            offerEarlier: true,
+            supersededTurnCount: 0,
+            earlier: "idle",
+          },
+        }}
+        environmentOpen
+        projects={[chatProject()]}
+        tab={tabA}
+      >
+        <div />
+      </ChatThreadEnvironment>,
+    );
+
+    expect(await screen.findByText("2 attachments")).toBeVisible();
+    expect(screen.queryByText("1 attachment")).not.toBeInTheDocument();
+    expect(readWholeThread).toHaveBeenCalledWith(loaded.thread.id);
+  });
 });

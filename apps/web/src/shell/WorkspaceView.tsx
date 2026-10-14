@@ -1595,6 +1595,10 @@ function renderNonCodeTab(
         projects={props.projects}
         tab={tab}
         providerController={props.providerController}
+        {...(props.revealChatTurn !== undefined &&
+        String(props.revealChatTurn.threadId) === String(tab.threadId)
+          ? { revealTurnId: props.revealChatTurn.turnId }
+          : {})}
         {...(props.projectServerUrl === undefined
           ? {}
           : { projectServerUrl: props.projectServerUrl })}
@@ -1710,10 +1714,6 @@ function renderNonCodeTab(
                   : { requestClient: props.workRequestClient })}
                 threadClient={workThreadClient}
                 threadId={tab.threadId}
-                {...(props.revealChatTurn !== undefined &&
-                String(props.revealChatTurn.threadId) === String(tab.threadId)
-                  ? { revealTurnId: props.revealChatTurn.turnId }
-                  : {})}
                 title={tab.title}
                 providerGroups={props.workProviderGroups ?? []}
                 {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}

@@ -1,6 +1,7 @@
 import type { ProjectSummary, WorkspaceTab } from "@octant/contracts";
 import { deriveChatEnvironmentProjection } from "@octant/domain/shell-policy";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import type { ChatThreadView } from "@octant/contracts/chat";
 import type { ChatController } from "../chat/useChatController";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { EnvironmentCard } from "./EnvironmentGroup";
@@ -112,9 +113,34 @@ function ChatEnvironmentFacts(props: {
     );
   }
 
-  const attachmentCount = view.attachments.filter(
-    (attachment) => attachment.status !== "purged",
-  ).length;
+  return (
+    <ChatEnvironmentCounts
+      controller={props.controller}
+      {...(props.project === undefined ? {} : { project: props.project })}
+      view={view}
+    />
+  );
+}
+
+/**
+ * The thread's attachment, source, and turn counts are totals over the whole
+ * thread. A view that opened on its newest messages holds only the pages that
+ * are loaded, so the totals come from the host's whole-thread read while this
+ * panel is open, and say they are being counted until it answers.
+ */
+function ChatEnvironmentCounts(props: {
+  readonly controller: ChatController;
+  readonly project?: ChatProject;
+  readonly view: ChatThreadView;
+}) {
+  const windowed = props.controller.transcriptWindow?.windowed === true;
+  const whole = useWholeChatThread(
+    windowed ? props.view : undefined,
+    props.controller.readWholeThread,
+  );
+  const view = windowed ? whole : props.view;
+  const count = (value: (counted: ChatThreadView) => number, singular: string) =>
+    view === undefined ? "Counting" : countLabel(value(view), singular);
   return (
     <div className="environment-chat-group">
       <dl>
@@ -123,12 +149,63 @@ function ChatEnvironmentFacts(props: {
           label="Memory"
           value={props.project === undefined ? "Unavailable for unfiled Chat" : "Project-scoped"}
         />
-        <ChatFact label="Attachments" value={countLabel(attachmentCount, "attachment")} />
-        <ChatFact label="Sources" value={countLabel(view.citations.length, "source")} />
-        <ChatFact label="Recap" value={countLabel(view.turns.length, "turn")} />
+        <ChatFact
+          label="Attachments"
+          value={count(
+            (counted) =>
+              counted.attachments.filter((attachment) => attachment.status !== "purged").length,
+            "attachment",
+          )}
+        />
+        <ChatFact label="Sources" value={count((counted) => counted.citations.length, "source")} />
+        <ChatFact label="Recap" value={count((counted) => counted.turns.length, "turn")} />
       </dl>
     </div>
   );
+}
+
+/**
+ * The whole thread behind a windowed view, read again when the view gains a
+ * turn, an attachment, or a source, or a reply settles; never per streamed
+ * delta.
+ */
+function useWholeChatThread(
+  view: ChatThreadView | undefined,
+  read: (threadId: ChatThreadView["thread"]["id"]) => Promise<ChatThreadView>,
+): ChatThreadView | undefined {
+  const [whole, setWhole] = useState<ChatThreadView | undefined>(undefined);
+  const lastTurn = view?.turns.at(-1);
+  const key =
+    view === undefined
+      ? undefined
+      : [
+          String(view.thread.id),
+          view.turns.length,
+          String(lastTurn?.id ?? ""),
+          lastTurn?.attempts.length ?? 0,
+          lastTurn?.attempts.at(-1)?.outcome ?? "",
+          view.attachments.length,
+          view.citations.length,
+        ].join(":");
+  const threadId = view?.thread.id;
+  useEffect(() => {
+    if (key === undefined || threadId === undefined) return;
+    let current = true;
+    read(threadId).then(
+      (answered) => {
+        if (current) setWhole(answered);
+      },
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [key, read, threadId]);
+  return whole !== undefined &&
+    threadId !== undefined &&
+    String(whole.thread.id) === String(threadId)
+    ? whole
+    : undefined;
 }
 
 function ChatFact(props: { readonly label: string; readonly value: string }) {

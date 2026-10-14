@@ -58,6 +58,12 @@ export interface TranscriptWindowProps<T> {
    * the top and stays there until the reader scrolls.
    */
   readonly align?: "start" | "end";
+  /**
+   * Whether an end-aligned list follows new output at the bottom. A run of
+   * earlier rows the reader jumped to does not end at the newest output, so a
+   * page arriving below it must not carry the reader to its end.
+   */
+  readonly followOutput?: boolean;
   readonly role?: "log" | "region";
   readonly ariaLabel?: string;
   readonly lead?: ReactNode;
@@ -100,6 +106,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const overscan = props.overscan ?? DEFAULT_OVERSCAN;
   const gap = props.gap ?? 0;
   const align = props.align ?? "end";
+  const follows = align === "end" && props.followOutput !== false;
   const ListTag = props.listTag ?? "div";
   const ItemTag = props.itemTag ?? "div";
   const scrollElementRef = useRef<HTMLDivElement>(null);
@@ -118,9 +125,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const firstKey = items[0] === undefined ? undefined : itemKey(items[0], 0);
   const remembered = scrollMemory.get(restoreKey);
   const restored = remembered?.firstKey === firstKey ? remembered : undefined;
-  const followingRef = useRef(
-    restored?.following === true || (restored === undefined && align === "end"),
-  );
+  const followingRef = useRef(follows && (restored?.following === true || restored === undefined));
   const appliedRevealKeyRef = useRef<string | undefined>(undefined);
   const sawFindMatchRef = useRef(false);
   const pendingFocusRef = useRef<
@@ -157,7 +162,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     gap,
     scrollMargin,
     scrollEndThreshold: FOLLOW_THRESHOLD_PX,
-    ...(align === "end" ? { anchorTo: "end" as const, followOnAppend: true } : {}),
+    ...(align === "end" ? { anchorTo: "end" as const, followOnAppend: follows } : {}),
     useFlushSync: false,
     getItemKey: (index) => {
       const item = items[index];
@@ -191,6 +196,9 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       setScrollMargin(computeScrollMargin(scroll, leadRef.current));
       const trail = trailRef.current;
       setTrailSize(trail === null ? 0 : trail.offsetHeight);
+      // The frame itself can shrink under a following list, as when the
+      // composer below it grows; the list stays at its end.
+      if (followingRef.current && align === "end") scrollToContentEnd(scroll);
     };
     update();
     if (typeof ResizeObserver === "undefined") return;
@@ -200,7 +208,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     if (leadRef.current !== null) observer.observe(leadRef.current);
     if (trailRef.current !== null) observer.observe(trailRef.current);
     return () => observer.disconnect();
-  }, [items.length, props.lead, props.trail]);
+  }, [align, items.length, props.lead, props.trail]);
 
   useLayoutEffect(() => {
     return () => {
@@ -222,8 +230,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   }, [firstKey]);
 
   useLayoutEffect(() => {
-    followingRef.current =
-      restored?.following === true || (restored === undefined && align === "end");
+    followingRef.current = follows && (restored?.following === true || restored === undefined);
     appliedRevealKeyRef.current = undefined;
     setStickyIndexes(new Set());
     setLiveMessage("");
@@ -231,11 +238,18 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
     countRef.current = items.length;
   }, [restoreKey]);
 
+  // Rows measure taller than their estimate once they mount, which moves the
+  // end of the list after it was scrolled there. Following the total size
+  // keeps a following list at its end within the same commit; reacting later
+  // let the scroll event from the first placement see the list short of its
+  // end and stop following, and a long Chat thread opened about two thousand
+  // pixels above its newest message.
+  const totalSize = virtualizer.getTotalSize();
   useLayoutEffect(() => {
     const scroll = scrollElementRef.current;
     if (scroll === null || align !== "end" || !followingRef.current) return;
     scrollToContentEnd(scroll);
-  }, [align, items.length, restoreKey, trailSize, scrollMargin, virtualizer]);
+  }, [align, items.length, restoreKey, trailSize, scrollMargin, totalSize, virtualizer]);
 
   useLayoutEffect(() => {
     if (revealKey === undefined || revealKey === appliedRevealKeyRef.current) return;
@@ -426,7 +440,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   function onScroll(): void {
     const scroll = scrollElementRef.current;
     if (scroll === null) return;
-    followingRef.current = align === "end" && isAtContentEnd(scroll);
+    followingRef.current = follows && isAtContentEnd(scroll);
   }
 
   const list = (

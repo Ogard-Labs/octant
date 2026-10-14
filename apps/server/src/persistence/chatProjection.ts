@@ -15,6 +15,7 @@ import {
   decodeChatThreadId,
   decodeChatThreadUpdated,
   decodeChatThreadView,
+  decodeChatThreadWindow,
   decodeChatTurn,
   decodeChatTurnCreated,
   decodeChatTurnId,
@@ -32,6 +33,8 @@ import {
   type ChatThread,
   type ChatThreadId,
   type ChatThreadView,
+  type ChatThreadWindow,
+  type ChatTurnId,
   type ChatTranscriptSearchHit,
   type ChatTurn,
   type ChatTurnRouteDecision,
@@ -42,6 +45,7 @@ import { AggregateId as AggregateIdSchema } from "@octant/contracts";
 import type { AggregateVersion } from "@octant/contracts/events";
 import type { ThreadWorkList } from "@octant/domain/thread-work-policy";
 import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
+import { activeChatTurns } from "@octant/domain/chat-policy";
 import { Schema } from "effect";
 import type { Projection } from "./projection";
 import {
@@ -596,9 +600,251 @@ export function readChatThreadView(
   });
   const attachments = readChatAttachments(connection, threadId);
   const citations = readChatCitations(connection, threadId);
-  const workState = readThreadWorkState(connection, threadId);
   const contents = readChatContentBodies(connection, threadId, turns, citations);
   const routeDecisions = readChatTurnRouteDecisions(connection, threadId);
+  return decodeChatThreadView({
+    ...readChatThreadViewHead(connection, thread),
+    turns,
+    contents,
+    attachments,
+    citations,
+    ...(routeDecisions.length === 0 ? {} : { routeDecisions }),
+  });
+}
+
+/**
+ * How many bytes of encoded turns one Chat window may carry before it stops
+ * adding turns. A Chat turn carries its message, every attempt's reply and
+ * research (each body twice, as text and as parts), its attachments, sources,
+ * and route receipt, so a page of the maximum turns could otherwise pass the
+ * 8 MiB a paired device's response is cut at and fail to decode there.
+ */
+export const CHAT_THREAD_WINDOW_BYTES = 2 * 1024 * 1024;
+
+/** Where a window starts reading: the newest turns, or beside one named active turn. */
+export type ChatThreadWindowAnchor =
+  | { readonly kind: "newest" }
+  | { readonly kind: "before"; readonly turnId: ChatTurnId }
+  | { readonly kind: "after"; readonly turnId: ChatTurnId }
+  | { readonly kind: "through"; readonly turnId: ChatTurnId };
+
+export type ChatThreadWindowRead =
+  | { readonly kind: "window"; readonly window: ChatThreadWindow }
+  | { readonly kind: "missing" }
+  /** The anchor is not an active turn of this thread: unknown, or an edit superseded it. */
+  | { readonly kind: "stale" };
+
+/**
+ * One contiguous run of the thread's active turns, oldest first, for a client
+ * that opens on the newest turns and loads the rest on request. Superseded
+ * turns are never paged: the page counts them in `supersededTurnCount`
+ * instead, so the revised-message notice stays exact while they are not
+ * loaded. Attachments, sources, and route receipts are the page's own; the
+ * newest page (`hasLater` false) also carries what belongs to no turn yet, an
+ * attachment waiting for the next message and a route receipt whose turn was
+ * never accepted, because those sit after the last turn.
+ *
+ * The run stops at `limit` turns or once its encoded turns would pass
+ * `CHAT_THREAD_WINDOW_BYTES`, and always holds at least one turn when the
+ * thread has one. `through` is the page that ends with the named turn.
+ */
+export function readChatThreadWindow(
+  connection: SqliteConnection,
+  threadId: ChatThreadId,
+  request: { readonly limit: number; readonly anchor: ChatThreadWindowAnchor },
+): ChatThreadWindowRead {
+  const thread = readRawThread(connection, threadId);
+  if (thread === undefined) return { kind: "missing" };
+  const order = connection
+    .prepare(`
+      SELECT turn_id, json_extract(turn_json, '$.supersedes') AS supersedes
+      FROM chat_turn_projection
+      WHERE thread_id = ?
+      ORDER BY sequence ASC
+    `)
+    .all(threadId) as ReadonlyArray<{
+    readonly turn_id: string;
+    readonly supersedes: string | null;
+  }>;
+  const active = activeChatTurns(
+    order.map((row) => ({
+      id: row.turn_id,
+      ...(row.supersedes === null ? {} : { supersedes: row.supersedes }),
+    })),
+  ).map((turn) => turn.id);
+  const anchor = request.anchor;
+  let start = active.length;
+  let end = active.length;
+  let walk: "back" | "forward" = "back";
+  if (anchor.kind !== "newest") {
+    const at = active.indexOf(String(anchor.turnId));
+    if (at === -1) return { kind: "stale" };
+    if (anchor.kind === "before") start = end = at;
+    else if (anchor.kind === "through") start = end = at + 1;
+    else {
+      start = end = at + 1;
+      walk = "forward";
+    }
+  }
+  const pages: ChatTurnWindowPiece[] = [];
+  let bytes = 0;
+  while (pages.length < request.limit) {
+    const turnId = walk === "back" ? active[start - 1] : active[end];
+    if (turnId === undefined) break;
+    const piece = readChatTurnWindowPiece(connection, threadId, turnId);
+    if (pages.length > 0 && bytes + piece.bytes > CHAT_THREAD_WINDOW_BYTES) break;
+    bytes += piece.bytes;
+    if (walk === "back") {
+      pages.unshift(piece);
+      start -= 1;
+    } else {
+      pages.push(piece);
+      end += 1;
+    }
+  }
+  const hasLater = end < active.length;
+  const journaledTurnIds = new Set(order.map((row) => row.turn_id));
+  const pageTurnIds = new Set(pages.map((piece) => String(piece.turn.id)));
+  const citations = pages.flatMap((piece) => piece.citations);
+  const attachments = [
+    ...pages.flatMap((piece) => piece.attachments),
+    ...(hasLater ? [] : readChatAttachmentsWithoutTurn(connection, threadId)),
+  ].toSorted((left, right) => compareIds(left.id, right.id));
+  const routeDecisions = (
+    hasLater
+      ? pages.flatMap((piece) => (piece.routeDecision === undefined ? [] : [piece.routeDecision]))
+      : readChatTurnRouteDecisions(connection, threadId).filter(
+          (decision) =>
+            pageTurnIds.has(String(decision.turnId)) ||
+            !journaledTurnIds.has(String(decision.turnId)),
+        )
+  ).toSorted(
+    (left, right) =>
+      compareIds(left.decidedAt, right.decidedAt) || compareIds(left.turnId, right.turnId),
+  );
+  const contentById = new Map(
+    pages.flatMap((piece) => piece.contents).map((content) => [String(content.contentId), content]),
+  );
+  return {
+    kind: "window",
+    window: decodeChatThreadWindow({
+      version: 1,
+      view: {
+        ...readChatThreadViewHead(connection, thread),
+        turns: pages.map((piece) => piece.turn),
+        contents: [...contentById.keys()].sort().flatMap((id) => {
+          const content = contentById.get(id);
+          return content === undefined ? [] : [content];
+        }),
+        attachments,
+        citations: citations.toSorted((left, right) =>
+          compareIds(left.citationId, right.citationId),
+        ),
+        ...(routeDecisions.length === 0 ? {} : { routeDecisions }),
+      },
+      hasEarlier: start > 0,
+      hasLater,
+      supersededTurnCount: order.length - active.length,
+    }),
+  };
+}
+
+/** One turn with everything the window carries for it, and its encoded size. */
+interface ChatTurnWindowPiece {
+  readonly turn: ChatTurn;
+  readonly contents: ReadonlyArray<ReturnType<typeof decodeChatContentBody>>;
+  readonly attachments: ReadonlyArray<ReturnType<typeof decodeChatAttachment>>;
+  readonly citations: ReadonlyArray<ReturnType<typeof decodeChatCitation>>;
+  readonly routeDecision: ChatTurnRouteDecision | undefined;
+  readonly bytes: number;
+}
+
+function readChatTurnWindowPiece(
+  connection: SqliteConnection,
+  threadId: ChatThreadId,
+  turnId: string,
+): ChatTurnWindowPiece {
+  const row = connection
+    .prepare(`
+      SELECT schema_version, turn_json
+      FROM chat_turn_projection
+      WHERE thread_id = ? AND turn_id = ?
+    `)
+    .get(threadId, turnId) as
+    | { readonly schema_version: number; readonly turn_json: string }
+    | undefined;
+  if (row === undefined) throw new Error("Chat projection turn order is inconsistent");
+  assertChatProjectionSchema(row.schema_version);
+  const turn = decodeChatTurn(JSON.parse(row.turn_json));
+  const attachments = readChatProjectionRows(
+    connection,
+    `SELECT schema_version, attachment_json AS json
+     FROM chat_attachment_projection
+     WHERE thread_id = ? AND turn_id = ?`,
+    [threadId, turnId],
+    decodeChatAttachment,
+  );
+  const citations = readChatProjectionRows(
+    connection,
+    `SELECT schema_version, citation_json AS json
+     FROM chat_citation_projection
+     WHERE thread_id = ? AND turn_id = ?`,
+    [threadId, turnId],
+    decodeChatCitation,
+  );
+  const decision = readChatTurnRouteDecision(connection, turnId);
+  const routeDecision =
+    decision !== undefined && String(decision.threadId) === String(threadId) ? decision : undefined;
+  const contents = readChatContentBodies(connection, threadId, [turn], citations);
+  const bytes = Buffer.byteLength(
+    JSON.stringify({ turn, contents, attachments, citations, routeDecision }),
+    "utf8",
+  );
+  return { turn, contents, attachments, citations, routeDecision, bytes };
+}
+
+function readChatAttachmentsWithoutTurn(
+  connection: SqliteConnection,
+  threadId: ChatThreadId,
+): ReadonlyArray<ReturnType<typeof decodeChatAttachment>> {
+  return readChatProjectionRows(
+    connection,
+    `SELECT schema_version, attachment_json AS json
+     FROM chat_attachment_projection
+     WHERE thread_id = ? AND turn_id IS NULL`,
+    [threadId],
+    decodeChatAttachment,
+  );
+}
+
+function readChatProjectionRows<T>(
+  connection: SqliteConnection,
+  sql: string,
+  parameters: ReadonlyArray<string>,
+  decode: (value: unknown) => T,
+): ReadonlyArray<T> {
+  const rows = connection.prepare(sql).all(...parameters) as ReadonlyArray<{
+    readonly schema_version: number;
+    readonly json: string;
+  }>;
+  return rows.map(({ schema_version, json }) => {
+    assertChatProjectionSchema(schema_version);
+    return decode(JSON.parse(json));
+  });
+}
+
+function compareIds(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
+ * The thread-wide part of a view that every read carries whole: the thread,
+ * its task list and follow-up, and the newest sequence any of its projections
+ * reached, which is where a client's event stream continues from.
+ */
+function readChatThreadViewHead(connection: SqliteConnection, thread: ChatThread) {
+  const threadId = thread.id;
+  const workState = readThreadWorkState(connection, threadId);
   const lastSequenceRow = connection
     .prepare(`
       SELECT coalesce(max(last_sequence), 0) AS last_sequence
@@ -635,19 +881,14 @@ export function readChatThreadView(
     ) as {
     readonly last_sequence: number;
   };
-  return decodeChatThreadView({
+  return {
     thread,
-    turns,
     lastSequence: lastSequenceRow.last_sequence,
-    contents,
-    attachments,
-    citations,
     workItems: workState.workList.items,
     workListVersion: workState.workList.version,
     followUpVersion: workState.followUpVersion,
     ...(workState.followUp === undefined ? {} : { followUp: workState.followUp }),
-    ...(routeDecisions.length === 0 ? {} : { routeDecisions }),
-  });
+  };
 }
 
 function readChatAttachments(

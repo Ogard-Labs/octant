@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   decodeChatThread,
   decodeChatThreadId,
+  decodeChatTurnId,
   type ChatSettings,
   type ChatThread,
 } from "@octant/contracts";
@@ -21,6 +22,8 @@ import {
   readChatThread,
   readChatThreads,
   readChatThreadView,
+  readChatThreadWindow,
+  CHAT_THREAD_WINDOW_BYTES,
   readChatNavigation,
   readPendingChatPurges,
   readThreadFollowUp,
@@ -688,5 +691,358 @@ describe("ChatProjection", () => {
     expect(searchChatThreads(connection, "beta")).toHaveLength(1);
     expect(readChatContent(connection, ids.content)?.body).toBe(body);
     connection.close();
+  });
+
+  describe("thread windows", () => {
+    const threadId = decodeChatThreadId(ids.thread);
+    const turnId = (index: number) => `83000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    const contentId = (index: number, role: "user" | "assistant") =>
+      `84000000-0000-4000-8${role === "user" ? "0" : "1"}00-${String(index).padStart(12, "0")}`;
+
+    /**
+     * A thread of `count` exchanges journaled through the projection, each a
+     * message and a completed reply. `supersedes` maps a turn's index to the
+     * index of the earlier turn its message revised.
+     */
+    function seedThread(
+      count: number,
+      options: {
+        readonly supersedes?: ReadonlyMap<number, number>;
+        readonly bodyOf?: (index: number) => string;
+        readonly replyOf?: (index: number) => string;
+      } = {},
+    ): SqliteConnection {
+      const connection = openConnection();
+      const store = journal(connection);
+      store.append({
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 0,
+        events: [pending("chat.thread-created@1", { kind: "thread-created", thread: thread() })],
+      });
+      for (let index = 0; index < count; index += 1) {
+        const prompt = options.bodyOf?.(index) ?? `Message ${String(index)}`;
+        const reply = options.replyOf?.(index) ?? `Reply ${String(index)}`;
+        const revised = options.supersedes?.get(index);
+        store.append(
+          {
+            aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+            expectedVersion: index + 1,
+            events: [
+              pending("chat.turn-created@1", {
+                kind: "turn-created",
+                turn: {
+                  id: turnId(index),
+                  threadId: ids.thread,
+                  sequence: index + 1,
+                  userMessageRef: {
+                    contentId: contentId(index, "user"),
+                    digest: digest(prompt),
+                    byteLength: Buffer.byteLength(prompt),
+                  },
+                  attachmentIds: [],
+                  ...(revised === undefined ? {} : { supersedes: turnId(revised) }),
+                  attempts: [
+                    {
+                      id: `85000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+                      turnId: turnId(index),
+                      threadId: ids.thread,
+                      providerInstanceId: ids.provider,
+                      providerSessionId: ids.session,
+                      modelId: "model-a",
+                      contextManifestId: ids.manifest,
+                      outcome: "completed",
+                      responseRefs: [
+                        {
+                          contentId: contentId(index, "assistant"),
+                          digest: digest(reply),
+                          byteLength: Buffer.byteLength(reply),
+                        },
+                      ],
+                      citationIds: [],
+                      createdAt: now,
+                      updatedAt: now,
+                    },
+                  ],
+                  createdAt: now,
+                },
+              }),
+            ],
+          },
+          {
+            beforeEvents(inner) {
+              for (const [role, body] of [
+                ["user", prompt],
+                ["assistant", reply],
+              ] as const) {
+                writeChatContent(inner, {
+                  contentId: contentId(index, role),
+                  threadId: ids.thread,
+                  role,
+                  body,
+                  digest: digest(body),
+                  byteLength: Buffer.byteLength(body),
+                });
+              }
+            },
+          },
+        );
+      }
+      return connection;
+    }
+
+    function window(
+      connection: SqliteConnection,
+      limit: number,
+      anchor:
+        | { readonly kind: "newest" }
+        | { readonly kind: "before" | "after" | "through"; readonly index: number } = {
+        kind: "newest",
+      },
+    ) {
+      const read = readChatThreadWindow(connection, threadId, {
+        limit,
+        anchor:
+          anchor.kind === "newest"
+            ? anchor
+            : { kind: anchor.kind, turnId: decodeChatTurnId(turnId(anchor.index)) },
+      });
+      if (read.kind !== "window") throw new Error(`Expected a window, read ${read.kind}.`);
+      return read.window;
+    }
+
+    const turnIndexes = (view: { readonly turns: ReadonlyArray<{ readonly id: string }> }) =>
+      view.turns.map((turn) => Number(String(turn.id).slice(-12)));
+
+    it("opens on the newest active turns without reading earlier message bodies", () => {
+      const connection = seedThread(10);
+      // Remove the earlier bodies: a read that touched them would fail.
+      for (let index = 0; index < 7; index += 1) {
+        connection
+          .prepare("DELETE FROM chat_content_store WHERE content_id IN (?, ?)")
+          .run(contentId(index, "user"), contentId(index, "assistant"));
+      }
+      expect(() => readChatThreadView(connection, threadId)).toThrow();
+
+      const newest = window(connection, 3);
+
+      expect(turnIndexes(newest.view)).toEqual([7, 8, 9]);
+      expect(newest.view.contents.map((content) => content.body).toSorted()).toEqual([
+        "Message 7",
+        "Message 8",
+        "Message 9",
+        "Reply 7",
+        "Reply 8",
+        "Reply 9",
+      ]);
+      expect(newest).toMatchObject({
+        version: 1,
+        hasEarlier: true,
+        hasLater: false,
+        supersededTurnCount: 0,
+      });
+      connection.close();
+    });
+
+    it("returns the page before, after, or ending with a named turn", () => {
+      const connection = seedThread(10);
+
+      const before = window(connection, 3, { kind: "before", index: 7 });
+      expect(turnIndexes(before.view)).toEqual([4, 5, 6]);
+      expect(before).toMatchObject({ hasEarlier: true, hasLater: true });
+
+      const through = window(connection, 3, { kind: "through", index: 2 });
+      expect(turnIndexes(through.view)).toEqual([0, 1, 2]);
+      expect(through).toMatchObject({ hasEarlier: false, hasLater: true });
+
+      const after = window(connection, 3, { kind: "after", index: 6 });
+      expect(turnIndexes(after.view)).toEqual([7, 8, 9]);
+      expect(after).toMatchObject({ hasEarlier: true, hasLater: false });
+      connection.close();
+    });
+
+    it("pages over active turns only and counts the turns an edit superseded", () => {
+      // Turn 5 revises turn 2, which leaves 2, 3, and 4 out of the conversation.
+      const connection = seedThread(6, { supersedes: new Map([[5, 2]]) });
+
+      const newest = window(connection, 2);
+      expect(turnIndexes(newest.view)).toEqual([1, 5]);
+      expect(newest).toMatchObject({ hasEarlier: true, supersededTurnCount: 3 });
+      expect(turnIndexes(window(connection, 2, { kind: "before", index: 1 }).view)).toEqual([0]);
+      connection.close();
+    });
+
+    it("answers stale for an anchor that is superseded or not in the thread", () => {
+      const connection = seedThread(6, { supersedes: new Map([[5, 2]]) });
+
+      for (const anchor of [3, 40]) {
+        expect(
+          readChatThreadWindow(connection, threadId, {
+            limit: 3,
+            anchor: { kind: "before", turnId: decodeChatTurnId(turnId(anchor)) },
+          }),
+        ).toEqual({ kind: "stale" });
+      }
+      expect(
+        readChatThreadWindow(connection, decodeChatThreadId(ids.threadB), {
+          limit: 3,
+          anchor: { kind: "newest" },
+        }),
+      ).toEqual({ kind: "missing" });
+      connection.close();
+    });
+
+    it("stops short of its limit once its encoded turns pass the page budget", () => {
+      // Each body is encoded twice, as text and as parts, so three of these
+      // pass the budget and two do not.
+      const large = "x".repeat(Math.ceil(CHAT_THREAD_WINDOW_BYTES / 5));
+      const connection = seedThread(4, {
+        bodyOf: (index) => (index >= 1 ? `${large}${String(index)}` : "small"),
+      });
+
+      const newest = window(connection, 30);
+      expect(turnIndexes(newest.view)).toEqual([2, 3]);
+      expect(newest.hasEarlier).toBe(true);
+      expect(turnIndexes(window(connection, 30, { kind: "before", index: 2 }).view)).toEqual([
+        0, 1,
+      ]);
+
+      // One turn larger than the whole budget still makes a page of its own.
+      const huge = "y".repeat(900_000);
+      const oversized = seedThread(2, {
+        bodyOf: (index) => (index === 1 ? huge : "small"),
+        replyOf: (index) => (index === 1 ? huge : "small"),
+      });
+      expect(turnIndexes(window(oversized, 30).view)).toEqual([1]);
+      connection.close();
+      oversized.close();
+    });
+
+    it("carries the page's own attachments, sources, and route receipts", () => {
+      const connection = seedThread(6);
+      const insertAttachment = (id: string, turn: number | undefined) =>
+        connection
+          .prepare(
+            `INSERT INTO chat_attachment_projection (
+               attachment_id, thread_id, turn_id, schema_version, attachment_json,
+               aggregate_version, last_sequence
+             ) VALUES (?, ?, ?, 1, ?, 1, 1)`,
+          )
+          .run(
+            id,
+            ids.thread,
+            turn === undefined ? null : turnId(turn),
+            JSON.stringify({
+              id,
+              threadId: ids.thread,
+              ...(turn === undefined ? {} : { turnId: turnId(turn) }),
+              displayName: "notes.txt",
+              mediaType: "text/plain",
+              byteLength: 4,
+              digest: digest("note"),
+              status: turn === undefined ? "pending" : "finalized",
+              createdAt: now,
+            }),
+          );
+      insertAttachment("86000000-0000-4000-8000-000000000001", 1);
+      insertAttachment("86000000-0000-4000-8000-000000000002", undefined);
+      const citationId = "87000000-0000-4000-8000-000000000001";
+      connection
+        .prepare(
+          `INSERT INTO chat_citation_projection (
+             citation_id, thread_id, turn_id, attempt_id, schema_version, citation_json,
+             aggregate_version, last_sequence
+           ) VALUES (?, ?, ?, ?, 1, ?, 1, 1)`,
+        )
+        .run(
+          citationId,
+          ids.thread,
+          turnId(1),
+          `85000000-0000-4000-8000-${"1".padStart(12, "0")}`,
+          JSON.stringify({
+            citationId,
+            threadId: ids.thread,
+            turnId: turnId(1),
+            attemptId: `85000000-0000-4000-8000-${"1".padStart(12, "0")}`,
+            sourceTitle: "Source",
+            sourceUrl: "https://example.com/",
+            backend: "searxng",
+            retrievedAt: now,
+          }),
+        );
+      const candidate = (modelId: string) => ({
+        hostId: "local",
+        providerInstanceId: ids.provider,
+        modelId,
+      });
+      const insertDecision = (decisionTurnId: string) =>
+        connection
+          .prepare(
+            `INSERT INTO chat_turn_route_projection (
+               turn_id, thread_id, schema_version, decision_json, aggregate_version,
+               decided_at, last_sequence
+             ) VALUES (?, ?, 1, ?, 1, ?, 1)`,
+          )
+          .run(
+            decisionTurnId,
+            ids.thread,
+            JSON.stringify({
+              threadId: ids.thread,
+              turnId: decisionTurnId,
+              decision: {
+                kind: "waiting",
+                request: {
+                  pool: {
+                    candidates: [candidate("model-a"), candidate("model-b")],
+                    mixedVendorEnabled: false,
+                    fallbackAllowed: false,
+                    higherCostFallbackAllowed: false,
+                  },
+                  requiredCapabilities: [],
+                },
+                mode: "chat",
+                activeHostId: "local",
+                parentCandidate: candidate("model-a"),
+                eligibility: [
+                  {
+                    candidate: candidate("model-a"),
+                    eligible: false,
+                    reasons: ["provider-not-ready"],
+                  },
+                  {
+                    candidate: candidate("model-b"),
+                    eligible: false,
+                    reasons: ["provider-not-ready"],
+                  },
+                ],
+                reason: "no-eligible-candidate",
+                message: "No model in the pool is ready.",
+              },
+              decidedAt: now,
+            }),
+            now,
+          );
+      insertDecision(turnId(1));
+      // A waiting receipt whose turn the host never accepted.
+      const neverAccepted = "88000000-0000-4000-8000-000000000001";
+      insertDecision(neverAccepted);
+
+      const newest = window(connection, 3);
+      expect(newest.view.attachments.map((attachment) => attachment.id)).toEqual([
+        "86000000-0000-4000-8000-000000000002",
+      ]);
+      expect(newest.view.citations).toEqual([]);
+      expect(newest.view.routeDecisions?.map((decision) => decision.turnId)).toEqual([
+        neverAccepted,
+      ]);
+
+      const earlier = window(connection, 3, { kind: "before", index: 3 });
+      expect(turnIndexes(earlier.view)).toEqual([0, 1, 2]);
+      expect(earlier.view.attachments.map((attachment) => attachment.id)).toEqual([
+        "86000000-0000-4000-8000-000000000001",
+      ]);
+      expect(earlier.view.citations.map((citation) => citation.citationId)).toEqual([citationId]);
+      expect(earlier.view.routeDecisions?.map((decision) => decision.turnId)).toEqual([turnId(1)]);
+      connection.close();
+    });
   });
 });

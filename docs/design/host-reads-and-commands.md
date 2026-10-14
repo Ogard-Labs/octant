@@ -75,9 +75,30 @@ newest window again. Each read is a GET, runs the same authority check as the
 whole-thread read beside it before reading anything, and is a
 `project.overview.read` for a paired device.
 
-| Mode | Route                                  | Anchor                         | Page                                                                                                                                        |
-| ---- | -------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Work | `GET /api/work/turns/window/:threadId` | `before=<requestId>` (or none) | `limit` 1 to 64 (the client asks 30), at most 2 MiB of encoded turns (a paired device's response is cut at 8 MiB), always at least one turn |
+| Mode | Route                                    | Anchor                                                 | Page                                                                                                                                        |
+| ---- | ---------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Work | `GET /api/work/turns/window/:threadId`   | `before=<requestId>` (or none)                         | `limit` 1 to 64 (the client asks 30), at most 2 MiB of encoded turns (a paired device's response is cut at 8 MiB), always at least one turn |
+| Chat | `GET /api/chat/threads/:threadId/window` | one of `before`, `after`, `through=<turnId>` (or none) | `limit` 1 to 50 (the client asks 30), at most 2 MiB of encoded turns with their bodies, always at least one turn                            |
+
+A Chat window answers `ChatThreadWindow`: the unchanged `ChatThreadView` shape
+holding only the page, plus the bounds and `supersededTurnCount`. It pages over
+the active conversation, so an anchor an edit has superseded is `stale` like
+one the thread never held, and the revised-message count comes from the host
+rather than from the loaded turns. The view's bodies, attachments, sources, and
+route receipts are the page's own; the newest page also carries what belongs to
+no turn yet, an attachment waiting for the next message and a route receipt
+whose turn was never accepted, so a receipt for a turn on an unloaded page is
+never mistaken for an orphan. `through` is the page that ends with the named
+turn. A jump to a turn that is not loaded (a transcript search hit) reads that
+page and shows it as one detached range in place of the newest turns, which
+keep receiving live updates; **Load later messages** reads `after` its newest
+turn and joins it to the newest turns once the two share a turn, and **Jump to
+latest** leaves it. Sending a message leaves it first, and leaving the thread
+ends the jump, so coming back opens on the newest turns. The client holds at most
+the newest run and one detached range, never two runs with a gap shown as one.
+Readers that need the whole thread read the unchanged whole-thread route: the
+Markdown copy and save, and the thread's attachment, source, and turn counts
+in the Environment panel while it is open.
 
 A host without a window route answers 404, and the client reads the thread's
 whole-transcript route instead and shows it as fully loaded. A fresh newest

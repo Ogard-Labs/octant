@@ -1297,6 +1297,18 @@ function LaunchedShell(
     controller.workspace === undefined || activePaneId === undefined || activeMode !== "chat"
       ? undefined
       : activeChatThreadTabId(controller.workspace.layouts.chat, activePaneId);
+  // A search hit is a one-time jump. Once the reader leaves the hit's thread,
+  // coming back opens it on its newest messages instead of jumping to the hit
+  // again after they had already gone back to the newest ones.
+  const previousActiveChatThreadId = useRef(activeChatThreadId);
+  useEffect(() => {
+    const previous = previousActiveChatThreadId.current;
+    previousActiveChatThreadId.current = activeChatThreadId;
+    if (previous === undefined || String(previous) === String(activeChatThreadId ?? "")) return;
+    setRevealChatTurn((current) =>
+      current !== undefined && String(current.threadId) === String(previous) ? undefined : current,
+    );
+  }, [activeChatThreadId]);
   const activeCodeThreadId =
     controller.workspace === undefined || activePaneId === undefined || activeMode !== "code"
       ? undefined

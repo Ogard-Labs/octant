@@ -20,6 +20,9 @@ import {
   decodeChatSettings,
   decodeChatThread,
   decodeChatThreadView,
+  decodeChatThreadWindow,
+  decodeChatThreadWindowRequest,
+  MAX_CHAT_THREAD_WINDOW_TURNS,
   decodeChatTranscriptSearch,
   decodeChatTurn,
   decodeChatTurnRouteDecision,
@@ -1168,6 +1171,80 @@ describe("chat contracts", () => {
         }),
       ).toThrow();
     });
+  });
+});
+
+describe("Chat thread windows", () => {
+  const view = {
+    thread: threadFixture,
+    turns: [turnFixture],
+    lastSequence: 4,
+    contents: [],
+    attachments: [],
+    citations: [],
+    workItems: [],
+    workListVersion: 0,
+    followUpVersion: 0,
+  };
+
+  it("decodes a window with its bounds and refuses a field it does not name", () => {
+    const window = decodeChatThreadWindow({
+      version: 1,
+      view,
+      hasEarlier: true,
+      hasLater: false,
+      supersededTurnCount: 2,
+    });
+    expect(window.hasEarlier).toBe(true);
+    expect(window.supersededTurnCount).toBe(2);
+    for (const excess of [{ cursor: "next" }, { activeTurnCount: 1 }]) {
+      expect(() =>
+        decodeChatThreadWindow({
+          version: 1,
+          view,
+          hasEarlier: false,
+          hasLater: false,
+          supersededTurnCount: 0,
+          ...excess,
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("refuses a window that carries more turns than one page holds", () => {
+    expect(() =>
+      decodeChatThreadWindow({
+        version: 1,
+        view: {
+          ...view,
+          turns: Array.from({ length: MAX_CHAT_THREAD_WINDOW_TURNS + 1 }, () => turnFixture),
+        },
+        hasEarlier: false,
+        hasLater: false,
+        supersededTurnCount: 0,
+      }),
+    ).toThrow();
+  });
+
+  it("bounds a window request to one page and at most one anchor", () => {
+    expect(decodeChatThreadWindowRequest({ limit: 30 }).limit).toBe(30);
+    for (const anchor of ["before", "after", "through"] as const) {
+      expect(
+        decodeChatThreadWindowRequest({ limit: MAX_CHAT_THREAD_WINDOW_TURNS, [anchor]: ids.turn })[
+          anchor
+        ],
+      ).toBe(ids.turn);
+    }
+    for (const invalid of [
+      { limit: 0 },
+      { limit: MAX_CHAT_THREAD_WINDOW_TURNS + 1 },
+      { limit: 1.5 },
+      { limit: 30, before: "not-a-turn" },
+      { limit: 30, before: ids.turn, through: ids.turn },
+      { limit: 30, cursor: ids.turn },
+    ]) {
+      expect(() => decodeChatThreadWindowRequest(invalid)).toThrow();
+    }
   });
 });
 

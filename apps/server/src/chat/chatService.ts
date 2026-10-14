@@ -54,6 +54,8 @@ import {
   type ChatThread,
   type ChatThreadId,
   type ChatThreadView,
+  type ChatThreadWindow,
+  type ChatThreadWindowRequest,
   type ChatTranscriptSearch,
   type ChatTurn,
   type ChatTurnRouteDecision,
@@ -1151,6 +1153,48 @@ export class ChatService {
     return {
       ...view,
       thread: this.#withAggregateHeadVersion(view.thread),
+    };
+  }
+
+  /**
+   * One page of the thread's active turns for a client that opens on the
+   * newest and loads the rest on request. It runs the same check as `read`
+   * before reading anything. An anchor that is not an active turn of this
+   * thread, because it never was or an edit has since superseded it, is
+   * `stale`: the client drops its earlier pages and reads the newest again.
+   */
+  readWindow(threadId: ChatThreadId, request: ChatThreadWindowRequest): ChatThreadWindow {
+    this.#assertReadableThread(threadId);
+    const anchor =
+      request.before !== undefined
+        ? ({ kind: "before", turnId: request.before } as const)
+        : request.after !== undefined
+          ? ({ kind: "after", turnId: request.after } as const)
+          : request.through !== undefined
+            ? ({ kind: "through", turnId: request.through } as const)
+            : ({ kind: "newest" } as const);
+    const read = this.#persistence.readChatThreadWindow(threadId, {
+      limit: request.limit,
+      anchor,
+    });
+    if (read.kind === "missing") {
+      throw new ChatServiceError({
+        category: "invalid",
+        message: "Chat thread was not found.",
+      });
+    }
+    if (read.kind === "stale") {
+      throw new ChatServiceError({
+        category: "stale",
+        message: "That Chat message is no longer part of this conversation.",
+      });
+    }
+    return {
+      ...read.window,
+      view: {
+        ...read.window.view,
+        thread: this.#withAggregateHeadVersion(read.window.view.thread),
+      },
     };
   }
 
