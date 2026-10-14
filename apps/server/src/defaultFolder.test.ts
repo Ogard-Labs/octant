@@ -9,12 +9,18 @@ import {
 const home = "/Users/ada";
 
 describe("the default folder", () => {
-  it("falls back to Documents/Octant in the home folder until someone names one", () => {
-    expect(hostDefaultFolder(home)).toBe("/Users/ada/Documents/Octant");
-    expect(effectiveDefaultFolder({}, home)).toBe("/Users/ada/Documents/Octant");
+  it("falls back to Octant at the top of the home folder until someone names one", () => {
+    expect(hostDefaultFolder(home)).toBe("/Users/ada/Octant");
+    expect(effectiveDefaultFolder({}, home)).toBe("/Users/ada/Octant");
     expect(effectiveDefaultFolder({ defaultFolder: "/Users/ada/Work" as never }, home)).toBe(
       "/Users/ada/Work",
     );
+  });
+
+  it("keeps a stored folder under Documents where it is", () => {
+    expect(
+      effectiveDefaultFolder({ defaultFolder: "/Users/ada/Documents/Octant" as never }, home),
+    ).toBe("/Users/ada/Documents/Octant");
   });
 
   it("gives each mode its own subfolder", () => {

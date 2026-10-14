@@ -493,16 +493,15 @@ export class ProjectService implements ProjectServiceApi {
       if (command.kind === "ensure-default-project") {
         const type = command.projectType;
         this.#assertModeEnabled(type);
-        // Work always may; Code only once its own switch says so, because the
-        // default folder is not a repository and the switch is what proves the
-        // Git requirement was turned off with it.
+        // Work always may; Code only while it does not need a Git repository,
+        // because the default folder is a plain folder.
         if (
           type === "code" &&
-          this.#persistence.readCodeSettings?.()?.settings.allowDefaultFolderThreads !== true
+          this.#persistence.readCodeSettings?.()?.settings.requireGitRepository !== false
         ) {
           throw new ProjectServiceError({
             category: "unsupported",
-            message: "Code threads without a Project are turned off in Code settings.",
+            message: "Code needs a Git repository, so it cannot start without a Project.",
           });
         }
         // The one folder Octant creates on its own: the mode's subfolder of

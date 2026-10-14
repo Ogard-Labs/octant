@@ -682,6 +682,14 @@ const grokProfile: AcpProviderProfile = {
       GROK_SUBAGENTS: "0",
       GROK_WORKFLOWS: "0",
       GROK_SANDBOX: "off",
+      // Folder trust is what keeps a Project's hooks, MCP and the rest out
+      // (see hostDeniedEntries below), and `[folder_trust] enabled = false` in
+      // the person's config.toml, or GROK_FOLDER_TRUST=0, switches it off:
+      // grok 1.0.50 then trusted the probe folder with its trust list
+      // unreadable. "1" here, as a guard, outranks both; the GROK_CONFIG
+      // overlay cannot set it. It also keeps an agent that edits the
+      // writable config.toml from opening the next session up.
+      GROK_FOLDER_TRUST: "1",
       NO_COLOR: "1",
     },
     // GROK_HOME is the native profile via hostAuthentication. A managed
@@ -690,7 +698,11 @@ const grokProfile: AcpProviderProfile = {
       GROK_CONFIG: JSON.stringify(GROK_FEATURE_OVERLAY),
       ...(apiKey === undefined ? {} : { XAI_API_KEY: apiKey }),
     }),
-    args: () => ["agent", "stdio"],
+    // `[cli] use_leader` in config.toml makes `grok agent stdio` hand the
+    // session to a shared leader process it starts outside this sandbox
+    // (grok 1.0.50 started `grok agent leader` with it set). --no-leader is an
+    // option of `agent`, so it goes before `stdio`.
+    args: () => ["agent", "--no-leader", "stdio"],
     managedFiles: () => [],
     // Grok loads a Project's hooks, repo-local MCP and LSP servers, plugins
     // (.grok/plugins, .claude/plugins), skills, commands and instructions
@@ -919,8 +931,14 @@ const copilotProfile: AcpProviderProfile = {
     // lists even in an untrusted folder. With all of them unreadable the
     // session opened, started no Project server, and still reached its own
     // MCP servers.
+    // Copilot also reads .claude/settings.json and .claude/settings.local.json
+    // as repository settings: in a trusted folder `copilot plugin marketplace
+    // list` (1.0.90) showed a marketplace declared in either, and with both
+    // unreadable it warned and went on.
     forbiddenRootEntries: [
       ".agents/skills",
+      ".claude/settings.json",
+      ".claude/settings.local.json",
       ".claude/skills",
       ".github/agents",
       ".github/copilot/settings.json",

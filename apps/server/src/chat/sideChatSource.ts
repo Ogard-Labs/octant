@@ -19,11 +19,16 @@ import {
   type SideChatCheckoutState,
   type SideChatDeliveryTargetState,
   type SideChatSourceState,
-  type SideChatSubagentsState,
+  type SideChatSubagentRun,
   type SideChatUncommittedFile,
   type SideChatUncommittedFilesState,
   type SideChatWorkFolderState,
 } from "@octant/domain";
+import {
+  markReaderOfMarkedThread,
+  recordReaderMark,
+  type ThreadOutsideContentMarks,
+} from "../context/inheritedExternalContentMark";
 import type { SideChatSourceContext } from "./chatService";
 import { walkCodeConversation, type SideChatSourceResolution } from "./threadMentionService";
 
@@ -37,6 +42,12 @@ import { walkCodeConversation, type SideChatSourceResolution } from "./threadMen
  * do without: when it is unreadable the turn is refused. The state section is
  * supplementary, and each of its parts says "could not be read" on its own
  * rather than costing the whole turn.
+ *
+ * A source marked with outside content marks the sidecar
+ * (`markReaderOfMarkedThread`, label `side-chat`) before the framed text is
+ * returned, so the sidecar's provider never reads a marked transcript on an
+ * unmarked thread. A mark that cannot be recorded makes the source unreadable,
+ * which refuses the turn.
  */
 export async function resolveSideChatSourceContext(
   ports: {
@@ -46,6 +57,8 @@ export async function resolveSideChatSourceContext(
       sourceThreadId: MentionableThreadId,
     ) => Promise<SideChatSourceResolution>;
     readonly readState: SideChatSourceStateReader;
+    readonly marks: ThreadOutsideContentMarks;
+    readonly uuid: () => string;
   },
   input: {
     readonly sidecarThreadId: string;
@@ -66,7 +79,7 @@ export async function resolveSideChatSourceContext(
     return { kind: "unreadable" };
   }
   if (resolved.kind === "unreadable") return { kind: "unreadable" };
-  let state: SideChatSourceState | undefined;
+  let state: SideChatSourceStateRead | undefined;
   try {
     state = await ports.readState(input.windowId, {
       threadId: resolved.source.threadId,
@@ -74,6 +87,32 @@ export async function resolveSideChatSourceContext(
     });
   } catch {
     state = undefined;
+  }
+  // Read after everything taken from the source, so anything that marked it
+  // before those reads marks the sidecar too.
+  const marked = markReaderOfMarkedThread({
+    marks: ports.marks,
+    readerThreadId: input.sidecarThreadId,
+    sourceThreadId: String(resolved.source.threadId),
+    sourceLabel: "side-chat",
+    correlationId: ports.uuid,
+  });
+  if (marked.status === "refused") return { kind: "unreadable" };
+  // A finished subagent's reply marks its parent only when it is delivered,
+  // which waits while the parent's turn runs, so the source's own mark cannot
+  // vouch for it. Each reply the state carries marks the sidecar itself.
+  if (state?.subagents?.kind === "observed") {
+    for (const run of state.subagents.runs) {
+      if (run.resultText === undefined) continue;
+      const markedByReply = recordReaderMark({
+        marks: ports.marks,
+        readerThreadId: input.sidecarThreadId,
+        sourceLabel: "subagent-result",
+        contentReference: `subagent-result-${run.runId}`,
+        correlationId: ports.uuid,
+      });
+      if (markedByReply.status === "refused") return { kind: "unreadable" };
+    }
   }
   return {
     kind: "resolved",
@@ -88,10 +127,25 @@ export async function resolveSideChatSourceContext(
 export type SideChatSourceStateReader = (
   windowId: WindowId,
   source: { readonly threadId: MentionableThreadId; readonly mode: OctantMode },
-) => Promise<SideChatSourceState>;
+) => Promise<SideChatSourceStateRead>;
+
+/**
+ * The source's state as the host read it: the state the Side Chat is shown,
+ * with each subagent run's id kept beside it so a reply the state carries can
+ * mark the sidecar under that run's name.
+ */
+export type SideChatSourceStateRead = Omit<SideChatSourceState, "subagents"> & {
+  readonly subagents?:
+    | {
+        readonly kind: "observed";
+        readonly runs: ReadonlyArray<SideChatSubagentRun & { readonly runId: string }>;
+      }
+    | { readonly kind: "unavailable" };
+};
 
 /** One AgentRun as its parent thread's summary reports it. */
 export interface SideChatSubagentSummary {
+  readonly runId: string;
   readonly role: string;
   readonly task: string;
   readonly lifecycleStatus: string;
@@ -309,7 +363,10 @@ function deliveryTarget(target: {
   };
 }
 
-function readSubagents(ports: SideChatSourceStatePorts, threadId: string): SideChatSubagentsState {
+function readSubagents(
+  ports: SideChatSourceStatePorts,
+  threadId: string,
+): NonNullable<SideChatSourceStateRead["subagents"]> {
   if (ports.subagents === undefined) return { kind: "observed", runs: [] };
   let summaries: ReadonlyArray<SideChatSubagentSummary>;
   try {
@@ -323,6 +380,7 @@ function readSubagents(ports: SideChatSourceStatePorts, threadId: string): SideC
   return {
     kind: "observed",
     runs: newestFirst.map((run) => ({
+      runId: String(run.runId),
       role: run.role,
       task: run.task,
       status: run.lifecycleStatus,

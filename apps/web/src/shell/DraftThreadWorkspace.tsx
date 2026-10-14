@@ -495,7 +495,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           ...(props.mode === "code" && props.codeDefaultFolderThreads !== true
             ? {
                 disabled: true,
-                disabledReason: "Enable Threads without a Project in Code settings",
+                disabledReason: "Code needs a Git repository. Change it in Code settings",
               }
             : {}),
         } satisfies ComposerProjectEntry)
@@ -808,7 +808,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                 {defaultFolderEntry?.disabled === true ? (
                   <>
                     <p>
-                      Threads without a Project is turned off. You can change this in Code settings.
+                      Code needs a Git repository, so it cannot start in the default folder. You can
+                      change this in Code settings.
                     </p>
                     {props.onOpenCodeSettings === undefined ? null : (
                       <OctantButton onClick={props.onOpenCodeSettings} size="sm" variant="link">

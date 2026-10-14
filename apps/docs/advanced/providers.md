@@ -122,6 +122,44 @@ tools as unsupported, and its text and native-tool support do not imply an
 app-browser bridge. Changing the thread to Full access does not remove the
 isolation requirement.
 
+### What each provider can do
+
+Claude Code and Codex are the two providers Octant is built around, and they
+get a feature in full first. Every other provider is listed here with what is
+weaker. Where a provider cannot do something, Octant turns that feature off for
+it instead of imitating it.
+
+| Feature                           | Claude Code | Codex                       | OpenCode             | Pi            | ACP agents            | Ollama                | Model endpoints                          |
+| --------------------------------- | ----------- | --------------------------- | -------------------- | ------------- | --------------------- | --------------------- | ---------------------------------------- |
+| Reopen the thread's own session   | Yes         | Yes                         | Yes                  | Yes           | Most                  | Replayed              | Replayed                                 |
+| Approval prompts from the runtime | Yes         | Yes                         | Yes                  | Yes           | Yes                   | No                    | No                                       |
+| Questions from the agent          | Yes         | No                          | Yes (not on 2.x)     | No            | Most                  | No                    | No                                       |
+| Reasoning shown                   | Yes         | Yes                         | Yes                  | Yes           | If the agent sends it | If the model sends it | If the endpoint sends it                 |
+| Token usage counted               | Yes         | Yes                         | Yes                  | Yes           | No                    | After a reply         | After a reply                            |
+| File changes and diffs            | Yes         | Yes                         | Diffs only           | No            | No                    | No                    | No                                       |
+| Attachments sent natively         | No          | Image models                | Non-text models      | No            | No                    | Vision models         | No                                       |
+| Octant tools (Browser, Computer)  | Yes         | Yes                         | macOS, some releases | After a check | macOS, some agents    | No                    | Verified models                          |
+| Change model inside a thread      | Yes         | Yes                         | No                   | No            | No                    | Yes                   | Yes                                      |
+| Compact session                   | Yes         | Yes, Codex 0.162.1 or newer | No                   | No            | No                    | Octant does it        | Octant does it; Code uses Octant Harness |
+| Auto-review of approvals in Code  | Yes         | Yes                         | No                   | No            | No                    | No                    | No                                       |
+
+- **Replayed** means the provider keeps no session of its own, so Octant sends
+  the thread's history again, fitted to the model's context window. Changing
+  the model is therefore fine.
+- **Most** for ACP agents: they reopen a session only when the agent offers to,
+  and they ask questions on every agent except Mistral Vibe and fx.
+- **Token usage** is not measured for ACP agents. A spend ceiling leaves their
+  turns out and says so.
+- **Ollama** answers in Chat only: no tools, no file changes, no approvals.
+- **Model endpoints** (OpenAI-compatible, Anthropic-compatible, Azure AI
+  Foundry) run Octant Harness. They show reasoning and usage only once a reply
+  carries them, and Octant tools reach only models you verified.
+- **Oh My Pi** lists models but starts no session, so it never appears in a
+  picker.
+- No provider reports web research or citations as its own feature, and
+  Claude Code and Codex leave child agents to Octant. Octant's own tools and
+  delegation cover those.
+
 ### Provider catalog
 
 **Settings → Provider catalog** lists every provider driver that ships with

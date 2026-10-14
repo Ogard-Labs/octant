@@ -228,6 +228,9 @@ export class ChatProjection implements Projection {
       );
     }
     indexTranscriptSearchForTurn(connection, turn, event.globalSequence, turn.createdAt);
+    if (turn.supersedes !== undefined) {
+      dropInactiveTranscriptSearch(connection, String(turn.threadId));
+    }
   }
 
   #applyAttemptUpdated(connection: SqliteConnection, event: EventEnvelope): void {
@@ -265,7 +268,15 @@ export class ChatProjection implements Projection {
       updatedTurn.createdAt,
       event.globalSequence,
     );
-    indexTranscriptSearchForTurn(connection, updatedTurn, event.globalSequence, attempt.updatedAt);
+    // A late attempt for a turn an edit already replaced must not bring its text back.
+    if (!isTurnReplacedByEdit(connection, updatedTurn)) {
+      indexTranscriptSearchForTurn(
+        connection,
+        updatedTurn,
+        event.globalSequence,
+        attempt.updatedAt,
+      );
+    }
   }
 
   #applyTurnRouteDecided(connection: SqliteConnection, event: EventEnvelope): void {
@@ -655,23 +666,7 @@ export function readChatThreadWindow(
 ): ChatThreadWindowRead {
   const thread = readRawThread(connection, threadId);
   if (thread === undefined) return { kind: "missing" };
-  const order = connection
-    .prepare(`
-      SELECT turn_id, json_extract(turn_json, '$.supersedes') AS supersedes
-      FROM chat_turn_projection
-      WHERE thread_id = ?
-      ORDER BY sequence ASC
-    `)
-    .all(threadId) as ReadonlyArray<{
-    readonly turn_id: string;
-    readonly supersedes: string | null;
-  }>;
-  const active = activeChatTurns(
-    order.map((row) => ({
-      id: row.turn_id,
-      ...(row.supersedes === null ? {} : { supersedes: row.supersedes }),
-    })),
-  ).map((turn) => turn.id);
+  const { journaled, active } = readTurnIds(connection, threadId);
   const anchor = request.anchor;
   let start = active.length;
   let end = active.length;
@@ -703,7 +698,7 @@ export function readChatThreadWindow(
     }
   }
   const hasLater = end < active.length;
-  const journaledTurnIds = new Set(order.map((row) => row.turn_id));
+  const journaledTurnIds = new Set(journaled);
   const pageTurnIds = new Set(pages.map((piece) => String(piece.turn.id)));
   const citations = pages.flatMap((piece) => piece.citations);
   const attachments = [
@@ -744,7 +739,7 @@ export function readChatThreadWindow(
       },
       hasEarlier: start > 0,
       hasLater,
-      supersededTurnCount: order.length - active.length,
+      supersededTurnCount: journaled.length - active.length,
     }),
   };
 }
@@ -1297,6 +1292,77 @@ function normalizeSearchText(value: string): string {
 /** Escape LIKE metacharacters so a user needle cannot widen into every row. */
 function escapeLikePattern(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+/**
+ * The thread's active turn ids, oldest first: what a reader of the thread sees.
+ * An edit supersedes the revised turn and every turn after it, so a turn's
+ * activity cannot be read from its own row; it takes the fold over the thread.
+ */
+function readTurnIds(
+  connection: SqliteConnection,
+  threadId: string,
+): { readonly journaled: ReadonlyArray<string>; readonly active: ReadonlyArray<string> } {
+  const order = connection
+    .prepare(`
+      SELECT turn_id, json_extract(turn_json, '$.supersedes') AS supersedes
+      FROM chat_turn_projection
+      WHERE thread_id = ?
+      ORDER BY sequence ASC
+    `)
+    .all(threadId) as ReadonlyArray<{
+    readonly turn_id: string;
+    readonly supersedes: string | null;
+  }>;
+  const active = activeChatTurns(
+    order.map((row) => ({
+      id: row.turn_id,
+      ...(row.supersedes === null ? {} : { supersedes: row.supersedes }),
+    })),
+  ).map((turn) => turn.id);
+  return { journaled: order.map((row) => row.turn_id), active };
+}
+
+/**
+ * Whether a later edit replaced this turn: it names a turn at or before this
+ * one. Streaming persists an attempt update per delta, so this reads only the
+ * turns after this one (none, for the turn being streamed) rather than folding
+ * the whole thread.
+ */
+function isTurnReplacedByEdit(connection: SqliteConnection, turn: ChatTurn): boolean {
+  return (
+    connection
+      .prepare(`
+        SELECT 1
+        FROM chat_turn_projection AS edit
+        INNER JOIN chat_turn_projection AS revised
+          ON revised.thread_id = edit.thread_id
+          AND revised.turn_id = json_extract(edit.turn_json, '$.supersedes')
+        WHERE edit.thread_id = ?
+          AND edit.sequence > ?
+          AND revised.sequence <= ?
+        LIMIT 1
+      `)
+      .get(String(turn.threadId), turn.sequence, turn.sequence) !== undefined
+  );
+}
+
+/**
+ * Transcript search finds what the thread shows, so a superseded turn leaves
+ * the index the moment an edit replaces it; a hit on one could never be
+ * revealed, because the thread window answers stale for a turn it does not show.
+ */
+function dropInactiveTranscriptSearch(connection: SqliteConnection, threadId: string): void {
+  const active = new Set(readTurnIds(connection, threadId).active);
+  const indexed = connection
+    .prepare("SELECT DISTINCT turn_id FROM chat_transcript_search_projection WHERE thread_id = ?")
+    .all(threadId) as ReadonlyArray<{ readonly turn_id: string }>;
+  const remove = connection.prepare(
+    "DELETE FROM chat_transcript_search_projection WHERE thread_id = ? AND turn_id = ?",
+  );
+  for (const row of indexed) {
+    if (!active.has(row.turn_id)) remove.run(threadId, row.turn_id);
+  }
 }
 
 function indexTranscriptSearchForTurn(

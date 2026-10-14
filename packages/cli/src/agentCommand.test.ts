@@ -1,7 +1,8 @@
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import type { LocalControlRequest, OpenedLocalControlSession } from "./localControl";
-import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
+import { NativeHarnessApproval, decodeHostAnswer } from "@octant/contracts";
+import { decidePendingApproval, resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 
 function session(
   answer: (request: LocalControlRequest) => { status: number; body: unknown },
@@ -381,6 +382,63 @@ describe("octant agent command line", () => {
           decision: "approved",
         })),
       );
+    },
+  );
+});
+
+describe("octant agent approval prompt", () => {
+  const threadId = "00000000-0000-4000-8000-000000000101";
+  const leadRequest = {
+    id: "00000000-0000-4000-8000-000000000081",
+    toolName: "bash",
+    summary: "bash: bun run test",
+    approvalClass: "shell-commands",
+    status: "pending",
+    askedAt: "2026-10-13T12:06:00.000Z",
+  };
+  const childSource = {
+    runId: "00000000-0000-4000-8000-000000000091",
+    providerInstanceId: "10000000-0000-4000-8000-000000000001",
+    modelId: "frontier-large",
+  };
+
+  async function answer(raw: unknown, typed: string) {
+    const stdout = sink();
+    const sent: LocalControlRequest[] = [];
+    await decidePendingApproval(
+      {
+        command: { json: false },
+        stdout,
+        session: session((request) => {
+          sent.push(request);
+          return { status: 200, body: {} };
+        }),
+      },
+      threadId,
+      decodeHostAnswer(NativeHarnessApproval)(raw),
+      { next: async () => typed },
+    );
+    return { prompt: stdout.text(), sent };
+  }
+
+  it("offers a lead's request an answer for the whole session and sends it", async () => {
+    const { prompt, sent } = await answer(leadRequest, "a");
+    expect(prompt).toContain("[a]lways this session");
+    expect(sent).toMatchObject([{ body: { decision: "approve-always" } }]);
+  });
+
+  it.each([
+    ["a child's request", { ...leadRequest, source: childSource }],
+    ["a request after the thread took in outside content", { ...leadRequest, singleUse: true }],
+  ])(
+    "offers %s only allow and deny, and refuses an answer for the whole session",
+    async (_name, raw) => {
+      const { prompt, sent } = await answer(raw, "a");
+      expect(prompt).toContain("allow? [y]es / [n]o >");
+      expect(prompt).not.toContain("[a]lways");
+      expect(sent).toMatchObject([{ body: { decision: "deny" } }]);
+      const allowed = await answer(raw, "y");
+      expect(allowed.sent).toMatchObject([{ body: { decision: "approve" } }]);
     },
   );
 });

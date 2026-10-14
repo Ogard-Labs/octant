@@ -79,7 +79,7 @@ Side Chat is a separate Chat conversation about one source thread. Open the righ
 
 Every Side Chat turn reads the source thread fresh: its newest 40 messages, and what it has done so far. For a Code thread that includes the branch, the uncommitted files Git sees, the files its turns changed, and the delivery target. For a Work thread it includes the Project folder. For every thread it includes the latest subagent results. About a Work or Code thread, Side Chat can also list and read the thread's files (and search them, for Code) when the model supports Octant's tools. Otherwise it says it cannot see the files.
 
-Side Chat can only read. It cannot send the source thread messages, approve, steer, change criteria, or write anything. If the source thread is deleted or no longer openable, Side Chat refuses rather than inventing an empty conversation.
+Side Chat can only read. It cannot send the source thread messages, approve, steer, change criteria, or write anything. If the source thread is deleted or no longer openable, Side Chat refuses rather than inventing an empty conversation. A Side Chat about a thread marked as having read outside content is marked too, because it reads that thread's conversation; the same holds for any thread you mention with `#`.
 
 ## Turn actions
 
@@ -114,13 +114,13 @@ see the origin chain and any direct forks and switch to one of them. If the
 origin has been archived or deleted, the lineage says the origin is no longer
 available rather than hiding that the thread is a fork.
 
-## Complete and snooze threads
+## Put away and snooze threads
 
 A thread you are done with can be put away without archiving it. Choose
-**Complete** from the row's menu (right-click, or the ⋯ control on hover) and
-the thread moves to the collapsed **Completed** shelf at the foot of the
+**Put away** from the row's menu (right-click, or the ⋯ control on hover) and
+the thread moves to the collapsed **Put away** shelf at the foot of the
 sidebar. Everything about it stays. **Reopen** brings it back, and so does
-sending it a new message. Octant refuses to complete a thread while an answer
+sending it a new message. Octant refuses to put a thread away while an answer
 is still running.
 
 **Snooze** hides a thread until a time you pick, in its own collapsed shelf
@@ -128,8 +128,8 @@ with the time until it returns. It comes back early if the answer that was runni
 ends the row reappears marked **Woke** until you open it; **Wake** ends a
 snooze by hand.
 
-Completed threads move to the archive on their own after a week. Change that
-window, or turn it off, under **Settings › General › Archive completed
+Put-away threads move to the archive on their own after a week. Change that
+window, or turn it off, under **Settings › General › Archive put-away
 threads**. Archiving keeps every thread; only a confirmed purge deletes.
 
 ## Long threads

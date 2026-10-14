@@ -8,7 +8,13 @@ import {
   NativeHarnessFollowUpPreview,
   decodeHostAnswer,
 } from "@octant/contracts";
-import { listAgentThreads, openAgentSideChat, readAgentGoal, reviseAgentGoal } from "./agentHost";
+import {
+  approvalMayBeRemembered,
+  listAgentThreads,
+  openAgentSideChat,
+  readAgentGoal,
+  reviseAgentGoal,
+} from "./agentHost";
 import {
   forkAgentThread,
   listAgentCheckpoints,
@@ -522,25 +528,32 @@ async function takeFollowUp(
   );
 }
 
-/** A gated tool call is allowed or refused from the terminal: y, a (always this session), or n. */
-async function decidePendingApproval(
-  input: RunAgentCliCommandInput,
+/**
+ * A gated tool call is allowed or refused from the terminal: y, a (always this
+ * session, only when the host would remember it), or n. Any other answer, `a`
+ * included when it is not offered, refuses the call.
+ */
+export async function decidePendingApproval(
+  input: Pick<RunAgentCliCommandInput, "session" | "stdout"> & {
+    readonly command: { readonly json: boolean };
+  },
   threadId: string,
   approval: NonNullable<NativeHarnessSessionView["approvals"]>[number],
-  lines: LineSource,
+  lines: Pick<LineSource, "next">,
 ): Promise<void> {
+  const mayRemember = approvalMayBeRemembered(approval);
   if (input.command.json) {
     input.stdout.write(`${JSON.stringify({ kind: "approval", approval })}\n`);
   } else {
     input.stdout.write(
-      `\n! ${approval.toolName} wants to ${approval.summary} (${approval.approvalClass})\n  allow? [y]es / ${approval.singleUse === true ? "" : "[a]lways this session / "}[n]o > `,
+      `\n! ${approval.toolName} wants to ${approval.summary} (${approval.approvalClass})\n  allow? [y]es / ${mayRemember ? "[a]lways this session / " : ""}[n]o > `,
     );
   }
   const line = (await lines.next())?.trim().toLowerCase() ?? "";
   const decision =
     line === "y" || line === "yes" || line === "approve"
       ? "approve"
-      : line === "a" || line === "always" || line === "approve-always"
+      : mayRemember && (line === "a" || line === "always" || line === "approve-always")
         ? "approve-always"
         : "deny";
   await input.session.send({

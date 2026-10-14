@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +12,7 @@ import {
   DuplicateEventIdentity,
   EventPayloadInvalid,
   JournalWriteFailed,
+  ThreadIdInUse,
   UnknownEventName,
   UnsupportedEventVersion,
 } from "./journalErrors";
@@ -463,6 +465,46 @@ describe("Journal", () => {
     );
     expect(rowCount(connection, "event_journal")).toBe(1);
     connection.close();
+  });
+
+  it("refuses to start a thread under an id another mode's thread already holds", () => {
+    const threadTypes = ["chat-thread", "work-thread", "code-thread"] as const;
+    for (const holder of threadTypes) {
+      for (const newcomer of threadTypes.filter((type) => type !== holder)) {
+        const connection = openMigratedConnection();
+        const journal = createJournal(connection);
+        const event = () => pendingEvent(randomUUID());
+        journal.append({
+          aggregate: { aggregateType: holder, aggregateId: ids.aggregate },
+          expectedVersion: 0,
+          events: [event()],
+        });
+
+        expect(() =>
+          journal.append({
+            aggregate: { aggregateType: newcomer, aggregateId: ids.aggregate },
+            expectedVersion: 0,
+            events: [event()],
+          }),
+        ).toThrow(ThreadIdInUse);
+        expect(rowCount(connection, "event_journal")).toBe(1);
+
+        // The holder keeps appending, and a thread's own side aggregates
+        // keyed by its id are not threads.
+        journal.append({
+          aggregate: { aggregateType: holder, aggregateId: ids.aggregate },
+          expectedVersion: 1,
+          events: [event()],
+        });
+        journal.append({
+          aggregate: { aggregateType: "thread-turn-metrics", aggregateId: ids.aggregate },
+          expectedVersion: 0,
+          events: [event()],
+        });
+        expect(rowCount(connection, "event_journal")).toBe(3);
+        connection.close();
+      }
+    }
   });
 
   it("converts an aggregate-version race into ConcurrencyConflict", () => {

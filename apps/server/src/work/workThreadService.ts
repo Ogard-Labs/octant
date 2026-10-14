@@ -87,7 +87,11 @@ type LinearIssueContextPort = Pick<
   | "consumeFramedForFirstTurn"
   | "takeFramedForFirstTurn"
 >;
-import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  ThreadIdInUse,
+} from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { WorkThreadProjection } from "./workThreadProjection";
@@ -724,7 +728,7 @@ export class WorkThreadService {
               }
             : command.kind === "complete-work-thread"
               ? // Completing is "I'm done here": any snooze would keep the row
-                // out of the Completed shelf, so it goes.
+                // out of the Put away shelf, so it goes.
                 {
                   ...withoutThreadRest(current),
                   completedAt: updatedAt,
@@ -1145,6 +1149,9 @@ export class WorkThreadService {
 
   #mapFailure(error: unknown): WorkThreadServiceError {
     if (error instanceof WorkThreadServiceError) return error;
+    if (error instanceof ThreadIdInUse) {
+      return this.#failure("invalid", "That thread ID is already in use.");
+    }
     if (error instanceof ConcurrencyConflict) {
       return this.#failure("stale", "Work thread changed; reload and retry.");
     }
@@ -1177,9 +1184,9 @@ function liveTurnFacts(activity: WorkThreadRuntimeActivity) {
 }
 
 const WORK_COMPLETE_REFUSALS = {
-  archived: "An archived thread cannot be completed.",
-  executing: "Wait for the running turn to finish before completing this thread.",
-  "awaiting-input": "This thread is waiting on you; answer it before completing it.",
+  archived: "An archived thread cannot be put away.",
+  executing: "Wait for the running turn to finish before putting this thread away.",
+  "awaiting-input": "This thread is waiting on you; answer it before putting it away.",
 } as const;
 
 const WORK_SNOOZE_REFUSALS = {

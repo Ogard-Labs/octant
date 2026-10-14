@@ -1,9 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   decodeChatAttachmentId,
+  decodeChatThreadId,
   decodeContextSubjectRef,
+  decodeEventActor,
   decodeProviderInstanceId,
   decodeProviderObservedState,
   type AggregateVersion,
@@ -34,6 +37,8 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { ResearchRouter } from "./research/researchRouter";
 import { ChatService } from "./chatService";
 import { ThreadWorkService } from "./threadWorkService";
+import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 
 const directories: Array<string> = [];
 const now = "2026-07-20T08:00:00.000Z";
@@ -909,5 +914,91 @@ describe("Chat lifecycle integration", () => {
       expect(error).toMatchObject({ failure: { category: "invalid" } });
     }
     fixture.close();
+  });
+
+  it("refuses a Chat thread or branch under the id of a marked Code or Work thread and leaves that thread's mark", async () => {
+    for (const mode of ["code", "work"] as const) {
+      const fixture = createFixture({ providerA: ["complete"] });
+      const { connection, journal } = fixture.persistence;
+      const heldId = decodeChatThreadId(
+        mode === "code"
+          ? "86000000-0000-4000-8000-0000000c0de1"
+          : "86000000-0000-4000-8000-0000000a0be1",
+      );
+      connection
+        .prepare(
+          `INSERT INTO event_journal (
+            event_id, aggregate_type, aggregate_id, aggregate_version, event_name, event_version,
+            correlation_id, actor_kind, actor_id, occurred_at, payload_json, host_id
+          ) VALUES (?, ?, ?, 1, ?, 1, ?, 'system', ?, ?, ?, 'local')`,
+        )
+        .run(
+          randomUUID(),
+          `${mode}-thread`,
+          heldId,
+          `${mode}.thread-created@1`,
+          randomUUID(),
+          ids.actor,
+          now,
+          JSON.stringify({ kind: "thread-created", thread: { id: heldId } }),
+        );
+      const marked = new ExternalContentIngestionStore({
+        journal,
+        connection,
+        uuid: randomUUID,
+        clock: () => now,
+        actor: decodeEventActor({ kind: "system", actorId: ids.actor }),
+      }).record({
+        threadId: heldId,
+        provenance: { origin: "external-content", sourceLabel: "web" },
+        contentReference: "page-1",
+        correlationId: randomUUID(),
+        authorized: true,
+      });
+      expect(marked.kind).toBe("recorded");
+
+      await expect(
+        fixture.service.execute({
+          kind: "create-chat-thread",
+          hostId: "local",
+          title: "Same id",
+          threadId: heldId,
+        }),
+      ).rejects.toMatchObject({
+        failure: { category: "invalid", message: "That thread ID is already in use." },
+      });
+
+      const source = await fixture.service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Source",
+      });
+      if (source.kind !== "thread-created") throw new Error("Expected a created Chat thread.");
+      await fixture.service.execute({
+        kind: "send-chat-turn",
+        threadId: source.thread.id,
+        expectedVersion: source.thread.version,
+        prompt: "First question",
+      });
+      const view = fixture.service.read(source.thread.id);
+      const turn = view.turns[0];
+      if (turn === undefined) throw new Error("Expected a Chat turn.");
+      await expect(
+        fixture.service.execute({
+          kind: "branch-chat-thread",
+          threadId: source.thread.id,
+          expectedVersion: view.thread.version,
+          turnId: turn.id,
+          title: "Same id branch",
+          branchThreadId: heldId,
+        }),
+      ).rejects.toMatchObject({
+        failure: { category: "invalid", message: "That thread ID is already in use." },
+      });
+
+      expect(fixture.persistence.readChatThread(heldId)).toBeUndefined();
+      expect(readThreadExternalContentTaint(connection, heldId).externalContentIngested).toBe(true);
+      fixture.close();
+    }
   });
 });

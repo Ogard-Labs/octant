@@ -484,8 +484,11 @@ export const ShellSettings = Schema.Struct({
    * Where Octant puts what nobody gave a home: Work and Code threads started
    * without a Project bind `<folder>/Work` and `<folder>/Code`, and artifact
    * files mirror under `<folder>/Artifacts` unless the mirror says otherwise.
-   * Absent means the host's own default (`~/Documents/Octant`); the host fills
-   * it in on read so every client sees the folder that is actually in effect.
+   * Absent means the host's own default (`~/Octant`); the host fills it in on
+   * read so every client sees the folder that is actually in effect. A window
+   * saves settings whole, so its first save stores that filled-in folder, and
+   * a stored folder stays put when the host default changes: installs that
+   * saved settings while the default was `~/Documents/Octant` keep it.
    */
   defaultFolder: Schema.optional(DefaultFolder),
   /** Absent preserves streaming replies for existing installations. */
@@ -573,7 +576,7 @@ export const ShellSettings = Schema.Struct({
    */
   marketplaceFetchesEnabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
-   * How long a completed thread rests in the Completed shelf before the host
+   * How long a put-away thread rests in the Put away shelf before the host
    * archives it. `null` means never. Archiving keeps everything and is the
    * only thing this timer does; a purge still needs its own confirmation
    * (`docs/decisions/0035`). A store persisted before completion shipped

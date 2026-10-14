@@ -191,7 +191,12 @@ import {
 import { makeContextSummaryGenerator } from "../context/contextSummaryGenerator";
 import { deriveCatalogEpoch, type CapabilityCatalogEntry } from "../context/capabilityCatalog";
 import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
-import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  ThreadIdInUse,
+} from "../persistence/journalErrors";
+import { readThreadIdModes } from "../persistence/threadIdentity";
 import type { PersistenceService } from "../persistence/persistenceService";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import { ProjectionApplicationFailed } from "../persistence/projection";
@@ -240,6 +245,7 @@ import {
 
 const RESEARCH_TOOL_NAME = "octant_web_research";
 const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
+const THREAD_ID_IN_USE_MESSAGE = "That thread ID is already in use.";
 /**
  * What a turn is planned against when neither the provider nor the reviewed
  * catalog named the model's window. It is an estimate, journaled as the
@@ -626,6 +632,8 @@ export interface ChatServiceOptions {
    */
   readonly resolveThreadMentionContext?: (input: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+    /** The thread whose turn names the mentions; a marked mention marks it. */
+    readonly readerThreadId: string;
     readonly windowId?: WindowId;
     readonly dialogueEnabled?: boolean;
   }) => Promise<ReadonlyArray<ChatThreadMentionContext>>;
@@ -723,9 +731,9 @@ export class ChatServiceError extends Error {
 }
 
 const CHAT_COMPLETE_REFUSALS = {
-  archived: "An archived thread cannot be completed.",
-  executing: "Wait for the running answer to finish before completing this thread.",
-  "awaiting-input": "This thread is waiting on you; answer it before completing it.",
+  archived: "An archived thread cannot be put away.",
+  executing: "Wait for the running answer to finish before putting this thread away.",
+  "awaiting-input": "This thread is waiting on you; answer it before putting it away.",
 } as const;
 
 const CHAT_SNOOZE_REFUSALS = {
@@ -1760,6 +1768,7 @@ export class ChatService {
     inheritedMark: InheritedExternalContentMark | undefined,
   ): Promise<ChatCommandResult> {
     this.#assertReady();
+    if (command.threadId !== undefined) this.#assertThreadIdFree(command.threadId);
     if (command.projectId !== undefined) {
       this.#assertActiveChatProject(command.projectId);
     }
@@ -2754,15 +2763,7 @@ export class ChatService {
       });
     }
     const branchThreadId = command.branchThreadId ?? decodeChatThreadId(this.#uuid());
-    if (
-      String(branchThreadId) === String(source.id) ||
-      this.#persistence.readChatThread(branchThreadId) !== undefined
-    ) {
-      throw new ChatServiceError({
-        category: "invalid",
-        message: "Chat branch thread ID is already in use.",
-      });
-    }
+    this.#assertThreadIdFree(branchThreadId);
 
     const contentById = new Map(
       view.contents.map((content) => [String(content.contentId), content]),
@@ -3695,6 +3696,7 @@ export class ChatService {
             previous,
           });
     const threadMentionContexts = await this.#resolveThreadMentions(
+      thread.id,
       threadMentionIds,
       executionContext,
       tools?.definitions.some((definition) => definition.name === "octant_thread_message") === true,
@@ -3946,6 +3948,7 @@ export class ChatService {
    * unreadable one costs the mention, not the send.
    */
   async #resolveThreadMentions(
+    readerThreadId: ChatThreadId,
     threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
     executionContext: ChatServiceExecutionContext | undefined,
     dialogueEnabled: boolean,
@@ -3961,6 +3964,7 @@ export class ChatService {
     try {
       resolved = await this.#resolveThreadMentionContext({
         threadMentionIds,
+        readerThreadId: String(readerThreadId),
         ...(executionContext?.windowId === undefined
           ? {}
           : { windowId: executionContext.windowId }),
@@ -6011,6 +6015,17 @@ export class ChatService {
     };
   }
 
+  /**
+   * Refuses a client-chosen id that any mode's thread already holds, before
+   * the scratch directory is reset for it. The journal refuses the same
+   * append; this check only keeps the refusal ahead of every side effect.
+   */
+  #assertThreadIdFree(threadId: ChatThreadId): void {
+    if (readThreadIdModes(this.#persistence.connection, String(threadId)).length > 0) {
+      throw new ChatServiceError({ category: "invalid", message: THREAD_ID_IN_USE_MESSAGE });
+    }
+  }
+
   #mapFailure(error: unknown): ChatServiceError {
     if (error instanceof ThreadWorkServiceError) {
       return new ChatServiceError(error.failure);
@@ -6037,6 +6052,11 @@ export class ChatService {
           category: error.code === "stale-version" ? "stale" : "invalid",
           message: error.message,
         }),
+      );
+    }
+    if (error instanceof ThreadIdInUse) {
+      return new ChatServiceError(
+        decodeChatFailure({ category: "invalid", message: THREAD_ID_IN_USE_MESSAGE }),
       );
     }
     if (error instanceof ConcurrencyConflict) {

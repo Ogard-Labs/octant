@@ -14,7 +14,6 @@ export interface CodeSettingsUpdate {
   readonly defaultPermissionPersistence: CodeSettings["defaultPermissionPersistence"];
   readonly externalEditor?: NonNullable<CodeSettings["externalEditor"]>;
   readonly requireGitRepository?: boolean;
-  readonly allowDefaultFolderThreads?: boolean;
   readonly defaultDiffLayout?: CodeDiffLayout;
 }
 
@@ -22,7 +21,6 @@ interface CodeSettingsDraft {
   readonly executionPolicy: CodeSettings["defaultExecutionPolicy"];
   readonly permissionPersistence: CodeSettings["defaultPermissionPersistence"];
   readonly requireGitRepository: boolean;
-  readonly allowDefaultFolderThreads: boolean;
   readonly defaultDiffLayout: CodeDiffLayout;
   readonly executable: string;
   readonly argumentsText: string;
@@ -52,9 +50,6 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [requireGitRepository, setRequireGitRepository] = useState(
     props.settings.requireGitRepository,
   );
-  const [allowDefaultFolderThreads, setAllowDefaultFolderThreads] = useState(
-    props.settings.allowDefaultFolderThreads,
-  );
   const [defaultDiffLayout, setDefaultDiffLayout] = useState(
     props.settings.defaultDiffLayout ?? "unified",
   );
@@ -78,11 +73,6 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
     setRequireGitRepository((current) =>
       current === previousSettings.requireGitRepository
         ? props.settings.requireGitRepository
-        : current,
-    );
-    setAllowDefaultFolderThreads((current) =>
-      current === previousSettings.allowDefaultFolderThreads
-        ? props.settings.allowDefaultFolderThreads
         : current,
     );
     setDefaultDiffLayout((current) =>
@@ -114,7 +104,6 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
       executionPolicy,
       permissionPersistence,
       requireGitRepository,
-      allowDefaultFolderThreads,
       defaultDiffLayout,
       executable,
       argumentsText,
@@ -139,7 +128,6 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         defaultExecutionPolicy: draft.executionPolicy,
         defaultPermissionPersistence: draft.permissionPersistence,
         requireGitRepository: draft.requireGitRepository,
-        allowDefaultFolderThreads: draft.allowDefaultFolderThreads,
         defaultDiffLayout: draft.defaultDiffLayout,
         ...(trimmedExecutable === ""
           ? {}
@@ -204,42 +192,18 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
             </OctantToggleGroup>
           </SettingRow>
           <SettingRow
-            description="Off lets a Code thread start in a plain folder. Branches, worktrees, diffs, and pull requests stay unavailable there until the folder becomes a repository."
-            label="Require a Git repository"
+            description="Off lets a Code thread start in a plain folder, the default folder included; branches, diffs, and pull requests stay unavailable there."
+            label="Code needs a Git repository"
+            focused={props.focusedSetting === "code-require-git"}
             scope="mode"
             settingId="code-require-git"
           >
             <OctantSwitch
               checked={requireGitRepository}
-              label="Require a Git repository"
+              label="Code needs a Git repository"
               onCheckedChange={(checked) => {
                 setRequireGitRepository(checked);
-                // The default folder is not a repository, so requiring Git
-                // again takes threads without a Project with it.
-                const next = checked ? { allowDefaultFolderThreads: false } : {};
-                if (checked) setAllowDefaultFolderThreads(false);
-                void commit({ requireGitRepository: checked, ...next });
-              }}
-            />
-          </SettingRow>
-          <SettingRow
-            description={
-              requireGitRepository
-                ? "Turn off the Git requirement first: the default folder is not a repository."
-                : "Lets a Code thread start with no Project chosen, in the Code subfolder of the default folder."
-            }
-            label="Threads without a Project"
-            focused={props.focusedSetting === "code-default-folder-threads"}
-            scope="mode"
-            settingId="code-default-folder-threads"
-          >
-            <OctantSwitch
-              checked={allowDefaultFolderThreads}
-              disabled={requireGitRepository}
-              label="Threads without a Project"
-              onCheckedChange={(checked) => {
-                setAllowDefaultFolderThreads(checked);
-                void commit({ allowDefaultFolderThreads: checked });
+                void commit({ requireGitRepository: checked });
               }}
             />
           </SettingRow>

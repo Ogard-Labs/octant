@@ -124,6 +124,27 @@ export async function runMcpCommand(ports: McpCommandPorts): Promise<number> {
   return pipeToHost(resolution.endpoint, ports);
 }
 
+/**
+ * `octant mcp` as typed: its arguments are only `--help`. Shared by the full
+ * command and the launcher the desktop app puts on a terminal's `PATH`, so both
+ * answer a stray argument the same way.
+ */
+export async function runMcpCliCommand(
+  args: ReadonlyArray<string>,
+  ports: McpCommandPorts,
+): Promise<number> {
+  if (args.length === 1 && args[0] === "--help") {
+    ports.stdout.write(MCP_COMMAND_HELP);
+    return 0;
+  }
+  if (args.length > 0) {
+    // stdout carries protocol frames only.
+    ports.stderr.write("octant mcp takes no arguments. Run `octant mcp --help`.\n");
+    return 1;
+  }
+  return await runMcpCommand(ports);
+}
+
 function answerWithoutGrant(message: ParsedMessage): JsonObject | undefined {
   if (message.kind === "malformed") return message.answer;
   const { id, method, params } = message;

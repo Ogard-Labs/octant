@@ -16,6 +16,7 @@ import {
   AggregateId,
   CorrelationId,
   type CodeAttachmentId,
+  type OctantMode,
   type CodeAttachmentMediaType,
   type CodeAttachmentReference,
   EventId,
@@ -113,7 +114,11 @@ import {
 } from "@octant/domain/thread-completion-policy";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
-import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
+import {
+  ConcurrencyConflict,
+  JournalWriteFailed,
+  ThreadIdInUse,
+} from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
@@ -185,6 +190,7 @@ import {
   type RecordExternalContentIngestion,
 } from "../context/inheritedExternalContentMark";
 
+const THREAD_ID_IN_USE_MESSAGE = "That thread ID is already in use.";
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
@@ -383,6 +389,8 @@ export interface CodePersistencePort {
     Partial<Pick<Journal, "transaction">>;
   readonly readCodeSettings: () => { readonly settings: CodeSettings } | undefined;
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
+  /** The modes whose journaled thread answers to this id. */
+  readonly readThreadIdModes: (threadId: string) => ReadonlyArray<OctantMode>;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
   readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
   readonly readCodeRuntimeWorks: (
@@ -747,9 +755,9 @@ function withoutRest<T extends Pick<CodeThread, "completedAt" | "snooze">>(
 }
 
 const COMPLETE_REFUSALS = {
-  archived: "An archived thread cannot be completed.",
-  executing: "Wait for the running turn to finish before completing this thread.",
-  "awaiting-input": "This thread is waiting on you; answer it before completing it.",
+  archived: "An archived thread cannot be put away.",
+  executing: "Wait for the running turn to finish before putting this thread away.",
+  "awaiting-input": "This thread is waiting on you; answer it before putting it away.",
 } as const;
 
 const SNOOZE_REFUSALS = {
@@ -1210,6 +1218,7 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.threadId) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
+        this.#assertThreadIdFree(command.threadId);
         const inheritedMark =
           this.#requireForkOrigin(command.projectId, command.threadId, command.forkedFrom) ??
           executionContext?.inheritedMark;
@@ -1482,6 +1491,7 @@ export class CodeService {
             );
           }
           if (bindingError instanceof CodeServiceError) throw bindingError;
+          if (bindingError instanceof ThreadIdInUse) throw this.#mapFailure(bindingError);
           throw this.#failure(
             "interrupted",
             "Managed Code worktree creation was rolled back after a binding failure.",
@@ -1593,21 +1603,10 @@ export class CodeService {
             ? {}
             : { externalEditor: command.externalEditor }),
           requireGitRepository: command.requireGitRepository ?? current.requireGitRepository,
-          allowDefaultFolderThreads:
-            command.allowDefaultFolderThreads ?? current.allowDefaultFolderThreads,
           defaultDiffLayout: command.defaultDiffLayout ?? current.defaultDiffLayout,
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });
-        // The default folder is not a repository, so a thread there can only
-        // start while Git is not required. Refuse the pair rather than store a
-        // switch whose thread would never start.
-        if (settings.allowDefaultFolderThreads && settings.requireGitRepository) {
-          throw this.#failure(
-            "invalid",
-            "Threads without a Project need the Git requirement turned off first.",
-          );
-        }
         this.#append(
           "code-settings",
           CODE_SETTINGS_AGGREGATE_ID,
@@ -1622,6 +1621,7 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.thread.id) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
+        this.#assertThreadIdFree(command.thread.id);
         const inheritedMark =
           this.#requireForkOrigin(
             command.thread.projectId,
@@ -2053,7 +2053,7 @@ export class CodeService {
                 }
               : command.kind === "complete-code-thread"
                 ? // Completing is "I'm done here": the pin and any snooze
-                  // would keep the row out of the Completed shelf, so both go.
+                  // would keep the row out of the Put away shelf, so both go.
                   {
                     ...withoutPinned(withoutRest(current)),
                     completedAt: updatedAt,
@@ -3055,7 +3055,6 @@ export class CodeService {
       defaultExecutionPolicy: "approval-gated",
       defaultPermissionPersistence: "current-session",
       requireGitRepository: true,
-      allowDefaultFolderThreads: false,
       defaultDiffLayout: "unified",
       version: 0 as AggregateVersion,
       updatedAt: decodeTimestamp(this.#clock()),
@@ -3245,8 +3244,22 @@ export class CodeService {
     return this.#failure(category, message);
   }
 
+  /**
+   * Refuses an id another mode's thread already holds before anything is
+   * prepared, so a colliding id creates no worktree and journals no checkout.
+   * The journal refuses the same append as the backstop for a race.
+   */
+  #assertThreadIdFree(threadId: CodeThreadId): void {
+    if (this.#persistence.readThreadIdModes(String(threadId)).length > 0) {
+      throw this.#failure("conflict", THREAD_ID_IN_USE_MESSAGE);
+    }
+  }
+
   #mapFailure(error: unknown): CodeServiceError {
     if (error instanceof CodeServiceError) return error;
+    if (error instanceof ThreadIdInUse) {
+      return this.#failure("conflict", THREAD_ID_IN_USE_MESSAGE);
+    }
     if (error instanceof ConcurrencyConflict) {
       return this.#failure("stale", "Code state changed; reload and retry.");
     }

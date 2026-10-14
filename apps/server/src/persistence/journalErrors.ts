@@ -34,6 +34,16 @@ export class DuplicateEventIdentity extends Data.TaggedError("DuplicateEventIden
   readonly eventId: string;
 }> {}
 
+/**
+ * A new thread aggregate whose id another mode's thread already holds. Thread
+ * ids are one space across Chat, Work, and Code, because the mark, metrics,
+ * attachments, and purge all key by the bare id.
+ */
+export class ThreadIdInUse extends Data.TaggedError("ThreadIdInUse")<{
+  readonly aggregateType: string;
+  readonly aggregateId: string;
+}> {}
+
 export class JournalWriteFailed extends Data.TaggedError("JournalWriteFailed")<{
   readonly operation: "append";
 }> {}

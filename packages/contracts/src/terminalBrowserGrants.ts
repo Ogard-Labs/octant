@@ -27,7 +27,7 @@ export type TerminalBrowserGrantId = typeof TerminalBrowserGrantId.Type;
  * one the person can act on: `not-local-window` is a paired device asking,
  * `not-a-code-thread` covers an unknown id and a Work or Chat thread alike (a
  * Work thread has no shell, and the answer must not say which it was),
- * `thread-not-active` is an archived or completed thread, `window-cannot-open-thread`
+ * `thread-not-active` is an archived or put-away thread, `window-cannot-open-thread`
  * is a window that does not hold the thread's Project, `browser-unavailable` is a
  * host or thread that lends no Browser, `terminal-already-granted` is a second
  * grant for a terminal that has one, `no-live-grant` is a switch-off with

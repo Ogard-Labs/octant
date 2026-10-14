@@ -101,7 +101,7 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
   },
   {
     id: "review-complete",
-    label: "Complete the thread",
+    label: "Put the thread away",
     area: "Review",
     defaultChord: "C",
     page: "review",

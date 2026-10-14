@@ -17,6 +17,7 @@ import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { SqliteConnection } from "../persistence/sqlitePort";
+import { readThreadIdModes } from "../persistence/threadIdentity";
 import { readThreadExternalContentState } from "./externalContentTaintProjection";
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
@@ -87,6 +88,9 @@ export class ExternalContentClearStore {
           ? input.expectedVersion
           : -1,
       currentVersion: state?.version ?? 0,
+      threadIdShared:
+        aggregateId !== undefined &&
+        readThreadIdModes(this.#connection, String(aggregateId)).length > 1,
     });
     if (decision.kind === "refuse") {
       // A caller with no authority here, or a window that cannot reach the

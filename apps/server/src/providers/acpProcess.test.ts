@@ -1202,6 +1202,26 @@ describe("Grok Build consumed configuration", () => {
   );
 });
 
+describe("Grok Build folder trust and leader", () => {
+  it("keeps folder trust on even when the person switched it off", () => {
+    const managedHome = "/tmp/managed-grok";
+    const environment = sanitizeAcpEnvironment(
+      grok,
+      { PATH: "/usr/bin", GROK_FOLDER_TRUST: "0" },
+      { managedHome, executionPolicy: "full-access" },
+    );
+    expect(environment.GROK_FOLDER_TRUST).toBe("1");
+  });
+
+  it("starts its own agent rather than joining a shared leader process", () => {
+    expect(grok.process.args({ root: "/tmp/project", managedHome: "/tmp/managed" })).toEqual([
+      "agent",
+      "--no-leader",
+      "stdio",
+    ]);
+  });
+});
+
 describe("Kimi Code host-profile extension surfaces", () => {
   it("denies reused MCP, skills, plugins, and hooks after granting the native profile", async () => {
     const target = fixture(kimi);
@@ -1428,6 +1448,8 @@ describe.each([
     profile: copilot,
     denied: [
       ".agents/skills",
+      ".claude/settings.json",
+      ".claude/settings.local.json",
       ".claude/skills",
       ".github/agents",
       ".github/copilot/settings.json",

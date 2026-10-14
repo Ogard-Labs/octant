@@ -164,7 +164,7 @@ export function createPinnedFetch(
     });
 }
 
-async function defaultResolveAll(hostname: string): Promise<ReadonlyArray<string>> {
+export async function defaultResolveAll(hostname: string): Promise<ReadonlyArray<string>> {
   const bare = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;
   if (isIP(bare) !== 0) return [bare];
   const results = await lookup(hostname, { all: true });

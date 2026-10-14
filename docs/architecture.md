@@ -70,12 +70,12 @@ The design rests on a small set of invariants that every package obeys:
   duplicate answers, and settles the underlying callback only when complete.
 - **Capabilities are honest and fail closed.** Every provider reports what it
   supports in every mode; an unsupported capability is disabled or refused,
-  never silently emulated. A first-class provider may offer a capability in
-  full; every other provider gets a documented degraded form, listed in the
-  "degraded on" matrix, or reports the capability unsupported. Not built yet:
-  the matrix is not written, and which providers are first-class is not yet
-  named. The app-managed tools below stay provider-neutral, and a seam is never
-  widened for one vendor.
+  never silently emulated. Claude Code and Codex are the first-class providers
+  and may offer a capability in full; every other provider gets a documented
+  degraded form, listed in the [provider capability
+  matrix](#security-and-authority) ("degraded on"), or reports the capability
+  unsupported. The app-managed tools below stay provider-neutral, and a seam is
+  never widened for one vendor.
 - **Install ≠ trust ≠ enable.** Extensions contribute nothing until each of
   those steps has been taken explicitly, and even then only within the mode,
   Project, thread, and provider policy that applies.
@@ -322,7 +322,7 @@ through the transport its adapter verified:
 | ACP runtimes                        | An HTTP MCP bridge when the runtime advertises and accepts it; ACP client file and terminal capabilities are separate                                                                                                                                      |
 | Pi                                  | Octant's own Pi extension, calling a token-authenticated loopback bridge                                                                                                                                                                                   |
 | Native harness and direct endpoints | Definitions in the request, for models with verified tool support                                                                                                                                                                                          |
-| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant, reached through `octant mcp`; the person adds that command to their CLI, and Octant writes no provider configuration. Not yet packaged in the desktop app ([detail](design/terminal-browser-grant.md)) |
+| Typed CLI in a thread terminal      | Browser only, on a loopback MCP endpoint per grant, reached through `octant mcp`; the person adds that command to their CLI, and Octant writes no provider configuration. The macOS app ships the command too ([detail](design/terminal-browser-grant.md)) |
 
 No transport edits a person's provider MCP, hook, or global configuration;
 OpenCode's per-launch posture stays in its connection-private configuration.
@@ -659,23 +659,32 @@ A Work or Code thread started without a chosen Project lands in the mode's
 **default Project**: the host provisions `<default folder>/Work` or
 `<default folder>/Code` on first use, binds it as an ordinary Project marked
 `origin: "default-folder"`, and reuses it after. The default folder is the
-`defaultFolder` shell setting (`~/Documents/Octant` unless changed, always
-inside the user's home), and artifact files mirror under its `Artifacts`
-subfolder until a mirror setting says otherwise. With the Code setting
-`requireGitRepository` off, a Code thread may start in a folder that is not a
-repository on a `plain-folder` checkout whose head is `none`; every Git-backed
-feature reports itself unavailable there rather than inventing a revision. Code
-threads without a Project need the further `allowDefaultFolderThreads` switch,
-which the host accepts only while Git is not required. See
+`defaultFolder` shell setting (`~/Octant` unless changed, always inside the
+user's home), and artifact files mirror under its `Artifacts` subfolder until a
+mirror setting says otherwise. It sits at the top of home rather than in
+`~/Documents`, which macOS guards with a privacy prompt. Work always offers its
+default Project. Code has one choice, the `requireGitRepository` setting ("Code
+needs a Git repository", on by default). Off, a Code thread may start in a
+folder that is not a repository on a `plain-folder` checkout whose head is
+`none`, and that includes the Code default Project; every Git-backed feature
+reports itself unavailable there rather than inventing a revision. On, both are
+refused. See
 [decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md](decisions/0118-a-default-folder-for-what-nobody-gave-a-home.md).
 
-Not built yet: two decisions change this paragraph, and the shipped host keeps
-the behavior above until they land. The default folder moves from
-`~/Documents/Octant` to `~/Octant`. The `requireGitRepository` and
-`allowDefaultFolderThreads` switches, and the row Work offers to start a thread
-in the default folder instead of a Project, fold into one choice. Both were
-decided together; the choice's wording, and what happens to values stored under
-the old default and the two old switches, are settled when it is built.
+The default folder used to be `~/Documents/Octant`, and threads without a
+Project in Code had a separate `allowDefaultFolderThreads` switch beside the Git
+requirement. A stored folder is kept, so an install that stored
+`~/Documents/Octant` keeps it; only an install that never stored one follows
+the new default. A window saves shell settings whole, filled-in folder
+included, so in practice any install that saved a setting while the old default
+was in effect stored it. Default Projects already bound under the old folder
+stay ordinary Projects with their threads, and a changed folder creates a new
+default Project beside them. Settings, journal events, and update commands that
+still carry `allowDefaultFolderThreads` decode, and the switch is dropped: the
+Git requirement each install stored is the one choice it keeps. The host only
+ever stored that switch on with Git not required, so on-and-on never existed;
+an install that had Git off and the switch off now also offers the Code
+default Project, which is the one combination the single choice cannot keep.
 
 Code task creation accepts a plain-folder checkout when the server admits it under
 Code settings. The renderer preserves its proposed branch as delivery intent without
@@ -797,7 +806,50 @@ the new thread's first message. Starting one is not a review the way a clear
 is. The host's follow-up creator reads the source's mark when it creates the
 thread and hands the mark to the Chat, Work, or Code creation as a host-only
 input no wire command can carry; a source a person cleared passes on nothing.
-Fork, branch, and follow-up journal their marks through one shared step.
+
+A thread a person confirms from a Code planner's proposal starts marked when
+the planner thread is marked, by the same rule (label `planner-proposal`,
+content reference `planner-proposal-<planner thread>-<proposal>`). The planner
+agent wrote the proposal's title and intent after reading whatever marked its
+thread, and the intent becomes the new thread's opening prompt; confirming
+reviews the proposed work, not what the planner read. The planner service reads
+the planner thread's mark at the confirm and hands it to the Code creation as
+the same host-only input; a mark that cannot be journaled refuses the confirm,
+creates nothing, and leaves the proposal pending.
+
+Fork, branch, follow-up, and planner proposal journal their marks through one
+shared step.
+
+A Work-to-Code promotion starts its linked Code thread unmarked. The proposal
+names a Work Project, not a Work thread: its summary is text the person typed
+into the proposal, its artifact refs are opaque names the host checks for
+leaked authority and never reads into the Code thread, and the linked thread
+takes only that summary, as its title. No agent-written or outside text
+crosses, and there is no source thread whose mark the host could read; marking
+from one would mean trusting a thread id the client names. A promotion that
+comes to carry a Work thread's transcript or text an agent wrote must mark by
+the rule above.
+
+A `#thread` mention or a Side Chat's source brings another thread's
+transcript into a turn, so a source marked with outside content marks the
+thread reading it (labels `thread-mention` and `side-chat`, content reference
+`<label>-<source thread>`). The host reads the source's mark after reading its
+transcript and appends the reader's mark before it hands the framed text to
+the turn, the order the sibling-thread `read` keeps, so the reader's provider
+never sees a marked source's text on an unmarked thread. A mark that cannot be
+recorded withholds the text: a mention is answered as unreadable, which costs
+the mention and not the send, and a Side Chat turn is refused. The reference
+names the source, so mentioning one source again journals nothing new until a
+person clears the reader. The sibling-thread `read` marks its caller on every
+call, whatever the target, because an agent chose to read; a mention or a
+Side Chat is the person's own choice of thread, so an unmarked or cleared
+source passes on nothing, as for a fork. Chat, Work, and Code mentions share
+one resolver, and a thread that mentions itself is not marked again. A Side
+Chat's state section also carries finished subagents' replies, and a reply
+marks its parent only when it is delivered, which waits while the parent's
+turn runs, so each reply in that section marks the sidecar itself (label
+`subagent-result`, content reference `subagent-result-<run>`) by the same
+order; a reply that cannot mark it refuses the turn.
 
 An in-place restore (`restore-git-checkpoint`, sent by both Restore files to
 this point and Undo restore) overwrites a checkout other threads may share, so
@@ -810,15 +862,25 @@ the id derives from Project and binding revision, so two Projects on one folder
 have different ids for one directory, and a managed worktree has its own path
 and so never matches. The refusal names the other thread by title (cut to 100
 characters) only when it is in the requesting thread's Project; otherwise it
-says a thread in another Project is writing. The check sees only turns the
-runtime has registered as live. A turn whose checkpoint capture begins after a
-restore has started queues behind it for the same checkout id, so it starts from
-the restored files. A writing turn that already captured its checkpoint but is
-still preparing to start (credentials, session seeding, fork preparation) is
-not yet live: a restore that arrives then is not refused, and that turn runs
-from files captured before the restore. Restore from here and
-Fork from here create a thread on its own worktree and are not subject to the
-check. Discard and revert also overwrite files and are not yet covered.
+says a thread in another Project is writing. A writing turn counts from just
+before the host captures its checkpoint, through the runtime's preparation
+(credentials, session seeding, fork preparation), until the runtime has taken
+it on, so a restore cannot land between the capture and the launch. A start
+that is refused or fails while preparing stops counting at once and holds
+nothing back after that. Stopping a turn that is still preparing releases its
+root at once, even if a preparation step never returns, and the turn is
+refused at its next admission check, at the latest just before the runtime
+takes it on, so it never reaches its provider. The other order is serialized
+by root too: a turn that starts while a restore that passed this check is still
+overwriting the same root holds the root, so no further restore starts, and
+waits for the overwrite to finish before it captures its checkpoint, so it
+starts from the restored files. A second restore of a root that is being
+overwritten is refused as a `conflict` as well. Git alone queues only per
+checkout id, which would let a turn or a restore in another Project on the same
+folder, or a recovered start that captures nothing, run on a half-restored
+tree. Restore from here and Fork from here create a thread on its own worktree
+and are not subject to the check. Discard and revert also overwrite files and
+are not yet covered.
 
 A child AgentRun starts only when the thread's agent delegates through the
 Octant Harness `delegate` tool or a provider harness's `octant_agents` tool.
@@ -1565,10 +1627,17 @@ flowchart LR
     route sits on the loopback chain only. No tool, command, model output,
     structured reference, agent message, or host-run turn (routine, goal
     loop, usage-limit resume, child-run delivery) can clear.
+  - The mark is keyed by the bare thread id, and Chat, Work, and Code
+    threads share one id space: the journal refuses to start a thread under an
+    id another mode's thread already holds, so a client-chosen id cannot share
+    another mode's mark or, by being purged, erase it. A mark that threads of
+    two modes already share (history from before that check) cannot be told
+    apart, so a clear of it is refused as `thread-unavailable`.
   - One clear covers that thread and only it. A child run and a fork keep
-    their own taint; a Code fork, a Chat branch or restore, and a follow-up
-    or side task start with their source's mark when they are made (see the
-    Code fork rule under Modes).
+    their own taint; a Code fork, a Chat branch or restore, a follow-up or
+    side task, and a thread confirmed from a planner proposal start with their
+    source's mark when they are made, and a mention or Side Chat of a marked
+    thread marks the thread reading it (see the Code fork rule under Modes).
   - A clear removes the mark only. Nothing leaves the model's context and the
     provider session is not restarted, so what the thread read can still steer
     the model.
@@ -1710,7 +1779,10 @@ flowchart LR
   erases the named thread; a Project- or host-scoped purge erases only threads
   whose last update is older than their effective window; purging an
   already-purged thread succeeds idempotently. A remote principal can neither
-  set a window nor purge. See
+  set a window nor purge. A purge erases by the bare thread id, so a thread
+  whose id another mode's thread also holds (history from before the journal
+  refused that, below) is never purged: a thread-scoped purge refuses it as
+  `invalid`, and a Project- or host-scoped purge passes over it. See
   `docs/decisions/0035`. The one self-applying
   exception is startup journal compaction, which removes a
   `code.checkout-observed@1` event only when the next event of the same
@@ -2225,7 +2297,23 @@ composition inspector for pin, exclude, and rebuild. Each of those commands
 is refused `unauthorized`, before it is journaled, unless the subject is the
 context subject of a chat, work, or code thread the calling local window can
 open (the rule that lets it read the thread's kept images and Browser captures);
-a paired device never reaches the route. Inspecting a thread that has no context plan yet is a successful empty answer, not a failed request. New context plans retain
+a paired device never reaches the route. Inspect (`POST /api/context/inspect`)
+follows open in the same way: it answers a local window only for the context
+subject of a chat, work, or code thread that window can open, or for a
+`project` subject naming a Project it can open. A window can open a Project by
+the rule that decides which of its threads it can open: a Chat Project only
+while it is the window's Chat context, any active Work Project, and a Code
+Project the Code Project access rule admits (the window's own bound Project).
+A paired device is admitted to inspect as a `project.overview.read` and judged
+by the same rules under its own device scope, so it reaches only what its
+overview reads already cover: threads in active Work and Code Projects and
+those Projects themselves. It holds no Chat context, so it inspects no Chat
+thread or Chat Project. Every other subject, including one that does not exist
+or names no thread or Project, is refused `unauthorized` (403, "Context subject
+is not available to this window.") before the harness is read, in the same
+words whether or not the subject exists. Inspecting a subject the caller may
+read that has no context plan yet is a successful empty answer, not a failed
+request. New context plans retain
 model and service limit provenance and inspection metadata in the journal-backed
 plan projection. Inspection restores those saved facts after a host restart
 without querying the provider; saved observation timestamps remain unchanged.
@@ -3416,8 +3504,8 @@ native harness in `apps/server/src/harness`:
   hosted third-party search provider ships. A tool the thread was not offered
   refuses as `tool-unavailable` without reaching policy or a person. The harness has no
   per-host network rules, rule expiry, or learn mode yet: a tool process gets the
-  thread's OS-level `none` or `allow`. The approved design for them, with only its pure
-  decision and event schemas built so far, is
+  thread's OS-level `none` or `allow`. The approved design for them, with its pure
+  decision, event schemas, and host proxy built but no command routed through the proxy yet, is
   [Harness tool egress rules](#harness-tool-egress-rules). `nativeHarnessEgress.hostile.test.ts` holds the
   adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
   Seatbelt and shows only the networked one reaching a loopback listener.
@@ -3620,11 +3708,13 @@ composer. The web shows open offers as cards above the chips.
 
 ### Harness tool egress rules
 
-**Status: design approved by the maintainer on 2026-10-13. Phase 1 is in:
-the rule model and decision (`decideToolEgress` in
-`packages/domain/src/toolEgressPolicy.ts`) and the event schemas
-(`packages/contracts/src/toolEgress.ts`). Nothing calls them yet, so nothing
-that runs has changed.** Today a harness tool process gets the thread's
+**Status: design approved by the maintainer on 2026-10-13. Phases 1 and 2
+are in: the rule model and decision (`decideToolEgress` in
+`packages/domain/src/toolEgressPolicy.ts`), the event schemas
+(`packages/contracts/src/toolEgress.ts`), and the host proxy
+(`apps/server/src/harness/nativeHarnessEgressProxy.ts`, which reads request
+heads and ClientHellos in `nativeHarnessEgressWire.ts`). No launch starts the
+proxy yet, so nothing that runs has changed.** Today a harness tool process gets the thread's
 OS-level `none` or `allow` (see Egress and hostile content above). This is the
 approved-but-unfinished design, and the phases below track its delivery. Its
 approval replaces the "no local egress proxy in this release" decision in the
@@ -3667,17 +3757,42 @@ listener per confined launch:
   port means a confined process cannot borrow another launch's identity, and a
   call-scoped rule needs no extra bookkeeping.
 - **Protocol.** HTTP `CONNECT host:port` tunnels, and absolute-form plain
-  `http://` requests, which the proxy forwards with `Proxy-Authorization` and
-  hop-by-hop headers removed and nothing added. Every request must carry
-  `Proxy-Authorization` with the launch token; a missing or wrong token gets
-  `407` and is recorded. The proxy does not terminate TLS, inspect bodies, add
+  `http://` requests, which the proxy forwards in origin form with
+  `Proxy-Authorization` and hop-by-hop headers removed. A proxied plain
+  connection carries exactly one request: the proxy forwards its head and the
+  content its `Content-Length` or `chunked` framing declares, drops anything
+  after it, and shuts a connection whose content does not frame. A second
+  plain request on the same proxied connection would otherwise reach the
+  origin undecided, under whatever `Host` it named, which a shared front end
+  routes on. The rule covers absolute-form requests only: bytes inside a
+  `CONNECT` tunnel are opaque, so plain HTTP a client sends through a tunnel
+  (Node, for one, tunnels `http://` through `CONNECT`) can carry further
+  requests with any `Host` to the tunnel's destination. That is a residual
+  risk alongside fronting inside TLS and Encrypted Client Hello below. The one
+  header the proxy writes is `Connection: close` in place of the client's
+  own, so the client opens a new connection for its next request. Every request must carry
+  `Proxy-Authorization: Basic` with user `octant` and the launch token; a
+  missing or wrong token gets `407` and is recorded under one fixed entry
+  (host `invalid`, port 0), never the host it named, because anyone on the
+  machine can send such a request. A client that asks
+  without credentials first and answers the `407` (Git's default) leaves one
+  `token` refusal per connection it opens that way. A head the proxy cannot
+  read one way only (a repeated `Host`, `Content-Length`, `Transfer-Encoding`,
+  or `Proxy-Authorization`; both framing headers; a `Transfer-Encoding` other
+  than `chunked`, or any `Transfer-Encoding` on HTTP/1.0; a folded line; a line break that is not CRLF; a
+  `Connection` option naming `Host` or a framing header; a `Host` that names
+  another host than the target; an origin-form or `https://` target) gets
+  `400` before any decision and is not a decision record, because it names no
+  destination the proxy accepted as one. A head must arrive within 10 seconds
+  and 32 KiB. The proxy does not terminate TLS, inspect bodies, add
   credentials, or follow redirects; a redirect is the client's next request,
   checked like any other. When the first bytes of a `CONNECT` tunnel are a TLS
   ClientHello with a server name, that name must equal the `CONNECT` host or
   the tunnel closes (`sni-mismatch`). That stops a client naming an allowed
   host to the proxy and a different one to a shared front end; fronting by a
-  Host header inside TLS, and Encrypted Client Hello, remain a residual risk
-  stated in the approval copy for wildcard and CDN-hosted rules.
+  Host header inside TLS, plain requests inside a tunnel (above), and
+  Encrypted Client Hello remain a residual risk stated in the approval copy
+  for wildcard and CDN-hosted rules.
 - **Decision order per request.** Token, then destination syntax (an IP
   literal, a port outside 1–65535, or a name that is not a valid DNS name
   refuses), then the rule match, then resolution, then the private-destination
@@ -3830,11 +3945,18 @@ or body:
   the launch refuses before the command runs.
 - `thread.egress-decisions-recorded@1` while the launch runs: each distinct
   host and port first decided, or whose counts changed, with its decision,
-  reason, request count, and bytes each way. The proxy flushes a batch at 16
-  entries or every 5 seconds, whichever comes first, so a crash loses at most
-  that tail of decisions and counts, never more. When a batch cannot be
-  appended the proxy refuses new requests for that launch
-  (`audit-unavailable`) and keeps existing tunnels until they end.
+  reason, request count, and bytes each way. The proxy flushes a batch once 16
+  entries are first decided, and every changed entry every 5 seconds, so a
+  crash loses at most that tail of decisions and counts, never more. A launch
+  names at most 24 allowed and 28 refused destinations; past those a decision
+  still counts, under one overflow entry (host `overflow.invalid`, port 0) for
+  allowed and one per refusal reason, so its records hold at most 64 entries,
+  its summary is never truncated, and it writes at most four batches beyond
+  one per 5 seconds however many requests it makes. When a batch cannot be
+  appended, or its append has not answered within 10 seconds, the proxy
+  refuses new requests for that launch (`audit-unavailable`) and keeps
+  existing tunnels until they end. A launch start or summary append that has
+  not answered within 10 seconds counts as not appended.
 - `thread.egress-launch-summarized@1` when the launch ends: the final totals,
   including the bytes received that taint the thread, and each distinct host
   and port, at most 64 entries with a `truncated` flag. It is appended before
@@ -3884,7 +4006,9 @@ resolution (served by the system resolver's cache), a linear match over at
 most 128 rules, and a first-chunk peek for the server name. The data path is
 a socket pipe with no inspection, so throughput is bound by loopback. The
 phase 2 benchmark sets the budget: a clone and a package install against a
-local fixture origin within 10% of the direct path.
+local fixture origin within 10% of the direct path. It runs on demand as
+`bun run egress-proxy:benchmark` in `apps/server`, not in the default suite,
+because a wall-clock budget is not a stable CI check.
 
 **Delivery phases.** Each phase lands as its own PR with the hostile cases
 for what it adds in `nativeHarnessEgress.hostile.test.ts`, extending the
@@ -4011,9 +4135,32 @@ prompt, schema, tool, route, model, or capability.
   folder in the OS profile (`forbiddenRootEntries`, read and write, in every
   posture including Full access) unless a switch of its own is proven to turn
   that loading off. Grok Build is handled by its own folder trust instead
-  (see the table below), and Codex is the exception: it has no Octant OS
-  profile, so its `.agents/skills` loading is not handled yet. Only the skill
-  folder is
+  (see the table below). Codex is the exception: it has no Octant OS profile and no
+  switch, so before every `thread/start` and `thread/resume`, in every mode,
+  the driver lists Codex's skills at the Project root (`skills/list` with
+  `forceReload`) and sends a `skills.config` rule with the thread that
+  disables each Project skill by its `SKILL.md` path, and each package Codex
+  reported it could not load, which carries a path but no scope. A path, not a
+  name, because a name rule would also disable a user skill of that name.
+  Every scope other than `user`, `system`, and `admin` counts as the
+  Project's, so a scope a later release adds is disabled too. A thread whose
+  skills cannot be listed does not start. Older releases were read at their
+  source tags. Codex loads Project skills by itself from 0.66.0
+  (`.codex/skills` at the repository root, on by default from 0.79.0;
+  `.agents/skills` from 0.94.0), and reads `skills.config` rules from a
+  thread's `config` only from 0.108.0. Before that they came from the user's
+  own config file alone. So a release from 0.66.0 up to 0.108.0 refuses every
+  thread and asks for an update. A release older than 0.66.0 loads no Project
+  skill: when it answers `skills/list` with method-not-found, the thread runs
+  without rules. The rules hold for the thread as started or resumed: Codex
+  still lists those skills, as disabled, and a skill created in the Project
+  during a thread is enabled from the next turn until the thread is resumed.
+  Codex also loads the user's own `~/.agents/skills` and `$CODEX_HOME/skills`
+  (`scope: user`) by itself; those are not handled. Measured against codex-cli
+  0.162.1, nothing stops the discovery itself: the app-server ignores
+  `features.skip_host_skill_discovery`, `project_root_markers = []` still
+  scans the Project root, and a `skills.config` rule matches one skill's exact
+  name or `SKILL.md` path, never a folder. Only the skill folder is
   denied; the folder around it (`.claude`, `.github`, `.grok`, and so on)
   stays readable, because it holds the runtime's own settings or the
   Project's other content. fx and Kimi Code deny all of `.agents`. Because the
@@ -4055,7 +4202,7 @@ prompt, schema, tool, route, model, or capability.
   | Kilo (ACP)                    | None: switched off                                                                                                                                                                  | `KILO_DISABLE_EXTERNAL_SKILLS=1`, `KILO_DISABLE_PROJECT_CONFIG=1`, `KILO_PURE=1`                                                                                                                                                                             |
   | Mistral Vibe (ACP)            | None: switched off                                                                                                                                                                  | `VIBE_SKILL_PATHS="[]"`, `VIBE_DISABLED_SKILLS='["*"]'`, `VIBE_INCLUDE_PROJECT_CONTEXT="false"`                                                                                                                                                              |
   | Pi, Oh My Pi                  | None: switched off                                                                                                                                                                  | `--no-skills`                                                                                                                                                                                                                                                |
-  | Codex                         | `.agents/skills`, in the Project and up to the repository root (app-server `skills/list`, 0.162.1); not `.claude/skills`                                                            | Not handled yet: Codex runs without an Octant OS profile, so a root deny does not apply                                                                                                                                                                      |
+  | Codex                         | `.agents/skills`, in the Project and up to the repository root (app-server `skills/list`, 0.162.1); not `.claude/skills`                                                            | Disabled by path at each thread start and resume; refused if unlisted. Still listed, as disabled; one made mid-thread stays on until resume                                                                                                                  |
   | Direct HTTP and image drivers | None: no runtime of their own                                                                                                                                                       | n/a                                                                                                                                                                                                                                                          |
 
   The same rule covers the code a runtime starts from a Project by itself:
@@ -4071,24 +4218,26 @@ prompt, schema, tool, route, model, or capability.
   (`AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`,
   `.clinerules`, `.goosehints`, and the like) stay readable: they are text
   the runtime adds to its own context, not code, and they get no authority
-  from Octant. fx's root `AGENTS.md` deny predates this rule.
+  from Octant. Two runtimes do not read them: fx, whose root `AGENTS.md` deny
+  predates this rule, and Grok Build, which loads no Project instructions in
+  the untrusted folder Octant gives it.
 
-  | Runtime            | Project code it loads by itself                                                                                                                                                                                                                                                                                                                                             | How                                                                                                                                                                                                                                                                                                                                            |
-  | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | GitHub Copilot     | In a folder trusted in the person's Copilot profile: the MCP servers in `.mcp.json` (else `.github/mcp.json`), started at `session/new` (1.0.90); hooks in `.github/hooks` and the repository settings files, which can also enable plugins; `.github/extensions`; `mcp-servers` in `.github/agents` files. Language servers from `.github/lsp.json`, listed even untrusted | Denied: those eight entries. No flag or variable turns them off in ACP                                                                                                                                                                                                                                                                         |
-  | Grok Build         | In a folder trusted in Grok's own list, at the root and up to the repository root: hooks (`.grok/hooks`, `.claude/settings.json`), repo-local MCP and LSP servers, plugins in `.grok/plugins` and `.claude/plugins`, skills, commands, instructions (1.0.50)                                                                                                                | `trusted_folders.toml` in the reused `GROK_HOME` is denied (`hostDeniedEntries`), so every folder is untrusted: `grok inspect --json` lists no hooks, skills, or instructions and shows the plugins disabled; `grok mcp doctor` does not start the repo-local servers. The person's interactive trust is untouched. No Project entry is denied |
-  | Devin              | The MCP servers in `.devin/config.json`, `.devin/mcp_config.json`, `.devin/mcp_config.local.json` and the hooks in `.devin/config.json` and `.devin/hooks.json`, with Octant's managed config and `--respect-workspace-trust` (`devin acp`, 3000.11.3)                                                                                                                      | Denied: those files, plus `.devin/config.local.json` and `.devin/hooks.v1.json`. The managed config's empty `mcpServers` and `hooks` do not override them. `.devin/plans` stays writable                                                                                                                                                       |
-  | Kimi Code          | In a workspace trusted in Kimi: the MCP servers in `.mcp.json` at the repository root, started at `session/new` (0.38.0); `.kimi-code/mcp.json`                                                                                                                                                                                                                             | Denied: `.mcp.json` (new) and all of `.kimi-code`                                                                                                                                                                                                                                                                                              |
-  | Mistral Vibe       | In a folder trusted in the person's Vibe profile: MCP servers in `.vibe/config.toml` and Python tools in `.vibe/tools`, both loaded despite `VIBE_MCP_SERVERS` and `VIBE_TOOL_PATHS` (2.26.0); `.vibe/hooks.toml`, `.vibe/plugins`, `.vibe/agents`                                                                                                                          | Denied: those five entries. Hiding Vibe's trust list instead stops it starting: it rewrites a list it cannot read and exits when that fails                                                                                                                                                                                                    |
-  | OpenCode (ACP)     | `mcp` servers in `opencode.json` and plugin modules in `.opencode/plugin`, despite `OPENCODE_PURE` (2.0.27)                                                                                                                                                                                                                                                                 | Switched off: `OPENCODE_DISABLE_PROJECT_CONFIG=1`, after which neither loaded (the server driver already set it)                                                                                                                                                                                                                               |
-  | Cline              | JS and TS plugin modules in `.cline/plugins`, hook scripts in `.cline/hooks` and `.clinerules/hooks`, with no trust step (source on `main`, 3.0.71; not installed here)                                                                                                                                                                                                     | Denied: those three folders. No switch reaches an ACP launch; the source skips an unreadable folder. `CLINE_SESSION_BACKEND_MODE=local` keeps the session in the confined process rather than a running Cline hub daemon, which would sit outside these denies                                                                                 |
-  | Goose              | Plugins in `.agents/plugins`, enabled when found, with the hooks and `.mcp.json` servers they carry (source, 1.48.0 and 1.54.0; not installed here)                                                                                                                                                                                                                         | Denied: `.agents/plugins`. Only a per-plugin switch exists                                                                                                                                                                                                                                                                                     |
-  | Kilo               | The MCP servers in `.kilocode/mcp.json` and `.kilo/mcp.json`, read on every start even with `KILO_DISABLE_PROJECT_CONFIG` (source on `main`; not installed here)                                                                                                                                                                                                            | Denied: those two files; the source skips one it cannot read. `KILO_DISABLE_PROJECT_CONFIG` and `KILO_PURE` cover its other Project config and plugins                                                                                                                                                                                         |
-  | fx                 | The Project `.mcp.json`, admitted only for servers approved in fx's own home settings, which the managed home leaves empty (source)                                                                                                                                                                                                                                         | Unchanged: `.mcp.json`, `.fx.json`, `AGENTS.md` denied                                                                                                                                                                                                                                                                                         |
-  | GLM Agent          | None: only the ACP session's MCP servers; `.claude/commands` are prompt text put into a message when the person types `/name` (source, 1.15.0; not installed here)                                                                                                                                                                                                          | Nothing to deny                                                                                                                                                                                                                                                                                                                                |
-  | Gemini CLI         | In a trusted folder: `mcpServers`, `hooks`, and tool discovery commands in `.gemini/settings.json`; `mcpServers` in `.gemini/agents` files (source, 0.64.0; not installed here)                                                                                                                                                                                             | **Not handled.** A denied `settings.json` still exists for Node's `existsSync`, so Gemini's settings loader fails the session. An untrusted folder starts no MCP server at all, Octant's own included                                                                                                                                          |
-  | Qwen Code          | `hooks` in `.qwen/settings.json` (its folder trust is off by default, so every folder counts as trusted), `.qwen/agents` hooks, and in Full access the unapproved `mcpServers` of `.qwen/settings.json` and `.mcp.json` (source, 0.25.1; not installed here)                                                                                                                | **Not handled.** Same settings loader failure as Gemini on a denied file. `--safe-mode` would turn these off and keep session MCP servers per its source, but is unproven here                                                                                                                                                                 |
-  | Claude (Agent SDK) | None                                                                                                                                                                                                                                                                                                                                                                        | `settingSources: []`                                                                                                                                                                                                                                                                                                                           |
+  | Runtime            | Project code it loads by itself                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | How                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+  | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | GitHub Copilot     | In a folder trusted in the person's Copilot profile: the MCP servers in `.mcp.json` (else `.github/mcp.json`), started at `session/new` (1.0.90); hooks in `.github/hooks` and the repository settings files, which can also enable plugins; `.github/extensions`; `mcp-servers` in `.github/agents` files. Language servers from `.github/lsp.json`, listed even untrusted. The repository settings also come from `.claude/settings.json` and `.claude/settings.local.json`: a marketplace declared in either was listed (`copilot plugin marketplace list`) | Denied: those ten entries. No flag or variable turns them off in ACP                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+  | Grok Build         | In a folder trusted in Grok's own list, at the root and up to the repository root: hooks (`.grok/hooks`, `.claude/settings.json`), repo-local MCP and LSP servers, plugins in `.grok/plugins` and `.claude/plugins`, skills, commands, instructions (1.0.50)                                                                                                                                                                                                                                                                                                   | `trusted_folders.toml` in the reused `GROK_HOME` is denied (`hostDeniedEntries`), so every folder is untrusted: `grok inspect --json` lists no hooks, skills, or instructions and shows the plugins disabled; `grok mcp doctor` does not start the repo-local servers. `GROK_FOLDER_TRUST=1` is a guard, because `[folder_trust] enabled = false` in the person's `config.toml` or `GROK_FOLDER_TRUST=0` turns the gate off and the probe folder counted as trusted again. `agent --no-leader stdio`, because `[cli] use_leader` hands the session to a shared leader process outside the sandbox. The person's interactive trust is untouched. No Project entry is denied |
+  | Devin              | The MCP servers in `.devin/config.json`, `.devin/mcp_config.json`, `.devin/mcp_config.local.json` and the hooks in `.devin/config.json` and `.devin/hooks.json`, with Octant's managed config and `--respect-workspace-trust` (`devin acp`, 3000.11.3)                                                                                                                                                                                                                                                                                                         | Denied: those files, plus `.devin/config.local.json` and `.devin/hooks.v1.json`. The managed config's empty `mcpServers` and `hooks` do not override them. `.devin/plans` stays writable                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+  | Kimi Code          | In a workspace trusted in Kimi: the MCP servers in `.mcp.json` at the repository root, started at `session/new` (0.38.0); `.kimi-code/mcp.json`                                                                                                                                                                                                                                                                                                                                                                                                                | Denied: `.mcp.json` (new) and all of `.kimi-code`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+  | Mistral Vibe       | In a folder trusted in the person's Vibe profile: MCP servers in `.vibe/config.toml` and Python tools in `.vibe/tools`, both loaded despite `VIBE_MCP_SERVERS` and `VIBE_TOOL_PATHS` (2.26.0); `.vibe/hooks.toml`, `.vibe/plugins`, `.vibe/agents`                                                                                                                                                                                                                                                                                                             | Denied: those five entries. Hiding Vibe's trust list instead stops it starting: it rewrites a list it cannot read and exits when that fails                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+  | OpenCode (ACP)     | `mcp` servers in `opencode.json` and plugin modules in `.opencode/plugin`, despite `OPENCODE_PURE` (2.0.27)                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Switched off: `OPENCODE_DISABLE_PROJECT_CONFIG=1`, after which neither loaded (the server driver already set it)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+  | Cline              | JS and TS plugin modules in `.cline/plugins`, hook scripts in `.cline/hooks` and `.clinerules/hooks`, with no trust step (source on `main`, 3.0.71; not installed here)                                                                                                                                                                                                                                                                                                                                                                                        | Denied: those three folders. No switch reaches an ACP launch; the source skips an unreadable folder. `CLINE_SESSION_BACKEND_MODE=local` keeps the session in the confined process rather than a running Cline hub daemon, which would sit outside these denies                                                                                                                                                                                                                                                                                                                                                                                                             |
+  | Goose              | Plugins in `.agents/plugins`, enabled when found, with the hooks and `.mcp.json` servers they carry (source, 1.48.0 and 1.54.0; not installed here)                                                                                                                                                                                                                                                                                                                                                                                                            | Denied: `.agents/plugins`. Only a per-plugin switch exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+  | Kilo               | The MCP servers in `.kilocode/mcp.json` and `.kilo/mcp.json`, read on every start even with `KILO_DISABLE_PROJECT_CONFIG` (source on `main`; not installed here)                                                                                                                                                                                                                                                                                                                                                                                               | Denied: those two files; the source skips one it cannot read. `KILO_DISABLE_PROJECT_CONFIG` and `KILO_PURE` cover its other Project config and plugins                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+  | fx                 | The Project `.mcp.json`, admitted only for servers approved in fx's own home settings, which the managed home leaves empty (source)                                                                                                                                                                                                                                                                                                                                                                                                                            | Unchanged: `.mcp.json`, `.fx.json`, `AGENTS.md` denied                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+  | GLM Agent          | None: only the ACP session's MCP servers; `.claude/commands` are prompt text put into a message when the person types `/name` (source, 1.15.0; not installed here)                                                                                                                                                                                                                                                                                                                                                                                             | Nothing to deny                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+  | Gemini CLI         | In a trusted folder: `mcpServers`, `hooks`, and tool discovery commands in `.gemini/settings.json`; `mcpServers` in `.gemini/agents` files (source, 0.64.0; not installed here)                                                                                                                                                                                                                                                                                                                                                                                | **Not handled.** A denied `settings.json` still exists for Node's `existsSync`, so Gemini's settings loader fails the session. An untrusted folder starts no MCP server at all, Octant's own included                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+  | Qwen Code          | `hooks` in `.qwen/settings.json` (its folder trust is off by default, so every folder counts as trusted), `.qwen/agents` hooks, and in Full access the unapproved `mcpServers` of `.qwen/settings.json` and `.mcp.json` (source, 0.25.1; not installed here)                                                                                                                                                                                                                                                                                                   | **Not handled.** Same settings loader failure as Gemini on a denied file. `--safe-mode` would turn these off and keep session MCP servers per its source, but is unproven here                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+  | Claude (Agent SDK) | None                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `settingSources: []`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
   Three gaps remain open. Folders above the Project root: Copilot, Devin,
   Kimi Code (`.mcp.json` at the repository root), and Mistral Vibe look
@@ -4102,7 +4251,12 @@ prompt, schema, tool, route, model, or capability.
   `mcp.json`, `skills`, `plugins`, and `hooks` are the denied exception.
   Closing either needs a per-runtime switch or a profile that holds only the
   sign-in. On Linux a denied file appears as an empty file rather than a
-  missing one, which a runtime may refuse to parse.
+  missing one, which a runtime may refuse to parse, and a deny path that does
+  not exist is skipped. So when the person has no Grok `trusted_folders.toml`,
+  an agent could create one in the writable `GROK_HOME` during a session.
+  With folder trust forced on, that file cannot switch the gate off, but an
+  entry in it could trust a folder for a later session of the same process
+  until the next launch hides it.
 
   Where a skill is found decides who sees it, in the catalog, the palette, the
   turn resolver, presets, Code profile admission, and Canvas refresh. A skill
@@ -4776,6 +4930,106 @@ mechanisms are:
   results also land inside it. Simulator captures remain isolated in their own
   private directory and are writable only by the capture launch.
 
+- **Provider capability matrix ("degraded on").** Claude Code and Codex are the
+  first-class providers: the two subscription coding runtimes the product is
+  built around. A feature may be built in full for them first. Every other
+  provider is listed below with what is weaker, and reports the capability
+  `unsupported` or `unavailable` and fails closed where it has no form of it.
+  Nothing in code makes the providers match; the conformance harness checks
+  that a driver reports its own capabilities honestly, not that drivers agree.
+  A feature only some providers have still reaches the others through
+  `@octant/provider-sdk` or `@octant/plugin-api`, and no seam is widened for one
+  vendor.
+
+  The first token of each cell is what the driver declares in its static
+  capability block (`ProviderCapabilitySupport`, or `absent` where the block
+  omits an optional capability, which reads as `unsupported`; `varies` where the
+  value is computed per install, profile, or model). The words after it say how
+  that value is refined once the driver probes or runs. A refinement that
+  upgrades a declaration (`unavailable` to `supported` after a reply reports
+  usage) is the degraded form: the capability exists but is not promised before
+  it is seen.
+
+  | Capability               | Claude Code                                                  | Codex                                                     | OpenCode                                                          | Pi                                                                             | ACP agents                                                                    | Ollama                                                    | Harness endpoints                                                                 | Oh My Pi                              |
+  | ------------------------ | ------------------------------------------------------------ | --------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------- |
+  | `streaming`              | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`                                                                   | `unavailable` until a reply streams                       | `unavailable` until a reply streams; a chat-completions endpoint may answer whole | `supported`                           |
+  | `resume`                 | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`; `unsupported` when the agent offers neither load nor resume      | `supported` by replaying history Octant holds             | `supported` by replaying history Octant holds                                     | `unsupported`                         |
+  | `interruption`           | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`                                                                   | `supported`                                               | `supported`                                                                       | `supported`                           |
+  | `approvals`              | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`                                                                   | `unsupported`                                             | `unsupported`; every Harness tool call passes the server instead                  | `unsupported`                         |
+  | `userQuestions`          | `supported`                                                  | `unsupported`                                             | `supported`; `unsupported` on the 2.x route                       | `unsupported`                                                                  | `varies`: `unsupported` on Mistral Vibe and fx                                | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+  | `reasoning`              | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `unavailable`; `supported` when the agent reports a reasoning option or model | `varies`: from each model's reported thinking             | `unavailable` until a response carries reasoning                                  | `supported`                           |
+  | `usage`                  | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `unsupported`; turns are not measured                                         | `unavailable` until a reply reports counts                | `unavailable` until a response reports usage                                      | `unsupported`; turns are not measured |
+  | `toolActivity`           | `supported`                                                  | `supported`                                               | `supported`                                                       | `supported`                                                                    | `supported`                                                                   | `varies`: from the models' tool support                   | `unsupported`                                                                     | `unsupported`                         |
+  | `fileChanges`            | `supported`                                                  | `supported`                                               | `unsupported`                                                     | `unavailable`                                                                  | `unavailable`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unavailable`                         |
+  | `diffs`                  | `supported`                                                  | `supported`                                               | `supported`                                                       | `unavailable`                                                                  | `unavailable`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unavailable`                         |
+  | `taskProgress`           | `supported`                                                  | `supported`                                               | `supported`                                                       | `unavailable`                                                                  | `supported`                                                                   | `unsupported`                                             | `unsupported`                                                                     | `unavailable`                         |
+  | `nativeChildAgents`      | `unsupported`; Octant owns delegation                        | `unsupported`; Octant owns delegation                     | `unsupported`                                                     | `unsupported`                                                                  | `unavailable`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+  | `nativeAttachments`      | `unsupported`                                                | `unsupported`; `supported` when a model takes image input | `unsupported`; `supported` when a model takes non-text input      | `unsupported`                                                                  | `unsupported`                                                                 | `varies`: `supported` when a model takes images           | `unsupported`                                                                     | `unsupported`                         |
+  | `nativeWebResearch`      | `unsupported`                                                | `unsupported`                                             | `unsupported`                                                     | `unsupported`                                                                  | `unsupported`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+  | `appManagedTools`        | `supported`                                                  | `supported`                                               | `unsupported`; `supported` on macOS in a verified isolated config | `unsupported`; `supported` once the probe attests the tool bridge on Pi 0.85.1 | `varies`: `supported` on macOS when the agent serves HTTP MCP                 | `unsupported`                                             | `unsupported`; `supported` for each model a person verified                       | `unsupported`                         |
+  | `acpClientCapabilities`  | `absent`                                                     | `absent`                                                  | `absent`                                                          | `absent`                                                                       | `supported`                                                                   | `absent`                                                  | `absent`                                                                          | `absent`                              |
+  | `modelSwitch`            | `supported`                                                  | `supported`                                               | `absent`; the session stays on its model                          | `absent`; same                                                                 | `absent`; same                                                                | `absent`; Octant replays history, so the model may change | `absent`; Octant replays history, so the model may change                         | `absent`                              |
+  | `sessionCompaction.chat` | `supported`; `unavailable` when the install lacks `/compact` | `supported`; `unavailable` before Codex 0.162.1           | `absent`                                                          | `absent`                                                                       | `absent`                                                                      | `absent`; Octant summarizes                               | `unsupported`; Octant summarizes                                                  | `absent`                              |
+  | `sessionCompaction.work` | as Chat                                                      | as Chat                                                   | `absent`                                                          | `absent`                                                                       | `absent`                                                                      | `absent`                                                  | `unsupported`; Octant summarizes                                                  | `absent`                              |
+  | `sessionCompaction.code` | as Chat                                                      | as Chat                                                   | `absent`                                                          | `absent`                                                                       | `absent`                                                                      | `absent`                                                  | `supported`; Octant Harness compacts its own transcript                           | `absent`                              |
+  | `citations`              | `unsupported`                                                | `unsupported`                                             | `unsupported`                                                     | `unsupported`                                                                  | `unsupported`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+  | `harnessAutoReview`      | `supported`                                                  | `supported`                                               | `unsupported`                                                     | `unsupported`                                                                  | `unsupported`                                                                 | `unsupported`                                             | `unsupported`                                                                     | `unsupported`                         |
+
+  Which driver kinds each column covers, and how each may be used in a mode, as
+  `providerCatalogCapabilities` in `@octant/domain` holds it. A runtime's Work and
+  Code tools reach the models its connection check reports with tool use;
+  Harness endpoints reach them only for models a person verified.
+
+  | Column            | Driver kinds                                                                                                     | Chat  | Work              | Code              | Agent loop       |
+  | ----------------- | ---------------------------------------------------------------------------------------------------------------- | ----- | ----------------- | ----------------- | ---------------- |
+  | Claude Code       | `claude`                                                                                                         | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Codex             | `codex`                                                                                                          | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | OpenCode          | `opencode`                                                                                                       | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Pi                | `pi`                                                                                                             | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | ACP agents        | `kilo`, `devin`, `mistral-vibe`, `kimi-code`, `grok`, `goose`, `glm`, `gemini`, `copilot`, `cline`, `qwen`, `fx` | `yes` | `checked-models`  | `checked-models`  | `runtime`        |
+  | Ollama            | `ollama`                                                                                                         | `yes` | `no`              | `no`              | `replies-only`   |
+  | Harness endpoints | `openai-compatible`, `anthropic-compatible`, `azure-foundry`                                                     | `yes` | `verified-models` | `verified-models` | `octant-harness` |
+  | Oh My Pi          | `oh-my-pi`                                                                                                       | `no`  | `no`              | `no`              | `none`           |
+
+  The image profiles (`openai-image`, `gemini-native-image`, `bfl-image`,
+  `ideogram-image`) are not turn drivers and are not in the matrix.
+
+  Where each provider is weaker than Claude Code and Codex:
+
+  - **Codex** has no user questions, so a question the model would ask is not
+    offered. It takes image input only when a model reports it. Compaction
+    needs Codex 0.162.1 or newer.
+  - **OpenCode** reports no file changes, has no model switch inside a session
+    and no runtime compaction, and offers Octant's tools only on macOS in the
+    verified isolated configuration. A 2.x runtime whose confined jail cannot
+    serve a Git work tree is listing-only: models show, no turn is offered.
+  - **Pi** reports no user questions, file changes, diffs, or task progress,
+    and offers Octant's tools only after its probe attests the tool bridge on
+    the one release that bridge was read against.
+  - **ACP agents** do not report usage, so a spend ceiling leaves their turns
+    out and says so. They report no file changes or diffs, ask no user
+    questions on Mistral Vibe and fx, resume only when the agent offers load or
+    resume, and offer Octant's tools only on macOS when the agent serves HTTP
+    MCP. fx is also refused in Chat and Plan.
+  - **Ollama** is replies only: Chat, no tools, no approvals, no questions, no
+    file changes. Streaming, reasoning, usage, and tool activity are claimed
+    only after a reply shows them.
+  - **Harness endpoints** carry the Octant Harness agent loop. They have no
+    provider approvals or questions, claim streaming, reasoning, and usage only
+    after a response shows them, and offer Octant's tools per verified model.
+    Chat and Work compaction is the host's, not the endpoint's.
+  - **Oh My Pi** lists models and starts no session; its driver refuses
+    `acquire`, so it never reaches a picker.
+
+  `providerFeatureMatrix.test.ts` pins this section: every
+  `ProviderCapabilities` field has a row, every non-image driver kind appears in
+  exactly one column, the leading token of each cell equals the value in the
+  driver's static capability block, and the mode columns equal
+  `providerCatalogCapabilities`. It cannot see a refinement made at probe time
+  (the words after the first token), nor the compaction rows, which the drivers
+  assign outside the static blocks; the conformance harness covers the
+  compaction claim, and the rest is reviewed with the driver.
+
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,
   terminal lifetimes, and output. Terminal requests with direct `args` use
@@ -4817,7 +5071,7 @@ mechanisms are:
   Project inactive or rebound ends the terminal the same way. A host restart
   ends a terminal still recorded as running as `host-restarted`, since its
   process did not survive.
-- **Terminal Browser grant (built except desktop packaging).** A person may start a Code thread
+- **Terminal Browser grant.** A person may start a Code thread
   terminal with a Browser grant, so a provider CLI they type there can drive
   that thread's Browser and nothing else. It is off by default, asked for per
   terminal, and honored only from a local window: a paired device, a routine, or
@@ -4836,8 +5090,11 @@ mechanisms are:
   and end are journaled without the token or address. The window switches a
   terminal on with a restart the person confirms, shows the state the host
   reports, and shows the first effect on an origin as a request from the
-  terminal, not from the thread's agent. Not built: desktop packaging of the
-  `octant` command. Detail is in
+  terminal, not from the thread's agent. The packaged macOS app ships an
+  `octant` that runs only `octant mcp`, with the app's own executable in Node
+  mode; a granted terminal, and no other, starts with its folder first on
+  `PATH` and may read that folder and the app runtime it starts with, nothing
+  more. Detail is in
   [Terminal Browser grant](design/terminal-browser-grant.md).
 - **Terminal shell configuration.** On macOS a thread or Project terminal is
   the person's login shell (`-l`), and its read roots add, read-only and only

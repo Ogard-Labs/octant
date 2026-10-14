@@ -10,6 +10,7 @@ import {
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Journal } from "../persistence/journal";
+import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { catchUpProjection } from "../persistence/projection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -148,6 +149,46 @@ describe("ExternalContentIngestionStore", () => {
           .prepare(`SELECT event_name FROM event_journal WHERE event_name = ?`)
           .all(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested),
       ).toHaveLength(1);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("refuses, rather than claiming a mark, when every append loses to another writer", () => {
+    const { connection } = openHarness();
+    try {
+      let attempts = 0;
+      const store = new ExternalContentIngestionStore({
+        journal: {
+          append: () => {
+            attempts += 1;
+            throw new ConcurrencyConflict({
+              aggregateType: "thread-external-content",
+              aggregateId: ids.thread,
+              expectedVersion: 0,
+              actualVersion: 1,
+            });
+          },
+        },
+        connection,
+        uuid: () => ids.event,
+        clock: () => now,
+        actor: decodeActor({ kind: "system", actorId: ids.actor }),
+      });
+
+      expect(
+        store.record({
+          threadId: ids.thread,
+          provenance: { origin: "tool-result", sourceLabel: "web-fetch" },
+          contentReference: "page-1",
+          correlationId: ids.correlation,
+          authorized: true,
+        }),
+      ).toEqual({ kind: "refused", reason: "contended" });
+      expect(attempts).toBe(3);
+      expect(readThreadExternalContentTaint(connection, ids.thread).externalContentIngested).toBe(
+        false,
+      );
     } finally {
       connection.close();
     }
