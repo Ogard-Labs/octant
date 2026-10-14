@@ -37,7 +37,7 @@ import { launchFor, threadRule } from "./nativeHarnessEgressProxy.test-support";
 const enabled = process.env.OCTANT_RUN_EGRESS_PROXY_BENCHMARK === "1";
 const BUDGET = 1.1;
 const RUNS = Number(process.env.OCTANT_EGRESS_PROXY_BENCHMARK_RUNS ?? "9");
-const ORIGIN_ADDRESS = "203.0.113.20";
+const ORIGIN_ADDRESS = "93.184.216.20";
 
 const root = enabled ? realpathSync(mkdtempSync(join(tmpdir(), "octant-egress-bench-"))) : "";
 const closers: Array<() => Promise<void>> = [];
