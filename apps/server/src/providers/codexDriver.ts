@@ -51,6 +51,7 @@ import {
   decodeAccountReadResult,
   decodeConfigReadResult,
   decodeModelListResult,
+  decodeSkillsListResult,
   decodeThreadResumeResult,
   decodeThreadStartResult,
   decodeThreadCompactStartResult,
@@ -64,6 +65,7 @@ import {
   type CodexRpcId,
   type CodexRateLimitsReadResult,
   type CodexServerMessage,
+  type CodexSkillsListResult,
   type CodexThreadResult,
   type CodexTurnResult,
   type CodexTurnSteerResult,
@@ -91,7 +93,8 @@ export interface CodexThreadStartInput {
   readonly serviceTier?: string;
   /**
    * app-server config overrides: `model_reasoning_effort` carries the reasoning
-   * selection, and a Work or Chat thread carries its mode's overrides.
+   * selection, every thread carries its Project skills switched off, and a
+   * Work or Chat thread carries its mode's overrides.
    */
   readonly config?: CodexThreadConfig;
   /** An empty list gives the thread no execution environment (Chat). */
@@ -107,6 +110,9 @@ export interface CodexThreadConfig {
   readonly "features.plugins"?: false;
   readonly "features.apps"?: false;
   readonly mcp_servers?: Readonly<Record<string, { readonly enabled: false }>>;
+  readonly skills?: {
+    readonly config: ReadonlyArray<{ readonly path: string; readonly enabled: false }>;
+  };
 }
 
 export interface CodexThreadResumeInput {
@@ -179,6 +185,45 @@ function codexChatThreadConfig(
   );
 }
 
+/**
+ * The `skills/list` scopes whose skills do not come from the Project: the
+ * user's own (`$CODEX_HOME/skills`, `~/.agents/skills`), Codex's bundled ones,
+ * and the administrator's. Any other scope, including one a later release
+ * adds, is treated as the Project's and switched off.
+ */
+const CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT = new Set(["user", "system", "admin"]);
+
+/**
+ * Codex loads every `.agents/skills` package in the folders from the
+ * repository root down to `cwd` by itself, as `scope: "repo"`, enabled, so a
+ * Project skill reached a turn without Octant's review, trust and enable
+ * steps. Measured against codex-cli 0.162.1 with `skills/list`: no setting
+ * stops that discovery. `features.skip_host_skill_discovery` is ignored by the
+ * app-server, `project_root_markers = []` still scans `cwd`, and a
+ * `skills.config` rule matches only one skill's exact name or `SKILL.md` path.
+ * So each Project skill found at `cwd` is switched off by its path; a name
+ * would also switch off a user skill of the same name. The listing bypasses
+ * Codex's cache because a skill added since the last listing would otherwise
+ * be missed. A thread whose skills cannot be listed does not start.
+ *
+ * The rules hold for the thread as started or resumed: a skill created in the
+ * Project later is enabled from the next turn until the thread is resumed.
+ */
+function codexProjectSkillsConfig(
+  client: CodexClientPort,
+  cwd: string,
+): Effect.Effect<NonNullable<CodexThreadConfig["skills"]>, ProviderFailure> {
+  return request(() => client.skillsList({ cwds: [cwd], forceReload: true })).pipe(
+    Effect.map((result) => ({
+      config: result.data.flatMap((entry) =>
+        entry.skills
+          .filter((skill) => !CODEX_SKILL_SCOPES_OUTSIDE_THE_PROJECT.has(skill.scope))
+          .map((skill) => ({ path: skill.path, enabled: false as const })),
+      ),
+    })),
+  );
+}
+
 export type CodexTurnInputItem =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "image"; readonly url: string };
@@ -214,6 +259,10 @@ export interface CodexClientPort {
   rateLimitsRead(): Promise<CodexRateLimitsReadResult>;
   modelList(cursor?: string): Promise<CodexModelListResult>;
   configRead(input: { readonly cwd: string }): Promise<CodexConfigReadResult>;
+  skillsList(input: {
+    readonly cwds: readonly [string];
+    readonly forceReload: true;
+  }): Promise<CodexSkillsListResult>;
   threadStart(input: CodexThreadStartInput): Promise<CodexThreadResult>;
   threadResume(input: CodexThreadResumeInput): Promise<CodexThreadResult>;
   turnStart(input: CodexTurnStartInput): Promise<CodexTurnResult>;
@@ -652,6 +701,7 @@ export function makeCodexClient(connection: CodexAppServerConnection): CodexClie
         decodeModelListResult,
       ),
     configRead: (input) => rpc.request("config/read", input, decodeConfigReadResult),
+    skillsList: (input) => rpc.request("skills/list", input, decodeSkillsListResult),
     threadStart: (input) => rpc.request("thread/start", input, decodeThreadStartResult),
     threadResume: (input) => rpc.request("thread/resume", input, decodeThreadResumeResult),
     turnStart: (input) => rpc.request("turn/start", input, decodeTurnStartResult),
@@ -936,10 +986,17 @@ function makeConnection(
     })();
     let unsubscribe: (() => void) | undefined;
     let pendingLifecycleRegistrations = 0;
-    const modeThreadConfig = (): Effect.Effect<CodexThreadConfig | undefined, ProviderFailure> =>
-      mode === "chat"
-        ? codexChatThreadConfig(client, projectRoot)
-        : Effect.succeed(mode === "work" ? CODEX_WORK_CONFIG : undefined);
+    const modeThreadConfig = (): Effect.Effect<CodexThreadConfig, ProviderFailure> =>
+      Effect.gen(function* () {
+        const skills = yield* codexProjectSkillsConfig(client, projectRoot);
+        const modeConfig =
+          mode === "chat"
+            ? yield* codexChatThreadConfig(client, projectRoot)
+            : mode === "work"
+              ? CODEX_WORK_CONFIG
+              : {};
+        return { ...modeConfig, skills };
+      });
 
     const offer = (event: ProviderRuntimeEvent) => Effect.runFork(Queue.offer(queue, event));
     const activate = (state: SessionState) => {
@@ -1293,15 +1350,14 @@ function makeConnection(
             }
             const dynamicTools = codexDynamicTools(input.tools);
             const modeConfig = yield* modeThreadConfig();
-            const config =
-              modeConfig === undefined ? undefined : { ...optionSettings.config, ...modeConfig };
+            const config = { ...optionSettings.config, ...modeConfig };
             const thread = yield* request(() =>
               client.threadStart({
                 cwd: projectRoot,
                 model: input.modelId,
                 ...settings,
                 ...optionSettings,
-                ...(config === undefined ? {} : { config }),
+                config,
                 ...(mode === "chat" ? { environments: [] as const } : {}),
                 ...(dynamicTools === undefined ? {} : { dynamicTools }),
               }),
@@ -1346,7 +1402,7 @@ function makeConnection(
                   // the same overrides, so they are stated on every resume.
                   client.threadResume({
                     threadId: input.resumeCursor.value,
-                    ...(modeConfig === undefined ? {} : { config: modeConfig }),
+                    config: modeConfig,
                   }),
                 catch: (error) =>
                   error instanceof CodexRpcClientFailure ? error : providerFailure(error),

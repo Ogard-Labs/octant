@@ -24,6 +24,7 @@ import type {
   CodexAccountReadResult,
   CodexConfigReadResult,
   CodexRateLimitsReadResult,
+  CodexSkillsListResult,
   CodexThreadResult,
   RateLimitSnapshot,
 } from "./codexProtocol";
@@ -126,6 +127,7 @@ function fixture(
       readonly nextCursor: string | null;
     }>;
     readonly configRead?: () => Promise<CodexConfigReadResult>;
+    readonly skillsList?: () => Promise<CodexSkillsListResult>;
     readonly threadResume?: (input: CodexThreadResumeInput) => Promise<CodexThreadResult>;
     readonly threadStart?: (input: CodexThreadStartInput) => Promise<CodexThreadResult>;
     readonly respondApproval?: (input: unknown) => Promise<void>;
@@ -169,6 +171,10 @@ function fixture(
     configRead: async (value) => {
       calls.push({ method: "config/read", input: value });
       return input.configRead === undefined ? { config: {} } : input.configRead();
+    },
+    skillsList: async (value) => {
+      calls.push({ method: "skills/list", input: value });
+      return input.skillsList === undefined ? { data: [{ skills: [] }] } : input.skillsList();
     },
     threadStart: async (value) => {
       calls.push({ method: "thread/start", input: value });
@@ -1021,7 +1027,7 @@ describe("Codex thread and turn lifecycle", () => {
       sandbox: "read-only",
       approvalsReviewer: "user",
       serviceTier: "fast",
-      config: { model_reasoning_effort: "low" },
+      config: { model_reasoning_effort: "low", skills: { config: [] } },
     });
     expect(starts[1]?.input).toEqual({
       cwd: projectRoot,
@@ -1029,6 +1035,7 @@ describe("Codex thread and turn lifecycle", () => {
       approvalPolicy: "on-request",
       sandbox: "read-only",
       approvalsReviewer: "user",
+      config: { skills: { config: [] } },
     });
     await acquired.close();
   });
@@ -1125,6 +1132,7 @@ describe("Codex thread and turn lifecycle", () => {
     );
     expect(f.calls.map(({ method }) => method)).toEqual([
       "subscribe",
+      "skills/list",
       "thread/start",
       "turn/start",
     ]);
@@ -1355,6 +1363,7 @@ describe("Codex thread and turn lifecycle", () => {
     await Effect.runPromise(acquired.connection.stop(sessionId));
     expect(f.calls.map(({ method }) => method)).toEqual([
       "subscribe",
+      "skills/list",
       "thread/start",
       "unsubscribe",
     ]);
@@ -1363,7 +1372,11 @@ describe("Codex thread and turn lifecycle", () => {
   });
 
   it("switches Codex's shell off for a Work thread on start and again on every resume", async () => {
-    const shellOff = { "features.shell_tool": false, "features.unified_exec": false };
+    const shellOff = {
+      "features.shell_tool": false,
+      "features.unified_exec": false,
+      skills: { config: [] },
+    };
     const f = fixture();
     const work = await acquireConnection(makeCodexDriver(f.options()), "work");
     await startSession(work.connection);
@@ -1386,9 +1399,13 @@ describe("Codex thread and turn lifecycle", () => {
     const code = fixture();
     const coding = await acquireConnection(makeCodexDriver(code.options()), "code");
     await startSession(coding.connection);
-    expect(code.calls.find(({ method }) => method === "thread/start")?.input).not.toHaveProperty(
+    expect(code.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
+      config: { skills: { config: [] } },
+    });
+    expect(code.calls.find(({ method }) => method === "thread/start")?.input).not.toHaveProperty([
       "config",
-    );
+      "features.shell_tool",
+    ]);
     await coding.close();
   });
 
@@ -1400,6 +1417,7 @@ describe("Codex thread and turn lifecycle", () => {
       "features.plugins": false,
       "features.apps": false,
       mcp_servers: { node_repl: { enabled: false }, "docs.local": { enabled: false } },
+      skills: { config: [] },
     };
     const f = fixture({
       configRead: async () => ({
@@ -1460,6 +1478,83 @@ describe("Codex thread and turn lifecycle", () => {
     await chat.close();
   });
 
+  it("switches off by path every Project skill Codex lists, on start and every resume, in every mode", async () => {
+    const listing: CodexSkillsListResult = {
+      data: [
+        {
+          skills: [
+            { path: `${projectRoot}/.agents/skills/probe/SKILL.md`, scope: "repo" },
+            { path: "/tmp/.agents/skills/repo-probe/SKILL.md", scope: "repo" },
+            { path: `${projectRoot}/.agents/skills/later/SKILL.md`, scope: "workspace" },
+            { path: "/Users/someone/.agents/skills/mine/SKILL.md", scope: "user" },
+            { path: "/Users/someone/.codex/skills/.system/imagegen/SKILL.md", scope: "system" },
+            { path: "/etc/codex/skills/policy/SKILL.md", scope: "admin" },
+          ],
+        },
+      ],
+    };
+    const skillsOff = {
+      config: [
+        { path: `${projectRoot}/.agents/skills/probe/SKILL.md`, enabled: false },
+        { path: "/tmp/.agents/skills/repo-probe/SKILL.md", enabled: false },
+        { path: `${projectRoot}/.agents/skills/later/SKILL.md`, enabled: false },
+      ],
+    };
+    for (const mode of ["chat", "work", "code"] as const) {
+      const f = fixture({ skillsList: async () => listing });
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), mode);
+      await startSession(acquired.connection);
+      await Effect.runPromise(
+        acquired.connection.resume({
+          sessionId: secondSessionId,
+          resumeCursor: { driverKind: "codex", value: "thread-existing" },
+          executionPolicy: "approval-gated",
+        }),
+      );
+      // Each lifecycle call is preceded by a listing of its own.
+      const methods = f.calls.map(({ method }) => method);
+      const start = methods.indexOf("thread/start");
+      const resume = methods.indexOf("thread/resume");
+      expect(methods.lastIndexOf("skills/list", start), mode).toBeGreaterThanOrEqual(0);
+      expect(methods.lastIndexOf("skills/list", resume), mode).toBeGreaterThan(start);
+      for (const at of [start, resume]) {
+        expect(f.calls[at]?.input, mode).toMatchObject({ config: { skills: skillsOff } });
+      }
+      expect(
+        f.calls.filter(({ method }) => method === "skills/list").map(({ input }) => input),
+      ).toEqual([
+        { cwds: [projectRoot], forceReload: true },
+        { cwds: [projectRoot], forceReload: true },
+      ]);
+      await acquired.close();
+    }
+  });
+
+  it("refuses to start or resume a thread in any mode when Codex cannot list its skills", async () => {
+    for (const mode of ["chat", "work", "code"] as const) {
+      const f = fixture({
+        skillsList: async () => {
+          throw new Error("skills unreadable");
+        },
+      });
+      const acquired = await acquireConnection(makeCodexDriver(f.options()), mode);
+      await expect(startSession(acquired.connection)).rejects.toThrow();
+      await expect(
+        Effect.runPromise(
+          acquired.connection.resume({
+            sessionId: secondSessionId,
+            resumeCursor: { driverKind: "codex", value: "thread-existing" },
+            executionPolicy: "approval-gated",
+          }),
+        ),
+      ).rejects.toThrow();
+      expect(
+        f.calls.some(({ method }) => method === "thread/start" || method === "thread/resume"),
+      ).toBe(false);
+      await acquired.close();
+    }
+  });
+
   it("resumes only Codex cursors that exist under the exact Project root", async () => {
     const f = fixture();
     const acquired = await acquireConnection(makeCodexDriver(f.options()));
@@ -1473,6 +1568,7 @@ describe("Codex thread and turn lifecycle", () => {
     expect(valid.resumeCursor).toEqual({ driverKind: "codex", value: "thread-existing" });
     expect(f.calls.find(({ method }) => method === "thread/resume")?.input).toEqual({
       threadId: "thread-existing",
+      config: { skills: { config: [] } },
     });
     for (const resumeCursor of [
       { driverKind: "opencode" as const, value: "thread-existing" },
@@ -2123,6 +2219,7 @@ describe("Codex execution authority and approvals", () => {
         approvalPolicy,
         sandbox,
         approvalsReviewer: "user",
+        config: { skills: { config: [] } },
       });
       await acquired.close();
     },
