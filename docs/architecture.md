@@ -5342,7 +5342,12 @@ client shows the failure page.
 
 **Forwarder and signer on the client.** The forwarder runs in the desktop
 app's main process and binds `127.0.0.1` and `::1` on one port the desktop
-records, so the page's origin stays the same across launches. It holds no
+records, so the page's origin stays the same across launches. A port cannot be
+held while the app is closed. When the recorded port is taken at launch, the
+forwarder tries the next free port in a small fixed range, records it, and the
+next Open says that pages opened earlier start with empty storage, because
+their origin changed; when the whole range is taken, Open is refused with that
+reason and nothing else in Octant is affected. It holds no
 private key: device keys are non-extractable WebCrypto keys in the renderer's
 storage. For each upstream request the forwarder builds the proof payload and
 asks an open Octant window to sign it over IPC. The renderer signs only
@@ -5373,15 +5378,29 @@ would run on Octant's origin next to its session cookie); wildcard DNS for the
 host (it needs public DNS or a resolver, which is ingress or relay territory).
 
 **Who can use a name.** Loopback is reachable by every process on the client,
-including another OS user. A name answers only to a browser holding that
-open's claim cookie. Open mints a one-time claim token. Octant's own browser
-gets the cookie set directly in its partition; the default browser opens
-`/.octant/claim` on the name with the token in the fragment, which the page
-posts back, the launch-token pattern `octant web` uses. The cookie has a
-reserved name and is `HttpOnly`, `SameSite=Strict`, and host-only; the
-forwarder strips it before forwarding and drops any upstream `Set-Cookie` of
-that name. A cross-site page in the person's browser sends no claim cookie and
-is refused.
+including another OS user, and any of them can serve some other
+`*.octant.localhost` name on some other port. Every such name is same-site
+with the proxied one, and a cookie for a name is sent to every port on it, so
+neither `SameSite=Strict` nor the exact `Host` match proves where a request
+came from. The forwarder therefore admits a request only when it carries that
+open's secret and, where the browser sends fetch metadata, `Sec-Fetch-Site` is
+`same-origin` or `none` and any `Origin` is the name's exact origin.
+`same-site` and `cross-site` requests are refused, so a sibling name's page
+cannot drive the dev server through the person's browser.
+
+Open mints the secret. Octant's own browser never holds it as a cookie: the
+desktop adds it as a request header only to requests for the name's exact
+origin, so no other port ever sees it. The default browser gets it as a
+cookie: Open loads `/.octant/claim` on the name with a one-time token in the
+fragment, which the page posts back, the launch-token pattern `octant web`
+uses. The cookie has a reserved name and is `HttpOnly`, `SameSite=Strict`, and
+host-only; the forwarder strips it before forwarding and drops any upstream
+`Set-Cookie` of that name. Residual risk, stated in the user guide: because
+browsers send a name's cookies to every port on it, a process on the client
+that gets the person's browser to request the name on its own port receives
+the cookie and can replay it to the forwarder. What it reaches is that one dev
+server for as long as the grant lives, never Octant authority on either
+computer. Whether to offer the default browser at all is an open decision.
 
 **What the page sees.** The page's origin is the name. Upstream, the dev
 server sees `Host: localhost:<port>`, and `Origin` and `Referer` that name the
@@ -5457,6 +5476,7 @@ forwarder serves at the name; a refusal before opening is a line on the row.
 | No Octant window open               | Open an Octant window to keep this page connected.                                       |
 | Over a limit                        | {host} is busy with other requests from this computer. Try again in a moment.            |
 | Request body too large              | This upload is over the 8 MB Octant can send to {host}.                                  |
+| Forwarder ports all taken           | Octant can't open pages here: its local ports {first}–{last} are in use.                 |
 | Live updates not connected (in-app) | Live updates aren't connected. A dev server set to a fixed reload port can't reach this. |
 
 ## Package map

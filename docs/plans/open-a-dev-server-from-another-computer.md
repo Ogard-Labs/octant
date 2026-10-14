@@ -92,6 +92,23 @@ order in which the work would land. It does not authorize building or merging.
     Recommended: **A**. Opening is the person browsing, not the agent
     writing, and a remote device gets no more than a local window.
 
+11. **Opening in the default browser.**
+    - A. Offer Open in browser, with the replayable-cookie risk stated in the
+      user guide.
+    - B. Octant's browser only, where the secret is a header the desktop adds
+      for the exact origin and never a cookie.
+
+    Recommended: **A**. The exposure is one dev server the person opened, to
+    a process already running on their computer, and the issue asks for the
+    person's own browser. Choose B if review weighs that risk higher.
+
+12. **Forwarder port range.**
+    - A. Ten ports from one fixed default, falling forward on collision.
+    - B. Any free port the system assigns.
+
+    Recommended: **A**. A small known range keeps names recognizable and makes
+    the refusal copy precise; B changes every origin on each collision.
+
 ## Slices
 
 Each slice is one reviewable change. Slices 1 to 4 are host-only and ship
@@ -136,7 +153,11 @@ dark; slice 5 makes the feature reachable.
    pages, the renderer signing channel, Open and Open in browser on Local
    servers and Running services, and the live-updates indicator.
    Tests: desktop tests that the name is stable for the same host, thread, and
-   port; an unknown `Host` and a request without the claim cookie are refused;
+   port; an unknown `Host`, a request without the secret, and a `same-site` or
+   `cross-site` request from a sibling `*.octant.localhost` name are refused;
+   Octant's browser sends the secret only to the name's exact origin; a taken
+   recorded port moves to the next in the range and a fully taken range
+   refuses Open with its copy;
    the renderer refuses to sign anything but a proxy-route payload for a grant
    it holds; `Location` and `Set-Cookie` rewriting; web component tests for
    the row states and failure lines; rendered QA of both cards on a client
