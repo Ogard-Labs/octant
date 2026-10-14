@@ -13,13 +13,30 @@ import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
 const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
-export type NativeHarnessApprovalOutcome = "approved" | "denied" | "expired" | "cancelled";
+/**
+ * At most this many harness approvals wait for a person at once across the
+ * whole host, the same cap the MCP and browser tool approvals use. A lead or
+ * child that keeps asking would otherwise stack prompts without bound; past
+ * the cap a call is refused at once and nothing is journaled.
+ */
+export const MAX_WAITING_NATIVE_HARNESS_APPROVALS = 32;
+
+export type NativeHarnessApprovalOutcome =
+  | "approved"
+  | "denied"
+  | "expired"
+  | "cancelled"
+  | "too-many-waiting";
+
+/** How an asked, journaled approval settles; a refused ask is never journaled. */
+type SettledApprovalOutcome = Exclude<NativeHarnessApprovalOutcome, "too-many-waiting">;
 
 interface Waiter {
   readonly threadId: string;
   readonly approvalClass: string;
   readonly allowRemember: boolean;
-  readonly resolve: (outcome: NativeHarnessApprovalOutcome, remembered?: boolean) => void;
+  readonly expiresAt: number;
+  readonly resolve: (outcome: SettledApprovalOutcome, remembered?: boolean) => void;
   readonly timer: ReturnType<typeof setTimeout>;
   readonly onAbort: () => void;
   readonly signal: AbortSignal | undefined;
@@ -79,6 +96,10 @@ export class NativeHarnessApprovalStore {
     ) {
       return Promise.resolve("approved");
     }
+    this.#expire();
+    if (this.#waiters.size >= MAX_WAITING_NATIVE_HARNESS_APPROVALS) {
+      return Promise.resolve("too-many-waiting");
+    }
     this.#options.sessions.ensure({
       threadId: input.threadId,
       mode: input.mode,
@@ -87,6 +108,8 @@ export class NativeHarnessApprovalStore {
       lead: input.lead,
     });
     const approvalId = decodeNativeHarnessApprovalId(this.#options.uuid());
+    const askedAt = decodeUtcTimestamp(this.#options.clock());
+    const timeoutMs = this.#options.timeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
     const approval = decodeNativeHarnessApproval({
       id: approvalId,
       toolName: input.toolName,
@@ -98,7 +121,7 @@ export class NativeHarnessApprovalStore {
       approvalClass: input.approvalClass,
       ...(singleUse ? { singleUse: true } : {}),
       status: "pending",
-      askedAt: decodeUtcTimestamp(this.#options.clock()),
+      askedAt,
     });
     this.#options.sessions.askApproval(input.threadId, approval);
     try {
@@ -107,7 +130,7 @@ export class NativeHarnessApprovalStore {
       // A surface that cannot show the approval does not stop it being asked.
     }
     return new Promise((resolve) => {
-      const settle = (outcome: NativeHarnessApprovalOutcome, remembered?: boolean) => {
+      const settle = (outcome: SettledApprovalOutcome, remembered?: boolean) => {
         const waiter = this.#waiters.get(String(approvalId));
         if (waiter === undefined) return;
         this.#waiters.delete(String(approvalId));
@@ -123,11 +146,9 @@ export class NativeHarnessApprovalStore {
         threadId: input.threadId,
         approvalClass: input.approvalClass,
         allowRemember: input.source === undefined && !singleUse,
+        expiresAt: Date.parse(askedAt) + timeoutMs,
         resolve: settle,
-        timer: setTimeout(
-          () => settle("expired"),
-          this.#options.timeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS,
-        ),
+        timer: setTimeout(() => settle("expired"), timeoutMs),
         onAbort: () => settle("cancelled"),
         signal: input.signal,
       };
@@ -146,6 +167,7 @@ export class NativeHarnessApprovalStore {
    * a reader listing what a person can still answer never lists a dead one.
    */
   waiting(): ReadonlyArray<{ readonly threadId: string; readonly approvalId: string }> {
+    this.#expire();
     return [...this.#waiters].map(([approvalId, waiter]) => ({
       threadId: waiter.threadId,
       approvalId,
@@ -157,6 +179,7 @@ export class NativeHarnessApprovalStore {
     approvalId: string,
     decision: "approve" | "approve-always" | "deny",
   ): "decided" | "approval-not-found" | "already-settled" {
+    this.#expire();
     const waiter = this.#waiters.get(approvalId);
     if (waiter === undefined || waiter.threadId !== threadId) {
       return this.#options.sessions.settleApproval(
@@ -177,5 +200,28 @@ export class NativeHarnessApprovalStore {
     }
     waiter.resolve(decision === "deny" ? "denied" : "approved", remember);
     return "decided";
+  }
+
+  /**
+   * Settles every approval whose time is up by the clock as expired, journaled
+   * exactly as a timer expiry is. A reader of the session view calls this
+   * first so the person is never shown an overdue approval as pending.
+   */
+  expireOverdue(): void {
+    this.#expire();
+  }
+
+  /**
+   * The timer alone is not enough: it fires late behind a busy event loop or
+   * across a machine's sleep, and until it fires an overdue approval would
+   * still be listed, could still be approved, and would hold a waiting slot.
+   * So asking, listing, and deciding all check the clock first, as the MCP
+   * and browser tool approvals do.
+   */
+  #expire(): void {
+    const now = Date.parse(this.#options.clock());
+    for (const waiter of [...this.#waiters.values()]) {
+      if (waiter.expiresAt <= now) waiter.resolve("expired");
+    }
   }
 }
