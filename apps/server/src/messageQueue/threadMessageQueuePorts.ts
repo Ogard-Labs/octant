@@ -64,6 +64,11 @@ export interface ThreadMessageQueuePortDependencies {
     projectId: ProjectId | undefined,
   ) => boolean;
   readonly effectiveCodeThread?: (windowId: WindowId, thread: CodeThread) => CodeThread;
+  /**
+   * Whether the thread's session is being compacted. Every turn is refused
+   * meanwhile, so a queued message waits it out as it waits out a running turn.
+   */
+  readonly compacting?: (scope: ThreadMessageQueueScope) => boolean;
   readonly attachments: Pick<ThreadMessageQueueModePort, "retain" | "commit" | "release"> & {
     readonly prepare: (input: ThreadMessageQueueResource) => Promise<boolean>;
   };
@@ -209,7 +214,9 @@ export function createThreadMessageQueuePort(
       .digest("hex");
     return {
       status:
-        facts.tail?.status === "active" || ("executing" in facts && facts.executing)
+        facts.tail?.status === "active" ||
+        ("executing" in facts && facts.executing) ||
+        deps.compacting?.(input.scope) === true
           ? "busy"
           : "ready",
       binding,

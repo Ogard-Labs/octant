@@ -14,6 +14,8 @@ import {
   decodeCodeCheckoutId,
   decodeCodeCheckoutHead,
   decodeCodeOperationCommand,
+  decodeCodeOperationId,
+  decodeCodeThreadId,
   decodeCodeEvidenceBatchResponse,
   decodeCodeRelativePath,
   decodeHarnessRetryNotice,
@@ -53,7 +55,12 @@ import {
   decodeCodeFailure,
 } from "@octant/contracts";
 import { Effect } from "effect";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import type {
+  ProviderAcquireInput,
+  ProviderConnection,
+  ProviderDriver,
+  ProviderSessionResume,
+} from "@octant/provider-sdk/driver";
 import type { Journal } from "../persistence/journal";
 import { GhPullRequestPort, createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
@@ -347,6 +354,11 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly supportsModelSwitch?: (thread: CodeThread) => boolean;
   /**
+   * Whether the thread's session is being compacted. A turn is refused
+   * meanwhile: it would resume the session the runtime is rewriting.
+   */
+  readonly compactionRunning?: (threadId: CodeThreadId) => boolean;
+  /**
    * Reads the thread's own earlier conversation for a provider-switch handoff,
    * through the bounded selector a child's parent context uses. Absent means
    * this host cannot hand a conversation over, so a turn on a provider other
@@ -626,6 +638,33 @@ export interface CodeOperationRuntime {
    * the request gone.
    */
   turnAwaitsPerson?(threadId: string): boolean;
+  /**
+   * Whether a turn on the thread is being prepared, runs, or waits on the
+   * person. A compaction is refused meanwhile.
+   */
+  turnInProgress?(threadId: string): boolean;
+  /**
+   * The provider session a compaction of the thread resumes: the one its next
+   * turn would resume, in the checkout that turn would run in.
+   */
+  readonly compactionSessions?: {
+    /** Whether the thread has such a session. Reads stored facts only. */
+    readonly exists: (threadId: string) => boolean;
+    /** How full its window was at the thread's latest usage report, and when. */
+    readonly occupancy: (
+      threadId: string,
+    ) => { readonly tokens: number; readonly observedAt: string } | undefined;
+    /**
+     * How to open it, under the asking window's authority over the thread's
+     * checkout; undefined when that window may not, or the session is gone.
+     */
+    readonly open: (
+      threadId: string,
+      windowId: WindowId | undefined,
+    ) => Promise<
+      { readonly acquire: ProviderAcquireInput; readonly resume: ProviderSessionResume } | undefined
+    >;
+  };
   close(): Promise<void>;
   reconcile?: () => Promise<void>;
   /**
@@ -808,6 +847,15 @@ export function createCodeOperationRuntime(
     uuid: options.uuid,
     clock: options.clock,
   });
+  const startingTurns = new Map<string, number>();
+  const holdStartingTurn = (threadId: string) => {
+    startingTurns.set(threadId, (startingTurns.get(threadId) ?? 0) + 1);
+  };
+  const releaseStartingTurn = (threadId: string) => {
+    const remaining = (startingTurns.get(threadId) ?? 1) - 1;
+    if (remaining === 0) startingTurns.delete(threadId);
+    else startingTurns.set(threadId, remaining);
+  };
   const turns = new RuntimeTurnController({
     options,
     events,
@@ -911,6 +959,29 @@ export function createCodeOperationRuntime(
       : { resolveProfileSkills: options.resolveProfileSkills }),
   });
   turns.bindService(service);
+  /**
+   * The session the thread's next turn would resume, with nothing a turn would
+   * refuse: the same provider, checkout, and model (or one the provider can
+   * carry the session on to), and a cursor to resume from.
+   */
+  const compactableSession = (threadId: CodeThreadId) => {
+    const thread = options.persistence.readCodeThread(threadId);
+    if (thread === undefined || thread.lifecycle !== "active") return undefined;
+    const recovered = events.providerSessionForThread(thread.id, NO_OPERATION);
+    if (recovered.status !== "ok") return undefined;
+    const session = recovered.session;
+    const resumeCursor = session?.resumeCursor;
+    if (
+      session === undefined ||
+      resumeCursor === undefined ||
+      String(session.providerInstanceId) !== String(thread.providerInstanceId) ||
+      String(session.checkoutId) !== String(thread.checkoutId) ||
+      (String(session.modelId) !== String(thread.modelId) &&
+        options.supportsModelSwitch?.(thread) !== true)
+    )
+      return undefined;
+    return { thread, sessionId: session.sessionId, resumeCursor };
+  };
 
   return {
     terminals: terminal,
@@ -1110,147 +1181,167 @@ export function createCodeOperationRuntime(
     },
     revokeApprovals: (windowId) => approvalStore?.revokeWindow(windowId),
     execute: async (windowId, rawCommand, executeOptions) => {
-      const command = decodeCodeOperationCommand(rawCommand);
-      if (command.kind === "start-provider-turn") {
-        const thread = options.persistence.readCodeThread(command.threadId);
-        // The pause state is the thread's own; a window without Open
-        // authority over its Project learns nothing here, not even "paused".
-        if (
-          thread !== undefined &&
-          !(await options.windowAccess.canAccessProject(windowId, thread.projectId))
-        ) {
-          throw new CodeServiceError(
-            decodeCodeFailure({
-              category: "unauthorized",
-              message: "Code operation is unauthorized.",
-            }),
-          );
-        }
-        if (thread !== undefined && options.isProviderModelAllowed?.(thread) === false) {
-          throw new CodeServiceError(
-            decodeCodeFailure({
-              category: "unauthorized",
-              message:
-                "This provider or model is not allowed by this Code Project's provider policy.",
-            }),
-          );
-        }
-        if (thread !== undefined && Object.keys(thread.modelOptionValues ?? {}).length > 0) {
-          const probe = await options
-            .probeProvider?.(thread.providerInstanceId)
-            .catch(() => undefined);
-          const model = probe?.models.find(
-            (candidate) => String(candidate.id) === String(thread.modelId),
-          );
-          if (
-            probe === undefined ||
-            (probe.readiness !== "ready" && probe.readiness !== "degraded")
-          ) {
-            throw new CodeServiceError(
-              decodeCodeFailure({
-                category: "unavailable",
-                message:
-                  "Selected Code model options cannot be verified. Check the provider before sending.",
-              }),
-            );
-          }
-          if (
-            model === undefined ||
-            unsupportedModelOptionValues(thread.modelOptionValues, model.options).length > 0
-          ) {
-            throw new CodeServiceError(
-              decodeCodeFailure({
-                category: "unsupported",
-                message:
-                  "Selected Code model no longer offers these options. Choose an available option before sending.",
-              }),
-            );
-          }
-        }
-        const admission =
-          thread === undefined
-            ? undefined
-            : options.nativeHarness?.admitTurn?.({
-                threadId: String(thread.id),
-                mode: "code",
-                providerInstanceId: thread.providerInstanceId,
-                modelId: thread.modelId,
-                projectId: thread.projectId,
-              });
-        if (admission?.kind === "paused") {
-          throw new CodeServiceError(
-            decodeCodeFailure({
-              category: "waiting",
-              message: `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
-            }),
-          );
-        }
-        if (thread !== undefined && options.spendCeiling !== undefined) {
-          const spendReservationId = decodeSpendCeilingReservationId(options.uuid());
-          const spendAdmission = options.spendCeiling.admit({
-            reservationId: spendReservationId,
-            threadId: String(thread.id),
-            threadType: "code-thread",
-            projectId: String(thread.projectId),
-            turnUpperBoundTokens: WORK_TURN_SAFE_INPUT_TOKENS,
-          });
-          if (spendAdmission.status === "refused") {
-            throw new CodeServiceError(
-              decodeCodeFailure({
-                category: "unavailable",
-                message: spendAdmission.refusal.message,
-              }),
-            );
-          }
-          spendReservations.set(String(thread.id), spendReservationId);
-        }
-        turns.noteStart(command);
-      }
-      // Runtime work is opened by the service after its authoritative scope
-      // check, while provider turns outlive this call and are opened by the
-      // turn controller itself.
-      const observed = codeRuntimeWorkObserved(command);
+      // A turn counts as running for a compaction from the moment it passes the
+      // compaction check until it is launched or refused, because it reads the
+      // session it resumes while it is prepared.
+      let heldStart: string | undefined;
       try {
-        const result = await service.execute(windowId, command, executeOptions);
+        const command = decodeCodeOperationCommand(rawCommand);
         if (command.kind === "start-provider-turn") {
-          if (result.kind === "provider-turn-state" && result.state === "running") {
-            turns.launch(command.threadId);
-          } else {
+          const thread = options.persistence.readCodeThread(command.threadId);
+          // The pause state is the thread's own; a window without Open
+          // authority over its Project learns nothing here, not even "paused".
+          if (
+            thread !== undefined &&
+            !(await options.windowAccess.canAccessProject(windowId, thread.projectId))
+          ) {
+            throw new CodeServiceError(
+              decodeCodeFailure({
+                category: "unauthorized",
+                message: "Code operation is unauthorized.",
+              }),
+            );
+          }
+          if (thread !== undefined && options.compactionRunning?.(thread.id) === true) {
+            throw new CodeServiceError(
+              decodeCodeFailure({
+                category: "waiting",
+                message: "This session is being compacted. Send again when it finishes.",
+              }),
+            );
+          }
+          if (thread !== undefined) {
+            heldStart = String(thread.id);
+            holdStartingTurn(heldStart);
+          }
+          if (thread !== undefined && options.isProviderModelAllowed?.(thread) === false) {
+            throw new CodeServiceError(
+              decodeCodeFailure({
+                category: "unauthorized",
+                message:
+                  "This provider or model is not allowed by this Code Project's provider policy.",
+              }),
+            );
+          }
+          if (thread !== undefined && Object.keys(thread.modelOptionValues ?? {}).length > 0) {
+            const probe = await options
+              .probeProvider?.(thread.providerInstanceId)
+              .catch(() => undefined);
+            const model = probe?.models.find(
+              (candidate) => String(candidate.id) === String(thread.modelId),
+            );
+            if (
+              probe === undefined ||
+              (probe.readiness !== "ready" && probe.readiness !== "degraded")
+            ) {
+              throw new CodeServiceError(
+                decodeCodeFailure({
+                  category: "unavailable",
+                  message:
+                    "Selected Code model options cannot be verified. Check the provider before sending.",
+                }),
+              );
+            }
+            if (
+              model === undefined ||
+              unsupportedModelOptionValues(thread.modelOptionValues, model.options).length > 0
+            ) {
+              throw new CodeServiceError(
+                decodeCodeFailure({
+                  category: "unsupported",
+                  message:
+                    "Selected Code model no longer offers these options. Choose an available option before sending.",
+                }),
+              );
+            }
+          }
+          const admission =
+            thread === undefined
+              ? undefined
+              : options.nativeHarness?.admitTurn?.({
+                  threadId: String(thread.id),
+                  mode: "code",
+                  providerInstanceId: thread.providerInstanceId,
+                  modelId: thread.modelId,
+                  projectId: thread.projectId,
+                });
+          if (admission?.kind === "paused") {
+            throw new CodeServiceError(
+              decodeCodeFailure({
+                category: "waiting",
+                message: `${admission.status === "paused-by-advisor" ? "The advisor paused this thread" : "This thread is paused"}: ${admission.detail} Resume the harness session to continue.`,
+              }),
+            );
+          }
+          if (thread !== undefined && options.spendCeiling !== undefined) {
+            const spendReservationId = decodeSpendCeilingReservationId(options.uuid());
+            const spendAdmission = options.spendCeiling.admit({
+              reservationId: spendReservationId,
+              threadId: String(thread.id),
+              threadType: "code-thread",
+              projectId: String(thread.projectId),
+              turnUpperBoundTokens: WORK_TURN_SAFE_INPUT_TOKENS,
+            });
+            if (spendAdmission.status === "refused") {
+              throw new CodeServiceError(
+                decodeCodeFailure({
+                  category: "unavailable",
+                  message: spendAdmission.refusal.message,
+                }),
+              );
+            }
+            spendReservations.set(String(thread.id), spendReservationId);
+          }
+          turns.noteStart(command);
+        }
+        // Runtime work is opened by the service after its authoritative scope
+        // check, while provider turns outlive this call and are opened by the
+        // turn controller itself.
+        const observed = codeRuntimeWorkObserved(command);
+        try {
+          const result = await service.execute(windowId, command, executeOptions);
+          if (command.kind === "start-provider-turn") {
+            if (result.kind === "provider-turn-state" && result.state === "running") {
+              turns.launch(command.threadId);
+            } else {
+              turns.settleSpendReservation(command.threadId);
+            }
+          }
+          if (observed !== undefined) {
+            const state = codeRuntimeWorkStateFrom(command, result);
+            if (state !== undefined)
+              observeRuntimeWorkOutcome(
+                runtimeWork.settle({
+                  id: observed.id,
+                  threadId: command.threadId,
+                  kind: observed.kind,
+                  state,
+                }),
+              );
+          }
+          return result;
+        } catch (error) {
+          // A throw is the service refusing or breaking, not the work finishing.
+          // The record closes rather than staying open for a unit that will never
+          // report again.
+          if (command.kind === "start-provider-turn") {
             turns.settleSpendReservation(command.threadId);
           }
-        }
-        if (observed !== undefined) {
-          const state = codeRuntimeWorkStateFrom(command, result);
-          if (state !== undefined)
+          if (observed !== undefined)
             observeRuntimeWorkOutcome(
               runtimeWork.settle({
                 id: observed.id,
                 threadId: command.threadId,
                 kind: observed.kind,
-                state,
+                state: "failed",
               }),
             );
+          throw error;
+        } finally {
+          if (command.kind === "start-provider-turn") turns.clearStart(command.threadId);
         }
-        return result;
-      } catch (error) {
-        // A throw is the service refusing or breaking, not the work finishing.
-        // The record closes rather than staying open for a unit that will never
-        // report again.
-        if (command.kind === "start-provider-turn") {
-          turns.settleSpendReservation(command.threadId);
-        }
-        if (observed !== undefined)
-          observeRuntimeWorkOutcome(
-            runtimeWork.settle({
-              id: observed.id,
-              threadId: command.threadId,
-              kind: observed.kind,
-              state: "failed",
-            }),
-          );
-        throw error;
       } finally {
-        if (command.kind === "start-provider-turn") turns.clearStart(command.threadId);
+        if (heldStart !== undefined) releaseStartingTurn(heldStart);
       }
     },
     inspectTerminal: async (windowId, input) => {
@@ -1261,6 +1352,50 @@ export function createCodeOperationRuntime(
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
     admitsTurn: (windowId, thread) => service.admitsTurn(windowId, thread),
     turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
+    turnInProgress: (threadId) => startingTurns.has(threadId) || turns.holdsTurn(threadId),
+    compactionSessions: {
+      exists: (threadId) => compactableSession(decodeCodeThreadId(threadId)) !== undefined,
+      occupancy: (threadId) => {
+        const found = compactableSession(decodeCodeThreadId(threadId));
+        return found === undefined
+          ? undefined
+          : events.latestWindowOccupancy(found.thread.id, found.sessionId);
+      },
+      open: async (threadId, windowId) => {
+        if (windowId === undefined) return undefined;
+        const found = compactableSession(decodeCodeThreadId(threadId));
+        if (found === undefined) return undefined;
+        const stored = found.thread;
+        if (!(await options.windowAccess.canAccessProject(windowId, stored.projectId)))
+          return undefined;
+        const checkout = options.persistence.readCodeCheckout(stored.checkoutId);
+        if (checkout === undefined) return undefined;
+        const root = await options.resolveCheckoutRoot(windowId, stored, checkout);
+        if (root === undefined || root === null) return undefined;
+        const thread = options.sessionAuthority?.effectiveThread(windowId, stored) ?? stored;
+        return {
+          acquire: {
+            instanceId: thread.providerInstanceId,
+            mode: "code",
+            projectRoot: root.checkoutRoot,
+            permissionPersistence: thread.permissionPersistence,
+          },
+          resume: {
+            sessionId: found.sessionId,
+            resumeCursor: found.resumeCursor,
+            // The compaction runs no tool, so it never needs more than the
+            // gated posture; a Plan thread stays read-only.
+            executionPolicy: thread.executionPolicy === "plan" ? "plan" : "approval-gated",
+            modelId: thread.modelId,
+            ...(thread.modelOptionValues === undefined ||
+            Object.keys(thread.modelOptionValues).length === 0
+              ? {}
+              : { modelOptionValues: thread.modelOptionValues }),
+            tools: [],
+          },
+        };
+      },
+    },
     subscribe: (windowId, threadId, operationId, afterCursor, limit) =>
       service.subscribe(windowId, threadId, operationId, afterCursor, limit),
     readRepositoryTestStatus: (windowId, threadId, checkoutId) =>
@@ -1614,6 +1749,12 @@ function approvalPrompt(
   return { message, detail: boundApprovalDetail(`${effectDetail}\n\n${scope}`) };
 }
 
+/**
+ * Stands in for the operation a session read would otherwise exclude: a
+ * compaction is no turn, so every recorded turn counts as an earlier one.
+ */
+const NO_OPERATION = decodeCodeOperationId("00000000-0000-4000-8000-000000000000");
+
 const APPROVAL_DETAIL_SUFFIX =
   "\n[Additional approval detail omitted; the exact effect remains digest-bound.]";
 
@@ -1852,6 +1993,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   bindService(service: CodeOperationService): void {
     this.#service = service;
+  }
+
+  /** Whether a turn on the thread was noted, runs, or waits on the person. */
+  holdsTurn(threadId: string): boolean {
+    return this.#pending.has(threadId) || this.#active.has(threadId);
   }
 
   noteStart(command: Extract<CodeOperationCommand, { kind: "start-provider-turn" }>): void {

@@ -19,6 +19,7 @@ import {
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { ROUTINE_HOST_SCOPE_ID } from "../routineHostScope";
+import { CodeServiceError } from "../code/codeService";
 import { WorkTurnServiceError } from "../work/workTurnService";
 import { agentResultDeliveryReceipt } from "./agentResultDeliveryBatch";
 import { agentResultDeliveryBatchPrompt } from "./agentResultDeliveryPrompt";
@@ -123,6 +124,8 @@ export function createWorkAgentResultDeliveryPort(
 export function createCodeAgentResultDeliveryPort(
   input: AgentResultDeliveryPortDependencies & {
     readonly readThread: (threadId: CodeThreadId) => CodeThread | undefined;
+    /** Whether the thread's session is being compacted, which holds every new turn. */
+    readonly compacting?: (threadId: CodeThreadId) => boolean;
     readonly stageEvidence?: (
       windowId: WindowId,
       threadId: CodeThreadId,
@@ -151,6 +154,11 @@ export function createCodeAgentResultDeliveryPort(
       ) {
         return { kind: "refused", detail: "The parent Code thread is gone." };
       }
+      // The result waits the compaction out rather than being spent on a
+      // refused turn; it is offered again when the compaction ends.
+      if (input.compacting?.(thread.id) === true) {
+        return { kind: "deferred", detail: "The parent Code thread's session is being compacted." };
+      }
       try {
         const prompt = await input.stageEvidence(
           ROUTINE_HOST_SCOPE_ID,
@@ -177,6 +185,12 @@ export function createCodeAgentResultDeliveryPort(
                   : "The delivery was not admitted.",
             };
       } catch (error) {
+        // A compaction that began while the result was being staged refuses
+        // the turn as `waiting`, and the result waits it out. The refusal
+        // says so itself: by now the compaction may already have ended.
+        if (error instanceof CodeServiceError && error.failure.category === "waiting") {
+          return { kind: "deferred", detail: error.failure.message };
+        }
         return { kind: "refused", detail: refusalDetail(error) };
       }
     },

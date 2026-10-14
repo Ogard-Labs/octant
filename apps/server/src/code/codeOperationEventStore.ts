@@ -26,6 +26,7 @@ import {
   type CodeThreadId,
   type ProviderContextBreakdown,
   type ProviderInstanceId,
+  type ProviderSessionId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
@@ -304,6 +305,57 @@ export class CodeOperationEventStore {
         if (cursor !== undefined) conversations.set(String(frame.operationId), cursor.value);
       }
       return conversations;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * How full a provider session's window was at the thread's latest usage
+   * report: the occupancy the provider reported, or else the input its last
+   * request carried, which is what the window held then. Undefined when that
+   * report came from a turn on another session (a switch, or a fresh session
+   * whose turns reported nothing yet), when no turn reported usage, or when a
+   * record does not decode.
+   */
+  latestWindowOccupancy(
+    threadId: CodeThreadId,
+    sessionId: ProviderSessionId,
+  ): { readonly tokens: number; readonly observedAt: string } | undefined {
+    try {
+      const envelope = this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "usage",
+        limit: 1,
+      })[0];
+      if (
+        envelope === undefined ||
+        envelope.eventName !== CODE_OPERATION_EVENT_RECORDED ||
+        envelope.eventVersion !== 1
+      )
+        return undefined;
+      const frame = decodeCodeOperationEventFrame(envelope.payload);
+      if (String(frame.threadId) !== String(threadId) || frame.event.kind !== "usage")
+        return undefined;
+      const sessionReady = this.#journal
+        .latestThreadEvents({
+          aggregateType: "code-operation",
+          threadId: String(threadId),
+          kind: "provider-session-ready",
+          limit: MAX_SESSION_READY_RECORDS,
+        })
+        .map((ready) => decodeCodeOperationEventFrame(ready.payload))
+        .find((ready) => String(ready.operationId) === String(frame.operationId));
+      if (
+        sessionReady?.event.kind !== "provider-session-ready" ||
+        String(sessionReady.event.sessionId) !== String(sessionId)
+      )
+        return undefined;
+      return {
+        tokens: frame.event.contextTokens ?? frame.event.inputTokens,
+        observedAt: frame.occurredAt,
+      };
     } catch {
       return undefined;
     }

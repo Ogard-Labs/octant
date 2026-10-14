@@ -54,7 +54,7 @@ describe("context routes", () => {
     } as const;
     const executed = await route(request("/api/context/commands", command));
     expect(executed?.status).toBe(200);
-    expect(execute).toHaveBeenCalledWith(command, "local-window");
+    expect(execute).toHaveBeenCalledWith(command, "local-window", windowId);
 
     const forged = await route(request("/api/context/inspect", { subject, windowId }, capability));
     expect(forged?.status).toBe(400);
@@ -145,6 +145,24 @@ describe("context routes", () => {
     },
   );
 
+  it("refuses to compact a Code thread this window cannot open before it has any effect", async () => {
+    const execute = vi.fn(() => ({ kind: "compaction-started" }) as never);
+    const windowCanOpenThread = vi.fn(async () => false);
+    const route = handler({ execute }, windowCanOpenThread);
+
+    const response = await route(
+      request("/api/context/commands", {
+        kind: "compact-session",
+        subject: subjectOf("code-thread"),
+        compactionId,
+      }),
+    );
+
+    expect(response?.status).toBe(403);
+    expect(windowCanOpenThread).toHaveBeenCalledWith(windowId, "code-thread", subjectId);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it.each(["chat-thread", "work-thread", "code-thread"] as const)(
     "runs context commands on a %s the window can open",
     async (aggregateType) => {
@@ -158,7 +176,9 @@ describe("context routes", () => {
       for (const command of commandsFor(threadSubject)) {
         const response = await route(request("/api/context/commands", command));
         expect(response?.status).toBe(200);
-        expect(execute).toHaveBeenLastCalledWith(command, "local-window");
+        // The service learns which window asked: a Code thread's session is
+        // opened in its checkout under that window's authority.
+        expect(execute).toHaveBeenLastCalledWith(command, "local-window", windowId);
       }
       expect(windowCanOpenThread).toHaveBeenCalledWith(windowId, aggregateType, subjectId);
     },
@@ -221,6 +241,7 @@ describe("context routes", () => {
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "compact-session" }),
       "remote-device",
+      windowId,
     );
   });
 
@@ -251,6 +272,7 @@ function handler(
     execute: (
       command: unknown,
       principal: ContextRoutePrincipal,
+      window: WindowId,
     ) => ReturnType<ContextRouteService["execute"]>;
   }> = {},
   windowCanOpenThread: (
