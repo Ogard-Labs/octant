@@ -263,6 +263,26 @@ describe("findUnreachableModules", () => {
     expect(violations.map(({ path }) => path)).toEqual(["apps/server/src/egress/proxy.ts"]);
   });
 
+  it("reports a module that only a known island imports", () => {
+    const files = [
+      { path: "apps/server/src/egress/proxy.ts", content: `import { a } from "./wire";` },
+      { path: "apps/server/src/egress/wire.ts", content: "export const a = 1;" },
+    ];
+    const islands = new Map([["apps/server/src/egress/proxy.ts", "not started yet"]]);
+
+    // Listing the importer as an island exposes what only it depends on; the
+    // dependency is reported until it is listed too.
+    expect(findUnreachableModules(files, islands).map(({ path }) => path)).toEqual([
+      "apps/server/src/egress/wire.ts",
+    ]);
+    expect(
+      findUnreachableModules(
+        files,
+        new Map([...islands, ["apps/server/src/egress/wire.ts", "only the proxy imports it"]]),
+      ),
+    ).toEqual([]);
+  });
+
   it("suppresses a module listed in KNOWN_ISLANDS", () => {
     const [exemptPath] = [...KNOWN_ISLANDS.keys()];
     const violations = findUnreachableModules([

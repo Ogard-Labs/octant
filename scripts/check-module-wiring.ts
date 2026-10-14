@@ -110,6 +110,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "The host egress proxy, exercised by its own, hostile, and benchmark tests but started by no confined launch yet. Remove once the harness confinement launch starts it.",
   ],
   [
+    "apps/server/src/harness/nativeHarnessEgressWire.ts",
+    "Request-head and ClientHello readers whose only consumer is the proxy above. Remove once the harness confinement launch reaches the proxy.",
+  ],
+  [
     "packages/domain/src/toolEgressPolicy.ts",
     "The egress rule model and decision the proxy consults; its only consumer is the proxy above, so it is an island with it. Remove once the harness confinement launch reaches the proxy.",
   ],
@@ -337,8 +341,11 @@ function resolveRelative(fromPath: string, specifier: string, known: ReadonlySet
  * Every file reachable from a non-test module, an HTML entry point, or a package
  * export that something imports.
  */
-export function collectReferencedPaths(files: ReadonlyArray<ScannedFile>): ReadonlySet<string> {
-  return collectReferences(files, extractSpecifiers);
+export function collectReferencedPaths(
+  files: ReadonlyArray<ScannedFile>,
+  islands: ReadonlySet<string> = new Set(),
+): ReadonlySet<string> {
+  return collectReferences(files, extractSpecifiers, islands);
 }
 
 /**
@@ -347,13 +354,15 @@ export function collectReferencedPaths(files: ReadonlyArray<ScannedFile>): Reado
  */
 export function collectRuntimeReferencedPaths(
   files: ReadonlyArray<ScannedFile>,
+  islands: ReadonlySet<string> = new Set(),
 ): ReadonlySet<string> {
-  return collectReferences(files, extractRuntimeSpecifiers);
+  return collectReferences(files, extractRuntimeSpecifiers, islands);
 }
 
 function collectReferences(
   files: ReadonlyArray<ScannedFile>,
   extract: (content: string) => ReadonlyArray<string>,
+  islands: ReadonlySet<string>,
 ): ReadonlySet<string> {
   const known = new Set(files.map((file) => file.path));
   const exportMap = buildPackageExportMap(files);
@@ -377,6 +386,10 @@ function collectReferences(
     // references originating in tests or the scaffolding they share (support
     // files, fixtures, fakes, smokes) never count toward reachability.
     if (isTestScaffolding(file.path)) continue;
+
+    // An island is unreachable from the running host, so what it imports is not
+    // product use either; counting it would hide every module only it depends on.
+    if (islands.has(file.path)) continue;
 
     // Electron loads dedicated preloads from bundled output, so there is no
     // TypeScript import edge. Count only literal entries declared by tsdown.
@@ -407,8 +420,9 @@ function collectReferences(
 export function findUnreachableModules(
   files: ReadonlyArray<ScannedFile>,
   exemptions: ReadonlyMap<string, string> = KNOWN_ISLANDS,
+  islands: ReadonlySet<string> = new Set(exemptions.keys()),
 ): ReadonlyArray<WiringViolation> {
-  const referenced = collectReferencedPaths(files);
+  const referenced = collectReferencedPaths(files, islands);
   return files
     .filter((file) => isCandidate(file.path))
     .filter((file) => !referenced.has(file.path))
@@ -432,9 +446,10 @@ export function findUnreachableModules(
 export function findTypeOnlyReferencedModules(
   files: ReadonlyArray<ScannedFile>,
   exemptions: ReadonlyMap<string, string> = KNOWN_ISLANDS,
+  islands: ReadonlySet<string> = new Set(exemptions.keys()),
 ): ReadonlyArray<WiringViolation> {
-  const referenced = collectReferencedPaths(files);
-  const runtimeReferenced = collectRuntimeReferencedPaths(files);
+  const referenced = collectReferencedPaths(files, islands);
+  const runtimeReferenced = collectRuntimeReferencedPaths(files, islands);
   return files
     .filter((file) => isCandidate(file.path))
     .filter((file) => referenced.has(file.path) && !runtimeReferenced.has(file.path))
@@ -562,11 +577,12 @@ export function findStaleIslandExemptions(
 ): ReadonlyArray<WiringViolation> {
   const known = new Set(files.map((file) => file.path));
   const none: ReadonlyMap<string, string> = new Map();
+  const islands = new Set(exemptions.keys());
   const stillIslands = new Set(
     [
-      ...findUnreachableModules(files, none),
-      ...findTypeOnlyReferencedModules(files, none),
-      ...findBarrelOnlyModules(files, none, new Set(exemptions.keys())),
+      ...findUnreachableModules(files, none, islands),
+      ...findTypeOnlyReferencedModules(files, none, islands),
+      ...findBarrelOnlyModules(files, none, islands),
     ].map((violation) => violation.path),
   );
   const violations: WiringViolation[] = [];
