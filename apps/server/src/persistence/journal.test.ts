@@ -754,6 +754,20 @@ describe("Journal", () => {
       { aggregateId: ids.aggregate, aggregateVersion: 2 },
       { aggregateId: other, aggregateVersion: 1 },
     ]);
+
+    // A payload that is not JSON fails its read as the unnarrowed replay does,
+    // rather than failing the query or vanishing from it.
+    connection.exec("PRAGMA ignore_check_constraints = ON");
+    connection
+      .prepare("UPDATE event_journal SET payload_json = ? WHERE global_sequence = ?")
+      .run("{not-json", 2);
+    connection.exec("PRAGMA ignore_check_constraints = OFF");
+    expect(() => read({ payloadPrefix: { path: "value", prefix: "launch:" } })).toThrow(
+      expect.objectContaining({ _tag: "ReplayEventInvalid", reason: "malformed-json" }),
+    );
+    expect(() => read({})).toThrow(
+      expect.objectContaining({ _tag: "ReplayEventInvalid", reason: "malformed-json" }),
+    );
     connection.close();
   });
 

@@ -3964,12 +3964,15 @@ listener per confined launch:
   machine did, and its tunnels close then. Revocation closes them at once.
   Expiry is derived from the stored timestamp rather than journaled as its own
   event, so replay reaches the same answer with no clock-dependent record.
-  The host keeps an expired rule in memory for 24 hours, during which a
-  request it would have matched is refused `expired`; after that the rule
-  leaves memory, at startup or at the next sweep (at most one a minute, run
-  when rules are read), and the same request is refused `no-rule`. Learn
-  mode proposes both alike, and neither changes when the rule stopped
-  allowing anything.
+  The host keeps an expired rule in memory for 24 hours after it first sees
+  the rule expired, during which a request it would have matched is refused
+  `expired`; after that a sweep (at most one a minute, run when rules are
+  read) drops it, and the same request is refused `no-rule`. Learn mode
+  proposes both alike, and neither changes when the rule stopped allowing
+  anything. The 24 hours and the minute run on the host's suspend-aware
+  uptime, not the wall clock: a clock set forward cannot drop a rule that is
+  live again once the clock is corrected, and a clock set back does not stop
+  the sweeps.
 - **Who grants.** Rules arise only from answering a `network-access` approval
   — a learn-mode proposal or a person adding a rule in the thread's rules
   list — never from a model tool call, a tool result, a reviewer, or

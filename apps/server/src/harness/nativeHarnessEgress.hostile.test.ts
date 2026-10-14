@@ -12,6 +12,7 @@ import {
   TOOL_EGRESS_EVENT_NAMES,
   TOOL_EGRESS_PROJECT_AGGREGATE,
   TOOL_EGRESS_THREAD_AGGREGATE,
+  THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
   ToolEgressLaunchId,
   ToolEgressRuleId,
   decodeWindowId,
@@ -2443,6 +2444,8 @@ describe("native harness tool egress grants and learn mode", () => {
   ) {
     const base = options.base ?? taintJournal();
     let at = options.at ?? egressStart;
+    // Time that passes, as opposed to the wall clock being set.
+    let elapsed = 0;
     const rules = new ToolEgressRules({
       journal: options.journal?.(base.journal) ?? base.journal,
       readCodeThread: (threadId) =>
@@ -2468,11 +2471,17 @@ describe("native harness tool egress grants and learn mode", () => {
       personActor,
       uuid: randomUUID,
       clock: () => new Date(at).toISOString(),
+      elapsedMs: () => elapsed,
     });
     return {
       ...base,
       rules,
       advance: (milliseconds: number) => {
+        at += milliseconds;
+        elapsed += milliseconds;
+      },
+      /** Sets the wall clock forward or back without any time passing. */
+      setClock: (milliseconds: number) => {
         at += milliseconds;
       },
       tainted: (threadId: string) =>
@@ -3427,6 +3436,7 @@ describe("native harness tool egress grants and learn mode", () => {
       return answers;
     }
 
+    const answerLaunch = String(launchFor().launchId);
     const answers = (host: EgressHost) =>
       [String(egressThread), String(egressOtherThread)].flatMap((threadId) =>
         [...seededRequestHosts, "*.example.org", "*.example.net"].flatMap((name) => {
@@ -3440,6 +3450,11 @@ describe("native harness tool egress grants and learn mode", () => {
               threadId,
               principal: person,
               grants: [{ host: name, port: 443, scope: { kind: "project", lifetime: "7d" } }],
+            }),
+            host.rules.answer({
+              threadId,
+              principal: person,
+              grants: [{ host: name, port: 443, scope: { kind: "call", launchId: answerLaunch } }],
             }),
           ];
           return outcomes.map((outcome) =>
@@ -3509,7 +3524,23 @@ describe("native harness tool egress grants and learn mode", () => {
 
         const origin = await tcpFixture();
         expect(await decisions(bounded, origin.port)).toEqual(await decisions(full, origin.port));
-        expect(answers(bounded)).toEqual(answers(full));
+        // A person reviews both threads and clears their marks, so standing
+        // grants meet the hosts tainted launches asked for rather than the
+        // taint, and call grants are answered.
+        for (const host of [bounded, full]) {
+          for (const threadId of [String(egressThread), String(egressOtherThread)]) {
+            host.clears.clear({
+              threadId,
+              windowId: decodeWindowId(randomUUID()),
+              expectedVersion: host.clears.read(threadId).version,
+              principal: "local-window",
+              turn: "idle",
+            });
+          }
+        }
+        const answered = answers(bounded);
+        expect(answered).toEqual(answers(full));
+        expect(answered).toContain("answered");
         expect(viewsWithoutDrawnIds(bounded)).toEqual(viewsWithoutDrawnIds(full));
 
         const restarted = egressHost({ base, journal: unreadableRevocations });
@@ -3560,6 +3591,50 @@ describe("native harness tool egress grants and learn mode", () => {
         read.filter((name) => name === TOOL_EGRESS_EVENT_NAMES.decisionsRecorded),
       ).toHaveLength(seeded.openDecisionBatches);
       expect(read).not.toContain("unrelated-content");
+      // The launches' marks are read: they keep a marked launch from tainting again.
+      expect(read).toContain(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested);
+    });
+
+    it("appends to a thread whose newest record is a decision batch that landed after its launch settled", async () => {
+      const base = taintJournal();
+      const host = egressHost({ base });
+      const launch = launchFor();
+      const started = await startLaunch(host, { launch });
+      await ask(started, "registry.example.com:443");
+      await started.finish();
+      const head = base.journal
+        .aggregateVersions(TOOL_EGRESS_THREAD_AGGREGATE)
+        .find(({ aggregateId }) => aggregateId === String(egressThread));
+      base.journal.append({
+        aggregate: { aggregateType: TOOL_EGRESS_THREAD_AGGREGATE, aggregateId: egressThread },
+        expectedVersion: head?.aggregateVersion ?? 0,
+        events: [
+          {
+            eventId: randomUUID(),
+            eventName: TOOL_EGRESS_EVENT_NAMES.decisionsRecorded,
+            eventVersion: 1,
+            correlationId: randomUUID(),
+            actor: hostActor,
+            occurredAt: new Date(egressStart).toISOString(),
+            payload: {
+              launch,
+              entries: [
+                {
+                  host: "registry.example.com",
+                  port: 443,
+                  decision: "refused",
+                  reason: "no-rule",
+                  requests: 1,
+                },
+              ],
+              threadTainted: false,
+            },
+          },
+        ],
+      });
+      expect(grantThreadRule(egressHost({ base }), "registry.example.com")).toMatchObject({
+        kind: "answered",
+      });
     });
 
     it("drops a rule from memory a day after it expires and refuses it all along", async () => {
@@ -3585,7 +3660,6 @@ describe("native harness tool egress grants and learn mode", () => {
       expect(await ask(launch, "registry.example.com:443")).toBe(
         "octant-egress-refused: expired registry.example.com:443",
       );
-
       host.advance(60_000);
       expect(await ask(launch, "registry.example.com:443")).toBe(
         "octant-egress-refused: no-rule registry.example.com:443",
@@ -3595,16 +3669,79 @@ describe("native harness tool egress grants and learn mode", () => {
       ).toEqual({ kind: "refused", reason: "rule-not-found" });
       expect(origin.connections()).toBe(1);
 
+      // A restart holds the rule for another day from when it first sees it expired.
       const restarted = egressHost({
         base,
         at: egressStart + 3_600_000 + EXPIRED_TOOL_EGRESS_RULE_RETENTION_MS,
       });
       const later = await startLaunch(restarted, { origin: origin.port });
       expect(await ask(later, "registry.example.com:443")).toBe(
+        "octant-egress-refused: expired registry.example.com:443",
+      );
+      restarted.advance(EXPIRED_TOOL_EGRESS_RULE_RETENTION_MS);
+      expect(await ask(later, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+      expect(origin.connections()).toBe(1);
+    });
+
+    it("keeps a live rule when the wall clock is set days ahead and then corrected", async () => {
+      const base = taintJournal();
+      const host = egressHost({ base });
+      const origin = await tcpFixture();
+      expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+      const launch = await startLaunch(host, { origin: origin.port });
+
+      host.setClock(3 * 86_400_000);
+      host.advance(60_000);
+      expect(await ask(launch, "registry.example.com:443")).toBe(
+        "octant-egress-refused: expired registry.example.com:443",
+      );
+      host.advance(60_000);
+      expect(await ask(launch, "registry.example.com:443")).toBe(
+        "octant-egress-refused: expired registry.example.com:443",
+      );
+      host.setClock(-3 * 86_400_000);
+      host.advance(60_000);
+      expect(await ask(launch, "registry.example.com:443")).toBe("connected");
+
+      // The same at startup: a host started with its clock days ahead holds the rule.
+      const early = egressHost({ base, at: egressStart + 3 * 86_400_000 });
+      expect(early.rules.view(String(egressThread), "local-window")?.threadRules).toEqual([]);
+      early.advance(60_000);
+      early.setClock(-3 * 86_400_000);
+      early.advance(60_000);
+      expect(early.rules.view(String(egressThread), "local-window")?.threadRules).toEqual([
+        expect.objectContaining({ host: "registry.example.com" }),
+      ]);
+    });
+
+    it("keeps sweeping expired rules after the wall clock is set back", async () => {
+      const host = egressHost();
+      const origin = await tcpFixture();
+      const granted = host.rules.answer({
+        threadId: String(egressThread),
+        principal: person,
+        grants: [
+          { host: "registry.example.com", port: 443, scope: { kind: "thread", lifetime: "1h" } },
+        ],
+      });
+      const ruleId = granted.kind === "answered" ? String(granted.ruleIds[0]) : "";
+      const launch = await startLaunch(host, { origin: origin.port });
+
+      host.advance(3 * 86_400_000);
+      expect(await ask(launch, "registry.example.com:443")).toBe(
+        "octant-egress-refused: expired registry.example.com:443",
+      );
+      // Set back two days: the rule is still expired, and a sweep timed on the
+      // wall clock would wait until the clock caught up again.
+      host.setClock(-2 * 86_400_000);
+      host.advance(EXPIRED_TOOL_EGRESS_RULE_RETENTION_MS + 60_000);
+      expect(await ask(launch, "registry.example.com:443")).toBe(
         "octant-egress-refused: no-rule registry.example.com:443",
       );
       expect(
-        restarted.rules.revoke({ threadId: String(egressThread), principal: person, ruleId }),
+        host.rules.revoke({ threadId: String(egressThread), principal: person, ruleId }),
       ).toEqual({ kind: "refused", reason: "rule-not-found" });
     });
   });

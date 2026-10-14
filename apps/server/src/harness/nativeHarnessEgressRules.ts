@@ -48,6 +48,7 @@ import {
   type ToolEgressRule,
   type ToolEgressRuleScope,
 } from "@octant/domain/tool-egress-policy";
+import { uptime } from "node:os";
 import { Option, Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import {
@@ -112,9 +113,11 @@ export function toolEgressLaunchTaintReference(launchId: string): string {
 const REPLAY_BATCH = 1_000;
 
 /**
- * How long an expired rule stays in memory. A request it would have matched
- * is refused `expired` until then and `no-rule` after, and learn mode
- * proposes both; either way the rule allows nothing once `expiresAt` passes.
+ * How long an expired rule stays in memory after this host first sees it
+ * expired, counted on elapsed time rather than the wall clock. A request it
+ * would have matched is refused `expired` until then and `no-rule` after, and
+ * learn mode proposes both; either way the rule allows nothing once
+ * `expiresAt` passes.
  */
 export const EXPIRED_TOOL_EGRESS_RULE_RETENTION_MS = 24 * 3_600_000;
 /** The least time between two sweeps of expired rules, which run when rules are read. */
@@ -198,6 +201,12 @@ export interface ToolEgressRulesOptions {
   readonly personActor: typeof EventActor.Type;
   readonly uuid: () => string;
   readonly clock: () => string;
+  /**
+   * Suspend-aware elapsed milliseconds that setting the wall clock cannot
+   * move; the host's uptime unless a test supplies its own. Only the time an
+   * expired rule stays in memory is counted on it.
+   */
+  readonly elapsedMs?: () => number;
 }
 
 interface StoredRule {
@@ -264,11 +273,15 @@ export class ToolEgressRules {
    */
   readonly #unreadableAggregates = new Set<string>();
   readonly #live = new Map<string, LiveLaunchState>();
-  /** When expired rules are next swept from memory, in milliseconds. */
+  readonly #elapsedMs: () => number;
+  /** When expired rules are next swept from memory, in elapsed milliseconds. */
   #nextSweepAt = Number.NEGATIVE_INFINITY;
+  /** When each held rule was first seen expired, in elapsed milliseconds. */
+  readonly #seenExpiredAt = new WeakMap<StoredRule, number>();
 
   constructor(options: ToolEgressRulesOptions) {
     this.#options = options;
+    this.#elapsedMs = options.elapsedMs ?? (() => uptime() * 1_000);
     this.#hostActor = decodeActor(options.hostActor);
     this.#personActor = decodeActor(options.personActor);
     this.#hydrate();
@@ -859,24 +872,40 @@ export class ToolEgressRules {
   }
 
   /**
-   * Drops rules that expired more than the retention ago from every thread
-   * and Project, at most once a minute. Expiry is decided from `expiresAt`
-   * on every request whether or not a rule is still held, so a sweep that is
-   * late, skipped, or stopped by an unreadable clock changes no decision.
+   * Drops rules that have been expired for the retention, at most once a
+   * minute. Both the minute and the retention run on elapsed time from when
+   * this host first saw a rule expired, so a wall clock set forward drops
+   * nothing early (a rule live again once the clock is corrected is still
+   * held) and one set back does not stop the sweeps. Expiry itself is decided
+   * from `expiresAt` on every request whether or not a rule is still held, so
+   * a sweep that is late, skipped, or stopped by an unreadable clock changes
+   * no decision.
    */
   #sweepExpiredRules(force = false): void {
     let nowMs: number;
+    let elapsed: number;
     try {
       nowMs = Date.parse(this.#options.clock());
+      elapsed = this.#elapsedMs();
     } catch {
       return;
     }
-    if (!Number.isFinite(nowMs) || (!force && nowMs < this.#nextSweepAt)) return;
-    this.#nextSweepAt = nowMs + EXPIRED_RULE_SWEEP_INTERVAL_MS;
+    if (!Number.isFinite(nowMs) || !Number.isFinite(elapsed)) return;
+    if (!force && elapsed < this.#nextSweepAt) return;
+    this.#nextSweepAt = elapsed + EXPIRED_RULE_SWEEP_INTERVAL_MS;
     for (const held of [this.#threadRules, this.#projectRules]) {
       for (const [owner, rules] of held) {
         for (const [ruleId, rule] of rules) {
-          if (nowMs - Date.parse(rule.expiresAt) >= EXPIRED_TOOL_EGRESS_RULE_RETENTION_MS) {
+          // An unreadable expiry is never held as expired here; the decision
+          // still refuses it.
+          if (!(nowMs >= Date.parse(rule.expiresAt))) {
+            this.#seenExpiredAt.delete(rule);
+            continue;
+          }
+          const seen = this.#seenExpiredAt.get(rule);
+          if (seen === undefined) {
+            this.#seenExpiredAt.set(rule, elapsed);
+          } else if (elapsed - seen >= EXPIRED_TOOL_EGRESS_RULE_RETENTION_MS) {
             rules.delete(ruleId);
           }
         }

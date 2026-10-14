@@ -206,7 +206,10 @@ export class Journal {
     // The same read with rows a caller has no use for left out in SQL, so
     // they are never parsed or decoded: a startup that needs a few kinds of
     // record from an aggregate type no longer decodes every row of it. Each
-    // narrowing is skipped when its parameter is NULL.
+    // narrowing is skipped when its parameter is NULL. A payload that is not
+    // JSON never reaches `json_extract`, which would fail the whole query;
+    // the prefix narrowing keeps such a row instead, so #decodeRow throws
+    // `malformed-json` for it exactly as the unnarrowed read does.
     this.#replayNarrowedAggregateTypeRows = options.connection.prepare(`
       SELECT
         global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
@@ -216,7 +219,8 @@ export class Journal {
       WHERE aggregate_type = ? AND global_sequence > ?
         AND (? IS NULL OR event_name = ?)
         AND (? IS NULL OR event_name <> ?)
-        AND (? IS NULL OR substr(json_extract(payload_json, ?), 1, length(?)) = ?)
+        AND (? IS NULL OR CASE WHEN json_valid(payload_json)
+          THEN substr(json_extract(payload_json, ?), 1, length(?)) = ? ELSE 1 END)
       ORDER BY global_sequence ASC
       LIMIT ?
     `);
