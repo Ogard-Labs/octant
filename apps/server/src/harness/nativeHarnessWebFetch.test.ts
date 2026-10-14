@@ -27,7 +27,7 @@ describe("public web fetch", () => {
       url: `http://pinned.test:${port}/page`,
       maxBytes: 4_096,
       fetch: createPinnedFetch({ resolveAll: async () => ["127.0.0.1"], isPrivate: () => false }),
-      resolveAddress: async () => "203.0.113.5",
+      resolveAddress: async () => "93.184.216.5",
     });
     expect(result.status).toBe(200);
     expect(result.text).toBe("hello from the pinned address");

@@ -193,7 +193,7 @@ function pinnedWebFetch(publicName: string): NonNullable<NativeHarnessToolPorts[
       return await fetchPublicUrl({
         ...input,
         fetch: createPinnedFetch({ resolveAll: async () => ["127.0.0.1"], isPrivate: () => false }),
-        resolveAddress: async (hostname) => (hostname === publicName ? "203.0.113.10" : hostname),
+        resolveAddress: async (hostname) => (hostname === publicName ? "93.184.216.10" : hostname),
       });
     } catch (error) {
       if (error instanceof PublicFetchRefused) return { refused: error.reason };
@@ -654,6 +654,20 @@ describe("native harness web-fetch destinations", () => {
     "http://[64:ff9b::10.0.0.1]/",
     "http://[64:ff9b:1::1]/",
     "http://[2002:a9fe:a9fe::]/",
+    "http://192.0.0.8/",
+    "http://192.0.2.1/",
+    "http://198.18.0.1/",
+    "http://198.19.255.254/",
+    "http://198.51.100.1/",
+    "http://203.0.113.1/",
+    "http://[100::1]/",
+    "http://[100:0:0:1::1]/",
+    "http://[2001:2::1]/",
+    "http://[2001:db8::1]/",
+    "http://[3fff::1]/",
+    "http://[5f00::1]/",
+    "http://[2001:0:4136:e378:8000:63bf:80ff:fffe]/",
+    "http://[2001:0:a00:1::a247:27dd]/",
   ])("refuses %s as a private destination without connecting", async (url) => {
     await expect(
       fetchPublicUrl({ url, maxBytes: 1_024, fetch: neverConnect }),
@@ -670,6 +684,10 @@ describe("native harness web-fetch destinations", () => {
       "FE80::1",
       "fe80::1%en0",
       "64:ff9b::a9fe:a9fe",
+      "192.0.0.9",
+      "2001:1::1",
+      "::ffff:198.51.100.1",
+      "2002:cb00:7101::1",
       "not-an-address",
     ]) {
       expect([address, isPrivateAddress(address)]).toEqual([address, true]);
@@ -680,6 +698,9 @@ describe("native harness web-fetch destinations", () => {
       "::ffff:93.184.216.34",
       "64:ff9b::5db8:d822",
       "2002:5db8:d822::1",
+      "2001:0:4136:e378:8000:63bf:a247:27dd",
+      "2001:200::1",
+      "198.20.0.1",
     ]) {
       expect([address, isPrivateAddress(address)]).toEqual([address, false]);
     }
@@ -692,7 +713,7 @@ describe("native harness web-fetch destinations", () => {
         url: `http://rebinding.example.test:${target.port}/`,
         maxBytes: 1_024,
         fetch: createPinnedFetch({ resolveAll: async () => ["0:0:0:0:0:ffff:7f00:1"] }),
-        resolveAddress: async () => "203.0.113.10",
+        resolveAddress: async () => "93.184.216.10",
       }),
     ).rejects.toMatchObject({ name: "PublicFetchRefused", reason: "private-destination" });
     expect(target.seen).toEqual([]);
@@ -707,7 +728,7 @@ describe("native harness web-fetch destinations", () => {
         url: `http://rebinding.example.test:${target.port}/`,
         maxBytes: 1_024,
         fetch: createPinnedFetch({ resolveAll: async () => ["127.0.0.1"] }),
-        resolveAddress: async () => "203.0.113.10",
+        resolveAddress: async () => "93.184.216.10",
       }),
     ).rejects.toMatchObject({ name: "PublicFetchRefused", reason: "private-destination" });
     expect(target.seen).toEqual([]);
@@ -737,7 +758,7 @@ describe("native harness web-fetch destinations", () => {
             }),
             resolveAddress: async (hostname) =>
               hostname === "public.example.test"
-                ? "203.0.113.10"
+                ? "93.184.216.10"
                 : hostname === "localhost"
                   ? "127.0.0.1"
                   : hostname.replace(/^\[|\]$/g, ""),
@@ -1200,7 +1221,7 @@ describe("native harness tool egress proxy", () => {
     const origin = await tcpFixture();
     const harness = await startEgressHarness({
       rules: rules(),
-      routes: new Map([["203.0.113.10", origin.port]]),
+      routes: new Map([["93.184.216.10", origin.port]]),
     });
     const tunnel = await openTunnel(harness.proxy, target, harness.authorization);
     const [host = "", port = ""] = target.split(":");
@@ -1319,11 +1340,25 @@ describe("native harness tool egress proxy", () => {
     "fd12:3456::1",
     "64:ff9b::a9fe:a9fe",
     "2002:7f00:1::",
+    "192.0.0.8",
+    "192.0.2.1",
+    "198.18.0.1",
+    "198.19.255.254",
+    "198.51.100.1",
+    "203.0.113.1",
+    "100::1",
+    "100:0:0:1::1",
+    "2001:2::1",
+    "2001:db8::1",
+    "3fff::1",
+    "5f00::1",
+    "2001:0:4136:e378:8000:63bf:80ff:fffe",
+    "2001:0:a00:1::a247:27dd",
     "not-an-address",
   ])("refuses a ruled name that resolves to %s", async (answer) => {
     const harness = await startEgressHarness({
       rules: [threadRule("*.example.com", 443)],
-      resolve: async () => ["203.0.113.10", answer],
+      resolve: async () => ["93.184.216.10", answer],
     });
     const tunnel = await openTunnel(harness.proxy, "cdn.example.com:443", harness.authorization);
     expect(refusal(tunnel.answer).line).toBe(
@@ -1337,12 +1372,12 @@ describe("native harness tool egress proxy", () => {
 
   it("connects to the address it checked and refuses the same name once it rebinds to a private one", async () => {
     const origin = await tcpFixture();
-    const answers = [["2001:db8::10"], ["127.0.0.1"]];
+    const answers = [["2606:2800:220:1::10"], ["127.0.0.1"]];
     const harness = await startEgressHarness({
       rules: [threadRule("registry.example.com", 443)],
       resolve: async () => answers.shift() ?? [],
       routes: new Map([
-        ["2001:db8::10", origin.port],
+        ["2606:2800:220:1::10", origin.port],
         ["127.0.0.1", origin.port],
       ]),
     });
@@ -1362,7 +1397,7 @@ describe("native harness tool egress proxy", () => {
     );
     // One resolution per request, and the socket opened to exactly the address checked.
     expect(harness.resolved).toEqual(["registry.example.com", "registry.example.com"]);
-    expect(harness.dialed).toEqual([{ address: "2001:db8::10", port: 443 }]);
+    expect(harness.dialed).toEqual([{ address: "2606:2800:220:1::10", port: 443 }]);
     first.socket.destroy();
     expect(await summaryEntries(harness)).toEqual([
       expect.objectContaining({ decision: "allowed", requests: 1 }),
@@ -1408,7 +1443,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
         rules: [threadRule("registry.example.com", 443)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
       });
       const tunnel = await openTunnel(
         harness.proxy,
@@ -1426,7 +1461,7 @@ describe("native harness tool egress proxy", () => {
 
     it("refuses another launch's token, including one from another thread, and a token after its launch ends", async () => {
       const origin = await tcpFixture();
-      const routes = new Map([["203.0.113.10", origin.port]]);
+      const routes = new Map([["93.184.216.10", origin.port]]);
       const lead = await startEgressHarness({
         rules: [threadRule("registry.example.com", 443)],
         routes,
@@ -1464,7 +1499,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture((socket) => socket.end("HTTP/1.1 204 No Content\r\n\r\n"));
       const harness = await startEgressHarness({
         rules: [threadRule("files.example.com", 80)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
         limits: { flushIntervalMs: 20 },
       });
       await exchange(
@@ -1504,7 +1539,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
         rules: [threadRule(host, 443)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
       });
       const tunnel = await openTunnel(harness.proxy, `${host}:443`, harness.authorization);
       expect(tunnel.status).toBe(200);
@@ -1665,7 +1700,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
         rules: [threadRule("files.example.com", 80), threadRule("files.example.com", 443)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
       });
       const lines = head.flatMap((line) =>
         line.startsWith("CONNECT ") || line.startsWith("connect ")
@@ -1728,7 +1763,7 @@ describe("native harness tool egress proxy", () => {
         });
         const harness = await startEgressHarness({
           rules: [threadRule("files.example.com", 80)],
-          routes: new Map([["203.0.113.10", origin.port]]),
+          routes: new Map([["93.184.216.10", origin.port]]),
         });
         const first = [
           "POST http://files.example.com/upload HTTP/1.1",
@@ -1747,7 +1782,7 @@ describe("native harness tool egress proxy", () => {
         expect(origin.seen().endsWith(`\r\n\r\n${body}`)).toBe(true);
         expect(origin.seen()).not.toContain("forbidden.example.com");
         expect(harness.resolved).toEqual(["files.example.com"]);
-        expect(harness.dialed).toEqual([{ address: "203.0.113.10", port: 80 }]);
+        expect(harness.dialed).toEqual([{ address: "93.184.216.10", port: 80 }]);
       },
     );
 
@@ -1755,7 +1790,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture(() => undefined);
       const harness = await startEgressHarness({
         rules: [threadRule("files.example.com", 80)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
       });
       const answer = await exchange(
         harness.proxy,
@@ -1776,7 +1811,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
         rules: [threadRule("registry.example.com", 443)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
       });
       const tunnel = await openTunnel(
         harness.proxy,
@@ -1800,10 +1835,10 @@ describe("native harness tool egress proxy", () => {
       const harness = await startEgressHarness({
         rules: [threadRule("files.example.com", 80)],
         resolve: async (host) =>
-          host === "files.example.com" ? ["203.0.113.10"] : ["203.0.113.66"],
+          host === "files.example.com" ? ["93.184.216.10"] : ["93.184.216.66"],
         routes: new Map([
-          ["203.0.113.10", allowedOrigin.port],
-          ["203.0.113.66", collector.port],
+          ["93.184.216.10", allowedOrigin.port],
+          ["93.184.216.66", collector.port],
         ]),
       });
       const request = (host: string) =>
@@ -1886,8 +1921,8 @@ describe("native harness tool egress proxy", () => {
         resolve: (host) =>
           host === "slow.example.com"
             ? new Promise(() => undefined)
-            : Promise.resolve(["203.0.113.10"]),
-        routes: new Map([["203.0.113.10", origin.port]]),
+            : Promise.resolve(["93.184.216.10"]),
+        routes: new Map([["93.184.216.10", origin.port]]),
       });
       for (let index = 0; index < 3; index += 1) {
         const tunnel = await openTunnel(
@@ -1907,7 +1942,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
         rules: [threadRule("registry.example.com", 443)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
       });
       const endpoint = harness.proxy.endpoint;
       if (endpoint.kind !== "loopback") throw new Error("expected a loopback endpoint");
@@ -1932,7 +1967,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
         rules: [threadRule("registry.example.com", 443)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
       });
       for (let index = 0; index < 128; index += 1) {
         const tunnel = await openTunnel(
@@ -1958,7 +1993,7 @@ describe("native harness tool egress proxy", () => {
     async function openAllowedTunnel(options: Parameters<typeof startEgressHarness>[0] = {}) {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
         ...options,
       });
       const tunnel = await openTunnel(
@@ -2026,7 +2061,7 @@ describe("native harness tool egress proxy", () => {
       const harness = await startEgressHarness({
         launch,
         rules: [threadRule("registry.example.com", 443), callRule],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
         taint: () => ({ threadTainted: tainted, parentTainted: false }),
       });
       const standing = await openTunnel(
@@ -2080,7 +2115,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
         rules: [threadRule("registry.example.com", 443)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
       });
       for (let wave = 0; wave < 10; wave += 1) {
         await Promise.all(
@@ -2112,7 +2147,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
         rules: [threadRule("registry.example.com", 443)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
         limits: { flushIntervalMs: 60_000 },
       });
       for (let wave = 0; wave < 4; wave += 1) {
@@ -2176,7 +2211,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
         rules: [threadRule("*.example.com", 443)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
       });
       for (let index = 0; index < 26; index += 1) {
         const tunnel = await openTunnel(
@@ -2256,7 +2291,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
         rules: [threadRule("registry.example.com", 443)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
         limits: { flushIntervalMs: 20 },
         failBatches: () => !journalUp,
       });
@@ -2283,7 +2318,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
         rules: [threadRule("registry.example.com", 443)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
         limits: { flushIntervalMs: 20, recordTimeoutMs: 50 },
         hangBatches: true,
       });
@@ -2313,7 +2348,7 @@ describe("native harness tool egress proxy", () => {
       const origin = await tcpFixture();
       const harness = await startEgressHarness({
         rules: [threadRule("registry.example.com", 443)],
-        routes: new Map([["203.0.113.10", origin.port]]),
+        routes: new Map([["93.184.216.10", origin.port]]),
         clock: () => {
           if (broken) throw new Error("clock unavailable");
           return new Date(egressStart).toISOString();
