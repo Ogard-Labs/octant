@@ -117,6 +117,22 @@ describe("Work turn live stream route", () => {
   });
 });
 
+describe("Work transcript route", () => {
+  it("answers the whole thread for the authorized window and is never cached", async () => {
+    const transcript = vi.fn(async () => ({ threadId, turns: [], liveCursor: 3 }));
+    const route = routeFixture({ transcript });
+
+    const response = await route(
+      request(`/api/work/turns/transcript/${threadId}`, { method: "GET" }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("cache-control")).toBe("no-store");
+    expect(await response!.json()).toEqual({ threadId, turns: [], liveCursor: 3 });
+    expect(transcript).toHaveBeenCalledWith(windowId, threadId);
+  });
+});
+
 describe("Work transcript window route", () => {
   const before = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const emptyWindow = {
