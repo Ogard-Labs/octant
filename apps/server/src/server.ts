@@ -937,7 +937,11 @@ import {
 import { createSyncedArtifactRouteHandler } from "./replica/syncedArtifactRoutes";
 import { decideReplicaArtifactBinding } from "@octant/domain/replica-entry-policy";
 import { createReplicaMembershipJournal } from "./replica/replicaMembershipProjection";
-import { createReplicaDeviceKey, makeReplicaDeviceSigner } from "./replica/replicaDeviceKeyService";
+import {
+  createReplicaDeviceKey,
+  makeReplicaDeviceSigner,
+  removeReplicaDeviceKey,
+} from "./replica/replicaDeviceKeyService";
 import { createHostResourceRouteHandler } from "./hostResourceRoutes";
 import { desktopCredentialStore } from "./hostDataMap";
 import { ThreadRetentionService } from "./threadRetentionService";
@@ -11098,6 +11102,10 @@ export function startOctantServer(
           if (replicaDeviceKeys === undefined) return { status: "refused", reason: "unavailable" };
           return makeReplicaDeviceSigner(replicaDeviceKeys, instanceId).sign(payload);
         },
+        remove: async (instanceId) => {
+          if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
+          await removeReplicaDeviceKey(replicaDeviceKeys, instanceId);
+        },
       },
       journal: replicaJournal,
       // A pull reconciles each valid artifact entry and journals what it did.
@@ -11122,6 +11130,10 @@ export function startOctantServer(
       localHostId: LOCAL_HOST_ID,
       clock: () => Date.now(),
       restoreStopped: () => replicaArtifactSync.service?.restoreProgress()?.state === "stopped",
+      // A computer that left its replica says so on the switch too.
+      syncOff: async () => {
+        await replicaStoreSettingsService.turnSyncOff();
+      },
     });
     // Publish and pull for artifacts. With sync off, or no identity in a
     // replica, nothing is queued and no store is called; a Code thread under

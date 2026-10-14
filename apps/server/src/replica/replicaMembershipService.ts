@@ -125,6 +125,8 @@ export interface ReplicaMembershipPorts {
     /** A new device key, stored under the instance id it certifies. */
     readonly create: () => Promise<{ readonly instanceId: string; readonly publicKey: string }>;
     readonly sign: (instanceId: string, payload: Uint8Array) => Promise<ReplicaDeviceSignOutcome>;
+    /** Delete an instance's device key once this computer left with it. */
+    readonly remove: (instanceId: string) => Promise<void>;
   };
   readonly journal: ReplicaMembershipJournal;
   /** Reconciles pulled artifact entries. Without it a pull reads membership records only. */
@@ -138,6 +140,8 @@ export interface ReplicaMembershipPorts {
    * every command that would read the store is refused before any store call.
    */
   readonly restoreStopped?: () => boolean;
+  /** Turns Settings › Sync's switch off once this computer left its replica. */
+  readonly syncOff?: () => Promise<void>;
 }
 
 export type ReplicaMembershipOutcome = ReplicaMembershipResult;
@@ -372,6 +376,8 @@ export class ReplicaMembershipService {
   }
 
   async #run(command: ReplicaMembershipCommand): Promise<ReplicaMembershipOutcome> {
+    // Leaving without the store needs none; leaving through it asks for one.
+    if (command.kind === "leave") return this.#leave(command.withoutStore === true);
     const selection = this.#ports.store();
     if (selection.status === "not-configured") {
       return this.#refuse(
@@ -416,6 +422,82 @@ export class ReplicaMembershipService {
       case "pull":
         return this.#pull(store);
     }
+  }
+
+  /**
+   * Leave this computer's replica. A member in good standing first publishes
+   * a signed `replica-left` record naming the founder it pinned, so the other
+   * computers show it as left rather than going quiet; what it published
+   * before stays in the store and keeps counting. Then the identity is
+   * journaled as left - the projection forgets it, its founder, its held
+   * records, and its queue - its device key is deleted, and sync turns off.
+   * Joining again, here or in another store, is a new identity with a new key.
+   *
+   * A record that cannot be published refuses the leave and changes nothing:
+   * a record kept to publish later would need the old store's location and
+   * credentials after the person chose another store, and would write into a
+   * store they may have left because they stopped trusting it.
+   * `withoutStore` is the way out for a store that is gone for good; the
+   * other computers then keep listing this one until someone revokes it.
+   */
+  async #leave(withoutStore: boolean): Promise<ReplicaMembershipOutcome> {
+    const state = this.#ports.state();
+    const local = state.local;
+    if (local === undefined) {
+      return this.#refuse("leave", "not-a-member", "This computer is not in a replica.");
+    }
+    const founder = state.founder;
+    // Only a member in good standing writes the record: a joining, revoked,
+    // or cut-out identity's record would count for nothing on any computer.
+    const tells =
+      !withoutStore &&
+      founder !== undefined &&
+      replicaInGoodStanding(state.membership, local.instanceId);
+    if (tells) {
+      const selection = this.#ports.store();
+      if (selection.status === "not-configured") {
+        return this.#refuse(
+          "leave",
+          "not-configured",
+          "Sync is off, so this computer cannot tell your other computers it is leaving. Turn sync on, or leave without telling them.",
+        );
+      }
+      const finished = await this.#finishPending(selection.store, "leave");
+      if (finished !== undefined) return finished;
+      // A leave whose record landed before the host stopped is not written twice.
+      const alreadyLeft = this.#ports
+        .state()
+        .records.some(
+          ({ entry }) =>
+            entry.kind === "replica-left" && same(entry.origin.instanceId, local.instanceId),
+        );
+      if (!alreadyLeft) {
+        const publish = await this.#publishLocal(selection.store, "leave", local, (origin) =>
+          decodeReplicaMembershipEntry({
+            format: REPLICA_ENTRY_FORMAT,
+            kind: "replica-left",
+            origin,
+            founder: founder.instanceId,
+          }),
+        );
+        if (publish.status === "stopped") return publish.outcome;
+      }
+    }
+    this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.left, {
+      instanceId: local.instanceId,
+      toldStore: tells,
+    });
+    let keyRemoved = true;
+    try {
+      await this.#ports.credentials.remove(local.instanceId);
+    } catch {
+      // The identity is already gone here, so the leave stands and the
+      // result says the key stayed; once the record landed, every computer
+      // cuts this one at it, so nothing that key signs later counts.
+      keyRemoved = false;
+    }
+    await this.#ports.syncOff?.().catch(() => undefined);
+    return { kind: "left", instanceId: local.instanceId, toldStore: tells, keyRemoved };
   }
 
   async #createReplica(
@@ -1324,7 +1406,7 @@ export class ReplicaMembershipService {
    */
   async #publishLocal(
     store: ReplicaStore,
-    command: "approve-join" | "confirm-join" | "revoke",
+    command: "approve-join" | "confirm-join" | "revoke" | "leave",
     local: ReplicaLocalIdentity,
     build: (origin: ReplicaMembershipEntry["origin"]) => ReplicaMembershipEntry,
   ): Promise<LocalPublish<ReplicaMembershipEntry>> {
@@ -1541,7 +1623,7 @@ export class ReplicaMembershipService {
 }
 
 /** A command that publishes under this host's established identity. */
-type LocalCommand = "approve-join" | "confirm-join" | "revoke" | "publish-artifact";
+type LocalCommand = "approve-join" | "confirm-join" | "revoke" | "leave" | "publish-artifact";
 
 const SQUATTED_SLOTS_MESSAGE =
   "The replica store holds files this computer did not write in its next slots. Remove them with the storage provider's tools, rotate the store credentials, or move to a new store.";
