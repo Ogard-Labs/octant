@@ -1383,6 +1383,52 @@ describe.each([fx, copilot, grok, goose, cline])(
   },
 );
 
+describe("Linux deny paths below Full access", () => {
+  it.each([
+    ["approval-gated", "a writable"],
+    ["plan", "a read-only"],
+  ] as const)(
+    "masks an existing denied folder and leaves a missing one alone (%s, %s Project root)",
+    async (executionPolicy, _root) => {
+      const target = fixture(copilot);
+      const managedHome = join(target.canonicalRoot, "managed-home");
+      const hostAuthenticationPath = join(target.canonicalRoot, "host-auth");
+      mkdirSync(hostAuthenticationPath, { recursive: true });
+      const prepare = () =>
+        Effect.runPromise(
+          makeAcpConfinementLive({
+            platform: "linux",
+            sandboxPath: target.bwrapPath,
+            temporaryDirectory: join(target.canonicalRoot, "tmp"),
+            hostAuthenticationPath,
+          }).prepare({
+            profile: copilot,
+            binaryPath: target.binaryPath,
+            root: target.canonicalRoot,
+            managedHome,
+            mode: "code",
+            executionPolicy,
+            environment: {},
+          }),
+        );
+      const denied = join(target.canonicalRoot, ".claude", "skills");
+
+      // Mounting over a missing path makes Bubblewrap create it: an empty
+      // folder in the person's Project, or a failed start on a read-only root.
+      const missing = await prepare();
+      expect(missing.args).toContain(target.binaryPath);
+      expect(missing.args).not.toContain(denied);
+      expect(existsSync(join(target.canonicalRoot, ".claude"))).toBe(false);
+
+      mkdirSync(denied, { recursive: true });
+      const present = await prepare();
+      const mounted = present.args.indexOf(denied);
+      expect(mounted).toBeGreaterThan(0);
+      expect(present.args[mounted - 1]).toBe("--tmpfs");
+    },
+  );
+});
+
 describe("ACP probe confinement", () => {
   it("allows provider control-plane egress without granting Chat thread authority", async () => {
     const target = fixture(kilo);
