@@ -250,8 +250,12 @@ agent messaging. A Code thread's agent can leave a short message for another
 thread of the same Project: Octant delivers it as untrusted data at the start
 of that thread's next turn, starts nothing there, and returns no reply. Child
 runs are not part of that. Active children cannot be detached, and there are
-no hidden per-thread routing rules. Token and monetary ceilings are enforced
-as hard limits only when the provider reports reliable usage or cost.
+no hidden per-thread routing rules. A child's turns count toward its parent
+thread's and Project's spend ceilings like the parent's own. A child on a
+provider that never reports usage, such as an ACP agent, is not measured
+against the token or money budget, and the ceiling says so; a child on a
+provider that can report usage but did not is never counted as free. See
+[Spend ceilings](/advanced/usage-and-limits#spend-ceilings).
 
 ## Next steps
 

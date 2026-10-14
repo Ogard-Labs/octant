@@ -332,7 +332,7 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         approvals: "supported",
         userQuestions: profile.userQuestions,
         reasoning: "supported",
-        usage: "unavailable",
+        usage: "unsupported",
         fileChanges: "unavailable",
         nativeChildAgents: "unavailable",
         harnessAutoReview: "unsupported",

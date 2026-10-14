@@ -151,6 +151,28 @@ describe("SpendCeilingSnapshot", () => {
   it("decodes an empty snapshot when no ceilings are set", () => {
     expect(decodeSpendCeilingSnapshot({})).toEqual({});
   });
+
+  it("names each provider a reading leaves unmeasured once", () => {
+    const provider = {
+      providerInstanceId: "71000000-0000-4000-8000-000000000004",
+      displayName: "Agent CLI",
+    };
+    const remaining = {
+      ceilingTokens: 1_000,
+      notMeasuredProviders: [provider],
+      window: { kind: "lifetime" },
+      version: 1,
+    };
+    expect(
+      decodeSpendCeilingSnapshot({ threadRemaining: remaining }).threadRemaining
+        ?.notMeasuredProviders,
+    ).toEqual([provider]);
+    expect(() =>
+      decodeSpendCeilingSnapshot({
+        threadRemaining: { ...remaining, notMeasuredProviders: [provider, provider] },
+      }),
+    ).toThrow();
+  });
 });
 
 describe("SPEND_CEILING_EVENT_NAMES", () => {

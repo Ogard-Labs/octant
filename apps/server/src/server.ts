@@ -854,6 +854,7 @@ import {
   isNativeHarnessDriverKind,
   isProviderAllowedByProjectPolicy,
   providerKeepsConversation,
+  providerUsageIsNotMeasured,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
   type PreviewPosture,
@@ -3238,6 +3239,19 @@ export function startOctantServer(
         return workThreadProjection.read(input.threadId as never) !== undefined;
       },
       projectExists: (projectId) => persistence.readProject(projectId as never) !== undefined,
+      // Decided by the instance's runtime capability as the host observes it
+      // now, for old rows too. A removed instance or one with no observation
+      // yet counts, so its unreported turns keep refusing.
+      notMeasuredProvider: (providerInstanceId) => {
+        const instance = persistence
+          .readProviderInstances()
+          .find((candidate) => String(candidate.id) === providerInstanceId);
+        if (instance === undefined) return undefined;
+        const observed = providerRuntimeRegistry.observedState(instance.id);
+        return providerUsageIsNotMeasured(observed?.capabilities.usage)
+          ? { providerInstanceId: instance.id, displayName: instance.displayName }
+          : undefined;
+      },
     });
     spendCeilingHolder.service = spendCeilingService;
     requireJournalHydration(

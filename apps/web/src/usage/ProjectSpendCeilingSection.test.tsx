@@ -212,4 +212,44 @@ describe("ProjectSpendCeilingSection", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("has no price");
     expect(screen.getByRole("status")).toHaveTextContent("money cannot be measured");
   });
+
+  it("names the Project's providers that report no usage as not measured", async () => {
+    const projectId = "00000000-0000-4000-8000-000000000201";
+    const window = { kind: "calendar" as const, period: "month" as const, timeZone: "UTC" };
+    const snapshot = vi.fn().mockResolvedValue({
+      project: {
+        scope: { kind: "project", projectId },
+        window,
+        policy: { tokenBudget: 50_000 },
+        version: 1,
+        setAt: "2026-09-17T00:00:00.000Z",
+        setBy: { kind: "local-user", actorId: "host" },
+      },
+      projectRemaining: {
+        ceilingTokens: 50_000,
+        committedTokens: 900,
+        reservedTokens: 0,
+        remainingTokens: 49_100,
+        notMeasuredProviders: [
+          { providerInstanceId: "00000000-0000-4000-8000-000000000301", displayName: "Agent CLI" },
+          { providerInstanceId: "00000000-0000-4000-8000-000000000302", displayName: "Pair CLI" },
+        ],
+        window,
+        version: 1,
+      },
+    });
+    render(
+      <ProjectSpendCeilingSection
+        client={{ snapshot, execute: vi.fn() } as never}
+        projectId={projectId}
+      />,
+    );
+    expect(await screen.findByText(/49,100 of 50,000 tokens remaining this month/i)).toBeVisible();
+    expect(
+      screen.getByText(
+        "Not measured: Agent CLI and Pair CLI report no usage, so their turns do not count toward the token or money budget. Turns and run time still count.",
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });

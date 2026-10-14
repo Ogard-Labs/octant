@@ -166,6 +166,27 @@ export function spendCeilingRemainingPhrases(
 }
 
 /**
+ * Names the providers a ceiling leaves unmeasured: their runtime never reports
+ * usage, so their turns add nothing to the token or money figure. Saying so
+ * keeps a person from reading the ceiling as covering them.
+ */
+export function notMeasuredProvidersNote(
+  remainings: ReadonlyArray<SpendCeilingRemaining | undefined>,
+): string | undefined {
+  const names = new Map<string, string>();
+  for (const remaining of remainings) {
+    for (const provider of remaining?.notMeasuredProviders ?? []) {
+      names.set(String(provider.providerInstanceId), provider.displayName);
+    }
+  }
+  if (names.size === 0) return undefined;
+  const list = new Intl.ListFormat("en", { type: "conjunction" }).format([...names.values()]);
+  return names.size === 1
+    ? `Not measured: ${list} reports no usage, so its turns do not count toward the token or money budget. Turns and run time still count.`
+    : `Not measured: ${list} report no usage, so their turns do not count toward the token or money budget. Turns and run time still count.`;
+}
+
+/**
  * Whether either ceiling has a money budget. Money is only known once a
  * provider reports a turn, so it is checked between turns and the surfaces
  * say so wherever a money budget is in force.

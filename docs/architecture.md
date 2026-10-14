@@ -2304,7 +2304,7 @@ each usage report what the runtime does with the prompt (`promptRetention`):
 | Codex app-server  | Each turn's input is a `userMessage` in the thread and is sent with every later request. Compaction rebuilds the thread from a summary and as many recent user messages as fit in 20,000 tokens, so what survives is Codex's choice. Octant sees compaction as the `contextCompaction` item.                                                                                                                               | `kept`, or `compacted` for the rest of a turn in which a `contextCompaction` item arrived | `build_compacted_history` and `COMPACT_USER_MESSAGE_MAX_TOKENS` in codex-rs `core/src/compact.rs`; the item in `codexProtocol.ts` |
 | OpenCode          | Each prompt is a user message sent again with every request. A completed compaction sends the summary and at most a recent tail of messages. Octant sees `session.compacted` (1.x), `session.next.compaction.ended` (2.x) and `session.compaction.ended` (2.0.22).                                                                                                                                                         | `kept`, or `compacted` for the rest of a prompt in which compaction ended                 | `filterCompacted` in opencode `packages/opencode/src/session/message-v2.ts`; the events in `@opencode-ai/sdk`                     |
 | Pi                | Each prompt is a session entry sent with every request. A compaction keeps a summary and the entries from `firstKeptEntryId` on. Octant sees `compaction_end`; one without `result` (aborted or failed) changed nothing.                                                                                                                                                                                                   | `kept`, or `compacted` when a `compaction_end` with a `result` arrived during the prompt  | Pi's JSON event stream docs (`packages/coding-agent/docs/json.md`, `compaction_start`/`compaction_end`)                           |
-| ACP agents        | Each agent manages its own history; the protocol says nothing about what it keeps or compacts, and the driver reports no usage.                                                                                                                                                                                                                                                                                            | absent                                                                                    | ACP driver (`acpDriver.ts`, usage `unavailable`)                                                                                  |
+| ACP agents        | Each agent manages its own history; the protocol says nothing about what it keeps or compacts, and the driver reports no usage.                                                                                                                                                                                                                                                                                            | absent                                                                                    | ACP driver (`acpDriver.ts`, usage `unsupported`)                                                                                  |
 | Any other adapter | Not determined.                                                                                                                                                                                                                                                                                                                                                                                                            | absent                                                                                    | —                                                                                                                                 |
 
 From that the turn runner builds the parts (`octantWindowBreakdown` in
@@ -2741,8 +2741,13 @@ the composer and sends nothing until the person does.
 
 The ACP and RPC mappers (Devin, Kimi, Grok, Copilot, Mistral Vibe, Oh My Pi)
 report no usage today: the prompt result is read only for its stop reason, and
-the capability is declared `unavailable`, so their turns are `unavailable` and
-no cache figure is invented. Pi accumulates usage, including cache reads and
+the capability is declared `unsupported`, so their turns are recorded as
+unreported and no cache figure is invented. A driver declares usage
+`unsupported` only when it never reports usage for that instance, because a
+spend ceiling leaves such a provider's unreported turns out (below); one
+response without usage is not that evidence, so a runtime observed per turn
+(the local Ollama runtime, a compatible endpoint) keeps its earlier value
+instead. Pi accumulates usage, including cache reads and
 writes, from completed assistant messages. OpenCode reports input apart from
 cache reads and writes, so its mapper adds them into `inputTokens` like the
 Claude and Pi mappers do; that follows OpenCode's own token accounting and has
@@ -2966,27 +2971,47 @@ summed by message id. Every turn that reached the provider leaves exactly one
 ledger row however it ended — completed, failed, cancelled, or interrupted —
 and Work keeps usage the provider reports after a cancel. A turn that reached
 the provider and reported nothing (an ACP agent in Code reports no usage) is
-recorded as unreported and unpriced, so token and money ceilings refuse after
-it (see the not-yet-built change below); a turn refused or failed before the
+recorded as unreported and unpriced; whether token and money ceilings refuse
+after it depends on its provider (below). A turn refused or failed before the
 provider leaves no row. A Code turn
 reaches the provider once its `provider-session-ready` frame is journaled,
 just before the prompt is sent, or when it completes. Any unpriced row in the
-window — a model with no price, a provider that reports no cost or no usage,
-and usage recorded before the ledger carried cost — makes the money ceiling
-refuse `unknown-spend` rather than count that usage as free. That refusal
+window — a model with no price, a provider that reports no cost, an unreported
+turn of a provider that can report usage, and usage recorded before the ledger
+carried cost — makes the money ceiling refuse `unknown-spend` rather than count
+that usage as free. That refusal
 offers clearing the ceiling, waiting out a Project's calendar window, Usage,
 or pausing; a raise cannot price the usage, so it is not offered. Turns from
 before this behaviour that left no ledger row at all, including every child
 run's, are not counted.
 
-Not built yet: a provider that reports no usage is not counted against a
-ceiling. Its unreported turns neither raise spend nor refuse a later turn for
-that reason, and the composer and Usage say visibly that the provider is not
-measured, so a person is not led to read the ceiling as covering it. The rule
-concerns usage a provider does not report; a model with no known price, or
-usage journaled before the ledger carried cost, is a different case and still
-makes a money ceiling refuse `unknown-spend` as described above. Until this is
-built, the host refuses as the paragraph above describes.
+A provider that never reports usage is not counted against a token or money
+ceiling. The host decides by provider, not by row: a ledger row's
+`provider_instance_id` names the instance, and the instance's runtime
+capability as the host observes it now (`ProviderRuntimeRegistry`, the same
+observation that gates app-managed tools and model switches) decides whether
+its unreported rows count. Only `usage: "unsupported"` leaves them out: the ACP
+mappers and Oh My Pi declare it because they never emit usage. A provider that
+can report usage keeps the rule above, so its failed, cancelled, or
+interrupted turn that reported nothing still refuses `unknown-spend`; counting
+it as nothing would make an interrupted turn free. An instance that no longer
+exists, is disabled, has not been probed since the host started, or declares
+`unavailable` counts the same way: an unknown capability fails closed. Rows
+written before this rule are read the same way, so a thread with unreported
+turns from an ACP agent is no longer stuck. The rule reads the capability at
+evaluation time for every row in the window, so a runtime that starts
+reporting usage makes its earlier unreported rows count again (refusing until
+they leave the window or the ceiling is cleared), and a driver must never
+downgrade to `unsupported` because one response lacked usage. Excluded rows add
+no tokens and no cost; the provider's reported rows, if any, still count, and
+every other provider's spend in the same thread or Project is counted and
+enforced. Turns and run time count every provider. The reading
+(`SpendCeilingRemaining.notMeasuredProviders`) names each excluded instance
+with rows in the window, and the thread Usage panel and Project overview show
+it as **Not measured**, so a person is not led to read the ceiling as covering
+it. A model with no known price, or usage journaled before the ledger carried
+cost, is a different case and still makes a money ceiling refuse
+`unknown-spend` as described above.
 
 Money is checked between turns, like turns and run time, not reserved like
 tokens. A provider reports cost only when a turn settles and no per-turn price

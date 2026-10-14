@@ -239,7 +239,10 @@ const BETA_LISTING_ONLY_CAPABILITIES = {
   approvals: "unsupported",
   userQuestions: "unsupported",
   reasoning: "unsupported",
-  usage: "unsupported",
+  // Not "unsupported": the same instance may hold turns from a runtime that
+  // reported usage, and a spend ceiling reads that as "never reports" and
+  // would stop counting their unreported turns.
+  usage: "unavailable",
   toolActivity: "unsupported",
   fileChanges: "unsupported",
   diffs: "unsupported",

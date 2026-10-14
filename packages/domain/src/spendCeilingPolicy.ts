@@ -1,4 +1,5 @@
 import type {
+  ProviderCapabilitySupport,
   SpendCeilingCommand,
   SpendCeilingCommandRefusal,
   SpendCeilingOverrun,
@@ -15,6 +16,19 @@ export const SPEND_CEILING_ACTION_NAMES = {
   read: "usage.spend-ceiling.read",
   set: "host.store.spend-ceiling",
 } as const;
+
+/**
+ * Whether a provider's unreported turns stay out of token and money ceilings.
+ * Only a runtime that declares it never reports usage qualifies: a provider
+ * that can report usage leaves an unreported row when a turn failed, was
+ * cancelled, or lost its usage frame, and counting that row as nothing would
+ * make an interrupted turn free. A capability the host does not know (no
+ * observation yet, a removed or disabled instance) or one not yet proven
+ * (`unavailable`) counts, so the ceiling keeps refusing rather than guessing.
+ */
+export function providerUsageIsNotMeasured(usage: ProviderCapabilitySupport | undefined): boolean {
+  return usage === "unsupported";
+}
 
 export type SpendTokenTotal =
   | { readonly status: "known"; readonly tokens: number }

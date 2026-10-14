@@ -199,7 +199,11 @@ function baseCapabilities(
     approvals: "supported",
     userQuestions: profile.userQuestions,
     reasoning: "unavailable",
-    usage: "unavailable",
+    // The mapper reads a prompt result only for its stop reason and never
+    // emits usage, so no ACP agent's turn is measured. Declared unsupported,
+    // a spend ceiling leaves these turns out and says so instead of refusing
+    // every turn after the first as unknown spend.
+    usage: "unsupported",
     toolActivity: "supported",
     fileChanges: "unavailable",
     diffs: "unavailable",
