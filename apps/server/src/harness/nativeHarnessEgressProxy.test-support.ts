@@ -361,3 +361,32 @@ export function clientHello(serverNames: ReadonlyArray<string>, recordSize = 16_
   }
   return Buffer.concat(records);
 }
+
+/**
+ * The injected resolver and dialer a launch started through the rules store
+ * uses: every name answers a documentation address, and each such address is
+ * routed to a loopback fixture.
+ */
+export function fixtureNetwork(routes: ReadonlyMap<string, number>): {
+  readonly resolveAll: (host: string) => Promise<ReadonlyArray<string>>;
+  readonly connect: (destination: { readonly address: string; readonly port: number }) => Socket;
+  readonly dialed: ReadonlyArray<{ readonly address: string; readonly port: number }>;
+  readonly resolved: ReadonlyArray<string>;
+} {
+  const dialed: Array<{ address: string; port: number }> = [];
+  const resolved: string[] = [];
+  return {
+    resolveAll: async (host) => {
+      resolved.push(host);
+      return ["203.0.113.10"];
+    },
+    connect: ({ address, port }) => {
+      dialed.push({ address, port });
+      const fixturePort = routes.get(address);
+      if (fixturePort === undefined) throw new Error(`no fixture routed for ${address}`);
+      return netConnect({ host: "127.0.0.1", port: fixturePort, allowHalfOpen: true });
+    },
+    dialed,
+    resolved,
+  };
+}

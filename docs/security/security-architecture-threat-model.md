@@ -671,8 +671,9 @@ crosses a server authority or sandbox boundary without additional local compromi
 4. **Seatbelt host-level egress:** two-level OS enforcement (`none` / `allow`) with broker-level
    host allowlists for V1; no local egress proxy in this release.
    _Superseded for native-harness tool processes only by the harness tool egress rules, which the
-   maintainer approved on 2026-10-13 and which are not built yet. It still governs every other
-   process._
+   maintainer approved on 2026-10-13. Their decision, proxy, grants, and learn mode are built, but
+   no command runs through the proxy yet, so this decision still describes what runs. It still
+   governs every other process._
 
 This document is **approved**.
 

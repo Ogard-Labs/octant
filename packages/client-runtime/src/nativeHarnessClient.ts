@@ -12,6 +12,9 @@ import {
   type NativeHarnessSessionCommand,
   NativeHarnessSessionCommandResult,
   NativeHarnessSessionView,
+  type ToolEgressCommand,
+  ToolEgressCommandResult,
+  ToolEgressThreadView,
   decodeHostAnswer,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -82,6 +85,13 @@ export interface NativeHarnessClient {
     command: SteerNativeHarnessSession,
     signal?: AbortSignal,
   ): Promise<NativeHarnessSessionView | null>;
+  /** A Code thread's network rules, its Project's, and its open proposals; null for any other thread. */
+  egress(threadId: string, signal?: AbortSignal): Promise<ToolEgressThreadView | null>;
+  egressCommand(
+    threadId: string,
+    command: ToolEgressCommand,
+    signal?: AbortSignal,
+  ): Promise<ToolEgressCommandResult>;
 }
 
 export class NativeHarnessClientFailure extends Error {
@@ -97,6 +107,7 @@ export class NativeHarnessClientFailure extends Error {
 const ROUTING_PATH = "/api/native-harness/routing";
 const PROJECT_ROUTING_PATH = "/api/native-harness/routing/projects";
 const SESSIONS_PATH = "/api/native-harness/sessions";
+const EGRESS_PATH = "/api/native-harness/egress/threads";
 
 /**
  * Client for the native harness surfaces: slot routing and the per-thread
@@ -231,6 +242,18 @@ export function createNativeHarnessClient(
         ),
       );
     },
+    async egress(threadId, signal) {
+      const body = await get(`${EGRESS_PATH}/${encodeURIComponent(threadId)}`, signal);
+      const view = (body as { view?: unknown }).view;
+      return view === null || view === undefined
+        ? null
+        : decodeHostAnswer(ToolEgressThreadView)(view);
+    },
+    async egressCommand(threadId, command, signal) {
+      return decodeHostAnswer(ToolEgressCommandResult)(
+        await write("POST", `${EGRESS_PATH}/${encodeURIComponent(threadId)}`, command, signal),
+      );
+    },
     async activateFollowUp(threadId, activation, signal) {
       return decodeHostAnswer(NativeHarnessFollowUpActivationResult)(
         await write(
@@ -289,6 +312,7 @@ function isRefusal(body: unknown): boolean {
     kind === "native-harness-session-refused" ||
     kind === "follow-up-refused" ||
     kind === "question-refused" ||
-    kind === "approval-refused"
+    kind === "approval-refused" ||
+    kind === "tool-egress-refused"
   );
 }

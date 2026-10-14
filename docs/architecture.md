@@ -3505,7 +3505,7 @@ native harness in `apps/server/src/harness`:
   refuses as `tool-unavailable` without reaching policy or a person. The harness has no
   per-host network rules, rule expiry, or learn mode yet: a tool process gets the
   thread's OS-level `none` or `allow`. The approved design for them, with its pure
-  decision, event schemas, and host proxy built but no command routed through the proxy yet, is
+  decision, event schemas, host proxy, grants, and learn mode built but no command routed through the proxy yet, is
   [Harness tool egress rules](#harness-tool-egress-rules). `nativeHarnessEgress.hostile.test.ts` holds the
   adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
   Seatbelt and shows only the networked one reaching a loopback listener.
@@ -3708,13 +3708,16 @@ composer. The web shows open offers as cards above the chips.
 
 ### Harness tool egress rules
 
-**Status: design approved by the maintainer on 2026-10-13. Phases 1 and 2
-are in: the rule model and decision (`decideToolEgress` in
-`packages/domain/src/toolEgressPolicy.ts`), the event schemas
-(`packages/contracts/src/toolEgress.ts`), and the host proxy
+**Status: design approved by the maintainer on 2026-10-13. Phases 1 to 3
+are in: the rule model and decision (`decideToolEgress` and
+`decideToolEgressGrant` in `packages/domain/src/toolEgressPolicy.ts`), the
+event and wire schemas (`packages/contracts/src/toolEgress.ts`), the host proxy
 (`apps/server/src/harness/nativeHarnessEgressProxy.ts`, which reads request
-heads and ClientHellos in `nativeHarnessEgressWire.ts`). No launch starts the
-proxy yet, so nothing that runs has changed.** Today a harness tool process gets the thread's
+heads and ClientHellos in `nativeHarnessEgressWire.ts`), and the grants,
+learn-mode proposals, rules lists, journal records, and recovery
+(`nativeHarnessEgressRules.ts`, served by `nativeHarnessEgressRoutes.ts`, shown
+in a Code thread's Agents tab as Network access). No launch starts the proxy
+yet, so nothing that runs has changed.** Today a harness tool process gets the thread's
 OS-level `none` or `allow` (see Egress and hostile content above). This is the
 approved-but-unfinished design, and the phases below track its delivery. Its
 approval replaces the "no local egress proxy in this release" decision in the
@@ -3927,7 +3930,13 @@ beyond that refusals are counted, not proposed. A proposal from a tainted
 thread is marked and can only be granted as a `call` rule on the next
 confirmed call. A child's proposals surface on its parent's thread with the
 child named, and granting them grants the parent. With learn mode off, the
-refusal reaches the command's output and nothing is proposed.
+refusal reaches the command's output and nothing is proposed. The setting is
+`thread.egress-learn-mode-set@1` on the thread's `thread-egress` aggregate, and
+a person who may answer the thread's approvals switches it. A launch's
+proposals are raised in one append when it ends; a host and port already open
+on the thread is not proposed again, and a rule granted for a proposal's host
+and port, or a decline, closes it. A proposal that cannot be recorded is a
+suggestion lost, never a grant.
 
 **Audit journal.** On the thread's own `thread-egress` aggregate unless noted,
 not on the thread aggregate; payloads carry host,
@@ -3958,17 +3967,56 @@ or body:
   existing tunnels until they end. A launch start or summary append that has
   not answered within 10 seconds counts as not appended.
 - `thread.egress-launch-summarized@1` when the launch ends: the final totals,
-  including the bytes received that taint the thread, and each distinct host
-  and port, at most 64 entries with a `truncated` flag. It is appended before
+  including the bytes received that taint the thread, a count of request heads
+  refused as unreadable or too large (they name no destination, so they appear
+  nowhere else), and each distinct host and port, at most 64 entries with a `truncated` flag. It is appended before
   the tool result returns to the model; when it cannot be, the call reports
   `unavailable`, so the model never acts on egress the journal does not hold.
 - `thread.egress-launch-incomplete@1`, appended at startup for every launch
   that has a start event and no summary, because the server exited first.
   Its record holds what the batches captured and says the tail is unknown.
-  Because the bytes received are then unknown too, recovery taints the thread
-  unless the recorded batches show the launch received none and ended before
-  its first allowed connection. Recovery also taints the thread for a launch
-  that was summarized with bytes received but whose taint event is missing.
+  Because the bytes received are then unknown too, recovery taints the thread.
+  The recorded batches cannot show that a launch ended, so recovery taints for
+  every incomplete launch rather than guessing from them. Recovery also taints
+  the thread for a launch that was summarized with bytes received but whose
+  taint event is missing. A launch's taint is recorded under its own content
+  reference (`tool-egress-launch:<launch id>`), and recovery reads the journal
+  for that event, not the taint projection, so a mark a person cleared
+  afterwards stays cleared. Until a launch's mark is written, the host treats
+  its thread as tainted for every egress decision and grant.
+- `thread.egress-learn-mode-set@1`: learn mode on or off, and the person who
+  switched it.
+
+**Rules phase 3 settled.** The design left these open; each keeps authority
+where it was or narrows it:
+
+- _Where a `call` rule comes from._ A `call` rule names a launch id, so it can
+  be granted only for a launch that has one: the reviewer's per-call answer
+  and the tainted thread's single-use confirmation, both of which phase 4
+  wires to the `bash` prompt. The proposal card and the rules list offer the
+  thread lifetimes (1 hour, 8 hours, 7 days) and the Project lifetimes. A
+  `call` rule expires at most 8 hours after it is granted, which bounds a
+  launch that never ends.
+- _One answer, two aggregates._ An answer that grants thread and Project rules
+  appends to `thread-egress` and then `project-egress`. When the second append
+  fails the answer reports `unavailable`; what the rules lists show is what is
+  in force.
+- _Who reaches the surface._ The rules lists and answers are served at
+  `/api/native-harness/egress/threads/<thread id>` with the same thread check
+  as the harness session's approvals. Like those approvals the route is not in
+  the paired-device catalogue today, so a paired device reaches it only once it
+  may answer the thread's approvals; the server takes the principal from the
+  authenticated request and refuses a Project rule from a paired device either
+  way.
+- _Purge._ A thread purge erases the thread's `thread-egress` aggregate. Project
+  rules are the Project's: a thread purge leaves `project-egress` in place,
+  including the id of the thread a rule was granted from, and a Project erase
+  removes it.
+- _Where the lists show._ A Code thread's Agents tab shows Network access once
+  its commands run through these rules, or once the thread holds a rule or a
+  proposal. Until phase 4 routes commands to the proxy, the card says that
+  commands on the thread do not go through these rules yet, so nobody mistakes
+  a rule for a restriction that runs.
 
 **Failure modes.** Each fails closed:
 

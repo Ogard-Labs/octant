@@ -9,8 +9,13 @@ import { Schema } from "effect";
 import {
   AggregateId,
   EventActor,
+  TOOL_EGRESS_EVENT_NAMES,
+  TOOL_EGRESS_PROJECT_AGGREGATE,
+  TOOL_EGRESS_THREAD_AGGREGATE,
   ToolEgressLaunchId,
   ToolEgressRuleId,
+  decodeWindowId,
+  type ToolEgressLaunch,
   type AgentRunAuthority,
   type CodeThread,
   type ProviderExecutionPolicy,
@@ -22,6 +27,8 @@ import {
   type ToolEgressRule,
 } from "@octant/domain/tool-egress-policy";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
+import { bindPrincipalRouteContext } from "../principalRouteContext";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { Journal } from "../persistence/journal";
@@ -40,12 +47,20 @@ import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
 import { createNativeHarnessComposition } from "./nativeHarnessComposition";
 import { startToolEgressProxy } from "./nativeHarnessEgressProxy";
+import { createNativeHarnessEgressRouteHandler } from "./nativeHarnessEgressRoutes";
+import {
+  ToolEgressRules,
+  toolEgressLaunchTaintReference,
+  type ToolEgressLiveLaunch,
+} from "./nativeHarnessEgressRules";
 import {
   basicAuthorization,
   clientHello,
   closeEgressHarnesses,
   egressOtherThread,
+  egressProject,
   egressStart,
+  fixtureNetwork,
   egressThread,
   exchange,
   inOneHour,
@@ -134,6 +149,7 @@ function temporaryDirectory(prefix: string): string {
 /** The real journal, ingestion store, and taint projection the server composes. */
 function taintJournal(): {
   readonly connection: SqliteConnection;
+  readonly journal: Journal;
   readonly store: ExternalContentIngestionStore;
   readonly clears: ExternalContentClearStore;
 } {
@@ -166,7 +182,7 @@ function taintJournal(): {
       actorId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
     }),
   });
-  return { connection, store, clears };
+  return { connection, journal, store, clears };
 }
 
 const authority = {
@@ -2343,6 +2359,638 @@ describe("native harness tool egress proxy", () => {
     it("reports the launch unavailable when its summary cannot be recorded", async () => {
       const harness = await startEgressHarness({ failSummary: true });
       expect(await harness.proxy.close()).toEqual({ status: "unavailable" });
+    });
+  });
+});
+
+describe("native harness tool egress grants and learn mode", () => {
+  const childThread = Schema.decodeUnknownSync(AggregateId)("00000000-0000-4000-8000-0000000000e4");
+  const launches: ToolEgressLiveLaunch[] = [];
+  afterEach(async () => {
+    await Promise.all(launches.splice(0).map((launch) => launch.finish()));
+    await closeEgressHarnesses();
+  });
+
+  const hostActor = Schema.decodeUnknownSync(EventActor)({
+    kind: "system",
+    actorId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  });
+  const personActor = Schema.decodeUnknownSync(EventActor)({
+    kind: "local-user",
+    actorId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  });
+  const person = { kind: "local-window" } as const;
+  const device = {
+    kind: "remote-device",
+    deviceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  } as const;
+  const eightHours = { kind: "thread", lifetime: "8h" } as const;
+
+  type JournalPort = ConstructorParameters<typeof ToolEgressRules>[0]["journal"];
+
+  /** The rules store over the real journal and taint projection the server composes. */
+  function egressHost(
+    options: {
+      readonly base?: ReturnType<typeof taintJournal>;
+      readonly journal?: (journal: Journal) => JournalPort;
+      readonly failTaint?: () => boolean;
+    } = {},
+  ) {
+    const base = options.base ?? taintJournal();
+    let at = egressStart;
+    const rules = new ToolEgressRules({
+      journal: options.journal?.(base.journal) ?? base.journal,
+      readCodeThread: (threadId) =>
+        threadId === String(egressThread) || threadId === String(egressOtherThread)
+          ? { projectId: String(egressProject) }
+          : undefined,
+      readThreadTaint: (threadId) =>
+        readThreadExternalContentTaint(base.connection, threadId).externalContentIngested,
+      recordLaunchTaint: ({ threadId, launchId }) => {
+        if (options.failTaint?.() === true) return "unavailable";
+        const marked = base.store.record({
+          threadId,
+          provenance: { origin: "external-content", sourceLabel: "tool-egress" },
+          contentReference: toolEgressLaunchTaintReference(launchId),
+          correlationId: launchId,
+          authorized: true,
+        });
+        return marked.kind === "recorded" || marked.kind === "already-recorded"
+          ? "recorded"
+          : "unavailable";
+      },
+      hostActor,
+      personActor,
+      uuid: randomUUID,
+      clock: () => new Date(at).toISOString(),
+    });
+    return {
+      ...base,
+      rules,
+      advance: (milliseconds: number) => {
+        at += milliseconds;
+      },
+      tainted: (threadId: string) =>
+        readThreadExternalContentTaint(base.connection, threadId).externalContentIngested,
+      taint: (threadId: string) =>
+        base.store.record({
+          threadId,
+          provenance: { origin: "external-content", sourceLabel: "web-fetch" },
+          contentReference: `page-${randomUUID()}`,
+          correlationId: randomUUID(),
+          authorized: true,
+        }),
+      events: (aggregateType: string) =>
+        base.journal.replayAggregateType({ aggregateType, afterSequence: 0, limit: 1_000 }),
+    };
+  }
+  type EgressHost = ReturnType<typeof egressHost>;
+
+  async function startLaunch(
+    host: EgressHost,
+    options: {
+      readonly launch?: ToolEgressLaunch;
+      readonly origin?: number;
+      readonly resolveAll?: (name: string) => Promise<ReadonlyArray<string>>;
+    } = {},
+  ) {
+    const network = fixtureNetwork(
+      new Map(options.origin === undefined ? [] : [["203.0.113.10", options.origin]]),
+    );
+    const started = await host.rules.startLaunch({
+      launch: options.launch ?? launchFor(),
+      endpoint: { kind: "loopback" },
+      resolveAll: options.resolveAll ?? network.resolveAll,
+      connect: network.connect,
+    });
+    if (started.status !== "listening") throw new Error(`launch refused: ${started.reason}`);
+    launches.push(started.launch);
+    const finish = () => {
+      launches.splice(launches.indexOf(started.launch), 1);
+      return started.launch.finish();
+    };
+    return {
+      proxy: started.launch.proxy,
+      authorization: basicAuthorization(started.launch.proxy.token),
+      network,
+      finish,
+    };
+  }
+  type StartedLaunch = Awaited<ReturnType<typeof startLaunch>>;
+
+  const answerLine = (answer: string) => answer.slice(answer.indexOf("\r\n\r\n") + 4).trim();
+  const ask = async (launch: StartedLaunch, target: string) => {
+    const tunnel = await openTunnel(launch.proxy, target, launch.authorization);
+    if (tunnel.status === 200) tunnel.socket.destroy();
+    return tunnel.status === 200 ? "connected" : answerLine(tunnel.answer);
+  };
+  const grantThreadRule = (host: EgressHost, name: string, threadId = egressThread) =>
+    host.rules.answer({
+      threadId: String(threadId),
+      principal: person,
+      grants: [{ host: name, port: 443, scope: eightHours }],
+    });
+
+  describe("learn mode", () => {
+    it("refuses and proposes a host however often it is asked, and never connects to it", async () => {
+      const host = egressHost();
+      const origin = await tcpFixture();
+      const launch = await startLaunch(host, { origin: origin.port });
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        expect(await ask(launch, "registry.example.com:443")).toBe(
+          "octant-egress-refused: no-rule registry.example.com:443",
+        );
+      }
+      expect(await launch.finish()).toMatchObject({ status: "summarized" });
+      expect(launch.network.resolved).toEqual([]);
+      expect(launch.network.dialed).toEqual([]);
+      expect(origin.connections()).toBe(0);
+      const proposals = host.rules.view(String(egressThread), "local-window")?.proposals ?? [];
+      expect(proposals).toEqual([
+        expect.objectContaining({
+          host: "registry.example.com",
+          port: 443,
+          reason: "no-rule",
+          attempts: 100,
+          threadTainted: false,
+        }),
+      ]);
+      // The proposal is a record a person reads; the next launch is refused all the same.
+      const next = await startLaunch(host, { origin: origin.port });
+      expect(await ask(next, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+      expect(
+        host.events(TOOL_EGRESS_THREAD_AGGREGATE).map((event) => event.eventName),
+      ).not.toContain(TOOL_EGRESS_EVENT_NAMES.threadRuleGranted);
+    });
+
+    it("grants nothing for a proposal left unanswered or turned down", async () => {
+      const host = egressHost();
+      const origin = await tcpFixture();
+      const first = await startLaunch(host, { origin: origin.port });
+      await ask(first, "registry.example.com:443");
+      await first.finish();
+      const [proposal] = host.rules.view(String(egressThread), "local-window")?.proposals ?? [];
+      expect(proposal).toBeDefined();
+      expect(
+        host.rules.decline({
+          threadId: String(egressThread),
+          principal: person,
+          proposalIds: [String(proposal?.proposalId)],
+        }),
+      ).toEqual({ kind: "answered", ruleIds: [] });
+      expect(host.rules.view(String(egressThread), "local-window")?.proposals).toEqual([]);
+      const second = await startLaunch(host, { origin: origin.port });
+      expect(await ask(second, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+      expect(origin.connections()).toBe(0);
+    });
+
+    it("allows a proposed host once a person grants it, on that thread only", async () => {
+      const host = egressHost();
+      const origin = await tcpFixture();
+      const first = await startLaunch(host, { origin: origin.port });
+      await ask(first, "registry.example.com:443");
+      await first.finish();
+      expect(grantThreadRule(host, "Registry.Example.com")).toMatchObject({ kind: "answered" });
+      // The rule answers the proposal for its host.
+      expect(host.rules.view(String(egressThread), "local-window")?.proposals).toEqual([]);
+      const retry = await startLaunch(host, { origin: origin.port });
+      expect(await ask(retry, "registry.example.com:443")).toBe("connected");
+      const elsewhere = await startLaunch(host, {
+        origin: origin.port,
+        launch: launchFor(egressOtherThread),
+      });
+      expect(await ask(elsewhere, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+    });
+
+    it("proposes nothing with learn mode off, and never a refusal it may not propose", async () => {
+      const host = egressHost();
+      expect(grantThreadRule(host, "lan.example.com")).toMatchObject({ kind: "answered" });
+      const launch = await startLaunch(host, {
+        resolveAll: async (name) => (name === "lan.example.com" ? ["10.0.0.5"] : ["203.0.113.10"]),
+      });
+      expect(await ask(launch, "lan.example.com:443")).toBe(
+        "octant-egress-refused: private-destination lan.example.com:443",
+      );
+      expect(await ask(launch, "203.0.113.5:443")).toBe(
+        "octant-egress-refused: ip-literal 203.0.113.5:443",
+      );
+      const unauthenticated = await openTunnel(launch.proxy, "registry.example.com:443", undefined);
+      expect(unauthenticated.status).toBe(407);
+      await launch.finish();
+      expect(host.rules.view(String(egressThread), "local-window")?.proposals).toEqual([]);
+
+      expect(
+        host.rules.setLearnMode({
+          threadId: String(egressThread),
+          principal: person,
+          enabled: false,
+        }),
+      ).toEqual({ kind: "answered", ruleIds: [] });
+      const quiet = await startLaunch(host);
+      expect(await ask(quiet, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+      await quiet.finish();
+      const view = host.rules.view(String(egressThread), "local-window");
+      expect(view?.learnMode).toBe(false);
+      expect(view?.proposals).toEqual([]);
+    });
+
+    it("proposes at most sixteen hosts a launch and sixty-four a thread", async () => {
+      const host = egressHost();
+      for (let round = 0; round < 5; round += 1) {
+        const launch = await startLaunch(host);
+        for (let index = 0; index < 20; index += 1) {
+          await ask(launch, `host-${String(round)}-${String(index)}.example.com:443`);
+        }
+        await launch.finish();
+        const open = host.rules.view(String(egressThread), "local-window")?.proposals.length;
+        expect(open).toBe(Math.min(16 * (round + 1), 64));
+      }
+    });
+
+    it("refuses and proposes a host whose rule has expired", async () => {
+      const host = egressHost();
+      const origin = await tcpFixture();
+      expect(
+        host.rules.answer({
+          threadId: String(egressThread),
+          principal: person,
+          grants: [
+            { host: "registry.example.com", port: 443, scope: { kind: "thread", lifetime: "1h" } },
+          ],
+        }),
+      ).toMatchObject({ kind: "answered" });
+      host.advance(3_600_000);
+      const launch = await startLaunch(host, { origin: origin.port });
+      expect(await ask(launch, "registry.example.com:443")).toBe(
+        "octant-egress-refused: expired registry.example.com:443",
+      );
+      await launch.finish();
+      const view = host.rules.view(String(egressThread), "local-window");
+      expect(view?.threadRules).toEqual([]);
+      expect(view?.proposals).toEqual([expect.objectContaining({ reason: "expired" })]);
+      expect(origin.connections()).toBe(0);
+    });
+  });
+
+  describe("who may grant", () => {
+    it("refuses a Project rule from a paired device and lets it grant a thread rule", () => {
+      const host = egressHost();
+      expect(
+        host.rules.answer({
+          threadId: String(egressThread),
+          principal: device,
+          grants: [
+            {
+              host: "registry.example.com",
+              port: 443,
+              scope: { kind: "project", lifetime: "7d" },
+            },
+          ],
+        }),
+      ).toEqual({ kind: "refused", reason: "needs-local-window" });
+      expect(host.events(TOOL_EGRESS_PROJECT_AGGREGATE)).toEqual([]);
+      expect(
+        host.rules.answer({
+          threadId: String(egressThread),
+          principal: device,
+          grants: [{ host: "registry.example.com", port: 443, scope: eightHours }],
+        }),
+      ).toMatchObject({ kind: "answered" });
+      expect(
+        host.events(TOOL_EGRESS_THREAD_AGGREGATE).map((event) => event.payload),
+      ).toContainEqual(expect.objectContaining({ principal: device }));
+    });
+
+    it("takes the principal from the authenticated request, so a paired device cannot grant a Project rule over the route", async () => {
+      const host = egressHost();
+      const windowId = decodeWindowId("00000000-0000-4000-8000-000000000467");
+      const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+      const windows = new WindowAuthorityStore();
+      windows.register({ windowId, capability, now: 0 });
+      let authorized = true;
+      const handler = createNativeHarnessEgressRouteHandler({
+        windowAuthorityStore: windows,
+        rules: host.rules,
+        authorizeThread: () => authorized,
+        now: () => 1,
+      });
+      const url = `http://127.0.0.1/api/native-harness/egress/threads/${String(egressThread)}`;
+      const projectGrant = JSON.stringify({
+        kind: "grant-rules",
+        grants: [
+          { host: "registry.example.com", port: 443, choice: { kind: "project", lifetime: "7d" } },
+        ],
+        declineProposalIds: [],
+      });
+      const remote = new Request(url, { method: "POST", body: projectGrant });
+      bindPrincipalRouteContext(remote, {
+        principal: { kind: "remote-device", deviceId: device.deviceId } as never,
+        scopeId: windowId,
+      });
+      const refused = await handler(remote);
+      expect(refused?.status).toBe(409);
+      expect(await refused?.json()).toMatchObject({ reason: "needs-local-window" });
+      expect(host.events(TOOL_EGRESS_PROJECT_AGGREGATE)).toEqual([]);
+
+      const local = () =>
+        new Request(url, {
+          method: "POST",
+          body: projectGrant,
+          headers: { "x-octant-window-capability": capability },
+        });
+      authorized = false;
+      expect((await handler(local()))?.status).toBe(403);
+      authorized = true;
+      const granted = await handler(local());
+      expect(granted?.status).toBe(200);
+      expect(await granted?.json()).toMatchObject({
+        kind: "tool-egress-updated",
+        view: { projectRules: [expect.objectContaining({ host: "registry.example.com" })] },
+      });
+    });
+
+    it("lets a tainted thread grant only call rules, and stops its standing rules", async () => {
+      const host = egressHost();
+      const origin = await tcpFixture();
+      expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+      expect(host.taint(String(egressThread)).kind).toBe("recorded");
+
+      const launch = launchFor();
+      const started = await startLaunch(host, { origin: origin.port, launch });
+      expect(await ask(started, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+      for (const scope of [eightHours, { kind: "project", lifetime: "7d" } as const]) {
+        expect(
+          host.rules.answer({
+            threadId: String(egressThread),
+            principal: person,
+            grants: [{ host: "registry.example.com", port: 443, scope }],
+          }),
+        ).toEqual({ kind: "refused", reason: "thread-tainted" });
+      }
+      expect(
+        host.rules.answer({
+          threadId: String(egressThread),
+          principal: person,
+          grants: [
+            {
+              host: "registry.example.com",
+              port: 443,
+              scope: { kind: "call", launchId: String(launch.launchId) },
+            },
+          ],
+        }),
+      ).toMatchObject({ kind: "answered" });
+      expect(await ask(started, "registry.example.com:443")).toBe("connected");
+      // A call rule is this launch's; the next one is refused again.
+      const next = await startLaunch(host, { origin: origin.port });
+      expect(await ask(next, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+      await started.finish();
+      expect(host.rules.view(String(egressThread), "local-window")).toMatchObject({
+        threadTainted: true,
+        projectGrant: "thread-tainted",
+      });
+    });
+
+    it("lets a reviewer grant only call rules, and nothing on a tainted thread", () => {
+      const host = egressHost();
+      const call = { kind: "call", launchId: randomUUID() } as const;
+      const answer = (scope: Parameters<typeof host.rules.answer>[0]["grants"][number]["scope"]) =>
+        host.rules.answer({
+          threadId: String(egressThread),
+          principal: { kind: "reviewer" },
+          grants: [{ host: "registry.example.com", port: 443, scope }],
+        });
+      expect(answer(eightHours)).toEqual({ kind: "refused", reason: "reviewer-call-only" });
+      expect(answer({ kind: "project", lifetime: "7d" })).toEqual({
+        kind: "refused",
+        reason: "reviewer-call-only",
+      });
+      expect(answer(call)).toMatchObject({ kind: "answered" });
+      expect(
+        host.events(TOOL_EGRESS_THREAD_AGGREGATE).map((event) => event.payload),
+      ).toContainEqual(expect.objectContaining({ principal: { kind: "reviewer" }, scope: call }));
+      host.taint(String(egressThread));
+      expect(answer(call)).toEqual({ kind: "refused", reason: "needs-person" });
+    });
+
+    it("keeps a child of a tainted parent off the parent's standing rules", async () => {
+      const host = egressHost();
+      const origin = await tcpFixture();
+      expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+      const child = (): ToolEgressLaunch => ({
+        ...launchFor(childThread),
+        parentThreadId: egressThread,
+      });
+      const clean = await startLaunch(host, { origin: origin.port, launch: child() });
+      expect(await ask(clean, "registry.example.com:443")).toBe("connected");
+      await clean.finish();
+
+      host.taint(String(egressThread));
+      const tainted = await startLaunch(host, { origin: origin.port, launch: child() });
+      expect(await ask(tainted, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+      expect(await ask(tainted, "mirror.example.com:443")).toBe(
+        "octant-egress-refused: no-rule mirror.example.com:443",
+      );
+      await tainted.finish();
+      // The child's proposals land on the parent's thread, naming the child.
+      expect(host.rules.view(String(egressThread), "local-window")?.proposals).toContainEqual(
+        expect.objectContaining({
+          host: "mirror.example.com",
+          childThreadId: childThread,
+          threadTainted: true,
+        }),
+      );
+    });
+  });
+
+  describe("records", () => {
+    it("puts nothing in force when a grant cannot be journaled", async () => {
+      const host = egressHost({
+        journal: (journal) => ({
+          append: (input, options) => {
+            if (JSON.stringify(input).includes("egress-rule-granted")) {
+              throw new Error("journal unavailable");
+            }
+            return journal.append(input, options);
+          },
+          replayAggregateType: (cursor) => journal.replayAggregateType(cursor),
+        }),
+      });
+      const origin = await tcpFixture();
+      expect(grantThreadRule(host, "registry.example.com")).toEqual({
+        kind: "refused",
+        reason: "unavailable",
+      });
+      expect(
+        host.rules.answer({
+          threadId: String(egressThread),
+          principal: person,
+          grants: [
+            { host: "registry.example.com", port: 443, scope: { kind: "project", lifetime: "7d" } },
+          ],
+        }),
+      ).toEqual({ kind: "refused", reason: "unavailable" });
+      const view = host.rules.view(String(egressThread), "local-window");
+      expect(view?.threadRules).toEqual([]);
+      expect(view?.projectRules).toEqual([]);
+      const launch = await startLaunch(host, { origin: origin.port });
+      expect(await ask(launch, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+    });
+
+    it.each(["harness-bash-call", "repository-test-run"])(
+      "taints the thread from bytes received before a %s's result returns",
+      async (toolCallId) => {
+        const host = egressHost();
+        const origin = await tcpFixture();
+        expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+        const launch = await startLaunch(host, {
+          origin: origin.port,
+          launch: { ...launchFor(), toolCallId },
+        });
+        const tunnel = await openTunnel(
+          launch.proxy,
+          "registry.example.com:443",
+          launch.authorization,
+        );
+        expect(await roundTrip(tunnel.socket, "package", 7)).toBe("package");
+        expect(host.tainted(String(egressThread))).toBe(false);
+        const ended = await launch.finish();
+        expect(ended).toMatchObject({ status: "summarized", summary: { bytesReceived: 7 } });
+        expect(host.tainted(String(egressThread))).toBe(true);
+      },
+    );
+
+    it("leaves a thread clean when its launch received nothing", async () => {
+      const host = egressHost();
+      const launch = await startLaunch(host);
+      await ask(launch, "registry.example.com:443");
+      expect(await launch.finish()).toMatchObject({ summary: { bytesReceived: 0 } });
+      expect(host.tainted(String(egressThread))).toBe(false);
+    });
+
+    it("counts request heads it could not read in the launch summary", async () => {
+      const host = egressHost();
+      const launch = await startLaunch(host);
+      await exchange(
+        launch.proxy,
+        "CONNECT registry.example.com:443 HTTP/1.1\r\nHost: registry.example.com:443\r\n folded\r\n\r\n",
+      );
+      await exchange(
+        launch.proxy,
+        "GET http://a.example.com/ HTTP/1.1\r\nHost: a.example.com\r\nHost: b.example.com\r\n\r\n",
+      );
+      await exchange(
+        launch.proxy,
+        `GET http://a.example.com/ HTTP/1.1\r\nX-Pad: ${"a".repeat(40_000)}\r\n\r\n`,
+      );
+      expect(await launch.finish()).toMatchObject({
+        status: "summarized",
+        summary: { malformedRequests: 3, entries: [] },
+      });
+    });
+
+    it("closes a tunnel the moment its rule is revoked", async () => {
+      const host = egressHost();
+      const origin = await tcpFixture();
+      const granted = grantThreadRule(host, "registry.example.com");
+      expect(granted.kind).toBe("answered");
+      const launch = await startLaunch(host, { origin: origin.port });
+      const tunnel = await openTunnel(
+        launch.proxy,
+        "registry.example.com:443",
+        launch.authorization,
+      );
+      expect(await roundTrip(tunnel.socket, "before", 6)).toBe("before");
+      const closed = new Promise<void>((resolve) => tunnel.socket.once("close", () => resolve()));
+      expect(
+        host.rules.revoke({
+          threadId: String(egressThread),
+          principal: person,
+          ruleId: granted.kind === "answered" ? String(granted.ruleIds[0]) : "",
+        }),
+      ).toEqual({ kind: "answered", ruleIds: [] });
+      await closed;
+      expect(origin.seen()).toBe("before");
+      expect(await ask(launch, "registry.example.com:443")).toBe(
+        "octant-egress-refused: no-rule registry.example.com:443",
+      );
+    });
+
+    it("loses at most one decision batch when the server dies mid-launch, and recovery marks the launch incomplete", async () => {
+      const base = taintJournal();
+      let crashed = false;
+      const dying = egressHost({
+        base,
+        journal: (journal) => ({
+          append: (input, options) => {
+            if (crashed) throw new Error("the server is gone");
+            return journal.append(input, options);
+          },
+          replayAggregateType: (cursor) => journal.replayAggregateType(cursor),
+        }),
+      });
+      const launch = await startLaunch(dying);
+      for (let index = 0; index < 20; index += 1) {
+        await ask(launch, `host-${String(index)}.example.com:443`);
+      }
+      await waitFor(() =>
+        dying
+          .events(TOOL_EGRESS_THREAD_AGGREGATE)
+          .some((event) => event.eventName === TOOL_EGRESS_EVENT_NAMES.decisionsRecorded),
+      );
+      crashed = true;
+
+      const restarted = egressHost({ base });
+      expect(restarted.tainted(String(egressThread))).toBe(false);
+      expect(restarted.rules.recover()).toEqual({ incomplete: 1, unmarked: 0 });
+      const incomplete = restarted
+        .events(TOOL_EGRESS_THREAD_AGGREGATE)
+        .find((event) => event.eventName === TOOL_EGRESS_EVENT_NAMES.launchIncomplete);
+      expect(incomplete?.payload).toMatchObject({ tail: "unknown", truncated: false });
+      expect(incomplete?.payload).toHaveProperty("entries.length", 16);
+      // The tail is unknown, so recovery taints the thread.
+      expect(restarted.tainted(String(egressThread))).toBe(true);
+      // A second restart finds the launch settled and appends nothing more.
+      expect(egressHost({ base }).rules.recover()).toEqual({ incomplete: 0, unmarked: 0 });
+      expect(await launch.finish()).toEqual({ status: "unavailable" });
+    });
+
+    it("leaves the thread tainted after a restart when the server died between the summary and the taint", async () => {
+      const base = taintJournal();
+      const origin = await tcpFixture();
+      const before = egressHost({ base, failTaint: () => true });
+      expect(grantThreadRule(before, "registry.example.com")).toMatchObject({ kind: "answered" });
+      const launch = await startLaunch(before, { origin: origin.port });
+      const tunnel = await openTunnel(
+        launch.proxy,
+        "registry.example.com:443",
+        launch.authorization,
+      );
+      expect(await roundTrip(tunnel.socket, "package", 7)).toBe("package");
+      expect(await launch.finish()).toEqual({ status: "unavailable" });
+      expect(before.tainted(String(egressThread))).toBe(false);
+      // Until the mark is written this host treats the thread as tainted.
+      expect(before.rules.view(String(egressThread), "local-window")?.threadTainted).toBe(true);
+
+      const after = egressHost({ base });
+      expect(after.rules.recover()).toEqual({ incomplete: 0, unmarked: 0 });
+      expect(after.tainted(String(egressThread))).toBe(true);
     });
   });
 });

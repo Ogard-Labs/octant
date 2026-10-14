@@ -122,6 +122,18 @@ export interface ToolEgressProxyOptions {
    */
   readonly connect?: (destination: { readonly address: string; readonly port: number }) => Socket;
   readonly limits?: Partial<ToolEgressProxyLimits>;
+  /**
+   * Told of every request refused for `no-rule` or `expired`, the two
+   * refusals learn mode may propose a rule for. It is told after the refusal
+   * is decided and answered; nothing it does or throws changes a decision.
+   */
+  readonly onProposable?: (refusal: ToolEgressProposableRefusal) => void;
+}
+
+export interface ToolEgressProposableRefusal {
+  readonly host: string;
+  readonly port: number;
+  readonly reason: "no-rule" | "expired";
 }
 
 export type ToolEgressProxyStart =
@@ -216,6 +228,7 @@ export class ToolEgressProxy {
   #pending = 0;
   #bytesSent = 0;
   #bytesReceived = 0;
+  #malformedRequests = 0;
   #accepting = false;
   #closed = false;
   #auditUnavailable = false;
@@ -302,6 +315,7 @@ export class ToolEgressProxy {
       endedAt,
       bytesSent: this.#bytesSent,
       bytesReceived: this.#bytesReceived,
+      malformedRequests: this.#malformedRequests,
       entries: tallies.slice(0, MAX_TOOL_EGRESS_SUMMARY_ENTRIES).map(decisionEntry),
       truncated: tallies.length > MAX_TOOL_EGRESS_SUMMARY_ENTRIES,
       threadTainted: this.#facts().threadTainted,
@@ -393,9 +407,11 @@ export class ToolEgressProxy {
       switch (read.status) {
         case "incomplete":
         case "too-large":
+          this.#malformedRequests += 1;
           respond(socket, 431, "octant-egress-refused: request-head-too-large");
           return;
         case "malformed":
+          this.#malformedRequests += 1;
           respond(socket, 400, `octant-egress-refused: malformed-request (${read.detail})`);
           return;
         case "read":
@@ -891,6 +907,7 @@ export class ToolEgressProxy {
     destination: { readonly host: string; readonly port: number },
   ): void {
     this.#count({ ...destination, decision: "refused", reason }, { requests: 1 });
+    if (reason === "no-rule" || reason === "expired") this.#propose({ ...destination, reason });
     if (reason === "token") {
       respond(
         socket,
@@ -905,6 +922,14 @@ export class ToolEgressProxy {
       403,
       `octant-egress-refused: ${reason} ${destination.host}:${String(destination.port)}`,
     );
+  }
+
+  #propose(refusal: ToolEgressProposableRefusal): void {
+    try {
+      this.#options.onProposable?.(refusal);
+    } catch {
+      // A proposal is a suggestion for a person; failing to note one changes nothing here.
+    }
   }
 
   #count(

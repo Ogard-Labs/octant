@@ -48,6 +48,7 @@ import {
   decodeCodeRepositoryId,
   decodeCodeThreadId,
   decodeWorkThreadId,
+  THREAD_EXTERNAL_CONTENT_AGGREGATE,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadCreationRootId,
   decodeThreadWorkingDirectory,
@@ -777,6 +778,11 @@ import { NativeHarnessQuestionStore } from "./harness/nativeHarnessQuestions";
 import { createAgentRunInteractions } from "./agentRun/agentRunInteractions";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
 import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
+import { createNativeHarnessEgressRouteHandler } from "./harness/nativeHarnessEgressRoutes";
+import {
+  ToolEgressRules,
+  toolEgressLaunchTaintReference,
+} from "./harness/nativeHarnessEgressRules";
 import { NativeHarnessTurnObserver } from "./harness/nativeHarnessTurnObserver";
 import { fetchPublicUrl, PublicFetchRefused } from "./harness/nativeHarnessWebFetch";
 import { searxngHarnessWebSearch } from "./harness/nativeHarnessWebSearch";
@@ -2786,6 +2792,53 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
+    // Harness tool egress rules, proposals, and launch records. Recovery runs
+    // here, before any route admits a turn: a launch the last run never
+    // summarized is marked incomplete, and every launch whose bytes taint its
+    // thread marks it now. No launch runs on the proxy yet; confinement routes
+    // commands there in a later change.
+    const toolEgressRules = new ToolEgressRules({
+      journal: persistence.journal,
+      readCodeThread: (threadId) => {
+        try {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          return thread === undefined ? undefined : { projectId: String(thread.projectId) };
+        } catch {
+          return undefined;
+        }
+      },
+      readThreadTaint: (threadId) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+      recordLaunchTaint: ({ threadId, launchId }) => {
+        const marked = externalContentIngestionStore.record({
+          threadId,
+          provenance: { origin: "external-content", sourceLabel: "tool-egress" },
+          contentReference: toolEgressLaunchTaintReference(launchId),
+          correlationId: launchId,
+          authorized: true,
+        });
+        return marked.kind === "recorded" || marked.kind === "already-recorded"
+          ? "recorded"
+          : "unavailable";
+      },
+      hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    toolEgressRules.recover();
+    const unsubscribeToolEgressRules = persistence.journal.subscribeCommitted((append) => {
+      for (const event of append.events) {
+        if (event.aggregateType === THREAD_EXTERNAL_CONTENT_AGGREGATE) {
+          // A thread tainted mid-launch stops its standing rules at once.
+          toolEgressRules.recheck();
+        } else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
+          const purged = event.payload as { readonly threadId?: unknown };
+          if (typeof purged.threadId === "string") toolEgressRules.forgetThread(purged.threadId);
+        }
+      }
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeToolEgressRules));
     // Where a mention or a Side Chat reads its source's mark and marks the
     // thread reading that source's transcript.
     const threadOutsideContentMarks = {
@@ -6318,6 +6371,11 @@ export function startOctantServer(
       create: createFollowUpOnHost,
       sendFirstMessage: (input) => sideTaskFirstMessage.current?.(input) ?? Promise.resolve(false),
       clock: () => new Date().toISOString(),
+    });
+    const nativeHarnessEgressRoutes = createNativeHarnessEgressRouteHandler({
+      windowAuthorityStore,
+      rules: toolEgressRules,
+      authorizeThread: authorizeFollowUpThread,
     });
     const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
       windowAuthorityStore,
@@ -10553,6 +10611,7 @@ export function startOctantServer(
       (await agentRunSettingsRoutes(request)) ??
       (await nativeHarnessRoutingRoutes(request)) ??
       (await nativeHarnessSessionRoutes(request)) ??
+      (await nativeHarnessEgressRoutes(request)) ??
       (await followUpSuggestionRoutes(request)) ??
       (await sideTaskRoutes(request)) ??
       (await githubRoutes(request)) ??
