@@ -4,6 +4,16 @@ import type { PrincipalRouteContext } from "./principalRouteContext";
 import { isRoutineHostScope } from "./routineHostScope";
 import { windowCanAccessCodeProject } from "./windowCodeProjectAccess";
 
+export interface CodeProjectAccessOptions {
+  readonly readWorkspace: (scopeId: WindowId) => WindowWorkspace | undefined;
+  readonly hasActiveCodeProject: (projectId: ProjectId) => boolean;
+  /**
+   * Whether a local window still holds its authority. A closed window is
+   * revoked, but its persisted workspace stays behind.
+   */
+  readonly isWindowLive: (scopeId: WindowId) => boolean;
+}
+
 /** Bridges authenticated requests to Code services that still accept an opaque scope ID.
  * No device workspace or persistent permission is created by a remote read or command.
  */
@@ -12,15 +22,10 @@ export class CodeProjectAccess {
     readonly context: PrincipalRouteContext;
     active: boolean;
   }>();
-  readonly #options: {
-    readonly readWorkspace: (scopeId: WindowId) => WindowWorkspace | undefined;
-    readonly hasActiveCodeProject: (projectId: ProjectId) => boolean;
-  };
+  readonly #standing = new AsyncLocalStorage<true>();
+  readonly #options: CodeProjectAccessOptions;
 
-  constructor(options: {
-    readonly readWorkspace: (scopeId: WindowId) => WindowWorkspace | undefined;
-    readonly hasActiveCodeProject: (projectId: ProjectId) => boolean;
-  }) {
+  constructor(options: CodeProjectAccessOptions) {
     this.#options = options;
   }
 
@@ -41,11 +46,13 @@ export class CodeProjectAccess {
    * judged when each check runs, with no request's admission. A Code turn's
    * tool call is an async descendant of the request that started the turn
    * and runs after that request ended, so inside it every check refuses as
-   * deferred work. A read the turn makes for its window belongs here: it gets
-   * what the window holds now and never what a finished request held.
+   * deferred work. The Code runtime runs each of a turn's tool calls here:
+   * the call gets what the window holds now, never what a request held.
+   * A window that has closed holds nothing: its persisted workspace outlives
+   * it, and closing it does not stop its turns.
    */
   standingAuthority<T>(read: () => T): T {
-    return this.#requests.exit(read);
+    return this.#requests.exit(() => this.#standing.run(true, read));
   }
 
   canAccessProject(scopeId: WindowId, projectId: ProjectId): boolean {
@@ -61,6 +68,8 @@ export class CodeProjectAccess {
       if (request.context.principal.kind === "remote-device") {
         return this.#options.hasActiveCodeProject(projectId);
       }
+    } else if (this.#standing.getStore() === true && !this.#options.isWindowLive(scopeId)) {
+      return false;
     }
     return windowCanAccessCodeProject({
       workspace: this.#options.readWorkspace(scopeId),

@@ -261,6 +261,11 @@ export interface CodeOperationRuntimeOptions {
   readonly persistence: RuntimePersistence;
   readonly windowAccess: {
     readonly canAccessProject: CodeOperationAuthorityPort["canAccessProject"];
+    /**
+     * Runs `run` on the window's standing authority: its persisted binding,
+     * judged when each check inside runs, never a request's admission.
+     */
+    readonly standingAuthority: <T>(run: () => T) => T;
   };
   readonly resolveCheckoutRoot: CodeOperationAuthorityPort["resolveCheckoutRoot"];
   readonly resolveProviderDriver: (thread: CodeThread) => Awaitable<ProviderDriver | undefined>;
@@ -3177,7 +3182,16 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       );
     }
     sets.push(active.extensionTools);
-    return sets.every((set) => set === undefined) ? undefined : combineAppManagedToolSets(...sets);
+    if (sets.every((set) => set === undefined)) return undefined;
+    // A provider's tool call reaches this set as an async descendant of the
+    // request that started the turn (or the provider's process). Once that
+    // request ended, every Project check inside the call refused; while it was
+    // still open, a paired device's wider in-request reach applied. Each call
+    // is judged instead on the turn's window as it stands when the call runs,
+    // never on any request's admission.
+    const tools = combineAppManagedToolSets(...sets);
+    const standing = this.#options.windowAccess.standingAuthority;
+    return { ...tools, execute: (input) => standing(() => tools.execute(input)) };
   }
 
   #owned(thread: CodeThread, checkoutRoot: string): ActiveTurn | undefined {
