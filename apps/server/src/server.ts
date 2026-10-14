@@ -5398,6 +5398,7 @@ export function startOctantServer(
                       options,
                     ),
                 },
+                standingAuthority: (read) => codeProjectAccess.standingAuthority(read),
               },
               windowId,
             ),

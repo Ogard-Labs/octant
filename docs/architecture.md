@@ -1434,7 +1434,10 @@ or stops a thread.
   turn and every other runtime work record, or the thread's creation when it
   has never run; a turn parked on an approval keeps its running record, so
   its time is when that turn last moved. `read` takes its transcript from
-  the Code `#thread` mention read for the window the turn runs for.
+  the Code `#thread` mention read for the window the turn runs for, judged on
+  that window's standing authority (its persisted Project binding when the
+  call runs). The request that started the turn has ended by the time a tool
+  is called, and its admission is never carried into the read.
 
 ## Agent task display
 

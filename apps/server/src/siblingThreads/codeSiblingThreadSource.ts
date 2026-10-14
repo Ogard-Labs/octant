@@ -31,6 +31,12 @@ export interface CodeSiblingThreadEvidence {
   readonly decisionPending: (thread: CodeThread) => boolean;
   /** The Code `#thread` mention read, which re-authorizes the window on every page. */
   readonly mentions: Pick<ThreadMentionDirectory, "readTranscript">;
+  /**
+   * Runs a read on the window's standing authority. A tool call runs after
+   * the request that started its turn has ended, so the mention read must be
+   * judged on what the window holds now rather than on that request.
+   */
+  readonly standingAuthority: <T>(read: () => Promise<T>) => Promise<T>;
 }
 
 /**
@@ -61,7 +67,13 @@ export function codeSiblingThreadSource(
         .filter((thread) => String(thread.projectId) === String(projectId))
         .map(snapshot),
     readTranscript: async (threadId) =>
-      await evidence.mentions.readTranscript(windowId, decodeMentionableThreadId(String(threadId))),
+      await evidence.standingAuthority(
+        async () =>
+          await evidence.mentions.readTranscript(
+            windowId,
+            decodeMentionableThreadId(String(threadId)),
+          ),
+      ),
   };
 }
 

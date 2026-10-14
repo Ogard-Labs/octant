@@ -135,3 +135,37 @@ it("lets a routine reach its active Code Project with no window bound to it, and
   // Any other unbound scope still reaches nothing.
   expect(access.canAccessProject(scopeId, projectId)).toBe(false);
 });
+
+it("judges work that outlives its request on the window's standing binding, never on the request", async () => {
+  const otherProject = decodeProjectId("00000000-0000-4000-8000-00000000c013");
+  const workspace = defaultWindowWorkspace(scopeId);
+  const access = new CodeProjectAccess({
+    readWorkspace: () => ({
+      ...workspace,
+      contextByMode: {
+        ...workspace.contextByMode,
+        code: contextKeyForProject("code", LOCAL_HOST_ID, projectId, "/repo"),
+      },
+    }),
+    hasActiveCodeProject: () => true,
+  });
+  const context = resolvePrincipalRouteContext({
+    request: new Request("https://octant.example/api/code/execute"),
+    principal,
+  });
+  let release = () => {};
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let deferred: Promise<ReadonlyArray<boolean>> | undefined;
+  await access.run(context, async () => {
+    deferred = waiting.then(() => [
+      access.canAccessProject(scopeId, projectId),
+      access.standingAuthority(() => access.canAccessProject(scopeId, projectId)),
+      // The device's request reached any active Project; standing does not.
+      access.standingAuthority(() => access.canAccessProject(scopeId, otherProject)),
+    ]);
+  });
+  release();
+  expect(await deferred).toEqual([false, true, false]);
+});
