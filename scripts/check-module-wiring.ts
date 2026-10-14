@@ -104,23 +104,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/client-runtime/src/remoteProductMutations.ts",
     "Remote product mutation exercisers whose only consumer is remoteExitEvidenceADriver.ts. Remove once a product caller serves that evidence or the smoke is retired.",
   ],
-  // ── Egress rules, phase 4 of docs/architecture.md § Harness tool egress rules ──
-  [
-    "apps/server/src/harness/nativeHarnessEgressProxy.ts",
-    "The host egress proxy, exercised by its own, hostile, and benchmark tests but started by no confined launch yet. Remove once the harness confinement launch starts it.",
-  ],
-  [
-    "apps/server/src/harness/nativeHarnessEgressWire.ts",
-    "Request-head and ClientHello readers whose only consumer is the proxy above. Remove once the harness confinement launch reaches the proxy.",
-  ],
-  [
-    "packages/domain/src/toolEgressPolicy.ts",
-    "The egress rule model and decision the proxy consults; its only consumer is the proxy above, so it is an island with it. Remove once the harness confinement launch reaches the proxy.",
-  ],
-  [
-    "packages/contracts/src/toolEgress.ts",
-    "Egress rule and journal event schemas whose only consumers are the proxy above, its domain policy, and their tests. Remove once the harness confinement launch reaches the proxy.",
-  ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
   [
     "packages/provider-sdk/src/conformance.ts",
