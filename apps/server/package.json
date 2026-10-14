@@ -22,6 +22,7 @@
     "start": "bun src/main.ts",
     "test": "vitest run --project unit --project process --testTimeout=30000",
     "test:evidence": "vitest run --project evidence --testTimeout=300000",
+    "egress-proxy:benchmark": "OCTANT_RUN_EGRESS_PROXY_BENCHMARK=1 vitest run --project evidence --testTimeout=600000 src/harness/nativeHarnessEgressProxy.benchmark.test.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

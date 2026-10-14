@@ -3504,8 +3504,8 @@ native harness in `apps/server/src/harness`:
   hosted third-party search provider ships. A tool the thread was not offered
   refuses as `tool-unavailable` without reaching policy or a person. The harness has no
   per-host network rules, rule expiry, or learn mode yet: a tool process gets the
-  thread's OS-level `none` or `allow`. The approved design for them, with only its pure
-  decision and event schemas built so far, is
+  thread's OS-level `none` or `allow`. The approved design for them, with its pure
+  decision, event schemas, and host proxy built but no command routed through the proxy yet, is
   [Harness tool egress rules](#harness-tool-egress-rules). `nativeHarnessEgress.hostile.test.ts` holds the
   adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
   Seatbelt and shows only the networked one reaching a loopback listener.
@@ -3708,11 +3708,13 @@ composer. The web shows open offers as cards above the chips.
 
 ### Harness tool egress rules
 
-**Status: design approved by the maintainer on 2026-10-13. Phase 1 is in:
-the rule model and decision (`decideToolEgress` in
-`packages/domain/src/toolEgressPolicy.ts`) and the event schemas
-(`packages/contracts/src/toolEgress.ts`). Nothing calls them yet, so nothing
-that runs has changed.** Today a harness tool process gets the thread's
+**Status: design approved by the maintainer on 2026-10-13. Phases 1 and 2
+are in: the rule model and decision (`decideToolEgress` in
+`packages/domain/src/toolEgressPolicy.ts`), the event schemas
+(`packages/contracts/src/toolEgress.ts`), and the host proxy
+(`apps/server/src/harness/nativeHarnessEgressProxy.ts`, which reads request
+heads and ClientHellos in `nativeHarnessEgressWire.ts`). No launch starts the
+proxy yet, so nothing that runs has changed.** Today a harness tool process gets the thread's
 OS-level `none` or `allow` (see Egress and hostile content above). This is the
 approved-but-unfinished design, and the phases below track its delivery. Its
 approval replaces the "no local egress proxy in this release" decision in the
@@ -3755,17 +3757,42 @@ listener per confined launch:
   port means a confined process cannot borrow another launch's identity, and a
   call-scoped rule needs no extra bookkeeping.
 - **Protocol.** HTTP `CONNECT host:port` tunnels, and absolute-form plain
-  `http://` requests, which the proxy forwards with `Proxy-Authorization` and
-  hop-by-hop headers removed and nothing added. Every request must carry
-  `Proxy-Authorization` with the launch token; a missing or wrong token gets
-  `407` and is recorded. The proxy does not terminate TLS, inspect bodies, add
+  `http://` requests, which the proxy forwards in origin form with
+  `Proxy-Authorization` and hop-by-hop headers removed. A proxied plain
+  connection carries exactly one request: the proxy forwards its head and the
+  content its `Content-Length` or `chunked` framing declares, drops anything
+  after it, and shuts a connection whose content does not frame. A second
+  plain request on the same proxied connection would otherwise reach the
+  origin undecided, under whatever `Host` it named, which a shared front end
+  routes on. The rule covers absolute-form requests only: bytes inside a
+  `CONNECT` tunnel are opaque, so plain HTTP a client sends through a tunnel
+  (Node, for one, tunnels `http://` through `CONNECT`) can carry further
+  requests with any `Host` to the tunnel's destination. That is a residual
+  risk alongside fronting inside TLS and Encrypted Client Hello below. The one
+  header the proxy writes is `Connection: close` in place of the client's
+  own, so the client opens a new connection for its next request. Every request must carry
+  `Proxy-Authorization: Basic` with user `octant` and the launch token; a
+  missing or wrong token gets `407` and is recorded under one fixed entry
+  (host `invalid`, port 0), never the host it named, because anyone on the
+  machine can send such a request. A client that asks
+  without credentials first and answers the `407` (Git's default) leaves one
+  `token` refusal per connection it opens that way. A head the proxy cannot
+  read one way only (a repeated `Host`, `Content-Length`, `Transfer-Encoding`,
+  or `Proxy-Authorization`; both framing headers; a `Transfer-Encoding` other
+  than `chunked`, or any `Transfer-Encoding` on HTTP/1.0; a folded line; a line break that is not CRLF; a
+  `Connection` option naming `Host` or a framing header; a `Host` that names
+  another host than the target; an origin-form or `https://` target) gets
+  `400` before any decision and is not a decision record, because it names no
+  destination the proxy accepted as one. A head must arrive within 10 seconds
+  and 32 KiB. The proxy does not terminate TLS, inspect bodies, add
   credentials, or follow redirects; a redirect is the client's next request,
   checked like any other. When the first bytes of a `CONNECT` tunnel are a TLS
   ClientHello with a server name, that name must equal the `CONNECT` host or
   the tunnel closes (`sni-mismatch`). That stops a client naming an allowed
   host to the proxy and a different one to a shared front end; fronting by a
-  Host header inside TLS, and Encrypted Client Hello, remain a residual risk
-  stated in the approval copy for wildcard and CDN-hosted rules.
+  Host header inside TLS, plain requests inside a tunnel (above), and
+  Encrypted Client Hello remain a residual risk stated in the approval copy
+  for wildcard and CDN-hosted rules.
 - **Decision order per request.** Token, then destination syntax (an IP
   literal, a port outside 1–65535, or a name that is not a valid DNS name
   refuses), then the rule match, then resolution, then the private-destination
@@ -3918,11 +3945,18 @@ or body:
   the launch refuses before the command runs.
 - `thread.egress-decisions-recorded@1` while the launch runs: each distinct
   host and port first decided, or whose counts changed, with its decision,
-  reason, request count, and bytes each way. The proxy flushes a batch at 16
-  entries or every 5 seconds, whichever comes first, so a crash loses at most
-  that tail of decisions and counts, never more. When a batch cannot be
-  appended the proxy refuses new requests for that launch
-  (`audit-unavailable`) and keeps existing tunnels until they end.
+  reason, request count, and bytes each way. The proxy flushes a batch once 16
+  entries are first decided, and every changed entry every 5 seconds, so a
+  crash loses at most that tail of decisions and counts, never more. A launch
+  names at most 24 allowed and 28 refused destinations; past those a decision
+  still counts, under one overflow entry (host `overflow.invalid`, port 0) for
+  allowed and one per refusal reason, so its records hold at most 64 entries,
+  its summary is never truncated, and it writes at most four batches beyond
+  one per 5 seconds however many requests it makes. When a batch cannot be
+  appended, or its append has not answered within 10 seconds, the proxy
+  refuses new requests for that launch (`audit-unavailable`) and keeps
+  existing tunnels until they end. A launch start or summary append that has
+  not answered within 10 seconds counts as not appended.
 - `thread.egress-launch-summarized@1` when the launch ends: the final totals,
   including the bytes received that taint the thread, and each distinct host
   and port, at most 64 entries with a `truncated` flag. It is appended before
@@ -3972,7 +4006,9 @@ resolution (served by the system resolver's cache), a linear match over at
 most 128 rules, and a first-chunk peek for the server name. The data path is
 a socket pipe with no inspection, so throughput is bound by loopback. The
 phase 2 benchmark sets the budget: a clone and a package install against a
-local fixture origin within 10% of the direct path.
+local fixture origin within 10% of the direct path. It runs on demand as
+`bun run egress-proxy:benchmark` in `apps/server`, not in the default suite,
+because a wall-clock budget is not a stable CI check.
 
 **Delivery phases.** Each phase lands as its own PR with the hostile cases
 for what it adds in `nativeHarnessEgress.hostile.test.ts`, extending the
