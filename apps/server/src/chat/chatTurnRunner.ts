@@ -37,7 +37,10 @@ import type { ContextHarnessService } from "../context/contextHarnessService";
 import { TurnCompactions } from "../context/automaticCompaction";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
-import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
+import {
+  capacityWaitSentence,
+  type ProviderCapacityScheduler,
+} from "../context/providerCapacityScheduler";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -112,6 +115,23 @@ function mapProviderFailure(failure: ProviderFailure): ChatFailure {
     message: failure.message,
     ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
   });
+}
+
+/**
+ * Whether a failure says the provider is out of capacity rather than that the
+ * request was wrong: a rate limit, or an overloaded endpoint that named how
+ * long to wait. A refused request (400), a rejected credential, or an endpoint
+ * that is simply down says nothing about capacity, and backing off on one
+ * would hide the real error behind a capacity refusal on the next turn. A
+ * spent or billing usage limit is not one either: the attempt parks on it and
+ * its own resume or the person's retry decides when to try again.
+ */
+function isCapacitySignal(failure: ProviderFailure): boolean {
+  if (failure.usageLimit !== undefined && failure.usageLimit.kind !== "temporary") return false;
+  return (
+    failure.category === "rate-limited" ||
+    (failure.category === "unavailable" && failure.retryAfterMs !== undefined)
+  );
 }
 
 function isChatFailure(error: unknown): error is ChatFailure {
@@ -399,20 +419,21 @@ export class ChatTurnRunner {
         origin: "thread",
       });
       if (submission.status === "queued") {
+        const message = capacityWaitSentence({
+          reason: submission.reason,
+          ...(submission.notBeforeMs === undefined ? {} : { notBeforeMs: submission.notBeforeMs }),
+          nowMs: Date.parse(clock()),
+        });
         yield* persistOutcome("interrupted", {
           code: decodeDiagnosticFailureCode("capacity-unavailable"),
+          message,
         });
         terminalOutcome = "interrupted";
         capacityScheduler.recordTerminal({
           reservationId: input.reservationId,
           outcome: "timeout",
         });
-        return yield* Effect.fail(
-          decodeChatFailure({
-            category: "interrupted",
-            message: "Provider capacity is unavailable; retry this turn.",
-          }),
-        );
+        return yield* Effect.fail(decodeChatFailure({ category: "interrupted", message }));
       }
       capacityScheduler.markRunning(input.reservationId);
       const spendReservationId = decodeSpendCeilingReservationId(String(input.reservationId));
@@ -450,6 +471,12 @@ export class ChatTurnRunner {
           return Effect.fail(error as ChatFailure);
         }
         const failure = mapProviderFailure(error);
+        if (isCapacitySignal(error)) {
+          capacityScheduler.recordCapacitySignal({
+            providerInstanceId: input.providerInstanceId,
+            ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }),
+          });
+        }
         const outcome =
           failure.category === "waiting"
             ? "waiting"

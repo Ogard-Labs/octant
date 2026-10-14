@@ -2452,6 +2452,33 @@ runtime's separate `autocompact_state` message is only sent to remote workers, s
 the host does not depend on it. Codex CLI and every other runtime report no
 point and stay `unknown`.
 
+**Provider capacity.** One in-memory `ProviderCapacityScheduler` per host admits
+every Chat turn, managed child, Automation dispatch, and context compaction
+against each provider instance's service limits and its observable concurrency
+(two requests at once for Chat turns). Work holds a slot from dispatch until its
+owner reports how it ended. A reported end frees the slot at once, whether the
+work completed, failed, was cancelled, or timed out, and whether or not the
+provider reported usage: usage it did not report stays counted at the estimate
+(`ambiguous`) until it is reconciled or newer provider facts replace it. Only
+work whose end nobody saw keeps its slot: work running at shutdown, and a
+managed child whose provider never confirmed it stopped. Holding the slot of
+every turn that ended without usage leaked it: two failed turns, or two replies
+from an endpoint that reports no usage, refused every later turn on that
+provider until the host restarted.
+
+Only a capacity answer backs a provider off. When a Chat turn fails on a rate
+limit, or on an overloaded endpoint that named a `Retry-After`, the scheduler
+refuses all work on that provider for the wait the provider named, at most 60
+seconds, or for 10 seconds when it named none. Those are the bounds of a direct
+endpoint's own retries, which have already waited by the time a turn fails, so
+the backoff only keeps new turns from piling onto the same limit. Facts observed
+meanwhile neither shorten nor erase it. A refused request (HTTP 400), a rejected
+credential, an unreachable endpoint, and a spent or billing usage limit are not
+capacity answers: the turn fails or parks with its own cause and the next turn
+runs. A turn the scheduler refuses ends Interrupted with `capacity-unavailable`
+and a sentence that names what is full and, when known, how long until it frees
+("The provider rate-limited this endpoint. Try this turn again in 15 seconds.").
+
 **What fills a provider-run window.** A usage report may carry
 `contextBreakdown` (`ProviderContextBreakdown` in `@octant/contracts`): a closed
 set of part kinds (`system-prompt`, `octant-instructions`, `system-tools`,
