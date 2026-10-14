@@ -369,7 +369,7 @@ describe("removeAllLocalData", () => {
     expect(existsSync(databasePath)).toBe(false);
   });
 
-  it("stages and removes only the private-listener host identity and TLS key with the selected store", async () => {
+  it("stages and removes only the private-listener host identity, TLS key, and remembered setting with the selected store", async () => {
     const { directory, databasePath } = temporaryStore();
     migratedConnection(databasePath).close();
     const remoteDirectory = join(directory, "remote");
@@ -378,11 +378,13 @@ describe("removeAllLocalData", () => {
     const hostKey = join(remoteDirectory, "private-listener-host-key.pem");
     const tlsKey = join(remoteDirectory, "private-listener-tls-key.pem");
     const tlsCertificate = join(remoteDirectory, "private-listener-tls-cert.pem");
+    const setting = join(remoteDirectory, "private-listener-setting.json");
     const unrelatedRemoteState = join(remoteDirectory, "keep-me.txt");
     writeFileSync(hostId, "55555555-5555-4555-8555-555555555555\n");
     writeFileSync(hostKey, "private-key");
     writeFileSync(tlsKey, "tls-private-key");
     writeFileSync(tlsCertificate, "tls-certificate");
+    writeFileSync(setting, '{"certificate":"self-made"}');
     writeFileSync(unrelatedRemoteState, "must remain");
 
     const report = await removeAllLocalDataWithCredentialPurge({
@@ -397,6 +399,7 @@ describe("removeAllLocalData", () => {
       "octant.sqlite3",
       join("remote", "private-listener-host-id"),
       join("remote", "private-listener-host-key.pem"),
+      join("remote", "private-listener-setting.json"),
       join("remote", "private-listener-tls-cert.pem"),
       join("remote", "private-listener-tls-key.pem"),
     ]);
@@ -405,6 +408,7 @@ describe("removeAllLocalData", () => {
     expect(existsSync(hostKey)).toBe(false);
     expect(existsSync(tlsKey)).toBe(false);
     expect(existsSync(tlsCertificate)).toBe(false);
+    expect(existsSync(setting)).toBe(false);
     expect(existsSync(unrelatedRemoteState)).toBe(true);
   });
 

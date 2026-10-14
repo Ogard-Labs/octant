@@ -5587,8 +5587,9 @@ mechanisms are:
     failed with `tls-key-exposed` and serves nothing, and the file is left as
     it is. A key file reached through a link, or that is not a P-256 key,
     fails as `invalid-tls` and is likewise never overwritten. Disabling the
-    listener keeps the key; complete data removal deletes the key and
-    certificate with the store. The key never appears in a route response,
+    listener keeps the key; complete data removal deletes the key, the
+    certificate, and the remembered listener setting with the store, so the
+    listener stays off afterwards. The key never appears in a route response,
     the status projection, a log line, the journal, a diagnostics read or
     export, or an error message.
   - **Renewal.** Every enable, restart, and server start checks the
