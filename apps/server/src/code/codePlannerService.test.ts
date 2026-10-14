@@ -56,11 +56,13 @@ interface FixtureOptions {
     creation: CodePlannerThreadCreation,
   ) => Promise<CodeCommandResult>;
   readonly canAccessProject?: (windowId: WindowId, projectId: ProjectId) => boolean;
+  readonly isMarkedWithOutsideContent?: (threadId: string) => boolean;
 }
 
 function fixture(options?: FixtureOptions): {
   service: CodePlannerService;
   created: Array<CodePlannerThreadCreation>;
+  contexts: Array<unknown>;
 } {
   const connection = openConnection();
   const runtime = createPhase1RuntimeRegistries();
@@ -91,6 +93,7 @@ function fixture(options?: FixtureOptions): {
       String(threadId) === ids.thread ? thread : undefined,
   } as unknown as PersistenceService;
   const created: Array<CodePlannerThreadCreation> = [];
+  const contexts: Array<unknown> = [];
   const service = new CodePlannerService({
     persistence,
     uuid: () => crypto.randomUUID(),
@@ -98,12 +101,14 @@ function fixture(options?: FixtureOptions): {
     canAccessProject: options?.canAccessProject ?? (() => true),
     createThread:
       options?.createThread ??
-      (async (_windowId, creation) => {
+      (async (_windowId, creation, _signal, executionContext) => {
         created.push(creation);
+        contexts.push(executionContext);
         return { kind: "thread-created", thread: creation as never } as never;
       }),
+    isMarkedWithOutsideContent: options?.isMarkedWithOutsideContent ?? (() => false),
   });
-  return { service, created };
+  return { service, created, contexts };
 }
 
 const projectId = decodeProjectId(ids.project);
@@ -277,6 +282,33 @@ describe("planner work proposals", () => {
       status: "confirmed",
       createdThreadId: ids.otherThread,
     });
+  });
+
+  it("asks for the confirmed thread to start marked when the planner thread is marked", async () => {
+    for (const marked of [true, false]) {
+      const { service, contexts } = fixture({
+        isMarkedWithOutsideContent: (id) => marked && id === ids.thread,
+      });
+      await designate(service);
+      const proposed = service.propose(threadId, draft);
+      if (proposed.status !== "proposed") throw new Error("expected a proposal");
+      await service.resolveProposal(windowId, {
+        kind: "confirm-planner-work-proposal",
+        proposalId: String(proposed.proposal.id),
+        expectedVersion: 1,
+        creation: managedCreation(),
+      });
+      expect(contexts).toEqual([
+        marked
+          ? {
+              inheritedMark: {
+                sourceLabel: "planner-proposal",
+                contentReference: `planner-proposal-${ids.thread}-${String(proposed.proposal.id)}`,
+              },
+            }
+          : {},
+      ]);
+    }
   });
 
   it("creates nothing when the user declines", async () => {

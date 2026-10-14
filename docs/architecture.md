@@ -806,7 +806,50 @@ the new thread's first message. Starting one is not a review the way a clear
 is. The host's follow-up creator reads the source's mark when it creates the
 thread and hands the mark to the Chat, Work, or Code creation as a host-only
 input no wire command can carry; a source a person cleared passes on nothing.
-Fork, branch, and follow-up journal their marks through one shared step.
+
+A thread a person confirms from a Code planner's proposal starts marked when
+the planner thread is marked, by the same rule (label `planner-proposal`,
+content reference `planner-proposal-<planner thread>-<proposal>`). The planner
+agent wrote the proposal's title and intent after reading whatever marked its
+thread, and the intent becomes the new thread's opening prompt; confirming
+reviews the proposed work, not what the planner read. The planner service reads
+the planner thread's mark at the confirm and hands it to the Code creation as
+the same host-only input; a mark that cannot be journaled refuses the confirm,
+creates nothing, and leaves the proposal pending.
+
+Fork, branch, follow-up, and planner proposal journal their marks through one
+shared step.
+
+A Work-to-Code promotion starts its linked Code thread unmarked. The proposal
+names a Work Project, not a Work thread: its summary is text the person typed
+into the proposal, its artifact refs are opaque names the host checks for
+leaked authority and never reads into the Code thread, and the linked thread
+takes only that summary, as its title. No agent-written or outside text
+crosses, and there is no source thread whose mark the host could read; marking
+from one would mean trusting a thread id the client names. A promotion that
+comes to carry a Work thread's transcript or text an agent wrote must mark by
+the rule above.
+
+A `#thread` mention or a Side Chat's source brings another thread's
+transcript into a turn, so a source marked with outside content marks the
+thread reading it (labels `thread-mention` and `side-chat`, content reference
+`<label>-<source thread>`). The host reads the source's mark after reading its
+transcript and appends the reader's mark before it hands the framed text to
+the turn, the order the sibling-thread `read` keeps, so the reader's provider
+never sees a marked source's text on an unmarked thread. A mark that cannot be
+recorded withholds the text: a mention is answered as unreadable, which costs
+the mention and not the send, and a Side Chat turn is refused. The reference
+names the source, so mentioning one source again journals nothing new until a
+person clears the reader. The sibling-thread `read` marks its caller on every
+call, whatever the target, because an agent chose to read; a mention or a
+Side Chat is the person's own choice of thread, so an unmarked or cleared
+source passes on nothing, as for a fork. Chat, Work, and Code mentions share
+one resolver, and a thread that mentions itself is not marked again. A Side
+Chat's state section also carries finished subagents' replies, and a reply
+marks its parent only when it is delivered, which waits while the parent's
+turn runs, so each reply in that section marks the sidecar itself (label
+`subagent-result`, content reference `subagent-result-<run>`) by the same
+order; a reply that cannot mark it refuses the turn.
 
 An in-place restore (`restore-git-checkpoint`, sent by both Restore files to
 this point and Undo restore) overwrites a checkout other threads may share, so
@@ -1591,9 +1634,10 @@ flowchart LR
     two modes already share (history from before that check) cannot be told
     apart, so a clear of it is refused as `thread-unavailable`.
   - One clear covers that thread and only it. A child run and a fork keep
-    their own taint; a Code fork, a Chat branch or restore, and a follow-up
-    or side task start with their source's mark when they are made (see the
-    Code fork rule under Modes).
+    their own taint; a Code fork, a Chat branch or restore, a follow-up or
+    side task, and a thread confirmed from a planner proposal start with their
+    source's mark when they are made, and a mention or Side Chat of a marked
+    thread marks the thread reading it (see the Code fork rule under Modes).
   - A clear removes the mark only. Nothing leaves the model's context and the
     provider session is not restarted, so what the thread read can still steer
     the model.

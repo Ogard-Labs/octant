@@ -820,6 +820,8 @@ export interface CodeOperationServiceOptions {
    */
   readonly resolveThreadMentionContext?: (input: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+    /** The thread whose turn names the mentions; a marked mention marks it. */
+    readonly readerThreadId: string;
     readonly windowId: WindowId;
   }) => Promise<ReadonlyArray<CodeThreadMentionContext>>;
   /**
@@ -3123,7 +3125,7 @@ export class CodeOperationService {
     const context = [
       ...skillContext,
       ...profileContext.blocks,
-      ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
+      ...(await this.#resolveThreadMentions(thread.id, command.threadMentionIds, windowId)),
       ...(await this.#resolveFileMentions(command.fileMentionPaths, windowId, thread)),
       ...(issueContext === undefined
         ? []
@@ -3316,6 +3318,7 @@ export class CodeOperationService {
    * costs only the turn that named it.
    */
   async #resolveThreadMentions(
+    readerThreadId: CodeThreadId,
     threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
     windowId: WindowId,
   ): Promise<ReadonlyArray<ProviderContextBlock>> {
@@ -3328,7 +3331,11 @@ export class CodeOperationService {
     if (resolve === undefined) return unreadable();
     let resolved: ReadonlyArray<CodeThreadMentionContext>;
     try {
-      resolved = await resolve({ threadMentionIds, windowId });
+      resolved = await resolve({
+        threadMentionIds,
+        readerThreadId: String(readerThreadId),
+        windowId,
+      });
     } catch {
       // A resolver that throws proves nothing about any one mention, so every
       // named thread is reported unread rather than half of them guessed.
