@@ -8,12 +8,37 @@ import type {
   WorkspaceTab,
 } from "@octant/contracts/shell";
 
-export function activeSurfaceTitle(layout: WorkspaceLayoutNode, activePaneId: PaneId): string {
+export function activeSurfaceTitle(
+  layout: WorkspaceLayoutNode,
+  activePaneId: PaneId,
+  liveThreadTitles?: ReadonlyMap<string, string>,
+): string {
   const surface = findWorkspacePane(layout, activePaneId)?.surface;
-  return surface === undefined ? "Octant" : workspaceSurfaceTitle(surface);
+  return surface === undefined ? "Octant" : workspaceSurfaceTitle(surface, liveThreadTitles);
 }
 
-export function workspaceSurfaceTitle(surface: WorkspaceTab): string {
+/**
+ * The title a pane or tab shows for a surface.
+ *
+ * A thread's tab stores the title the thread had when the tab opened, and the
+ * workspace layout is not rewritten when the thread is renamed, in this window
+ * or another. The rows the navigation already keeps current are the title's
+ * source, so a rename shows on an open pane as soon as it shows in the
+ * sidebar. A thread on another host is left alone: this window does not read
+ * that host's rows.
+ */
+export function workspaceSurfaceTitle(
+  surface: WorkspaceTab,
+  liveThreadTitles?: ReadonlyMap<string, string>,
+): string {
+  if (
+    (surface.kind === "chat-thread" ||
+      surface.kind === "work-thread" ||
+      surface.kind === "code-overview") &&
+    !("hostId" in surface && surface.hostId !== undefined)
+  ) {
+    return liveThreadTitles?.get(String(surface.threadId)) ?? surface.title;
+  }
   return surface.kind === "welcome" &&
     surface.mode === "code" &&
     surface.title === "Welcome to Code"

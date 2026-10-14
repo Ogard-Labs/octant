@@ -17,6 +17,10 @@ in the host’s SQLite journal (`octant.sqlite3` under `OCTANT_DATA_DIR` /
 Application Support). The phone does not keep a separate IndexedDB/SQLite thread
 database — only device keys, host registry, and session material locally.
 
+Removing a host from the phone's list stops that host's session and deletes its
+device key from secure storage. Other hosts' keys stay. If the key cannot be
+deleted, the host still leaves the list and the hosts screen says so.
+
 ## Develop
 
 From the monorepo root (Bun 1.3+):
