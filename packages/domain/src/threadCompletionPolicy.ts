@@ -1,8 +1,8 @@
 /**
  * Pure policy for a thread's two resting states.
  *
- * A **completed** thread is one the person put away: it leaves the active list
- * for the Completed shelf, stays readable, and is archived by the host only
+ * A **completed** thread (shown as Put away) is one the person put away: it leaves the active list
+ * for the Put away shelf, stays readable, and is archived by the host only
  * after the window Settings names. A **snoozed** thread is hidden until a wake
  * time; it stays active in every other way, so a running turn keeps running.
  * Nothing here reads a clock or storage — every caller passes `now`.

@@ -573,7 +573,7 @@ export const ShellSettings = Schema.Struct({
    */
   marketplaceFetchesEnabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
-   * How long a completed thread rests in the Completed shelf before the host
+   * How long a put-away thread rests in the Put away shelf before the host
    * archives it. `null` means never. Archiving keeps everything and is the
    * only thing this timer does; a purge still needs its own confirmation
    * (`docs/decisions/0035`). A store persisted before completion shipped

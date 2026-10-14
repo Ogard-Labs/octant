@@ -77,7 +77,7 @@ computer that runs Octant, can switch one on; a paired device cannot.
 ## How it ends
 
 The terminal's access ends when you choose **Switch off**, the terminal stops
-or restarts, the thread is completed, archived, or deleted, or Octant stops.
+or restarts, the thread is put away, archived, or deleted, or Octant stops.
 The CLI is then refused at its next Browser call and `octant mcp` exits. To use
 the Browser again, switch the terminal on again and start the CLI again.
 

@@ -27,7 +27,7 @@ const TILE_ICONS: Readonly<Record<SidebarTileId, LucideIcon>> = {
 
 /**
  * The sidebar's four counts as tiles: what needs the person, what is running,
- * what finished unread, and what was completed today. Each tile is one button
+ * what finished unread, and what was put away today. Each tile is one button
  * whose name carries the count, so a screen reader hears "Running, 2" rather
  * than a bare number beside a label.
  */

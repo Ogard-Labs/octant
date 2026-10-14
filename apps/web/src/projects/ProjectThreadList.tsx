@@ -159,7 +159,7 @@ function threadRowStates(thread: ChatThreadNavigationItem): ReadonlyArray<string
   if (thread.pinned === true) states.push("Pinned");
   if (thread.woke === true) states.push("Snooze ended");
   else if (thread.shelf === "snoozed") states.push("Snoozed");
-  if (thread.shelf === "completed") states.push("Completed");
+  if (thread.shelf === "completed") states.push("Put away");
   return states;
 }
 
@@ -498,7 +498,7 @@ export function ThreadRowActionsGutter(props: {
         : [
             {
               icon: <Check aria-hidden="true" size={14} strokeWidth={1.8} />,
-              label: "Complete thread",
+              label: "Put thread away",
               value: "complete",
             } as const,
           ]),
