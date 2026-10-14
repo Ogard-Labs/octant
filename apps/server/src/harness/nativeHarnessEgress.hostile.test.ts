@@ -1708,36 +1708,65 @@ describe("native harness tool egress proxy", () => {
       expect(harness.dialed).toEqual([]);
     });
 
-    it("keeps a request pipelined behind an allowed one on the allowed destination", async () => {
-      const origin = await tcpFixture((socket) => {
-        socket.once("data", () => socket.end("HTTP/1.1 204 No Content\r\n\r\n"));
-      });
+    it.each([
+      { name: "no content", content: [] as string[], body: "" },
+      { name: "a content-length body", content: ["Content-Length: 5"], body: "hello" },
+      {
+        name: "a chunked body",
+        content: ["Transfer-Encoding: chunked"],
+        body: "5;note=x\r\nhello\r\n0\r\nX-Trailer: done\r\n\r\n",
+      },
+    ])(
+      "forwards only the first request on a connection after $name, never one pipelined behind it",
+      async ({ content, body }) => {
+        // The origin answers late, so everything the proxy relays has arrived by then.
+        const origin = await tcpFixture((socket) => {
+          setTimeout(() => socket.end("HTTP/1.1 204 No Content\r\n\r\n"), 100);
+        });
+        const harness = await startEgressHarness({
+          rules: [threadRule("files.example.com", 80)],
+          routes: new Map([["203.0.113.10", origin.port]]),
+        });
+        const first = [
+          "POST http://files.example.com/upload HTTP/1.1",
+          "Host: files.example.com",
+          `Proxy-Authorization: ${harness.authorization}`,
+          ...content,
+          "",
+          "",
+        ].join("\r\n");
+        // Same origin address, another virtual host: what a shared front end would route on.
+        const smuggled = ["GET /steal HTTP/1.1", "Host: forbidden.example.com", "", ""].join(
+          "\r\n",
+        );
+        await exchange(harness.proxy, `${first}${body}${smuggled}`);
+        expect(origin.seen()).toContain("POST /upload HTTP/1.1");
+        expect(origin.seen().endsWith(`\r\n\r\n${body}`)).toBe(true);
+        expect(origin.seen()).not.toContain("forbidden.example.com");
+        expect(harness.resolved).toEqual(["files.example.com"]);
+        expect(harness.dialed).toEqual([{ address: "203.0.113.10", port: 80 }]);
+      },
+    );
+
+    it("shuts a forwarded request whose chunked body does not frame", async () => {
+      const origin = await tcpFixture(() => undefined);
       const harness = await startEgressHarness({
         rules: [threadRule("files.example.com", 80)],
         routes: new Map([["203.0.113.10", origin.port]]),
       });
-      const second = [
-        "GET http://collector.example.com/steal HTTP/1.1",
-        "Host: collector.example.com",
-        `Proxy-Authorization: ${harness.authorization}`,
-        "",
-        "",
-      ].join("\r\n");
-      await exchange(
+      const answer = await exchange(
         harness.proxy,
         [
-          "GET http://files.example.com/ HTTP/1.1",
+          "POST http://files.example.com/upload HTTP/1.1",
           "Host: files.example.com",
           `Proxy-Authorization: ${harness.authorization}`,
+          "Transfer-Encoding: chunked",
           "",
-          second,
+          "zz\r\nhello\r\n0\r\n\r\nGET /steal HTTP/1.1\r\nHost: forbidden.example.com\r\n\r\n",
         ].join("\r\n"),
       );
-      // The proxy reads one head per connection; the rest is bytes for the
-      // destination it already decided, never a second decision.
-      expect(harness.resolved).toEqual(["files.example.com"]);
-      expect(harness.dialed).toEqual([{ address: "203.0.113.10", port: 80 }]);
-      expect(origin.seen()).toContain("Connection: close");
+      expect(answer).toBe("");
+      expect(origin.seen()).not.toContain("forbidden.example.com");
     });
 
     it("keeps a CONNECT written inside a tunnel on the tunnel's destination", async () => {
@@ -1844,6 +1873,56 @@ describe("native harness tool egress proxy", () => {
       const over = await openTunnel(harness.proxy, "over.example.com:443", harness.authorization);
       expect(refusal(over.answer).line).toBe("octant-egress-refused: limit over.example.com:443");
       expect(harness.resolved).toHaveLength(16);
+    });
+
+    it("counts requests still resolving against the tunnel limit", async () => {
+      const origin = await tcpFixture();
+      const harness = await startEgressHarness({
+        rules: [threadRule("*.example.com", 443)],
+        limits: { maxTunnels: 4 },
+        resolve: (host) =>
+          host === "slow.example.com"
+            ? new Promise(() => undefined)
+            : Promise.resolve(["203.0.113.10"]),
+        routes: new Map([["203.0.113.10", origin.port]]),
+      });
+      for (let index = 0; index < 3; index += 1) {
+        const tunnel = await openTunnel(
+          harness.proxy,
+          "fast.example.com:443",
+          harness.authorization,
+        );
+        expect(tunnel.status).toBe(200);
+      }
+      void openTunnel(harness.proxy, "slow.example.com:443", harness.authorization);
+      await waitFor(() => harness.resolved.includes("slow.example.com"));
+      const over = await openTunnel(harness.proxy, "fast.example.com:443", harness.authorization);
+      expect(refusal(over.answer).line).toBe("octant-egress-refused: limit fast.example.com:443");
+    });
+
+    it("reads a head that arrives a byte at a time", async () => {
+      const origin = await tcpFixture();
+      const harness = await startEgressHarness({
+        rules: [threadRule("registry.example.com", 443)],
+        routes: new Map([["203.0.113.10", origin.port]]),
+      });
+      const endpoint = harness.proxy.endpoint;
+      if (endpoint.kind !== "loopback") throw new Error("expected a loopback endpoint");
+      const head = connectRequest("registry.example.com:443", harness.authorization);
+      const answer = await new Promise<string>((resolve) => {
+        const socket = netConnect({ host: endpoint.host, port: endpoint.port });
+        socket.on("data", (chunk: Buffer) => {
+          resolve(chunk.toString("latin1"));
+          socket.destroy();
+        });
+        void (async () => {
+          for (const byte of head) {
+            socket.write(byte);
+            await new Promise((wait) => setImmediate(wait));
+          }
+        })();
+      });
+      expect(answer).toBe("HTTP/1.1 200 Connection Established\r\n\r\n");
     });
 
     it("refuses a tunnel past 128 open ones", async () => {

@@ -98,9 +98,11 @@ export interface EgressHarness {
 
 const proxies: ToolEgressProxy[] = [];
 const fixtures: Server[] = [];
+const fixtureSockets: Socket[] = [];
 
 export async function closeEgressHarnesses(): Promise<void> {
   await Promise.all(proxies.splice(0).map((proxy) => proxy.close()));
+  for (const socket of fixtureSockets.splice(0)) socket.destroy();
   await Promise.all(
     fixtures
       .splice(0)
@@ -187,6 +189,7 @@ export async function tcpFixture(
   let connections = 0;
   const server = createServer({ allowHalfOpen: true }, (socket) => {
     connections += 1;
+    fixtureSockets.push(socket);
     socket.on("data", (chunk: Buffer) => {
       seen += chunk.toString("latin1");
     });

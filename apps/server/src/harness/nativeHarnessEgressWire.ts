@@ -196,6 +196,98 @@ export function forwardedRequestHead(head: Extract<ProxyRequestHead, { kind: "fo
   return Buffer.from(lines.join("\r\n"), "latin1");
 }
 
+export type RequestContentRead =
+  /** Every byte belongs to the request; more is still to come. */
+  | { readonly status: "more" }
+  /** The request ends `length` bytes into this chunk; anything after it is not the request's. */
+  | { readonly status: "complete"; readonly length: number }
+  | { readonly status: "malformed" };
+
+const MAX_CHUNK_LINE = 4_096;
+const MAX_TRAILER_LINES = 100;
+
+/**
+ * Where a forwarded request's content ends, by the framing its head
+ * declared: `Content-Length` bytes, a `chunked` body to its last chunk and
+ * trailers, or nothing. The proxy forwards exactly one request per
+ * connection, so the origin never parses a second request the proxy did not
+ * decide, whatever `Host` it names.
+ */
+export class RequestContent {
+  #remaining: number;
+  readonly #chunked: boolean;
+  #state: "size" | "data" | "data-cr" | "data-lf" | "trailer" = "size";
+  #line = "";
+  #trailerLines = 0;
+
+  constructor(head: Extract<ProxyRequestHead, { kind: "forward" }>) {
+    const contentLength = fieldValue(head.headers, "content-length");
+    this.#chunked = fieldValue(head.headers, "transfer-encoding") !== undefined;
+    this.#remaining = this.#chunked ? 0 : Number(contentLength ?? "0");
+  }
+
+  /** True when the head declared no content at all. */
+  get empty(): boolean {
+    return !this.#chunked && this.#remaining === 0;
+  }
+
+  read(chunk: Buffer): RequestContentRead {
+    if (!this.#chunked) {
+      if (chunk.length < this.#remaining) {
+        this.#remaining -= chunk.length;
+        return { status: "more" };
+      }
+      const length = this.#remaining;
+      this.#remaining = 0;
+      return { status: "complete", length };
+    }
+    let at = 0;
+    while (at < chunk.length) {
+      if (this.#state === "data") {
+        const take = Math.min(this.#remaining, chunk.length - at);
+        this.#remaining -= take;
+        at += take;
+        if (this.#remaining === 0) this.#state = "data-cr";
+        continue;
+      }
+      const byte = chunk[at] ?? 0;
+      at += 1;
+      if (this.#state === "data-cr" || this.#state === "data-lf") {
+        if (byte !== (this.#state === "data-cr" ? 0x0d : 0x0a)) return { status: "malformed" };
+        this.#state = this.#state === "data-cr" ? "data-lf" : "size";
+        continue;
+      }
+      // A size or trailer line, read to its CRLF.
+      if (byte === 0x0a) {
+        if (!this.#line.endsWith("\r")) return { status: "malformed" };
+        const line = this.#line.slice(0, -1);
+        this.#line = "";
+        if (this.#state === "trailer") {
+          if (line.length === 0) return { status: "complete", length: at };
+          this.#trailerLines += 1;
+          if (
+            this.#trailerLines > MAX_TRAILER_LINES ||
+            !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+:/.test(line)
+          ) {
+            return { status: "malformed" };
+          }
+          continue;
+        }
+        const size = /^([0-9a-fA-F]{1,12})(?:[ \t]*;[\x20-\x7e\t]*)?$/.exec(line);
+        if (size === null) return { status: "malformed" };
+        this.#remaining = Number.parseInt(size[1] ?? "", 16);
+        this.#state = this.#remaining === 0 ? "trailer" : "data";
+        continue;
+      }
+      if (this.#line.endsWith("\r") || this.#line.length >= MAX_CHUNK_LINE) {
+        return { status: "malformed" };
+      }
+      this.#line += String.fromCharCode(byte);
+    }
+    return { status: "more" };
+  }
+}
+
 export function fieldValue(
   headers: ReadonlyArray<ProxyHeaderField>,
   name: string,
@@ -238,7 +330,8 @@ function malformed(detail: string): ProxyHeadRead {
 }
 
 export type ClientHelloRead =
-  | { readonly status: "incomplete" }
+  /** Nothing can be decided before the buffer holds `needed` bytes. */
+  | { readonly status: "incomplete"; readonly needed: number }
   /** The tunnel's first byte is not a TLS handshake record. */
   | { readonly status: "not-tls" }
   /** It starts as a TLS handshake that does not parse, or is larger than the proxy reads. */
@@ -249,6 +342,8 @@ const TLS_HANDSHAKE_RECORD = 0x16;
 const TLS_CLIENT_HELLO = 0x01;
 const TLS_MAX_RECORD = 16_384 + 2_048;
 const SERVER_NAME_EXTENSION = 0x0000;
+/** A real ClientHello spans one or two records; many tiny ones only make the reader work. */
+const MAX_CLIENT_HELLO_RECORDS = 16;
 const SERVER_NAME_HOST = 0x00;
 
 /**
@@ -258,14 +353,14 @@ const SERVER_NAME_HOST = 0x00;
  * the one the proxy checks.
  */
 export function readClientHelloServerName(buffer: Buffer, maxBytes: number): ClientHelloRead {
-  if (buffer.length === 0) return { status: "incomplete" };
+  if (buffer.length === 0) return { status: "incomplete", needed: 1 };
   if (buffer[0] !== TLS_HANDSHAKE_RECORD) return { status: "not-tls" };
   const fragments: Buffer[] = [];
   let handshakeBytes = 0;
   let offset = 0;
   for (;;) {
-    const handshake = Buffer.concat(fragments, handshakeBytes);
-    if (handshake.length >= 4) {
+    if (handshakeBytes >= 4) {
+      const handshake = Buffer.concat(fragments, handshakeBytes);
       if (handshake[0] !== TLS_CLIENT_HELLO) return { status: "unreadable" };
       const length = handshake.readUIntBE(1, 3);
       if (length > maxBytes) return { status: "unreadable" };
@@ -274,14 +369,18 @@ export function readClientHelloServerName(buffer: Buffer, maxBytes: number): Cli
         return clientHelloServerName(handshake.subarray(4, 4 + length));
       }
     }
-    if (offset > maxBytes) return { status: "unreadable" };
-    if (buffer.length < offset + 5) return { status: "incomplete" };
+    if (offset > maxBytes || fragments.length >= MAX_CLIENT_HELLO_RECORDS) {
+      return { status: "unreadable" };
+    }
+    if (buffer.length < offset + 5) return { status: "incomplete", needed: offset + 5 };
     if (buffer[offset] !== TLS_HANDSHAKE_RECORD || buffer[offset + 1] !== 0x03) {
       return { status: "unreadable" };
     }
     const recordLength = buffer.readUInt16BE(offset + 3);
     if (recordLength === 0 || recordLength > TLS_MAX_RECORD) return { status: "unreadable" };
-    if (buffer.length < offset + 5 + recordLength) return { status: "incomplete" };
+    if (buffer.length < offset + 5 + recordLength) {
+      return { status: "incomplete", needed: offset + 5 + recordLength };
+    }
     fragments.push(buffer.subarray(offset + 5, offset + 5 + recordLength));
     handshakeBytes += recordLength;
     offset += 5 + recordLength;

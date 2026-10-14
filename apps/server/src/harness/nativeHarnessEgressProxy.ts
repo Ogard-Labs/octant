@@ -27,6 +27,7 @@ import {
   type ProxyRequestHead,
   readClientHelloServerName,
   readProxyRequestHead,
+  RequestContent,
 } from "./nativeHarnessEgressWire";
 import { defaultResolveAll, isPrivateAddress } from "./nativeHarnessWebFetch";
 
@@ -324,7 +325,9 @@ export class ToolEgressProxy {
     socket.once("close", () => this.#sockets.delete(socket));
     socket.setNoDelay(true);
 
-    const chunks: Buffer[] = [];
+    // One bounded buffer, filled once: a head that trickles in a byte at a
+    // time is neither recopied nor rescanned from the start for each byte.
+    const received = Buffer.allocUnsafe(this.#limits.maxHeadBytes);
     let length = 0;
     let searchFrom = 0;
     const stop = () => {
@@ -342,15 +345,14 @@ export class ToolEgressProxy {
       socket.destroy();
     };
     const onData = (chunk: Buffer) => {
-      chunks.push(chunk);
-      length += chunk.length;
-      const buffer = Buffer.concat(chunks, length);
-      // Only bytes that just arrived can complete the head, so a head that
-      // trickles in a byte at a time is not rescanned from the start each time.
-      if (buffer.indexOf(HEAD_END, searchFrom) === -1 && length < this.#limits.maxHeadBytes) {
+      const copied = chunk.copy(received, length);
+      length += copied;
+      const found = received.subarray(0, length).indexOf(HEAD_END, searchFrom);
+      if (found === -1 && length < this.#limits.maxHeadBytes) {
         searchFrom = Math.max(0, length - HEAD_END.length + 1);
         return;
       }
+      const buffer = Buffer.concat([received.subarray(0, length), chunk.subarray(copied)]);
       stop();
       const read = readProxyRequestHead(buffer, this.#limits.maxHeadBytes);
       switch (read.status) {
@@ -394,7 +396,11 @@ export class ToolEgressProxy {
       return;
     }
     const destination = { host: decision.host, port: decision.port };
-    if (this.#tunnels.size >= this.#limits.maxTunnels || this.#pending >= this.#limits.maxPending) {
+    // A pending request holds a tunnel slot too, so the tunnels it becomes stay within the limit.
+    if (
+      this.#tunnels.size + this.#pending >= this.#limits.maxTunnels ||
+      this.#pending >= this.#limits.maxPending
+    ) {
       this.#refuse(socket, "limit", destination);
       return;
     }
@@ -427,8 +433,7 @@ export class ToolEgressProxy {
       socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       this.#relayClientHello(tunnel, leftover);
     } else {
-      this.#send(tunnel, Buffer.concat([forwardedRequestHead(head), leftover]));
-      this.#relay(tunnel, socket, upstream, "sent");
+      this.#forwardRequest(tunnel, head, leftover);
     }
     socket.resume();
   }
@@ -479,22 +484,72 @@ export class ToolEgressProxy {
   }
 
   /**
+   * Forwards one request: its head and exactly the content its framing
+   * declares. Bytes after that are dropped, because a second request on the
+   * same connection would reach the origin undecided, under whatever `Host`
+   * it named. Content that does not frame the way its head said shuts the
+   * connection.
+   */
+  #forwardRequest(
+    tunnel: Tunnel,
+    head: Extract<ProxyRequestHead, { kind: "forward" }>,
+    leftover: Buffer,
+  ): void {
+    const content = new RequestContent(head);
+    let complete = content.empty;
+    const take = (chunk: Buffer): Buffer | undefined => {
+      if (complete || chunk.length === 0) return Buffer.alloc(0);
+      const read = content.read(chunk);
+      if (read.status === "malformed") return undefined;
+      if (read.status === "more") return chunk;
+      complete = true;
+      return chunk.subarray(0, read.length);
+    };
+    const first = take(leftover);
+    if (first === undefined) {
+      this.#closeTunnel(tunnel);
+      return;
+    }
+    this.#send(tunnel, Buffer.concat([forwardedRequestHead(head), first]));
+    tunnel.client.on("data", (chunk: Buffer) => {
+      const part = take(chunk);
+      if (part === undefined) {
+        this.#closeTunnel(tunnel);
+        return;
+      }
+      this.#send(tunnel, part);
+    });
+    tunnel.client.on("end", () => tunnel.upstream.end());
+  }
+
+  /**
    * Holds the tunnel's first client bytes until they show whether they are a
    * TLS ClientHello. One that names a server other than the `CONNECT` host,
    * or that cannot be read to the end, closes the tunnel before a byte of it
    * reaches the destination; bytes that are not TLS pass.
    */
   #relayClientHello(tunnel: Tunnel, leftover: Buffer): void {
-    let held: Buffer = leftover;
+    // Held bytes are joined only once they can complete the next record, so
+    // a hello that trickles in is not recopied for every byte.
+    const held: Buffer[] = leftover.length > 0 ? [leftover] : [];
+    let heldBytes = leftover.length;
+    let needed = 1;
     let checked = false;
     const onData = (chunk: Buffer) => {
       if (checked) return;
-      held = Buffer.concat([held, chunk]);
+      held.push(chunk);
+      heldBytes += chunk.length;
       inspect();
     };
     const inspect = () => {
-      const read = readClientHelloServerName(held, this.#limits.maxClientHelloBytes);
-      if (read.status === "incomplete") return;
+      if (heldBytes < needed) return;
+      const buffer = Buffer.concat(held, heldBytes);
+      held.splice(0, held.length, buffer);
+      const read = readClientHelloServerName(buffer, this.#limits.maxClientHelloBytes);
+      if (read.status === "incomplete") {
+        needed = read.needed;
+        return;
+      }
       checked = true;
       tunnel.client.off("data", onData);
       tunnel.client.off("end", onEnd);
@@ -513,14 +568,14 @@ export class ToolEgressProxy {
         this.#closeTunnel(tunnel);
         return;
       }
-      this.#send(tunnel, held);
+      this.#send(tunnel, buffer);
       this.#relay(tunnel, tunnel.client, tunnel.upstream, "sent");
     };
     const onEnd = () => {
       if (checked) return;
       checked = true;
       tunnel.client.off("data", onData);
-      if (held.length > 0) {
+      if (heldBytes > 0) {
         this.#count(
           { host: tunnel.host, port: tunnel.port, decision: "refused", reason: "sni-mismatch" },
           { requests: 1 },
@@ -532,7 +587,7 @@ export class ToolEgressProxy {
     };
     tunnel.client.on("data", onData);
     tunnel.client.on("end", onEnd);
-    if (held.length > 0) inspect();
+    if (heldBytes > 0) inspect();
   }
 
   #relay(tunnel: Tunnel, from: Socket, to: Socket, direction: "sent" | "received"): void {

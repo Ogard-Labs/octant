@@ -3667,12 +3667,14 @@ listener per confined launch:
   call-scoped rule needs no extra bookkeeping.
 - **Protocol.** HTTP `CONNECT host:port` tunnels, and absolute-form plain
   `http://` requests, which the proxy forwards in origin form with
-  `Proxy-Authorization` and hop-by-hop headers removed. The one header it
-  writes is `Connection: close` in place of the client's own, so a proxied
-  plain connection carries one exchange: the proxy reads one request head per
-  connection, and whatever follows it is bytes for the destination already
-  decided, so a client that reused the connection could otherwise send its
-  next request, for another host, to this one. Every request must carry
+  `Proxy-Authorization` and hop-by-hop headers removed. A proxied plain
+  connection carries exactly one request: the proxy forwards its head and the
+  content its `Content-Length` or `chunked` framing declares, drops anything
+  after it, and shuts a connection whose content does not frame. A second
+  request on the same connection would otherwise reach the origin undecided,
+  under whatever `Host` it named, which a shared front end routes on. The one
+  header the proxy writes is `Connection: close` in place of the client's
+  own, so the client opens a new connection for its next request. Every request must carry
   `Proxy-Authorization: Basic` with user `octant` and the launch token; a
   missing or wrong token gets `407` and is recorded. A client that asks
   without credentials first and answers the `407` (Git's default) leaves one
