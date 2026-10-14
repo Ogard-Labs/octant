@@ -278,7 +278,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
     if (negotiation.kind === "rejected") {
       throw new RemoteConnectionError("incompatible", "Remote protocol versions are incompatible.");
     }
-    await requireProvenHostHello(hello, known);
+    await requireProvenHostHello(hello, known, now());
   };
 
   const requestChallenge = async (known: DeviceIdentity): Promise<RemoteAuthChallengeV1> => {
@@ -660,8 +660,9 @@ function sessionNeedsRenewal(session: RemoteSessionFacts, nowMs: number): boolea
 export async function requireProvenHostHello(
   hello: HostHelloV1,
   pinned: PinnedHostIdentity | undefined,
+  now: number,
 ): Promise<void> {
-  const verification = await verifyHostHello(hello, pinned);
+  const verification = await verifyHostHello(hello, { pinned, now });
   if (verification.status === "verified") return;
   switch (verification.reason) {
     case "host-changed":
@@ -669,9 +670,9 @@ export async function requireProvenHostHello(
     case "host-outdated":
       throw new RemoteConnectionError("incompatible", verification.message);
     case "unproven":
-      // Whatever answered does not hold the paired host key, so it can
-      // neither change nor end this pairing: refuse, keep the device key, and
-      // let a later connection reach the real host.
+    case "expired":
+      // Whatever answered did not prove it is the paired host now. Refuse and
+      // keep the device key so a later connection can reach the real host.
       throw new RemoteConnectionError("unavailable", verification.message);
   }
 }

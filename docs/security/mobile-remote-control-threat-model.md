@@ -37,19 +37,19 @@
 
 ## Threats and mitigations
 
-| ID  | Threat                                            | Mitigation                                                                                                                                                                       |
-| --- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T1  | Lost/stolen phone with unlocked vault access      | SecureStore-backed keys; biometric gate for revoke; host refuses remote merge; host revoke-self removes device; other clients stay up                                            |
-| T2  | Lost phone with lock-screen push previews         | Redacted push payloads only (`buildRedactedPushNotification`); no secrets/paths/prompts                                                                                          |
-| T3  | Jailbroken/rooted device exfiltrates SecureStore  | Fail-soft integrity heuristic + soft warn UI; do not brick pairing; host revoke remains available                                                                                |
-| T4  | Screenshots / app switcher leak thread detail     | Native capture blocking unavailable in the current client; scrub UI strings for secretish/path content and disclose the limit in Settings                                        |
-| T5  | Stale host still accepts phone mutations          | Session health + host mutation gate; stale presentation copy; zero queued mutations when not ready                                                                               |
-| T6  | Concurrent desktop + phone; revoke wrong client   | Device-scoped revoke; concurrent-session tests (Mobile A)                                                                                                                        |
-| T7  | Push token reused across hosts/devices            | Token store keyed by `{ hostId, deviceId }`; clear on revoke path residual                                                                                                       |
-| T8  | Deep link opens wrong host thread                 | Deep links carry explicit `hostId` + `threadId`; parse rejects foreign schemes                                                                                                   |
-| T9  | Notification content over-sharing after C lands   | Domain redaction tests; Mobile C residual for live provider send                                                                                                                 |
-| T10 | Public store listing before internal evidence     | Store decision deferred (`MOBILE-LATER-STORE`); internal EAS profiles only                                                                                                       |
-| T11 | Something at the paired address poses as the host | The hello carries the host identity public key; the client checks key, fingerprint, and signature, then the pinned host id and fingerprint, before it sends a claim or challenge |
+| ID  | Threat                                            | Mitigation                                                                                                                                                                                                                                                                                                                         |
+| --- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1  | Lost/stolen phone with unlocked vault access      | SecureStore-backed keys; biometric gate for revoke; host refuses remote merge; host revoke-self removes device; other clients stay up                                                                                                                                                                                              |
+| T2  | Lost phone with lock-screen push previews         | Redacted push payloads only (`buildRedactedPushNotification`); no secrets/paths/prompts                                                                                                                                                                                                                                            |
+| T3  | Jailbroken/rooted device exfiltrates SecureStore  | Fail-soft integrity heuristic + soft warn UI; do not brick pairing; host revoke remains available                                                                                                                                                                                                                                  |
+| T4  | Screenshots / app switcher leak thread detail     | Native capture blocking unavailable in the current client; scrub UI strings for secretish/path content and disclose the limit in Settings                                                                                                                                                                                          |
+| T5  | Stale host still accepts phone mutations          | Session health + host mutation gate; stale presentation copy; zero queued mutations when not ready                                                                                                                                                                                                                                 |
+| T6  | Concurrent desktop + phone; revoke wrong client   | Device-scoped revoke; concurrent-session tests (Mobile A)                                                                                                                                                                                                                                                                          |
+| T7  | Push token reused across hosts/devices            | Token store keyed by `{ hostId, deviceId }`; clear on revoke path residual                                                                                                                                                                                                                                                         |
+| T8  | Deep link opens wrong host thread                 | Deep links carry explicit `hostId` + `threadId`; parse rejects foreign schemes                                                                                                                                                                                                                                                     |
+| T9  | Notification content over-sharing after C lands   | Domain redaction tests; Mobile C residual for live provider send                                                                                                                                                                                                                                                                   |
+| T10 | Public store listing before internal evidence     | Store decision deferred (`MOBILE-LATER-STORE`); internal EAS profiles only                                                                                                                                                                                                                                                         |
+| T11 | Something at the paired address poses as the host | The hello carries the host identity public key; before a claim or challenge the client checks key, fingerprint, signature, and expiry, then the pinned host id and fingerprint. Stops a responder that states the paired fingerprint without the key or relabels another host's hello; see residual risk for what it does not stop |
 
 ## Residual risk
 
@@ -63,12 +63,16 @@
 - Live APNs/FCM delivery remains a Mobile C residual.
 - A compromised host can still send whatever the host policy allows to a paired
   device; mobile cannot exceed host authority but also cannot save a malicious host.
-- First contact trusts TLS: the phone pins the host identity key from the first
-  verified hello. The check does not bind the TLS connection, so an attacker who
-  can present a certificate the phone trusts for the listener's name could relay
-  a genuine host's hello. Pinning the listener certificate itself is the subject
-  of the one-step pairing design, not built.
-- A hello signed by a different key at the paired address ends that pairing
-  (the phone deletes that device key and asks to pair again). Anyone who can
-  answer at that address can force this, as they could before hellos were
-  checked; a hello that proves no key leaves the pairing intact.
+- The hello check does not authenticate the live peer. The phone checks only
+  the hello, not the negotiation record's `hostSignature`, and the hello's nonce
+  is the host's. A genuine hello from the paired host can be replayed until it
+  expires (one minute plus two minutes of allowed skew), and an attacker who can
+  present a certificate the phone trusts for the listener's name can relay
+  genuine hellos. First contact pins the key from the first verified hello over
+  TLS; pinning the listener certificate is the subject of the one-step pairing
+  design, not built.
+- Anything that answers at the paired address can still deny service: a hello
+  signed with its own key shows "host identity changed", and a 401 naming the
+  device revoked or expired shows that state. Neither deletes the device key;
+  the phone deletes it when the person pairs that address again or signs out.
+  Removing a host from the phone's list does not delete its key (unchanged).

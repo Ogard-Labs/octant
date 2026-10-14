@@ -200,7 +200,7 @@ export function createRemotePairingClient(
     if (new Date(hello.expiresAt).getTime() <= now()) {
       throw new RemotePairingFailure("unavailable", "Host hello has expired.");
     }
-    await requireSelfProvenHello(hello);
+    await requireSelfProvenHello(hello, now());
     return hello;
   };
 
@@ -217,7 +217,7 @@ export function createRemotePairingClient(
     }
     // The fingerprint this hello proves becomes the pin every later
     // connection is checked against.
-    await requireSelfProvenHello(input.hostHello);
+    await requireSelfProvenHello(input.hostHello, now());
     const trimmedLabel = input.deviceLabel.trim();
     if (trimmedLabel.length === 0) {
       throw new RemotePairingFailure("invalid", "Device label is required.");
@@ -413,8 +413,8 @@ export function createRemotePairingClient(
  * First contact: nothing is pinned yet, so the hello must at least prove the
  * key it names. A refused hello stops pairing before a device key is made.
  */
-async function requireSelfProvenHello(hello: HostHelloV1): Promise<void> {
-  const verification = await verifyHostHello(hello);
+async function requireSelfProvenHello(hello: HostHelloV1, now: number): Promise<void> {
+  const verification = await verifyHostHello(hello, { now });
   if (verification.status === "refused") {
     throw new RemotePairingFailure("invalid", verification.message);
   }

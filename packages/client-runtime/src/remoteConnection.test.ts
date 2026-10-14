@@ -735,6 +735,62 @@ describe("RemoteConnection host identity / origin fail-closed", () => {
     );
   });
 
+  it("refuses a hello whose own expiry has passed, keeping the pairing", async () => {
+    const server = createFakeServer({});
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      knownDevice: {
+        hostId: HOST_ID,
+        deviceId: "22222222-2222-4222-8222-222222222222",
+        credentialGeneration: 1,
+        hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+      },
+      // The host signs hellos valid for one minute; ten minutes later even
+      // the allowed clock skew has run out, as for a captured hello replayed.
+      now: () => Date.now() + 10 * 60_000,
+    });
+
+    await expect(connection.connect()).rejects.toThrow(
+      "This host's hello had already expired, so Octant did not connect. Check this device's clock, then connect again.",
+    );
+    expect(connection.state()).toBe("unavailable");
+    expect(server.fetch).not.toHaveBeenCalledWith(
+      "https://mac.example.test/api/remote/auth/challenge",
+      expect.anything(),
+    );
+    expect(connection.deviceIdentity()).toBeDefined();
+  });
+
+  it("accepts a hello just past its expiry within the allowed clock skew", async () => {
+    const server = createFakeServer({});
+    const { store } = createTestDeviceKeyStore();
+    const pairing = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+    await pairing.connect();
+    const identity = pairing.deviceIdentity();
+    if (identity === undefined) throw new Error("pairing produced no identity");
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      knownDevice: identity,
+      now: () => Date.now() + 90_000,
+    });
+
+    await connection.connect();
+    expect(connection.state()).toBe("ready");
+  });
+
   it("asks to update a host that sends no public key in its hello", async () => {
     const server = createFakeServer({
       tamperHello: ({ hostPublicKey: _omitted, ...hello }) => hello,

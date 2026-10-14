@@ -222,6 +222,9 @@ describe("RemoteSessionBridge", () => {
 
     await waitUntil(() => bridge.getState().kind === "unauthorized");
     expect(bridge.getState()).toMatchObject({ kind: "unauthorized", reasonCode: "host-changed" });
+    // A validly signed hello from any other key ends nothing by itself: the
+    // key stays until the person forgets the host or pairs again.
+    await expect(pairingStore.get(deviceKeyId)).resolves.toBeDefined();
   });
 
   async function resumePairedDevice(config: Parameters<typeof createFakeRemoteServer>[0]) {
@@ -340,6 +343,10 @@ describe("RemoteSessionBridge", () => {
 
     await waitUntil(() => bridge.getState().kind === "unauthorized");
     expect(bridge.getState()).toMatchObject({ kind: "unauthorized", reasonCode: reason });
+    if (failure !== undefined) {
+      // A bare 401 naming the reason is unauthenticated, so the key stays.
+      await expect(pairingStore.get(deviceKeyId)).resolves.toBeDefined();
+    }
   });
 
   it("retains the paired key after an ambiguous unauthorized resume failure", async () => {
