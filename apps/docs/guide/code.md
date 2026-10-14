@@ -253,6 +253,39 @@ window, or turn it off, under **Settings › General › Archive completed
 threads**. Archiving keeps every thread and its history; only a confirmed purge
 in **Settings › Data & privacy** deletes anything.
 
+## Agents that see the other threads of a Project
+
+When several Code threads work in the same Project, each thread's agent can
+look at the others before it messages one or while it waits for one to finish.
+It has three read-only actions:
+
+- **List** the other open threads of the Project, up to 32, with each title,
+  whether the thread is working, waiting for you, or idle, and when that last
+  changed.
+- **Read** one of them: its title, state, and recent messages, the same window
+  a `#thread` mention of it would show from your window.
+- **Wait** for one to stop working, for up to two minutes. Waiting returns the
+  state only.
+
+An agent sees only the open Code threads of its own Project. Threads in other
+Projects, completed or archived threads, Chat and Work threads, and helper
+agents started by a thread are never listed or readable, and asking for one
+gets the same refusal as asking for a thread that does not exist. Nothing the
+agent does here sends, changes, or stops another thread, so it works in Plan
+mode too.
+
+A turn may read 8 times and wait 4 times. Listing or reading marks the
+thread as having read outside content, because titles and messages were
+written by someone else. From then on the thread asks you before risky
+actions until you clear the mark. Each read and wait is recorded on the
+thread that made it, without the text it read.
+
+The agent is offered these actions only on providers that can carry Octant's
+own tools: Claude, Codex, ACP agents that accept Octant's tools, OpenCode
+with Octant's isolated configuration, Pi, and direct endpoints for models
+you verified for tools. A profile whose tool list leaves out `octant_threads`
+does not offer them.
+
 ## Next steps
 
 - [Promotions](/guide/promotions) for creating Code threads from Work work

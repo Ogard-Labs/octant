@@ -21,6 +21,7 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "linear-issue": "A Linear issue",
   "mcp-tool": "Results from connected tools",
   "product-feedback-comment": "A comment sent as feedback",
+  "sibling-thread": "Other threads in this Project",
   "simulator-screen": "A simulator screen sent as feedback",
   "subagent-result": "A subagent's result",
   octant_agent_message: "A message from another agent",

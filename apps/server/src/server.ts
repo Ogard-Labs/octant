@@ -725,6 +725,11 @@ import {
   type AgentMessageEndpointResolver,
 } from "./agentMessage/agentMessageService";
 import { createAgentMessageTools } from "./agentMessage/agentMessageTools";
+import { codeSiblingThreadSource } from "./siblingThreads/codeSiblingThreadSource";
+import {
+  SiblingThreadsService,
+  createSiblingThreadTools,
+} from "./siblingThreads/siblingThreadTools";
 import { readThreadExternalContentTaint } from "./context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "./harness/nativeHarnessAuthority";
 import {
@@ -2892,6 +2897,16 @@ export function startOctantServer(
       // scope covers every mode. A remote window's narrower Open scope is a
       // 0013 federation concern and stays out of this seam.
       openModes: ["chat", "work", "code"],
+    });
+    // The sibling-threads tool's host side. It appends only to the reader's
+    // own records: its outside-content mark and its observation stream.
+    const siblingThreadsService = new SiblingThreadsService({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
     });
     const githubReadToolService = new GithubReadToolService({
       catalogue: githubCatalogueService,
@@ -5361,6 +5376,37 @@ export function startOctantServer(
             profileDisplayName: thread.profileDisplayName ?? "the bound profile",
             readPosture,
           }),
+        // The facts come from the host's own records on every call. The
+        // Code runtime, the decision reader, and the mention directory are
+        // declared later in this startup; a turn runs only after they exist.
+        siblingThreads: ({ windowId, thread }) =>
+          createSiblingThreadTools({
+            service: siblingThreadsService,
+            source: codeSiblingThreadSource(
+              {
+                threads: () => persistence.readCodeThreads(),
+                thread: (threadId) => persistence.readCodeThread(threadId),
+                runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
+                turnAwaitsPerson: (threadId) =>
+                  codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true,
+                decisionPending: (candidate) =>
+                  codeTurnDecisions.forThread(candidate) !== undefined,
+                mentions: {
+                  readTranscript: async (readerWindowId, threadId, options) =>
+                    await codeThreadMentionDirectory.readTranscript(
+                      readerWindowId,
+                      threadId,
+                      options,
+                    ),
+                },
+                standingAuthority: (read) => codeProjectAccess.standingAuthority(read),
+              },
+              windowId,
+            ),
+            callerThreadId: String(thread.id),
+            toolConstraints: thread.toolConstraints ?? [],
+            profileDisplayName: thread.profileDisplayName ?? "the bound profile",
+          }),
         carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
         confirmAgentMessagesDelivered: (messageIds) =>
           agentMessageService.confirmDelivered(messageIds),
@@ -6794,6 +6840,22 @@ export function startOctantServer(
     });
     const projectMentionLabel = (projectId: string) =>
       persistence.readProject(projectId as ProjectId)?.name;
+    // One Code directory serves both a `#thread` mention and a sibling-threads
+    // `read`, so an agent reads exactly what its window could mention.
+    const codeThreadMentionDirectory = createCodeThreadMentionDirectory({
+      bootstrap: async (windowId) => await routeCodeService.bootstrap(windowId),
+      conversation: async (windowId, threadId, afterCursor, limit) => {
+        const read = routeCodeService.conversation;
+        if (read === undefined) throw new Error("Code conversation is unavailable.");
+        return await read(windowId, threadId, afterCursor, limit);
+      },
+      readEvidence: async (windowId, threadId, operationId, contentId) => {
+        const read = routeCodeService.readOperationContent;
+        if (read === undefined) throw new Error("Code operation evidence is unavailable.");
+        return await read(windowId, threadId, operationId, contentId);
+      },
+      projectLabel: projectMentionLabel,
+    });
     const threadMentionService = new ThreadMentionService({
       // Every mode contributes its own already-authorized listing, because a
       // mention resolves exactly what the principal can Open —
@@ -6817,20 +6879,7 @@ export function startOctantServer(
           }),
           projectLabel: projectMentionLabel,
         }),
-        createCodeThreadMentionDirectory({
-          bootstrap: async (windowId) => await routeCodeService.bootstrap(windowId),
-          conversation: async (windowId, threadId, afterCursor, limit) => {
-            const read = routeCodeService.conversation;
-            if (read === undefined) throw new Error("Code conversation is unavailable.");
-            return await read(windowId, threadId, afterCursor, limit);
-          },
-          readEvidence: async (windowId, threadId, operationId, contentId) => {
-            const read = routeCodeService.readOperationContent;
-            if (read === undefined) throw new Error("Code operation evidence is unavailable.");
-            return await read(windowId, threadId, operationId, contentId);
-          },
-          projectLabel: projectMentionLabel,
-        }),
+        codeThreadMentionDirectory,
       ],
       sidecars: sideChatSidecars,
       sideChatThreads: createChatSideChatThreadFactory({

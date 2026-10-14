@@ -36,6 +36,18 @@ export class CodeProjectAccess {
     });
   }
 
+  /**
+   * Runs `read` on the window's standing authority: its persisted binding,
+   * judged when each check runs, with no request's admission. A Code turn's
+   * tool call is an async descendant of the request that started the turn
+   * and runs after that request ended, so inside it every check refuses as
+   * deferred work. A read the turn makes for its window belongs here: it gets
+   * what the window holds now and never what a finished request held.
+   */
+  standingAuthority<T>(read: () => T): T {
+    return this.#requests.exit(read);
+  }
+
   canAccessProject(scopeId: WindowId, projectId: ProjectId): boolean {
     // A routine runs as the host, which owns every Project; a window's binding
     // narrows what that window drives, not what the host may. The dispatcher

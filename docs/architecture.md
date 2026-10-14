@@ -1424,9 +1424,31 @@ or stops a thread.
   the bytes returned, never the text; purging the reader purges it. A call
   the host cannot journal returns `unavailable` and nothing else. A refused
   call is not journaled, and `list` is recorded only by its mark.
-- **Not built.** The contract, the pure rules, and the host's three actions
-  exist; the registration on Code turns does not, so no turn is offered the
-  tool yet.
+- **Carriage.** The Code runtime adds the tool to each turn's app-managed
+  tool set, created once per turn so the bounds above are that turn's. It
+  reaches the provider on the transport that runtime already uses for every
+  app-managed tool: an in-process MCP server for Claude, dynamic tools for
+  Codex, a loopback MCP bridge for ACP agents and OpenCode, a loopback
+  custom-tool bridge for Pi, and function calling for direct endpoints. A thread whose runtime carries no
+  app-managed tools (Ollama, OpenCode without Octant's isolated
+  configuration, an ACP agent that does not take the bridge, a direct-endpoint
+  model nobody verified for tools) is offered none, this one included. Child
+  runs compose their own tool sets and are never offered it.
+- **Facts.** The host answers from its own records on every call. Threads
+  are the persisted Code threads; a deleted thread's row is erased and a
+  child run never has one, so neither resolves. The state comes from the
+  evidence that files a thread on the Code board: running work is `working`;
+  an unanswered approval or question, a step whose outcome is unconfirmed or
+  that waits on a decision, an interrupted last turn, or a finished turn that
+  asked the person to decide is `waiting-for-person`; anything else is
+  `idle`. `stateChangedAt` is the newest update among the latest provider
+  turn and every other runtime work record, or the thread's creation when it
+  has never run; a turn parked on an approval keeps its running record, so
+  its time is when that turn last moved. `read` takes its transcript from
+  the Code `#thread` mention read for the window the turn runs for, judged on
+  that window's standing authority (its persisted Project binding when the
+  call runs). The request that started the turn has ended by the time a tool
+  is called, and its admission is never carried into the read.
 
 ## Agent task display
 
