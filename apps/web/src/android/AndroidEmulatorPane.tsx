@@ -55,7 +55,8 @@ export type AndroidEmulatorIntent =
       readonly durationMs: number;
     }
   | { readonly kind: "type-text"; readonly emulatorId: AndroidEmulatorId; readonly text: string }
-  | { readonly kind: "key-press"; readonly emulatorId: AndroidEmulatorId; readonly key: string };
+  | { readonly kind: "key-press"; readonly emulatorId: AndroidEmulatorId; readonly key: string }
+  | { readonly kind: "open-url"; readonly emulatorId: AndroidEmulatorId; readonly url: string };
 
 export function AndroidEmulatorPane(props: {
   readonly client: AndroidToolchainClient;
@@ -302,6 +303,10 @@ export function AndroidEmulatorPane(props: {
         if (liveEmulatorId !== undefined)
           void run({ kind: "shutdown", emulatorId: liveEmulatorId });
         return;
+      case "open-url":
+        if (liveEmulatorId !== undefined)
+          void run({ kind: "open-url", emulatorId: liveEmulatorId, url: action.url });
+        return;
       case "boot":
       case "select": {
         const emulator = emulators.find((one) => String(one.emulatorId) === action.deviceId);
@@ -340,6 +345,7 @@ export function AndroidEmulatorPane(props: {
   return (
     <DevicePane
       busy={busy}
+      canOpenUrl={controller.runtime?.capabilities?.openUrl === true}
       devices={devices}
       diagnostics={androidDiagnostics({
         controller,
@@ -586,6 +592,14 @@ function androidActionRequest(input: {
         kind: "key-press",
         requestedBy: localUserActor(),
         key: intent.key,
+        timeoutMs: 30_000,
+      };
+    case "open-url":
+      return {
+        ...base,
+        kind: "open-url",
+        requestedBy: localUserActor(),
+        url: intent.url,
         timeoutMs: 30_000,
       };
   }

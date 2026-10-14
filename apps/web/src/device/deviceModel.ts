@@ -1,3 +1,5 @@
+import { isDeviceOpenUrl } from "@octant/contracts/device-host";
+
 /**
  * The platform-neutral picture of one device pane. The iOS Simulator and the
  * Android emulator panes translate what their hosts report into this, and
@@ -79,7 +81,27 @@ export type DeviceAction =
   | { readonly kind: "select"; readonly deviceId: string }
   | { readonly kind: "check-again" }
   | { readonly kind: "reconnect" }
-  | { readonly kind: "stop-live-view" };
+  | { readonly kind: "stop-live-view" }
+  /** An address the host checks again and confirms whole before the device opens it. */
+  | { readonly kind: "open-url"; readonly url: string };
+
+/**
+ * What a person typed into Open URL, as the address the device would receive,
+ * or nothing when it is not one the host accepts. A bare host gets `https://`,
+ * the way a browser's address bar reads it.
+ */
+export function deviceOpenUrlFrom(input: string): string | undefined {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) return undefined;
+  const withScheme = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(trimmed) ? trimmed : `https://${trimmed}`;
+  let href: string;
+  try {
+    href = new URL(withScheme).href;
+  } catch {
+    return undefined;
+  }
+  return isDeviceOpenUrl(href) ? href : undefined;
+}
 
 /** One sentence and at most one way to fix it. */
 export interface DeviceProblem {
@@ -230,6 +252,7 @@ export function deviceProblemFor<Intent extends { readonly kind: string }>(
         shutdown: `${name} didn't shut down${late}.`,
         screenshot: `The screenshot of ${name} wasn't saved.`,
         "open-input": `Input on ${name} couldn't be turned on.`,
+        "open-url": `${name} didn't open that address.`,
         run: `The app didn't launch on ${name}.`,
       };
       return {

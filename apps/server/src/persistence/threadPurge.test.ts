@@ -46,6 +46,7 @@ import { toSafeExportRow } from "./usageExport";
 import { queryUsageRecords, readAllUsageRecords } from "./usageProjection";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { purgeThreadArtifacts } from "./threadArtifactPurge";
+import { erasePurgedProjectData } from "./threadPurge";
 import { managedWorktreeRoot } from "../code/managedWorktreeService";
 import { ThreadCheckpointProjection } from "./threadCheckpointProjection";
 import { ThreadRetentionService } from "../threadRetentionService";
@@ -414,6 +415,23 @@ describe("thread purge sweep", () => {
     expect(childRows()).toEqual([{ subject_id: null, input_tokens: 3 }]);
   });
 
+  it("erases a Canvas's record of outside content with the rest of the Canvas when its Project is erased", () => {
+    const harness = openHarness();
+    const thread = threads.work;
+    seedCanvasFamily(harness, thread);
+
+    erasePurgedProjectData({
+      connection: harness.connection,
+      projectId,
+      canvasIds: [uuidFor(thread.mode, "canvas")],
+    });
+
+    const remaining = harness.connection
+      .prepare(`SELECT aggregate_type FROM event_journal WHERE payload_json LIKE ?`)
+      .all(`%${thread.marker}%`);
+    expect(remaining).toEqual([]);
+  });
+
   it("leaves a managed worktree in place whose receipt names a path outside the managed worktree directory", async () => {
     const harness = openHarness();
     seedControlThread(harness);
@@ -628,6 +646,11 @@ function seedCanvasFamily(harness: Harness, thread: SeededThread): void {
   insertEvent(harness.connection, "canvas-comments", canvasId, {
     canvasId,
     body: thread.marker,
+  });
+  insertEvent(harness.connection, "canvas-outside-content", canvasId, {
+    canvasId,
+    versionId: uuidFor(thread.mode, "version"),
+    writerId: thread.marker,
   });
   const shareId = uuidFor(thread.mode, "share");
   insertEvent(harness.connection, "canvas-share", shareId, {

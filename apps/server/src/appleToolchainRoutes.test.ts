@@ -225,6 +225,93 @@ describe("Apple toolchain routes", () => {
     );
   });
 
+  describe("Open URL", () => {
+    const openUrl = {
+      actionId: "60000000-0000-4000-8000-000000000008",
+      correlationId: "60000000-0000-4000-8000-000000000009",
+      authority,
+      ...scope,
+      kind: "open-url",
+      simulatorId: "60000000-0000-4000-8000-00000000000a",
+      url: "https://example.com/welcome",
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      timeoutMs: 30_000,
+      approval: { kind: "approved", approvalId: "60000000-0000-4000-8000-00000000000b" },
+    };
+    const evidence = {
+      actionId: openUrl.actionId,
+      correlationId: openUrl.correlationId,
+      authority,
+      kind: "open-url",
+      outcome: "succeeded",
+      simulatorId: openUrl.simulatorId,
+      requestedBy: openUrl.requestedBy,
+      diagnostics: [{ severity: "note", message: "open-url completed (https://example.com)" }],
+      artifacts: [],
+      cleanup: "complete",
+      durationMs: 5,
+      completedAt: "2026-10-14T20:00:01.000Z",
+    };
+    function routes(resolveContext: ReturnType<typeof vi.fn>) {
+      const service = {
+        discover: vi.fn(),
+        execute: vi.fn(async () => evidence),
+        cancel: vi.fn(),
+        snapshot: vi.fn(),
+        readScreenshotArtifact: vi.fn(),
+      };
+      const handler = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        resolveContext,
+        service,
+        now: () => 2,
+      });
+      return { handler, service };
+    }
+
+    it("hands an address the window may open to the host with that window's authority", async () => {
+      const resolveContext = vi.fn(async () => context);
+      const { handler, service } = routes(resolveContext);
+
+      const response = await handler(request({ kind: "apple-action-request", request: openUrl }));
+
+      expect(response?.status).toBe(200);
+      expect(resolveContext).toHaveBeenCalledWith(
+        windowId,
+        expect.objectContaining(scope),
+        expect.objectContaining({ kind: "apple-action-request" }),
+      );
+      expect(service.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "open-url", url: "https://example.com/welcome" }),
+        context,
+      );
+    });
+
+    it("refuses a script, file, or data address before authority is checked or the host is reached", async () => {
+      for (const url of ["javascript:alert(1)", "file:///etc/hosts", "data:text/plain,hi"]) {
+        const resolveContext = vi.fn(async () => context);
+        const { handler, service } = routes(resolveContext);
+
+        const response = await handler(
+          request({ kind: "apple-action-request", request: { ...openUrl, url } }),
+        );
+
+        expect(response?.status, url).toBe(400);
+        expect(resolveContext).not.toHaveBeenCalled();
+        expect(service.execute).not.toHaveBeenCalled();
+      }
+    });
+
+    it("refuses an Open URL for a thread the window has no authority over", async () => {
+      const { handler, service } = routes(vi.fn(async () => undefined));
+
+      const response = await handler(request({ kind: "apple-action-request", request: openUrl }));
+
+      expect(response?.status).toBe(403);
+      expect(service.execute).not.toHaveBeenCalled();
+    });
+  });
+
   it("fails closed before service access for invalid window authority", async () => {
     const service = {
       discover: vi.fn(),

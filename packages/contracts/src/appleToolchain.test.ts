@@ -380,6 +380,55 @@ describe("Apple runtime contracts", () => {
     expect(() => decode({ ...swipe, requestedBy: undefined })).toThrow();
   });
 
+  it("decodes Open URL only with an http(s) address and the person who asked", () => {
+    const decode = contracts.decodeAppleSimulatorRequest as (value: unknown) => any;
+    const openUrl = {
+      actionId: "10000000-0000-4000-8000-000000000001",
+      correlationId: "10000000-0000-4000-8000-000000000002",
+      authority: {
+        hostId: "10000000-0000-4000-8000-000000000003",
+        mode: "code",
+        projectId: "10000000-0000-4000-8000-000000000004",
+        providerInstanceId: "10000000-0000-4000-8000-000000000007",
+        extension: { kind: "core" },
+      },
+      threadId: "10000000-0000-4000-8000-000000000008",
+      checkoutId: "10000000-0000-4000-8000-000000000009",
+      simulatorId: "10000000-0000-4000-8000-000000000010",
+      timeoutMs: 30000,
+      approval: { kind: "approved", approvalId: "10000000-0000-4000-8000-000000000011" },
+      requestedBy: { kind: "local-user", actorId: "10000000-0000-4000-8000-000000000012" },
+      kind: "open-url",
+      url: "https://example.com/welcome?from=octant",
+    };
+    expect(decode(openUrl).url).toBe("https://example.com/welcome?from=octant");
+    expect(() => decode({ ...openUrl, url: undefined })).toThrow();
+    expect(() => decode({ ...openUrl, requestedBy: undefined })).toThrow();
+    expect(() => decode({ ...openUrl, url: "javascript:alert(1)" })).toThrow();
+    expect(() => decode({ ...openUrl, url: "file:///etc/hosts" })).toThrow();
+  });
+
+  it("tells the pane which newer device actions the host performs", () => {
+    const decodeSnapshot = contracts.decodeAppleRuntimeSnapshot as (value: unknown) => any;
+    const older = {
+      sequence: 1,
+      snapshotAt: "2026-10-14T20:00:00.000Z",
+      toolchain: {
+        toolchainId: "10000000-0000-4000-8000-000000000012",
+        available: true,
+        discoveredAt: "2026-10-14T20:00:00.000Z",
+      },
+      simulators: [],
+      active: [],
+      recentEvidence: [],
+    };
+    // A host that predates the flag says nothing, and the pane offers nothing.
+    expect(decodeSnapshot(older).capabilities).toBeUndefined();
+    expect(decodeSnapshot({ ...older, capabilities: { openUrl: true } }).capabilities).toEqual({
+      openUrl: true,
+    });
+  });
+
   it("decodes replay-safe progress and bounded runtime snapshots", () => {
     const decodeProgress = contracts.decodeAppleActionProgress;
     const decodeSnapshot = contracts.decodeAppleRuntimeSnapshot;

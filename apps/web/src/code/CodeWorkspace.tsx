@@ -876,6 +876,15 @@ function appleActionRequest(input: {
         requestedBy: localUserActor(),
         timeoutMs: 30_000,
       };
+    case "open-url":
+      return {
+        ...base,
+        kind: "open-url",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        url: intent.url,
+        timeoutMs: 30_000,
+      };
   }
 }
 

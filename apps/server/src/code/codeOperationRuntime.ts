@@ -656,6 +656,12 @@ export interface CodeOperationRuntime {
     readonly options: ReadonlyArray<string>;
   }): boolean;
   /**
+   * Takes a native-harness question off the thread's inline surface once the
+   * harness has settled it some other way (an answer from another surface,
+   * expiry, or cancellation), so it is no longer listed or answerable here.
+   */
+  withdrawHarnessQuestion?(input: { readonly threadId: string; readonly questionId: string }): void;
+  /**
    * Every approval and question a running turn is waiting on that this window
    * could answer through `execute`, under the same scope those answers pass.
    */
@@ -1396,6 +1402,7 @@ export function createCodeOperationRuntime(
       return { terminalId: input.terminalId, state: snapshot.status };
     },
     raiseHarnessQuestion: (input) => turns.raiseHarnessQuestion(input),
+    withdrawHarnessQuestion: (input) => turns.withdrawHarnessQuestion(input),
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
     admitsTurn: (windowId, thread) => service.admitsTurn(windowId, thread),
     turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
@@ -1706,8 +1713,16 @@ function approvalPrompt(
     const input =
       isAppleSimulatorInputKind(effect.request.kind) ||
       isAppleSimulatorOpenInputKind(effect.request.kind);
-    message = input ? "Allow input to this Simulator?" : `Allow Apple ${effect.request.kind}?`;
+    const url = "url" in effect.request ? effect.request.url : undefined;
+    message = input
+      ? "Allow input to this Simulator?"
+      : url !== undefined
+        ? "Open this URL on the Simulator?"
+        : `Allow Apple ${effect.request.kind}?`;
     effectDetail = [
+      // The whole address, exactly as the device receives it: the approval
+      // binds to it, and the evidence later keeps only its origin.
+      ...(url === undefined ? [] : [`URL: ${url}`]),
       ...(input
         ? [
             "Covers taps, swipes, typing and keys on this Simulator for 15 minutes after each input.",
@@ -1727,8 +1742,14 @@ function approvalPrompt(
     const input =
       isAndroidEmulatorInputKind(effect.request.kind) ||
       isAndroidEmulatorOpenInputKind(effect.request.kind);
-    message = input ? "Allow input to this emulator?" : `Allow Android ${effect.request.kind}?`;
+    const url = effect.request.url;
+    message = input
+      ? "Allow input to this emulator?"
+      : url !== undefined
+        ? "Open this URL on the emulator?"
+        : `Allow Android ${effect.request.kind}?`;
     effectDetail = [
+      ...(url === undefined ? [] : [`URL: ${url}`]),
       ...(input
         ? ["Covers taps, swipes, typing and keys on this emulator for 15 minutes after each input."]
         : []),
@@ -2749,6 +2770,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
     active.cursor = frame.cursor;
     return true;
+  }
+
+  /**
+   * Forgets a native-harness question the harness has already settled. Only
+   * a question this turn raised for the harness is removed; a provider's own
+   * question with the same id is left alone.
+   */
+  withdrawHarnessQuestion(input: { readonly threadId: string; readonly questionId: string }): void {
+    const active = this.#active.get(input.threadId);
+    if (active === undefined || !active.harnessQuestions.has(input.questionId)) return;
+    active.harnessQuestions.delete(input.questionId);
+    active.questions.delete(input.questionId);
   }
 
   /** Whether this thread's running turn has an approval or a question still unanswered. */
