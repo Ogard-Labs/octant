@@ -109,6 +109,12 @@ export interface HostFederationLifecycleOptions {
    * `remoteRevokeSelf` against the host's session bridge.
    */
   readonly revokeSelf?: (bridge: RemoteSessionBridge) => Promise<RemoteRevokeSelfResult>;
+  /**
+   * Runs after a remote host's local record is gone, so whatever else this
+   * device keeps for that host (such as pages of its servers opened in the
+   * desktop) goes with it. A failure here never undoes the removal.
+   */
+  readonly onHostCleared?: (hostId: string) => Promise<void>;
 }
 
 export interface HostFederationRevokeOptions {
@@ -407,6 +413,11 @@ export function createHostFederationLifecycle(
     options.cache?.remove(hostId);
     registrations.delete(hostId);
     rebuildFromTransports();
+    try {
+      await options.onHostCleared?.(hostId);
+    } catch {
+      // The host is already forgotten; the owner of the extra data reports its own failure.
+    }
     return { localCredentialRemoved };
   };
 

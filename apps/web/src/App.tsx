@@ -1817,7 +1817,7 @@ function LaunchedShell(
     ],
   );
   const observedHosts = useHostObservation(hostClient);
-  const federation = useHostFederationLifecycle();
+  const federation = useHostFederationLifecycle(props.hostBridge);
   const hostFederationLifecycle = federation?.lifecycle;
   const hostFederationTransports = federation?.transports;
   const [federationRevision, setFederationRevision] = useState(0);

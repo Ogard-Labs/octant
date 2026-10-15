@@ -95,6 +95,7 @@ export const IPC_CHANNELS = {
   remoteServerPageOpen: "octant:remote-server-page:open",
   remoteServerPageSign: "octant:remote-server-page:sign",
   remoteServerPageSigned: "octant:remote-server-page:signed",
+  remoteServerPageForgetHost: "octant:remote-server-page:forget-host",
 } as const;
 
 type ResolvedSidebarMaterial = "opaque" | "translucent";
@@ -575,6 +576,7 @@ export interface OctantHostBridge {
    * request; the answer is opened, or refused with words for the row.
    */
   readonly openRemoteServerPage: (request: unknown) => Promise<RemoteServerPageBridgeOutcome>;
+  readonly forgetRemoteServerPages: (hostId: string) => Promise<void>;
   /**
    * Makes this window the signer for the pages it opens: the forwarder asks
    * it to sign each of their requests, and it answers with Octant's headers
@@ -1108,6 +1110,9 @@ export function createHostBridge(
       } catch {
         return { kind: "refused", message: "Octant could not open this server." };
       }
+    },
+    forgetRemoteServerPages: async (hostId: string): Promise<void> => {
+      await ipc.invoke(IPC_CHANNELS.remoteServerPageForgetHost, hostId);
     },
     subscribeRemoteServerPageSigning: (signer: (request: unknown) => Promise<unknown>) => {
       const receive: DeepLinkListener = (_event, message) => {

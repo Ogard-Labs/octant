@@ -191,6 +191,7 @@ describe("desktop preload bridge", () => {
       "downloadAppUpdate",
       "enablePrivateListener",
       "forgetPairedComputer",
+      "forgetRemoteServerPages",
       "getComputerUseStatus",
       "getHostCapabilities",
       "getManagedToolsStatus",

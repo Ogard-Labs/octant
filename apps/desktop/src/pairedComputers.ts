@@ -186,6 +186,12 @@ export async function forgetPairedComputer(input: {
   readonly pins: PairedComputerPins;
   readonly windows: PairedComputerWindows;
   readonly storage: PageStoragePort;
+  /** The pages of that computer's servers Octant's browser opened, which go with it. */
+  readonly serverPages?: {
+    readonly forgetListener: (
+      listenerOrigin: string,
+    ) => Promise<{ readonly status: "forgotten" | "incomplete" }>;
+  };
 }): Promise<ForgetOutcome> {
   const origin = typeof input.origin === "string" ? input.origin : "";
   if (input.pins.pinFor(origin) === undefined) {
@@ -195,6 +201,8 @@ export async function forgetPairedComputer(input: {
   input.pins.forget(origin);
   try {
     await clearRemotePageStorage(input.storage, origin);
+    const pages = await input.serverPages?.forgetListener(origin);
+    if (pages?.status === "incomplete") throw new Error("Server page storage was not cleared.");
   } catch {
     return {
       status: "refused",
@@ -358,6 +366,7 @@ export function installPairedComputerIpcHandlers(options: {
   readonly pins: () => PairedComputerPins;
   readonly windows: PairedComputerWindows;
   readonly storage: PageStoragePort;
+  readonly serverPages?: Parameters<typeof forgetPairedComputer>[0]["serverPages"];
   readonly webBuildVersion: string;
 }): void {
   const authorize = (event: unknown): void => {
@@ -391,6 +400,7 @@ export function installPairedComputerIpcHandlers(options: {
       pins: options.pins(),
       windows: options.windows,
       storage: options.storage,
+      ...(options.serverPages === undefined ? {} : { serverPages: options.serverPages }),
     });
   });
 }

@@ -37,6 +37,13 @@ so its cookies and storage stay apart from your own `localhost` servers and from
 Octant. The same server keeps the same name across reopens and restarts, as long as
 Octant gets the same local port it used before.
 
+Octant's browser keeps what a page stores, so a sign-in inside your dev app
+survives a reopen. Removing the other computer from Octant, or unpairing this
+device from it, closes that computer's open pages and deletes everything they
+stored: cookies, local storage, and caches. Your default browser keeps its own
+storage for Open in browser pages; clear it in that browser. If Octant could not
+delete everything, it keeps the page names so the next removal tries again.
+
 ## Limits
 
 - **Links to `localhost` inside the page do not load.** The page runs on your

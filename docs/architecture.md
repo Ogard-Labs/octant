@@ -6650,7 +6650,10 @@ mechanisms are:
     becomes a failure page in the plan's copy. Octant's browser is a sandboxed
     window per name in a persistent partition, with every permission refused,
     kept on the page's origin, and not a Browser tab, so no agent can drive
-    it. The forwarder answers a WebSocket upgrade 501: the proxy route carries
+    it. Removing a host, revoking this device from it, or forgetting a paired
+    computer closes that computer's page windows, clears every persistent
+    partition for its recorded page names through `clearRemotePageStorage`, and
+    forgets the names; a name that could not be cleared stays for a retry. The forwarder answers a WebSocket upgrade 501: the proxy route carries
     upgrades, and the forwarder does not pass them on yet.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
