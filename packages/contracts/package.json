@@ -70,6 +70,7 @@
     "./host": "./src/host.ts",
     "./host-resources": "./src/hostResources.ts",
     "./host-oauth": "./src/hostOAuth.ts",
+    "./provider-key-journal": "./src/providerKeyJournal.ts",
     "./host-control": "./src/hostControl.ts",
     "./host-data-map": "./src/hostDataMap.ts",
     "./host-export": "./src/hostExport.ts",

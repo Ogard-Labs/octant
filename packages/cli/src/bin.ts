@@ -362,6 +362,7 @@ function printUsage(): void {
       "  octant project access <name> full-access|approval-gated",
       "  octant provider key set <instance> [--replace] [--stdin]",
       "  octant provider key status|remove <instance>",
+      "  octant provider remove <instance>",
       "  octant listener [status]",
       "  octant listener enable --hostname <lan-or-tailscale-address> --port <port> --cert <path> --key <path>",
       "  octant listener disable",

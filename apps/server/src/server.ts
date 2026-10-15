@@ -561,7 +561,12 @@ import {
   slowRequestRoute,
   withServerTiming,
 } from "./latencyStatsProjection";
-import { isProviderExecutableAvailable, ProviderService } from "./providers/providerService";
+import {
+  isProviderExecutableAvailable,
+  ProviderService,
+  ProviderServiceError,
+} from "./providers/providerService";
+import { providerKeyJournal, reconcileProviderKeyChanges } from "./providers/providerKeyJournal";
 import {
   CANONICAL_REVIEWED_MODEL_MANIFEST,
   refreshReviewedModelManifest,
@@ -10993,6 +10998,23 @@ export function startOctantServer(
       control: () => currentRemoteGateway?.localDeviceAdministration(),
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const providerKeyChangeJournal = providerKeyJournal({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      now: () => new Date().toISOString(),
+    });
+    // A host that stopped between a key request and its outcome settles the
+    // request before it serves another key change: the snapshot is taken here,
+    // ahead of the routes, so it never contains a change still in flight.
+    if (credentialResolver !== undefined) {
+      void reconcileProviderKeyChanges({
+        journal: providerKeyChangeJournal,
+        unsettled: providerKeyChangeJournal.unsettled(),
+        readInstances: () => persistence.readProviderInstances(),
+        deleteKey: (id) => credentialResolver.delete(id),
+      }).catch(() => undefined);
+    }
     const providerCredentialRoutes = createProviderCredentialRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
       windowAuthorityStore,
@@ -11002,6 +11024,22 @@ export function startOctantServer(
         credentialBroker === undefined || credentialResolver === undefined
           ? undefined
           : { store: credentialResolver, readStored: (id) => credentialBroker.resolve(id) },
+      journal: providerKeyChangeJournal,
+      removeProvider: async (windowId, instance) => {
+        try {
+          await providerService.execute(windowId, {
+            kind: "remove-provider",
+            instanceId: instance.id,
+            expectedVersion: instance.version,
+          });
+          return { kind: "removed" };
+        } catch (error) {
+          if (error instanceof ProviderServiceError) {
+            return { kind: "refused", message: error.failure.message };
+          }
+          throw error;
+        }
+      },
     });
     const privateListenerSetting = createPrivateListenerSetting(providerDataDirectory);
     const privateListenerAdministrationRoutes = createPrivateListenerAdministrationRouteHandler({

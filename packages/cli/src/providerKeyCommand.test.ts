@@ -156,6 +156,88 @@ describe("octant provider key", () => {
   });
 });
 
+describe("octant provider remove", () => {
+  const REMOVE_PROVIDER: ProviderKeyCliCommand = {
+    action: "remove-provider",
+    instance: "Private gateway",
+  };
+
+  it("takes one provider and no flag", () => {
+    expect(resolveProviderKeyCliCommand(["remove", "gw"], {})).toEqual({
+      action: "remove-provider",
+      instance: "gw",
+    });
+    expect(resolveProviderKeyCliCommand(["remove"], {})).toBeUndefined();
+    expect(resolveProviderKeyCliCommand(["remove", "gw", "other"], {})).toBeUndefined();
+    expect(resolveProviderKeyCliCommand(["remove", "gw"], { stdin: true })).toBeUndefined();
+  });
+
+  it("asks the host to remove the provider and its key in one request", async () => {
+    const { sent, out, run } = fixture(() => ({
+      status: 200,
+      body: { outcome: "removed", instanceId: ID, displayName: "Private gateway" },
+    }));
+
+    expect(await run(REMOVE_PROVIDER)).toBe(0);
+    expect(sent).toEqual([
+      {
+        path: "/api/desktop/provider-credentials/remove-provider",
+        method: "POST",
+        body: { instance: "Private gateway" },
+      },
+    ]);
+    expect(out.join("")).toBe(`Private gateway (${ID}) was removed with its stored key.\n`);
+  });
+
+  it("refuses the way key remove does for an unknown, shared or unreachable provider", async () => {
+    for (const command of [
+      REMOVE_PROVIDER,
+      { action: "remove", instance: "Private gateway" } as const,
+    ]) {
+      const notFound = fixture(() => ({
+        status: 404,
+        body: { category: "not-found", message: "x" },
+      }));
+      expect(await notFound.run(command)).toBe(1);
+      expect(notFound.err.join("")).toContain('No provider has the id or name "Private gateway".');
+
+      const shared = fixture(() => ({
+        status: 409,
+        body: {
+          category: "ambiguous",
+          message: "x",
+          candidates: [{ id: ID, displayName: "Private gateway" }],
+        },
+      }));
+      expect(await shared.run(command)).toBe(1);
+      expect(shared.err.join("")).toContain(`  ${ID}  Private gateway`);
+
+      const noStore = fixture(() => ({
+        status: 503,
+        body: { category: "credential-store-unavailable", message: "x" },
+      }));
+      expect(await noStore.run(command)).toBe(1);
+      expect(noStore.err.join("")).toContain("org.freedesktop.secrets");
+    }
+  });
+
+  it("says why the provider stays and how to clear a key that was left", async () => {
+    const refused = fixture(() => ({
+      status: 409,
+      body: { category: "provider-refused", message: "The provider has an active session." },
+    }));
+    expect(await refused.run(REMOVE_PROVIDER)).toBe(1);
+    expect(refused.err.join("")).toContain("was not removed: The provider has an active session.");
+
+    const kept = fixture(() => ({
+      status: 503,
+      body: { category: "provider-removed-key-kept", message: "x", instanceId: ID },
+    }));
+    expect(await kept.run(REMOVE_PROVIDER)).toBe(1);
+    expect(kept.err.join("")).toContain(`octant provider key remove ${ID}`);
+  });
+});
+
 describe("hidden terminal prompt", () => {
   it("writes the prompt but never echoes a keystroke", async () => {
     const terminal = Object.assign(new EventEmitter(), {
