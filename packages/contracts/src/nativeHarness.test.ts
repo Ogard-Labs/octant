@@ -3,6 +3,7 @@ import {
   MAX_NATIVE_HARNESS_FOLLOW_UPS,
   NATIVE_HARNESS_TOOL_NAMES,
   decodeActivateNativeHarnessFollowUp,
+  decodeDecideNativeHarnessApproval,
   decodeNativeHarnessApproval,
   decodeNativeHarnessAdvisorIntervention,
   decodeNativeHarnessCarriedNote,
@@ -253,6 +254,57 @@ describe("native harness turns and sessions", () => {
         detail: "Advisor paused the run: the diff touches the release script.",
       }).status,
     ).toBe("paused-by-advisor");
+  });
+});
+
+describe("native harness command confirmations", () => {
+  const pending = {
+    id: "00000000-0000-4000-8000-000000000030",
+    toolName: "bash",
+    summary: "bash: npm install",
+    approvalClass: "shell-exec",
+    status: "pending",
+    askedAt: at,
+  };
+  const listed = { host: "registry.npmjs.org", port: 443, from: "thread-rule", preselected: true };
+
+  it("lists hosts only on a single-use confirmation, and only in rule form", () => {
+    expect(
+      decodeNativeHarnessApproval({ ...pending, singleUse: true, commandHosts: [listed] })
+        .commandHosts,
+    ).toEqual([listed]);
+    expect(() => decodeNativeHarnessApproval({ ...pending, commandHosts: [listed] })).toThrow();
+    for (const host of ["127.0.0.1", "localhost", "Registry.NPMJS.org", "*.com"]) {
+      expect(() =>
+        decodeNativeHarnessApproval({
+          ...pending,
+          singleUse: true,
+          commandHosts: [{ ...listed, host }],
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("takes confirmed hosts only with a one-time approval", () => {
+    const approvalId = pending.id;
+    const commandHosts = [{ host: "registry.npmjs.org", port: 443 }];
+    expect(
+      decodeDecideNativeHarnessApproval({ approvalId, decision: "approve", commandHosts })
+        .commandHosts,
+    ).toEqual(commandHosts);
+    expect(() =>
+      decodeDecideNativeHarnessApproval({ approvalId, decision: "approve-always", commandHosts }),
+    ).toThrow();
+    expect(() =>
+      decodeDecideNativeHarnessApproval({ approvalId, decision: "deny", commandHosts }),
+    ).toThrow();
+    expect(() =>
+      decodeDecideNativeHarnessApproval({
+        approvalId,
+        decision: "approve",
+        commandHosts: [{ host: "registry.npmjs.org", port: 0 }],
+      }),
+    ).toThrow();
   });
 });
 

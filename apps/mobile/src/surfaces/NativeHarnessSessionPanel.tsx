@@ -42,6 +42,11 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   const [note, setNote] = useState<string>();
   const [answer, setAnswer] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
+  // Hosts ticked on a marked thread's command, for the approval they were ticked on.
+  const [tickedHosts, setTickedHosts] = useState<{
+    readonly approvalId: string;
+    readonly keys: ReadonlySet<string>;
+  }>();
 
   const load = useCallback(async () => {
     try {
@@ -78,6 +83,20 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   if (view === undefined || view === null) return null;
   const pendingQuestion = view.questions.find((question) => question.status === "pending");
   const pendingApproval = view.approvals?.find((approval) => approval.status === "pending");
+  const hostKey = (entry: { readonly host: string; readonly port: number }) =>
+    `${entry.host}:${String(entry.port)}`;
+  const listedHosts = pendingApproval?.commandHosts;
+  const ticked =
+    pendingApproval !== undefined && tickedHosts?.approvalId === String(pendingApproval.id)
+      ? tickedHosts.keys
+      : new Set((listedHosts ?? []).filter((entry) => entry.preselected).map(hostKey));
+  const toggleHost = (key: string) => {
+    if (pendingApproval === undefined) return;
+    const keys = new Set(ticked);
+    if (keys.has(key)) keys.delete(key);
+    else keys.add(key);
+    setTickedHosts({ approvalId: String(pendingApproval.id), keys });
+  };
   const decide = (decision: "approve" | "approve-always" | "deny") => {
     if (pendingApproval === undefined) return;
     void decideMobileNativeHarnessApproval({
@@ -85,6 +104,13 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
       threadId: props.threadId,
       approvalId: String(pendingApproval.id),
       decision,
+      ...(listedHosts === undefined || decision !== "approve"
+        ? {}
+        : {
+            commandHosts: listedHosts
+              .filter((entry) => ticked.has(hostKey(entry)))
+              .map((entry) => ({ host: entry.host, port: entry.port })),
+          }),
     }).then((result) => {
       setNote(
         result?.kind === "approval-decided"
@@ -193,6 +219,30 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           </Text>
           {pendingApproval.outsideContent === undefined ? null : (
             <OutsideContentNote outsideContent={pendingApproval.outsideContent} />
+          )}
+          {listedHosts === undefined ? null : (
+            <>
+              <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
+                {listedHosts.length === 0
+                  ? "This command can reach no host: this thread and its Project allow none."
+                  : "This command can reach only the hosts you select, and only while it runs."}
+              </Text>
+              {listedHosts.length === 0 ? null : (
+                <View style={styles.chips} testID="mobile-native-harness-command-hosts">
+                  {listedHosts.map((entry) => {
+                    const key = hostKey(entry);
+                    return (
+                      <GlassChip
+                        active={ticked.has(key)}
+                        key={key}
+                        label={entry.port === 443 ? entry.host : key}
+                        onPress={() => toggleHost(key)}
+                      />
+                    );
+                  })}
+                </View>
+              )}
+            </>
           )}
           <View style={styles.chips}>
             <GlassChip active={false} label="Allow" onPress={() => decide("approve")} />

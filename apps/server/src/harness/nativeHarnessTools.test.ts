@@ -402,6 +402,7 @@ describe("native harness tools", () => {
       readonly exitCodes: Record<string, number>;
       readonly facts?: Partial<ToolCallLiveFacts>;
       readonly approvals?: NativeHarnessToolPorts["approvals"];
+      readonly callEnded?: NativeHarnessToolPorts["callEnded"];
       /** Runs while the check command runs, as a concurrent change would. */
       readonly duringRun?: (goals: GoalService) => Promise<void>;
     }) {
@@ -432,6 +433,7 @@ describe("native harness tools", () => {
           },
         },
         ...(input.approvals === undefined ? {} : { approvals: input.approvals }),
+        ...(input.callEnded === undefined ? {} : { callEnded: input.callEnded }),
       });
       return { goals, tools, commands };
     }
@@ -497,8 +499,10 @@ describe("native harness tools", () => {
       expect(replaced.result).toMatchObject({ error: "criteria-already-set" });
     });
 
-    it("runs nothing when the check was changed while it waited for approval", async () => {
+    it("runs nothing when the check was changed while it waited for approval, and ends the approved call", async () => {
       let goals: GoalService | undefined;
+      const approvedCalls: string[] = [];
+      const endedCalls: string[] = [];
       const {
         tools,
         commands,
@@ -507,7 +511,9 @@ describe("native harness tools", () => {
         criteria: [{ text: "Parser tests pass", check: "bun run test parser" }],
         exitCodes: { "bun run test parser": 0, true: 0 },
         facts: { executionPolicy: "approval-gated", approvalSatisfied: false },
-        approvals: async () => {
+        callEnded: (callId) => endedCalls.push(callId),
+        approvals: async ({ callId }) => {
+          approvedCalls.push(callId);
           // Someone swaps the criterion's command while the approval is open.
           const goal = goals?.read(threadId).goal;
           if (goal !== null && goal !== undefined) {
@@ -529,6 +535,9 @@ describe("native harness tools", () => {
         error: "criterion-changed",
       });
       expect(commands).toEqual([]);
+      // What the approval left for its command is let go though none ran.
+      expect(endedCalls).toEqual(approvedCalls);
+      expect(endedCalls).toHaveLength(1);
     });
 
     it("records nothing when the criterion was reworded while its check ran", async () => {

@@ -18,6 +18,7 @@ import {
   decodeWindowId,
   type ToolEgressLaunch,
   type AgentRunAuthority,
+  type NativeHarnessApproval,
   type CodeThread,
   type ProviderExecutionPolicy,
   type ToolActionAuthority,
@@ -62,7 +63,9 @@ import {
   ToolEgressRules,
   toolEgressLaunchTaintReference,
   type ToolEgressLiveLaunch,
+  type ToolEgressPerson,
 } from "./nativeHarnessEgressRules";
+import { createNativeHarnessSessionRouteHandler } from "./nativeHarnessSessionRoutes";
 import { seedEgressJournal, seededRequestHosts } from "./nativeHarnessEgressRules.test-support";
 import {
   basicAuthorization,
@@ -3970,6 +3973,504 @@ describe("native harness tool egress grants and learn mode", () => {
   // does, composed for an approval-gated or auto-accept-edits Code thread; the
   // only fixture is "the public internet", one loopback origin the proxy
   // reaches through its injected resolver and dialer.
+  describe("a marked thread's command confirmation", () => {
+    type Answer = {
+      readonly decision: "approve" | "approve-always" | "deny";
+      readonly commandHosts?: ReadonlyArray<{ readonly host: string; readonly port: number }>;
+      readonly principal?: ToolEgressPerson;
+    };
+    const decodeAggregate = Schema.decodeUnknownSync(AggregateId);
+
+    /**
+     * A Code lead on a proxied thread whose commands each open a tunnel to
+     * every `host:port` the command names, through a real launch of the host
+     * proxy. A person answers each approval by trying the given answers in
+     * order until one is decided.
+     */
+    async function markedCommandLead(
+      host: EgressHost,
+      options: {
+        readonly answers: Array<ReadonlyArray<Answer>>;
+        readonly decide?: (approval: NativeHarnessApproval, answer: Answer) => Promise<string>;
+        /** Changed by the person while they answer, before the command runs. */
+        readonly postureAfterAnswer?: ProviderExecutionPolicy;
+      },
+    ) {
+      const origin = await tcpFixture();
+      const network = fixtureNetwork(new Map([["93.184.216.10", origin.port]]));
+      const checkoutRoot = temporaryDirectory("octant-egress-marked-");
+      const openShell = recordingShell();
+      let posture: ProviderExecutionPolicy = "approval-gated";
+      let postureAfterAnswer = options.postureAfterAnswer;
+      const asked: NativeHarnessApproval[] = [];
+      const decisions: string[] = [];
+      const approvals: NativeHarnessApprovalStore = new NativeHarnessApprovalStore({
+        sessions: {
+          ensure: () => ({}) as never,
+          askApproval: () => undefined,
+          settleApproval: () => "approval-not-found",
+        },
+        uuid: randomUUID,
+        clock: () => now,
+        onAsked: ({ approval }) => {
+          asked.push(approval);
+          const attempts = options.answers.shift() ?? [{ decision: "deny" }];
+          setImmediate(async () => {
+            for (const answer of attempts) {
+              const outcome =
+                options.decide === undefined
+                  ? approvals.decide(String(egressThread), String(approval.id), answer.decision, {
+                      principal: answer.principal ?? person,
+                      ...(answer.commandHosts === undefined
+                        ? {}
+                        : { commandHosts: answer.commandHosts }),
+                    })
+                  : await options.decide(approval, answer);
+              decisions.push(outcome);
+              if (outcome === "decided") break;
+            }
+            if (postureAfterAnswer !== undefined) posture = postureAfterAnswer;
+            postureAfterAnswer = undefined;
+          });
+        },
+      });
+      const proxiedShell = (scope: HarnessEgressScope): NativeHarnessShellPort => ({
+        run: async (input) => {
+          const started = await host.rules.startLaunch({
+            launch: {
+              launchId: Schema.decodeUnknownSync(ToolEgressLaunchId)(randomUUID()),
+              threadId: decodeAggregate(scope.threadId),
+              projectId: decodeAggregate(scope.projectId),
+              ...(input.callId === undefined ? {} : { toolCallId: input.callId }),
+            },
+            endpoint: { kind: "loopback" },
+            resolveAll: network.resolveAll,
+            connect: network.connect,
+            confirmed: input.confirmedHosts,
+          });
+          if (started.status !== "listening") {
+            return { status: "unavailable", output: "", truncated: false };
+          }
+          const authorization = basicAuthorization(started.launch.proxy.token);
+          const lines: string[] = [];
+          for (const target of input.command.split(" ")) {
+            const tunnel = await openTunnel(started.launch.proxy, target, authorization);
+            if (tunnel.status === 200) tunnel.socket.destroy();
+            lines.push(
+              `${target} ${tunnel.status === 200 ? "connected" : answerLine(tunnel.answer)}`,
+            );
+          }
+          const ended = await started.launch.finish();
+          return ended.status === "summarized"
+            ? { status: "ran", exitCode: 0, output: lines.join("\n"), truncated: false }
+            : { status: "unavailable", output: "", truncated: false };
+        },
+      });
+      const composition = createNativeHarnessComposition({
+        isChildAuthorityCurrent: () => true,
+        authority: {
+          resolve: () => authority,
+          service: new ToolCallAuthorityService({
+            resolveGrantedAuthority: () => authority,
+            resolveLiveFacts: () => ({
+              providerAppManagedTools: "supported",
+              host: { computerUseEnabled: false },
+              executionPolicy: posture,
+              approvalSatisfied: posture === "full-access",
+              externalContentIngested: host.tainted(String(egressThread)),
+            }),
+          }),
+        },
+        isHarnessProvider: () => true,
+        shell: openShell,
+        proxiedShell,
+        commandHosts: (threadId) => host.rules.commandConfirmationHosts(threadId),
+        approvals,
+        readCodeExecutionPolicy: () => posture,
+        hostId: authority.hostId,
+        readThreadTaint: (threadId) => host.tainted(threadId),
+        recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+        uuid: randomUUID,
+        clock: () => now,
+      });
+      const tools = composition.forCode({
+        thread: {
+          id: String(egressThread),
+          projectId: String(egressProject),
+          providerInstanceId: authority.providerInstanceId,
+          modelId: "harness-model",
+        } as unknown as CodeThread,
+        checkoutRoot,
+        windowId: "window-1",
+      });
+      if (tools === undefined) throw new Error("the harness offered no tools");
+      const bash = async (...targets: ReadonlyArray<string>) => {
+        const outcome = await tools.execute({
+          name: "bash",
+          inputJson: JSON.stringify({ command: targets.join(" ") }),
+        });
+        const result = outcome.result as { readonly output?: string; readonly error?: string };
+        return result.output === undefined
+          ? result
+          : Object.fromEntries(
+              result.output.split("\n").map((line) => {
+                const [target = "", ...answer] = line.split(" ");
+                return [target, answer.join(" ")];
+              }),
+            );
+      };
+      return {
+        bash,
+        asked,
+        decisions,
+        openShell,
+        approvals,
+        setPosture: (next: ProviderExecutionPolicy) => {
+          posture = next;
+        },
+      };
+    }
+
+    const callGrants = (host: EgressHost) =>
+      host
+        .events(TOOL_EGRESS_THREAD_AGGREGATE)
+        .filter(
+          (event) =>
+            event.eventName === TOOL_EGRESS_EVENT_NAMES.threadRuleGranted &&
+            (event.payload as { scope: { kind: string } }).scope.kind === "call",
+        )
+        .map((event) => event.payload as Record<string, unknown>);
+
+    /** A thread rule, a Project rule, an open proposal, and then the thread is marked. */
+    async function markedThreadWithHosts() {
+      const host = egressHost();
+      expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+      expect(
+        host.rules.answer({
+          threadId: String(egressThread),
+          principal: person,
+          grants: [
+            {
+              host: "mirror.example.com",
+              port: 443,
+              scope: { kind: "project", lifetime: "7d" },
+            },
+          ],
+        }),
+      ).toMatchObject({ kind: "answered" });
+      const proposing = await startLaunch(host);
+      expect(await ask(proposing, "cdn.example.com:443")).toContain("no-rule");
+      await proposing.finish();
+      host.taint(String(egressThread));
+      return host;
+    }
+
+    it("lists the thread's and Project's rule hosts preselected and its proposals unticked", async () => {
+      const host = await markedThreadWithHosts();
+      const lead = await markedCommandLead(host, { answers: [[{ decision: "deny" }]] });
+
+      await lead.bash("registry.example.com:443");
+
+      expect(lead.asked).toEqual([
+        expect.objectContaining({
+          toolName: "bash",
+          singleUse: true,
+          commandHosts: [
+            { host: "registry.example.com", port: 443, from: "thread-rule", preselected: true },
+            { host: "mirror.example.com", port: 443, from: "project-rule", preselected: true },
+            { host: "cdn.example.com", port: 443, from: "proposal", preselected: false },
+          ],
+        }),
+      ]);
+    });
+
+    it("reaches exactly the hosts the person confirmed for that command", async () => {
+      const host = await markedThreadWithHosts();
+      const lead = await markedCommandLead(host, {
+        answers: [
+          [
+            {
+              decision: "approve",
+              commandHosts: [
+                { host: "registry.example.com", port: 443 },
+                { host: "cdn.example.com", port: 443 },
+              ],
+            },
+          ],
+        ],
+      });
+
+      const reached = await lead.bash(
+        "registry.example.com:443",
+        "mirror.example.com:443",
+        "cdn.example.com:443",
+        "elsewhere.example.com:443",
+      );
+
+      expect(reached).toEqual({
+        "registry.example.com:443": "connected",
+        // A standing rule the person left unticked stays suspended.
+        "mirror.example.com:443": "octant-egress-refused: no-rule mirror.example.com:443",
+        "cdn.example.com:443": "connected",
+        "elsewhere.example.com:443": "octant-egress-refused: no-rule elsewhere.example.com:443",
+      });
+      expect(callGrants(host)).toEqual([
+        expect.objectContaining({
+          host: "registry.example.com",
+          approvalId: lead.asked[0]?.id,
+          principal: person,
+          threadTainted: true,
+        }),
+        expect.objectContaining({ host: "cdn.example.com", approvalId: lead.asked[0]?.id }),
+      ]);
+      // The proposal the person took is answered; what was refused is proposed, marked.
+      expect(
+        host.rules
+          .view(String(egressThread), "local-window")
+          ?.proposals.map((proposal) => [proposal.host, proposal.threadTainted]),
+      ).toEqual([
+        ["mirror.example.com", true],
+        ["elsewhere.example.com", true],
+      ]);
+    });
+
+    it("refuses a host the confirmation did not list, and decides nothing until the answer names only listed hosts", async () => {
+      const host = await markedThreadWithHosts();
+      const lead = await markedCommandLead(host, {
+        answers: [
+          [
+            { decision: "approve", commandHosts: [{ host: "collector.example.com", port: 443 }] },
+            { decision: "approve", commandHosts: [{ host: "registry.example.com", port: 8443 }] },
+            { decision: "approve", commandHosts: [{ host: "*.example.com", port: 443 }] },
+            {
+              decision: "approve-always",
+              commandHosts: [{ host: "registry.example.com", port: 443 }],
+            },
+            { decision: "deny", commandHosts: [{ host: "registry.example.com", port: 443 }] },
+            // Canonicalized before it is compared, as a rule host is.
+            { decision: "approve", commandHosts: [{ host: "Registry.Example.COM.", port: 443 }] },
+          ],
+        ],
+      });
+
+      const reached = await lead.bash("registry.example.com:443", "collector.example.com:443");
+
+      expect(lead.decisions).toEqual([
+        "host-not-offered",
+        "host-not-offered",
+        "host-not-offered",
+        "host-not-offered",
+        "host-not-offered",
+        "decided",
+      ]);
+      expect(reached).toEqual({
+        "registry.example.com:443": "connected",
+        "collector.example.com:443": "octant-egress-refused: no-rule collector.example.com:443",
+      });
+      expect(callGrants(host).map((grant) => grant.host)).toEqual(["registry.example.com"]);
+    });
+
+    it("gives the next command nothing, and keeps no call rule once its command ends", async () => {
+      const base = taintJournal();
+      const host = egressHost({ base });
+      expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+      host.taint(String(egressThread));
+      const lead = await markedCommandLead(host, {
+        answers: [
+          [{ decision: "approve", commandHosts: [{ host: "registry.example.com", port: 443 }] }],
+          [{ decision: "approve" }],
+          // A surface that shows no hosts approves with no list.
+          [{ decision: "approve", principal: device }],
+        ],
+      });
+
+      expect(await lead.bash("registry.example.com:443")).toEqual({
+        "registry.example.com:443": "connected",
+      });
+      const callRules = () =>
+        host.rules
+          .view(String(egressThread), "local-window")
+          ?.threadRules.filter((rule) => rule.scope === "call");
+      expect(callRules()).toEqual([]);
+      expect(await lead.bash("registry.example.com:443")).toEqual({
+        "registry.example.com:443": "octant-egress-refused: no-rule registry.example.com:443",
+      });
+      expect(await lead.bash("registry.example.com:443")).toEqual({
+        "registry.example.com:443": "octant-egress-refused: no-rule registry.example.com:443",
+      });
+      expect(callGrants(host)).toHaveLength(1);
+      // Neither another launch nor a restarted host finds the rule.
+      const later = await startLaunch(host);
+      expect(await ask(later, "registry.example.com:443")).toContain("no-rule");
+      await later.finish();
+      expect(
+        egressHost({ base })
+          .rules.view(String(egressThread), "local-window")
+          ?.threadRules.filter((rule) => rule.scope === "call"),
+      ).toEqual([]);
+    });
+
+    it("lets a confirmation reach only its own command, even one that never ran proxied", async () => {
+      const host = egressHost();
+      expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+      host.taint(String(egressThread));
+      const lead = await markedCommandLead(host, {
+        answers: [
+          [{ decision: "approve", commandHosts: [{ host: "registry.example.com", port: 443 }] }],
+          [{ decision: "approve" }],
+        ],
+        // The person switches the thread to Full access while answering.
+        postureAfterAnswer: "full-access",
+      });
+
+      await lead.bash("registry.example.com:443");
+      expect(lead.openShell.commands).toEqual(["registry.example.com:443"]);
+      lead.setPosture("approval-gated");
+      expect(await lead.bash("registry.example.com:443")).toEqual({
+        "registry.example.com:443": "octant-egress-refused: no-rule registry.example.com:443",
+      });
+      expect(callGrants(host)).toEqual([]);
+    });
+
+    it("refuses a grant past the thread's rule limit before the command runs", async () => {
+      const host = egressHost();
+      for (let index = 0; index < 64; index += 1) {
+        expect(grantThreadRule(host, `host${String(index)}.example.com`)).toMatchObject({
+          kind: "answered",
+        });
+      }
+      host.taint(String(egressThread));
+      const lead = await markedCommandLead(host, {
+        answers: [
+          [{ decision: "approve", commandHosts: [{ host: "host1.example.com", port: 443 }] }],
+        ],
+      });
+
+      expect(await lead.bash("host1.example.com:443")).toMatchObject({
+        error: "shell-unavailable",
+      });
+      expect(callGrants(host)).toEqual([]);
+    });
+
+    it("takes who confirmed from the request, and refuses an unlisted host, over the approvals route", async () => {
+      const host = await markedThreadWithHosts();
+      const windowId = decodeWindowId("00000000-0000-4000-8000-000000000611");
+      let settled: NativeHarnessApprovalStore | undefined;
+      const handler = createNativeHarnessSessionRouteHandler({
+        windowAuthorityStore: new WindowAuthorityStore(),
+        store: {
+          read: () => undefined,
+          pause: () => false,
+          resume: () => false,
+          turnInFlight: () => false,
+        } as never,
+        followUps: {} as never,
+        authorizeThread: () => true,
+        decideApproval: ({ threadId, approvalId, decision, answer }) =>
+          settled?.decide(threadId, approvalId, decision, answer) ?? "approval-not-found",
+      });
+      const statuses: unknown[] = [];
+      const lead = await markedCommandLead(host, {
+        answers: [
+          [
+            {
+              decision: "approve",
+              commandHosts: [{ host: "collector.example.com", port: 443 }],
+            },
+            { decision: "approve", commandHosts: [{ host: "registry.example.com", port: 443 }] },
+          ],
+        ],
+        decide: async (approval, answer) => {
+          const request = new Request(
+            `http://127.0.0.1/api/native-harness/sessions/${String(egressThread)}/approvals`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                approvalId: approval.id,
+                decision: answer.decision,
+                commandHosts: answer.commandHosts,
+                // A body cannot name who answered.
+              }),
+            },
+          );
+          bindPrincipalRouteContext(request, {
+            principal: { kind: "remote-device", deviceId: device.deviceId } as never,
+            scopeId: windowId,
+          });
+          const response = await handler(request);
+          const body = (await response?.json()) as { kind?: string; reason?: string };
+          statuses.push(body.reason ?? response?.status);
+          // The store read here is a stub, so a decided approval reads as not found.
+          return body.reason === "host-not-offered" ? "host-not-offered" : "decided";
+        },
+      });
+      settled = lead.approvals;
+
+      expect(await lead.bash("registry.example.com:443")).toEqual({
+        "registry.example.com:443": "connected",
+      });
+      expect(statuses[0]).toBe("host-not-offered");
+      expect(callGrants(host)).toEqual([
+        expect.objectContaining({
+          host: "registry.example.com",
+          principal: { kind: "remote-device", deviceId: device.deviceId },
+        }),
+      ]);
+    });
+
+    it("offers no proposal on a thread whose revocations cannot be read, as nothing can be granted there", async () => {
+      const host = egressHost();
+      const granted = grantThreadRule(host, "registry.example.com");
+      const proposing = await startLaunch(host);
+      expect(await ask(proposing, "cdn.example.com:443")).toContain("no-rule");
+      await proposing.finish();
+      const ruleId = granted.kind === "answered" ? String(granted.ruleIds[0]) : "";
+      host.rules.revoke({ threadId: String(egressThread), principal: person, ruleId });
+      host.taint(String(egressThread));
+      const restarted = egressHost({
+        base: {
+          connection: host.connection,
+          journal: host.journal,
+          store: host.store,
+          clears: host.clears,
+        },
+        journal: (journal) => ({
+          append: (input, options) => journal.append(input, options),
+          transaction: (body) => journal.transaction(body),
+          aggregateVersions: (aggregateType) => journal.aggregateVersions(aggregateType),
+          replayAggregateType: (cursor) =>
+            journal
+              .replayAggregateType(cursor)
+              .map((envelope) =>
+                envelope.eventName === TOOL_EGRESS_EVENT_NAMES.threadRuleRevoked
+                  ? { ...envelope, payload: { unreadable: true } }
+                  : envelope,
+              ),
+        }),
+      });
+
+      expect(host.rules.commandConfirmationHosts(String(egressThread))).toEqual([
+        { host: "cdn.example.com", port: 443, from: "proposal", preselected: false },
+      ]);
+      expect(restarted.rules.commandConfirmationHosts(String(egressThread))).toEqual([]);
+    });
+
+    it("leaves an unmarked thread's command as it was: no hosts listed, standing rules apply", async () => {
+      const host = egressHost();
+      expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+      const lead = await markedCommandLead(host, { answers: [[{ decision: "approve" }]] });
+
+      expect(await lead.bash("registry.example.com:443")).toEqual({
+        "registry.example.com:443": "connected",
+      });
+      expect(lead.asked).toEqual([
+        expect.not.objectContaining({ commandHosts: expect.anything() }),
+      ]);
+      expect(lead.asked[0]?.singleUse).toBeUndefined();
+      expect(callGrants(host)).toEqual([]);
+    });
+  });
+
   describe.runIf(
     process.platform === "darwin" || (process.platform === "linux" && existsSync("/usr/bin/bwrap")),
   )("commands on proxied network", () => {
@@ -3984,6 +4485,11 @@ describe("native harness tool egress grants and learn mode", () => {
         readonly socketParent?: string;
         /** Composes without the proxied shell, as a host with the switch off. */
         readonly switchOff?: boolean;
+        /**
+         * A person who answers each command's approval with these hosts, in
+         * order, on a thread whose taint the host reads.
+         */
+        readonly confirms?: Array<ReadonlyArray<{ readonly host: string; readonly port: number }>>;
       } = {},
     ) {
       const origin = await listen(() => ({ status: 200, body: "package-body" }));
@@ -4010,9 +4516,10 @@ describe("native harness tool egress grants and learn mode", () => {
               threadId: decodeAggregate(scope.threadId),
               projectId: decodeAggregate(scope.projectId),
             },
-            startLaunch: (launch) =>
+            startLaunch: (launch, confirmed) =>
               host.rules.startLaunch({
                 launch,
+                confirmed,
                 endpoint:
                   process.platform === "darwin" && options.socketParent === undefined
                     ? { kind: "loopback" }
@@ -4024,6 +4531,30 @@ describe("native harness tool egress grants and learn mode", () => {
           },
         });
       const posture = options.posture ?? "approval-gated";
+      const confirms = options.confirms;
+      const asked: NativeHarnessApproval[] = [];
+      const approvals: NativeHarnessApprovalStore | undefined =
+        confirms === undefined
+          ? undefined
+          : new NativeHarnessApprovalStore({
+              sessions: {
+                ensure: () => ({}) as never,
+                askApproval: () => undefined,
+                settleApproval: () => "approval-not-found",
+              },
+              uuid: randomUUID,
+              clock: () => now,
+              onAsked: ({ approval }) => {
+                asked.push(approval);
+                const commandHosts = confirms.shift() ?? [];
+                setImmediate(() =>
+                  approvals?.decide(String(egressThread), String(approval.id), "approve", {
+                    principal: person,
+                    commandHosts,
+                  }),
+                );
+              },
+            });
       const composition = createNativeHarnessComposition({
         isChildAuthorityCurrent: () => true,
         authority: {
@@ -4035,13 +4566,19 @@ describe("native harness tool egress grants and learn mode", () => {
               host: { computerUseEnabled: false },
               executionPolicy: posture,
               approvalSatisfied: true,
-              externalContentIngested: false,
+              externalContentIngested: confirms !== undefined && host.tainted(String(egressThread)),
             }),
           }),
         },
         isHarnessProvider: () => true,
         shell: createNativeHarnessShell({ process: processPort, scriptDirectory: scripts }),
         ...(options.switchOff === true ? {} : { proxiedShell }),
+        ...(approvals === undefined
+          ? {}
+          : {
+              approvals,
+              commandHosts: (threadId: string) => host.rules.commandConfirmationHosts(threadId),
+            }),
         readCodeExecutionPolicy: () => posture,
         hostId: authority.hostId,
         readThreadTaint: () => false,
@@ -4072,7 +4609,7 @@ describe("native harness tool egress grants and learn mode", () => {
           readonly error?: string;
         };
       };
-      return { bash, origin, network, checkoutRoot };
+      return { bash, origin, network, checkoutRoot, asked };
     }
 
     it.each(["approval-gated", "auto-accept-edits"] as const)(
@@ -4216,6 +4753,30 @@ describe("native harness tool egress grants and learn mode", () => {
       expect(JSON.stringify(run)).not.toContain("package-body");
       // Its byte count is unknown, so the thread is marked as recovery would.
       expect(host.tainted(String(egressThread))).toBe(true);
+    });
+
+    it("lets a marked thread's confirmed command reach the hosts the person ticked, and the next command none", async () => {
+      const host = egressHost();
+      grantThreadRuleOn(host, "registry.example.com", 8080);
+      grantThreadRuleOn(host, "other.example.com", 8080);
+      host.taint(String(egressThread));
+      const code = await proxiedCode(host, {
+        confirms: [[{ host: "registry.example.com", port: 8080 }], []],
+      });
+      const other = "curl -sS --max-time 10 -w ' %{http_code}' http://other.example.com:8080/pkg";
+
+      const confirmed = await code.bash(`${fetchPackage}; echo; ${other}`);
+      const next = await code.bash(fetchPackage);
+
+      expect(code.asked[0]?.commandHosts).toEqual([
+        { host: "registry.example.com", port: 8080, from: "thread-rule", preselected: true },
+        { host: "other.example.com", port: 8080, from: "thread-rule", preselected: true },
+      ]);
+      expect(confirmed).toMatchObject({ status: "ran" });
+      expect(confirmed.output?.split("\n")[0]).toBe("package-body 200");
+      expect(confirmed.output).toContain("octant-egress-refused: no-rule other.example.com:8080");
+      expect(next.output).toContain("octant-egress-refused: no-rule registry.example.com:8080");
+      expect(code.origin.seen).toHaveLength(1);
     });
 
     it("leaves a command on open network with the switch off, as before the rules", async () => {
