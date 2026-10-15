@@ -11,7 +11,10 @@ import { AGENT_PLUGINS_MCP_SCHEMA } from "@octant/plugin-host/agent-plugins";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  readApprovalOutsideContent,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import {
   EXTENSION_AGGREGATE_TYPE,
@@ -196,6 +199,7 @@ function openHost(
       isPairedDeviceScope,
       threadTainted: (threadId) =>
         readThreadExternalContentTaint(connection, threadId).externalContentIngested,
+      outsideContent: (threadId) => readApprovalOutsideContent(connection, threadId),
     }),
     recordExternalContentIngestion: (input) => taint.record(input),
   });
@@ -396,6 +400,8 @@ function lifecycle(host: ReturnType<typeof openHost>) {
 /** Approves `search` in Project A from thread one and remembers the answer. */
 async function rememberSearch(host: ReturnType<typeof openHost>) {
   const first = host.call({ threadId: threadOne, projectId: projectA });
+  // A clean thread's prompt names no outside content.
+  expect((await host.prompt()).outsideContent).toBeUndefined();
   expect(await host.prompt()).toMatchObject({
     extensionId,
     packageId,
@@ -507,6 +513,17 @@ describe("an MCP tool a person always allows in a Project", () => {
     const tainted = host.call({ threadId: threadOne, projectId: projectA });
     expect(await host.prompt()).toMatchObject({ mcpToolName: "search", rememberable: false });
     const pending = await host.prompt();
+    // The prompt names the source that marked the thread and when it was read.
+    expect(pending.outsideContent).toEqual({
+      sources: [
+        expect.objectContaining({
+          sourceLabel: "mcp-tool",
+          ingestionCount: 1,
+          lastIngestedAt: now,
+        }),
+      ],
+      sourceCount: 1,
+    });
     expect(
       host.approvals.decide(atWindow, {
         approvalId: pending.approvalId,

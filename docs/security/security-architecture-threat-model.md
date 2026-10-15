@@ -307,8 +307,11 @@ guidance instead.
   (privilege expansion) is the only entry in one of the four classes; the flag also covers
   `computer-use`, `web-fetch`, and the harness `bash`, `edit`, `write`, and `goal-check`. A Code Git action a person takes from a window (discard, restore, push, create a
   pull request, bring a run home) is that person's own per-action act, and no agent tool issues
-  one. Residual gaps: the prompt does not yet name the ingested sources or say that the mark is
-  why it asks, and a provider runtime's own tools sit outside this gate (below). In the native
+  one. The prompt says the mark is why it asks and names the sources that marked the thread,
+  with how often and when each was last read: the harness, MCP tool, and Computer use approvals
+  carry `outsideContent`, which the host reads from the ingestion projection when it asks, bounded
+  to eight labels plus a total and holding no content or content reference. Residual gap: a
+  provider runtime's own tools sit outside this gate (below). In the native
   harness only results that bring in outside content mark the thread
   (`web-fetch`, `web-search`, a child's collected or delivered reply); local reads, searches, edits, and
   commands do not. On a tainted thread a harness "always" approval stops covering its class, and
