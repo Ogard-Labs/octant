@@ -302,9 +302,13 @@ export function createLiveLocalListenerHoldingProbe(
  * families: a process that might be answering is treated as answering.
  */
 function answersOn(bindAddress: string, host: "127.0.0.1" | "::1"): boolean {
-  const address = bindAddress.replace(/^\[|\]$/g, "");
+  const address = bindAddress.replace(/^\[|\]$/g, "").toLowerCase();
   if (address === host || address === "*" || address === "::") return true;
-  return address === "0.0.0.0" && host === "127.0.0.1";
+  // An IPv6 socket bound to an IPv4-mapped address answers that IPv4 address.
+  return (
+    (address === "0.0.0.0" || address === "::ffff:127.0.0.1" || address === "::ffff:0.0.0.0") &&
+    host === "127.0.0.1"
+  );
 }
 
 /**

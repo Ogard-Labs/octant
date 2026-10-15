@@ -654,6 +654,7 @@ function assembleServices(
         : handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
     authenticatedProduct: async (request, route, facts) =>
       handleAuthenticatedRoute(request, route, facts, auth),
+    hasServerProxySession: (request) => auth.hasServerProxySession(request),
     serverProxy: async (request, route, facts) =>
       facts === undefined
         ? protocolReject(403)

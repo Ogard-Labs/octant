@@ -1389,13 +1389,91 @@ describe("relay from a paired device to its granted dev server", () => {
     expect(server.requests).toHaveLength(0);
   });
 
+  it("reads at most 4 KiB of a proxy request without a live session, and few at once per source", async () => {
+    const harness = await setup();
+    const server = await devServer((_request, response) => response.end("stored"));
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const path = `/api/server-proxy/${grantId}/upload`;
+    const unauthenticated = (
+      body: ReadableStream<Uint8Array>,
+      headers: Record<string, string> = {},
+    ) =>
+      harness.fetch(
+        new Request(`${ORIGIN}${path}`, {
+          method: "POST",
+          headers: new Headers({
+            host: HOST_HEADER,
+            origin: ORIGIN,
+            "sec-fetch-site": "same-origin",
+            "content-type": "application/octet-stream",
+            cookie: `${PROXY_COOKIE}=${randomUUID()}`,
+            ...headers,
+          }),
+          body,
+          duplex: "half",
+        } as RequestInit),
+        facts("unauthenticated-source"),
+      );
+    // An endless upload with no declared length: the listener stops reading
+    // just past 4 KiB and answers.
+    let pulled = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1_024;
+        controller.enqueue(new Uint8Array(1_024));
+      },
+    });
+    expect((await unauthenticated(endless)).status).toBe(413);
+    expect(pulled).toBeLessThanOrEqual(8 * 1_024);
+    // A declared 8 MiB is refused before a byte is read.
+    let declaredPulled = 0;
+    const declared = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        declaredPulled += 1_024;
+        controller.enqueue(new Uint8Array(1_024));
+      },
+    });
+    const refused = await unauthenticated(declared, {
+      "content-length": String(8 * 1_024 * 1_024),
+    });
+    expect(refused.status).toBe(413);
+    expect(declaredPulled).toBeLessThanOrEqual(1_024);
+
+    // Uploads that stall below the cap hold only four places per source.
+    const stalled = Array.from({ length: 4 }, () => {
+      let stop = () => {};
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(16));
+          stop = () => controller.close();
+        },
+      });
+      return { answer: unauthenticated(body), stop: () => stop() };
+    });
+    await vi.waitFor(async () => {
+      const fifth = await unauthenticated(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.close();
+          },
+        }),
+      );
+      expect(fifth.status).toBe(429);
+    });
+    for (const upload of stalled) upload.stop();
+    for (const upload of stalled) expect((await upload.answer).status).toBe(401);
+    expect(server.requests).toHaveLength(0);
+  });
+
   it("relays an upload up to 8 MiB and refuses a larger one with 413", async () => {
     const harness = await setup();
     const server = await devServer((_request, response) => response.end("stored"));
     harness.targets.set(listenerKey(1), listedAt(1, server));
     const proxy = await session(harness, await pair(harness), "server-proxy");
     const grantId = await grantTo(harness, proxy, 1);
-    const large = "x".repeat(2 * 1_024 * 1_024);
+    const large = "x".repeat(8 * 1_024 * 1_024);
     const accepted = await call(
       harness,
       relayRequest(proxy, grantId, {

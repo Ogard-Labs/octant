@@ -570,6 +570,9 @@ describe("re-observing the port a grant forwards to", () => {
     // Holding only the other family is no longer holding this address.
     expect(await probe(async () => listing(4213, "node", "[::1]")).check(holder)).toBe("stopped");
     expect(await probe(async () => listing(4213, "node", "*")).check(holder)).toBe("held");
+    // An IPv4-mapped bind answers the IPv4 loopback, so another process there counts.
+    const mapped = async () => `${listing(4213)}\n${listing(5000, "node", "[::ffff:127.0.0.1]")}`;
+    expect(await probe(mapped).check(holder)).toBe("changed-hands");
   });
 
   it("answers unavailable when the host could not look, never stopped", async () => {

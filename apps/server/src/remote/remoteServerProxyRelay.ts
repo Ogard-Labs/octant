@@ -312,8 +312,10 @@ function connect(
   });
 }
 
-function nodeHeaders(headers: ReadonlyArray<RemoteServerRelayHeader>): OutgoingHttpHeaders {
-  const result: Record<string, string | string[]> = {};
+export function nodeHeaders(headers: ReadonlyArray<RemoteServerRelayHeader>): OutgoingHttpHeaders {
+  // No prototype: a header named `constructor` or `__proto__` is an ordinary
+  // key here, never an inherited value or a prototype assignment.
+  const result: Record<string, string | string[]> = Object.create(null);
   for (const [name, value] of headers) {
     const existing = result[name];
     if (existing === undefined) result[name] = value;

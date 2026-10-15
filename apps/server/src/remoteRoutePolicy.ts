@@ -19,6 +19,15 @@ const SERVER_PROXY_PREFIX = "/api/server-proxy/";
  * it, so it is bounded rather than streamed.
  */
 export const REMOTE_SERVER_PROXY_RELAY_MAX_BODY_BYTES = 8 * 1_024 * 1_024;
+/**
+ * A proxy request whose cookie names no live proxy session can only be
+ * refused, so the listener reads no more of its body than the grants route
+ * takes, and holds only a few such requests from one source at once. Without
+ * this, unauthenticated uploads could hold the proxy surface's every slot with
+ * 8 MiB each before any proof was checked.
+ */
+const UNAUTHENTICATED_SERVER_PROXY_BODY_BYTES = 4_096;
+const UNAUTHENTICATED_SERVER_PROXY_PER_SOURCE = 4;
 
 const REMOTE_REQUEST_HEADERS = [
   "accept",
@@ -493,6 +502,11 @@ export interface RemoteRouteHandlerOptions {
     route: RemoteRouteDefinition,
     facts?: RemoteRouteFacts,
   ) => RemoteRouteResponse | Promise<RemoteRouteResponse>;
+  /**
+   * Whether a proxy request's cookie names a live proxy session whose device
+   * still stands, asked before its body is read. Absent, none does.
+   */
+  readonly hasServerProxySession?: (request: Request) => boolean;
 }
 
 /**
@@ -570,19 +584,59 @@ export function createRemoteRoutePolicy(options: RemoteRoutePolicyOptions): Remo
 export function createRemoteRouteHandler(
   options: RemoteRouteHandlerOptions,
 ): (request: Request, facts?: RemoteRouteFacts) => Promise<Response> {
+  const unauthenticatedProxyBySource = new Map<string, number>();
   return async (request, facts) => {
     const decision = options.policy.inspect(request);
     if (decision.kind === "reject") return decision.response;
     if (decision.kind === "preflight")
       return new Response(null, { status: 204, headers: decision.headers });
 
+    let maxBodyBytes = decision.maxBodyBytes;
+    let releaseUnauthenticated: (() => void) | undefined;
+    if (decision.surface === "server-proxy" && options.hasServerProxySession?.(request) !== true) {
+      maxBodyBytes = Math.min(maxBodyBytes, UNAUTHENTICATED_SERVER_PROXY_BODY_BYTES);
+      if (declaredBodyBytes(request) > maxBodyBytes) {
+        await request.body?.cancel().catch(() => undefined);
+        return rejectionResponse(413, decision.headers);
+      }
+      const source = facts?.sourceKey ?? "";
+      const held = unauthenticatedProxyBySource.get(source) ?? 0;
+      if (held >= UNAUTHENTICATED_SERVER_PROXY_PER_SOURCE) {
+        await request.body?.cancel().catch(() => undefined);
+        return rejectionResponse(429, decision.headers);
+      }
+      unauthenticatedProxyBySource.set(source, held + 1);
+      let released = false;
+      releaseUnauthenticated = () => {
+        if (released) return;
+        released = true;
+        const next = (unauthenticatedProxyBySource.get(source) ?? 1) - 1;
+        if (next <= 0) unauthenticatedProxyBySource.delete(source);
+        else unauthenticatedProxyBySource.set(source, next);
+      };
+    }
+    try {
+      return await routeAdmitted(request, facts, decision, maxBodyBytes);
+    } finally {
+      // An unauthenticated request's answer is the host's own small refusal,
+      // so its source slot ends with the handler rather than a body stream.
+      releaseUnauthenticated?.();
+    }
+  };
+
+  async function routeAdmitted(
+    request: Request,
+    facts: RemoteRouteFacts | undefined,
+    decision: Extract<RemoteRouteDecision, { readonly kind: "allow" }>,
+    maxBodyBytes: number,
+  ): Promise<Response> {
     const release = options.policy.acquire(decision.surface);
     if (release === undefined) {
       return rejectionResponse(429, decision.headers);
     }
     let prepared: PreparedRequestResult;
     try {
-      prepared = await prepareRequestBody(request, decision.maxBodyBytes);
+      prepared = await prepareRequestBody(request, maxBodyBytes);
     } catch {
       release();
       return rejectionResponse(400, decision.headers);
@@ -631,7 +685,7 @@ export function createRemoteRouteHandler(
       return withAdmissionRelease(response, release);
     }
     return limitResponse(response, decision.headers, decision.maxResponseBytes, release);
-  };
+  }
 }
 
 function inspectRequest(

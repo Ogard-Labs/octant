@@ -126,7 +126,7 @@ describe("headers relayed to a dev server", () => {
 });
 
 describe("headers relayed back from a dev server", () => {
-  it("drops hop-by-hop headers, the length, and anything posing as Octant's", () => {
+  it("drops hop-by-hop headers, the length, origin directives, and anything posing as Octant's", () => {
     const headers = relayResponseHeaders([
       ["Connection", "keep-alive, X-Hop"],
       ["x-hop", "1"],
@@ -135,6 +135,8 @@ describe("headers relayed back from a dev server", () => {
       ["content-length", "42"],
       ["proxy-authenticate", "Basic"],
       ["x-octant-server-proxy", "relayed"],
+      ["clear-site-data", '"*"'],
+      ["Alt-Svc", 'h3=":443"'],
       ["content-type", "text/html"],
       ["location", "http://evil.example/"],
     ]);

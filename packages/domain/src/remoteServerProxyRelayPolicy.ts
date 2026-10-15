@@ -104,11 +104,19 @@ export function relayRequestHeaders(
 }
 
 /**
+ * Response headers that act on the origin that receives them rather than on
+ * the page: `Clear-Site-Data` would clear storage, and `Alt-Svc` would point
+ * later connections elsewhere, for whichever origin first reads the response.
+ */
+const ORIGIN_DIRECTIVES: ReadonlySet<string> = new Set(["clear-site-data", "alt-svc"]);
+
+/**
  * The dev server's response headers as the host relays them: without hop-by-hop
  * headers, without `Content-Length` (the body is streamed and may be cut short
- * by a revocation), without any `x-octant-` header, and without a `Set-Cookie`
- * for a cookie named for Octant. Everything else passes unchanged; the
- * forwarder on the device rewrites what the page's own address needs.
+ * by a revocation), without any `x-octant-` header, without `Clear-Site-Data`
+ * or `Alt-Svc`, and without a `Set-Cookie` for a cookie named for Octant.
+ * Everything else passes unchanged; the forwarder on the device rewrites what
+ * the page's own address needs.
  */
 export function relayResponseHeaders(
   headers: ReadonlyArray<RemoteServerRelayHeader>,
@@ -119,6 +127,7 @@ export function relayResponseHeaders(
     const name = rawName.toLowerCase();
     if (
       HOP_BY_HOP.has(name) ||
+      ORIGIN_DIRECTIVES.has(name) ||
       dropped.has(name) ||
       name === "content-length" ||
       name.startsWith("x-octant-")

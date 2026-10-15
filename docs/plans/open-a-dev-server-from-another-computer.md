@@ -448,6 +448,17 @@ dark; slice 5 makes the feature reachable.
    - A server's port and scheme come from the grant's endpoint only, which is
      a loopback IP literal; a `localhost` endpoint is refused rather than
      looked up.
+   - The forwarder must not read relayed responses through a session or cookie
+     jar that holds the listener's origin. A relayed response arrives from the
+     listener's address, so a jar would store the dev server's `Set-Cookie`
+     under that origin and send it back beside the proxy session cookie. The
+     forwarder hands the response to the page under the page's own name. The
+     host already drops `Clear-Site-Data` and `Alt-Svc`, which act on whichever
+     origin reads a response.
+   - The relay does not confirm which process accepted each connection, so a
+     port that changes hands between the check and the connection receives one
+     request before the next check closes the grant. The architecture records
+     why.
 
 4. **WebSocket upgrade on the proxy route only.**
    Tests: every other route still refuses an upgrade; an upgrade without a

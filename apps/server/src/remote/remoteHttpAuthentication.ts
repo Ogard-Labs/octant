@@ -280,6 +280,11 @@ export interface RemoteHttpAuthentication {
     transport: RequestTransportFacts,
     route?: RemoteRouteDefinition,
   ) => Promise<Response>;
+  /**
+   * Whether a request's proxy cookie names a live proxy session whose device
+   * still stands. The listener asks before reading a proxy request's body.
+   */
+  readonly hasServerProxySession: (request: Request) => boolean;
   /** A route only a proxy session reaches; a product session cookie is never read here. */
   readonly handleServerProxy: (
     request: Request,
@@ -674,7 +679,21 @@ export function createRemoteHttpAuthentication(
     }
   };
 
-  return { handlePreAuthRoute, handleAuthenticated, handleServerProxy };
+  const hasServerProxySession = (request: Request): boolean => {
+    const sessions = options.serverProxy?.sessions;
+    if (sessions === undefined) return false;
+    try {
+      return (
+        sessions.describe(
+          readSessionCookie(request.headers, REMOTE_SERVER_PROXY_SESSION_COOKIE),
+        ) !== undefined
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  return { handlePreAuthRoute, handleAuthenticated, handleServerProxy, hasServerProxySession };
 }
 
 /**
