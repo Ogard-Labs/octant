@@ -302,6 +302,37 @@ describe("RemoteServerGrantService", () => {
     ).toBe(reason);
   });
 
+  it("decides on the thread as it stands after the host looked", async () => {
+    const harness = setup();
+    harness.targets.set(listenerId(1), listed(1));
+    const archiving = new RemoteServerGrantService({
+      observeTarget: async () => {
+        harness.threads.set(String(threadId), {
+          lifecycle: "archived",
+          executionPolicy: "approval-gated",
+        });
+        return listed(1);
+      },
+      canOpenThread: async () => true,
+      readThread: (id) => harness.threads.get(String(id)),
+      readOpenGrants: () => [],
+      journal: harness.journal,
+      hostActor: decodeEventActor({ kind: "system", actorId: hostActorId }),
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    expect(
+      refusalOf(
+        await archiving.open({
+          principal: device(),
+          scopeId: scopeA,
+          request: fromLocalServers(1),
+        }),
+      ).reason,
+    ).toBe("thread-unreadable");
+    expect(archiving.openCount()).toBe(0);
+  });
+
   it("answers unavailable, not a refusal, when the host cannot look", async () => {
     const harness = setup();
     harness.targets.set(listenerId(1), { status: "unavailable" });

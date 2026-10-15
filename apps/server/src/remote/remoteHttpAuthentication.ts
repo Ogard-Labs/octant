@@ -386,7 +386,9 @@ export function createRemoteHttpAuthentication(
         "set-cookie": `${REMOTE_SERVER_PROXY_SESSION_COOKIE}=${issued.sessionId}; Secure; HttpOnly; SameSite=Strict; Path=${REMOTE_SERVER_PROXY_PATH}`,
       });
     } catch (error) {
-      return mapFailure(error);
+      // A refused proxy session clears the proxy cookie only; the product
+      // session it may sit beside is untouched.
+      return mapFailure(error, "server-proxy");
     } finally {
       release?.();
     }

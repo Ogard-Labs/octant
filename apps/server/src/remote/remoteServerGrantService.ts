@@ -186,11 +186,12 @@ export class RemoteServerGrantService {
       });
     }
 
+    // Read the thread again after the observation: an archive, a lost read,
+    // or a posture change while the host looked must decide this grant, not
+    // the thread as it stood before.
     const threadId = target.threadId;
     const thread =
-      threadId === undefined
-        ? undefined
-        : (named ?? (await this.#threadFact(input.scopeId, threadId)));
+      threadId === undefined ? undefined : await this.#threadFact(input.scopeId, threadId);
     const decision = decideRemoteServerGrant({
       actor: "remote-client",
       ...(thread === undefined ? {} : { thread }),

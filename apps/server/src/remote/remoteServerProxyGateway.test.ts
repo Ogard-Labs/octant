@@ -347,7 +347,11 @@ async function signIn(
   harness: Harness,
   paired: Paired,
   kind: "product" | "server-proxy",
-  options: { readonly signAs?: "product" | "server-proxy"; readonly path?: string } = {},
+  options: {
+    readonly signAs?: "product" | "server-proxy";
+    readonly path?: string;
+    readonly replay?: boolean;
+  } = {},
 ): Promise<{ readonly answer: Answer; readonly session?: Session }> {
   const { sourceKey } = paired;
   const challengeAnswer = await call(harness, {
@@ -402,15 +406,18 @@ async function signIn(
       ? buildRemoteChallengeProofPayload(transcriptInput)
       : buildRemoteServerProxySessionProofPayload(transcriptInput),
   );
-  const answer = await call(harness, {
-    method: "POST",
-    path:
-      options.path ??
-      (kind === "product" ? "/api/remote/auth/session" : "/api/remote/auth/server-proxy-session"),
-    sourceKey,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...challenge, signature }),
-  });
+  const send = () =>
+    call(harness, {
+      method: "POST",
+      path:
+        options.path ??
+        (kind === "product" ? "/api/remote/auth/session" : "/api/remote/auth/server-proxy-session"),
+      sourceKey,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...challenge, signature }),
+    });
+  const first = await send();
+  const answer = options.replay === true ? await send() : first;
   if (answer.status !== 200) return { answer };
   const cookieName = kind === "product" ? PRODUCT_COOKIE : PROXY_COOKIE;
   const setCookie = answer.headers.get("set-cookie") ?? "";
@@ -560,6 +567,16 @@ describe("proxy session and grant route on the private listener", () => {
     expect(asProxy.answer.status).toBe(401);
     const asProduct = await signIn(harness, paired, "product", { signAs: "server-proxy" });
     expect(asProduct.answer.status).toBe(401);
+  });
+
+  it("clears only the proxy cookie when a proxy session is refused", async () => {
+    const harness = await setup();
+    const paired = await pair(harness);
+    const { answer } = await signIn(harness, paired, "server-proxy", { replay: true });
+    expect(answer.status).toBe(401);
+    const cleared = answer.headers.get("set-cookie") ?? "";
+    expect(cleared).toContain(`${PROXY_COOKIE}=;`);
+    expect(cleared).not.toContain(PRODUCT_COOKIE);
   });
 
   it("never lets a product session reach the proxy route", async () => {

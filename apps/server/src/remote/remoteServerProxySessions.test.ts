@@ -14,7 +14,9 @@ const deviceId = "22222222-2222-4222-8222-222222222222";
 const origin = "https://192.168.1.20:9443";
 const issuedAtMs = Date.parse("2026-10-15T09:00:00.000Z");
 
-function harness(options: { readonly noncesPerSession?: number } = {}) {
+function harness(
+  options: { readonly noncesPerSession?: number; readonly sessionsPerHost?: number } = {},
+) {
   let now = issuedAtMs;
   let deviceCurrent = true;
   const ended: RemoteServerProxySessionEnded[] = [];
@@ -37,9 +39,14 @@ function harness(options: { readonly noncesPerSession?: number } = {}) {
     onSessionEnded: (session) => ended.push(session),
     now: () => now,
     uuid: randomUUID,
-    ...(options.noncesPerSession === undefined
-      ? {}
-      : { limits: { noncesPerSession: options.noncesPerSession } }),
+    limits: {
+      ...(options.noncesPerSession === undefined
+        ? {}
+        : { noncesPerSession: options.noncesPerSession }),
+      ...(options.sessionsPerHost === undefined
+        ? {}
+        : { sessionsPerHost: options.sessionsPerHost }),
+    },
   });
   const issue = (device = deviceId) =>
     sessions.issue({
@@ -149,6 +156,14 @@ describe("RemoteServerProxySessions", () => {
     expect(sessions.size()).toBe(4);
     expect(sessions.describe(oldest.sessionId)).toBeUndefined();
     expect(ended).toHaveLength(1);
+  });
+
+  it("lets a device at its cap replace its oldest session while the host is full", () => {
+    const { issue, sessions } = harness({ sessionsPerHost: 4 });
+    for (let count = 0; count < 4; count += 1) issue();
+    expect(issue().sessionId).toBeDefined();
+    expect(sessions.size()).toBe(4);
+    expect(refusal(() => issue("33333333-3333-4333-8333-333333333333"))).toBe("capacity");
   });
 
   it("ends every session a device holds, with the reason it is given", () => {

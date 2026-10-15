@@ -153,9 +153,8 @@ export class RemoteServerProxySessions {
   ): RemoteServerProxySessionIssued {
     this.sweepExpired();
     const facts = this.#proofs.issueServerProxySessionFacts(input);
-    if (this.#sessions.size >= this.#limits.sessionsPerHost) {
-      throw new RemoteRequestProofError("capacity");
-    }
+    // The device's own oldest session goes first, so a device at its cap that
+    // lost its cookie replaces a session even while the host is full.
     const own = [...this.#sessions.values()]
       .filter((session) => session.facts.deviceId === facts.deviceId)
       .sort((a, b) => a.issuedAtMs - b.issuedAtMs);
@@ -164,6 +163,9 @@ export class RemoteServerProxySessions {
       Math.max(0, own.length - this.#limits.sessionsPerDevice + 1),
     )) {
       this.#end(oldest, "proxy-session-ended");
+    }
+    if (this.#sessions.size >= this.#limits.sessionsPerHost) {
+      throw new RemoteRequestProofError("capacity");
     }
 
     const sessionId = this.#uuid();
