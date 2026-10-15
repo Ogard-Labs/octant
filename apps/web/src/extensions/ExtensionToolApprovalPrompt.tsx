@@ -145,6 +145,11 @@ export function ExtensionToolApprovalPrompt(props: {
         </>
       }
       className={props.className}
+      context={
+        pending.outsideContent === undefined ? undefined : (
+          <ApprovalOutsideContentNote outsideContent={pending.outsideContent} />
+        )
+      }
       detail={
         canRemember
           ? `${server} Always allow means Octant will run this tool in this Project without asking.`
@@ -154,9 +159,6 @@ export function ExtensionToolApprovalPrompt(props: {
       label="Extension tool approval"
       summary={`Allow ${pending.mcpToolName} from ${pluginName ?? UNNAMED_PLUGIN}?`}
     >
-      {pending.outsideContent === undefined ? null : (
-        <ApprovalOutsideContentNote outsideContent={pending.outsideContent} />
-      )}
       <code className="approval-row__code">
         {pending.inputJson === "" ? "(empty input)" : pending.inputJson}
       </code>

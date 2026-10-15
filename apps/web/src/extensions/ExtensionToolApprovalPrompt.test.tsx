@@ -78,6 +78,10 @@ describe("ExtensionToolApprovalPrompt", () => {
     expect(
       within(card).getByRole("list", { name: "Outside content that marked this thread" }),
     ).toHaveTextContent("Results from connected tools");
+    // The reason reads before the controls that answer it.
+    const note = within(card).getByText(/This thread took in outside content/);
+    const approve = within(card).getByRole("button", { name: "Approve once" });
+    expect(note.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("names no outside content on a clean thread's call", async () => {

@@ -1785,7 +1785,9 @@ flowchart LR
   from the ingestion projection when it asks; no client supplies them, and
   they hold labels and times only, never content or a content reference. The
   web prompt says the thread took in outside content, so the call is
-  approved once, and lists them in the words the Clear review uses. A
+  approved once, and lists them in the words the Clear review uses, ahead of
+  the answer controls; the mobile and CLI approval surfaces do not show them
+  yet. A
   Computer use approval the host gates as marked but whose sources it cannot
   read carries an empty list, so it still says so. A child run's approval
   names no sources: it is never remembered in the first place.
