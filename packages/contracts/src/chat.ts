@@ -33,6 +33,7 @@ import { GithubIssueContextRequest } from "./githubIssueContext";
 import { LinearIssueContextRequest } from "./linearIssueContext";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadTaskProgressList } from "./threadTasks";
+import { ThreadToolStepList } from "./threadToolSteps";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -272,6 +273,15 @@ export const ChatAttempt = Schema.Struct({
    * matrix states instead of this field implying.
    */
   tasks: Schema.optional(ThreadTaskProgressList),
+  /**
+   * The tool calls this attempt made, in arrival order, keyed by the
+   * provider's tool call id. Each is a name, a state, and a bounded progress
+   * or result message; no tool input or output is kept. Absent on an attempt
+   * that called no tool, and on one saved before the host recorded them.
+   */
+  toolSteps: Schema.optional(ThreadToolStepList),
+  /** Whether the attempt called more tools than `toolSteps` keeps. */
+  toolStepsTruncated: Schema.optional(Schema.Boolean),
   childObservations: Schema.optional(ProviderChildObservationState),
   /**
    * A question the provider asked mid-turn and is blocked on, journaled so the

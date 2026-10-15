@@ -31,6 +31,7 @@ export * from "./goalLoop";
 export * from "./shipTarget";
 export * from "./threadPlan";
 export * from "./threadTasks";
+export * from "./threadToolSteps";
 export * from "./threadWindow";
 export * from "./agentMessage";
 export * from "./siblingThreads";

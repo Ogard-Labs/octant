@@ -1,5 +1,10 @@
 import type { ProviderChildActivityEvent, TurnStopReason } from "@octant/contracts";
-import { observeTurnMetrics, startTurnMetrics } from "@octant/domain";
+import {
+  observeTurnMetrics,
+  recordThreadToolStep,
+  startTurnMetrics,
+  type ThreadToolSteps,
+} from "@octant/domain";
 import { boundedToolResultJson } from "../providers/toolResultJson";
 import {
   MAX_PROVIDER_CONTEXT_BLOCKS,
@@ -96,6 +101,8 @@ export interface WorkTurnRuntimePort {
     readonly onRetryCleared?: () => void;
     /** The provider's restated task list, whole, whenever it moves. */
     readonly onTasks?: (tasks: ThreadTaskProgressList) => void;
+    /** The turn's tool calls, whole, whenever one starts, moves, or ends. */
+    readonly onToolSteps?: (toolSteps: ThreadToolSteps) => void;
     readonly onChildActivity?: (event: ProviderChildActivityEvent) => void;
     readonly onRequestSettled?: (
       input: { readonly providerSessionId: ProviderSessionId; readonly providerCallbackId: string },
@@ -285,6 +292,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       let handledEvents = 0;
       let response = "";
       let tasks: ThreadTaskProgressList | undefined;
+      let toolSteps: ThreadToolSteps | undefined;
       let terminal: ProviderRuntimeEvent | undefined;
       const pendingRequestHolds = new Map<string, Deferred.Deferred<void>>();
       const pendingRequestCleanups = new Map<string, () => void>();
@@ -354,6 +362,11 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                   if (next === tasks) return;
                   tasks = next;
                   input.onTasks?.(next);
+                }
+                const nextToolSteps = recordThreadToolStep(toolSteps, event);
+                if (nextToolSteps !== toolSteps && nextToolSteps !== undefined) {
+                  toolSteps = nextToolSteps;
+                  input.onToolSteps?.(nextToolSteps);
                 }
                 if (event.kind === "tool-request") {
                   if (answeredToolRequestIds.has(event.requestId)) return;

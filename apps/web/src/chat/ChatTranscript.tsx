@@ -33,6 +33,8 @@ import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnAct
 import { ProviderQuestionCard } from "../transcript/ProviderQuestionCard";
 import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
+import { TurnActivityRows } from "../transcript/TurnActivityRows";
+import { toolStepsActivity } from "../transcript/turnActivity";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { AssistantMessageBody } from "../transcript/AssistantMessageBody";
@@ -774,6 +776,7 @@ const AttemptBlock = memo(function AttemptBlock(props: {
     responseContents.length === 0 || responseContents.some((content) => content === undefined)
       ? undefined
       : responseContents.map((content) => content!.body).join("");
+  const toolActivity = toolStepsActivity(props.attempt.toolSteps, props.attempt.toolStepsTruncated);
   const usageLimit = props.attempt.usageLimit;
   // A limited attempt parks as waiting with the provider's fact beside it;
   // retry is the manual recovery path the notice offers.
@@ -844,6 +847,18 @@ const AttemptBlock = memo(function AttemptBlock(props: {
                 ]
           }
         />
+        {toolActivity === undefined ? null : (
+          <TurnActivityRows
+            activity={toolActivity}
+            running={props.attempt.outcome === "queued" || props.attempt.outcome === "streaming"}
+            settled={
+              props.attempt.outcome === "completed" ||
+              props.attempt.outcome === "failed" ||
+              props.attempt.outcome === "interrupted" ||
+              props.attempt.outcome === "cancelled"
+            }
+          />
+        )}
         {props.attempt.tasks === undefined || props.attempt.tasks.length === 0 ? null : (
           <ThreadTasksPanel
             tasks={{

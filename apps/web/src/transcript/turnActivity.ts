@@ -1,4 +1,4 @@
-import type { HarnessRetryNotice } from "@octant/contracts";
+import type { HarnessRetryNotice, ThreadToolStep } from "@octant/contracts";
 
 /**
  * What a running turn is doing, beyond the message it is writing.
@@ -48,6 +48,28 @@ export interface TurnActivity {
 }
 
 export const EMPTY_TURN_ACTIVITY: TurnActivity = { rows: [], reasoning: "" };
+
+/**
+ * The tool rows of a Chat or Work turn, from the steps the host recorded for
+ * it. Absent when the turn called no tool, so the group draws nothing.
+ */
+export function toolStepsActivity(
+  steps: ReadonlyArray<ThreadToolStep> | undefined,
+  truncated: boolean | undefined,
+): TurnActivity | undefined {
+  if (steps === undefined || steps.length === 0) return undefined;
+  return {
+    rows: steps.map((step) => ({
+      kind: "tool" as const,
+      id: step.toolCallId,
+      toolName: step.toolName,
+      state: step.state,
+      ...(step.summary === undefined ? {} : { summary: step.summary }),
+    })),
+    reasoning: "",
+    ...(truncated === true ? { truncated: true } : {}),
+  };
+}
 
 /** How many rows are still open. */
 export function activeRowCount(activity: TurnActivity): number {

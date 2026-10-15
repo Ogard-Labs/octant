@@ -261,14 +261,14 @@ describe("mobile work follow-through", () => {
       [
         {
           ...acceptedTurn({ prompt: "Earlier ask", threadId, authority: thread.authority }),
-          toolSteps: [{ id: "step-1", name: "read", state: "succeeded" }],
+          futureActivity: [{ id: "step-1", name: "read", state: "succeeded" }],
         },
       ],
       [],
     );
     const transcript = await loadMobileWorkTranscript(port, threadId);
     expect(transcript.turns.map((turn) => turn.prompt)).toEqual(["Earlier ask"]);
-    expect(transcript.turns[0]).not.toHaveProperty("toolSteps");
+    expect(transcript.turns[0]).not.toHaveProperty("futureActivity");
   });
 
   it("refuses a Work transcript whose threadId does not match the request", async () => {

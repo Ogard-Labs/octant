@@ -117,6 +117,8 @@ import {
   type LoadEarlierMessagesState,
 } from "../transcript/LoadEarlierMessages";
 import { ThreadTasksPanel } from "../transcript/ThreadTasksPanel";
+import { TurnActivityRows } from "../transcript/TurnActivityRows";
+import { toolStepsActivity } from "../transcript/turnActivity";
 import { ProviderApprovalPrompt } from "../transcript/ProviderApprovalPrompt";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { ExtensionToolApprovalPrompt } from "../extensions/ExtensionToolApprovalPrompt";
@@ -323,6 +325,24 @@ function WorkTurnHeader(props: {
 }
 
 /**
+ * The turn's tool calls as the compact group Code uses. Open while the turn
+ * runs; a settled turn folds behind "N tool calls" and shows a tool it never
+ * saw end as unfinished.
+ */
+function WorkToolGroup(props: { readonly turn: WorkTurnState }) {
+  const activity = toolStepsActivity(props.turn.toolSteps, props.turn.toolStepsTruncated);
+  if (activity === undefined) return null;
+  const status = props.turn.status;
+  return (
+    <TurnActivityRows
+      activity={activity}
+      running={status === "accepted" || status === "running"}
+      settled={status === "completed" || status === "failed" || status === "cancelled"}
+    />
+  );
+}
+
+/**
  * Where a turn's header sits: before its first assistant entry, or after the
  * whole turn when no reply exists yet. A turn that ended without a reply used
  * to leave the transcript silent — the journal recorded the failure while the
@@ -469,6 +489,18 @@ function applyWorkTurnStreamFrame(
     if (current === undefined) return turns;
     const next = turns.slice();
     next[index] = { ...current, tasks: frame.tasks };
+    return next;
+  }
+  if (frame.kind === "turn-tools") {
+    if (index === -1) return turns;
+    const current = turns[index];
+    if (current === undefined) return turns;
+    const next = turns.slice();
+    next[index] = {
+      ...current,
+      toolSteps: frame.toolSteps,
+      ...(frame.toolStepsTruncated ? { toolStepsTruncated: true } : {}),
+    };
     return next;
   }
   if (frame.kind === "provider-retry" || frame.kind === "provider-retry-cleared") return turns;
@@ -1733,6 +1765,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     <HarnessRetryStatus
                       events={workRetryEvents(retries, String(row.head.requestId))}
                     />
+                    <WorkToolGroup turn={row.head} />
                   </>
                 )}
                 {row.entry.text === "" ? null : (
@@ -1761,6 +1794,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     : { usageResume: thread.usageResume })}
                 />
                 <HarnessRetryStatus events={workRetryEvents(retries, String(row.turn.requestId))} />
+                <WorkToolGroup turn={row.turn} />
               </div>
             );
           }

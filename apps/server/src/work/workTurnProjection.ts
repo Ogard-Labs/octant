@@ -90,6 +90,10 @@ export class WorkTurnProjection {
       transcript,
       ...(updated.wroteFiles === undefined ? {} : { wroteFiles: updated.wroteFiles }),
       ...(updated.tasks === undefined ? {} : { tasks: updated.tasks }),
+      ...(updated.toolSteps === undefined ? {} : { toolSteps: updated.toolSteps }),
+      ...(updated.toolStepsTruncated === undefined
+        ? {}
+        : { toolStepsTruncated: updated.toolStepsTruncated }),
       ...(updated.childObservations === undefined
         ? {}
         : { childObservations: updated.childObservations }),
