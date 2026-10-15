@@ -43,6 +43,13 @@ export const isDeviceOpenUrl = Schema.is(DeviceOpenUrl);
 export const decodeDeviceOpenUrl = Schema.decodeUnknownSync(DeviceOpenUrl);
 
 /**
+ * The orientation Rotate sets. The pane names the one it is not showing, so
+ * the same request means the same thing on a Simulator and an emulator.
+ */
+export const DeviceOrientation = Schema.Literal("portrait", "landscape");
+export type DeviceOrientation = typeof DeviceOrientation.Type;
+
+/**
  * Device actions this host performs beyond the original set, so a pane offers
  * one only once its host says so and never shows it disabled. A host that
  * predates a flag omits it. Flags this renderer does not know are ignored
@@ -52,5 +59,8 @@ export const decodeDeviceOpenUrl = Schema.decodeUnknownSync(DeviceOpenUrl);
 export const DeviceHostCapabilities = Schema.Struct({
   openUrl: Schema.optional(Schema.Boolean),
   recordScreen: Schema.optional(Schema.Boolean),
+  /** Volume up and down, sent as the `volume-up` and `volume-down` hardware keys. */
+  volume: Schema.optional(Schema.Boolean),
+  rotate: Schema.optional(Schema.Boolean),
 }).annotations({ parseOptions: { onExcessProperty: "ignore" } });
 export type DeviceHostCapabilities = typeof DeviceHostCapabilities.Type;

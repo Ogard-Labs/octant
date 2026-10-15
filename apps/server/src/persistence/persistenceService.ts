@@ -260,8 +260,9 @@ export interface PersistenceService {
     scopeRef: string,
   ) => ReadonlyArray<AgentProfile>;
   /**
-   * Whether the store is usable. Served from an inspection at most
-   * `DATABASE_STATUS_MAX_AGE_MS` old unless `fresh` is set; see the constant.
+   * Whether the store is usable, as the latest inspection found it: the one
+   * startup ran, or a later one a caller asked for with `fresh`. Readiness
+   * gates read it without inspecting; see `inspectedStatus` below.
    */
   readonly status: (options?: { readonly fresh?: boolean }) => DatabaseStatus;
   readonly projectionCatchUp: ReadonlyArray<{
@@ -285,19 +286,6 @@ export class PersistenceStartupFailed extends Data.TaggedError("PersistenceStart
   readonly category: PersistenceFailureCategory;
   readonly message: string;
 }> {}
-
-/**
- * How long one database inspection answers the readiness gates. `status()`
- * runs SQLite's integrity check and walks every journal row, and every
- * service calls it before every read as its readiness gate — on a busy host
- * that was hundreds of full inspections a minute on the main thread, each
- * stalling the event loop for about a third of a second; a CPU profile put a
- * third of all server time here. Only this process writes the store, and
- * everything that changes its state — migration, recovery, a restored backup —
- * runs at startup or offline, so an inspection this young answers the gate
- * exactly. Diagnostics that must not read a memo pass `fresh`.
- */
-const DATABASE_STATUS_MAX_AGE_MS = 10_000;
 
 export interface PersistenceLiveOptions {
   readonly dataDirectory?: string;
@@ -408,7 +396,18 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
         message: "Octant storage requires recovery before startup.",
       });
     }
-    let statusMemo = { computedAtMs: Date.parse(clock()), status };
+    // Readiness gates answer from the latest inspection and never start one.
+    // An inspection runs SQLite's integrity check and decodes every journal
+    // row, and every service calls `status()` before every read: run each
+    // time, a CPU profile put a third of all server time here, and even a
+    // re-inspection every 10 s held the event loop for 0.9 to 1.7 s on a
+    // 32,000-row journal, stalling an open window's reads every ten seconds.
+    // Only this process writes the store, and everything that changes what an
+    // inspection finds (migration, recovery, a restored backup) runs at
+    // startup or offline, so the startup inspection stays the answer.
+    // Diagnostics that must look again pass `fresh`, and the gates then
+    // follow what that inspection found.
+    let inspectedStatus = status;
     return {
       dataDirectory: store.directory,
       connection,
@@ -494,16 +493,10 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readProfilesForScope: (scopeKind, scopeRef) =>
         readProfilesForScope(connection, scopeKind, scopeRef),
       status: (statusOptions) => {
-        const nowMs = Date.parse(clock());
-        if (
-          statusOptions?.fresh !== true &&
-          nowMs - statusMemo.computedAtMs < DATABASE_STATUS_MAX_AGE_MS
-        ) {
-          return statusMemo.status;
+        if (statusOptions?.fresh === true) {
+          inspectedStatus = databaseStatus({ connection, journal, projections });
         }
-        const inspected = databaseStatus({ connection, journal, projections });
-        statusMemo = { computedAtMs: nowMs, status: inspected };
-        return inspected;
+        return inspectedStatus;
       },
       projectionCatchUp,
     };

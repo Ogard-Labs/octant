@@ -47,6 +47,13 @@ export interface DevicePaneProps {
   readonly canRecordScreen?: boolean;
   /** The host is recording this device now, so More offers Stop recording. */
   readonly recording?: boolean;
+  /** The host reported that it can rotate this device; absent, More has no Rotate. */
+  readonly canRotate?: boolean;
+  /**
+   * The host reported that it can press this device's volume keys. Without it
+   * More has no Volume up or down at all; they are never shown disabled.
+   */
+  readonly canVolume?: boolean;
 }
 
 /**
@@ -98,6 +105,7 @@ export function DevicePane(props: DevicePaneProps) {
   const act = (action: DeviceAction) => props.onAction?.(action);
   const canOpenUrl = live !== undefined && canAct && props.canOpenUrl === true;
   const canRecordScreen = live !== undefined && canAct && props.canRecordScreen === true;
+  const canRotate = live !== undefined && canAct && props.canRotate === true;
   const approvalWanted = props.needsApproval && live !== undefined && canAct;
   const line = lineFor({
     view,
@@ -154,10 +162,20 @@ export function DevicePane(props: DevicePaneProps) {
     } else if (item === "open-url") {
       setTyping(false);
       setOpeningUrl(true);
+    } else if (item === "rotate") {
+      // The streamed picture says which way the device sits now; with none,
+      // landscape is the change a person most often wants.
+      const sitsWide =
+        view.kind === "live" &&
+        view.screen.kind === "stream" &&
+        view.screen.size.width > view.screen.size.height;
+      act({ kind: "rotate", orientation: sitsWide ? "portrait" : "landscape" });
     } else if (item === "record-screen") {
       act({ kind: props.recording === true ? "stop-recording" : "start-recording" });
     } else if (item === "lock") enqueue({ kind: "key-press", key: "lock" }, false);
-    else if (item === "switch-device") setPicking(true);
+    else if (item === "volume-up" || item === "volume-down") {
+      enqueue({ kind: "key-press", key: item }, false);
+    } else if (item === "switch-device") setPicking(true);
     else if (item === "diagnostics") setDiagnosticsOpen(true);
     else if (item === "stop-live-view") act({ kind: "stop-live-view" });
     else act({ kind: "shutdown" });
@@ -178,6 +196,8 @@ export function DevicePane(props: DevicePaneProps) {
           screenshot: live !== undefined && canAct && !props.busy,
           typeText: hardware,
           openUrl: canOpenUrl,
+          rotate: canRotate,
+          volume: hardware && props.canVolume === true,
           recordScreen: canRecordScreen,
           recording: props.recording === true,
           switchDevice: canAct && choosable.length > 0 && view.kind !== "setup",

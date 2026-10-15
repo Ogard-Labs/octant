@@ -54,6 +54,17 @@ const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
  * hostile stream's decode work.
  */
 const MAX_STREAM_SCAN_EVENTS = 100_000;
+/**
+ * How many decoded frames, across threads, the stores on one journal keep between history
+ * reads. The board, the sidebar's pull-request join, and child observations
+ * each read whole thread histories every few seconds while a window is open,
+ * and decoding a 2,000-turn thread's 28,000 frames again for every read held
+ * the event loop for 0.7 to 1.6 s at a time on a loaded machine. A remembered
+ * frame measured about 425 bytes, so this bound (one thread at the scan
+ * ceiling) holds the memory near 45 MB; past it the least recently read
+ * threads are decoded afresh on their next read.
+ */
+const MAX_REMEMBERED_HISTORY_FRAMES = MAX_STREAM_SCAN_EVENTS;
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
@@ -67,6 +78,7 @@ type JournalPort = Pick<
   | "append"
   | "replayAggregate"
   | "replayAggregateTypeForThread"
+  | "aggregateTypeThreadHead"
   | "replayThreadAnchoredRows"
   | "latestThreadEvents"
   | "latestThreadResults"
@@ -165,14 +177,44 @@ export type CodeOperationEventReplay =
         | "scan-limit";
     };
 
+/** A thread's decoded history as of its newest row, and how many rows it read. */
+interface RememberedHistory {
+  readonly lastSequence: number;
+  readonly eventCount: number;
+  readonly frames: ReadonlyArray<typeof CodeOperationEventFrame.Type>;
+}
+
+/**
+ * The remembered histories of one journal, shared by every store built on it:
+ * the host builds one store for the board and another inside the Code runtime,
+ * and each keeping its own copy would double the frame bound. Least recently
+ * read first.
+ */
+interface RememberedHistories {
+  readonly byThread: Map<string, RememberedHistory>;
+  frames: number;
+}
+const rememberedHistoriesByJournal = new WeakMap<JournalPort, RememberedHistories>();
+
+function rememberedHistoriesFor(journal: JournalPort): RememberedHistories {
+  let remembered = rememberedHistoriesByJournal.get(journal);
+  if (remembered === undefined) {
+    remembered = { byThread: new Map(), frames: 0 };
+    rememberedHistoriesByJournal.set(journal, remembered);
+  }
+  return remembered;
+}
+
 export class CodeOperationEventStore {
   readonly #journal: JournalPort;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #actor: typeof EventActor.Type;
+  readonly #histories: RememberedHistories;
 
   constructor(options: CodeOperationEventStoreOptions) {
     this.#journal = options.journal;
+    this.#histories = rememberedHistoriesFor(options.journal);
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     try {
@@ -568,9 +610,50 @@ export class CodeOperationEventStore {
       return { status: "rebuild-required" };
     }
 
-    const frames: Array<typeof CodeOperationEventFrame.Type> = [];
-    let afterSequence = 0;
-    let scannedEvents = 0;
+    // A thread's rows are only ever appended, until a purge removes them. So
+    // a remembered history is current while the slice's size and newest row
+    // match it, is extended by reading only the rows after it while it is
+    // still a whole prefix of the slice, and is read afresh otherwise.
+    const key = String(threadId);
+    const head = this.#journal.aggregateTypeThreadHead({
+      aggregateType: "code-operation",
+      threadId: key,
+    });
+    if (head.eventCount > MAX_STREAM_SCAN_EVENTS) {
+      this.#forget(key);
+      return { status: "rebuild-required" };
+    }
+    const remembered = this.#histories.byThread.get(key);
+    if (
+      remembered !== undefined &&
+      remembered.lastSequence === head.lastSequence &&
+      remembered.eventCount === head.eventCount
+    ) {
+      this.#remember(key, remembered);
+      return { status: "ok", frames: remembered.frames };
+    }
+    let read =
+      remembered !== undefined && remembered.lastSequence < head.lastSequence
+        ? this.#readHistory(threadId, remembered)
+        : undefined;
+    if (read === undefined || (read.status === "ok" && read.eventCount !== head.eventCount)) {
+      read = this.#readHistory(threadId, undefined);
+    }
+    if (read.status !== "ok") {
+      this.#forget(key);
+      return read;
+    }
+    this.#remember(key, read);
+    return { status: "ok", frames: read.frames };
+  }
+
+  #readHistory(
+    threadId: CodeThreadId,
+    from: RememberedHistory | undefined,
+  ): ({ readonly status: "ok" } & RememberedHistory) | { readonly status: "rebuild-required" } {
+    const frames: Array<typeof CodeOperationEventFrame.Type> = [...(from?.frames ?? [])];
+    let afterSequence = from?.lastSequence ?? 0;
+    let scannedEvents = from?.eventCount ?? 0;
 
     for (;;) {
       const batch = this.#journal.replayAggregateTypeForThread({
@@ -608,7 +691,26 @@ export class CodeOperationEventStore {
       if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
 
-    return { status: "ok", frames };
+    return { status: "ok", lastSequence: afterSequence, eventCount: scannedEvents, frames };
+  }
+
+  #remember(key: string, history: RememberedHistory): void {
+    this.#forget(key);
+    const histories = this.#histories;
+    histories.byThread.set(key, history);
+    histories.frames += history.frames.length;
+    for (const [oldestKey, oldest] of histories.byThread) {
+      if (histories.frames <= MAX_REMEMBERED_HISTORY_FRAMES || oldestKey === key) break;
+      histories.byThread.delete(oldestKey);
+      histories.frames -= oldest.frames.length;
+    }
+  }
+
+  #forget(key: string): void {
+    const remembered = this.#histories.byThread.get(key);
+    if (remembered === undefined) return;
+    this.#histories.byThread.delete(key);
+    this.#histories.frames -= remembered.frames.length;
   }
 
   conversation(input: ReadCodeConversationInput): CodeConversationPage {

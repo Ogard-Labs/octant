@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { CodeCheckoutId, CodeThreadId } from "./code";
-import { DeviceHostCapabilities, DeviceOpenUrl } from "./deviceHost";
+import { DeviceHostCapabilities, DeviceOpenUrl, DeviceOrientation } from "./deviceHost";
 import { CorrelationId, EventActor, UtcTimestamp } from "./events";
 import { ToolActionApproval, ToolActionAuthority, ToolActionId } from "./toolActions";
 
@@ -102,6 +102,7 @@ export const AppleSimulatorActionKind = Schema.Literal(
   "open-url",
   "start-recording",
   "stop-recording",
+  "rotate",
 );
 export type AppleSimulatorActionKind = typeof AppleSimulatorActionKind.Type;
 
@@ -125,6 +126,7 @@ export const AppleActionKind = Schema.Literal(
   "open-url",
   "start-recording",
   "stop-recording",
+  "rotate",
 );
 export type AppleActionKind = typeof AppleActionKind.Type;
 
@@ -195,6 +197,8 @@ export const AppleSimulatorRequest = Schema.Struct({
   key: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
   /** The address `open-url` opens. Shown whole in its confirmation; evidence keeps the origin. */
   url: Schema.optional(DeviceOpenUrl),
+  /** The orientation `rotate` sets. */
+  orientation: Schema.optional(DeviceOrientation),
   timeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(10 * 60 * 1000)),
   approval: ToolActionApproval,
 })
@@ -238,6 +242,9 @@ export const AppleSimulatorRequest = Schema.Struct({
       }
       if (request.kind === "open-url") {
         return request.requestedBy !== undefined && request.url !== undefined;
+      }
+      if (request.kind === "rotate") {
+        return request.requestedBy !== undefined && request.orientation !== undefined;
       }
       if (request.kind === "start-recording" || request.kind === "stop-recording") {
         return request.requestedBy !== undefined;
@@ -334,6 +341,7 @@ export const AppleBuildEvidence = Schema.Struct({
         evidence.kind === "key-press" ||
         evidence.kind === "repair-input" ||
         evidence.kind === "open-url" ||
+        evidence.kind === "rotate" ||
         evidence.kind === "start-recording" ||
         evidence.kind === "stop-recording"
       ) {

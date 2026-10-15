@@ -489,13 +489,30 @@ export class AutomationProjection implements Projection {
     this.#evictOverflow(run.automationId, ids);
   }
 
-  /** Cap retained history per Automation, dropping the oldest runs first. */
+  /**
+   * Cap retained history per Automation, dropping the oldest runs first. Scans
+   * for the single oldest run instead of sorting the set: a rebuild evicts
+   * once per applied frame, and sorting there took minutes on a long history.
+   */
   #evictOverflow(automationId: AutomationId, ids: Set<AutomationRunId>): void {
-    if (ids.size <= MAX_AUTOMATION_HISTORY_ENTRIES) return;
-    const ordered = this.#runsNewestFirst(automationId);
-    for (const run of ordered.slice(MAX_AUTOMATION_HISTORY_ENTRIES)) {
-      ids.delete(run.id);
-      this.#runs.delete(run.id);
+    while (ids.size > MAX_AUTOMATION_HISTORY_ENTRIES) {
+      let oldestId: AutomationRunId | undefined;
+      let oldestKey = "";
+      for (const id of ids) {
+        const run = this.#runs.get(id);
+        if (run === undefined) {
+          ids.delete(id);
+          continue;
+        }
+        const key = cursorKey(run.createdAt, run.id);
+        if (oldestId === undefined || key < oldestKey) {
+          oldestId = id;
+          oldestKey = key;
+        }
+      }
+      if (oldestId === undefined) return;
+      ids.delete(oldestId);
+      this.#runs.delete(oldestId);
     }
   }
 
@@ -512,30 +529,32 @@ export class AutomationProjection implements Projection {
 }
 
 export interface HydrateAutomationProjectionInput {
-  readonly store: Pick<AutomationEventStore, "replayAll">;
+  readonly store: Pick<AutomationEventStore, "replayEach">;
   readonly projection: AutomationProjection;
 }
 
 /**
  * Rebuild the in-memory Automation projection from the authoritative journal
- * at startup or reconnect. Fails closed: a malformed, misattributed, or
- * undecodable frame leaves the projection empty and reports
- * `snapshot-required` instead of trusting a partially valid stream.
+ * at startup or reconnect, one journal batch at a time. Fails closed: a
+ * malformed, misattributed, or undecodable frame, or history past the scan
+ * cap, leaves the projection empty and reports `snapshot-required` instead of
+ * trusting a partial stream. The caller must surface that state; an empty
+ * projection alone looks like a host with no Automations.
  */
 export function hydrateAutomationProjection(
   input: HydrateAutomationProjectionInput,
 ): "ok" | "snapshot-required" {
-  let replay: ReturnType<AutomationEventStore["replayAll"]>;
+  input.projection.clear();
   try {
-    replay = input.store.replayAll();
+    const outcome = input.store.replayEach((envelope) => input.projection.applyEnvelope(envelope));
+    if (outcome.status !== "ok") {
+      input.projection.clear();
+      return "snapshot-required";
+    }
   } catch (error) {
+    input.projection.clear();
     if (error instanceof ReplayEventInvalid) return "snapshot-required";
     throw error;
-  }
-  if (replay.status !== "ok") return "snapshot-required";
-  input.projection.clear();
-  for (const envelope of replay.events) {
-    input.projection.applyEnvelope(envelope);
   }
   return "ok";
 }

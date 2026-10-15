@@ -15,6 +15,9 @@ import {
   decodeCanvasId,
   decodeCanvasVersion,
   decodeCanvasVersionAppended,
+  decodeContentIngestedPayload,
+  THREAD_EXTERNAL_CONTENT_AGGREGATE,
+  THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
   type CanvasActionReceipt,
   type CanvasCreated,
   type CanvasRefreshReceipt,
@@ -37,6 +40,7 @@ import {
   CANVAS_OUTSIDE_CONTENT_AGGREGATE_TYPE,
   CANVAS_OUTSIDE_CONTENT_CARRIED,
   canvasOutsideContentWriters,
+  isReplicaWriter,
   canvasVersionWriters,
   decodeCanvasOutsideContentCarried,
 } from "./canvasOutsideContentMark";
@@ -62,7 +66,7 @@ type JournalPort = Pick<Journal, "append" | "replay" | "replayAggregateType"> &
 
 export class CanvasEventStoreError extends Error {
   override readonly name = "CanvasEventStoreError";
-  readonly category: "invalid" | "journal-mismatch";
+  readonly category: "invalid" | "journal-mismatch" | "unreadable-mark";
 
   constructor(category: CanvasEventStoreError["category"], message: string) {
     super(message);
@@ -480,6 +484,66 @@ export class CanvasEventStore {
   }
 
   /**
+   * Records the synced author of each version this computer took from another
+   * one before such versions carried their own author. Those versions name the
+   * thread they landed in as their writer, so a person's Clear on that thread
+   * would let it read the synced text unmarked. The thread's journaled
+   * ingestion of the version (`replica-artifact:<canvas>:<version>`) survives
+   * a Clear, so it identifies them. Idempotent: a version already named is
+   * skipped, and a version the Canvas does not hold (or a purged Canvas) adds
+   * nothing.
+   */
+  carryAdoptedVersionWriters(input: {
+    readonly versionIdsOf: (canvasId: string) => ReadonlyArray<string> | undefined;
+    readonly occurredAt: UtcTimestamp;
+  }): void {
+    const journal = this.#journal;
+    if (!recordsMarks(journal)) return;
+    let afterSequence = 0;
+    while (true) {
+      const page = journal.replayAggregateType({
+        aggregateType: THREAD_EXTERNAL_CONTENT_AGGREGATE,
+        afterSequence,
+        limit: 1_000,
+        eventName: THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested,
+        payloadPrefix: { path: "contentReference", prefix: "replica-artifact:" },
+      });
+      for (const event of page) {
+        afterSequence = event.globalSequence;
+        const reference = decodeContentIngestedPayload(event.payload).contentReference;
+        const [, canvasId, versionId] = reference.split(":");
+        if (canvasId === undefined || versionId === undefined) continue;
+        if (input.versionIdsOf(canvasId)?.includes(versionId) !== true) continue;
+        const recorded = canvasOutsideContentWriters(journal, canvasId);
+        if (recorded.includes(versionId)) continue;
+        journal.append({
+          aggregate: {
+            aggregateType: CANVAS_OUTSIDE_CONTENT_AGGREGATE_TYPE,
+            aggregateId: decodeAggregateId(canvasId),
+          },
+          expectedVersion: decodeAggregateVersion(recorded.length),
+          events: [
+            {
+              eventId: decodeEventId(this.#uuid()),
+              eventName: CANVAS_OUTSIDE_CONTENT_CARRIED,
+              eventVersion: 1,
+              correlationId: decodeCorrelationId(this.#uuid()),
+              actor: this.#actor,
+              occurredAt: input.occurredAt,
+              payload: decodeCanvasOutsideContentCarried({
+                canvasId,
+                versionId,
+                writerId: versionId,
+              }),
+            },
+          ],
+        });
+      }
+      if (page.length < 1_000) return;
+    }
+  }
+
+  /**
    * Commits a version, and first, in the same journal unit, the Canvas's
    * record of each writer that is marked with outside content now and that the
    * Canvas does not already name. A mark that cannot be read or recorded
@@ -495,7 +559,15 @@ export class CanvasEventStore {
     try {
       recorded = recordsMarks(journal) ? canvasOutsideContentWriters(journal, canvasId) : [];
       marked = canvasVersionWriters(version).filter(
-        (writerId) => !recorded.includes(writerId) && writerMarked(writerId),
+        (writerId) =>
+          !recorded.includes(writerId) &&
+          // A synced version has no thread of its own to be marked: it is as
+          // marked as the thread it lands in, which took it as outside content.
+          writerMarked(
+            isReplicaWriter(version, writerId)
+              ? String(version.definition.provenance.threadId)
+              : writerId,
+          ),
       );
     } catch {
       throw unreadableMark();
@@ -586,9 +658,10 @@ function recordsMarks(
   return journal.transaction !== undefined && journal.replayAggregate !== undefined;
 }
 
+/** Why nothing was written, and what the person can do: the check can pass on a second try. */
+export const UNREADABLE_MARK_MESSAGE =
+  "The Canvas could not be checked for outside content, so nothing was written. Try again.";
+
 function unreadableMark(): CanvasEventStoreError {
-  return new CanvasEventStoreError(
-    "invalid",
-    "The Canvas could not be checked for outside content, so nothing was written.",
-  );
+  return new CanvasEventStoreError("unreadable-mark", UNREADABLE_MARK_MESSAGE);
 }

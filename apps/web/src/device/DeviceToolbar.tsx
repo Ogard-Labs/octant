@@ -11,8 +11,11 @@ import {
   Link,
   Lock,
   Power,
+  RotateCw,
   Smartphone,
   Square,
+  Volume1,
+  Volume2,
 } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -37,6 +40,10 @@ export interface DeviceToolbarControls {
   readonly recordScreen: boolean;
   /** A recording is running, so the item stops it instead of starting one. */
   readonly recording: boolean;
+  /** Only once the host reports that it can rotate this device. */
+  readonly rotate: boolean;
+  /** Only once the host reports that it can press the volume keys. */
+  readonly volume: boolean;
   readonly switchDevice: boolean;
   readonly stopLiveView: boolean;
   readonly shutdown: boolean;
@@ -137,7 +144,10 @@ export type DeviceMenuItem =
   | "type-text"
   | "open-url"
   | "record-screen"
+  | "rotate"
   | "lock"
+  | "volume-up"
+  | "volume-down"
   | "switch-device"
   | "diagnostics"
   | "stop-live-view"
@@ -158,6 +168,9 @@ function deviceMenuItems(props: {
   if (controls.openUrl) {
     items.push({ value: "open-url", label: "Open URL…", icon: <Link size={16} /> });
   }
+  if (controls.rotate) {
+    items.push({ value: "rotate", label: "Rotate", icon: <RotateCw size={16} /> });
+  }
   if (controls.recordScreen) {
     items.push({
       value: "record-screen",
@@ -167,6 +180,12 @@ function deviceMenuItems(props: {
   }
   if (controls.hardware && !props.wide) {
     items.push({ value: "lock", label: "Lock", icon: <Lock size={16} /> });
+  }
+  if (controls.volume) {
+    items.push(
+      { value: "volume-up", label: "Volume up", icon: <Volume2 size={16} /> },
+      { value: "volume-down", label: "Volume down", icon: <Volume1 size={16} /> },
+    );
   }
   if (controls.switchDevice) {
     items.push({ value: "switch-device", label: "Switch device…", icon: <Smartphone size={16} /> });

@@ -174,6 +174,23 @@ describe("AutomationCenter default surface", () => {
     expect(await screen.findByRole("list", { name: "Automations" })).toBeVisible();
   });
 
+  it("says the history could not load instead of showing an empty list", async () => {
+    const client = fakeClient({
+      list: vi.fn(async () => ({
+        kind: "automation-list" as const,
+        items: [],
+        historyUnavailable: true as const,
+      })),
+    });
+    renderCenter({ client });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Automation history could not be loaded");
+    expect(alert).toHaveTextContent("none are scheduled");
+    expect(screen.queryByRole("list", { name: "Automations" })).not.toBeInTheDocument();
+    expect(screen.queryByText("No automations match the current filters.")).not.toBeInTheDocument();
+  });
+
   it("turns an empty list into creation paths and working suggestions", async () => {
     const client = fakeClient({
       list: vi.fn(async () => ({ kind: "automation-list" as const, items: [] })),

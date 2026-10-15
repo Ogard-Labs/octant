@@ -2,6 +2,7 @@ import { decodeStableHostId } from "@octant/contracts/remote-access";
 import {
   createExpoSecureDeviceKeyStore,
   createInMemoryExpoSecureStringStorage,
+  PLATFORM_LISTENER_TRUST,
 } from "@octant/client-runtime";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -67,6 +68,7 @@ describe("live mobile session lifecycle", () => {
       deviceKeyId: "key",
       credentialGeneration: 1,
       origin: registration.origin,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     };
     let saved = () => {};
     const registry = {
@@ -140,6 +142,7 @@ describe("live mobile session lifecycle", () => {
           deviceId: `device-${hostId}`,
           credentialGeneration: 1,
           hostKeyFingerprint: "fingerprint",
+          listenerTrust: PLATFORM_LISTENER_TRUST,
         });
         await registry.upsert({
           hostId,

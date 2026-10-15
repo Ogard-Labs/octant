@@ -187,6 +187,19 @@ describe("Simulator input delivery", () => {
     ]);
   });
 
+  it("presses Volume up and down as hardware buttons", async () => {
+    const { fake, send } = helpers(() => ({ status: "delivered" }));
+    const deliver = createSimulatorInputDelivery(fake);
+
+    await deliver({ kind: "key-press", udid, budgetMs: 30_000, key: "volume-up" });
+    await deliver({ kind: "key-press", udid, budgetMs: 30_000, key: "Volume-Down" });
+
+    expect(send.mock.calls.map(([, sent]) => sent)).toEqual([
+      { op: "button", button: "volume-up" },
+      { op: "button", button: "volume-down" },
+    ]);
+  });
+
   it("asks the helpers to repair input without first looking up the screen", async () => {
     const { fake, send } = helpers(() => ({ status: "delivered" }));
 
@@ -195,6 +208,43 @@ describe("Simulator input delivery", () => {
     ).resolves.toEqual({ kind: "delivered" });
 
     expect(send.mock.calls.map(([, sent]) => sent)).toEqual([{ op: "repair-input" }]);
+  });
+
+  it("asks the helpers to rotate to the named orientation without first looking up the screen", async () => {
+    const { fake, send } = helpers(() => ({ status: "delivered" }));
+
+    await expect(
+      createSimulatorInputDelivery(fake)({
+        kind: "rotate",
+        udid,
+        budgetMs: 30_000,
+        orientation: "landscape",
+      }),
+    ).resolves.toEqual({ kind: "delivered" });
+
+    expect(send.mock.calls.map(([, sent]) => sent)).toEqual([
+      { op: "rotate", orientation: "landscape" },
+    ]);
+  });
+
+  it("asks the helper for the screen again after a rotation, since its size turned", async () => {
+    const screens = [
+      { width: 1206, height: 2622 },
+      { width: 2622, height: 1206 },
+    ];
+    const { fake, send } = helpers((sent) =>
+      sent.op === "hello"
+        ? { status: "delivered", screen: screens.shift()! }
+        : { status: "delivered" },
+    );
+    const deliver = createSimulatorInputDelivery(fake);
+    await deliver({ kind: "tap", udid, budgetMs: 30_000, point: { x: 100, y: 100 } });
+    await deliver({ kind: "rotate", udid, budgetMs: 30_000, orientation: "landscape" });
+    await deliver({ kind: "tap", udid, budgetMs: 30_000, point: { x: 2_000, y: 100 } });
+
+    const taps = send.mock.calls.map(([, sent]) => sent).filter((sent) => sent.op === "tap");
+    expect(taps).toHaveLength(2);
+    expect(taps[1]).toMatchObject({ x: 2_000 / 2_622 });
   });
 
   it("answers inside the action's deadline so the server hears the helper's own reason", async () => {

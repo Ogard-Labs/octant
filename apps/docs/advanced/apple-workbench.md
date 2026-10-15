@@ -76,7 +76,7 @@ or the validation-evidence dump — those stay on the Apple workbench command.
   **Booting**, **Live view lost**, and so on). On the right are **Home** and
   **Screenshot**, **Lock** when the pane is wide, and **More**: **Type
   text…**, **Open URL…**, **Record screen** (**Stop recording** while it
-  records), **Lock**, **Switch device…**, **Diagnostics** (what
+  records), **Lock**, **Volume up**, **Volume down**, **Switch device…**, **Diagnostics** (what
   is running, recent evidence, and where the live view comes from), **Stop
   live view**, and **Shut down**. Only actions the host supports today
   appear. The arrow keys move along the toolbar.
@@ -87,6 +87,10 @@ or the validation-evidence dump — those stay on the Apple workbench command.
   every address asks first, and the confirmation shows the whole address;
   **Allow input** does not cover it. Evidence records only the address's
   origin (`https://example.com`), never its path or query.
+- **Rotate.** **More** offers **Rotate** when the host supports it. It turns
+  the Simulator to the orientation it is not showing, portrait or landscape.
+  It needs the Octant desktop app and its managed streaming tool, asks first
+  on an approval-gated thread, and **Allow input** does not cover it.
 - **Record screen.** Records the Simulator's screen for up to 60 seconds, or
   until **Stop recording**, a shut down, or the host closing. On an
   approval-gated thread starting asks first; stopping does not. The video is

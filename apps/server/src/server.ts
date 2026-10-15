@@ -622,7 +622,10 @@ import { FileMentionService, fileMentionContextBlocks } from "./fileMentionServi
 import { createLocalServerRouteHandler } from "./localServerRoutes";
 import { createRemoteServerGrantLocalRouteHandler } from "./remoteServerGrantLocalRoutes";
 import { RemoteServerGrantService } from "./remote/remoteServerGrantService";
-import { createLiveLocalListenerPort } from "./localServers/localListenerPort";
+import {
+  createLiveLocalListenerHoldingProbe,
+  createLiveLocalListenerPort,
+} from "./localServers/localListenerPort";
 import {
   createLiveLocalServerHealthProbe,
   createLiveLocalServerStopPort,
@@ -852,6 +855,7 @@ import {
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import {
   decodeCanvasDefinition,
+  decodeCanvasId,
   decodeProjectId,
   type ProjectId,
   type UtcTimestamp,
@@ -6131,11 +6135,10 @@ export function startOctantServer(
     // process, so it is bound to the same authoritative thread, checkout, and
     // root resolution the Code workspace already uses. The live observer verifies
     // terminal roots and their descendants; unknown processes remain leftovers.
+    const ownedTerminalProcessRoots = async () =>
+      (await terminalProcessPort?.ownedProcessRoots()) ?? new Set<number>();
     const localServerService = new LocalServerService({
-      listeners: createLiveLocalListenerPort({
-        ownedProcessRoots: async () =>
-          (await terminalProcessPort?.ownedProcessRoots()) ?? new Set<number>(),
-      }),
+      listeners: createLiveLocalListenerPort({ ownedProcessRoots: ownedTerminalProcessRoots }),
       health: createLiveLocalServerHealthProbe(),
       stopPort: createLiveLocalServerStopPort(),
       scopes: createCodeThreadLocalServerScopeResolver({
@@ -6197,6 +6200,13 @@ export function startOctantServer(
         (await routeCodeService.read(scopeId, threadId)) !== undefined,
       readThread: persistence.readCodeThread,
       readOpenGrants: persistence.readOpenRemoteServerGrants,
+      confirmEndpoint: createLiveLocalListenerHoldingProbe({
+        ownedProcessRoots: ownedTerminalProcessRoots,
+      }),
+      isCodeEnabled: () =>
+        enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+          "code",
+        ),
       journal: persistence.journal,
       hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
       uuid: randomUUID,
@@ -6911,13 +6921,6 @@ export function startOctantServer(
                 targetThreadIds: threadMentionIds ?? [],
                 ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
               }),
-              canvasAgentToolPort === undefined
-                ? undefined
-                : createCanvasAgentTools({
-                    windowId,
-                    thread,
-                    port: canvasAgentToolPort,
-                  }),
               createImageAgentTools({
                 threadKind: "chat-thread",
                 scopeId: decodeImageGenerationScopeId(String(thread.id)),
@@ -6944,6 +6947,17 @@ export function startOctantServer(
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
           }),
+          // Outside the taint wrapper: a Canvas marks its reader only when a
+          // read or preview returns content from a Canvas that carries a mark,
+          // the rule Work and Code follow, so describe and a clean read leave
+          // the thread unmarked.
+          canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId,
+                thread,
+                port: canvasAgentToolPort,
+              }),
           // Host-internal: its results are Octant's own answers, not external
           // content, and `delegate` itself refuses while the thread is tainted.
           agentsManagedToolsFor({
@@ -9125,6 +9139,19 @@ export function startOctantServer(
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       writerMarked: threadOutsideContentMarks.isMarked,
     });
+    // Versions taken from another computer before they recorded their own
+    // author still name the thread they landed in, which a Clear exempts.
+    try {
+      canvasEventStore.carryAdoptedVersionWriters({
+        versionIdsOf: (canvasId) =>
+          persistence.canvasProjection
+            .getById(decodeCanvasId(canvasId))
+            ?.versions.map((version) => String(version.versionId)),
+        occurredAt: new Date().toISOString() as UtcTimestamp,
+      });
+    } catch {
+      // The next start tries again; a read refuses when the mark is unreadable.
+    }
     // One server-owned Canvas authority, shared by every Canvas mutation
     // including sharing, so a share can never be admitted under weaker checks
     // than a revise or a refresh.
@@ -10061,12 +10088,16 @@ export function startOctantServer(
     });
     // The Automation projection is in-memory; rebuild it from the
     // authoritative journal on every startup. Hydration fails closed: a
-    // hostile or undecodable frame leaves the projection empty instead of
-    // trusting a partially valid stream.
-    hydrateAutomationProjection({
-      store: automationEventStore,
-      projection: persistence.automationProjection,
-    });
+    // hostile or undecodable frame, or history past the scan cap, leaves the
+    // projection empty instead of trusting a partial stream. The host still
+    // starts; the Automation list reports the degraded state and the
+    // scheduler never starts, so nothing fires against history it never read.
+    // A live rehydration that fails later revokes the same state.
+    let automationHistoryAvailable =
+      hydrateAutomationProjection({
+        store: automationEventStore,
+        projection: persistence.automationProjection,
+      }) === "ok";
     // A6: shared device destinations, opt-in preferences, durable delivery
     // receipts. Credentialed APNs/FCM remains a named validation residual —
     // the default transport reports unavailable honestly.
@@ -10293,8 +10324,12 @@ export function startOctantServer(
       projection: persistence.automationProjection,
       dispatch: automationDispatch,
       now: () => new Date().toISOString() as UtcTimestamp,
+      onHistoryUnavailable: () => {
+        automationHistoryAvailable = false;
+        void automationScheduler.stop();
+      },
     });
-    automationScheduler.start();
+    if (automationHistoryAvailable) automationScheduler.start();
     // The host's own timer for completed threads, fed by every mode's service
     // that can archive on the host's behalf (decision 0088).
     const completedThreadArchiveSweep = new CompletedThreadArchiveSweep({
@@ -10331,6 +10366,7 @@ export function startOctantServer(
       windowAuthorityStore,
       projects: projectService,
       hostId: String(LOCAL_HOST_ID),
+      historyAvailable: () => automationHistoryAvailable,
     });
     const workPromotionProjection = new WorkPromotionProjection();
     const workPromotionEventStore = new WorkPromotionEventStore({
@@ -10846,6 +10882,31 @@ export function startOctantServer(
             },
             scopeId: context.scopeId,
             request: input.grantRequest,
+            stillAuthorized: input.stillAuthorized,
+            signal: input.signal,
+          }),
+        );
+      },
+      relay: (input) => {
+        const context = resolvePrincipalRouteContext({
+          request: input.request,
+          principal: input.principal,
+          abortSignal: input.signal,
+        });
+        return codeProjectAccess.run(context, () =>
+          remoteServerGrants.relay({
+            principal: {
+              deviceId: String(input.principal.deviceId),
+              credentialGeneration: input.principal.credentialGeneration,
+              sessionIdDigest: input.sessionIdDigest,
+              origin: input.principal.origin,
+            },
+            scopeId: context.scopeId,
+            grantId: input.grantId,
+            method: input.method,
+            pathQuery: input.pathQuery,
+            headers: input.headers,
+            body: input.body,
             stillAuthorized: input.stillAuthorized,
             signal: input.signal,
           }),

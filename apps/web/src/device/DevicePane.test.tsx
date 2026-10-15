@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deviceProblemFor, type DeviceChoice, type DeviceView } from "./deviceModel";
@@ -256,6 +256,30 @@ describe("DevicePane", () => {
     expect(screen.queryByRole("textbox", { name: /Address to open/ })).not.toBeInTheDocument();
   });
 
+  it("offers Volume up and down in More only once the host reports them, and sends the keys", async () => {
+    const user = userEvent.setup();
+    const older = pane({ canVolume: false });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Volume/ })).not.toBeInTheDocument();
+    older.unmount();
+
+    const { onInput } = pane({ canVolume: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Volume up" }));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Volume down" }));
+    await waitFor(() =>
+      expect(onInput.mock.calls.map(([input]) => input)).toEqual([
+        { kind: "key-press", key: "volume-up" },
+        { kind: "key-press", key: "volume-down" },
+      ]),
+    );
+  });
+
   it("says in the line when an address is not one the host opens, and sends nothing", async () => {
     const user = userEvent.setup();
     const { onAction } = pane({ canOpenUrl: true });
@@ -279,6 +303,41 @@ describe("DevicePane", () => {
     await user.keyboard("{Enter}");
     await screen.findAllByRole("menuitem");
     expect(screen.queryByRole("menuitem", { name: /Open URL/ })).not.toBeInTheDocument();
+  });
+
+  it("offers Rotate in More once the host reports it, and asks for the orientation not showing", async () => {
+    const user = userEvent.setup();
+    const { onAction, rerender, props } = pane({ canRotate: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Rotate" }));
+    // The picture is taller than wide, so the change is to landscape.
+    expect(onAction).toHaveBeenLastCalledWith({ kind: "rotate", orientation: "landscape" });
+
+    rerender(
+      <DevicePane
+        {...props}
+        view={{
+          kind: "live",
+          device: iphone,
+          screen: { kind: "stream", size: { width: 2622, height: 1206 }, attach: () => undefined },
+          liveView: "streaming",
+        }}
+      />,
+    );
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Rotate" }));
+    expect(onAction).toHaveBeenLastCalledWith({ kind: "rotate", orientation: "portrait" });
+  });
+
+  it("leaves Rotate out of More on a host that has not reported it", async () => {
+    const user = userEvent.setup();
+    pane({ canRotate: false });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Rotate/ })).not.toBeInTheDocument();
   });
 
   it("offers Record screen in More once the host reports it, and Stop recording while it records", async () => {

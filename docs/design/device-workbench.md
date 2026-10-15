@@ -172,13 +172,63 @@ is bound to it, and Allow input never covers it. Evidence and its log keep only
 output can quote the address, so none of it is kept, for the same reason typed
 text is redacted. The agent tools do not offer Open URL.
 
+## Volume
+
+The More menu offers **Volume up** and **Volume down** (after Lock) only when
+the host's runtime snapshot lists `capabilities.volume`; a host that predates
+the flag omits it and the items are left out, never shown disabled. Like Lock,
+they appear only while input is allowed. The Simulator host reports it only
+when the desktop's native device helper is wired in, because every Simulator
+hardware key rides that helper; the emulator host always reports it.
+
+Volume is not a new action kind: it is a `key-press` with the key
+`volume-up` or `volume-down`, so it is input in every respect. It needs a
+person's or agent's input authority exactly as Home and Lock do, Allow input
+covers it, Plan refuses it, and evidence keeps the key name like any other
+key. On the Simulator the desktop sends it as a hardware button (consumer-page
+usages `0xE9` and `0xEA`, the same codes the managed `serve-sim` stream uses)
+through the native helper, or through the stream while the legacy input
+services still receive. On the emulator it is `serve-avd`'s `volume-up` and
+`volume-down` buttons, or `adb shell input keyevent KEYCODE_VOLUME_UP` and
+`KEYCODE_VOLUME_DOWN`.
+
+## Rotate
+
+The device pane's More menu offers **Rotate** only when the host's runtime
+snapshot lists `capabilities.rotate`; a host that predates the flag omits it
+and the item is left out, never shown disabled. Both the Simulator and
+emulator hosts report it.
+
+The request names the orientation to set, `portrait` or `landscape`
+(`DeviceOrientation`), not a turn, so a repeated request is idempotent. The
+pane names the one the device is not showing: it reads the streamed picture,
+and with no picture it asks for `landscape`. There is no upside-down or
+reverse-landscape choice.
+
+On the Simulator, `simctl` has no rotate command and Octant does not script
+Simulator.app, so the host hands the request to the desktop's device broker
+like input, and the desktop runs `serve-sim rotate` against the managed
+stream, starting it when needed (`landscape` is `landscape_left`). Without the
+desktop app or the managed `serve-sim` tool the action is `unavailable`. On
+the emulator the host turns auto-rotate off and sets the rotation through adb
+(`settings put system accelerometer_rotation 0`, then `user_rotation` to `0`
+for portrait or `1` for landscape), so the sensor cannot undo it.
+
+Rotate is an effect, not input. Only a person (`local-user` or
+`remote-device` in `requestedBy`) may ask for it; an agent or the host is
+refused. Plan refuses it; Full access sends it unasked; on an approval-gated
+thread each Rotate raises its own confirmation, and Allow input never covers
+it. Evidence and its log record `rotate to <orientation> completed` and
+nothing from the device. The agent tools do not offer Rotate.
+
 ## Record screen
 
 The More menu offers **Record screen** only when the host's runtime snapshot
 lists `capabilities.recordScreen`; a host that predates the flag omits it and
 the item is left out, never shown disabled. While the snapshot's `recordings`
 lists this device the same item reads **Stop recording**. Both the Simulator
-and emulator hosts report it.
+and emulator hosts report it; the Simulator host does not wait on the desktop's
+device helper, because `simctl` alone records.
 
 Recording is two actions, `start-recording` and `stop-recording`. Starting
 launches the recorder and returns once it is running; the recorder outlives

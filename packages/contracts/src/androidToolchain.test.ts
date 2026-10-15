@@ -82,6 +82,14 @@ describe("AndroidEmulatorRequest", () => {
     ).toThrow();
   });
 
+  it("decodes Rotate only with an orientation and the person who asked", () => {
+    const rotate = { ...base, kind: "rotate", orientation: "landscape" };
+    expect(decodeAndroidEmulatorRequest(rotate).orientation).toBe("landscape");
+    expect(() => decodeAndroidEmulatorRequest({ ...rotate, orientation: undefined })).toThrow();
+    expect(() => decodeAndroidEmulatorRequest({ ...rotate, requestedBy: undefined })).toThrow();
+    expect(() => decodeAndroidEmulatorRequest({ ...rotate, orientation: "upside-down" })).toThrow();
+  });
+
   it("decodes Open URL only with an http(s) address and the person who asked", () => {
     const openUrl = { ...base, kind: "open-url", url: "https://example.com/welcome" };
     expect(decodeAndroidEmulatorRequest(openUrl).url).toBe("https://example.com/welcome");

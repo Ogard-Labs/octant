@@ -5,6 +5,7 @@ import {
   decodeRemoteServerGrantOpenedPayload,
   decodeRemoteServerGrantRequest,
   decodeRemoteServerGrantResult,
+  decodeRemoteServerProxyRefusal,
   encodeRemoteServerGrantResult,
 } from "./remoteServerGrants";
 
@@ -154,5 +155,23 @@ describe("remote server grant contracts", () => {
     ).toBe("device-revoked");
     expect(() => decodeRemoteServerGrantClosedPayload(opened)).toThrow();
     expect(() => decodeRemoteServerGrantClosedPayload({ ...opened, reason: "expired" })).toThrow();
+  });
+
+  it("states a relay refusal by reason and nothing about the server or the grant", () => {
+    for (const reason of ["grant-closed", "server-unreachable", "upgrade-refused"] as const) {
+      const refusal = { kind: "remote-server-proxy-refused", reason, message: "Refused." };
+      expect(decodeRemoteServerProxyRefusal(refusal)).toEqual(refusal);
+    }
+    const refusal = {
+      kind: "remote-server-proxy-refused",
+      reason: "grant-closed",
+      message: "Refused.",
+    } as const;
+    expect(() =>
+      decodeRemoteServerProxyRefusal({ ...refusal, reason: "server-stopped" }),
+    ).toThrow();
+    for (const extra of [{ grantId }, { port: 5173 }, { pid: 4213 }]) {
+      expect(() => decodeRemoteServerProxyRefusal({ ...refusal, ...extra })).toThrow();
+    }
   });
 });

@@ -74,6 +74,36 @@ describe("the live Simulator screen", () => {
     expect(watchScreen.mock.calls[0]?.[0]).toBe(request);
   });
 
+  it("turns the reported size with the frames when the device rotates", async () => {
+    const stream = feed();
+    const watchScreen = vi.fn(async (_request: unknown, _signal?: AbortSignal) => ({
+      status: "watching" as const,
+      screen: { width: 1206, height: 2622 },
+      frames: stream.frames,
+    }));
+    const sizes = [
+      { width: 506, height: 1_100 },
+      { width: 1_100, height: 506 },
+      { width: 506, height: 1_100 },
+    ];
+    const turning = vi.fn(async () => ({ ...sizes.shift()!, close: vi.fn() }));
+    const client = clientWatching(watchScreen);
+    const { result } = renderHook(() =>
+      useAppleSimulatorLiveScreen({ client, request, enabled: true, decode: turning }),
+    );
+    const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]);
+    stream.push(jpeg);
+    await waitFor(() => expect(result.current.status).toBe("live"));
+    stream.push(jpeg);
+    await waitFor(() =>
+      expect(result.current).toMatchObject({ screen: { width: 2622, height: 1206 } }),
+    );
+    stream.push(jpeg);
+    await waitFor(() =>
+      expect(result.current).toMatchObject({ screen: { width: 1206, height: 2622 } }),
+    );
+  });
+
   it("stops the stream at its source when the pane goes away", async () => {
     const stream = feed();
     let signal: AbortSignal | undefined;

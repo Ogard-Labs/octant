@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   accessSync,
   chmodSync,
@@ -736,20 +737,21 @@ describe("Claude runtime confinement", () => {
     expect(pids(target.root)).toEqual([]);
   });
 
-  it("lets a Plan turn write only the runtime's session and transcript folders of its account", () => {
+  it("lets a Plan turn write only the runtime's session folder and its own session's transcript", () => {
     const target = fixture();
     // A folder of the test's own. This used to be made inside the person's
     // real `~/.claude-accounts`, which a test has no business touching.
     const configDirectory = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-account-")));
     directories.push(configDirectory);
     const confinement = recordingConfinement();
+    const sessionId = randomUUID();
 
     const child = makePort(target, { confinement: confinement.port }).spawn({
       projectRoot: target.root,
       executionPolicy: "plan",
     })({
       command: target.binaryPath,
-      args: ["sdk-test"],
+      args: ["sdk-test", "--session-id", sessionId],
       cwd: target.root,
       env: {
         ...target.environment,
@@ -765,12 +767,50 @@ describe("Claude runtime confinement", () => {
     // The folder is read whole, and written only where the runtime keeps a
     // session: never its settings, hooks, skills, plugins or `.claude.json`.
     expect(launch.readRoots).toContain(configDirectory);
+    // Of `projects/`, only this session's transcript and its own folder: not
+    // the checkout's folder, whose name another checkout can share, and not
+    // its `memory/`, which a later session reads as instructions.
+    const sessionPath = join(
+      configDirectory,
+      "projects",
+      realpathSync(target.root).replace(/[^a-zA-Z0-9]/g, "-"),
+      sessionId,
+    );
     expect(launch.additionalWriteRoots).toEqual([
       join(configDirectory, "sessions"),
-      join(configDirectory, "projects"),
+      `${sessionPath}.jsonl`,
+      sessionPath,
     ]);
     // Made before the launch, because the launch cannot create them itself.
+    // The transcript is not: the runtime refuses a new session id whose
+    // transcript already exists.
     expect(readdirSync(configDirectory).sort()).toEqual(["projects", "sessions"]);
+    expect(existsSync(sessionPath)).toBe(true);
+    expect(existsSync(`${sessionPath}.jsonl`)).toBe(false);
+  });
+
+  it("grants a Plan turn no transcript when its arguments name no session", () => {
+    const target = fixture();
+    const configDirectory = realpathSync(target.environment.CLAUDE_CONFIG_DIR ?? "");
+    const confinement = recordingConfinement();
+
+    for (const args of [["sdk-test"], ["sdk-test", "--session-id", "../../settings"]]) {
+      const child = makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+      })({
+        command: target.binaryPath,
+        args,
+        cwd: target.root,
+        env: { ...target.environment, ANTHROPIC_API_KEY: "sk-test-not-a-real-key" },
+        signal: new AbortController().signal,
+      });
+      child.kill("SIGTERM");
+    }
+
+    for (const launch of confinement.prepared) {
+      expect(launch.additionalWriteRoots).toEqual([join(configDirectory, "sessions")]);
+    }
   });
 
   it("lets a subscription Plan turn rewrite its login file only where the login is a file", () => {
@@ -902,11 +942,27 @@ describe("Claude runtime confinement", () => {
       // what a later session loads is not.
       const stateRoot = realpathSync(target.environment.CLAUDE_CONFIG_DIR ?? "");
       mkdirSync(join(stateRoot, "skills"));
+      // This session in the runtime's folder for this checkout, another
+      // session in the same folder (which a checkout whose name sanitizes the
+      // same would also use), and another checkout's folder. Both `memory/`
+      // folders exist already, so the probe's write is refused for the file
+      // and not only for creating the folder.
+      const sessionId = randomUUID();
+      const ownProject = `projects/${realpathSync(target.root).replace(/[^a-zA-Z0-9]/g, "-")}`;
+      const otherProject = "projects/-Users-someone-another-checkout";
+      mkdirSync(join(stateRoot, ownProject, "memory"), { recursive: true });
+      mkdirSync(join(stateRoot, otherProject, "memory"), { recursive: true });
       const stateWrites = [
         "settings.json",
         ".claude.json",
         "skills/SKILL.md",
         "sessions/probe.json",
+        `${ownProject}/${sessionId}.jsonl`,
+        `${ownProject}/${sessionId}/subagent.jsonl`,
+        `${ownProject}/another-session.jsonl`,
+        `${ownProject}/memory/MEMORY.md`,
+        `${otherProject}/another-session.jsonl`,
+        `${otherProject}/memory/MEMORY.md`,
         "projects/probe.jsonl",
       ];
 
@@ -918,7 +974,8 @@ describe("Claude runtime confinement", () => {
         executionPolicy: "plan",
       })({
         command: probe,
-        args: [],
+        // The arguments the Agent SDK passes for a session Octant opened.
+        args: ["--session-id", sessionId],
         cwd: target.root,
         env: {
           ...target.environment,
@@ -947,7 +1004,18 @@ describe("Claude runtime confinement", () => {
       expect(output).toContain("state:skills/SKILL.md=refused");
       expect(existsSync(join(stateRoot, "settings.json"))).toBe(false);
       expect(output).toContain("state:sessions/probe.json=allowed");
-      expect(output).toContain("state:projects/probe.jsonl=allowed");
+      // The session's own transcript and folder are written; another
+      // session's transcript, in this checkout's folder or another's, and
+      // every `memory/` folder, which a later session reads as instructions,
+      // are not.
+      expect(output).toContain(`state:${ownProject}/${sessionId}.jsonl=allowed`);
+      expect(output).toContain(`state:${ownProject}/${sessionId}/subagent.jsonl=allowed`);
+      expect(output).toContain(`state:${ownProject}/another-session.jsonl=refused`);
+      expect(output).toContain(`state:${ownProject}/memory/MEMORY.md=refused`);
+      expect(output).toContain(`state:${otherProject}/another-session.jsonl=refused`);
+      expect(output).toContain(`state:${otherProject}/memory/MEMORY.md=refused`);
+      expect(output).toContain("state:projects/probe.jsonl=refused");
+      expect(existsSync(join(stateRoot, ownProject, "memory", "MEMORY.md"))).toBe(false);
       // The probe asks for a child process last, and no launch may run one.
       expect(output).not.toContain("exec=allowed");
       if (forks) {

@@ -85,7 +85,9 @@ export type DeviceAction =
   | { readonly kind: "start-recording" }
   | { readonly kind: "stop-recording" }
   /** An address the host checks again and confirms whole before the device opens it. */
-  | { readonly kind: "open-url"; readonly url: string };
+  | { readonly kind: "open-url"; readonly url: string }
+  /** The orientation the device is not showing now; the host sets it. */
+  | { readonly kind: "rotate"; readonly orientation: "portrait" | "landscape" };
 
 /**
  * What a person typed into Open URL, as the address the device would receive,
@@ -103,6 +105,20 @@ export function deviceOpenUrlFrom(input: string): string | undefined {
     return undefined;
   }
   return isDeviceOpenUrl(href) ? href : undefined;
+}
+
+/**
+ * The device's screen size turned to face the way a decoded frame does. The
+ * size a stream reports is read once, so after a rotation the pane follows
+ * the frames: taps are measured by it and Rotate reads it.
+ */
+export function screenFacing(
+  screen: { readonly width: number; readonly height: number },
+  frame: { readonly width: number; readonly height: number },
+): { readonly width: number; readonly height: number } {
+  return screen.width > screen.height === frame.width > frame.height
+    ? screen
+    : { width: screen.height, height: screen.width };
 }
 
 /** One sentence and at most one way to fix it. */
@@ -257,6 +273,7 @@ export function deviceProblemFor<Intent extends { readonly kind: string }>(
         "open-url": `${name} didn't open that address.`,
         "start-recording": `${name} didn't start recording.`,
         "stop-recording": `The recording of ${name} wasn't saved.`,
+        rotate: `${name} didn't rotate.`,
         run: `The app didn't launch on ${name}.`,
       };
       return {

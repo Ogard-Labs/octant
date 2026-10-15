@@ -533,6 +533,40 @@ describe("AppleWorkbenchPane", () => {
     });
   });
 
+  it("offers Rotate only when the host reports it, and asks the surface to rotate that Simulator", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const { vi } = await import("vitest");
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    const pane = (runtime: AppleRuntimeSnapshot) => (
+      <AppleWorkbenchPane
+        discovery={discovery}
+        liveFrame={liveFrame()}
+        onRun={onRun}
+        runtime={runtime}
+        status="ready"
+        variant="device"
+      />
+    );
+    const { rerender } = render(pane(runtimeSnapshot()));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: "Rotate" })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    rerender(pane({ ...runtimeSnapshot(), capabilities: { rotate: true } }));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Rotate" }));
+    expect(onRun).toHaveBeenCalledExactlyOnceWith({
+      kind: "rotate",
+      simulatorId: discovery.simulators[0]!.simulatorId,
+      orientation: "landscape",
+    });
+  });
+
   it("offers Repair input only for a disconnected-input refusal, and sends it only on a press", async () => {
     const { fireEvent, render, screen } = await import("@testing-library/react");
     const { vi } = await import("vitest");

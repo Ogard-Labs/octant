@@ -895,6 +895,15 @@ function appleActionRequest(input: {
         url: intent.url,
         timeoutMs: 30_000,
       };
+    case "rotate":
+      return {
+        ...base,
+        kind: "rotate",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        orientation: intent.orientation,
+        timeoutMs: 30_000,
+      };
   }
 }
 

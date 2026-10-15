@@ -352,7 +352,7 @@ export class AndroidToolchainService {
       emulators: this.#emulators,
       // What this host can do beyond the original actions; the pane offers
       // an item only once it is listed here.
-      capabilities: { openUrl: true, recordScreen: true },
+      capabilities: { openUrl: true, recordScreen: true, volume: true, rotate: true },
       recordings: [...this.#recordings.values()]
         .filter(
           (recording) =>
@@ -872,6 +872,41 @@ export class AndroidToolchainService {
         outcome,
         startedAt,
         [deviceOpenUrlDiagnostic(request.url, outcome === "succeeded" ? "completed" : outcome)],
+        result.cleanupUncertain ? "uncertain" : "complete",
+      );
+    }
+    if (request.kind === "rotate") {
+      if (request.orientation === undefined) {
+        return deniedEvidence(request, "orientation-required", startedAt, this.#options.now());
+      }
+      // Turning auto-rotate off first keeps the sensor from undoing the
+      // setting; the emulator keeps the chosen rotation until it is changed.
+      const settings = [
+        ["accelerometer_rotation", "0"],
+        ["user_rotation", request.orientation === "landscape" ? "1" : "0"],
+      ] as const;
+      let result: AndroidProcessResult | undefined;
+      for (const [key, value] of settings) {
+        result = await this.#command(
+          [adb, "-s", serial, "shell", "settings", "put", "system", key, value],
+          context,
+          request.timeoutMs,
+          signal,
+        );
+        if (!succeeded(result)) break;
+      }
+      if (result === undefined) throw new Error("rotate ran no command.");
+      const outcome = lostServerMidCommand(result) ? "interrupted" : outcomeFor(result);
+      return await this.#logged(
+        request,
+        outcome,
+        startedAt,
+        [
+          {
+            severity: "note",
+            message: `rotate to ${request.orientation} ${outcome === "succeeded" ? "completed" : outcome}`,
+          },
+        ],
         result.cleanupUncertain ? "uncertain" : "complete",
       );
     }
@@ -1572,6 +1607,8 @@ function androidKey(key: string): string | undefined {
   const keys: Record<string, string> = {
     home: "KEYCODE_HOME",
     lock: "KEYCODE_POWER",
+    "volume-up": "KEYCODE_VOLUME_UP",
+    "volume-down": "KEYCODE_VOLUME_DOWN",
     return: "KEYCODE_ENTER",
     enter: "KEYCODE_ENTER",
     escape: "KEYCODE_BACK",
@@ -1809,6 +1846,9 @@ function serveAvdCommand(request: AndroidEmulatorRequest): ServeAvdCommand | und
       return { kind: "direct", body: { action: "button", button: "back" } };
     }
     if (name === "lock") return { kind: "direct", body: { action: "button", button: "power" } };
+    if (name === "volume-up" || name === "volume-down") {
+      return { kind: "direct", body: { action: "button", button: name } };
+    }
     if (name === "enter" || name === "return") {
       return { kind: "direct", body: { action: "key", code: "Enter" } };
     }

@@ -131,17 +131,20 @@ export function evaluateAppleSimulatorRequest(
     (isAppleSimulatorInputKind(request.kind) ||
       isAppleSimulatorOpenInputKind(request.kind) ||
       request.kind === "open-url" ||
+      request.kind === "rotate" ||
       isAppleScreenRecordingKind(request.kind)) &&
     request.requestedBy === undefined
   ) {
     return { kind: "denied", reason: "actor-required" };
   }
   // Repairing input restarts the Simulator's home screen and closes its apps,
-  // and Open URL and screen recording are offered only in the pane. Only a
-  // person may ask for them; an agent or the host never does it for them.
+  // and Open URL, Rotate and screen recording are offered only in the pane.
+  // Only a person may ask for any of them; an agent or the host never does it
+  // for them.
   if (
     (request.kind === "repair-input" ||
       request.kind === "open-url" ||
+      request.kind === "rotate" ||
       isAppleScreenRecordingKind(request.kind)) &&
     request.requestedBy?.kind !== "local-user" &&
     request.requestedBy?.kind !== "remote-device"
@@ -150,6 +153,9 @@ export function evaluateAppleSimulatorRequest(
   }
   if (request.kind === "open-url" && request.url === undefined) {
     return { kind: "denied", reason: "url-required" };
+  }
+  if (request.kind === "rotate" && request.orientation === undefined) {
+    return { kind: "denied", reason: "orientation-required" };
   }
   const simulator = simulators.find((candidate) => candidate.simulatorId === request.simulatorId);
   if (simulator === undefined) return { kind: "denied", reason: "invalid-destination" };
@@ -166,6 +172,7 @@ export function evaluateAppleSimulatorRequest(
       request.kind === "screenshot" ||
       request.kind === "open-url" ||
       request.kind === "start-recording" ||
+      request.kind === "rotate" ||
       isAppleSimulatorInputKind(request.kind) ||
       isAppleSimulatorOpenInputKind(request.kind)) &&
     simulator.state !== "booted"

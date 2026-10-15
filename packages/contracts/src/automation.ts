@@ -1038,6 +1038,12 @@ export type AutomationQueryRequest = AutomationQuery;
 export const AutomationListResponse = Schema.Struct({
   kind: Schema.Literal("automation-list"),
   items: Schema.Array(AutomationSummary).pipe(Schema.maxItems(MAX_AUTOMATION_QUERY_LIMIT)),
+  /**
+   * Present when the host could not rebuild Automation history at start: the
+   * list is empty because nothing loaded, not because none exist, and nothing
+   * is scheduled.
+   */
+  historyUnavailable: Schema.optional(Schema.Literal(true)),
   nextCursor: Schema.optional(
     Schema.String.pipe(Schema.maxLength(MAX_AUTOMATION_QUERY_CURSOR_LENGTH)),
   ),

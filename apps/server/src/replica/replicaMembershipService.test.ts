@@ -643,6 +643,67 @@ describe("replica membership service", () => {
     ).toBe(2);
   });
 
+  it("commits a revocation to the slots it read, so an approval a stolen key writes into another one counts on no member", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const east = computer({ store: selected(store) });
+    await joinThrough(east, north, "Studio");
+    // South's slot 3 holds a file that is not South's record, and South
+    // writes on at 4. The listing shows 3, so the cut runs past it.
+    store.files.set(`${south.id()}/3.json`, new TextEncoder().encode("{}\n"));
+    await writeRecord(store, south.credentials, artifactEntry(south, 4));
+    const revoked = expectKind(
+      await north.service.execute({ kind: "revoke", subject: south.id() }),
+      "revoked",
+    );
+    expect(revoked.entry.cut).toBe(4);
+    expect(revoked.entry.kept).toEqual({
+      version: 1,
+      runs: [
+        { from: 1, to: 2 },
+        { from: 4, to: 4 },
+      ],
+    });
+    // Someone holding South's key and write access to the store replaces
+    // slot 3 with an approval of their own computer, which accepts it.
+    const intruder = computer({ store: selected(store) });
+    expectKind(
+      await intruder.service.execute({ kind: "write-join-request", displayName: "Intruder" }),
+      "join-requested",
+    );
+    store.files.delete(`${south.id()}/3.json`);
+    const approvalHash = await writeRecord(
+      store,
+      south.credentials,
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-approved",
+        origin: originOf(south, 3),
+        subject: intruder.id(),
+        subjectKey: intruder.projection.state().local?.publicKey ?? "",
+        subjectName: "Intruder",
+      }),
+    );
+    await writeRecord(
+      store,
+      intruder.credentials,
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-accepted",
+        origin: originOf(intruder, 2),
+        approver: south.id(),
+        approvalSequence: 3,
+        approvalHash,
+        founder: north.id(),
+      }),
+    );
+    for (const member of [north, east]) {
+      expectKind(await member.service.execute({ kind: "pull" }), "pulled");
+      expect(memberIds(member)).not.toContain(String(intruder.id()));
+      expect(cutOf(member, south.id())).toBe(4);
+    }
+  });
+
   it("shows the revocations a computer already wrote, so its cut can move before them", async () => {
     const store = memoryStore();
     const { north, south } = await joinedPair(store);

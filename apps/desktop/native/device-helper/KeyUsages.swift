@@ -9,12 +9,16 @@ struct KeyStroke: Equatable {
 enum HardwareButton: String {
     case home
     case lock
+    case volumeUp = "volume-up"
+    case volumeDown = "volume-down"
 
     /// Consumer-page usages the guest maps to its hardware buttons.
     var usage: (page: UInt64, code: UInt64) {
         switch self {
         case .home: return (0x0C, 0x40)
         case .lock: return (0x0C, 0x30)
+        case .volumeUp: return (0x0C, 0xE9)
+        case .volumeDown: return (0x0C, 0xEA)
         }
     }
 }
@@ -22,7 +26,7 @@ enum HardwareButton: String {
 enum KeyUsages {
     static let leftShift: UInt64 = 225
 
-    /// Named keys a request may carry. Home and Lock are buttons, not keys.
+    /// Named keys a request may carry. Home, Lock and Volume are buttons, not keys.
     static let named: [String: UInt64] = [
         "return": 40, "enter": 40, "escape": 41, "delete": 42, "backspace": 42,
         "tab": 43, "space": 44, "right": 79, "left": 80, "down": 81, "up": 82,

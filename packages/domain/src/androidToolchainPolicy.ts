@@ -90,6 +90,7 @@ export function evaluateAndroidEmulatorRequest(
     (isAndroidEmulatorInputKind(request.kind) ||
       isAndroidEmulatorOpenInputKind(request.kind) ||
       request.kind === "open-url" ||
+      request.kind === "rotate" ||
       isAndroidScreenRecordingKind(request.kind)) &&
     request.requestedBy === undefined
   ) {
@@ -98,10 +99,15 @@ export function evaluateAndroidEmulatorRequest(
   if (request.kind === "open-url" && request.url === undefined) {
     return { kind: "denied", reason: "url-required" };
   }
-  // Open URL and screen recording are offered only in the pane: a person
-  // asks for them, never an agent or the host on their behalf.
+  if (request.kind === "rotate" && request.orientation === undefined) {
+    return { kind: "denied", reason: "orientation-required" };
+  }
+  // Open URL, Rotate and screen recording are offered only in the pane: a
+  // person asks for them, never an agent or the host on their behalf.
   if (
-    (request.kind === "open-url" || isAndroidScreenRecordingKind(request.kind)) &&
+    (request.kind === "open-url" ||
+      request.kind === "rotate" ||
+      isAndroidScreenRecordingKind(request.kind)) &&
     request.requestedBy?.kind !== "local-user" &&
     request.requestedBy?.kind !== "remote-device"
   ) {
@@ -123,6 +129,7 @@ export function evaluateAndroidEmulatorRequest(
       request.kind === "launch" ||
       request.kind === "open-url" ||
       request.kind === "start-recording" ||
+      request.kind === "rotate" ||
       isAndroidEmulatorInputKind(request.kind) ||
       isAndroidEmulatorOpenInputKind(request.kind)) &&
     emulator.state !== "booted"

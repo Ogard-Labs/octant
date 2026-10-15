@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { REMOTE_SERVER_PROXY_RELAYED, REMOTE_SERVER_PROXY_RELAYED_HEADER } from "@octant/contracts";
 import {
   createRemoteRouteHandler,
   createRemoteRoutePolicy,
@@ -692,14 +693,78 @@ describe("remote route policy", () => {
     expect(response.status).toBe(200);
     expect(serverProxy).toHaveBeenCalledOnce();
     expect(authenticatedProduct).not.toHaveBeenCalled();
-    expect((await route(request("/api/server-proxy/anything", { method: "POST" }))).status).toBe(
-      404,
-    );
+    // Every other path under the prefix is the relay, still only the proxy
+    // surface's to answer.
+    await route(request("/api/server-proxy/anything", { method: "GET" }));
+    expect(serverProxy).toHaveBeenCalledTimes(2);
+    expect(authenticatedProduct).not.toHaveBeenCalled();
     expect(
       listDefaultRemoteAuthenticatedRoutes().some((candidate) =>
         candidate.match.path.startsWith("/api/server-proxy"),
       ),
     ).toBe(false);
+  });
+
+  it("passes a dev server's relayed response with its own headers and no size cap", async () => {
+    const page = "x".repeat(1_024);
+    const serverProxy = vi.fn(
+      async () =>
+        new Response(page, {
+          headers: {
+            "content-security-policy": "script-src 'self'",
+            [REMOTE_SERVER_PROXY_RELAYED_HEADER]: REMOTE_SERVER_PROXY_RELAYED,
+          },
+        }),
+    );
+    const { route } = handler({ serverProxy });
+    const response = await route(request(`/api/server-proxy/rsg_${"ab".repeat(32)}/page`));
+    expect(response.headers.get("content-security-policy")).toBe("script-src 'self'");
+    expect(response.headers.get("strict-transport-security")).toBeNull();
+    expect(await response.text()).toBe(page);
+  });
+
+  it("keeps the listener's headers and budget on the host's own answers on the relay route", async () => {
+    const serverProxy = vi.fn(async () => new Response("y".repeat(1_024), { status: 404 }));
+    const { route } = handler({ serverProxy });
+    const response = await route(request(`/api/server-proxy/rsg_${"ab".repeat(32)}/page`));
+    expect(response.headers.get("strict-transport-security")).not.toBeNull();
+    expect((await response.text()).length).toBe(32);
+  });
+
+  it("gives the relay route its own body budget and any media type", async () => {
+    const serverProxy = vi.fn(async (relayed: Request) =>
+      Response.json({ bytes: (await relayed.arrayBuffer()).byteLength }),
+    );
+    const { route } = handler({ serverProxy });
+    const path = `/api/server-proxy/rsg_${"ab".repeat(32)}/upload`;
+    const upload = await route(
+      request(path, {
+        method: "POST",
+        headers: { "content-type": "multipart/form-data; boundary=x" },
+        body: "z".repeat(1_024),
+      }),
+    );
+    expect(upload.status).toBe(200);
+    expect(serverProxy).toHaveBeenCalledOnce();
+    const tooLarge = await route(
+      request(path, {
+        method: "POST",
+        headers: {
+          "content-type": "text/plain",
+          "content-length": String(8 * 1_024 * 1_024 + 1),
+        },
+      }),
+    );
+    expect(tooLarge.status).toBe(413);
+    // The grants route keeps its own small JSON budget.
+    const grants = await route(
+      request("/api/server-proxy/grants", {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: "{}",
+      }),
+    );
+    expect(grants.status).toBe(415);
   });
 
   it("counts proxy requests apart from every other surface's", () => {

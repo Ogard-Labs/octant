@@ -34,6 +34,7 @@ import {
   createRemoteRoutePolicy,
   REMOTE_CANVAS_DESIGN_PAGE_ROUTE_ID,
   REMOTE_PROTOCOL_ROUTE_IDS,
+  REMOTE_SERVER_PROXY_RELAY_MAX_BODY_BYTES,
   type RemoteRouteDefinition,
   type RemoteRouteFacts,
 } from "../remoteRoutePolicy";
@@ -299,6 +300,9 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
         config: generation.config.listener,
         fetch: generation.services.gatewayFetch,
         serve: options.serve,
+        // The largest body any route takes is a relayed dev-server upload; every
+        // other route keeps its own smaller budget in the route policy.
+        maxRequestBodySize: REMOTE_SERVER_PROXY_RELAY_MAX_BODY_BYTES,
         ...(generation.config.listener.admissionLimits === undefined
           ? {}
           : { admissionLimits: generation.config.listener.admissionLimits }),
@@ -650,6 +654,7 @@ function assembleServices(
         : handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
     authenticatedProduct: async (request, route, facts) =>
       handleAuthenticatedRoute(request, route, facts, auth),
+    hasServerProxySession: (request) => auth.hasServerProxySession(request),
     serverProxy: async (request, route, facts) =>
       facts === undefined
         ? protocolReject(403)

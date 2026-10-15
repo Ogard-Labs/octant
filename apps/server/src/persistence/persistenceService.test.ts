@@ -93,12 +93,16 @@ describe("PersistenceLive", () => {
   it("answers readiness gates from one inspection and re-inspects only on request", async () => {
     const directory = temporaryDirectory();
     let integrityChecks = 0;
+    let clockMs = Date.parse(now);
     const counts = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const persistence = yield* Persistence;
           const afterStartup = integrityChecks;
           persistence.status();
+          // A host stays up for hours; the gates must not fall back to a full
+          // inspection once the startup one is a few seconds old.
+          clockMs += 60 * 60 * 1000;
           persistence.status();
           const afterGates = integrityChecks;
           persistence.status({ fresh: true });
@@ -107,7 +111,7 @@ describe("PersistenceLive", () => {
           Effect.provide(
             makePersistenceLive({
               dataDirectory: directory,
-              clock: () => now,
+              clock: () => new Date(clockMs).toISOString(),
               openConnection: (path) => {
                 const connection = openSqlite(path);
                 return new Proxy(connection, {

@@ -255,6 +255,54 @@ describe("artifact bundle contract", () => {
     expect(encoded.cut).toBe(4);
     expect(Object.keys(encoded)).toEqual(["format", "kind", "origin", "subject", "cut"]);
   });
+
+  it("encodes the slots a revocation keeps in one canonical form, and refuses any other", () => {
+    const fields = {
+      format: REPLICA_ENTRY_FORMAT,
+      kind: "revocation",
+      origin: origin(3),
+      subject: ids.otherVersion,
+      cut: 6,
+    } as const;
+    const runs = [
+      { from: 1, to: 3 },
+      { from: 5, to: 6 },
+    ];
+    const revocation = decodeReplicaMembershipEntry({ ...fields, kept: { version: 1, runs } });
+    const text = encodeReplicaEntry(revocation);
+    expect(encodeReplicaEntry(decodeReplicaEntryText(text))).toBe(text);
+    expect(JSON.parse(text)).toMatchObject({ cut: 6, kept: { version: 1, runs } });
+    for (const kept of [
+      // A run past the cut, runs that touch or overlap, out of order, or
+      // backwards, and an encoding version this host does not know.
+      { version: 1, runs: [{ from: 1, to: 7 }] },
+      {
+        version: 1,
+        runs: [
+          { from: 1, to: 3 },
+          { from: 4, to: 6 },
+        ],
+      },
+      {
+        version: 1,
+        runs: [
+          { from: 1, to: 3 },
+          { from: 3, to: 6 },
+        ],
+      },
+      {
+        version: 1,
+        runs: [
+          { from: 5, to: 6 },
+          { from: 1, to: 3 },
+        ],
+      },
+      { version: 1, runs: [{ from: 3, to: 1 }] },
+      { version: 2, runs },
+    ]) {
+      expect(() => decodeReplicaMembershipEntry({ ...fields, kept })).toThrow();
+    }
+  });
 });
 
 describe("replica entry contract", () => {

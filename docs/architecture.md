@@ -553,7 +553,9 @@ runs only when a person requests it. **Record screen** starts and stops a time-l
 the video is stored as evidence under the screenshot rules and starting is an
 effect confirmed per recording. **Open URL** opens a credential-free
 `http`/`https` address a person asked for; it is an effect confirmed per
-address (Allow input never covers it), and evidence keeps only the origin. Pane states, discovery, capture, input
+address (Allow input never covers it), and evidence keeps only the origin. **Rotate** turns the device between portrait
+and landscape for a person who asked; it is an effect confirmed on its own
+(Allow input never covers it). Pane states, discovery, capture, input
 delivery, keyboard layouts, and the managed streaming tools are specified in
 [Device workbench](design/device-workbench.md).
 
@@ -868,16 +870,24 @@ the managed child writing it, is marked at that moment, the store first appends
 `canvas.outside-content-carried@1` (aggregate `canvas-outside-content`, one
 event per writer, naming the writer and the first marked version) in the same
 journal unit as the version, so no moment exists at which the Canvas holds that
-text unmarked; a mark that cannot be read or recorded refuses the version. This
+text unmarked; a mark that cannot be read or recorded refuses the version
+(a create, revise, board drag, refresh, or adopted version is refused with
+`unavailable` and a message to try again, never reported as a race). This
 covers an agent's create and revise, a child's, a hand-off document, a person's
 edit, and a version taken from another computer, which marks the thread it
-lands in first (`Synced from …`). The Canvas tool's `read` and `preview` are how
+lands in first (`Synced from …`). A version taken from another computer is
+recorded under its own author, an agent whose id is the version's id, and the
+Canvas carries that author whenever the thread it lands in is marked, so a
+person's clear of that thread never makes the synced text the thread's own. A version taken before it recorded its own author is named the same way at host start, from the thread's journaled ingestion of it (`replica-artifact:<canvas>:<version>`), which a clear does not erase. The Canvas tool's `read` and `preview` are how
 another thread's model reaches a Canvas (any Canvas of its Project, by id), so
 both mark the reader (label `canvas`, content reference `canvas-<canvas>`)
 after the Canvas is read and before anything from it is returned, when the
 Canvas records a writer other than the reader or the thread it belongs to is
 marked now; the second rule covers a Canvas written before marks were recorded
-at write time. A reader that cannot be marked is not given the Canvas. A child
+at write time. A reader that cannot be marked is not given the Canvas. Every mode follows this
+rule, Chat included: only a `read` or `preview` that returns content from a
+marked Canvas marks the reader, so `describe`, a create, a revise, and a read
+of a clean Canvas leave the thread unmarked. A child
 is marked under its run, as its other tools are. A writer reading its own
 Canvas passes on nothing. The mark recorded at write time is the Canvas's own:
 a person's clear on the writer reviews what that thread read, not every thread
@@ -1690,8 +1700,8 @@ flowchart LR
   checkpoint describes the previous process rather than this one. It names
   the aggregate types it applies, and that replay reads only those rows.
   Automations are also in memory; the host rebuilds them with their own
-  hydration after catch-up instead, which leaves them empty rather than
-  partial when it cannot finish (see the next item).
+  hydration after catch-up instead, which leaves them empty and reported
+  unloaded rather than partial when it cannot finish (see the next item).
 - **Startup hydration reads a store's own rows.** Every in-memory store and
   projection rebuilds at start from its own aggregate types, read in journal
   order through the (type, sequence) index, so no store reads, decodes, or
@@ -1708,9 +1718,25 @@ flowchart LR
     it.
   - Work research keeps a 100,000-row cap; past it the host starts and
     research reports unavailable.
-  - Automations keep a 100,000-row cap; past it the host currently starts
-    with no automations and no warning (tracked as a follow-up).
+  - Automations apply rows one batch at a time under the 1,000,000-row cap.
+    Past it the host still starts, but the Automation list reports that
+    history could not be loaded (the Automation Center says so and that
+    nothing is scheduled), Automation commands are refused, and the
+    scheduler does not start, so nothing fires against history the host never
+    read. The journal is untouched; the state clears on a start that can read
+    it.
   - Work requests and the uncapped stores read all of their own rows.
+- **Reads while a window is open stay off the full journal.** Every service
+  checks that the store is usable before each read, and that check answers
+  from the latest store inspection (the integrity check plus a decode of every
+  journal row): the one startup ran, or a newer one host diagnostics asked
+  for. It never starts one itself. A Code thread's whole operation history,
+  which the board, the sidebar's pull-request join and child observations
+  read every few seconds, is read through a (type, thread, sequence) index
+  and kept decoded between reads: a later read decodes only the rows appended
+  since, and a thread whose slice shrank (a purge) is read afresh. The kept
+  histories are shared by every reader of the journal and bounded at 100,000
+  frames across threads, least recently read dropped first.
 - **Migrations.** Ordered, forward-only, checksum-verified, applied in
   transactions before the server reports ready. A changed checksum or an
   unknown newer migration fails closed; a store backup is taken before a
@@ -5178,12 +5204,12 @@ mechanisms are:
   because Bubblewrap would create it in the person's own Project (see
   [Extensions and skills](#extensions-and-skills)).
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                             |
-  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                           |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only the account's runtime folders |
-  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                          |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                             |
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                                                        |
+  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                                                      |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder |
+  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                                                     |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                                        |
 
   Codex is unwrapped because its app-server is leased once per provider
   instance: `providerRuntimeRegistry` keys runtimes by `instanceId`, so one
@@ -5210,30 +5236,49 @@ mechanisms are:
   itself.
   A confined Claude Plan launch reads the assigned leaf of that account's
   state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
-  writes only two folders in it, `sessions/` and `projects/`, plus the
-  launch temporary directory. Octant creates the two folders before the
-  launch. Measured on macOS 27 with Claude Code 2.1.299, one Plan turn
-  wrote session records in `sessions/`, its transcript in `projects/`, and
+  writes only `sessions/` and its own session in `projects/`: the
+  transcript `projects/<checkout>/<session>.jsonl` and the session's folder
+  `projects/<checkout>/<session>/` (subagent transcripts, saved tool
+  results), plus the launch temporary directory. `<session>` is the UUID
+  Octant opens the session under (`--session-id`) or resumes
+  (`--resume`); a launch whose arguments name neither gets no transcript.
+  `<checkout>` is the runtime's own name for the canonical working
+  directory: every character outside `[a-zA-Z0-9]` becomes `-`, and a name
+  over 200 characters is cut there and gains a hash of the full path (read
+  from Claude Code 2.1.300). That name is not unique (`/tmp/team-project`
+  and `/tmp/team/project` share one), so the grant is the session and not
+  the folder: other sessions' transcripts, in this folder or another, and
+  every `memory/` folder, which a later session reads as instructions, stay
+  read-only. Octant creates `sessions/` and the session's folder before the
+  launch, but not the transcript, because the runtime refuses a new
+  session id whose transcript already exists. Seatbelt grants the
+  transcript path before it exists. Bubblewrap binds only what exists, so
+  on Linux a new session's transcript is refused and a resumed one's is
+  written. Measured unconfined with Claude Code 2.1.300 and a refused API
+  key (no model call), a new session wrote only its transcript in that
+  folder, and a resume appended to the same file in place. Measured on macOS 27 with Claude Code 2.1.299, one Plan turn
+  wrote session records in `sessions/`, its transcript as
+  `projects/<checkout>/<session>.jsonl`, and
   `.claude.json` (with a lock, a temporary file and a copy in `backups/`)
   and `.last-cleanup` at the top of the leaf. The top-level writes are
   refused, and the runtime carries on without them: a second measured
-  Plan turn under this grant answered and completed while its
+  Plan turn under the earlier grant of all of `projects/` answered and
+  completed while its
   `.claude.json` lock and temporary file and its `.last-cleanup` were
   denied, its transcript landed in `projects/`, and the sandbox refused
-  nothing else that the first turn had been allowed. That keeps a Plan
+  nothing else that the first turn had been allowed. No real turn has run
+  yet under the narrower session grant. That keeps a Plan
   launch from writing what a later session outside this sandbox would
   load: `settings.json` and its hooks, `.claude.json` and its per-project
-  MCP servers, `skills/`, `plugins/`, `agents/` and `commands/`. An
+  MCP servers, `skills/`, `plugins/`, `agents/`, `commands/`, and any
+  `memory/` folder. An
   earlier smoke test planted a `SessionStart` hook in `settings.json` from a
   Plan launch that was allowed to run Git. A subscription login kept in a
   file rather than the macOS Keychain, as on Linux, is the one file also
   writable, `.credentials.json` in the secure-storage directory, so the
   runtime can save a refreshed login (maintainer decision, 2026-10-14).
   The cost is that a Plan launch there could replace the stored login. An
-  API-key launch and a macOS launch get no such file. `projects/` stays writable because resume
-  reads transcripts from there, so other sessions' transcripts and the
-  per-project `memory/` folders beside them, which a later session also
-  reads, stay writable too.
+  API-key launch and a macOS launch get no such file.
   The checkout must not be the leaf or a granted folder, sit inside
   one, or be an ancestor of one, so Plan cannot reopen the project
   through the account grant.
@@ -5689,11 +5734,13 @@ mechanisms are:
     DER SubjectPublicKeyInfo. The existing `certificateFingerprint` hashes the
     PEM text and is not a pin. Only the loopback administration status
     carries the pin; `octant listener status` prints it.
-  - **No client pins yet.** A self-made listener is served, but no Octant
-    client reads a pairing code or takes or checks a pin, and a client that
-    relies on platform trust refuses the certificate, so only a pasted
-    certificate can be reached by a client today. Settings still asks for a
-    certificate and key, and `octant listener`'s usage line still names them.
+  - **No app pins yet.** A self-made listener is served, and the client
+    runtime holds the trust rule below, but neither the desktop app nor the
+    phone app reads a pairing code or connects through a pinned transport
+    yet, and a client that relies on platform trust refuses the certificate,
+    so only a pasted certificate can be reached by a client today. Settings
+    still asks for a certificate and key, and `octant listener`'s usage line
+    still names them.
   - **No browser link.** A browser decides whether to trust the listener
     before any Octant page loads and cannot check a certificate the host made
     itself, so Settings offers no browser pairing link for a self-made
@@ -5733,12 +5780,74 @@ mechanisms are:
     parsed address, never its text prefix. A name is judged by its spelling
     only, so the reader cannot prove a named origin is private: any
     `*.ts.net` name passes, and public Tailscale Funnel names are `*.ts.net`
-    too. The plan's client rule closes that before a client sends anything.
-    The builder refuses the same contents, so the host never shows a code a
-    client would refuse.
-- **Adding a computer in one step.** Partly built: the host certificate and
-  pairing code above. The client pin rule, reading the code on each client,
-  and the rest are planned in [the plan](plans/one-step-pairing.md).
+    too. The client trust rule below closes that before a client sends
+    anything. The builder refuses the same contents, so the host never shows
+    a code a client would refuse.
+  - **Client trust rule.** The client runtime holds one rule every client
+    that reaches another host as a paired device applies; each platform's TLS
+    layer gathers the facts and sends no request bytes until the rule
+    accepts.
+    - **What a client keeps.** Each origin's pairing record (the device key's
+      metadata and the client host registry) holds that origin's trust:
+      `platform`, or `pinned` with a `sha256-` pin taken only from a pairing
+      code. A record from before pins, or for a pasted certificate, holds
+      `platform`. A stored trust that cannot be read is never read as a
+      weaker one: the device-key record stops resolving, so the device pairs
+      again, and the host registry refuses to load. Replacing the device key
+      keeps the origin's trust.
+    - **Certificate.** A pinned origin passes only when the served leaf
+      certificate's SubjectPublicKeyInfo hashes to the pin. That check
+      replaces platform chain, name, and date validation and never falls back
+      to it, so a certificate a public authority issued for the same name
+      does not pass, and the certificate's dates are not checked: anyone
+      holding the key can make a fresh certificate, and a device with a wrong
+      clock would be locked out. An origin with no pin passes only on
+      platform validation, so it never accepts a self-made certificate. A pin
+      naming another hash is refused as needing a newer Octant.
+    - **Address.** Before connecting, a client resolves the origin's name and
+      refuses unless every address it resolves to is an IP address the
+      listener address classifier calls private LAN or Tailscale; one public
+      answer refuses the whole name. It connects to the judged address, not
+      the name, and judges the connected peer address the same way before the
+      TLS handshake starts. An IPv4-mapped IPv6 form or a zone is refused, not
+      unwrapped, and so is a zero-padded IPv4 address such as `010.0.0.1`,
+      which a URL parser and the system resolver read as octal; the listener
+      address classifier refuses it everywhere for the same reason.
+    - **Staged trust.** An origin's trust may carry a staged next trust and
+      the end of its window. Until then either trust passes, and the first
+      connection that passes only the staged one makes it current and drops
+      the old; after it, only the current trust passes. A window ending more
+      than 30 days after the client's now is ignored, since the host never
+      announces a longer one. Nothing records a staged trust yet: the host's
+      announcement route is planned.
+    - **Copy.** A pin mismatch says "This isn't the computer you paired with:
+      its security key has changed. Octant stopped before sending anything.
+      If its key was replaced on purpose, pair again from that computer."; a
+      certificate platform validation refuses says "Octant couldn't verify
+      this computer's certificate. Pair with the full pairing code or QR code
+      from that computer."; an address outside the private network says
+      "This computer's address isn't on a private network or Tailscale, so
+      Octant stopped before sending anything."
+    - **Node.** The Node implementation, a module the client runtime's
+      barrel does not export so browser and phone bundles never load it,
+      resolves and judges the address, dials it, judges the peer, and runs
+      the handshake with Node's own refusal off, so the rule decides; it
+      hands over the socket only when the rule accepts. It requires TLS 1.3,
+      because TLS 1.2 renegotiation could present a second certificate after
+      the judged one, gives a handshake 10 seconds, and closes the connection
+      when the judgement itself fails. For platform trust it also checks the
+      certificate names the origin's host or address itself, since an IP
+      origin carries no server name. A name that does not resolve, an
+      address that does not answer, and a failed handshake come back as a
+      failure value, not a refusal, and nothing was sent. Only its tests can replace name
+      resolution, dialling, or trust roots. No other client runtime or CLI
+      source turns platform validation off or accepts every server name, and
+      a test refuses any that does. No `octant` command connects to another
+      host yet, so only tests use it.
+- **Adding a computer in one step.** Partly built: the host certificate,
+  pairing code, and client trust rule above. Reading the code and pinning on
+  the desktop and phone apps, and the rest, are planned in
+  [the plan](plans/one-step-pairing.md).
 - **Provider keys on a host without the desktop app.** _Designed, not yet
   built._ The desktop saves an endpoint's API key or bearer token over
   native IPC from its own renderer, so a browser client — local or paired —
@@ -5855,7 +5964,9 @@ mechanisms are:
   Membership is derived from the valid records a host holds and the founder it
   pinned; an entry counts only when its writer is admitted through a chain of
   signed approvals and acceptances from that founder and the entry sits at or
-  before any cut on it. A new computer joins by writing a join request into
+  before any cut on it and, when a revocation names the slots its writer read
+  as the subject's own (`kept`), in every such revocation's kept slots, so a
+  slot the revoker did not read as the subject's stays closed to its key. A new computer joins by writing a join request into
   the store, signed over the time it was written; a request older than a day
   is not offered for approval. A member in good standing approves it by name,
   and only the store's own copy of the request can be approved, not a copy a
@@ -5881,8 +5992,8 @@ mechanisms are:
   (`apps/docs/guide/sync-artifacts.md`) say so before sync is turned on.
   Opt-in encryption of replicas is not this rule. A replica import appends
   versions to this journal and adopts nothing else. Membership accepts an
-  entry signed by an admitted instance's device signing key, within its cut,
-  as authentic. It does not delegate host authority between hosts.
+  entry signed by an admitted instance's device signing key, within its cut
+  and its kept slots, as authentic. It does not delegate host authority between hosts.
 - **Replica store endpoints.** A bucket endpoint must be `https` with no path,
   query, or user info, and must not be link-local — IPv4 `169.254.0.0/16` or
   IPv6 `fe80::/10`, literal or IPv4-mapped — where cloud instance metadata
@@ -5980,6 +6091,58 @@ mechanisms are:
     purged, and when Octant stops its server. A thread purge erases the grant's
     records with the thread's. Nothing erases a device's records, so a revoked
     device's grant history stays with its revoke.
+  - **Relay.** `/api/server-proxy/<grant id>/<path>` relays one request to the
+    grant's dev server. Each carries the proxy session's signed envelope, with
+    its body (at most 8 MiB, any media type, 413 above) hashed into the proof.
+    The proof signs the canonical query (sorted and normalized) while the dev
+    server gets the query as the page wrote it; the two differ only in order
+    and percent-encoding, which a request carried over TLS with a single-use
+    nonce gives no one else a chance to choose. A proxy request whose cookie
+    names no live proxy session, or one whose device no longer stands, has at
+    most 4 KiB of its body read, 413 above, and one source holds at most four
+    such requests at once (429). Before every request, which gets its
+    own upstream connection, the host checks again: the grant is open and bound
+    to this device, credential generation, and proxy session; Code is on; the
+    thread is active and this device can still read it; and the process the
+    grant was minted for (pid, untruncated name, and port, from one `lsof`
+    narrowed to the port) still holds the port under an Octant terminal, and
+    no other process listens where it could answer the loopback address the
+    host connects to (a wildcard counts for both families, and an IPv4-mapped
+    bind for the IPv4 loopback). The check and the connection are two steps:
+    a server that exits and whose port another process binds in that gap
+    (milliseconds) receives that one request, and the next request's check
+    closes the grant; for an HTTPS dev server the pin refuses it first. The
+    host does not confirm the accepting process per connection, since that is
+    a host query per request and a socket still waiting to be accepted is not
+    yet visible to it. A
+    request never relies on a check that began before it arrived; a burst
+    shares the running check's successor. A lost check closes the grant
+    (`server-stopped`, `server-changed-hands`, `thread-archived`,
+    `thread-unreadable`, `code-disabled`) and the request is refused
+    `grant-closed`, the same answer as a grant that never existed or belongs
+    to another device; a check the host could not make answers 503 and keeps
+    the grant. The host connects only to the grant's `127.0.0.1` or `[::1]`
+    endpoint, within five seconds or `server-unreachable`, follows no redirect,
+    and sends the request's path and query with `Host: localhost:<port>`, an
+    `Origin` (admitted only as the listener's own) as the dev server's origin, a
+    `Referer` under the grant's path as that path on the dev server (any other
+    is dropped), and `Connection: close`. Hop-by-hop headers, `x-octant-`
+    headers, fetch metadata, forwarding claims, and cookies named `octant-`
+    (after any `__Secure-` or `__Host-` prefix) never cross; the page's other
+    cookies and `Authorization` do. The response comes back with hop-by-hop
+    headers, `Content-Length`, `x-octant-` headers, `Clear-Site-Data`,
+    `Alt-Svc`, and `Set-Cookie` for an `octant-` cookie removed, marked `x-octant-server-proxy: relayed` so the
+    device can tell it from the host's own answers, without the listener's
+    security headers or response budget, streamed with no size cap and closed
+    after five minutes without a byte. An HTTPS dev server's certificate is not
+    checked against a trust store; the first one under a grant is pinned for
+    its life, and another closes the grant as `server-changed-hands`. Each
+    request is registered under its grant before connecting, and holds its
+    place in the device's proxy budget until its response ends; closing the
+    grant closes the upstream socket and cuts the response before the call
+    that closed it returns. An upgrade request is refused `upgrade-refused`,
+    and `OPTIONS` is not relayed. The listener admits bodies up to the relay's
+    8 MiB; every other route keeps its own budget.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and

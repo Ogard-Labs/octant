@@ -1,4 +1,10 @@
-import { CanvasId, CanvasVersionId, type CanvasVersion } from "@octant/contracts";
+import {
+  CanvasId,
+  CanvasVersionId,
+  decodeCanvasActor,
+  type CanvasActor,
+  type CanvasVersion,
+} from "@octant/contracts";
 import { Schema } from "effect";
 import {
   recordReaderMark,
@@ -66,6 +72,21 @@ export function canvasOutsideContentWriters(
     }
     if (page.length < WRITERS_PAGE) return writers;
   }
+}
+
+/**
+ * The author recorded for a version adopted from another computer: an agent
+ * whose id is the version's own id. It is never a thread, so no reader is
+ * ever "the writer" of a synced version, and a person's Clear on the thread
+ * it landed in cannot exempt that thread from reading it.
+ */
+export function replicaVersionAuthor(versionId: CanvasVersionId): CanvasActor {
+  return decodeCanvasActor({ kind: "agent", actorId: String(versionId) });
+}
+
+/** Whether the writer id names a synced version's own author rather than a thread. */
+export function isReplicaWriter(version: CanvasVersion, writerId: string): boolean {
+  return writerId === String(version.versionId);
 }
 
 /**
