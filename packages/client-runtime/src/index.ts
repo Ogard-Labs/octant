@@ -65,6 +65,7 @@ export * from "./remoteProductMutations";
 export * from "./remoteShellHealth";
 export * from "./remoteSurfaceMatrix";
 export * from "./remotePairingClient";
+export * from "./appPairingCode";
 export * from "./remoteListenerTrust";
 export * from "./remoteSessionBridge";
 export * from "./connectionSupervisor";

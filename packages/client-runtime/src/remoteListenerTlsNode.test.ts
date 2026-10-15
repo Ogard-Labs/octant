@@ -2,6 +2,7 @@ import { createHash, X509Certificate } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { connect as connectTcp, createServer as createTcpServer, type Socket } from "node:net";
 import { dirname, join } from "node:path";
+import { createServer as createHttpsServer } from "node:https";
 import { createServer as createTlsServer } from "node:tls";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +20,11 @@ import {
   SELF_MADE_KEY,
   TEST_PLATFORM_ROOT,
 } from "./remoteListenerTlsNode.test-certs";
-import { listenerPinFromSha256, type ListenerOriginTrust } from "./remoteListenerTrust";
+import {
+  listenerPinFromSha256,
+  ListenerTrustRefused,
+  type ListenerOriginTrust,
+} from "./remoteListenerTrust";
 
 const HOSTNAME = "listener.octant.test";
 const NOW = Date.parse("2026-10-15T12:00:00.000Z");
@@ -366,6 +371,92 @@ describe("the address a listener connection reaches", () => {
     });
 
     expect(connection).toEqual({ status: "refused", reason: "not-private-address" });
+  });
+});
+
+describe("a fetch held to a listener's trust", () => {
+  const ORIGIN = "https://listener.example-tailnet.ts.net:8443";
+
+  /** An HTTPS listener on loopback that answers every request and records what reached it. */
+  async function startHttpsListener() {
+    const requests: string[] = [];
+    const server = createHttpsServer({ cert: SELF_MADE_CERT, key: SELF_MADE_KEY }, (req, res) => {
+      let body = "";
+      req.on("data", (chunk: Buffer) => (body += chunk.toString("utf8")));
+      req.on("end", () => {
+        requests.push(`${req.method} ${req.url} host=${req.headers.host} ${body}`);
+        res.writeHead(201, { "content-type": "application/json", "x-octant-test": "yes" });
+        res.end(JSON.stringify({ answered: true }));
+      });
+    });
+    server.on("tlsClientError", () => undefined);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("No listener port.");
+    closers.push(
+      () =>
+        new Promise((resolve) => {
+          server.closeAllConnections();
+          server.close(() => resolve());
+        }),
+    );
+    return { port: address.port, requests };
+  }
+
+  /** Dials loopback but reports the Tailscale peer the judged address names. */
+  function fetchFor(port: number, trust: ListenerOriginTrust) {
+    return testOnlyListenerTls.createListenerFetchOver(
+      { origin: ORIGIN, trust, now: () => NOW },
+      {
+        resolve: async () => ["100.101.102.103"],
+        dial: async () => {
+          const socket = await dialLoopback(port);
+          Object.defineProperty(socket, "remoteAddress", { value: "100.101.102.103" });
+          return socket;
+        },
+        handshakeTimeoutMs: 5_000,
+      },
+    );
+  }
+
+  it("carries a request to a listener serving the pinned key and reads its answer", async () => {
+    const listener = await startHttpsListener();
+    const fetch = fetchFor(listener.port, pinned(SELF_MADE_PIN));
+
+    const response = await fetch(`${ORIGIN}/api/remote/pairing?x=1`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ticketId: "t" }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.headers.get("x-octant-test")).toBe("yes");
+    await expect(response.json()).resolves.toEqual({ answered: true });
+    expect(listener.requests).toEqual([
+      `POST /api/remote/pairing?x=1 host=listener.example-tailnet.ts.net:8443 {"ticketId":"t"}`,
+    ]);
+  });
+
+  it("throws the refusal before a listener serving another key reads any request", async () => {
+    const listener = await startHttpsListener();
+    const fetch = fetchFor(listener.port, pinned(PLATFORM_TRUSTED_PIN));
+
+    const attempt = fetch(`${ORIGIN}/api/remote/hello`);
+
+    await expect(attempt).rejects.toBeInstanceOf(ListenerTrustRefused);
+    await expect(attempt).rejects.toMatchObject({ reason: "pin-mismatch" });
+    expect(listener.requests).toEqual([]);
+  });
+
+  it("refuses a URL on any origin but its own without connecting", async () => {
+    const dial = vi.fn(dialLoopback.bind(undefined, 1));
+    const fetch = testOnlyListenerTls.createListenerFetchOver(
+      { origin: ORIGIN, trust: pinned(SELF_MADE_PIN) },
+      { resolve: async () => ["100.101.102.103"], dial, handshakeTimeoutMs: 5_000 },
+    );
+
+    await expect(fetch("https://100.101.102.104:8443/api/remote/hello")).rejects.toThrow(TypeError);
+    expect(dial).not.toHaveBeenCalled();
   });
 });
 

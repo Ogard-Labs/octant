@@ -6,12 +6,15 @@
 
 import { createHash, type X509Certificate } from "node:crypto";
 import { lookup } from "node:dns/promises";
+import { request as httpRequest, type IncomingMessage } from "node:http";
 import { connect as connectTcp, isIP, type Socket } from "node:net";
+import { Readable } from "node:stream";
 import { connect as connectTls, type TLSSocket } from "node:tls";
 import {
   judgeListenerAddresses,
   judgeListenerCertificate,
   listenerPinFromSha256,
+  ListenerTrustRefused,
   type ListenerCertificateJudgement,
   type ListenerOriginTrust,
   type ListenerTrustRefusal,
@@ -78,7 +81,93 @@ export function connectListener(options: ListenerConnectionOptions): Promise<Lis
 export const testOnlyListenerTls = {
   connectListenerOver,
   secureListenerSocket,
+  createListenerFetchOver,
 } as const;
+
+/**
+ * A `fetch` that reaches one listener origin, each request over its own
+ * connection that passed the origin's trust. A refusal throws
+ * `ListenerTrustRefused` before any request byte is sent; an unreachable
+ * listener throws a `TypeError`, as the platform `fetch` does. It never
+ * follows a redirect and refuses a URL on any other origin.
+ */
+export function createListenerFetch(options: ListenerConnectionOptions): typeof globalThis.fetch {
+  return createListenerFetchOver(options, SYSTEM_NETWORK);
+}
+
+/** Responses to these statuses carry no body, and `Response` refuses one. */
+const BODYLESS_STATUSES: ReadonlySet<number> = new Set([101, 204, 205, 304]);
+
+function createListenerFetchOver(
+  options: ListenerConnectionOptions,
+  network: ListenerNetwork,
+): typeof globalThis.fetch {
+  return async (input, init) => {
+    const request = new Request(input, init);
+    const url = new URL(request.url);
+    if (url.origin !== options.origin) {
+      throw new TypeError("A listener fetch reaches only the origin it was made for.");
+    }
+    request.signal.throwIfAborted();
+    const body = request.body === null ? undefined : Buffer.from(await request.arrayBuffer());
+    const connection = await connectListenerOver(options, network);
+    if (connection.status === "refused") throw new ListenerTrustRefused(connection.reason);
+    if (connection.status === "failed") throw new TypeError("The listener could not be reached.");
+    const socket = connection.socket;
+    const headers: Record<string, string> = {};
+    request.headers.forEach((value, name) => {
+      headers[name] = value;
+    });
+    headers.host = url.host;
+    headers.connection = "close";
+    if (body !== undefined) headers["content-length"] = String(body.byteLength);
+    return await new Promise<Response>((resolve, reject) => {
+      const abort = (): void => {
+        outgoing.destroy();
+        reject(request.signal.reason);
+      };
+      const outgoing = httpRequest(
+        {
+          // The judged socket carries the request; no agent may dial another.
+          createConnection: () => socket,
+          method: request.method,
+          path: `${url.pathname}${url.search}`,
+          headers,
+        },
+        (incoming) => {
+          request.signal.removeEventListener("abort", abort);
+          try {
+            resolve(responseOf(incoming));
+          } catch {
+            incoming.destroy();
+            reject(new TypeError("The listener sent a response Octant cannot read."));
+          }
+        },
+      );
+      outgoing.once("error", () => {
+        socket.destroy();
+        reject(new TypeError("The listener connection failed."));
+      });
+      request.signal.addEventListener("abort", abort, { once: true });
+      outgoing.end(body);
+    });
+  };
+}
+
+function responseOf(incoming: IncomingMessage): Response {
+  const status = incoming.statusCode ?? 0;
+  const headers = new Headers();
+  for (let index = 0; index + 1 < incoming.rawHeaders.length; index += 2) {
+    const name = incoming.rawHeaders[index];
+    const value = incoming.rawHeaders[index + 1];
+    if (name !== undefined && value !== undefined) headers.append(name, value);
+  }
+  if (BODYLESS_STATUSES.has(status)) {
+    incoming.resume();
+    return new Response(null, { status, headers });
+  }
+  return new Response(Readable.toWeb(incoming) as ReadableStream<Uint8Array>, { status, headers });
+}
 
 async function connectListenerOver(
   options: ListenerConnectionOptions,
