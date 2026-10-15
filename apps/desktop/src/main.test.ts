@@ -1275,6 +1275,7 @@ function disabledStatus() {
     certificateFingerprint: null,
     certificateReady: false,
     certificateSource: null,
+    tlsPin: null,
   };
 }
 
@@ -1289,6 +1290,7 @@ function readyStatus(overrides: Record<string, unknown> = {}) {
     certificateFingerprint: "ab".repeat(32),
     certificateReady: true,
     certificateSource: "pasted" as const,
+    tlsPin: null,
     ...overrides,
   };
 }
@@ -1362,6 +1364,7 @@ describe("private listener IPC handlers", () => {
       certificateFingerprint: "ab".repeat(32),
       certificateReady: true,
       certificateSource: "pasted" as const,
+      tlsPin: null,
     });
     expect(service.enable).toHaveBeenCalledWith(
       expect.objectContaining({ localConfirmation: true }),

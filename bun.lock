@@ -130,6 +130,7 @@
         "class-variance-authority": "0.7.1",
         "clsx": "2.1.1",
         "katex": "0.18.9",
+        "lean-qr": "2.7.4",
         "lucide-react": "1.24.0",
         "monaco-editor": "catalog:",
         "react": "catalog:",
@@ -164,6 +165,7 @@
         "@octant/host-runtime": "workspace:*",
         "@octant/theme": "workspace:*",
         "@opentui/core": "0.5.10",
+        "lean-qr": "2.7.4",
       },
       "devDependencies": {
         "@types/bun": "catalog:",
@@ -1810,6 +1812,8 @@
     "kleur": ["kleur@3.0.3", "", {}, "sha512-eTIzlVOSUR+JxdDFepEYcBMtZ9Qqdef+rnzWdRZuMbOywu5tO2w2N7rqjoANZ5k9vywhL6Br1VRjUIgTQx4E8w=="],
 
     "lan-network": ["lan-network@0.2.1", "", { "bin": { "lan-network": "dist/lan-network-cli.js" } }, "sha512-ONPnazC96VKDntab9j9JKwIWhZ4ZUceB4A9Epu4Ssg0hYFmtHZSeQ+n15nIwTFmcBUKtExOer8WTJ4GF9MO64A=="],
+
+    "lean-qr": ["lean-qr@2.7.4", "", { "bin": { "lean-qr": "cli.mjs" } }, "sha512-tlMPFfqhAAZN7+j/djRSvl/2+AYT2+7RRuyq8bvcbV8gMiENiscquQ9WTfCSyeEdxsVaEB+tU7e9nFZC63BFnQ=="],
 
     "leven": ["leven@3.1.0", "", {}, "sha512-qsda+H8jTaUaN/x5vzW2rzc+8Rw4TAQ/4KjB46IwK5VH+IlVeeeje/EoZRpiXvIqjFgK84QffqPztGI3VBLG1A=="],
 
