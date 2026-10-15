@@ -24,6 +24,7 @@ import {
   ExternalContentTaintProjection,
   applyProvenanceToThreadTaint,
   hasThreadExternalContentReference,
+  readApprovalOutsideContent,
   readThreadExternalContentState,
   readThreadExternalContentTaint,
 } from "./externalContentTaintProjection";
@@ -60,9 +61,10 @@ function envelope(input: {
     readonly sourceLabel: string;
   };
   readonly contentReference: string;
+  readonly occurredAt?: string;
 }) {
   return decodeEnvelope({
-    eventId: `00000000-0000-4000-8000-00000000000${input.version}`,
+    eventId: `00000000-0000-4000-8000-${String(input.version).padStart(12, "0")}`,
     globalSequence: input.sequence,
     aggregateType: THREAD_EXTERNAL_CONTENT_AGGREGATE,
     aggregateId: input.threadId,
@@ -72,7 +74,7 @@ function envelope(input: {
     hostId: "local",
     correlationId,
     actor: { kind: "system", actorId },
-    occurredAt: now,
+    occurredAt: input.occurredAt ?? now,
     payload: {
       threadId: input.threadId,
       correlationId,
@@ -413,6 +415,126 @@ describe("a cleared thread in the taint projection", () => {
     }
     expect(projectionRows(restarted.connection)).toEqual(live);
     restarted.connection.close();
+  });
+});
+
+describe("the outside content an approval names", () => {
+  it("names nothing for an unmarked thread, and nothing a person has cleared", () => {
+    const connection = openMigrated();
+    try {
+      const projection = new ExternalContentTaintProjection();
+      expect(readApprovalOutsideContent(connection, threadId)).toBeUndefined();
+      // Content a person typed is recorded but does not mark the thread.
+      projection.apply(
+        connection,
+        envelope({
+          threadId,
+          version: 1,
+          sequence: 1,
+          provenance: { origin: "user", sourceLabel: "composer" },
+          contentReference: "typed-1",
+        }),
+      );
+      expect(readApprovalOutsideContent(connection, threadId)).toBeUndefined();
+      projection.apply(
+        connection,
+        envelope({
+          threadId,
+          version: 2,
+          sequence: 2,
+          provenance: { origin: "tool-result", sourceLabel: "mcp-tool" },
+          contentReference: "mcp-result-1",
+        }),
+      );
+      expect(readApprovalOutsideContent(connection, threadId)?.sourceCount).toBe(1);
+      projection.apply(connection, clearedEnvelope({ threadId, version: 3, sequence: 3 }));
+      expect(readApprovalOutsideContent(connection, threadId)).toBeUndefined();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("names the marking sources most recently read first, with counts and times", () => {
+    const connection = openMigrated();
+    try {
+      const projection = new ExternalContentTaintProjection();
+      const read = (
+        version: number,
+        sourceLabel: string,
+        occurredAt: string,
+        origin: "tool-result" | "external-content" | "user" = "external-content",
+      ) =>
+        projection.apply(
+          connection,
+          envelope({
+            threadId,
+            version,
+            sequence: version,
+            provenance: { origin, sourceLabel },
+            contentReference: `ref-${version}`,
+            occurredAt,
+          }),
+        );
+      read(1, "web-fetch", "2026-10-15T08:00:00.000Z");
+      read(2, "github-issue", "2026-10-15T08:30:00.000Z");
+      read(3, "web-fetch", "2026-10-15T09:00:00.000Z");
+      read(4, "composer", "2026-10-15T09:30:00.000Z", "user");
+
+      expect(readApprovalOutsideContent(connection, threadId)).toEqual({
+        sources: [
+          {
+            sourceLabel: "web-fetch",
+            ingestionCount: 2,
+            firstIngestedAt: "2026-10-15T08:00:00.000Z",
+            lastIngestedAt: "2026-10-15T09:00:00.000Z",
+          },
+          {
+            sourceLabel: "github-issue",
+            ingestionCount: 1,
+            firstIngestedAt: "2026-10-15T08:30:00.000Z",
+            lastIngestedAt: "2026-10-15T08:30:00.000Z",
+          },
+        ],
+        sourceCount: 2,
+      });
+      // Another thread's mark is never named here.
+      expect(readApprovalOutsideContent(connection, otherThreadId)).toBeUndefined();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("names at most eight sources and counts the rest", () => {
+    const connection = openMigrated();
+    try {
+      const projection = new ExternalContentTaintProjection();
+      for (let version = 1; version <= 11; version += 1) {
+        projection.apply(
+          connection,
+          envelope({
+            threadId,
+            version,
+            sequence: version,
+            provenance: { origin: "tool-result", sourceLabel: `source-${version}` },
+            contentReference: `ref-${version}`,
+          }),
+        );
+      }
+      const named = readApprovalOutsideContent(connection, threadId);
+      expect(named?.sourceCount).toBe(11);
+      expect(named?.sources.map((source) => source.sourceLabel)).toEqual([
+        "source-11",
+        "source-10",
+        "source-9",
+        "source-8",
+        "source-7",
+        "source-6",
+        "source-5",
+        "source-4",
+      ]);
+    } finally {
+      connection.close();
+    }
   });
 });
 

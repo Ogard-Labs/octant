@@ -553,6 +553,24 @@ export const IdeogramImageProviderConfiguration = Schema.Struct({
 export type IdeogramImageProviderConfiguration = typeof IdeogramImageProviderConfiguration.Type;
 export const ClaudeAuthentication = Schema.Literal("subscription", "api-key");
 export type ClaudeAuthentication = typeof ClaudeAuthentication.Type;
+
+export const ClaudeResumeIdentityRecord = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  octantSessionId: ProviderSessionId,
+  sdkSessionId: Schema.NonEmptyString.pipe(Schema.maxLength(4096)),
+  projectRoot: Schema.NonEmptyString.pipe(Schema.maxLength(16 * 1024)),
+  modelId: ProviderModelId,
+  authentication: ClaudeAuthentication,
+}).annotations(strict);
+export type ClaudeResumeIdentityRecord = typeof ClaudeResumeIdentityRecord.Type;
+/** An absent identity is the durable record that a resume identity was removed. */
+export const ClaudeResumeIdentityRecorded = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  octantSessionId: ProviderSessionId,
+  sdkSessionId: Schema.NonEmptyString.pipe(Schema.maxLength(4096)),
+  identity: Schema.optional(ClaudeResumeIdentityRecord),
+}).annotations(strict);
+export type ClaudeResumeIdentityRecorded = typeof ClaudeResumeIdentityRecorded.Type;
 /** Closed swatch set so multi-account drivers stay distinguishable in the picker. */
 export const CLAUDE_ACCOUNT_ACCENTS = [
   "rust",
@@ -2450,3 +2468,6 @@ export const decodeProviderRuntimeEvent = Schema.decodeUnknownSync(ProviderRunti
 export const decodeProviderFailure = Schema.decodeUnknownSync(ProviderFailure);
 export const decodeOllamaHistorySnapshot = Schema.decodeUnknownSync(OllamaHistorySnapshot);
 export const decodeOllamaHistoryRecorded = Schema.decodeUnknownSync(OllamaHistoryRecorded);
+export const decodeClaudeResumeIdentityRecorded = Schema.decodeUnknownSync(
+  ClaudeResumeIdentityRecorded,
+);

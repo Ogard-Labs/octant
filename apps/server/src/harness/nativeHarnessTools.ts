@@ -72,6 +72,8 @@ export interface NativeHarnessShellPort {
     readonly command: string;
     readonly cwd: string;
     readonly timeoutMs: number;
+    /** The authorized call this command runs for; it names the launch's egress records. */
+    readonly callId?: string;
     readonly signal?: AbortSignal;
   }): Promise<NativeHarnessShellRun>;
 }
@@ -385,8 +387,9 @@ export function createNativeHarnessTools(
               approvedCheck,
               options.ports,
               signal,
+              String(request.actionId),
             )
-          : await execute(name, args, options.ports, signal);
+          : await execute(name, args, options.ports, signal, String(request.actionId));
     } catch {
       return { ...refused("tool-execution-failed"), refused: false };
     }
@@ -453,6 +456,7 @@ async function execute(
   args: unknown,
   ports: NativeHarnessToolPorts,
   signal: AbortSignal | undefined,
+  callId: string,
 ): Promise<{ readonly result: unknown; readonly isError?: boolean }> {
   switch (name) {
     case "read": {
@@ -486,6 +490,7 @@ async function execute(
         command: input.command,
         cwd: ports.filesystem!.root,
         timeoutMs: input.timeoutMs ?? DEFAULT_SHELL_TIMEOUT_MS,
+        callId,
         ...(signal === undefined ? {} : { signal }),
       });
       if (run.status === "unavailable") return refused("shell-unavailable");
@@ -637,6 +642,7 @@ async function checkGoalCriterion(
   approvedCheck: string | undefined,
   ports: NativeHarnessToolPorts,
   signal: AbortSignal | undefined,
+  callId: string,
 ): Promise<{ readonly result: unknown; readonly isError?: boolean }> {
   const { goal: port, shell, filesystem } = ports;
   if (port === undefined || shell === undefined || filesystem === undefined) {
@@ -665,6 +671,7 @@ async function checkGoalCriterion(
     command: criterion.check,
     cwd: filesystem.root,
     timeoutMs: GOAL_CHECK_TIMEOUT_MS,
+    callId,
     ...(signal === undefined ? {} : { signal }),
   });
   if (run.status === "unavailable") return refused("shell-unavailable");

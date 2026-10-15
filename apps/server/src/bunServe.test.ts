@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { request } from "node:http";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 interface RawResponse {
   readonly handlerCalled: string | undefined;
@@ -198,6 +198,37 @@ describe("bunServe", () => {
       handlerCalled: undefined,
       status: 400,
     });
+  });
+
+  it("switches a connection to a WebSocket only when the route accepts the upgrade", async () => {
+    const url = new URL("/echo", serverUrl);
+    url.protocol = "ws:";
+    const socket = new WebSocket(url, ["echo"]);
+    socket.binaryType = "arraybuffer";
+    const received: unknown[] = [];
+    socket.addEventListener("message", (event) => received.push(event.data));
+    await new Promise((resolve, reject) => {
+      socket.addEventListener("open", resolve);
+      socket.addEventListener("error", reject);
+    });
+    expect(socket.protocol).toBe("echo");
+    socket.send("hello");
+    socket.send(Uint8Array.from([7, 8]));
+    await vi.waitFor(() => expect(received).toHaveLength(2));
+    expect(received[0]).toBe("hello");
+    expect(Array.from(new Uint8Array(received[1] as ArrayBuffer))).toEqual([7, 8]);
+    socket.close(1000);
+
+    // A route that does not accept the upgrade answers as it always does.
+    const refused = await rawRequest(new URL("/safe", serverUrl), {
+      headers: {
+        connection: "Upgrade",
+        upgrade: "websocket",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        "sec-websocket-version": "13",
+      },
+    });
+    expect(refused).toMatchObject({ handlerCalled: "called", status: 204 });
   });
 });
 

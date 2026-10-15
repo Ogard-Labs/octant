@@ -3,6 +3,7 @@ import type { ExtensionToolApproval } from "@octant/contracts/extension-rpc";
 import { useEffect, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { samePollingData } from "../polling/samePollingData";
+import { ApprovalOutsideContentNote } from "../composer/ApprovalOutsideContentNote";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { OctantButton } from "../ui/base/OctantButton";
 import { pluginNameIn, UNNAMED_PLUGIN } from "./toolGrantLabels";
@@ -144,6 +145,11 @@ export function ExtensionToolApprovalPrompt(props: {
         </>
       }
       className={props.className}
+      context={
+        pending.outsideContent === undefined ? undefined : (
+          <ApprovalOutsideContentNote outsideContent={pending.outsideContent} />
+        )
+      }
       detail={
         canRemember
           ? `${server} Always allow means Octant will run this tool in this Project without asking.`

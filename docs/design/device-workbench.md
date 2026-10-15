@@ -237,7 +237,7 @@ the action, and the host holds it until a stop, the time limit
 the host closing. On the Simulator the recorder is `xcrun simctl io <udid>
 recordVideo --codec=h264 --force <file>`, writing into the same host-private
 `0700` capture directory a screenshot uses, with that directory granted to
-this launch alone. On the emulator it is `adb shell screenrecord` with a time
+this launch alone. Stopping sends the recorder SIGINT and waits for it to exit, because `simctl` writes the file only then (SIGTERM leaves it empty and the device refusing any new recorder); only after a bounded wait does it escalate to SIGTERM and SIGKILL, and a recorder that cannot be confirmed gone reports `failed`. On the emulator it is `adb shell screenrecord` with a time
 limit and a 1.5 Mbit/s bit rate, so a full-length recording stays under the
 artifact store's 16 MiB bound; stopping sends it SIGINT (`pkill -2`) so the
 device finishes the file, then reads it with `exec-out cat` and deletes the

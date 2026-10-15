@@ -7,7 +7,9 @@ from this plan on three points. Environment is a dock tab, an available empty
 dock opens on a thread overview above a grid of tool tiles, and the start
 screen keeps its cards. [Workspace](../design/workspace.md) and
 [Start screen](../design/start-screen.md) own those rules, and the matching
-statements below are superseded.
+statements below are superseded. On 2026-10-15 he also decided that the split
+pane's drag handle alone marks the active pane, so "a clearly marked active
+pane" below means that handle.
 
 Henrik approved these decisions on 2026-08-21:
 
