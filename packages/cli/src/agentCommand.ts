@@ -10,6 +10,7 @@ import {
 } from "@octant/contracts";
 import {
   approvalMayBeRemembered,
+  approvalOutsideContentText,
   listAgentThreads,
   openAgentSideChat,
   readAgentGoal,
@@ -545,8 +546,9 @@ export async function decidePendingApproval(
   if (input.command.json) {
     input.stdout.write(`${JSON.stringify({ kind: "approval", approval })}\n`);
   } else {
+    const outside = approvalOutsideContentText(approval);
     input.stdout.write(
-      `\n! ${approval.toolName} wants to ${approval.summary} (${approval.approvalClass})\n  allow? [y]es / ${mayRemember ? "[a]lways this session / " : ""}[n]o > `,
+      `\n! ${approval.toolName} wants to ${approval.summary} (${approval.approvalClass})\n${outside.map((line) => `  ${line}\n`).join("")}  allow? [y]es / ${mayRemember ? "[a]lways this session / " : ""}[n]o > `,
     );
   }
   const line = (await lines.next())?.trim().toLowerCase() ?? "";
