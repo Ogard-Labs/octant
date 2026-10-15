@@ -835,6 +835,7 @@ import {
 import { SimulatorInputGrants } from "./apple/simulatorInputGrants";
 import { createDesktopSimulatorDevicePort } from "./apple/desktopSimulatorDevicePort";
 import { simulatorInputThroughDesktop } from "./apple/simulatorInputThroughDesktop";
+import { createSimulatorOrientationFollower } from "./apple/simulatorOrientationFollower";
 import { createAppleToolchainRouteHandler } from "./appleToolchainRoutes";
 import {
   AndroidToolchainService,
@@ -5865,6 +5866,22 @@ export function startOctantServer(
       now: () => new Date().toISOString(),
       newId: randomUUID,
     });
+    // The Simulator's real orientation follows its foreground app, so it is
+    // re-read after input that can change the app and, slowly, while watched.
+    const simulatorOrientation =
+      simulatorDevice === undefined
+        ? undefined
+        : createSimulatorOrientationFollower({
+            read: async (simulatorId, signal) => {
+              const answer = await simulatorDevice.deliver(
+                { kind: "read-orientation", udid: simulatorId, budgetMs: 5_000 },
+                signal,
+              );
+              return answer.kind === "delivered" ? answer.orientation : undefined;
+            },
+            note: (simulatorId, orientation) =>
+              appleToolchainService.noteOrientation(simulatorId as AppleSimulatorId, orientation),
+          });
     const appleValidationEvents = new ValidationEventStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -5987,8 +6004,12 @@ export function startOctantServer(
       windowAuthorityStore,
       service: appleToolchainService,
       resolveContext: resolveAppleContext,
-      afterAction: (windowId, request, evidence, context) =>
-        simulatorInputGrants.settle(String(windowId), request, evidence, context),
+      afterAction: (windowId, request, evidence, context) => {
+        simulatorInputGrants.settle(String(windowId), request, evidence, context);
+        if ("simulatorId" in request && request.simulatorId !== undefined) {
+          simulatorOrientation?.afterInput(String(request.simulatorId), request, evidence.outcome);
+        }
+      },
       inputGrants: (windowId, threadId) =>
         simulatorInputGrants.list(String(windowId), String(threadId)),
       ...(simulatorDevice === undefined
@@ -6007,6 +6028,8 @@ export function startOctantServer(
                   watch.orientation,
                 );
               }
+              if (watch.kind === "watching")
+                simulatorOrientation?.whileWatching(simulatorId, signal);
               return watch;
             },
           }),

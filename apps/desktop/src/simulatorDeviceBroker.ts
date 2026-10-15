@@ -112,6 +112,9 @@ export function createSimulatorInputDelivery(
     if (command.kind === "repair-input") {
       return result(await helpers.send(command.udid, { op: "repair-input" }, budgetMs, cancelled));
     }
+    if (command.kind === "read-orientation") {
+      return result(await helpers.send(command.udid, { op: "orientation" }, budgetMs, cancelled));
+    }
     if (command.kind === "rotate") {
       const rotated = result(
         await helpers.send(

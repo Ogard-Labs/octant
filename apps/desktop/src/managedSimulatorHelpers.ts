@@ -494,6 +494,25 @@ export function createManagedSimulatorHelpers(
     return { status: "delivered" };
   }
 
+  /** The screen's real orientation, read from a screenshot's size; it turns nothing. */
+  async function readOrientation(
+    udid: string,
+    timeoutMs: number,
+    cancelled: AbortSignal | undefined,
+  ): Promise<DeviceHelperReply> {
+    const sitsWide = await sitsWideOf(
+      udid,
+      AbortSignal.any([
+        AbortSignal.timeout(Math.max(1, Math.min(timeoutMs, ORIENTATION_READ_MS))),
+        ...(cancelled === undefined ? [] : [cancelled]),
+      ]),
+    );
+    if (sitsWide === undefined) {
+      return { status: "unavailable", message: "The Simulator's orientation could not be read." };
+    }
+    return { status: "delivered", orientation: sitsWide ? "landscape" : "portrait" };
+  }
+
   /**
    * serve-sim rotates a Simulator by sending the orientation over its running
    * stream, so the stream has to be up first. Simulator.app is never scripted.
@@ -626,6 +645,7 @@ export function createManagedSimulatorHelpers(
       if (request.op === "key") return native.send(simulatorId, request, timeoutMs, cancelled);
       if (request.op === "text") return typeText(simulatorId, request.text, timeoutMs, cancelled);
       if (request.op === "repair-input") return repairInput(simulatorId, timeoutMs, cancelled);
+      if (request.op === "orientation") return readOrientation(simulatorId, timeoutMs, cancelled);
       if (request.op === "rotate") {
         return rotate(simulatorId, request.orientation, timeoutMs, cancelled);
       }

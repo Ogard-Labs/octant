@@ -240,8 +240,15 @@ it in the watch response, the host records it like a rotate does, and the
 stream's own response carries it to the pane (the snapshot is not polled while
 no action runs), so a
 Simulator already in landscape when the pane opens, or turned from outside
-Octant, is drawn upright. A turn made outside Octant while a stream is running
-shows after the next stream start or Rotate. The Android emulator streams rotated frames and needs none of this.
+Octant, is drawn upright. The orientation follows the foreground app, not the last
+Rotate: after a rotate the Home screen stays portrait while apps turn, so the
+host re-reads the real screen (the same screenshot-size read, asked of the
+desktop as a `read-orientation` input that changes nothing) and records it like
+a rotate does. It reads shortly after a Home or app-switch key press or a tap
+(which may bring another app forward), and on a slow interval (every 5 seconds
+at most) while a live view is open. No Simulator is read more than once every 2
+seconds, and never per frame; the pane picks the change up with its next
+snapshot. The Android emulator streams rotated frames and needs none of this.
 
 Rotate is an effect, not input. Only a person (`local-user` or
 `remote-device` in `requestedBy`) may ask for it; an agent or the host is

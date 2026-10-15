@@ -46,7 +46,9 @@ export type DeviceHelperRequest =
    * Without an orientation the helper turns it away from the one serve-sim
    * reports, which the streamed picture's size cannot tell (it stays portrait).
    */
-  | { readonly op: "rotate"; readonly orientation?: "portrait" | "landscape" };
+  | { readonly op: "rotate"; readonly orientation?: "portrait" | "landscape" }
+  /** Reads which way the Simulator shows its screen now, from a screenshot's size; changes nothing. */
+  | { readonly op: "orientation" };
 
 export type DeviceHelperReply =
   | {
