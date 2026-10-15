@@ -27,7 +27,7 @@ describe("provider key journal records", () => {
       decodeProviderKeyJournalRecord({
         name: "provider-key.change-failed",
         ...base,
-        reason: "credential-store-unavailable",
+        reason: "abandoned",
       }).name,
     ).toBe("provider-key.change-failed");
   });

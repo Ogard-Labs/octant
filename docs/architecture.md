@@ -6012,7 +6012,7 @@ mechanisms are:
     store is unavailable, and does not accept a removed instance's id.
   - **Journal and reconciliation.** Each store, replace, and remove is
     journaled as a `provider-key.recorded@1` request before the store is
-    touched and as a `completed` or `failed` outcome after (Secret Service and
+    touched and as a `completed` outcome after (`failed` only when a removal with its provider never reached the provider) (Secret Service and
     the journal cannot be updated atomically), on an aggregate per instance
     ([`providerKeyJournal.ts`](../apps/server/src/providers/providerKeyJournal.ts),
     [`providerKeyJournal.ts` contract](../packages/contracts/src/providerKeyJournal.ts)).
@@ -6022,7 +6022,8 @@ mechanisms are:
     short key can be guessed offline; the schema rejects any other field. A
     request that cannot be journaled refuses the change (`journal-unavailable`)
     before the store is touched; an outcome that cannot be journaled is
-    best-effort. At host start, before the routes take a change, every request
+    best-effort, and a store error leaves its request unsettled because it
+    does not say whether the write committed. At host start, before the routes take a change, every request
     without an outcome is settled: a `set` whose instance is gone or was
     reconfigured since the request has its key cleared, an unchanged instance
     keeps whatever the store holds; a `remove` clears the key; a

@@ -51,7 +51,7 @@ export const ProviderKeyJournalRecord = Schema.Union(
     instanceId: ProviderInstanceId,
     action: ProviderKeyChangeAction,
     /** `abandoned`: a removal with its provider never reached the provider, so the key was kept. */
-    reason: Schema.Literal("credential-store-unavailable", "abandoned"),
+    reason: Schema.Literal("abandoned"),
   }).annotations(strict),
 );
 export type ProviderKeyJournalRecord = typeof ProviderKeyJournalRecord.Type;

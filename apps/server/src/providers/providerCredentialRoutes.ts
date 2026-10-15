@@ -197,7 +197,12 @@ export function createProviderCredentialRouteHandler(
           const recorder = begin("remove-with-provider");
           if (recorder === undefined) return refuse("journal-unavailable");
           const removal = await options.removeProvider(windowId, target.instance);
-          if (removal.kind === "refused") {
+          // A refusal after the removal was journaled (a later cleanup step
+          // failed) still removed the provider, so the projection decides.
+          const stillConfigured = options
+            .readProviderInstances()
+            .some((instance) => String(instance.id) === id);
+          if (removal.kind === "refused" && stillConfigured) {
             recorder.fail("abandoned");
             return Response.json(
               { category: "provider-refused", message: removal.message },
@@ -222,12 +227,9 @@ export function createProviderCredentialRouteHandler(
         if (route === ROUTES.remove) {
           const recorder = begin("remove");
           if (recorder === undefined) return refuse("journal-unavailable");
-          try {
-            await credentials.store.delete(id);
-          } catch (error) {
-            recorder.fail("credential-store-unavailable");
-            throw error;
-          }
+          // A store error does not say whether the delete committed, so the
+          // request stays unsettled and the next start clears the key again.
+          await credentials.store.delete(id);
           recorder.complete("removed");
           return answer("removed", target);
         }
@@ -248,12 +250,10 @@ export function createProviderCredentialRouteHandler(
         }
         const recorder = begin("set");
         if (recorder === undefined) return refuse("journal-unavailable");
-        try {
-          await credentials.store.set(id, decoded.credential);
-        } catch (error) {
-          recorder.fail("credential-store-unavailable");
-          throw error;
-        }
+        // A store error (a lost or malformed answer) does not say whether the
+        // write committed, so the request stays unsettled and the next start
+        // checks the key against its instance.
+        await credentials.store.set(id, decoded.credential);
         // Settings can remove or reconfigure the instance while the key is
         // being written. A removal would leave a key for no instance, and a new
         // base URL or authentication would send a key entered for the old

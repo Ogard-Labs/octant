@@ -46,6 +46,7 @@ function setup(
     readonly onSet?: () => void;
     readonly journalFails?: boolean;
     readonly failDelete?: boolean;
+    readonly onRefuse?: (instances: ProviderInstance[]) => void;
     readonly providerRefusal?: string;
     readonly onRemoveProvider?: (instance: ProviderInstance) => void;
   } = {},
@@ -79,6 +80,7 @@ function setup(
     journal,
     removeProvider: async (_window, instance) => {
       if (input.providerRefusal !== undefined) {
+        input.onRefuse?.(instances);
         return { kind: "refused", message: input.providerRefusal };
       }
       input.onRemoveProvider?.(instance);
@@ -394,10 +396,11 @@ describe("host-local provider key routes", () => {
     expect(records.at(-1)).toMatchObject({ name: "completed", outcome: "cleared-after-change" });
   });
 
-  it("journals a failed write and changes nothing when the request cannot be journaled", async () => {
+  it("leaves a request unsettled when the store errors, and changes nothing when the request cannot be journaled", async () => {
     const failing = setup({ failDelete: true });
     await failing.handle(hostLocal(REMOVE, { instance: GATEWAY_ID }));
-    expect(failing.records.map((record) => record.name)).toEqual(["requested", "failed"]);
+    // The store error may or may not have committed, so the request is left for the next start.
+    expect(failing.records.map((record) => record.name)).toEqual(["requested"]);
 
     const unjournaled = setup({ journalFails: true });
     const result = await json(
@@ -442,6 +445,20 @@ describe("host-local provider key routes", () => {
     expect(instances).toHaveLength(1);
     expect(stored.get(GATEWAY_ID)).toBe(KEY);
     expect(records.at(-1)).toMatchObject({ name: "failed", reason: "abandoned" });
+  });
+
+  it("clears the key when the provider service reports a failure after it already removed the provider", async () => {
+    const { handle, stored, instances } = setup({
+      providerRefusal: "Cleanup failed.",
+      onRefuse: (list) => list.splice(0),
+    });
+    stored.set(GATEWAY_ID, KEY);
+
+    const result = await json(await handle(hostLocal(REMOVE_PROVIDER, { instance: GATEWAY_ID })));
+
+    expect(result.status).toBe(200);
+    expect(instances).toHaveLength(0);
+    expect(stored.has(GATEWAY_ID)).toBe(false);
   });
 
   it("names the removed provider when its key could not be cleared, leaving the request to settle at start", async () => {
