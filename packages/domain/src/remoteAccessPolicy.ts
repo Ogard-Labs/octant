@@ -363,9 +363,15 @@ export function evaluateSession(input: {
   };
 }
 
+// A decimal octet without leading zeros. A URL parser and the system resolver
+// read `010` as octal 8, so a zero-padded address names a different host there
+// than here; it is refused rather than judged by its decimal reading.
+const CANONICAL_IPV4_OCTET = /^(?:0|[1-9][0-9]{0,2})$/;
+
 function isPrivateIpv4(value: string): boolean {
   const octets = value.split(".");
-  if (octets.length !== 4 || octets.some((octet) => !/^\d{1,3}$/.test(octet))) return false;
+  if (octets.length !== 4 || octets.some((octet) => !CANONICAL_IPV4_OCTET.test(octet)))
+    return false;
   const parts = octets.map(Number);
   const [first, second] = parts;
   if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
@@ -380,7 +386,8 @@ function isPrivateIpv4(value: string): boolean {
 
 function isTailscaleIpv4(value: string): boolean {
   const octets = value.split(".");
-  if (octets.length !== 4 || octets.some((octet) => !/^\d{1,3}$/.test(octet))) return false;
+  if (octets.length !== 4 || octets.some((octet) => !CANONICAL_IPV4_OCTET.test(octet)))
+    return false;
   const parts = octets.map(Number);
   const [first, second] = parts;
   return (

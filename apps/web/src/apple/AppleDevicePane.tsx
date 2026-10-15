@@ -126,6 +126,7 @@ export function AppleDevicePane(props: AppleWorkbenchPaneProps) {
       busy={props.busy === true}
       canOpenUrl={props.runtime?.capabilities?.openUrl === true}
       canRotate={props.runtime?.capabilities?.rotate === true}
+      canVolume={props.runtime?.capabilities?.volume === true}
       devices={devices}
       diagnostics={appleDiagnostics(props)}
       inputAllowed={props.inputAllowed !== false}

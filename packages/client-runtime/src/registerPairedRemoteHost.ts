@@ -33,6 +33,7 @@ export async function registerPairedRemoteHost(input: {
       credentialGeneration: input.approval.credentialGeneration,
       hostKeyFingerprint: input.hostKeyFingerprint,
       deviceId: input.approval.deviceId,
+      listenerTrust: input.approval.listenerTrust,
     },
   });
 }

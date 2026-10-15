@@ -42,6 +42,11 @@ export interface DevicePaneProps {
   readonly canOpenUrl?: boolean;
   /** The host reported that it can rotate this device; absent, More has no Rotate. */
   readonly canRotate?: boolean;
+  /**
+   * The host reported that it can press this device's volume keys. Without it
+   * More has no Volume up or down at all; they are never shown disabled.
+   */
+  readonly canVolume?: boolean;
 }
 
 /**
@@ -158,7 +163,9 @@ export function DevicePane(props: DevicePaneProps) {
         view.screen.size.width > view.screen.size.height;
       act({ kind: "rotate", orientation: sitsWide ? "portrait" : "landscape" });
     } else if (item === "lock") enqueue({ kind: "key-press", key: "lock" }, false);
-    else if (item === "switch-device") setPicking(true);
+    else if (item === "volume-up" || item === "volume-down") {
+      enqueue({ kind: "key-press", key: item }, false);
+    } else if (item === "switch-device") setPicking(true);
     else if (item === "diagnostics") setDiagnosticsOpen(true);
     else if (item === "stop-live-view") act({ kind: "stop-live-view" });
     else act({ kind: "shutdown" });
@@ -180,6 +187,7 @@ export function DevicePane(props: DevicePaneProps) {
           typeText: hardware,
           openUrl: canOpenUrl,
           rotate: canRotate,
+          volume: hardware && props.canVolume === true,
           switchDevice: canAct && choosable.length > 0 && view.kind !== "setup",
           stopLiveView:
             live !== undefined &&

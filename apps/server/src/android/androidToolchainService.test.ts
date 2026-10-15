@@ -589,7 +589,11 @@ describe("AndroidToolchainService", () => {
 
     it("tells the pane this host can open an address", () => {
       const { service } = openUrlService();
-      expect(service.snapshot(context).capabilities).toEqual({ openUrl: true, rotate: true });
+      expect(service.snapshot(context).capabilities).toEqual({
+        openUrl: true,
+        volume: true,
+        rotate: true,
+      });
     });
   });
 
@@ -1203,6 +1207,38 @@ describe("AndroidToolchainService", () => {
     );
     expect(evidence.outcome).toBe("failed");
     expect(execute).not.toHaveBeenCalled();
+    await service.close();
+  });
+
+  it("presses the volume keys through adb as key events", async () => {
+    const execute = discoveryExecutor();
+    const service = new AndroidToolchainService({
+      execute,
+      access: async () => undefined,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      readArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-09-20T20:00:00.000Z",
+      newId: () => ids.action,
+    });
+    await service.discover(discoveryRequest, context);
+    for (const [index, [key, keycode]] of [
+      ["volume-up", "KEYCODE_VOLUME_UP"],
+      ["volume-down", "KEYCODE_VOLUME_DOWN"],
+    ].entries() as IterableIterator<[number, [string, string]]>) {
+      execute.mockClear();
+      const evidence = await service.execute(
+        action("key-press", {
+          key,
+          requestedBy: actor,
+          actionId: `30000000-0000-4000-8000-0000000002${String(index).padStart(2, "0")}`,
+        }),
+        context,
+      );
+      expect(evidence.outcome, key).toBe("succeeded");
+      expect(execute.mock.calls[0]?.[0].argv, key).toContain(keycode);
+    }
     await service.close();
   });
 

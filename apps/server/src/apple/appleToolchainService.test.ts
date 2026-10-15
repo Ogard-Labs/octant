@@ -1972,7 +1972,7 @@ describe("AppleToolchainService Open URL", () => {
 
   it("tells the pane this host can open an address", async () => {
     const { service } = openUrlService({});
-    expect(service.snapshot(context).capabilities).toEqual({ openUrl: true, rotate: true });
+    expect(service.snapshot(context).capabilities).toEqual({ openUrl: true });
   });
 });
 
@@ -2079,7 +2079,11 @@ describe("AppleToolchainService Rotate", () => {
 
   it("tells the pane this host can rotate", async () => {
     const { service } = rotateService();
-    expect(service.snapshot(context).capabilities).toEqual({ openUrl: true, rotate: true });
+    expect(service.snapshot(context).capabilities).toEqual({
+      openUrl: true,
+      volume: true,
+      rotate: true,
+    });
   });
 });
 
@@ -2088,6 +2092,54 @@ describe("AppleToolchainService Simulator input", () => {
     kind: "local-user" as const,
     actorId: "30000000-0000-4000-8000-000000000099" as never,
   };
+
+  it("reports Volume only when the desktop's device helper can deliver the key", async () => {
+    const make = (injectSimulatorInput?: () => Promise<ReturnType<typeof processResult>>) =>
+      new AppleToolchainService({
+        execute: discoveryExecutor(),
+        ...(injectSimulatorInput === undefined ? {} : { injectSimulatorInput }),
+        writeArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-10-14T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+    expect(make().snapshot(context).capabilities).toEqual({ openUrl: true });
+    expect(make(async () => processResult("ok\n")).snapshot(context).capabilities).toEqual({
+      openUrl: true,
+      volume: true,
+      rotate: true,
+    });
+  });
+
+  it("hands a volume key to the device helper as the key the person pressed", async () => {
+    const injectSimulatorInput = vi.fn(async () => processResult("ok\n"));
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-10-14T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "key-press",
+        bundleIdentifier: undefined,
+        key: "volume-up",
+        requestedBy: actor,
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      context,
+    );
+    expect(evidence.outcome).toBe("succeeded");
+    expect(injectSimulatorInput).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "key-press", key: "volume-up" }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
 
   it("injects tap through the workbench channel and never re-runs a finished actionId", async () => {
     const execute = discoveryExecutor();

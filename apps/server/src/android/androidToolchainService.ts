@@ -326,7 +326,7 @@ export class AndroidToolchainService {
       emulators: this.#emulators,
       // What this host can do beyond the original actions; the pane offers
       // an item only once it is listed here.
-      capabilities: { openUrl: true, rotate: true },
+      capabilities: { openUrl: true, volume: true, rotate: true },
       active: [...this.#active.values()]
         .filter((entry) => androidContextMatches(entry.context, context))
         .map((entry) => entry.progress),
@@ -1376,6 +1376,8 @@ function androidKey(key: string): string | undefined {
   const keys: Record<string, string> = {
     home: "KEYCODE_HOME",
     lock: "KEYCODE_POWER",
+    "volume-up": "KEYCODE_VOLUME_UP",
+    "volume-down": "KEYCODE_VOLUME_DOWN",
     return: "KEYCODE_ENTER",
     enter: "KEYCODE_ENTER",
     escape: "KEYCODE_BACK",
@@ -1611,6 +1613,9 @@ function serveAvdCommand(request: AndroidEmulatorRequest): ServeAvdCommand | und
       return { kind: "direct", body: { action: "button", button: "back" } };
     }
     if (name === "lock") return { kind: "direct", body: { action: "button", button: "power" } };
+    if (name === "volume-up" || name === "volume-down") {
+      return { kind: "direct", body: { action: "button", button: name } };
+    }
     if (name === "enter" || name === "return") {
       return { kind: "direct", body: { action: "key", code: "Enter" } };
     }

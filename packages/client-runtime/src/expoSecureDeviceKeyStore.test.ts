@@ -5,6 +5,7 @@ import {
   createExpoSecureDeviceKeyStore,
   createInMemoryExpoSecureStringStorage,
 } from "./expoSecureDeviceKeyStore";
+import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const hostId = "11111111-1111-4111-8111-111111111111" as StableHostId;
 
@@ -74,6 +75,7 @@ describe("expoSecureDeviceKeyStore", () => {
       deviceId: "22222222-2222-4222-8222-222222222222",
       credentialGeneration: 1,
       hostKeyFingerprint: createHash("sha256").update("host").digest("hex"),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
 
     const metadata = await store.findByOrigin("https://host.example:8443");
@@ -88,6 +90,28 @@ describe("expoSecureDeviceKeyStore", () => {
     expect(snapshot.includes("PRIVATE")).toBe(false);
     expect(snapshot.includes("privateKey")).toBe(false);
     expect(snapshot.includes("pkcs8")).toBe(false);
+  });
+
+  it("keeps the listener pin recorded for an origin", async () => {
+    const storage = createInMemoryExpoSecureStringStorage();
+    const listenerTrust = {
+      current: { kind: "pinned", pin: `sha256-${"A".repeat(43)}` },
+    } as const;
+    const pair = await generateExtractablePair();
+    const keyId = await createExpoSecureDeviceKeyStore({ storage }).set(
+      { publicKey: pair.publicKey, privateKey: pair.privateKey },
+      { origin: "https://100.101.102.103:8443", hostId },
+    );
+    await createExpoSecureDeviceKeyStore({ storage }).updateMetadata(keyId, {
+      deviceId: "22222222-2222-4222-8222-222222222222",
+      credentialGeneration: 1,
+      hostKeyFingerprint: createHash("sha256").update("host").digest("hex"),
+      listenerTrust,
+    });
+
+    await expect(
+      createExpoSecureDeviceKeyStore({ storage }).findByOrigin("https://100.101.102.103:8443"),
+    ).resolves.toMatchObject({ keyId, listenerTrust });
   });
 
   it("rejects non-extractable private keys with an actionable error", async () => {
@@ -120,6 +144,7 @@ describe("expoSecureDeviceKeyStore", () => {
       deviceId: "22222222-2222-4222-8222-222222222222",
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
 
     const pendingPair = await generateExtractablePair();
@@ -137,6 +162,7 @@ describe("expoSecureDeviceKeyStore", () => {
       deviceId: "33333333-3333-4333-8333-333333333333",
       credentialGeneration: 1,
       hostKeyFingerprint: "b".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await store.removeOtherApprovedForOrigin(origin, nextId);
 

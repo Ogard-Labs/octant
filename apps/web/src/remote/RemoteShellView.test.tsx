@@ -7,6 +7,7 @@ import {
   createInMemoryDeviceKeyStore,
   createRemoteSessionBridge,
   mapBridgeStateToHostHealth,
+  PLATFORM_LISTENER_TRUST,
 } from "@octant/client-runtime";
 import {
   createFakeRemoteServer,
@@ -303,6 +304,7 @@ async function readyBridge(seen: ProductRequest[] = []) {
     credentialGeneration: 1,
     deviceKeyId,
     origin: ORIGIN,
+    listenerTrust: PLATFORM_LISTENER_TRUST,
   });
   await waitUntil(() => bridge.getState().kind === "ready");
   return { bridge, server };

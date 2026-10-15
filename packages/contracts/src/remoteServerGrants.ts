@@ -190,6 +190,43 @@ export const RemoteServerGrantClosedPayload = Schema.Struct({
 }).annotations(strict);
 export type RemoteServerGrantClosedPayload = typeof RemoteServerGrantClosedPayload.Type;
 
+/**
+ * A response the host relays from the dev server carries this header with the
+ * value {@link REMOTE_SERVER_PROXY_RELAYED}. The host strips every `x-octant-`
+ * header the dev server sends, so only the host can set it: a response without
+ * it is the host's own answer (a refusal, a budget, a failed proof), never the
+ * dev server's, whatever its status or body says.
+ *
+ * Relayed requests travel on `/api/server-proxy/<grant id>` followed by the dev
+ * server's own path and query.
+ */
+export const REMOTE_SERVER_PROXY_RELAYED_HEADER = "x-octant-server-proxy" as const;
+export const REMOTE_SERVER_PROXY_RELAYED = "relayed" as const;
+
+/**
+ * Why the host did not relay a request whose device proof it accepted.
+ *
+ * - `grant-closed`: the grant is not open for this device and proxy session,
+ *   or a check before this request closed it (the server stopped or changed
+ *   hands, the thread was archived or can no longer be read, Code is off). A
+ *   grant that never existed, one another device holds, and one that closed
+ *   answer the same, so a refusal never says which.
+ * - `server-unreachable`: the host could not connect to the dev server on its
+ *   loopback address in time, or the dev server failed before answering.
+ * - `upgrade-refused`: the request asked to upgrade the connection, which this
+ *   route does not carry.
+ */
+export const RemoteServerProxyRefusal = Schema.Struct({
+  kind: Schema.Literal("remote-server-proxy-refused"),
+  reason: Schema.Literal("grant-closed", "server-unreachable", "upgrade-refused"),
+  message: Schema.NonEmptyTrimmedString,
+}).annotations(strict);
+export type RemoteServerProxyRefusal = typeof RemoteServerProxyRefusal.Type;
+export type RemoteServerProxyRefusalReason = RemoteServerProxyRefusal["reason"];
+
+export const decodeRemoteServerProxyRefusal = Schema.decodeUnknownSync(RemoteServerProxyRefusal);
+export const encodeRemoteServerProxyRefusal = Schema.encodeSync(RemoteServerProxyRefusal);
+
 export const decodeRemoteServerGrantId = Schema.decodeUnknownSync(RemoteServerGrantId);
 export const decodeRemoteServerGrantRequest = Schema.decodeUnknownSync(RemoteServerGrantRequest);
 export const decodeRemoteServerGrantResult = Schema.decodeUnknownSync(RemoteServerGrantResult);

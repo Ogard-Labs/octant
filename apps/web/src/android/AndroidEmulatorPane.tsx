@@ -360,6 +360,7 @@ export function AndroidEmulatorPane(props: {
       busy={busy}
       canOpenUrl={controller.runtime?.capabilities?.openUrl === true}
       canRotate={controller.runtime?.capabilities?.rotate === true}
+      canVolume={controller.runtime?.capabilities?.volume === true}
       devices={devices}
       diagnostics={androidDiagnostics({
         controller,

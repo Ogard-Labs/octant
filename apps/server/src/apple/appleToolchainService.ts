@@ -573,7 +573,11 @@ export class AppleToolchainService {
       simulators: this.#lastSimulators,
       // What this host can do beyond the original actions; the pane offers
       // an item only once it is listed here.
-      capabilities: { openUrl: true, rotate: true },
+      // Volume and Rotate ride the desktop's device helper, like every hardware key.
+      capabilities: {
+        openUrl: true,
+        ...(this.#options.injectSimulatorInput === undefined ? {} : { volume: true, rotate: true }),
+      },
       active: [...this.#active.values()]
         .filter((active) => contextMatches(active.context, context))
         .map(({ progress }) => progress),

@@ -7,6 +7,7 @@
 // thrown error messages.
 
 import type { StableHostId } from "@octant/contracts/remote-access";
+import { decodeListenerOriginTrust, PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 import type {
   RemoteDeviceKeyMetadata,
   RemoteDeviceKeyPair,
@@ -32,6 +33,8 @@ interface PersistedDeviceKeyRecord {
   readonly deviceId?: string;
   readonly credentialGeneration?: number;
   readonly hostKeyFingerprint?: string;
+  /** Absent on a record approved before listener pins existed, which relied on platform trust. */
+  readonly listenerTrust?: unknown;
 }
 
 export interface ExpoSecureDeviceKeyStoreOptions {
@@ -136,6 +139,7 @@ export function createExpoSecureDeviceKeyStore(
         deviceId: metadata.deviceId,
         credentialGeneration: metadata.credentialGeneration,
         hostKeyFingerprint: metadata.hostKeyFingerprint,
+        listenerTrust: metadata.listenerTrust,
       };
       await writeCatalog(records);
     },
@@ -200,6 +204,13 @@ function metadataFromPersisted(
   ) {
     return undefined;
   }
+  // A trust that cannot be read leaves the record unusable, so the device
+  // pairs again rather than falling back to a weaker trust.
+  const listenerTrust =
+    record.listenerTrust === undefined
+      ? PLATFORM_LISTENER_TRUST
+      : decodeListenerOriginTrust(record.listenerTrust);
+  if (listenerTrust === undefined) return undefined;
   return {
     keyId: record.keyId,
     origin: record.origin,
@@ -207,6 +218,7 @@ function metadataFromPersisted(
     deviceId: record.deviceId,
     credentialGeneration: record.credentialGeneration,
     hostKeyFingerprint: record.hostKeyFingerprint,
+    listenerTrust,
   };
 }
 

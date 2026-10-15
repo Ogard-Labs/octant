@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deviceProblemFor, type DeviceChoice, type DeviceView } from "./deviceModel";
@@ -254,6 +254,30 @@ describe("DevicePane", () => {
       url: "https://example.com/welcome?from=octant",
     });
     expect(screen.queryByRole("textbox", { name: /Address to open/ })).not.toBeInTheDocument();
+  });
+
+  it("offers Volume up and down in More only once the host reports them, and sends the keys", async () => {
+    const user = userEvent.setup();
+    const older = pane({ canVolume: false });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Volume/ })).not.toBeInTheDocument();
+    older.unmount();
+
+    const { onInput } = pane({ canVolume: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Volume up" }));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Volume down" }));
+    await waitFor(() =>
+      expect(onInput.mock.calls.map(([input]) => input)).toEqual([
+        { kind: "key-press", key: "volume-up" },
+        { kind: "key-press", key: "volume-down" },
+      ]),
+    );
   });
 
   it("says in the line when an address is not one the host opens, and sends nothing", async () => {

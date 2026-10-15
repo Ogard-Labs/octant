@@ -6,6 +6,7 @@ import {
   createInMemoryClientHostRegistryStorage,
 } from "./hostFederationRegistry";
 import { registerPairedRemoteHost } from "./registerPairedRemoteHost";
+import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const HOST_ID = "11111111-1111-4111-8111-111111111111";
 const DEVICE_ID = "22222222-2222-4222-8222-222222222222";
@@ -14,6 +15,9 @@ const KEY_ID = "33333333-3333-4333-8333-333333333333";
 describe("registerPairedRemoteHost", () => {
   it("upserts a remote registration from pairing approval facts", async () => {
     const registry = createClientHostRegistry(createInMemoryClientHostRegistryStorage());
+    const listenerTrust = {
+      current: { kind: "pinned", pin: `sha256-${"A".repeat(43)}` },
+    } as const;
     await registerPairedRemoteHost({
       registry,
       approval: {
@@ -23,6 +27,7 @@ describe("registerPairedRemoteHost", () => {
         credentialGeneration: 2,
         deviceKeyId: KEY_ID,
         origin: "https://studio.tailnet:8443",
+        listenerTrust,
       },
       displayName: "Studio",
       hostKeyFingerprint: "a".repeat(64),
@@ -42,6 +47,7 @@ describe("registerPairedRemoteHost", () => {
         credentialGeneration: 2,
         hostKeyFingerprint: "a".repeat(64),
         deviceId: DEVICE_ID,
+        listenerTrust,
       },
     });
   });
@@ -58,6 +64,7 @@ describe("registerPairedRemoteHost", () => {
           credentialGeneration: 1,
           deviceKeyId: KEY_ID,
           origin: "https://studio.tailnet:8443",
+          listenerTrust: PLATFORM_LISTENER_TRUST,
         },
         displayName: "   ",
         hostKeyFingerprint: "a".repeat(64),

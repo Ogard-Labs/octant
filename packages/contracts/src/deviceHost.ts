@@ -55,6 +55,8 @@ export type DeviceOrientation = typeof DeviceOrientation.Type;
  */
 export const DeviceHostCapabilities = Schema.Struct({
   openUrl: Schema.optional(Schema.Boolean),
+  /** Volume up and down, sent as the `volume-up` and `volume-down` hardware keys. */
+  volume: Schema.optional(Schema.Boolean),
   rotate: Schema.optional(Schema.Boolean),
 }).annotations({ parseOptions: { onExcessProperty: "ignore" } });
 export type DeviceHostCapabilities = typeof DeviceHostCapabilities.Type;

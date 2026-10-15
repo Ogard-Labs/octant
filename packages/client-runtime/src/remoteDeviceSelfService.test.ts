@@ -16,6 +16,7 @@ import {
   ORIGIN,
   TICKET_ID,
 } from "./remoteConnectionFixtures";
+import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const hostId = decodeStableHostId(HOST_ID);
 
@@ -58,6 +59,7 @@ async function readyBridge(config: Parameters<typeof createFakeRemoteServer>[0] 
     deviceId,
     credentialGeneration: 1,
     hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+    listenerTrust: PLATFORM_LISTENER_TRUST,
   });
   const bridge = createRemoteSessionBridge({
     fetch: server.fetch,
@@ -70,6 +72,7 @@ async function readyBridge(config: Parameters<typeof createFakeRemoteServer>[0] 
     credentialGeneration: 1,
     deviceKeyId,
     origin: ORIGIN,
+    listenerTrust: PLATFORM_LISTENER_TRUST,
   });
   await waitForReady(bridge);
   return { bridge, pairingStore, deviceKeyId, server, deviceId };

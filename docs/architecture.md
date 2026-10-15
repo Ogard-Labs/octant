@@ -5689,11 +5689,13 @@ mechanisms are:
     DER SubjectPublicKeyInfo. The existing `certificateFingerprint` hashes the
     PEM text and is not a pin. Only the loopback administration status
     carries the pin; `octant listener status` prints it.
-  - **No client pins yet.** A self-made listener is served, but no Octant
-    client reads a pairing code or takes or checks a pin, and a client that
-    relies on platform trust refuses the certificate, so only a pasted
-    certificate can be reached by a client today. Settings still asks for a
-    certificate and key, and `octant listener`'s usage line still names them.
+  - **No app pins yet.** A self-made listener is served, and the client
+    runtime holds the trust rule below, but neither the desktop app nor the
+    phone app reads a pairing code or connects through a pinned transport
+    yet, and a client that relies on platform trust refuses the certificate,
+    so only a pasted certificate can be reached by a client today. Settings
+    still asks for a certificate and key, and `octant listener`'s usage line
+    still names them.
   - **No browser link.** A browser decides whether to trust the listener
     before any Octant page loads and cannot check a certificate the host made
     itself, so Settings offers no browser pairing link for a self-made
@@ -5733,12 +5735,74 @@ mechanisms are:
     parsed address, never its text prefix. A name is judged by its spelling
     only, so the reader cannot prove a named origin is private: any
     `*.ts.net` name passes, and public Tailscale Funnel names are `*.ts.net`
-    too. The plan's client rule closes that before a client sends anything.
-    The builder refuses the same contents, so the host never shows a code a
-    client would refuse.
-- **Adding a computer in one step.** Partly built: the host certificate and
-  pairing code above. The client pin rule, reading the code on each client,
-  and the rest are planned in [the plan](plans/one-step-pairing.md).
+    too. The client trust rule below closes that before a client sends
+    anything. The builder refuses the same contents, so the host never shows
+    a code a client would refuse.
+  - **Client trust rule.** The client runtime holds one rule every client
+    that reaches another host as a paired device applies; each platform's TLS
+    layer gathers the facts and sends no request bytes until the rule
+    accepts.
+    - **What a client keeps.** Each origin's pairing record (the device key's
+      metadata and the client host registry) holds that origin's trust:
+      `platform`, or `pinned` with a `sha256-` pin taken only from a pairing
+      code. A record from before pins, or for a pasted certificate, holds
+      `platform`. A stored trust that cannot be read is never read as a
+      weaker one: the device-key record stops resolving, so the device pairs
+      again, and the host registry refuses to load. Replacing the device key
+      keeps the origin's trust.
+    - **Certificate.** A pinned origin passes only when the served leaf
+      certificate's SubjectPublicKeyInfo hashes to the pin. That check
+      replaces platform chain, name, and date validation and never falls back
+      to it, so a certificate a public authority issued for the same name
+      does not pass, and the certificate's dates are not checked: anyone
+      holding the key can make a fresh certificate, and a device with a wrong
+      clock would be locked out. An origin with no pin passes only on
+      platform validation, so it never accepts a self-made certificate. A pin
+      naming another hash is refused as needing a newer Octant.
+    - **Address.** Before connecting, a client resolves the origin's name and
+      refuses unless every address it resolves to is an IP address the
+      listener address classifier calls private LAN or Tailscale; one public
+      answer refuses the whole name. It connects to the judged address, not
+      the name, and judges the connected peer address the same way before the
+      TLS handshake starts. An IPv4-mapped IPv6 form or a zone is refused, not
+      unwrapped, and so is a zero-padded IPv4 address such as `010.0.0.1`,
+      which a URL parser and the system resolver read as octal; the listener
+      address classifier refuses it everywhere for the same reason.
+    - **Staged trust.** An origin's trust may carry a staged next trust and
+      the end of its window. Until then either trust passes, and the first
+      connection that passes only the staged one makes it current and drops
+      the old; after it, only the current trust passes. A window ending more
+      than 30 days after the client's now is ignored, since the host never
+      announces a longer one. Nothing records a staged trust yet: the host's
+      announcement route is planned.
+    - **Copy.** A pin mismatch says "This isn't the computer you paired with:
+      its security key has changed. Octant stopped before sending anything.
+      If its key was replaced on purpose, pair again from that computer."; a
+      certificate platform validation refuses says "Octant couldn't verify
+      this computer's certificate. Pair with the full pairing code or QR code
+      from that computer."; an address outside the private network says
+      "This computer's address isn't on a private network or Tailscale, so
+      Octant stopped before sending anything."
+    - **Node.** The Node implementation, a module the client runtime's
+      barrel does not export so browser and phone bundles never load it,
+      resolves and judges the address, dials it, judges the peer, and runs
+      the handshake with Node's own refusal off, so the rule decides; it
+      hands over the socket only when the rule accepts. It requires TLS 1.3,
+      because TLS 1.2 renegotiation could present a second certificate after
+      the judged one, gives a handshake 10 seconds, and closes the connection
+      when the judgement itself fails. For platform trust it also checks the
+      certificate names the origin's host or address itself, since an IP
+      origin carries no server name. A name that does not resolve, an
+      address that does not answer, and a failed handshake come back as a
+      failure value, not a refusal, and nothing was sent. Only its tests can replace name
+      resolution, dialling, or trust roots. No other client runtime or CLI
+      source turns platform validation off or accepts every server name, and
+      a test refuses any that does. No `octant` command connects to another
+      host yet, so only tests use it.
+- **Adding a computer in one step.** Partly built: the host certificate,
+  pairing code, and client trust rule above. Reading the code and pinning on
+  the desktop and phone apps, and the rest, are planned in
+  [the plan](plans/one-step-pairing.md).
 - **Provider keys on a host without the desktop app.** _Designed, not yet
   built._ The desktop saves an endpoint's API key or bearer token over
   native IPC from its own renderer, so a browser client — local or paired —
@@ -5980,6 +6044,58 @@ mechanisms are:
     purged, and when Octant stops its server. A thread purge erases the grant's
     records with the thread's. Nothing erases a device's records, so a revoked
     device's grant history stays with its revoke.
+  - **Relay.** `/api/server-proxy/<grant id>/<path>` relays one request to the
+    grant's dev server. Each carries the proxy session's signed envelope, with
+    its body (at most 8 MiB, any media type, 413 above) hashed into the proof.
+    The proof signs the canonical query (sorted and normalized) while the dev
+    server gets the query as the page wrote it; the two differ only in order
+    and percent-encoding, which a request carried over TLS with a single-use
+    nonce gives no one else a chance to choose. A proxy request whose cookie
+    names no live proxy session, or one whose device no longer stands, has at
+    most 4 KiB of its body read, 413 above, and one source holds at most four
+    such requests at once (429). Before every request, which gets its
+    own upstream connection, the host checks again: the grant is open and bound
+    to this device, credential generation, and proxy session; Code is on; the
+    thread is active and this device can still read it; and the process the
+    grant was minted for (pid, untruncated name, and port, from one `lsof`
+    narrowed to the port) still holds the port under an Octant terminal, and
+    no other process listens where it could answer the loopback address the
+    host connects to (a wildcard counts for both families, and an IPv4-mapped
+    bind for the IPv4 loopback). The check and the connection are two steps:
+    a server that exits and whose port another process binds in that gap
+    (milliseconds) receives that one request, and the next request's check
+    closes the grant; for an HTTPS dev server the pin refuses it first. The
+    host does not confirm the accepting process per connection, since that is
+    a host query per request and a socket still waiting to be accepted is not
+    yet visible to it. A
+    request never relies on a check that began before it arrived; a burst
+    shares the running check's successor. A lost check closes the grant
+    (`server-stopped`, `server-changed-hands`, `thread-archived`,
+    `thread-unreadable`, `code-disabled`) and the request is refused
+    `grant-closed`, the same answer as a grant that never existed or belongs
+    to another device; a check the host could not make answers 503 and keeps
+    the grant. The host connects only to the grant's `127.0.0.1` or `[::1]`
+    endpoint, within five seconds or `server-unreachable`, follows no redirect,
+    and sends the request's path and query with `Host: localhost:<port>`, an
+    `Origin` (admitted only as the listener's own) as the dev server's origin, a
+    `Referer` under the grant's path as that path on the dev server (any other
+    is dropped), and `Connection: close`. Hop-by-hop headers, `x-octant-`
+    headers, fetch metadata, forwarding claims, and cookies named `octant-`
+    (after any `__Secure-` or `__Host-` prefix) never cross; the page's other
+    cookies and `Authorization` do. The response comes back with hop-by-hop
+    headers, `Content-Length`, `x-octant-` headers, `Clear-Site-Data`,
+    `Alt-Svc`, and `Set-Cookie` for an `octant-` cookie removed, marked `x-octant-server-proxy: relayed` so the
+    device can tell it from the host's own answers, without the listener's
+    security headers or response budget, streamed with no size cap and closed
+    after five minutes without a byte. An HTTPS dev server's certificate is not
+    checked against a trust store; the first one under a grant is pinned for
+    its life, and another closes the grant as `server-changed-hands`. Each
+    request is registered under its grant before connecting, and holds its
+    place in the device's proxy budget until its response ends; closing the
+    grant closes the upstream socket and cuts the response before the call
+    that closed it returns. An upgrade request is refused `upgrade-refused`,
+    and `OPTIONS` is not relayed. The listener admits bodies up to the relay's
+    8 MiB; every other route keeps its own budget.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and
