@@ -40,7 +40,10 @@ import {
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
-import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
+import {
+  JOURNAL_HYDRATION_MAX_SCAN,
+  replayAggregateTypesInOrder,
+} from "../persistence/journalHydration";
 import { ConcurrencyConflict, DuplicateEventIdentity } from "../persistence/journalErrors";
 
 export const AUTOMATION_DEFINITION_AGGREGATE_TYPE = "automation-definition";
@@ -61,8 +64,6 @@ export const AUTOMATION_FIRST_TURN_DISPATCH_CANCELLED =
   "automation-first-turn-dispatch-cancelled@1";
 export const AUTOMATION_FIRST_TURN_ACCEPTED = "automation-first-turn-accepted@1";
 export const AUTOMATION_NOTIFICATION_REF_RECORDED = "automation-notification-ref-recorded@1";
-
-const MAX_JOURNAL_SCAN_EVENTS = 100_000;
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -125,6 +126,8 @@ export interface AutomationEventStoreOptions {
   readonly journal: JournalPort;
   readonly uuid: () => string;
   readonly actor: typeof EventActor.Type;
+  /** Own-row cap for start-up hydration; defaults to the shared journal cap. */
+  readonly maxScan?: number;
 }
 
 export interface AppendAutomationDefinitionCreatedInput {
@@ -239,6 +242,10 @@ export type AutomationReplay =
       readonly reason: "identity-mismatch" | "invalid-frame" | "scan-limit";
     };
 
+export type AutomationReplayOutcome =
+  | { readonly status: "ok" }
+  | Extract<AutomationReplay, { readonly status: "snapshot-required" }>;
+
 const AUTOMATION_AGGREGATE_TYPES: ReadonlySet<string> = new Set([
   AUTOMATION_DEFINITION_AGGREGATE_TYPE,
   AUTOMATION_RUN_AGGREGATE_TYPE,
@@ -276,9 +283,11 @@ export class AutomationEventStore {
   readonly #journal: JournalPort;
   readonly #uuid: () => string;
   readonly #actor: typeof EventActor.Type;
+  readonly #maxScan: number;
 
   constructor(options: AutomationEventStoreOptions) {
     this.#journal = options.journal;
+    this.#maxScan = options.maxScan ?? JOURNAL_HYDRATION_MAX_SCAN;
     this.#uuid = options.uuid;
     try {
       this.#actor = decodeActor(options.actor);
@@ -751,26 +760,34 @@ export class AutomationEventStore {
   }
 
   /**
-   * Replay every automation definition and run event in journal order. Fails
-   * closed with `snapshot-required` when a frame is malformed or attributed to
-   * the wrong aggregate, so hydration never trusts a partially valid stream.
+   * Hand every automation definition and run event to `apply` in journal
+   * order, one journal batch at a time, so a rebuild holds no more than the
+   * state the projection keeps. Fails closed with `snapshot-required` when a
+   * frame is malformed or attributed to the wrong aggregate, or when the
+   * automation rows pass the scan cap. `apply` may already have seen frames
+   * by then, so the caller must discard what it built.
    */
-  replayAll(): AutomationReplay {
-    const events: Array<EventEnvelope> = [];
+  replayEach(apply: (envelope: EventEnvelope) => void): AutomationReplayOutcome {
     let scannedEvents = 0;
-
     for (const envelope of replayAggregateTypesInOrder(this.#journal, [
       ...AUTOMATION_AGGREGATE_TYPES,
     ])) {
       scannedEvents += 1;
-      if (scannedEvents > MAX_JOURNAL_SCAN_EVENTS) {
+      if (scannedEvents > this.#maxScan) {
         return { status: "snapshot-required", reason: "scan-limit" };
       }
       const inspection = inspectAutomationFrame(envelope);
       if (inspection !== "ok") return { status: "snapshot-required", reason: inspection };
-      events.push(envelope);
+      apply(envelope);
     }
-    return { status: "ok", events };
+    return { status: "ok" };
+  }
+
+  /** Every automation frame in memory; for tests and small tools only. */
+  replayAll(): AutomationReplay {
+    const events: Array<EventEnvelope> = [];
+    const outcome = this.replayEach((envelope) => events.push(envelope));
+    return outcome.status === "ok" ? { status: "ok", events } : outcome;
   }
 
   #appendOne(input: {

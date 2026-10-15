@@ -155,6 +155,14 @@ export function useAutomationCenterController(
       )
       .then((response) => {
         if (controller.signal.aborted) return;
+        if (response.historyUnavailable === true) {
+          setList({
+            status: "unavailable",
+            message:
+              "Automation history could not be loaded, so your automations are not shown and none are scheduled. Restart the host to try again.",
+          });
+          return;
+        }
         setList({
           status: "ready",
           items: response.items,

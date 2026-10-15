@@ -87,13 +87,19 @@ export interface AutomationSchedulerPassSummary {
 export interface AutomationSchedulerServiceOptions {
   readonly store: Pick<
     AutomationEventStore,
-    "appendOccurrenceLedger" | "appendRunCreated" | "appendRunStatusChanged" | "replayAll"
+    "appendOccurrenceLedger" | "appendRunCreated" | "appendRunStatusChanged" | "replayEach"
   >;
   readonly projection: AutomationProjection;
   readonly dispatch: AutomationDispatchPort;
   /** Wall clock: selects due occurrences and bounds persisted leases. */
   readonly now: () => UtcTimestamp;
   readonly config?: Partial<AutomationSchedulerConfig>;
+  /**
+   * Called when a live rehydration cannot finish. The projection is then
+   * empty, so the host must report Automation history as unloaded and stop
+   * scheduling instead of acting on it.
+   */
+  readonly onHistoryUnavailable?: () => void;
 }
 
 interface PassCollector {
@@ -129,6 +135,7 @@ export class AutomationSchedulerService {
   readonly #projection: AutomationProjection;
   readonly #dispatch: AutomationDispatchPort;
   readonly #now: () => UtcTimestamp;
+  readonly #onHistoryUnavailable: (() => void) | undefined;
   readonly #config: AutomationSchedulerConfig;
   readonly #offered = new Set<string>();
   #notify: (() => void) | undefined;
@@ -140,6 +147,7 @@ export class AutomationSchedulerService {
     this.#projection = options.projection;
     this.#dispatch = options.dispatch;
     this.#now = options.now;
+    this.#onHistoryUnavailable = options.onHistoryUnavailable;
     this.#config = { ...AUTOMATION_SCHEDULER_DEFAULTS, ...options.config };
   }
 
@@ -678,6 +686,7 @@ export class AutomationSchedulerService {
       projection: this.#projection,
     });
     if (status !== "ok") {
+      this.#onHistoryUnavailable?.();
       throw new AutomationSchedulerError(
         "hydration-failed",
         "Automation journal requires a snapshot; the scheduler fails closed.",

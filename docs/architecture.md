@@ -1696,8 +1696,8 @@ flowchart LR
   checkpoint describes the previous process rather than this one. It names
   the aggregate types it applies, and that replay reads only those rows.
   Automations are also in memory; the host rebuilds them with their own
-  hydration after catch-up instead, which leaves them empty rather than
-  partial when it cannot finish (see the next item).
+  hydration after catch-up instead, which leaves them empty and reported
+  unloaded rather than partial when it cannot finish (see the next item).
 - **Startup hydration reads a store's own rows.** Every in-memory store and
   projection rebuilds at start from its own aggregate types, read in journal
   order through the (type, sequence) index, so no store reads, decodes, or
@@ -1714,8 +1714,13 @@ flowchart LR
     it.
   - Work research keeps a 100,000-row cap; past it the host starts and
     research reports unavailable.
-  - Automations keep a 100,000-row cap; past it the host currently starts
-    with no automations and no warning (tracked as a follow-up).
+  - Automations apply rows one batch at a time under the 1,000,000-row cap.
+    Past it the host still starts, but the Automation list reports that
+    history could not be loaded (the Automation Center says so and that
+    nothing is scheduled), Automation commands are refused, and the
+    scheduler does not start, so nothing fires against history the host never
+    read. The journal is untouched; the state clears on a start that can read
+    it.
   - Work requests and the uncapped stores read all of their own rows.
 - **Migrations.** Ordered, forward-only, checksum-verified, applied in
   transactions before the server reports ready. A changed checksum or an

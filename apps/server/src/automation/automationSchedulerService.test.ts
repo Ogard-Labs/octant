@@ -20,6 +20,7 @@ import {
   AUTOMATION_DISPATCH_INTENT_RECORDED,
   AUTOMATION_RUN_AGGREGATE_TYPE,
   AutomationEventStore,
+  AutomationEventStoreError,
 } from "./automationEventStore";
 import { AutomationProjection, hydrateAutomationProjection } from "./automationProjection";
 import { automationRunIdForOccurrence } from "./automationRunIdentity";
@@ -488,6 +489,36 @@ describe("automation scheduler reconciliation pass", () => {
     session.connection.close();
   });
 
+  it("reports Automation history unavailable when a live rehydration cannot finish", () => {
+    const session = openSession();
+    session.store.appendDefinitionCreated({
+      automation: intervalDefinition({ missedRunPolicy: "run-once" as never }),
+    });
+    let reported = 0;
+    const racing = new AutomationSchedulerService({
+      store: {
+        appendOccurrenceLedger: (input) => session.store.appendOccurrenceLedger(input),
+        appendRunCreated: () => {
+          throw new AutomationEventStoreError("conflict", "rival claim");
+        },
+        appendRunStatusChanged: (input) => session.store.appendRunStatusChanged(input),
+        // The journal grew past the scan cap while the host was running.
+        replayEach: () => ({ status: "snapshot-required", reason: "scan-limit" }),
+      },
+      projection: session.projection,
+      dispatch: { offer: () => undefined },
+      now: () => "2026-08-10T16:30:00.000Z" as UtcTimestamp,
+      onHistoryUnavailable: () => {
+        reported += 1;
+      },
+    });
+
+    expect(racing.runPass().errors).toHaveLength(1);
+    expect(reported).toBe(1);
+    expect(session.projection.listDefinitions()).toHaveLength(0);
+    session.connection.close();
+  });
+
   it("completes a half-committed claim for the existing run instead of duplicating it", () => {
     const session = openSession();
     const definition = intervalDefinition({ missedRunPolicy: "run-once" as never });
@@ -500,7 +531,7 @@ describe("automation scheduler reconciliation pass", () => {
       },
       appendRunCreated: (input) => session.store.appendRunCreated(input),
       appendRunStatusChanged: (input) => session.store.appendRunStatusChanged(input),
-      replayAll: () => session.store.replayAll(),
+      replayEach: (apply) => session.store.replayEach(apply),
     };
     let wallNow = "2026-08-10T16:30:00.000Z";
     const crashing = new AutomationSchedulerService({
