@@ -527,6 +527,8 @@ export const BflImageProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("bfl-image-http"),
   modelAllowlist: UniqueManualModelIds,
   defaultModel: ProviderModelId,
+  /** A proxy or regional endpoint in place of the provider's own. Absent means the provider's own. */
+  baseUrl: Schema.optional(Schema.NonEmptyTrimmedString),
 })
   .pipe(Schema.filter(imageAllowlistContainsDefault))
   .annotations(strict);
@@ -543,6 +545,8 @@ export const IdeogramImageProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("ideogram-image-http"),
   modelAllowlist: UniqueManualModelIds,
   defaultModel: ProviderModelId,
+  /** A proxy or regional endpoint in place of the provider's own. Absent means the provider's own. */
+  baseUrl: Schema.optional(Schema.NonEmptyTrimmedString),
 })
   .pipe(Schema.filter(imageAllowlistContainsDefault))
   .annotations(strict);

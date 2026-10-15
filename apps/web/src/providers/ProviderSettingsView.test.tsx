@@ -1827,7 +1827,7 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("gemini-secret");
   });
 
-  it("creates a BFL image profile with a write-only key, no base URL, and no quality or size fields", async () => {
+  it("creates a BFL image profile with a write-only key, its provider's own endpoint when the base URL is blank, and no quality or size fields", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: geminiImageProvider() });
     renderImageProviderCreation(props);
@@ -1865,7 +1865,7 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("bfl-secret");
   });
 
-  it("saves BFL image configuration and clears the stored key on remove", async () => {
+  it("saves BFL image configuration with a proxy base URL and clears the stored key on remove", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: bflImageProvider() });
     renderProviderListExpanded(props);
@@ -1874,6 +1874,13 @@ describe("ProviderSettingsView", () => {
     await user.type(within(card).getByLabelText("Model allowlist for FLUX"), "flux-dev");
     await user.clear(within(card).getByLabelText("Default model for FLUX"));
     await user.type(within(card).getByLabelText("Default model for FLUX"), "flux-dev");
+    const keyNote = /Saving a different address removes this profile's stored API key/;
+    expect(within(card).queryByText(keyNote)).not.toBeInTheDocument();
+    await user.type(
+      within(card).getByLabelText("Base URL for FLUX"),
+      "https://proxy.example.test/bfl",
+    );
+    expect(within(card).getByText(keyNote)).toHaveAttribute("role", "status");
     await user.type(within(card).getByLabelText("API key for FLUX"), "rotated-bfl");
     await user.click(
       within(card).getByRole("button", { name: "Save Black Forest Labs image settings for FLUX" }),
@@ -1885,6 +1892,7 @@ describe("ProviderSettingsView", () => {
       kind: "bfl-image-http",
       modelAllowlist: ["flux-dev"],
       defaultModel: "flux-dev",
+      baseUrl: "https://proxy.example.test/bfl",
     });
     expect(credential.value).toBe("rotated-bfl");
     expect(document.body.textContent).not.toContain("rotated-bfl");
@@ -1893,7 +1901,7 @@ describe("ProviderSettingsView", () => {
     expect(props.onRemove).toHaveBeenCalledWith(id);
   });
 
-  it("creates an Ideogram image profile with a write-only key and no base URL", async () => {
+  it("creates an Ideogram image profile with a write-only key and its provider's own endpoint when the base URL is blank", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: geminiImageProvider() });
     renderImageProviderCreation(props);

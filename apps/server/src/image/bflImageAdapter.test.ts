@@ -1,14 +1,19 @@
-import { decodeProviderInstanceId, type ProviderModelId } from "@octant/contracts";
+import {
+  decodeProviderInstance,
+  decodeProviderInstanceId,
+  type ProviderModelId,
+} from "@octant/contracts";
+import { runImageGenerationConformance } from "@octant/provider-sdk/image-generation-conformance";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
-import { makeBflImageAdapter } from "./bflImageAdapter";
-import { BFL_IMAGE_API_BASE_URL, type ImageHttpFetch } from "./imageHttp";
+import { bflImageDriver, makeBflImageAdapter } from "./bflImageAdapter";
+import { makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
 
 const SECRET = "bfl-fixture-super-secret";
 const instanceId = decodeProviderInstanceId("a2000000-0000-4000-8000-000000000021");
 const modelId = "flux-pro-1.1" as ProviderModelId;
-const SUBMIT_URL = `${BFL_IMAGE_API_BASE_URL}/v1/${modelId}`;
-const POLL_URL = `${BFL_IMAGE_API_BASE_URL}/v1/poll/job-1`;
+const SUBMIT_URL = `https://api.bfl.ai/v1/${modelId}`;
+const POLL_URL = "https://api.bfl.ai/v1/poll/job-1";
 const SAMPLE_URL = "https://signed.example/generated.png?token=secret";
 const png = Uint8Array.from(
   Buffer.from(
@@ -30,14 +35,18 @@ function adapter(
     limits?: { connectionTimeoutMs?: number };
     pollIntervalMs?: number;
     maxPollAttempts?: number;
+    baseUrl?: string;
   } = {},
 ) {
   return makeBflImageAdapter({
-    instanceId,
-    credentialResolver: resolver(),
-    fetch,
+    ports: makeImageGenerationPorts({
+      instanceId: String(instanceId),
+      credentialResolver: resolver(),
+      fetch,
+      ...(overrides.limits === undefined ? {} : { limits: overrides.limits }),
+    }),
     pollIntervalMs: overrides.pollIntervalMs ?? 1,
-    ...(overrides.limits === undefined ? {} : { limits: overrides.limits }),
+    ...(overrides.baseUrl === undefined ? {} : { baseUrl: overrides.baseUrl }),
     ...(overrides.maxPollAttempts === undefined
       ? {}
       : { maxPollAttempts: overrides.maxPollAttempts }),
@@ -294,3 +303,70 @@ describe("BFL image adapter", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe("BFL image driver behind the image seam", () => {
+  it("keeps the image seam's conformance promises", async () => {
+    await expect(
+      runImageGenerationConformance({
+        driver: bflImageDriver,
+        instance: bflProfile(),
+        request: request({}),
+        respond: (call) =>
+          call.method === "POST"
+            ? submitResponse()
+            : pollResponse("Ready", { result: { sample: SAMPLE_URL } }),
+        expectedImageCount: 1,
+      }),
+    ).resolves.toMatchObject({ completedWithHostMediaTypes: true });
+  });
+
+  it("calls a configured base URL but fetches the signed result exactly where the provider put it", async () => {
+    const calls: Array<{ readonly url: string; readonly key: string | null }> = [];
+    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), key: new Headers(init?.headers).get("x-key") });
+      if (init?.method === "POST") {
+        return submitResponse("https://proxy.example.test/bfl/v1/poll/job-1");
+      }
+      if (String(url).startsWith("https://proxy.example.test/")) {
+        return pollResponse("Ready", { result: { sample: SAMPLE_URL } });
+      }
+      return new Response(png, { status: 200 });
+    });
+    const generator = bflImageDriver.create({
+      instance: bflProfile("https://proxy.example.test/bfl/"),
+      ports: makeImageGenerationPorts({
+        instanceId: String(instanceId),
+        credentialResolver: resolver(),
+        fetch,
+      }),
+    });
+
+    const result = await generator.generate(request({}));
+
+    expect(result.status).toBe("completed");
+    expect(calls).toEqual([
+      { url: `https://proxy.example.test/bfl/v1/${modelId}`, key: SECRET },
+      { url: "https://proxy.example.test/bfl/v1/poll/job-1", key: SECRET },
+      { url: SAMPLE_URL, key: null },
+    ]);
+  });
+});
+
+function bflProfile(baseUrl?: string) {
+  return decodeProviderInstance({
+    id: instanceId,
+    displayName: "FLUX",
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: "2026-10-15T00:00:00.000Z",
+    updatedAt: "2026-10-15T00:00:00.000Z",
+    driverKind: "bfl-image",
+    configuration: {
+      kind: "bfl-image-http",
+      modelAllowlist: [modelId],
+      defaultModel: modelId,
+      ...(baseUrl === undefined ? {} : { baseUrl }),
+    },
+  });
+}

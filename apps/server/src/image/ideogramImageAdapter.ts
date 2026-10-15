@@ -1,9 +1,7 @@
 import {
-  MAX_GENERATED_IMAGE_BYTES,
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_VARIANTS,
   type ProviderFailure,
-  type ProviderInstanceId,
 } from "@octant/contracts";
 import {
   imageFailure,
@@ -14,33 +12,20 @@ import {
   type ImageAdapterRequest,
   type ImageAdapterResult,
   type ImageGenerationAdapter,
+  type ImageGenerationDriver,
+  type ImageGenerationPorts,
 } from "@octant/provider-sdk/image-generation";
-import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
-import { sniffGeneratedImageMediaType } from "./generatedImageStore";
-import {
-  IDEOGRAM_IMAGE_API_BASE_URL,
-  fetchApprovedImageUrl,
-  performImageHttpRequest,
-  type ImageHttpFetch,
-  type ImageHttpLimits,
-} from "./imageHttp";
-import { isRecord } from "./openAiImageResponseCodec";
 
-const DEFAULT_LIMITS: ImageHttpLimits = {
-  connectionTimeoutMs: 120_000,
-  requestBodyBytes: MAX_GENERATED_IMAGE_BYTES * 2,
-  responseBodyBytes: MAX_GENERATED_IMAGE_BYTES * MAX_IMAGE_VARIANTS + 262_144,
-};
+export const IDEOGRAM_IMAGE_API_BASE_URL = "https://api.ideogram.ai/";
 
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 const IDEOGRAM_AUTH = { header: "Api-Key" } as const;
 
 export interface IdeogramImageAdapterOptions {
-  readonly instanceId: ProviderInstanceId;
-  readonly credentialResolver: ProviderCredentialResolver;
-  readonly fetch?: ImageHttpFetch;
-  readonly limits?: Partial<ImageHttpLimits>;
+  readonly ports: ImageGenerationPorts;
+  /** The profile's configured endpoint; the provider's own when absent. */
+  readonly baseUrl?: string;
 }
 
 /**
@@ -48,7 +33,7 @@ export interface IdeogramImageAdapterOptions {
  * URL path segment rather than a body field, but the request body is
  * `multipart/form-data` and the response is synchronous — no polling. Every
  * generated image is a URL, never inline bytes, fetched once per image
- * through the bounded `fetchApprovedImageUrl` exception. A whole-request
+ * through the host's bounded approved-URL port. A whole-request
  * refusal arrives as HTTP 422; a per-image refusal arrives inside an
  * otherwise-200 response as `is_image_safe: false` and fails the whole
  * result rather than returning a partial set of images.
@@ -56,22 +41,14 @@ export interface IdeogramImageAdapterOptions {
 export function makeIdeogramImageAdapter(
   options: IdeogramImageAdapterOptions,
 ): ImageGenerationAdapter {
-  const fetch = options.fetch ?? globalThis.fetch;
-  const limits: ImageHttpLimits = { ...DEFAULT_LIMITS, ...options.limits };
+  const baseUrl = withTrailingSlash(options.baseUrl ?? IDEOGRAM_IMAGE_API_BASE_URL);
   return {
     generate: async (request) => {
       try {
-        return await generateIdeogramImage({
-          adapterInstanceId: options.instanceId,
-          credentialResolver: options.credentialResolver,
-          fetch,
-          limits,
-          request,
-        });
+        return await generateIdeogramImage({ ports: options.ports, baseUrl, request });
       } catch (error) {
-        if (isProviderFailure(error)) {
-          if (error.category === "interrupted") return { status: "failed", providerFailure: error };
-          return { status: "failed", providerFailure: sanitizeImageFailure(error) };
+        if (isProviderFailure(error) && error.category === "interrupted") {
+          return { status: "failed", providerFailure: error };
         }
         return { status: "failed", providerFailure: sanitizeImageFailure(error) };
       }
@@ -79,11 +56,20 @@ export function makeIdeogramImageAdapter(
   };
 }
 
+export const ideogramImageDriver: ImageGenerationDriver = {
+  driverKind: "ideogram-image",
+  create: ({ instance, ports }) => {
+    const baseUrl =
+      instance.configuration.kind === "ideogram-image-http"
+        ? instance.configuration.baseUrl
+        : undefined;
+    return makeIdeogramImageAdapter({ ports, ...(baseUrl === undefined ? {} : { baseUrl }) });
+  },
+};
+
 async function generateIdeogramImage(input: {
-  readonly adapterInstanceId: ProviderInstanceId;
-  readonly credentialResolver: ProviderCredentialResolver;
-  readonly fetch: ImageHttpFetch;
-  readonly limits: ImageHttpLimits;
+  readonly ports: ImageGenerationPorts;
+  readonly baseUrl: string;
   readonly request: ImageAdapterRequest;
 }): Promise<ImageAdapterResult> {
   const signal = input.request.signal;
@@ -140,15 +126,11 @@ async function generateIdeogramImage(input: {
   form.set("prompt", input.request.prompt);
   form.set("num_images", String(variantCount));
 
-  const response = await performImageHttpRequest({
-    url: `${IDEOGRAM_IMAGE_API_BASE_URL}/v1/${encodeURIComponent(modelId)}/generate`,
+  const response = await input.ports.request({
+    url: new URL(`v1/${encodeURIComponent(modelId)}/generate`, input.baseUrl).toString(),
     method: "POST",
     auth: IDEOGRAM_AUTH,
-    instanceId: String(input.adapterInstanceId),
-    credentialResolver: input.credentialResolver,
     form,
-    fetch: input.fetch,
-    limits: input.limits,
     ...(signal === undefined ? {} : { signal }),
   });
 
@@ -186,17 +168,16 @@ async function generateIdeogramImage(input: {
 
   const images = [];
   for (const url of approvedUrls) {
-    const fetched = await fetchApprovedImageUrl({
+    // Fetched exactly as the provider's result named it: a configured base
+    // URL never rewrites or widens it, and it never carries the credential.
+    const fetched = await input.ports.fetchApprovedImageUrl({
       url,
-      fetch: input.fetch,
-      maxBytes: MAX_GENERATED_IMAGE_BYTES,
-      timeoutMs: input.limits.connectionTimeoutMs,
       ...(signal === undefined ? {} : { signal }),
     });
     if ("failure" in fetched) {
       return { status: "failed", providerFailure: sanitizeImageFailure(fetched.failure) };
     }
-    const mediaType = sniffGeneratedImageMediaType(fetched.bytes);
+    const mediaType = input.ports.sniffMediaType(fetched.bytes);
     if (mediaType === undefined) {
       return {
         status: "failed",
@@ -256,4 +237,13 @@ async function readIdeogramSafetyRefusal(response: Response): Promise<string> {
     // Falls through to the generic refusal message below.
   }
   return "The provider refused this request.";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/** A base URL's path is kept: `v1/...` resolves below it, never beside it. */
+function withTrailingSlash(baseUrl: string): string {
+  return baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
 }

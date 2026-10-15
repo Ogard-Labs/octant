@@ -1,13 +1,18 @@
-import { decodeProviderInstanceId, type ProviderModelId } from "@octant/contracts";
+import {
+  decodeProviderInstance,
+  decodeProviderInstanceId,
+  type ProviderModelId,
+} from "@octant/contracts";
+import { runImageGenerationConformance } from "@octant/provider-sdk/image-generation-conformance";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
-import { makeIdeogramImageAdapter } from "./ideogramImageAdapter";
-import { IDEOGRAM_IMAGE_API_BASE_URL, type ImageHttpFetch } from "./imageHttp";
+import { ideogramImageDriver, makeIdeogramImageAdapter } from "./ideogramImageAdapter";
+import { makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
 
 const SECRET = "ideogram-fixture-super-secret";
 const instanceId = decodeProviderInstanceId("a2000000-0000-4000-8000-000000000022");
 const modelId = "ideogram-v3" as ProviderModelId;
-const GENERATE_URL = `${IDEOGRAM_IMAGE_API_BASE_URL}/v1/${modelId}/generate`;
+const GENERATE_URL = `https://api.ideogram.ai/v1/${modelId}/generate`;
 const IMAGE_URL_1 = "https://signed.example/generated-1.png?token=secret";
 const IMAGE_URL_2 = "https://signed.example/generated-2.png?token=secret";
 const IMAGE_URL_3 = "https://signed.example/generated-3.png?token=secret";
@@ -25,11 +30,14 @@ function resolver(credential = SECRET): ProviderCredentialResolver {
   };
 }
 
-function adapter(fetch: ImageHttpFetch) {
+function adapter(fetch: ImageHttpFetch, baseUrl?: string) {
   return makeIdeogramImageAdapter({
-    instanceId,
-    credentialResolver: resolver(),
-    fetch,
+    ports: makeImageGenerationPorts({
+      instanceId: String(instanceId),
+      credentialResolver: resolver(),
+      fetch,
+    }),
+    ...(baseUrl === undefined ? {} : { baseUrl }),
   });
 }
 
@@ -265,3 +273,63 @@ describe("Ideogram image adapter", () => {
     if (result.status === "failed") expect(result.providerFailure.category).toBe("interrupted");
   });
 });
+
+describe("Ideogram image driver behind the image seam", () => {
+  it("keeps the image seam's conformance promises", async () => {
+    await expect(
+      runImageGenerationConformance({
+        driver: ideogramImageDriver,
+        instance: ideogramProfile(),
+        request: request({}),
+        respond: () => generateResponse([{ url: IMAGE_URL_1, isImageSafe: true }]),
+        expectedImageCount: 1,
+      }),
+    ).resolves.toMatchObject({ completedWithHostMediaTypes: true });
+  });
+
+  it("calls a configured base URL but fetches each image exactly where the provider put it", async () => {
+    const calls: Array<{ readonly url: string; readonly key: string | null }> = [];
+    const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), key: new Headers(init?.headers).get("Api-Key") });
+      if (init?.method === "POST") {
+        return generateResponse([{ url: IMAGE_URL_1, isImageSafe: true }]);
+      }
+      return new Response(png, { status: 200 });
+    });
+    const generator = ideogramImageDriver.create({
+      instance: ideogramProfile("https://proxy.example.test/ideogram/"),
+      ports: makeImageGenerationPorts({
+        instanceId: String(instanceId),
+        credentialResolver: resolver(),
+        fetch,
+      }),
+    });
+
+    const result = await generator.generate(request({}));
+
+    expect(result.status).toBe("completed");
+    expect(calls).toEqual([
+      { url: `https://proxy.example.test/ideogram/v1/${modelId}/generate`, key: SECRET },
+      { url: IMAGE_URL_1, key: null },
+    ]);
+  });
+});
+
+function ideogramProfile(baseUrl?: string) {
+  return decodeProviderInstance({
+    id: instanceId,
+    displayName: "Ideogram",
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: "2026-10-15T00:00:00.000Z",
+    updatedAt: "2026-10-15T00:00:00.000Z",
+    driverKind: "ideogram-image",
+    configuration: {
+      kind: "ideogram-image-http",
+      modelAllowlist: [modelId],
+      defaultModel: modelId,
+      ...(baseUrl === undefined ? {} : { baseUrl }),
+    },
+  });
+}
