@@ -27,6 +27,7 @@ import {
   CANVAS_REFRESH_RECEIPT_RECORDED,
   CANVAS_VERSION_APPENDED,
   CanvasEventStore,
+  CanvasEventStoreError,
 } from "./canvasEventStore";
 import { CanvasProjection } from "./canvasProjection";
 import { CANVAS_TOOL_NAME, createCanvasAgentTools } from "./canvasAgentTools";
@@ -1983,5 +1984,96 @@ describe("CanvasService adopting a version another computer wrote", () => {
     expect(head?.sequence).toBe(2);
     expect(String(head?.definition.provenance.threadId)).toBe(ids.thread);
     expect(String(head?.definition.provenance.projectId)).toBe(ids.project);
+  });
+});
+
+describe("CanvasService when the Canvas cannot be checked for outside content", () => {
+  const tryAgain = expect.stringContaining("Try again");
+  const unreadable = () => new CanvasEventStoreError("unreadable-mark", "Try again.");
+
+  it("refuses a revise instead of throwing", () => {
+    const { service, eventStore, projection } = createService();
+    vi.spyOn(eventStore, "appendVersion").mockImplementation(() => {
+      throw unreadable();
+    });
+
+    const result = service.revise(
+      reviseRequest(),
+      { mode: "chat", projectId: ids.project },
+      { id: ids.project, type: "chat", lifecycle: "active" },
+    );
+
+    expect(result).toMatchObject({ kind: "denied", denialCode: "unavailable", message: tryAgain });
+    expect(projection.getById(canvasId)?.currentVersion.sequence).toBe(1);
+  });
+
+  it("refuses a board drag instead of throwing", () => {
+    const { service, eventStore } = createService(
+      undefined,
+      undefined,
+      version({ definition: diagramDefinition }),
+    );
+    vi.spyOn(eventStore, "appendVersion").mockImplementation(() => {
+      throw unreadable();
+    });
+
+    expect(
+      service.reviseDiagramLayout(layoutReviseCommand(), boardContext, boardProject),
+    ).toMatchObject({ kind: "denied", denialCode: "unavailable", message: tryAgain });
+  });
+
+  it("refuses a refresh without calling it a race", async () => {
+    const source = {
+      sourceId: "99999999-9999-4999-8999-999999999999",
+      kind: "artifact",
+      hostId: "local",
+      projectId: ids.project,
+      opaqueRef: "artifact:unreadable",
+      displayName: "Unreadable source",
+    };
+    const current = version({ definition: { ...definition, sourceManifest: [source] } });
+    const { service, eventStore } = createService(
+      openConnection(),
+      (resolved) => ({
+        sourceId: resolved.sourceId,
+        status: "ready",
+        refreshedDefinition: current.definition,
+      }),
+      current,
+    );
+    vi.spyOn(eventStore, "appendVersion").mockImplementation(() => {
+      throw unreadable();
+    });
+
+    const result = await service.refresh(
+      {
+        ...refreshRequest(),
+        recipe: { ...refreshRequest().recipe, sourceManifest: [source] },
+      },
+      { mode: "chat", projectId: ids.project },
+      { id: ids.project, type: "chat", lifecycle: "active" },
+    );
+
+    expect(result).toMatchObject({ kind: "denied", denialCode: "unavailable", message: tryAgain });
+  });
+
+  it("refuses an adopted version and says to try again", () => {
+    const { service, eventStore } = createService();
+    vi.spyOn(eventStore, "appendVersion").mockImplementation(() => {
+      throw unreadable();
+    });
+
+    const adopted = service.adoptVersion(
+      {
+        canvasId,
+        versionId: ids.version2 as never,
+        content: definition as never,
+        createdAt: later as never,
+      },
+      { mode: "chat", projectId: ids.project },
+      { id: ids.project, type: "chat", lifecycle: "active" },
+    );
+
+    expect(adopted).toMatchObject({ kind: "denied", message: tryAgain });
   });
 });

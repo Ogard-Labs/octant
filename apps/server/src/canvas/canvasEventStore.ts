@@ -37,6 +37,7 @@ import {
   CANVAS_OUTSIDE_CONTENT_AGGREGATE_TYPE,
   CANVAS_OUTSIDE_CONTENT_CARRIED,
   canvasOutsideContentWriters,
+  isReplicaWriter,
   canvasVersionWriters,
   decodeCanvasOutsideContentCarried,
 } from "./canvasOutsideContentMark";
@@ -62,7 +63,7 @@ type JournalPort = Pick<Journal, "append" | "replay" | "replayAggregateType"> &
 
 export class CanvasEventStoreError extends Error {
   override readonly name = "CanvasEventStoreError";
-  readonly category: "invalid" | "journal-mismatch";
+  readonly category: "invalid" | "journal-mismatch" | "unreadable-mark";
 
   constructor(category: CanvasEventStoreError["category"], message: string) {
     super(message);
@@ -495,7 +496,15 @@ export class CanvasEventStore {
     try {
       recorded = recordsMarks(journal) ? canvasOutsideContentWriters(journal, canvasId) : [];
       marked = canvasVersionWriters(version).filter(
-        (writerId) => !recorded.includes(writerId) && writerMarked(writerId),
+        (writerId) =>
+          !recorded.includes(writerId) &&
+          // A synced version has no thread of its own to be marked: it is as
+          // marked as the thread it lands in, which took it as outside content.
+          writerMarked(
+            isReplicaWriter(version, writerId)
+              ? String(version.definition.provenance.threadId)
+              : writerId,
+          ),
       );
     } catch {
       throw unreadableMark();
@@ -586,9 +595,10 @@ function recordsMarks(
   return journal.transaction !== undefined && journal.replayAggregate !== undefined;
 }
 
+/** Why nothing was written, and what the person can do: the check can pass on a second try. */
+export const UNREADABLE_MARK_MESSAGE =
+  "The Canvas could not be checked for outside content, so nothing was written. Try again.";
+
 function unreadableMark(): CanvasEventStoreError {
-  return new CanvasEventStoreError(
-    "invalid",
-    "The Canvas could not be checked for outside content, so nothing was written.",
-  );
+  return new CanvasEventStoreError("unreadable-mark", UNREADABLE_MARK_MESSAGE);
 }

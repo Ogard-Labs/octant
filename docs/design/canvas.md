@@ -166,6 +166,11 @@ to is marked now. A reader that cannot be marked gets a refusal instead of the
 Canvas. Architecture owns the rule, including how a Canvas records a marked
 writer at write time
 ([Architecture: modes](../architecture.md#modes-chat-work-and-code)).
+The mark follows the Canvas tool only. A Canvas's mirrored or exported files
+carry no marker, so a thread that reads one with its own file tools is not
+marked, as for any file a marked thread writes; this residual is kept on
+purpose, because a file tool cannot tell a mirror from any other file.
+Chat marks a reader by this same rule, not on every Canvas tool result.
 A thread reference card reports the effective presentation and the first
 version's time (`canvasCreatedAt`). A Canvas that has outgrown the bound, by a
 revision or a person's edit, is listed as `sidebar`.

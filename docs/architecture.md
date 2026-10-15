@@ -866,16 +866,24 @@ the managed child writing it, is marked at that moment, the store first appends
 `canvas.outside-content-carried@1` (aggregate `canvas-outside-content`, one
 event per writer, naming the writer and the first marked version) in the same
 journal unit as the version, so no moment exists at which the Canvas holds that
-text unmarked; a mark that cannot be read or recorded refuses the version. This
+text unmarked; a mark that cannot be read or recorded refuses the version
+(a create, revise, board drag, refresh, or adopted version is refused with
+`unavailable` and a message to try again, never reported as a race). This
 covers an agent's create and revise, a child's, a hand-off document, a person's
 edit, and a version taken from another computer, which marks the thread it
-lands in first (`Synced from …`). The Canvas tool's `read` and `preview` are how
+lands in first (`Synced from …`). A version taken from another computer is
+recorded under its own author, an agent whose id is the version's id, and the
+Canvas carries that author whenever the thread it lands in is marked, so a
+person's clear of that thread never makes the synced text the thread's own. The Canvas tool's `read` and `preview` are how
 another thread's model reaches a Canvas (any Canvas of its Project, by id), so
 both mark the reader (label `canvas`, content reference `canvas-<canvas>`)
 after the Canvas is read and before anything from it is returned, when the
 Canvas records a writer other than the reader or the thread it belongs to is
 marked now; the second rule covers a Canvas written before marks were recorded
-at write time. A reader that cannot be marked is not given the Canvas. A child
+at write time. A reader that cannot be marked is not given the Canvas. Every mode follows this
+rule, Chat included: only a `read` or `preview` that returns content from a
+marked Canvas marks the reader, so `describe`, a create, a revise, and a read
+of a clean Canvas leave the thread unmarked. A child
 is marked under its run, as its other tools are. A writer reading its own
 Canvas passes on nothing. The mark recorded at write time is the Canvas's own:
 a person's clear on the writer reviews what that thread read, not every thread

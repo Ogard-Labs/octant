@@ -6911,13 +6911,6 @@ export function startOctantServer(
                 targetThreadIds: threadMentionIds ?? [],
                 ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
               }),
-              canvasAgentToolPort === undefined
-                ? undefined
-                : createCanvasAgentTools({
-                    windowId,
-                    thread,
-                    port: canvasAgentToolPort,
-                  }),
               createImageAgentTools({
                 threadKind: "chat-thread",
                 scopeId: decodeImageGenerationScopeId(String(thread.id)),
@@ -6944,6 +6937,17 @@ export function startOctantServer(
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
           }),
+          // Outside the taint wrapper: a Canvas marks its reader only when a
+          // read or preview returns content from a Canvas that carries a mark,
+          // the rule Work and Code follow, so describe and a clean read leave
+          // the thread unmarked.
+          canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId,
+                thread,
+                port: canvasAgentToolPort,
+              }),
           // Host-internal: its results are Octant's own answers, not external
           // content, and `delegate` itself refuses while the thread is tainted.
           agentsManagedToolsFor({
