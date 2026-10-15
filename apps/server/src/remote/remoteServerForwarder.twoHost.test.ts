@@ -241,6 +241,22 @@ async function startHost(devPort: number) {
           stillAuthorized: input.stillAuthorized,
           signal: input.signal,
         }),
+      relayUpgrade: (input) =>
+        grants.relayUpgrade({
+          principal: {
+            deviceId: String(input.principal.deviceId),
+            credentialGeneration: input.principal.credentialGeneration,
+            sessionIdDigest: input.sessionIdDigest,
+            origin: input.principal.origin,
+          },
+          scopeId: decodeWindowId(String(input.principal.deviceId)),
+          grantId: input.grantId,
+          pathQuery: input.pathQuery,
+          headers: input.headers,
+          stillAuthorized: input.stillAuthorized,
+          signal: input.signal,
+        }),
+      holdsOpenSockets: (digest) => grants.holdsOpenSockets(digest),
       closeSession: (digest, reason) => grants.closeSession(digest, reason),
     },
     serve,
