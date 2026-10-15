@@ -110,14 +110,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Provider conformance harness that chatProviderMatrixEvidence.test-support.ts runs against drivers; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the matrix evidence is retired.",
   ],
   [
-    "packages/contracts/src/remoteServerGrants.ts",
-    "Grant contracts for opening a dev server from a paired device; the plan in docs/plans/open-a-dev-server-from-another-computer.md ships them ahead of the host's grant service and route on purpose. Remove once that service imports them.",
-  ],
-  [
-    "packages/domain/src/remoteServerGrantPolicy.ts",
-    "Grant policy for opening a dev server from a paired device; the plan in docs/plans/open-a-dev-server-from-another-computer.md ships it ahead of the host's grant service and route on purpose. Remove once that service decides grants with it.",
-  ],
-  [
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
@@ -628,7 +620,20 @@ export function findUnregisteredRouteModules(
  * states a dated reason and the caller it is waiting on. Empty means every
  * served endpoint has a caller (or is a routing prefix).
  */
-export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map();
+export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
+  [
+    "/api/remote/auth/server-proxy-session",
+    "Host side of opening a dev server from a paired device; docs/plans/open-a-dev-server-from-another-computer.md builds the host first and its desktop forwarder last, so nothing calls it yet. Remove once the desktop forwarder does.",
+  ],
+  [
+    "/api/server-proxy",
+    "Host side of opening a dev server from a paired device; docs/plans/open-a-dev-server-from-another-computer.md builds the host first and its desktop forwarder last, so nothing calls it yet. Remove once the desktop forwarder does.",
+  ],
+  [
+    "/api/server-proxy/grants",
+    "Host side of opening a dev server from a paired device; docs/plans/open-a-dev-server-from-another-computer.md builds the host first and its desktop forwarder last, so nothing calls it yet. Remove once the desktop forwarder does.",
+  ],
+]);
 
 const API_PATH_PATTERN = /"(\/api\/[a-z0-9/_-]+)"/g;
 const PREFIX_GUARD_PATTERN = /startsWith\(\s*"(\/api\/[a-z0-9/_-]+)"/g;

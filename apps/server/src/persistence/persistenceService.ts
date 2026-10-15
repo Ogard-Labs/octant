@@ -122,6 +122,7 @@ import {
 } from "./codeProjection";
 import { readProductFeedbackNote, readProductFeedbackNotes } from "./productFeedbackProjection";
 import { readRunningProjectTerminals } from "./projectTerminalProjection";
+import { readOpenRemoteServerGrants } from "./remoteServerGrantProjection";
 import { readThreadCheckpoint, readThreadCheckpoints } from "./threadCheckpointProjection";
 import { databaseStatus, rebuildAll, type DatabaseStatus } from "./recovery";
 import {
@@ -225,6 +226,7 @@ export interface PersistenceService {
   ) => ProductFeedbackNote | undefined;
   readonly readProductFeedbackNotes: (threadId: string) => ReadonlyArray<ProductFeedbackNote>;
   readonly readRunningProjectTerminals: () => ReturnType<typeof readRunningProjectTerminals>;
+  readonly readOpenRemoteServerGrants: () => ReturnType<typeof readOpenRemoteServerGrants>;
   readonly readCodeSettings: () => ProjectedCodeSettings | undefined;
   readonly readThemeSettings: () => ProjectedThemeSettings | undefined;
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
@@ -463,6 +465,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readProductFeedbackNote: (noteId) => readProductFeedbackNote(connection, noteId),
       readProductFeedbackNotes: (threadId) => readProductFeedbackNotes(connection, threadId),
       readRunningProjectTerminals: () => readRunningProjectTerminals(connection),
+      readOpenRemoteServerGrants: () => readOpenRemoteServerGrants(connection),
       readCodeSettings: () => readCodeSettings(connection),
       readThemeSettings: () => readThemeSettings(connection),
       readCodeThread: (threadId) => readCodeThread(connection, threadId),

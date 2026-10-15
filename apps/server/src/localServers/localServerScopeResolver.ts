@@ -88,6 +88,9 @@ export function createCodeThreadLocalServerScopeResolver(
         userProjectRoots: [...new Set([currentCheckoutRoot, ...userProjectRoots])],
         posture: thread.executionPolicy,
         ownedPids: options.source.ownedPids(),
+        checkoutIsOwnWorktree:
+          checkout.kind === "managed-worktree" &&
+          currentCheckoutRoot !== project.binding.canonicalRoot,
       };
     },
   };

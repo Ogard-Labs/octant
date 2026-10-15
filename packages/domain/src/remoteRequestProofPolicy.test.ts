@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildRemoteChallengeProofPayload,
   buildRemoteKeyRotationProofPayload,
   buildRemoteRequestProofPayload,
+  buildRemoteServerProxySessionProofPayload,
   buildRemoteSessionMetadataPayload,
   canonicalizeRemotePathQuery,
   evaluateRemoteRequestFreshness,
@@ -124,5 +126,35 @@ describe("remote request proof policy", () => {
     expect(payload).not.toBe(
       buildRemoteSessionMetadataPayload({ ...metadata, origin: "https://evil.example.test" }),
     );
+  });
+});
+
+describe("proxy session transcript", () => {
+  it("signs the same facts as a product session under a label of its own", () => {
+    const input = {
+      challenge: {
+        challengeId: "11111111-1111-4111-8111-111111111111",
+        hostId: "22222222-2222-4222-8222-222222222222",
+        deviceId: "33333333-3333-4333-8333-333333333333",
+        credentialGeneration: 1,
+        nonce: "nonce",
+        issuedAt: "2026-10-15T09:00:00.000Z",
+        expiresAt: "2026-10-15T09:01:00.000Z",
+      },
+      sessionFacts: {
+        origin: "https://192.168.1.20:9443",
+        protocolVersion: 1,
+        authenticationVersion: 1,
+        capabilityDigest: "c".repeat(64),
+        issuedAt: "2026-10-15T09:00:00.000Z",
+        idleExpiresAt: "2026-10-15T09:15:00.000Z",
+        absoluteExpiresAt: "2026-10-15T21:00:00.000Z",
+      },
+    } as Parameters<typeof buildRemoteChallengeProofPayload>[0];
+    const product = buildRemoteChallengeProofPayload(input).split("\n");
+    const proxy = buildRemoteServerProxySessionProofPayload(input).split("\n");
+    expect(product[0]).toBe("octant.remote-session-challenge.v1");
+    expect(proxy[0]).toBe("octant.remote-server-proxy-session-challenge.v1");
+    expect(proxy.slice(1)).toEqual(product.slice(1));
   });
 });

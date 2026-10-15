@@ -8,7 +8,7 @@
 
 import type { RequestTransportFacts } from "../server";
 
-export type RemoteAdmissionSurface = "pairing" | "auth" | "product" | "pre-auth";
+export type RemoteAdmissionSurface = "pairing" | "auth" | "product" | "server-proxy" | "pre-auth";
 
 export type RemoteAdmissionPathSurface = RemoteAdmissionSurface | "static-asset";
 
@@ -25,6 +25,11 @@ export interface RemoteAdmissionLimits {
   readonly productConcurrentPerDevice: number;
   /** Product concurrent requests across the whole listener. */
   readonly productConcurrentPerListener: number;
+  /**
+   * Proxy-route concurrent requests across the whole listener, counted apart
+   * from the product's, so a dev page cannot starve the Octant interface.
+   */
+  readonly serverProxyConcurrentPerListener: number;
   /** Product state-changing (POST/PUT/PATCH/DELETE) token bucket per device per minute. */
   readonly productStateChangingPerDevicePerMinute: number;
   /** Coarse retry-after advertised to rejected remote clients. */
@@ -38,6 +43,7 @@ export const DEFAULT_REMOTE_ADMISSION_LIMITS: RemoteAdmissionLimits = {
   authPerDevicePerMinute: 12,
   productConcurrentPerDevice: 8,
   productConcurrentPerListener: 32,
+  serverProxyConcurrentPerListener: 64,
   productStateChangingPerDevicePerMinute: 60,
   retryAfterMs: 60_000,
 };
@@ -64,6 +70,7 @@ export type RemoteAdmissionDecision =
 
 export interface RemoteAdmissionCounts {
   readonly productConcurrentListener: number;
+  readonly serverProxyConcurrentListener: number;
 }
 
 export interface RemoteAdmissionDiagnostics {
@@ -118,6 +125,10 @@ export function createRemoteAdmissionPolicy(
   assertFinitePositiveInteger(limits.productConcurrentPerDevice, "productConcurrentPerDevice");
   assertFinitePositiveInteger(limits.productConcurrentPerListener, "productConcurrentPerListener");
   assertFinitePositiveInteger(
+    limits.serverProxyConcurrentPerListener,
+    "serverProxyConcurrentPerListener",
+  );
+  assertFinitePositiveInteger(
     limits.productStateChangingPerDevicePerMinute,
     "productStateChangingPerDevicePerMinute",
   );
@@ -130,6 +141,7 @@ export function createRemoteAdmissionPolicy(
   const authDevice = new Map<string, number[]>();
   const productDeviceConcurrent = new Map<string, number>();
   let productListenerConcurrent = 0;
+  let serverProxyListenerConcurrent = 0;
   const productDeviceStateChanging = new Map<string, number[]>();
 
   /** Sweep expired entries from a token-bucket map. Mutates the map in place. */
@@ -241,6 +253,24 @@ export function createRemoteAdmissionPolicy(
       return { kind: "admitted", release: NOOP_RELEASE };
     }
 
+    if (input.surface === "server-proxy") {
+      // Per device, the proxy session store holds the budget: only it knows
+      // which device a proxy request is from.
+      if (serverProxyListenerConcurrent >= limits.serverProxyConcurrentPerListener) {
+        return reject(limits);
+      }
+      serverProxyListenerConcurrent += 1;
+      let released = false;
+      return {
+        kind: "admitted",
+        release: () => {
+          if (released) return;
+          released = true;
+          serverProxyListenerConcurrent = Math.max(0, serverProxyListenerConcurrent - 1);
+        },
+      };
+    }
+
     // product
     if (productListenerConcurrent >= limits.productConcurrentPerListener) {
       return reject(limits);
@@ -288,11 +318,13 @@ export function createRemoteAdmissionPolicy(
     authDevice.clear();
     productDeviceConcurrent.clear();
     productListenerConcurrent = 0;
+    serverProxyListenerConcurrent = 0;
     productDeviceStateChanging.clear();
   };
 
   const counts = (): RemoteAdmissionCounts => ({
     productConcurrentListener: productListenerConcurrent,
+    serverProxyConcurrentListener: serverProxyListenerConcurrent,
   });
 
   const diagnostics = (): RemoteAdmissionDiagnostics => ({
@@ -325,6 +357,7 @@ export function classifyRemoteAdmissionPath(pathname: string): RemoteAdmissionPa
   if (pathname === "/api/remote/hello") return "pairing";
   if (matchPathPrefix(pathname, "/api/remote/pairing")) return "pairing";
   if (matchPathPrefix(pathname, "/api/remote/auth")) return "auth";
+  if (matchPathPrefix(pathname, "/api/server-proxy")) return "server-proxy";
   if (pathname === "/api" || pathname.startsWith("/api/")) return "product";
   return "static-asset";
 }

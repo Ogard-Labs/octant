@@ -684,9 +684,14 @@ describe("findUncalledEndpoints", () => {
 });
 
 describe("wiring exemptions", () => {
-  it("keeps known unregistered routes and uncalled endpoints empty", () => {
+  it("keeps known unregistered routes empty", () => {
     expect([...KNOWN_UNREGISTERED_ROUTES.keys()]).toEqual([]);
-    expect([...KNOWN_UNCALLED_ENDPOINTS.keys()]).toEqual([]);
+  });
+
+  it("states why each uncalled endpoint is served and when to remove it", () => {
+    for (const reason of KNOWN_UNCALLED_ENDPOINTS.values()) {
+      expect(reason).toMatch(/Remove (once|when) /);
+    }
   });
 
   it("states why each remaining island exists and when to remove it", () => {

@@ -21,6 +21,28 @@ function acquire(
 
 type RemoteAdmissionPolicy_acquire = ReturnType<typeof createRemoteAdmissionPolicy>["acquire"];
 
+describe("remoteAdmissionPolicy proxy budget", () => {
+  it("admits proxy requests while the product budget is full, and the reverse", () => {
+    const policy = createRemoteAdmissionPolicy({
+      limits: { productConcurrentPerListener: 1, serverProxyConcurrentPerListener: 1 },
+    });
+    const identity = { sourceKey: "source" };
+    const product = policy.acquire({ surface: "product", identity, method: "GET" });
+    expect(product.kind).toBe("admitted");
+    expect(policy.acquire({ surface: "product", identity, method: "GET" }).kind).toBe("rejected");
+    const proxy = policy.acquire({ surface: "server-proxy", identity, method: "POST" });
+    expect(proxy.kind).toBe("admitted");
+    expect(policy.acquire({ surface: "server-proxy", identity, method: "POST" }).kind).toBe(
+      "rejected",
+    );
+    if (proxy.kind === "admitted") proxy.release();
+    expect(policy.counts()).toEqual({
+      productConcurrentListener: 1,
+      serverProxyConcurrentListener: 0,
+    });
+  });
+});
+
 describe("remoteAdmissionPolicy surface classification", () => {
   it("classifies pre-auth, remote pairing, remote auth, product, and static-asset paths", () => {
     expect(classifyRemoteAdmissionPath("/health")).toBe("pre-auth");
@@ -30,6 +52,9 @@ describe("remoteAdmissionPolicy surface classification", () => {
     expect(classifyRemoteAdmissionPath("/api/remote/pairing/hello")).toBe("pairing");
     expect(classifyRemoteAdmissionPath("/api/remote/auth")).toBe("auth");
     expect(classifyRemoteAdmissionPath("/api/remote/auth/session")).toBe("auth");
+    expect(classifyRemoteAdmissionPath("/api/remote/auth/server-proxy-session")).toBe("auth");
+    expect(classifyRemoteAdmissionPath("/api/server-proxy/grants")).toBe("server-proxy");
+    expect(classifyRemoteAdmissionPath("/api/server-proxyx")).toBe("product");
     // Legacy /api/pairing and /api/auth are product, not pairing/auth surfaces.
     expect(classifyRemoteAdmissionPath("/api/pairing")).toBe("product");
     expect(classifyRemoteAdmissionPath("/api/pairing/hello")).toBe("product");
