@@ -149,7 +149,9 @@ anything.
   and revokes every device, and each device pairs again. Rotating the host
   identity key still revokes every device, unchanged.
   The client half, accepting and promoting a staged trust, is built;
-  recording one from the route is not.
+  recording one from the route is not. The route must keep the client's
+  bound: a client ignores a window ending more than 30 days after its own
+  now.
 - **Failure copy.** Each refusal is a typed failure with one line of copy:
   - a pin mismatch, a certificate platform validation refuses for an
     origin with no pin, and an address outside the private network: as in

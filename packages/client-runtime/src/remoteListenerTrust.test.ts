@@ -30,6 +30,7 @@ describe("judging a listener's addresses", () => {
     ["a *.ts.net name rather than an address", ["host.example-tailnet.ts.net"]],
     ["an IPv4-mapped IPv6 form of a private address", ["::ffff:10.0.0.5"]],
     ["an address with a zone", ["fe80::1%en0"]],
+    ["a zero-padded address another parser reads as octal", ["010.0.0.1"]],
     ["a private answer beside a public one", ["100.101.102.103", "203.0.113.7"]],
     ["no answer", []],
     ["an unknown peer", [undefined]],
@@ -131,6 +132,17 @@ describe("judging a listener's certificate", () => {
 
       expect(
         judgeListenerCertificate({ trust, servedPin: PIN_B, platformTrusted: true, now: NOW }),
+      ).toEqual({ status: "refused", reason: "pin-mismatch" });
+      expect(
+        judgeListenerCertificate({ trust, servedPin: PIN_A, platformTrusted: false, now: NOW }),
+      ).toEqual({ status: "accepted", trust: pinned(PIN_A) });
+    });
+
+    it("ignores a staged window that ends further out than the host ever announces", () => {
+      const trust = staged("2027-01-01T00:00:00.000Z");
+
+      expect(
+        judgeListenerCertificate({ trust, servedPin: PIN_B, platformTrusted: false, now: NOW }),
       ).toEqual({ status: "refused", reason: "pin-mismatch" });
       expect(
         judgeListenerCertificate({ trust, servedPin: PIN_A, platformTrusted: false, now: NOW }),

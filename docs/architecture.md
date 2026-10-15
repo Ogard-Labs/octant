@@ -5763,12 +5763,16 @@ mechanisms are:
       answer refuses the whole name. It connects to the judged address, not
       the name, and judges the connected peer address the same way before the
       TLS handshake starts. An IPv4-mapped IPv6 form or a zone is refused, not
-      unwrapped.
+      unwrapped, and so is a zero-padded IPv4 address such as `010.0.0.1`,
+      which a URL parser and the system resolver read as octal; the listener
+      address classifier refuses it everywhere for the same reason.
     - **Staged trust.** An origin's trust may carry a staged next trust and
       the end of its window. Until then either trust passes, and the first
       connection that passes only the staged one makes it current and drops
-      the old; after it, only the current trust passes. Nothing records a
-      staged trust yet: the host's announcement route is planned.
+      the old; after it, only the current trust passes. A window ending more
+      than 30 days after the client's now is ignored, since the host never
+      announces a longer one. Nothing records a staged trust yet: the host's
+      announcement route is planned.
     - **Copy.** A pin mismatch says "This isn't the computer you paired with:
       its security key has changed. Octant stopped before sending anything.
       If its key was replaced on purpose, pair again from that computer."; a
@@ -5781,10 +5785,14 @@ mechanisms are:
       barrel does not export so browser and phone bundles never load it,
       resolves and judges the address, dials it, judges the peer, and runs
       the handshake with Node's own refusal off, so the rule decides; it
-      hands over the socket only when the rule accepts. No other client
-      runtime or CLI source turns platform validation off, and a test
-      refuses any that does. No `octant` command connects to another host
-      yet, so only tests use it.
+      hands over the socket only when the rule accepts. It requires TLS 1.3,
+      because TLS 1.2 renegotiation could present a second certificate after
+      the judged one, gives a handshake 10 seconds, and closes the connection
+      when the judgement itself fails. Only its tests can replace name
+      resolution, dialling, or trust roots. No other client runtime or CLI
+      source turns platform validation off or accepts every server name, and
+      a test refuses any that does. No `octant` command connects to another
+      host yet, so only tests use it.
 - **Adding a computer in one step.** Partly built: the host certificate,
   pairing code, and client trust rule above. Reading the code and pinning on
   the desktop and phone apps, and the rest, are planned in

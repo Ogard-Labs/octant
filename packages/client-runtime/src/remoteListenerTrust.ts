@@ -33,6 +33,13 @@ export interface ListenerOriginTrust {
   readonly staged?: { readonly trust: ListenerTrust; readonly until: string };
 }
 
+/**
+ * The longest staged window a client honours, counted from now: the host
+ * announces the next trust for up to 30 days. A window ending later is
+ * ignored, so a damaged or hostile record cannot keep an old trust alive.
+ */
+export const MAX_STAGED_TRUST_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
+
 /** The trust of an origin paired before pins existed, or through a certificate the person pasted. */
 export const PLATFORM_LISTENER_TRUST: ListenerOriginTrust = { current: { kind: "platform" } };
 
@@ -118,12 +125,15 @@ export function judgeListenerCertificate(input: {
         input.servedPin !== undefined &&
         input.servedPin === trust.pin;
   const { current, staged } = input.trust;
-  // A window whose end cannot be read is over.
-  const stagedLive = staged !== undefined && Date.parse(staged.until) > input.now;
+  // A window whose end cannot be read is over, and one ending further out
+  // than the host ever announces is not honoured.
+  const stagedUntil = staged === undefined ? Number.NaN : Date.parse(staged.until);
+  const stagedLive =
+    stagedUntil > input.now && stagedUntil - input.now <= MAX_STAGED_TRUST_WINDOW_MS;
   if (passes(current)) {
     return { status: "accepted", trust: stagedLive ? input.trust : { current } };
   }
-  if (stagedLive && passes(staged.trust)) {
+  if (staged !== undefined && stagedLive && passes(staged.trust)) {
     return { status: "accepted", trust: { current: staged.trust } };
   }
   if (current.kind === "platform") return { status: "refused", reason: "platform-untrusted" };
@@ -180,7 +190,7 @@ function isPrivateListenerAddress(address: string | undefined): boolean {
   // its spelling. An IPv4-mapped IPv6 form or a zone is refused, not unwrapped.
   if (address === undefined) return false;
   const literal =
-    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(address) ||
+    /^[0-9]{1,3}(?:\.[0-9]{1,3}){3}$/.test(address) ||
     (address.includes(":") && /^[0-9A-Fa-f:]+$/.test(address));
   if (!literal) return false;
   const reach = classifyRemoteListenerAddress(address);

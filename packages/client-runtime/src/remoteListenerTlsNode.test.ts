@@ -1,14 +1,15 @@
 import { createHash, X509Certificate } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
-import { connect as connectTcp, type Socket } from "node:net";
+import { connect as connectTcp, createServer as createTcpServer, type Socket } from "node:net";
 import { dirname, join } from "node:path";
 import { createServer as createTlsServer } from "node:tls";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   connectListener,
-  secureListenerSocket,
+  testOnlyListenerTls,
   type ListenerConnection,
+  type ListenerConnectionOptions,
 } from "./remoteListenerTlsNode";
 import {
   EXPIRED_SELF_MADE_CERT,
@@ -42,12 +43,16 @@ const pinned = (pin: string): ListenerOriginTrust => ({ current: { kind: "pinned
 const platform: ListenerOriginTrust = { current: { kind: "platform" } };
 
 /** A TLS listener on loopback that records every byte that reaches it, before and after TLS. */
-async function startListener(certificate: { readonly cert: string; readonly key: string }) {
+async function startListener(certificate: {
+  readonly cert: string;
+  readonly key: string;
+  readonly maxVersion?: "TLSv1.2";
+}) {
   const rawBytes: number[] = [];
   const requestBytes: Buffer[] = [];
   const closedConnections: Array<Promise<void>> = [];
   const openSockets = new Set<Socket>();
-  const server = createTlsServer({ cert: certificate.cert, key: certificate.key }, (socket) => {
+  const server = createTlsServer({ ...certificate }, (socket) => {
     socket.on("data", (chunk: Buffer) => requestBytes.push(chunk));
     socket.on("error", () => undefined);
   });
@@ -93,13 +98,30 @@ function dialLoopback(port: number): Promise<Socket> {
 async function secureOverLoopback(
   port: number,
   trust: ListenerOriginTrust,
+  overrides: { readonly now?: () => number; readonly handshakeTimeoutMs?: number } = {},
 ): Promise<ListenerConnection> {
-  return secureListenerSocket({
+  return testOnlyListenerTls.secureListenerSocket({
     socket: await dialLoopback(port),
     hostname: HOSTNAME,
     trust,
-    now: () => NOW,
+    now: overrides.now ?? (() => NOW),
+    handshakeTimeoutMs: overrides.handshakeTimeoutMs ?? 5_000,
     platformRoots: [TEST_PLATFORM_ROOT],
+  });
+}
+
+/** Connects through replaced name resolution and dialling, as only tests may. */
+function connectOver(
+  options: ListenerConnectionOptions,
+  network: {
+    readonly resolve?: (hostname: string) => Promise<ReadonlyArray<string>>;
+    readonly dial: (address: string, port: number) => Promise<Socket>;
+  },
+): Promise<ListenerConnection> {
+  return testOnlyListenerTls.connectListenerOver(options, {
+    resolve: network.resolve ?? (async () => []),
+    dial: network.dial,
+    handshakeTimeoutMs: 5_000,
   });
 }
 
@@ -181,16 +203,66 @@ describe("a listener connection under its stored trust", () => {
   });
 });
 
+describe("a listener handshake that cannot be judged", () => {
+  it("refuses a listener that offers only TLS 1.2, whose renegotiation could swap the judged certificate", async () => {
+    const listener = await startListener({
+      cert: SELF_MADE_CERT,
+      key: SELF_MADE_KEY,
+      maxVersion: "TLSv1.2",
+    });
+
+    await expect(secureOverLoopback(listener.port, pinned(SELF_MADE_PIN))).rejects.toThrow();
+    await listener.allClosed();
+    expect(listener.requestText()).toBe("");
+  });
+
+  it("closes the connection without sending anything when the judgement itself fails", async () => {
+    const listener = await startListener({ cert: SELF_MADE_CERT, key: SELF_MADE_KEY });
+
+    await expect(
+      secureOverLoopback(listener.port, pinned(SELF_MADE_PIN), {
+        now: () => {
+          throw new Error("No clock.");
+        },
+      }),
+    ).rejects.toThrow("No clock.");
+    await listener.allClosed();
+    expect(listener.requestText()).toBe("");
+  });
+
+  it("gives up on a listener that never finishes the handshake", async () => {
+    // It reads what arrives, so it sees the client close, and never answers.
+    const silent = createTcpServer((socket) => socket.on("error", () => undefined).resume());
+    await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
+    const address = silent.address();
+    if (address === null || typeof address === "string") throw new Error("No listener port.");
+    closers.push(
+      () =>
+        new Promise((resolve) => {
+          silent.close(() => resolve());
+        }),
+    );
+
+    await expect(
+      secureOverLoopback(address.port, pinned(SELF_MADE_PIN), { handshakeTimeoutMs: 100 }),
+    ).rejects.toThrow(/handshake in time/);
+  });
+});
+
 describe("the address a listener connection reaches", () => {
   it("refuses a *.ts.net name that resolves to a public address without dialling it", async () => {
     const dial = vi.fn(dialLoopback.bind(undefined, 1));
 
-    const connection = await connectListener({
-      origin: "https://funnel-host.example-tailnet.ts.net",
-      trust: pinned(SELF_MADE_PIN),
-      resolve: async () => ["203.0.113.7"],
-      dial,
-    });
+    const connection = await connectOver(
+      {
+        origin: "https://funnel-host.example-tailnet.ts.net",
+        trust: pinned(SELF_MADE_PIN),
+      },
+      {
+        resolve: async () => ["203.0.113.7"],
+        dial,
+      },
+    );
 
     expect(connection).toEqual({ status: "refused", reason: "not-private-address" });
     expect(dial).not.toHaveBeenCalled();
@@ -199,12 +271,16 @@ describe("the address a listener connection reaches", () => {
   it("refuses a name that resolves to a private and a public address", async () => {
     const dial = vi.fn(dialLoopback.bind(undefined, 1));
 
-    const connection = await connectListener({
-      origin: "https://listener.example-tailnet.ts.net:8443",
-      trust: pinned(SELF_MADE_PIN),
-      resolve: async () => ["100.101.102.103", "203.0.113.7"],
-      dial,
-    });
+    const connection = await connectOver(
+      {
+        origin: "https://listener.example-tailnet.ts.net:8443",
+        trust: pinned(SELF_MADE_PIN),
+      },
+      {
+        resolve: async () => ["100.101.102.103", "203.0.113.7"],
+        dial,
+      },
+    );
 
     expect(connection).toEqual({ status: "refused", reason: "not-private-address" });
     expect(dial).not.toHaveBeenCalled();
@@ -214,17 +290,21 @@ describe("the address a listener connection reaches", () => {
     const listener = await startListener({ cert: SELF_MADE_CERT, key: SELF_MADE_KEY });
     const dialled: Array<{ readonly address: string; readonly port: number }> = [];
 
-    const connection = await connectListener({
-      origin: "https://listener.example-tailnet.ts.net:8443",
-      trust: pinned(SELF_MADE_PIN),
-      resolve: async () => ["100.101.102.103"],
-      // A route that lands somewhere other than the judged address, as when a
-      // platform resolves and connects in separate steps.
-      dial: async (address, port) => {
-        dialled.push({ address, port });
-        return dialLoopback(listener.port);
+    const connection = await connectOver(
+      {
+        origin: "https://listener.example-tailnet.ts.net:8443",
+        trust: pinned(SELF_MADE_PIN),
       },
-    });
+      {
+        resolve: async () => ["100.101.102.103"],
+        // A route that lands somewhere other than the judged address, as when a
+        // platform resolves and connects in separate steps.
+        dial: async (address, port) => {
+          dialled.push({ address, port });
+          return dialLoopback(listener.port);
+        },
+      },
+    );
 
     expect(dialled).toEqual([{ address: "100.101.102.103", port: 8443 }]);
     expect(connection).toEqual({ status: "refused", reason: "not-private-address" });
@@ -233,40 +313,47 @@ describe("the address a listener connection reaches", () => {
   });
 
   it("refuses an origin whose address is public before dialling it", async () => {
-    const dial = vi.fn(dialLoopback.bind(undefined, 1));
-
     const connection = await connectListener({
       origin: "https://203.0.113.7:8443",
       trust: pinned(SELF_MADE_PIN),
-      dial,
     });
 
     expect(connection).toEqual({ status: "refused", reason: "not-private-address" });
-    expect(dial).not.toHaveBeenCalled();
   });
 });
 
 describe("turning platform validation off", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sourceRoots = [here, join(here, "../../cli/src")];
+  const shippedSources = sourceRoots.flatMap((root) =>
+    readdirSync(root, { recursive: true, encoding: "utf8" })
+      .filter((path) => /\.tsx?$/.test(path) && !/\.test(-certs)?\.tsx?$/.test(path))
+      .map((path) => ({ path: join(root, path), text: readFileSync(join(root, path), "utf8") })),
+  );
+
   it("happens only where the pin judgement decides instead", () => {
     // A client that skips chain validation without checking the pin would
     // accept any certificate, so only the listener connection may do it.
-    const sourceRoots = [
-      dirname(fileURLToPath(import.meta.url)),
-      join(dirname(fileURLToPath(import.meta.url)), "../../cli/src"),
-    ];
-    const offenders = sourceRoots.flatMap((root) =>
-      readdirSync(root, { recursive: true, encoding: "utf8" })
-        .filter((path) => /\.tsx?$/.test(path) && !/\.test(-certs)?\.tsx?$/.test(path))
-        .filter((path) =>
-          /rejectUnauthorized\s*:\s*false|NODE_TLS_REJECT_UNAUTHORIZED/.test(
-            readFileSync(join(root, path), "utf8"),
-          ),
-        )
-        .map((path) => join(root, path)),
-    );
+    // Any `rejectUnauthorized` other than a literal `true` counts, as does a
+    // server identity check that accepts every name.
+    const offenders = shippedSources
+      .filter(({ text }) =>
+        /rejectUnauthorized\s*:\s*(?!true\b)|NODE_TLS_REJECT_UNAUTHORIZED|checkServerIdentity\s*:\s*\(\s*\)\s*=>\s*(?:undefined|\{\s*\})/.test(
+          text,
+        ),
+      )
+      .map(({ path }) => path);
 
-    expect(offenders).toEqual([
-      join(dirname(fileURLToPath(import.meta.url)), "remoteListenerTlsNode.ts"),
-    ]);
+    expect(offenders).toEqual([join(here, "remoteListenerTlsNode.ts")]);
+  });
+
+  it("leaves the replaceable network seams to tests", () => {
+    // Replacing resolution or dialling would let a caller skip the address
+    // rule, so only test sources may reach for them.
+    const offenders = shippedSources
+      .filter(({ text }) => text.includes("testOnlyListenerTls"))
+      .map(({ path }) => path);
+
+    expect(offenders).toEqual([join(here, "remoteListenerTlsNode.ts")]);
   });
 });

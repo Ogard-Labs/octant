@@ -12,9 +12,13 @@ import {
   judgeListenerAddresses,
   judgeListenerCertificate,
   listenerPinFromSha256,
+  type ListenerCertificateJudgement,
   type ListenerOriginTrust,
   type ListenerTrustRefusal,
 } from "./remoteListenerTrust";
+
+/** How long a listener has to finish the TLS handshake before the client gives up. */
+export const LISTENER_HANDSHAKE_TIMEOUT_MS = 10_000;
 
 export type ListenerConnection =
   | {
@@ -30,20 +34,50 @@ export interface ListenerConnectionOptions {
   readonly origin: string;
   readonly trust: ListenerOriginTrust;
   readonly now?: () => number;
-  /** Platform trust roots in PEM; Node's bundled roots when absent. Never read for a pinned trust. */
-  readonly platformRoots?: ReadonlyArray<string>;
-  /** Every address the name resolves to; the system resolver when absent. */
-  readonly resolve?: (hostname: string) => Promise<ReadonlyArray<string>>;
-  /** Opens TCP to the judged address; `net.connect` when absent. The peer it reaches is judged again. */
-  readonly dial?: (address: string, port: number) => Promise<Socket>;
 }
 
 /**
- * Connects to a listener origin under its stored trust. A refusal is a value
- * and the socket is already closed; a network failure rejects.
+ * The network a connection uses. Product callers always get the system's;
+ * only tests replace it, through `testOnlyListenerTls`, so no product caller
+ * can route around the address rule or add a trust root.
  */
-export async function connectListener(
+interface ListenerNetwork {
+  /** Every address the name resolves to. */
+  readonly resolve: (hostname: string) => Promise<ReadonlyArray<string>>;
+  /** Opens TCP to the judged address. The peer it reaches is judged again. */
+  readonly dial: (address: string, port: number) => Promise<Socket>;
+  /** Platform trust roots in PEM; Node's bundled roots when absent. Never read for a pinned trust. */
+  readonly platformRoots?: ReadonlyArray<string>;
+  readonly handshakeTimeoutMs: number;
+}
+
+const SYSTEM_NETWORK: ListenerNetwork = {
+  resolve: resolveAll,
+  dial: dialTcp,
+  handshakeTimeoutMs: LISTENER_HANDSHAKE_TIMEOUT_MS,
+};
+
+/**
+ * Connects to a listener origin under its stored trust. A refusal is a value
+ * and the socket is already closed; a network failure, a handshake that does
+ * not finish in time, or a listener that cannot speak TLS 1.3 rejects.
+ */
+export function connectListener(options: ListenerConnectionOptions): Promise<ListenerConnection> {
+  return connectListenerOver(options, SYSTEM_NETWORK);
+}
+
+/**
+ * Replaceable network seams, for tests only. A test in this package refuses
+ * any non-test source that names this export.
+ */
+export const testOnlyListenerTls = {
+  connectListenerOver,
+  secureListenerSocket,
+} as const;
+
+async function connectListenerOver(
   options: ListenerConnectionOptions,
+  network: ListenerNetwork,
 ): Promise<ListenerConnection> {
   const url = new URL(options.origin);
   if (url.protocol !== "https:" || url.origin !== options.origin) {
@@ -51,13 +85,12 @@ export async function connectListener(
   }
   const hostname = url.hostname.replace(/^\[(.*)\]$/, "$1");
   const port = url.port === "" ? 443 : Number(url.port);
-  const addresses =
-    isIP(hostname) === 0 ? await (options.resolve ?? resolveAll)(hostname) : [hostname];
+  const addresses = isIP(hostname) === 0 ? await network.resolve(hostname) : [hostname];
   const resolved = judgeListenerAddresses(addresses);
   if (resolved.status === "refused") return resolved;
   // The judged address is dialled, never the name, so a second lookup cannot
   // answer differently.
-  const socket = await (options.dial ?? dialTcp)(resolved.address, port);
+  const socket = await network.dial(resolved.address, port);
   const peer = judgeListenerAddresses([socket.remoteAddress]);
   if (peer.status === "refused") {
     socket.destroy();
@@ -68,7 +101,8 @@ export async function connectListener(
     hostname,
     trust: options.trust,
     now: options.now ?? Date.now,
-    ...(options.platformRoots === undefined ? {} : { platformRoots: options.platformRoots }),
+    handshakeTimeoutMs: network.handshakeTimeoutMs,
+    ...(network.platformRoots === undefined ? {} : { platformRoots: network.platformRoots }),
   });
 }
 
@@ -77,11 +111,12 @@ export async function connectListener(
  * judged, and hands the socket over only when the served certificate passes
  * the origin's trust.
  */
-export function secureListenerSocket(input: {
+function secureListenerSocket(input: {
   readonly socket: Socket;
   readonly hostname: string;
   readonly trust: ListenerOriginTrust;
   readonly now: () => number;
+  readonly handshakeTimeoutMs: number;
   readonly platformRoots?: ReadonlyArray<string>;
 }): Promise<ListenerConnection> {
   return new Promise((resolve, reject) => {
@@ -90,6 +125,10 @@ export function secureListenerSocket(input: {
       host: input.hostname,
       // Node refuses an IP address as a server name, so SNI goes only with a name.
       ...(isIP(input.hostname) === 0 ? { servername: input.hostname } : {}),
+      // TLS 1.2 renegotiation would present a second certificate after the
+      // one judged below; TLS 1.3 has no renegotiation, and the listener
+      // speaks it.
+      minVersion: "TLSv1.3",
       // Node does not refuse the handshake itself: a pinned origin replaces
       // chain validation with the pin, so the judgement below decides, and
       // nothing is written to the socket until it accepts. Platform validation
@@ -99,25 +138,43 @@ export function secureListenerSocket(input: {
       ...(input.platformRoots === undefined ? {} : { ca: [...input.platformRoots] }),
     });
     const fail = (error: Error): void => {
+      clearTimeout(timer);
+      tlsSocket.off("secureConnect", judge);
       tlsSocket.destroy();
       reject(error);
     };
-    tlsSocket.once("error", fail);
-    tlsSocket.once("secureConnect", () => {
+    const judge = (): void => {
+      clearTimeout(timer);
       tlsSocket.off("error", fail);
-      const judgement = judgeListenerCertificate({
-        trust: input.trust,
-        servedPin: servedPin(tlsSocket),
-        platformTrusted: tlsSocket.authorized,
-        now: input.now(),
-      });
+      let judgement: ListenerCertificateJudgement;
+      try {
+        judgement = judgeListenerCertificate({
+          trust: input.trust,
+          servedPin: servedPin(tlsSocket),
+          platformTrusted: tlsSocket.authorized,
+          now: input.now(),
+        });
+      } catch (error) {
+        // A certificate the client cannot read is never accepted.
+        tlsSocket.destroy();
+        reject(
+          error instanceof Error ? error : new Error("The listener's certificate is unreadable."),
+        );
+        return;
+      }
       if (judgement.status === "refused") {
         tlsSocket.destroy();
         resolve(judgement);
         return;
       }
       resolve({ status: "connected", socket: tlsSocket, trust: judgement.trust });
-    });
+    };
+    const timer = setTimeout(
+      () => fail(new Error("The listener did not finish the TLS handshake in time.")),
+      input.handshakeTimeoutMs,
+    );
+    tlsSocket.once("error", fail);
+    tlsSocket.once("secureConnect", judge);
   });
 }
 
