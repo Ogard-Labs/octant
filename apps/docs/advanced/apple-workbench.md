@@ -75,7 +75,7 @@ or the validation-evidence dump — those stay on the Apple workbench command.
   show a device. Beside it are the OS and the state in words (**Running**,
   **Booting**, **Live view lost**, and so on). On the right are **Home** and
   **Screenshot**, **Lock** when the pane is wide, and **More**: **Type
-  text…**, **Open URL…**, **Lock**, **Switch device…**, **Diagnostics** (what
+  text…**, **Open URL…**, **Lock**, **Volume up**, **Volume down**, **Switch device…**, **Diagnostics** (what
   is running, recent evidence, and where the live view comes from), **Stop
   live view**, and **Shut down**. Only actions the host supports today
   appear. The arrow keys move along the toolbar.

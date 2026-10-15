@@ -172,6 +172,26 @@ is bound to it, and Allow input never covers it. Evidence and its log keep only
 output can quote the address, so none of it is kept, for the same reason typed
 text is redacted. The agent tools do not offer Open URL.
 
+## Volume
+
+The More menu offers **Volume up** and **Volume down** (after Lock) only when
+the host's runtime snapshot lists `capabilities.volume`; a host that predates
+the flag omits it and the items are left out, never shown disabled. Like Lock,
+they appear only while input is allowed. The Simulator host reports it only
+when the desktop's native device helper is wired in, because every Simulator
+hardware key rides that helper; the emulator host always reports it.
+
+Volume is not a new action kind: it is a `key-press` with the key
+`volume-up` or `volume-down`, so it is input in every respect. It needs a
+person's or agent's input authority exactly as Home and Lock do, Allow input
+covers it, Plan refuses it, and evidence keeps the key name like any other
+key. On the Simulator the desktop sends it as a hardware button (consumer-page
+usages `0xE9` and `0xEA`, the same codes the managed `serve-sim` stream uses)
+through the native helper, or through the stream while the legacy input
+services still receive. On the emulator it is `serve-avd`'s `volume-up` and
+`volume-down` buttons, or `adb shell input keyevent KEYCODE_VOLUME_UP` and
+`KEYCODE_VOLUME_DOWN`.
+
 ## Managed device tools
 
 The iOS Simulator and Android emulator panes ride

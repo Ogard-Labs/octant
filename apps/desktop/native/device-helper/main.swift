@@ -297,7 +297,7 @@ private final class Session {
             return ["typed": KeyUsages.typesAsUSPositions(keyboardIdentifier: identifier)]
         case "button":
             guard let name = request["button"] as? String, let button = HardwareButton(rawValue: name)
-            else { throw Refusal(code: "unsupported-key", message: "button must be home or lock") }
+            else { throw Refusal(code: "unsupported-key", message: "button must be home, lock, volume-up or volume-down") }
             let input = try connection()
             try input.button(page: button.usage.page, code: button.usage.code, state: .down)
             Thread.sleep(forTimeInterval: tapHold)

@@ -346,6 +346,7 @@ export function AndroidEmulatorPane(props: {
     <DevicePane
       busy={busy}
       canOpenUrl={controller.runtime?.capabilities?.openUrl === true}
+      canVolume={controller.runtime?.capabilities?.volume === true}
       devices={devices}
       diagnostics={androidDiagnostics({
         controller,

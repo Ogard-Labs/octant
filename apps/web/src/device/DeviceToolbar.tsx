@@ -11,6 +11,8 @@ import {
   Lock,
   Power,
   Smartphone,
+  Volume1,
+  Volume2,
 } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
@@ -31,6 +33,8 @@ export interface DeviceToolbarControls {
   readonly typeText: boolean;
   /** Only once the host reports that it can open an address on this device. */
   readonly openUrl: boolean;
+  /** Only once the host reports that it can press the volume keys. */
+  readonly volume: boolean;
   readonly switchDevice: boolean;
   readonly stopLiveView: boolean;
   readonly shutdown: boolean;
@@ -131,6 +135,8 @@ export type DeviceMenuItem =
   | "type-text"
   | "open-url"
   | "lock"
+  | "volume-up"
+  | "volume-down"
   | "switch-device"
   | "diagnostics"
   | "stop-live-view"
@@ -153,6 +159,12 @@ function deviceMenuItems(props: {
   }
   if (controls.hardware && !props.wide) {
     items.push({ value: "lock", label: "Lock", icon: <Lock size={16} /> });
+  }
+  if (controls.volume) {
+    items.push(
+      { value: "volume-up", label: "Volume up", icon: <Volume2 size={16} /> },
+      { value: "volume-down", label: "Volume down", icon: <Volume1 size={16} /> },
+    );
   }
   if (controls.switchDevice) {
     items.push({ value: "switch-device", label: "Switch device…", icon: <Smartphone size={16} /> });
