@@ -40,7 +40,7 @@ type Screen = { readonly width: number; readonly height: number };
 /** A Simulator's screen size, asked of its helper once; a device never changes it. */
 function createScreenLookup(helpers: SimulatorDeviceHelpers) {
   const screens = new Map<string, Screen>();
-  return async (
+  const lookup = async (
     udid: string,
     budgetMs: number,
     cancelled?: AbortSignal,
@@ -67,6 +67,8 @@ function createScreenLookup(helpers: SimulatorDeviceHelpers) {
     screens.set(udid, described.screen);
     return { kind: "screen", screen: described.screen };
   };
+  // A rotation turns the screen, so the size asked of the helper once is stale.
+  return Object.assign(lookup, { forget: (udid: string) => screens.delete(udid) });
 }
 
 export function createSimulatorInputDelivery(
@@ -106,7 +108,7 @@ export function createSimulatorInputDelivery(
       return result(await helpers.send(command.udid, { op: "repair-input" }, budgetMs, cancelled));
     }
     if (command.kind === "rotate") {
-      return result(
+      const rotated = result(
         await helpers.send(
           command.udid,
           { op: "rotate", orientation: command.orientation },
@@ -114,6 +116,8 @@ export function createSimulatorInputDelivery(
           cancelled,
         ),
       );
+      if (rotated.kind === "delivered") screenOf.forget(command.udid);
+      return rotated;
     }
     if (command.kind === "key-press") {
       const key = command.key.toLowerCase();

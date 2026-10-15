@@ -128,7 +128,8 @@ export interface ManagedSimulatorHelpersOptions {
 interface StreamSession {
   readonly udid: string;
   readonly endpoint: ManagedDeviceEndpoint;
-  readonly screen: { readonly width: number; readonly height: number };
+  /** Turned with the device: a rotation swaps its width and height. */
+  screen: { readonly width: number; readonly height: number };
   readonly child: ChildProcess;
   readonly viewers: Set<DeviceViewer>;
   latest: Uint8Array | undefined;
@@ -509,9 +510,15 @@ export function createManagedSimulatorHelpers(
         message: "Rotate needs the managed serve-sim tool, and it is not installed.",
       };
     }
-    return outcome === "ok"
-      ? { status: "delivered" }
-      : { status: "unavailable", message: "The Simulator did not rotate." };
+    if (outcome !== "ok") {
+      return { status: "unavailable", message: "The Simulator did not rotate." };
+    }
+    const { width, height } = session.screen;
+    const long = Math.max(width, height);
+    const short = Math.min(width, height);
+    session.screen =
+      orientation === "landscape" ? { width: long, height: short } : { width: short, height: long };
+    return { status: "delivered" };
   }
 
   async function ensureFrames(session: StreamSession): Promise<void> {

@@ -105,6 +105,20 @@ export function deviceOpenUrlFrom(input: string): string | undefined {
   return isDeviceOpenUrl(href) ? href : undefined;
 }
 
+/**
+ * The device's screen size turned to face the way a decoded frame does. The
+ * size a stream reports is read once, so after a rotation the pane follows
+ * the frames: taps are measured by it and Rotate reads it.
+ */
+export function screenFacing(
+  screen: { readonly width: number; readonly height: number },
+  frame: { readonly width: number; readonly height: number },
+): { readonly width: number; readonly height: number } {
+  return screen.width > screen.height === frame.width > frame.height
+    ? screen
+    : { width: screen.height, height: screen.width };
+}
+
 /** One sentence and at most one way to fix it. */
 export interface DeviceProblem {
   readonly message: string;
