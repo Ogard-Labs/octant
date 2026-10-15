@@ -599,10 +599,14 @@ describe("Claude runtime confinement", () => {
 
     expect(confinement.prepared).toHaveLength(2);
     const [subscription, apiKey] = confinement.prepared;
+    // Every launch also refuses its transcript folder's `memory/` as a final
+    // write denial; only the rules beyond those grant anything.
+    const grants = (rules: ReadonlyArray<string> | undefined) =>
+      (rules ?? []).filter((rule) => !rule.startsWith("(deny file-write*"));
     if (process.platform === "darwin") {
       // Measured on macOS 27.0.1 with Claude Code 2.1.296: the runtime is
       // signed out with any one of these missing, and needs nothing more.
-      expect(subscription?.extraRules).toEqual([
+      expect(grants(subscription?.extraRules)).toEqual([
         seatbeltExecRule("/usr/bin/security"),
         '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
         '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
@@ -616,7 +620,7 @@ describe("Claude runtime confinement", () => {
     // No shell and no open exec in either case.
     expect(subscription?.allowProcessExec).toBe(false);
     // An API-key launch reads nothing from the store.
-    expect(apiKey?.extraRules).toBeUndefined();
+    expect(grants(apiKey?.extraRules)).toEqual([]);
     expect(apiKey?.allowProcessFork).toBe(false);
     expect(apiKey?.allowProcessExec).toBe(false);
   });
@@ -736,7 +740,7 @@ describe("Claude runtime confinement", () => {
     expect(pids(target.root)).toEqual([]);
   });
 
-  it("lets a Plan turn write only the runtime's session and transcript folders of its account", () => {
+  it("lets a Plan turn write only the runtime's session folder and its own checkout's transcript folder", () => {
     const target = fixture();
     // A folder of the test's own. This used to be made inside the person's
     // real `~/.claude-accounts`, which a test has no business touching.
@@ -765,12 +769,22 @@ describe("Claude runtime confinement", () => {
     // The folder is read whole, and written only where the runtime keeps a
     // session: never its settings, hooks, skills, plugins or `.claude.json`.
     expect(launch.readRoots).toContain(configDirectory);
+    // Of `projects/`, only the checkout's own transcript folder: not another
+    // checkout's transcripts, and not its own `memory/`, which a later session
+    // reads as instructions.
+    const transcriptFolder = join(
+      configDirectory,
+      "projects",
+      realpathSync(target.root).replace(/[^a-zA-Z0-9]/g, "-"),
+    );
     expect(launch.additionalWriteRoots).toEqual([
       join(configDirectory, "sessions"),
-      join(configDirectory, "projects"),
+      transcriptFolder,
     ]);
+    expect(launch.additionalDenyWritePaths).toEqual([join(transcriptFolder, "memory")]);
     // Made before the launch, because the launch cannot create them itself.
     expect(readdirSync(configDirectory).sort()).toEqual(["projects", "sessions"]);
+    expect(existsSync(transcriptFolder)).toBe(true);
   });
 
   it("lets a subscription Plan turn rewrite its login file only where the login is a file", () => {
@@ -902,11 +916,22 @@ describe("Claude runtime confinement", () => {
       // what a later session loads is not.
       const stateRoot = realpathSync(target.environment.CLAUDE_CONFIG_DIR ?? "");
       mkdirSync(join(stateRoot, "skills"));
+      // The runtime's folder for this checkout, and another checkout's beside
+      // it. Both `memory/` folders exist already, so the probe's write is
+      // refused for the file and not only for creating the folder.
+      const ownProject = `projects/${realpathSync(target.root).replace(/[^a-zA-Z0-9]/g, "-")}`;
+      const otherProject = "projects/-Users-someone-another-checkout";
+      mkdirSync(join(stateRoot, ownProject, "memory"), { recursive: true });
+      mkdirSync(join(stateRoot, otherProject, "memory"), { recursive: true });
       const stateWrites = [
         "settings.json",
         ".claude.json",
         "skills/SKILL.md",
         "sessions/probe.json",
+        `${ownProject}/probe-session.jsonl`,
+        `${ownProject}/memory/MEMORY.md`,
+        `${otherProject}/probe-session.jsonl`,
+        `${otherProject}/memory/MEMORY.md`,
         "projects/probe.jsonl",
       ];
 
@@ -947,7 +972,15 @@ describe("Claude runtime confinement", () => {
       expect(output).toContain("state:skills/SKILL.md=refused");
       expect(existsSync(join(stateRoot, "settings.json"))).toBe(false);
       expect(output).toContain("state:sessions/probe.json=allowed");
-      expect(output).toContain("state:projects/probe.jsonl=allowed");
+      // The session's own transcript is written; another checkout's
+      // transcripts and every `memory/` folder, which a later session reads
+      // as instructions, are not.
+      expect(output).toContain(`state:${ownProject}/probe-session.jsonl=allowed`);
+      expect(output).toContain(`state:${ownProject}/memory/MEMORY.md=refused`);
+      expect(output).toContain(`state:${otherProject}/probe-session.jsonl=refused`);
+      expect(output).toContain(`state:${otherProject}/memory/MEMORY.md=refused`);
+      expect(output).toContain("state:projects/probe.jsonl=refused");
+      expect(existsSync(join(stateRoot, ownProject, "memory", "MEMORY.md"))).toBe(false);
       // The probe asks for a child process last, and no launch may run one.
       expect(output).not.toContain("exec=allowed");
       if (forks) {
