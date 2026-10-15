@@ -953,8 +953,10 @@ choice reads as off.
 Each Code child allocation is keyed by its parent and delegation request. Two
 sibling requests receive distinct managed worktrees; only the same request can
 reuse its verified receipt. The host checks the actual Git worktree inventory
-and records the starting commit. Children start from committed source; the
-parent checkout's uncommitted edits are not copied into a child worktree.
+and records the starting commit. Children start from committed source only; the
+parent checkout's uncommitted edits are not copied into a child worktree, and
+there is no opt-in to seed one from the parent's working tree. A child that
+must see an edit starts after the parent commits it.
 
 Provider-owned child reports are read-only observations through the existing
 `child-agent-activity` SDK event. Chat attempts, Work turn updates, Code operation
@@ -1020,9 +1022,10 @@ is recorded as Interrupted and releases its capacity. The bound counts working
 time only: it pauses while the child waits for a person's approval or answer and
 resumes with the remaining time once every pending request is answered, because
 a child cut off with its approval card still open lost its work to the person's
-pace rather than its own. No separate wall-time bound exists; a waiting child
-keeps its capacity slot until the request is answered, the run is cancelled, or
-the host restarts.
+pace rather than its own. No separate overall wall-time cap exists, by decision: the working
+deadline is the only bound, since a cap that counted a person's wait would
+cut off the work it protects. A waiting child keeps its capacity slot until
+the request is answered, the run is cancelled, or the host restarts.
 
 Managed children retain a private provider-session cursor and a bounded,
 purgeable conversation alongside their journaled lifecycle. A cursor is bound
@@ -2350,7 +2353,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   declared capabilities, contributions, a second component, an entry point
   other than `builtin:provider-driver/<kind>`, and any source other than
   `bundled`. Outside drivers need their own design before the schema admits
-  them. The catalog repeats installed and trusted from the activation context
+  them; third-party provider-driver plugins are parked until after the
+  technical preview. The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -5212,9 +5216,12 @@ mechanisms are:
   research backends). The persisted value keeps its name for journal
   compatibility.
   A provider runtime launch is wrapped when the process carries exactly one
-  thread's authority. The goal is that every runtime below Full access is
-  wrapped; the current state, which `providerProcessConfinement.test.ts` pins
-  against this table, is below. Full access never gets the deny-default
+  thread's authority. The state below, which `providerProcessConfinement.test.ts`
+  pins against this table, is the accepted one: provider runtimes keep their
+  own sandboxes (Codex in every posture, Claude outside Plan) and closing that
+  gap is not an open goal. Octant says so rather than promising a boundary it
+  does not draw; a runtime that can be wrapped without losing what it needs is
+  taken as its own change. Full access never gets the deny-default
   profile. The one wrapper it can get is deny-only: an ACP profile with
   extension or host-auth paths to deny (Kimi, for example) launches Full access
   under an allow-default `sandbox-exec` profile or a Bubblewrap host-root bind
@@ -5234,11 +5241,11 @@ mechanisms are:
   instance: `providerRuntimeRegistry` keys runtimes by `instanceId`, so one
   process carries every thread on that instance, each choosing its own root
   and `sandbox` at `thread/start`. No profile is exact for all of them, and one
-  wide enough for all of them is not a boundary. That exception closes when
-  the lease is keyed by the thread's root and execution policy, as an OpenCode
-  connection is. Claude is a gap, not an exception: one process per query
-  already carries one thread's authority, and its remaining postures close as
-  its per-query spawn callback prepares a confined launch for them.
+  wide enough for all of them is not a boundary. Keying the lease by the
+  thread's root and execution policy, as an OpenCode connection is, would
+  change that, and nothing requires it. Claude's unwrapped postures rest on
+  the runtime's own sandbox for the same reason: its sign-in and tools need
+  reach that a deny-default profile would have to re-grant.
   `providerProcessConfinement.test.ts` refuses a new module that launches
   without the shared builder unless it is named here. The ACP/OpenCode/Pi row has one
   carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
@@ -5252,7 +5259,9 @@ mechanisms are:
   ([Persistence](#persistence), Provider runtimes' own web tools, lists which
   calls are observable), but the gate that mark applies to Octant's computer-use,
   MCP, and native-harness calls does not cover a tool the runtime executes
-  itself.
+  itself. That boundary is accepted: the mark gates Octant's own tools only,
+  and Claude's and Codex's built-in tools run under the runtime's own sandbox
+  and approvals.
   A confined Claude Plan launch reads the assigned leaf of that account's
   state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
   writes only `sessions/` and its own session in `projects/`: the
@@ -5992,7 +6001,9 @@ mechanisms are:
     renderer would inherit the window capability. The
     bridge secret binds the CLI to the host's OS user, and nothing a browser
     can present does. A browser on a host with no desktop app stays
-    read-only for credentials and names the CLI command.
+    read-only for credentials and names the CLI command: the browser client
+    never stores credentials, and a host-local `octant` prompt is the one way
+    to save a key there.
   - **Store absent or locked.** `octant server run` starts a credential
     broker only when Secret Service (`org.freedesktop.secrets` on the user
     bus) and `/usr/bin/secret-tool` are present at start. Without a broker the

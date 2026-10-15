@@ -30,10 +30,11 @@ anything.
   listener serves.
 - **Why the pin is required, not optional.** Today the certificate is the
   only thing that authenticates the host on first contact. The host hello
-  names the host identity key's fingerprint and carries a signature, but a
-  client holds no public key to check that signature against: it records the
-  fingerprint as the host states it at pairing and compares it on later
-  connections. A self-made certificate without a pin would leave first
+  carries the host identity public key, its fingerprint, and a signature, and
+  every client checks the key against the fingerprint and the signature
+  against the key (see the host identity rule in Architecture). That proves
+  the hello came from the key's holder, not that the holder is the host the
+  person meant, since a first contact has nothing to compare the key with. A self-made certificate without a pin would leave first
   contact unauthenticated, so the self-made path exists only together with
   a pin.
 - **Settings.** Settings makes the PEM fields optional behind "Use my own
