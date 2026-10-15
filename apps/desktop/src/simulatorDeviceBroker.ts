@@ -110,7 +110,9 @@ export function createSimulatorInputDelivery(
       return result(
         await helpers.send(
           command.udid,
-          key === "home" || key === "lock" ? { op: "button", button: key } : { op: "key", key },
+          key === "home" || key === "lock" || key === "volume-up" || key === "volume-down"
+            ? { op: "button", button: key }
+            : { op: "key", key },
           budgetMs,
           cancelled,
         ),

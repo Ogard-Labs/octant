@@ -47,4 +47,10 @@ describe("DeviceHostCapabilities", () => {
     expect(decode({ openUrl: true, recordScreen: true })).toEqual({ openUrl: true });
     expect(decode({})).toEqual({});
   });
+
+  it("reads the volume flag a host reports, and leaves it out for a host that predates it", () => {
+    expect(decode({ openUrl: true, volume: true })).toEqual({ openUrl: true, volume: true });
+    expect(decode({ openUrl: true }).volume).toBeUndefined();
+    expect(() => decode({ volume: "yes" })).toThrow();
+  });
 });

@@ -187,6 +187,19 @@ describe("Simulator input delivery", () => {
     ]);
   });
 
+  it("presses Volume up and down as hardware buttons", async () => {
+    const { fake, send } = helpers(() => ({ status: "delivered" }));
+    const deliver = createSimulatorInputDelivery(fake);
+
+    await deliver({ kind: "key-press", udid, budgetMs: 30_000, key: "volume-up" });
+    await deliver({ kind: "key-press", udid, budgetMs: 30_000, key: "Volume-Down" });
+
+    expect(send.mock.calls.map(([, sent]) => sent)).toEqual([
+      { op: "button", button: "volume-up" },
+      { op: "button", button: "volume-down" },
+    ]);
+  });
+
   it("asks the helpers to repair input without first looking up the screen", async () => {
     const { fake, send } = helpers(() => ({ status: "delivered" }));
 

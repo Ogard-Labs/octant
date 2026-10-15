@@ -99,6 +99,72 @@ describe("Android toolchain routes", () => {
     expect(service.discover).toHaveBeenCalledWith(expect.any(Object), context);
   });
 
+  describe("Volume keys", () => {
+    const volume = {
+      actionId: "60000000-0000-4000-8000-000000000018",
+      correlationId: "60000000-0000-4000-8000-000000000019",
+      authority,
+      ...scope,
+      kind: "key-press",
+      emulatorId: "Pixel_8_API_34",
+      key: "volume-up",
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      timeoutMs: 30_000,
+      approval: { kind: "approved", approvalId: "60000000-0000-4000-8000-00000000001b" },
+    };
+    function routes(resolveContext: ReturnType<typeof vi.fn>) {
+      const service = {
+        discover: vi.fn(),
+        execute: vi.fn(async () => ({
+          actionId: volume.actionId,
+          correlationId: volume.correlationId,
+          authority,
+          kind: "key-press",
+          outcome: "succeeded",
+          emulatorId: volume.emulatorId,
+          requestedBy: volume.requestedBy,
+          diagnostics: [],
+          artifacts: [],
+          cleanup: "complete",
+          durationMs: 5,
+          completedAt: "2026-10-14T20:00:01.000Z",
+        })),
+        cancel: vi.fn(),
+        snapshot: vi.fn(),
+        readScreenshotArtifact: vi.fn(),
+        watchScreen: vi.fn(),
+      };
+      const handler = createAndroidToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        resolveContext,
+        service,
+        now: () => 2,
+      });
+      return { handler, service };
+    }
+
+    it("hands a volume key to the host with the window's authority", async () => {
+      const { handler, service } = routes(vi.fn(async () => context));
+
+      const response = await handler(request({ kind: "android-action-request", request: volume }));
+
+      expect(response?.status).toBe(200);
+      expect(service.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "key-press", key: "volume-up" }),
+        context,
+      );
+    });
+
+    it("refuses a volume key for a thread the window has no authority over", async () => {
+      const { handler, service } = routes(vi.fn(async () => undefined));
+
+      const response = await handler(request({ kind: "android-action-request", request: volume }));
+
+      expect(response?.status).toBe(403);
+      expect(service.execute).not.toHaveBeenCalled();
+    });
+  });
+
   describe("Open URL", () => {
     const openUrl = {
       actionId: "60000000-0000-4000-8000-000000000008",

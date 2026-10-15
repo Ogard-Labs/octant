@@ -40,6 +40,11 @@ export interface DevicePaneProps {
    * More has no Open URL at all; it is never shown disabled.
    */
   readonly canOpenUrl?: boolean;
+  /**
+   * The host reported that it can press this device's volume keys. Without it
+   * More has no Volume up or down at all; they are never shown disabled.
+   */
+  readonly canVolume?: boolean;
 }
 
 /**
@@ -147,7 +152,9 @@ export function DevicePane(props: DevicePaneProps) {
       setTyping(false);
       setOpeningUrl(true);
     } else if (item === "lock") enqueue({ kind: "key-press", key: "lock" }, false);
-    else if (item === "switch-device") setPicking(true);
+    else if (item === "volume-up" || item === "volume-down") {
+      enqueue({ kind: "key-press", key: item }, false);
+    } else if (item === "switch-device") setPicking(true);
     else if (item === "diagnostics") setDiagnosticsOpen(true);
     else if (item === "stop-live-view") act({ kind: "stop-live-view" });
     else act({ kind: "shutdown" });
@@ -168,6 +175,7 @@ export function DevicePane(props: DevicePaneProps) {
           screenshot: live !== undefined && canAct && !props.busy,
           typeText: hardware,
           openUrl: canOpenUrl,
+          volume: hardware && props.canVolume === true,
           switchDevice: canAct && choosable.length > 0 && view.kind !== "setup",
           stopLiveView:
             live !== undefined &&
