@@ -297,6 +297,36 @@
   height: 11%;
 }
 
+/* A Simulator turned to landscape: the keys that sat on its sides sit on its
+   top and bottom edges, as they do on the device. */
+.device-body[data-orientation="landscape"]::before,
+.device-body[data-orientation="landscape"]::after {
+  width: auto;
+}
+
+.device-body[data-orientation="landscape"]::before {
+  top: -3px;
+  right: 18%;
+  bottom: auto;
+  left: auto;
+  width: 16%;
+  height: 3px;
+  background: linear-gradient(
+    to right,
+    var(--device-key) 0 44%,
+    transparent 44% 56%,
+    var(--device-key) 56%
+  );
+}
+
+.device-body[data-orientation="landscape"]::after {
+  top: -3px;
+  right: auto;
+  left: 24%;
+  width: 11%;
+  height: 3px;
+}
+
 .device-body[data-platform="android"]::before {
   top: 30%;
   right: -3px;

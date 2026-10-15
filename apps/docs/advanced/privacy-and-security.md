@@ -146,6 +146,12 @@ thread, the turn stops at that point and says why, so you answer the next
 approval yourself. If Octant cannot record the mark, the turn stops, and the
 thread's next turn is refused until the mark is recorded. While a thread is
 marked, some actions ask each time and some remembered approvals stop applying.
+Each of those approvals, in the desktop app, the browser, the phone app, and
+the terminal client, says the thread took in outside content and lists where it
+read from and when, ahead of the answer, so you can tell whether the action is
+one you asked for. When the Computer Use preview is collapsed to a strip, its
+approve button reads **Review before approving** and opens the full prompt, so
+the list is on screen before you allow anything.
 A notice above the message box says so, with a **Review** button. Review lists
 where the thread read from, how often, and when. **Clear the mark** tells Octant
 you looked at it, so those actions stop asking because of it.

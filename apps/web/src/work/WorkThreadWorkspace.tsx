@@ -1,3 +1,4 @@
+import { threadCompactionSubject } from "../context/CompactionDivider";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import {
   BrowserUseMention,
@@ -139,6 +140,11 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
+
+/** Only the person's messages carry a time here; the rows after one share it. */
+function workRowHappenedAt(row: WorkTranscriptRow): string | undefined {
+  return row.kind === "message" ? row.at : undefined;
+}
 
 type WorkTranscriptRow =
   | { readonly kind: "empty"; readonly key: "empty" }
@@ -1690,6 +1696,8 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         className="work-thread-workspace__conversation transcript-scroll"
         estimateSize={92}
         gap={20}
+        compactionSubject={threadCompactionSubject("work-thread", String(props.threadId))}
+        itemAt={workRowHappenedAt}
         itemKey={(row) => row.key}
         items={transcriptRows}
         {...(earlierRow === undefined

@@ -1,30 +1,27 @@
-import { decodeProviderFailure, type ProviderFailure } from "@octant/contracts";
+import {
+  MAX_GENERATED_IMAGE_BYTES,
+  MAX_IMAGE_VARIANTS,
+  type ProviderFailure,
+} from "@octant/contracts";
+import {
+  imageFailure,
+  imageInterrupted,
+  isImageEndpointAllowed,
+  isProviderFailure,
+  type ApprovedImageFetch,
+  type ImageGenerationEndpoint,
+  type ImageGenerationPorts,
+  type ImageHttpAuth,
+} from "@octant/provider-sdk/image-generation";
 import type {
   ProviderCredentialLease,
   ProviderCredentialResolver,
 } from "../providers/credentialBrokerClient";
 import { acquireProviderCredential, reportKeyRejection } from "../providers/providerApiKeyPool";
-
-const MAX_RETRY_AFTER_MS = 3_600_000;
+import { sniffGeneratedImageMediaType } from "./generatedImageStore";
 
 export const OPENAI_IMAGE_API_BASE_URL = "https://api.openai.com/v1";
 export const GEMINI_IMAGE_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-export const BFL_IMAGE_API_BASE_URL = "https://api.bfl.ai";
-export const IDEOGRAM_IMAGE_API_BASE_URL = "https://api.ideogram.ai";
-
-/**
- * How a provider's credential becomes a request header. A plain union of
- * string literals stopped scaling once BFL's raw `x-key` header (no scheme
- * prefix) joined `Authorization: Bearer` and `x-goog-api-key`: this
- * descriptor lets `performImageHttpRequest` build any of them generically
- * instead of growing another hardcoded literal and if-branch per vendor.
- * `Api-Key` is Ideogram's own raw header (`docs/decisions/0087`).
- */
-export type ImageHttpAuth =
-  | { readonly header: "authorization"; readonly scheme: "Bearer" }
-  | { readonly header: "x-goog-api-key" }
-  | { readonly header: "x-key" }
-  | { readonly header: "Api-Key" };
 
 export type ImageHttpFetch = (
   input: string | URL | Request,
@@ -37,7 +34,7 @@ export interface ImageHttpLimits {
   readonly responseBodyBytes: number;
 }
 
-export interface ImageHttpRequest {
+interface AuthenticatedImageHttpRequest {
   readonly url: string;
   readonly method: "POST" | "GET";
   readonly auth: ImageHttpAuth;
@@ -51,8 +48,10 @@ export interface ImageHttpRequest {
   readonly limits: ImageHttpLimits;
 }
 
-export async function performImageHttpRequest(request: ImageHttpRequest): Promise<Response> {
-  if (isAborted(request.signal)) throw interrupted();
+export async function performImageHttpRequest(
+  request: AuthenticatedImageHttpRequest,
+): Promise<Response> {
+  if (isAborted(request.signal)) throw imageInterrupted();
   const deadline = makeRequestDeadline(request.signal, request.limits.connectionTimeoutMs);
   const attempt: { lease?: ProviderCredentialLease | undefined } = {};
   try {
@@ -70,10 +69,10 @@ export async function performImageHttpRequest(request: ImageHttpRequest): Promis
       credential = await Promise.race([resolution, deadline.failure]);
     } catch (error) {
       if (isProviderFailure(error)) throw error;
-      throw fail("unauthenticated", "The provider credential is missing or unavailable.");
+      throw imageFailure("unauthenticated", "The provider credential is missing or unavailable.");
     }
     if (credential.length === 0) {
-      throw fail("unauthenticated", "The provider credential is missing or unavailable.");
+      throw imageFailure("unauthenticated", "The provider credential is missing or unavailable.");
     }
     if ("scheme" in request.auth) {
       headers.set(request.auth.header, `${request.auth.scheme} ${credential}`);
@@ -83,7 +82,7 @@ export async function performImageHttpRequest(request: ImageHttpRequest): Promis
 
     if (request.body !== undefined) {
       if (Buffer.byteLength(request.body, "utf8") > request.limits.requestBodyBytes) {
-        throw fail(
+        throw imageFailure(
           "invalid-configuration",
           "The provider request exceeded the configured size limit.",
         );
@@ -94,7 +93,7 @@ export async function performImageHttpRequest(request: ImageHttpRequest): Promis
       request.form !== undefined &&
       formPayloadBytes(request.form) > request.limits.requestBodyBytes
     ) {
-      throw fail(
+      throw imageFailure(
         "invalid-configuration",
         "The provider request exceeded the configured size limit.",
       );
@@ -129,18 +128,75 @@ export async function performImageHttpRequest(request: ImageHttpRequest): Promis
       response = outcome.value;
     } catch (error) {
       if (isProviderFailure(error)) throw error;
-      if (isAborted(request.signal)) throw interrupted();
-      throw fail("unavailable", "The provider endpoint could not be reached.");
+      if (isAborted(request.signal)) throw imageInterrupted();
+      throw imageFailure("unavailable", "The provider endpoint could not be reached.");
     }
     if (response.status >= 300 && response.status < 400) {
       await cancelResponseBody(response);
-      throw fail("invalid-configuration", "The configured endpoint returned a redirect.");
+      throw imageFailure("invalid-configuration", "The configured endpoint returned a redirect.");
     }
     await reportKeyRejection(attempt.lease, response);
     return boundResponse(response, request.limits, request.signal);
   } finally {
     deadline.close();
   }
+}
+
+/**
+ * The host's bounds for one image call when an adapter names none: room for
+ * every variant at the stored-image ceiling plus a JSON envelope. Providers
+ * that answer inline send base64, which expands bytes by 4/3, so the
+ * response bound allows that expansion or a valid maximal answer would be
+ * cut off before the adapter decodes it.
+ */
+export const IMAGE_HTTP_DEFAULT_LIMITS: ImageHttpLimits = {
+  connectionTimeoutMs: 120_000,
+  requestBodyBytes: MAX_GENERATED_IMAGE_BYTES * 2,
+  responseBodyBytes: 4 * Math.ceil(MAX_GENERATED_IMAGE_BYTES / 3) * MAX_IMAGE_VARIANTS + 262_144,
+};
+
+/**
+ * The ports one image profile's adapter receives through the provider-sdk
+ * image seam. The credential resolver, key pool, fetch, and limits stay
+ * here; the adapter only names the header its provider reads.
+ */
+export function makeImageGenerationPorts(options: {
+  readonly instanceId: string;
+  readonly credentialResolver: ProviderCredentialResolver;
+  readonly endpoint: ImageGenerationEndpoint;
+  readonly fetch?: ImageHttpFetch;
+  readonly limits?: Partial<ImageHttpLimits>;
+}): ImageGenerationPorts {
+  const fetch = options.fetch ?? globalThis.fetch;
+  const limits: ImageHttpLimits = { ...IMAGE_HTTP_DEFAULT_LIMITS, ...options.limits };
+  return {
+    request: async (request) => {
+      // Checked before any credential is read: a driver chooses the URL, so
+      // the host decides where the profile's key may go.
+      if (!isImageEndpointAllowed(request.url, options.endpoint)) {
+        throw imageFailure(
+          "unauthorized",
+          "The image provider asked to send its credential outside its own endpoint.",
+        );
+      }
+      return performImageHttpRequest({
+        ...request,
+        instanceId: options.instanceId,
+        credentialResolver: options.credentialResolver,
+        fetch,
+        limits,
+      });
+    },
+    fetchApprovedImageUrl: (input) =>
+      fetchApprovedImageUrl({
+        url: input.url,
+        fetch,
+        maxBytes: MAX_GENERATED_IMAGE_BYTES,
+        timeoutMs: limits.connectionTimeoutMs,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      }),
+    sniffMediaType: sniffGeneratedImageMediaType,
+  };
 }
 
 /**
@@ -156,8 +212,8 @@ export async function fetchApprovedImageUrl(input: {
   readonly maxBytes: number;
   readonly timeoutMs: number;
   readonly signal?: AbortSignal;
-}): Promise<{ readonly bytes: Uint8Array } | { readonly failure: ProviderFailure }> {
-  if (isAborted(input.signal)) return { failure: interrupted() };
+}): Promise<ApprovedImageFetch> {
+  if (isAborted(input.signal)) return { failure: imageInterrupted() };
   const deadline = makeRequestDeadline(input.signal, input.timeoutMs);
   try {
     let response: Response;
@@ -186,16 +242,16 @@ export async function fetchApprovedImageUrl(input: {
       response = outcome.value;
     } catch (error) {
       if (isProviderFailure(error)) throw error;
-      if (isAborted(input.signal)) throw interrupted();
-      throw fail("unavailable", "The provider image could not be reached.");
+      if (isAborted(input.signal)) throw imageInterrupted();
+      throw imageFailure("unavailable", "The provider image could not be reached.");
     }
     if (response.status >= 300 && response.status < 400) {
       await cancelResponseBody(response);
-      throw fail("protocol", "The provider's approved image URL returned a redirect.");
+      throw imageFailure("protocol", "The provider's approved image URL returned a redirect.");
     }
     if (!response.ok) {
       await cancelResponseBody(response);
-      throw fail(
+      throw imageFailure(
         "provider-failed",
         `The provider image fetch failed with HTTP ${response.status}.`,
       );
@@ -215,70 +271,10 @@ export async function fetchApprovedImageUrl(input: {
     return {
       failure: isProviderFailure(error)
         ? error
-        : fail("provider-failed", "The provider image fetch failed."),
+        : imageFailure("provider-failed", "The provider image fetch failed."),
     };
   } finally {
     deadline.close();
-  }
-}
-
-export function classifyImageHttpFailure(response: Response, now = Date.now()): ProviderFailure {
-  switch (response.status) {
-    case 401:
-      return fail("unauthenticated", "The provider rejected the configured credential.");
-    case 403:
-      return fail("unauthorized", "The provider denied this request.");
-    case 404:
-    case 405:
-    case 501:
-      return fail("unsupported", "The provider does not support this endpoint.");
-    case 408:
-    case 504:
-      return fail("unavailable", "The provider request timed out.");
-    case 429: {
-      const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"), now);
-      return {
-        category: "rate-limited",
-        message: "The provider rate limit was reached.",
-        ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
-      };
-    }
-    default:
-      return fail("provider-failed", `The provider request failed with HTTP ${response.status}.`);
-  }
-}
-
-export function sanitizeImageFailure(error: unknown): ProviderFailure {
-  try {
-    const decoded = decodeProviderFailure(error);
-    return {
-      category: decoded.category,
-      message: decoded.message,
-      ...(decoded.retryAfterMs === undefined ? {} : { retryAfterMs: decoded.retryAfterMs }),
-    };
-  } catch {
-    return fail("provider-failed", "The provider request failed.");
-  }
-}
-
-export function isProviderFailure(error: unknown): error is ProviderFailure {
-  return typeof error === "object" && error !== null && "category" in error && "message" in error;
-}
-
-export function fail(category: ProviderFailure["category"], message: string): ProviderFailure {
-  return { category, message };
-}
-
-export function interrupted(): ProviderFailure {
-  return fail("interrupted", "The provider request was cancelled.");
-}
-
-export async function readImageJson(response: Response): Promise<unknown> {
-  try {
-    return JSON.parse(await response.text()) as unknown;
-  } catch (error) {
-    if (isProviderFailure(error)) throw error;
-    throw fail("protocol", "The provider returned an invalid image response.");
   }
 }
 
@@ -290,7 +286,7 @@ function boundResponse(
   const declaredLength = parseContentLength(response.headers.get("content-length"));
   if (declaredLength !== undefined && declaredLength > limits.responseBodyBytes) {
     safelyCancel(response.body);
-    throw fail("protocol", "The provider response exceeded the configured size limit.");
+    throw imageFailure("protocol", "The provider response exceeded the configured size limit.");
   }
   if (response.body === null) return response;
 
@@ -303,7 +299,7 @@ function boundResponse(
     if (terminated) return;
     terminated = true;
     void reader.cancel().catch(() => undefined);
-    streamController?.error(interrupted());
+    streamController?.error(imageInterrupted());
     cleanup();
   };
   const body = new ReadableStream<Uint8Array>({
@@ -329,7 +325,7 @@ function boundResponse(
           cleanup();
           await reader.cancel();
           controller.error(
-            fail("protocol", "The provider response exceeded the configured size limit."),
+            imageFailure("protocol", "The provider response exceeded the configured size limit."),
           );
           return;
         }
@@ -342,7 +338,7 @@ function boundResponse(
         controller.error(
           isProviderFailure(error)
             ? error
-            : fail("unavailable", "The provider response stream timed out."),
+            : imageFailure("unavailable", "The provider response stream timed out."),
         );
       }
     },
@@ -381,10 +377,10 @@ function makeRequestDeadline(
     rejectFailure(reason);
     controller.abort();
   };
-  const abortFromCaller = () => abort(interrupted());
+  const abortFromCaller = () => abort(imageInterrupted());
   callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
   const timeout = setTimeout(
-    () => abort(fail("unavailable", "The provider request timed out.")),
+    () => abort(imageFailure("unavailable", "The provider request timed out.")),
     timeoutMs,
   );
   if (isAborted(callerSignal)) abortFromCaller();
@@ -418,19 +414,6 @@ function safelyCancelLateResponse(fetchRequest: Promise<Response>): void {
 
 function safelyCancel(body: ReadableStream<Uint8Array> | null): void {
   if (body !== null) void body.cancel().catch(() => undefined);
-}
-
-export function parseRetryAfter(value: string | null, now: number): number | undefined {
-  if (value === null) return undefined;
-  if (/^\d+$/.test(value)) {
-    const seconds = Number(value);
-    if (!Number.isSafeInteger(seconds) || seconds <= 0) return undefined;
-    return Math.min(seconds * 1_000, MAX_RETRY_AFTER_MS);
-  }
-  const retryAt = Date.parse(value);
-  if (!Number.isFinite(retryAt)) return undefined;
-  const delay = retryAt - now;
-  return delay <= 0 ? undefined : Math.min(delay, MAX_RETRY_AFTER_MS);
 }
 
 function parseContentLength(value: string | null): number | undefined {

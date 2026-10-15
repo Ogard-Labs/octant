@@ -1098,6 +1098,7 @@ describe("ProviderService", () => {
           kind: "bfl-image-http",
           modelAllowlist: ["flux-dev"],
           defaultModel: "flux-dev",
+          baseUrl: "https://proxy.example.test/bfl",
         },
       }),
     ).resolves.toMatchObject({
@@ -1107,6 +1108,7 @@ describe("ProviderService", () => {
         configuration: {
           modelAllowlist: ["flux-dev"],
           defaultModel: "flux-dev",
+          baseUrl: "https://proxy.example.test/bfl/",
         },
         version: 2,
       },
@@ -5254,6 +5256,52 @@ describe("a stored provider key and the base URL it was entered for", () => {
       expect(clearProviderCredential.mock.invocationCallOrder[0]).toBeLessThan(
         fixture.append.mock.invocationCallOrder.at(-1) ?? 0,
       );
+    },
+  );
+
+  it.each([
+    { driverKind: "bfl-image", kind: "bfl-image-http", model: "flux-dev" },
+    { driverKind: "ideogram-image", kind: "ideogram-image-http", model: "ideogram-v3" },
+  ] as const)(
+    "removes the stored $driverKind key when its base URL is set or moved, and keeps it otherwise",
+    async ({ driverKind, kind, model }) => {
+      const clearProviderCredential = vi.fn(async () => undefined);
+      const fixture = serviceFixture({ clearProviderCredential });
+      const configuration = (baseUrl?: string) => ({
+        kind,
+        modelAllowlist: [model],
+        defaultModel: model,
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+      });
+      await fixture.service.execute(windowId, {
+        kind:
+          driverKind === "bfl-image"
+            ? "create-bfl-image-provider"
+            : "create-ideogram-image-provider",
+        instanceId,
+        expectedVersion: 0,
+        displayName: "Images",
+        configuration: configuration(),
+      } as never);
+      const change = (expectedVersion: number, baseUrl?: string) =>
+        fixture.service.execute(windowId, {
+          kind:
+            driverKind === "bfl-image"
+              ? "change-bfl-image-configuration"
+              : "change-ideogram-image-configuration",
+          instanceId,
+          expectedVersion,
+          configuration: configuration(baseUrl),
+        } as never);
+
+      await change(1);
+      expect(clearProviderCredential).not.toHaveBeenCalled();
+      await change(2, "https://proxy.example.test/images");
+      expect(clearProviderCredential).toHaveBeenCalledTimes(1);
+      await change(3, "https://proxy.example.test/images/");
+      expect(clearProviderCredential).toHaveBeenCalledTimes(1);
+      await change(4);
+      expect(clearProviderCredential).toHaveBeenCalledTimes(2);
     },
   );
 

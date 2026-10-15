@@ -18,6 +18,12 @@ import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand
 import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
 import {
+  readAllStdin,
+  readHiddenLineFromTerminal,
+  resolveProviderKeyCliCommand,
+  runProviderKeyCliCommand,
+} from "./providerKeyCommand";
+import {
   resolveAuthCliCommand,
   resolveListenerCliCommand,
   resolvePairCliCommand,
@@ -248,6 +254,27 @@ async function main(): Promise<number> {
       }),
     );
   }
+  if (args.command === "provider") {
+    const command = resolveProviderKeyCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    return await withLocalControlSession((session) =>
+      runProviderKeyCliCommand({
+        command,
+        session,
+        key: {
+          interactive: process.stdin.isTTY === true,
+          readHidden: (prompt) => readHiddenLineFromTerminal(process.stdin, process.stderr, prompt),
+          readStdin: () => readAllStdin(process.stdin),
+        },
+        platform: process.platform,
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
   if (args.command === "pair" || args.command === "auth" || args.command === "listener") {
     const command: RemoteAccessCliCommand | undefined =
       args.command === "pair"
@@ -401,6 +428,8 @@ function printUsage(): void {
       "  octant project remove <name>",
       "  octant project rename <name> <new name>",
       "  octant project access <name> full-access|approval-gated",
+      "  octant provider key set <instance> [--replace] [--stdin]",
+      "  octant provider key status|remove <instance>",
       "  octant listener [status]",
       "  octant listener enable --hostname <lan-or-tailscale-address> --port <port> --cert <path> --key <path>",
       "  octant listener disable",

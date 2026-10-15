@@ -63,13 +63,18 @@ export const SimulatorDeviceInput = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("rotate"),
     ...destination,
-    orientation: DeviceOrientation,
+    /** Absent: turn the Simulator away from the way it sits now. */
+    orientation: Schema.optional(DeviceOrientation),
   }).annotations(strict),
 );
 export type SimulatorDeviceInput = typeof SimulatorDeviceInput.Type;
 
 export const SimulatorDeviceInputResult = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("delivered") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("delivered"),
+    /** After a rotate: which way the Simulator now sits, as the helper read it. */
+    orientation: Schema.optional(DeviceOrientation),
+  }).annotations(strict),
   Schema.Struct({
     /** `refused`: the helper answered no. `unavailable`: no helper answered. */
     kind: Schema.Literal("refused", "unavailable"),

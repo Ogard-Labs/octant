@@ -22,7 +22,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
@@ -217,6 +217,11 @@ import {
   RemoteDeviceControlFailure,
   type RemoteDeviceControlService,
 } from "./remoteDeviceControls";
+import {
+  installPairedComputerIpcHandlers,
+  PAIRED_COMPUTER_PARTITION,
+  PairedComputerPins,
+} from "./pairedComputers";
 import { markHostInteraction } from "./interactionTrace";
 import {
   installCanvasFrameGuards,
@@ -1421,6 +1426,73 @@ async function refreshDesktopWindowAuthorities(host: LocalHostDescriptor): Promi
   return await observed;
 }
 
+let pairedComputerPinStore: PairedComputerPins | undefined;
+
+function pairedComputerPins(): PairedComputerPins {
+  pairedComputerPinStore ??= new PairedComputerPins(
+    join(app.getPath("userData"), "paired-computer-pins.json"),
+  );
+  return pairedComputerPinStore;
+}
+
+/**
+ * The session every paired computer's window uses. Its certificate check is
+ * the pin alone: a name with a recorded pin passes only on that key, and
+ * every other name is refused, since this session opens nothing else.
+ * Installing the check again drops the network service's cached results, so
+ * a pin recorded since then applies to the next connection.
+ */
+function pairedComputerSession(): Electron.Session {
+  const pairedSession = session.fromPartition(PAIRED_COMPUTER_PARTITION);
+  pairedSession.setCertificateVerifyProc((request, callback) => {
+    callback(
+      pairedComputerPins().judgeCertificate(request.hostname, request.certificate.data, Date.now()),
+    );
+  });
+  pairedSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  pairedSession.setPermissionCheckHandler(() => false);
+  return pairedSession;
+}
+
+/** Open paired-computer windows, held until each closes so none is collected mid-pairing. */
+const pairedComputerWindows = new Set<BrowserWindow>();
+
+/**
+ * A window on another computer's own Octant page. It gets no preload and no
+ * desktop bridge, stays on that one origin, and opens no other window.
+ */
+function openPairedComputerWindow(input: { readonly origin: string; readonly url: string }): void {
+  const window = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      session: pairedComputerSession(),
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+    },
+  });
+  const staysOnOrigin = (url: string): boolean => {
+    try {
+      return new URL(url).origin === input.origin;
+    } catch {
+      return false;
+    }
+  };
+  window.webContents.on("will-navigate", (event) => {
+    if (!staysOnOrigin(event.url)) event.preventDefault();
+  });
+  window.webContents.on("will-redirect", (event) => {
+    if (!staysOnOrigin(event.url)) event.preventDefault();
+  });
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  pairedComputerWindows.add(window);
+  window.once("closed", () => pairedComputerWindows.delete(window));
+  void window.loadURL(input.url);
+}
+
 function installTrustedRendererRequestHeaders(): void {
   if (trustedRendererRequestHeadersInstalled) return;
   trustedRendererRequestHeadersInstalled = true;
@@ -1754,6 +1826,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
                 ? createSimulatorDeviceHelpers({ helperPath: deviceHelperPath })
                 : createUnavailableSimulatorHelpers(),
               startingManagedToolService,
+              { captureDirectory: join(desktopDataDirectory, "apple-runtime", "captures") },
             ),
           )
         : undefined;
@@ -2985,6 +3058,13 @@ function installIpcHandlers(): void {
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
     service: getHostIdentitySigningService(),
+  });
+  installPairedComputerIpcHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
+    pins: pairedComputerPins,
+    windows: { open: openPairedComputerWindow },
+    webBuildVersion: app.getVersion(),
   });
   installNativeMenuIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),

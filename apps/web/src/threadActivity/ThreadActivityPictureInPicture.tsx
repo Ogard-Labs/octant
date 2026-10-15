@@ -9,6 +9,7 @@ import { Eye, EyeOff, MonitorUp, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { IconButton } from "../shell/IconButton";
+import { ApprovalOutsideContentNote } from "../composer/ApprovalOutsideContentNote";
 import { OctantButton } from "../ui/base/OctantButton";
 import { computerUseApproveLabel } from "../computerUse/computerUseApprovalCopy";
 
@@ -322,14 +323,28 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
       <div className="thread-activity-pip__collapsed-controls">
         {currentComputerSession.pendingApproval === undefined ? null : (
           <>
-            <OctantButton
-              disabled={busy}
-              onClick={() => void decideComputerUse("approved")}
-              size="sm"
-              type="button"
-            >
-              {computerUseApproveLabel(currentComputerSession.pendingApproval)}
-            </OctantButton>
+            {/* A strip has no room for the sources that marked the thread, so
+                Approve there would be answered unseen. It opens the full
+                prompt, which lists them above the controls. */}
+            {currentComputerSession.pendingApproval.outsideContent === undefined ? (
+              <OctantButton
+                disabled={busy}
+                onClick={() => void decideComputerUse("approved")}
+                size="sm"
+                type="button"
+              >
+                {computerUseApproveLabel(currentComputerSession.pendingApproval)}
+              </OctantButton>
+            ) : (
+              <OctantButton
+                disabled={busy}
+                onClick={() => setCollapsed(false)}
+                size="sm"
+                type="button"
+              >
+                Review before approving
+              </OctantButton>
+            )}
             <OctantButton
               disabled={busy}
               onClick={() => void decideComputerUse("denied")}
@@ -444,6 +459,11 @@ function ComputerUseActivityPreview(props: {
           <h3>Allow computer access?</h3>
         </div>
         <p>{props.session.pendingApproval.summary}</p>
+        {props.session.pendingApproval.outsideContent === undefined ? null : (
+          <ApprovalOutsideContentNote
+            outsideContent={props.session.pendingApproval.outsideContent}
+          />
+        )}
         <div className="thread-activity-pip__permission-actions">
           <OctantButton
             disabled={props.busy}

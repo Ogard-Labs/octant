@@ -1576,6 +1576,7 @@ export interface BflImageConfigurationInput {
   readonly kind: BflImageProviderConfiguration["kind"];
   readonly modelAllowlist: ReadonlyArray<string>;
   readonly defaultModel: string;
+  readonly baseUrl?: string | undefined;
 }
 
 function normalizeBflImageConfiguration(
@@ -1589,6 +1590,9 @@ function normalizeBflImageConfiguration(
     kind: "bfl-image-http",
     modelAllowlist,
     defaultModel,
+    ...(configuration.baseUrl === undefined
+      ? {}
+      : { baseUrl: normalizeOpenAiCompatibleBaseUrl(configuration.baseUrl) }),
   };
 }
 
@@ -1596,6 +1600,7 @@ export interface IdeogramImageConfigurationInput {
   readonly kind: IdeogramImageProviderConfiguration["kind"];
   readonly modelAllowlist: ReadonlyArray<string>;
   readonly defaultModel: string;
+  readonly baseUrl?: string | undefined;
 }
 
 function normalizeIdeogramImageConfiguration(
@@ -1609,6 +1614,9 @@ function normalizeIdeogramImageConfiguration(
     kind: "ideogram-image-http",
     modelAllowlist,
     defaultModel,
+    ...(configuration.baseUrl === undefined
+      ? {}
+      : { baseUrl: normalizeOpenAiCompatibleBaseUrl(configuration.baseUrl) }),
   };
 }
 

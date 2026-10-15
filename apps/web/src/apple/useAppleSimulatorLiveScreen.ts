@@ -1,7 +1,7 @@
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { AppleScreenStreamRequest } from "@octant/contracts/apple-toolchain-rpc";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { screenFacing } from "../device/deviceModel";
+import { pictureIsTurned, screenFacing } from "../device/deviceModel";
 
 export type AppleSimulatorLiveScreen =
   /** Not asked for: the frame is not live, or this client cannot attach one. */
@@ -13,6 +13,8 @@ export type AppleSimulatorLiveScreen =
       readonly screen: { readonly width: number; readonly height: number };
       /** Give the canvas that should show the screen; frames are painted onto it. */
       readonly attach: (canvas: HTMLCanvasElement | null) => void;
+      /** The canvas shows the frame turned a quarter clockwise; see `pictureIsTurned`. */
+      readonly turned?: boolean;
     }
   /** The host has no live view right now; the captured still is what there is. */
   | { readonly status: "unavailable"; readonly message: string };
@@ -46,11 +48,18 @@ export function useAppleSimulatorLiveScreen(options: {
   readonly enabled: boolean;
   /** Raising it gives up the current view and asks for a fresh one: Reconnect. */
   readonly attempt?: number;
+  /**
+   * Which way the host says the Simulator sits. The frames stay portrait-sized
+   * after it turns, so a landscape Simulator is drawn turned to match.
+   */
+  readonly orientation?: "portrait" | "landscape";
   /** Replaceable where `createImageBitmap` does not exist. */
   readonly decode?: (jpeg: Uint8Array) => Promise<DecodedFrame>;
 }): AppleSimulatorLiveScreen {
   const { attempt = 0, client, enabled, request } = options;
   const decode = options.decode ?? decodeJpeg;
+  const orientationRef = useRef(options.orientation);
+  orientationRef.current = options.orientation;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const latestRef = useRef<{ readonly key: string; readonly frame: DecodedFrame } | undefined>(
     undefined,
@@ -77,9 +86,22 @@ export function useAppleSimulatorLiveScreen(options: {
     canvasRef.current = canvas;
     const latest = latestRef.current;
     if (canvas !== null && latest !== undefined && latest.key === requestKeyRef.current) {
-      paint(canvas, latest.frame);
+      paint(canvas, latest.frame, orientationRef.current);
     }
   }, []);
+
+  // The host learns a turn after the last frame was drawn, and a still screen
+  // sends no more: redraw the picture it has.
+  useEffect(() => {
+    const latest = latestRef.current;
+    if (
+      canvasRef.current !== null &&
+      latest !== undefined &&
+      latest.key === requestKeyRef.current
+    ) {
+      paint(canvasRef.current, latest.frame, options.orientation);
+    }
+  }, [options.orientation]);
 
   useEffect(() => {
     if (!enabled || request === undefined || requestKey === undefined) {
@@ -151,7 +173,8 @@ export function useAppleSimulatorLiveScreen(options: {
               }
               latestRef.current?.frame.close();
               latestRef.current = { key, frame };
-              if (canvasRef.current !== null) paint(canvasRef.current, frame);
+              if (canvasRef.current !== null)
+                paint(canvasRef.current, frame, orientationRef.current);
               const facing = screenFacing(shown ?? watch.screen, frame);
               if (!painted || facing !== shown) {
                 painted = true;
@@ -195,17 +218,31 @@ export function useAppleSimulatorLiveScreen(options: {
     known.key === requestKey
       ? known.state
       : { status: enabled && request !== undefined ? "connecting" : "off" };
-  return state.status === "live" ? { ...state, attach } : state;
+  return state.status === "live"
+    ? { ...state, attach, turned: pictureIsTurned(options.orientation, state.screen) }
+    : state;
 }
 
 async function decodeJpeg(jpeg: Uint8Array): Promise<DecodedFrame> {
   return createImageBitmap(new Blob([jpeg.slice()], { type: "image/jpeg" }));
 }
 
-function paint(canvas: HTMLCanvasElement, frame: DecodedFrame): void {
-  if (canvas.width !== frame.width) canvas.width = frame.width;
-  if (canvas.height !== frame.height) canvas.height = frame.height;
+function paint(
+  canvas: HTMLCanvasElement,
+  frame: DecodedFrame,
+  orientation: "portrait" | "landscape" | undefined,
+): void {
+  const turned = pictureIsTurned(orientation, frame);
+  const width = turned ? frame.height : frame.width;
+  const height = turned ? frame.width : frame.height;
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
   // The decoder's result is an ImageBitmap outside tests; a stand-in has no pixels to draw.
   if (typeof ImageBitmap === "undefined" || !(frame instanceof ImageBitmap)) return;
-  canvas.getContext("2d")?.drawImage(frame, 0, 0);
+  const context = canvas.getContext("2d");
+  if (context === null) return;
+  // A quarter turn clockwise: the frame's top edge ends up on the right.
+  if (turned) context.setTransform(0, 1, -1, 0, width, 0);
+  else context.setTransform(1, 0, 0, 1, 0, 0);
+  context.drawImage(frame, 0, 0);
 }

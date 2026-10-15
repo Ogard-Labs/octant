@@ -533,7 +533,7 @@ describe("AppleWorkbenchPane", () => {
     });
   });
 
-  it("offers Rotate only when the host reports it, and asks the surface to rotate that Simulator", async () => {
+  it("offers Rotate only when the host reports it, and asks the surface to rotate that Simulator without naming an orientation", async () => {
     const { render, screen } = await import("@testing-library/react");
     const userEvent = (await import("@testing-library/user-event")).default;
     const { vi } = await import("vitest");
@@ -563,7 +563,6 @@ describe("AppleWorkbenchPane", () => {
     expect(onRun).toHaveBeenCalledExactlyOnceWith({
       kind: "rotate",
       simulatorId: discovery.simulators[0]!.simulatorId,
-      orientation: "landscape",
     });
   });
 
