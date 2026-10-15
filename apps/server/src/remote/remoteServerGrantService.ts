@@ -39,7 +39,7 @@ import {
   type RemoteServerRelayHeader,
 } from "@octant/domain";
 import { Schema } from "effect";
-import type { LocalListenerHolding } from "../localServers/localListenerPort";
+import type { LocalListenerHolder, LocalListenerHolding } from "../localServers/localListenerPort";
 import type { RemoteServerGrantTarget } from "../localServers/localServerService";
 import type { Journal } from "../persistence/journal";
 import type { OpenRemoteServerGrantRecord } from "../persistence/remoteServerGrantProjection";
@@ -154,7 +154,7 @@ export interface RemoteServerGrantServiceOptions {
    * for still holds it as Octant's. Asked before every relayed request.
    */
   readonly confirmEndpoint: (
-    holder: { readonly port: number; readonly pid: number; readonly processName: string },
+    holder: LocalListenerHolder,
     signal?: AbortSignal,
   ) => Promise<LocalListenerHolding>;
   /** Whether Code is on; a grant is a Code thread's, so it closes when Code is off. */
@@ -382,7 +382,10 @@ export class RemoteServerGrantService {
       this.#closeGrant(grant, "thread-unreadable");
       return closedGrant();
     }
-    const holding = await this.#confirmEndpoint(grant);
+    const host = loopbackHost(grant.endpoint.url);
+    // The relay connects to a loopback address literal or nowhere.
+    if (host === undefined) return { kind: "refused", reason: "server-unreachable" };
+    const holding = await this.#confirmEndpoint(grant, host);
     if (holding === "unavailable") return { kind: "unavailable" };
     if (holding !== "held") {
       this.#closeGrant(grant, holding === "stopped" ? "server-stopped" : "server-changed-hands");
@@ -569,22 +572,27 @@ export class RemoteServerGrantService {
    * behind the one running, which starts when that one ends, so a burst of
    * requests shares at most two observations rather than one each.
    */
-  #confirmEndpoint(grant: LiveGrant): Promise<LocalListenerHolding> {
+  #confirmEndpoint(grant: LiveGrant, host: "127.0.0.1" | "::1"): Promise<LocalListenerHolding> {
     const key = String(grant.grantId);
     const queued = this.#confirming.get(key);
-    if (queued === undefined) return this.#startConfirmation(key, grant);
+    if (queued === undefined) return this.#startConfirmation(key, grant, host);
     if (queued.next !== undefined) return queued.next;
     const next = queued.current.then(
-      () => this.#startConfirmation(key, grant),
-      () => this.#startConfirmation(key, grant),
+      () => this.#startConfirmation(key, grant, host),
+      () => this.#startConfirmation(key, grant, host),
     );
     queued.next = next;
     return next;
   }
 
-  #startConfirmation(key: string, grant: LiveGrant): Promise<LocalListenerHolding> {
+  #startConfirmation(
+    key: string,
+    grant: LiveGrant,
+    host: "127.0.0.1" | "::1",
+  ): Promise<LocalListenerHolding> {
     const current = this.#options
       .confirmEndpoint({
+        host,
         port: grant.endpoint.port,
         pid: grant.endpoint.pid,
         processName: grant.endpoint.processName,
@@ -704,6 +712,16 @@ function deviceActor(deviceId: string): EventActor {
     actorId: decodeActorId(deviceId),
     deviceId: decodeEventActorDeviceId(deviceId),
   };
+}
+
+/** The loopback address literal a grant's endpoint names, or nothing. */
+function loopbackHost(url: string): "127.0.0.1" | "::1" | undefined {
+  try {
+    const { hostname } = new URL(url);
+    return hostname === "127.0.0.1" ? "127.0.0.1" : hostname === "[::1]" ? "::1" : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function closedGrant(): RemoteServerRelayOutcome {

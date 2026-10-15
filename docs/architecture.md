@@ -5986,7 +5986,9 @@ mechanisms are:
     to this device, credential generation, and proxy session; Code is on; the
     thread is active and this device can still read it; and the process the
     grant was minted for (pid, untruncated name, and port, from one `lsof`
-    narrowed to the port) still holds the port under an Octant terminal. A
+    narrowed to the port) still holds the port under an Octant terminal, and
+    no other process listens where it could answer the loopback address the
+    host connects to (a wildcard counts for both families). A
     request never relies on a check that began before it arrived; a burst
     shares the running check's successor. A lost check closes the grant
     (`server-stopped`, `server-changed-hands`, `thread-archived`,

@@ -506,11 +506,11 @@ describe("process table reads", () => {
 });
 
 describe("re-observing the port a grant forwards to", () => {
-  const holder = { port: 5173, pid: 4213, processName: "node" } as const;
+  const holder = { host: "127.0.0.1", port: 5173, pid: 4213, processName: "node" } as const;
   // 4213 runs under the Octant terminal shell 300.
   const psTable = ["  300     1 zsh", " 4213   300 node", " 5000     1 node"].join("\n");
-  const listing = (pid: number, name = "node") =>
-    [`p${pid}`, `c${name}`, "u501", "n127.0.0.1:5173"].join("\n");
+  const listing = (pid: number, name = "node", address = "127.0.0.1") =>
+    [`p${pid}`, `c${name}`, "u501", `n${address}:5173`].join("\n");
 
   function probe(lsof: () => Promise<string>, options: { roots?: ReadonlySet<number> } = {}) {
     const calls: string[][] = [];
@@ -557,6 +557,19 @@ describe("re-observing the port a grant forwards to", () => {
     expect(await probe(async () => listing(4213), { roots: new Set([999]) }).check(holder)).toBe(
       "changed-hands",
     );
+  });
+
+  it("judges only the sockets that answer the address the host connects to", async () => {
+    // The granted process kept the IPv6 loopback while another took IPv4.
+    const split = async () => `${listing(4213, "node", "[::1]")}\n${listing(5000)}`;
+    expect(await probe(split).check(holder)).toBe("changed-hands");
+    expect(await probe(split).check({ ...holder, host: "::1" })).toBe("held");
+    // A wildcard listener of another process might answer either family.
+    const wildcard = async () => `${listing(4213)}\n${listing(5000, "node", "*")}`;
+    expect(await probe(wildcard).check(holder)).toBe("changed-hands");
+    // Holding only the other family is no longer holding this address.
+    expect(await probe(async () => listing(4213, "node", "[::1]")).check(holder)).toBe("stopped");
+    expect(await probe(async () => listing(4213, "node", "*")).check(holder)).toBe("held");
   });
 
   it("answers unavailable when the host could not look, never stopped", async () => {

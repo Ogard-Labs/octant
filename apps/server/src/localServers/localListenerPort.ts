@@ -210,6 +210,8 @@ export function createLiveLocalListenerPort(
 
 /** The process a grant was minted for, holding its port. */
 export interface LocalListenerHolder {
+  /** The loopback address the host connects to for this grant. */
+  readonly host: "127.0.0.1" | "::1";
   readonly port: number;
   readonly pid: number;
   readonly processName: string;
@@ -276,10 +278,15 @@ export function createLiveLocalListenerHoldingProbe(
     else if (lsofFoundNothing(listing.reason)) return "stopped";
     else return "unavailable";
 
-    const holders = parseLsofFields(output, uid).filter((entry) => entry.port === holder.port);
+    // Only the sockets that can answer the address the host connects to
+    // count: the granted process may still hold the port on the other loopback
+    // family while another process took this one.
+    const holders = parseLsofFields(output, uid).filter(
+      (entry) => entry.port === holder.port && answersOn(entry.bindAddress, holder.host),
+    );
     if (holders.length === 0) return "stopped";
     if (
-      !holders.some((entry) => entry.pid === holder.pid && entry.processName === holder.processName)
+      holders.some((entry) => entry.pid !== holder.pid || entry.processName !== holder.processName)
     ) {
       return "changed-hands";
     }
@@ -287,6 +294,17 @@ export function createLiveLocalListenerHoldingProbe(
     const [table, roots] = ownership.value;
     return hasOwnedAncestor(parsePsTable(table), holder.pid, roots) ? "held" : "changed-hands";
   };
+}
+
+/**
+ * Whether a socket bound to `bindAddress` can answer a connection to `host`.
+ * `lsof -F n` names no address family, so a wildcard counts for both loopback
+ * families: a process that might be answering is treated as answering.
+ */
+function answersOn(bindAddress: string, host: "127.0.0.1" | "::1"): boolean {
+  const address = bindAddress.replace(/^\[|\]$/g, "");
+  if (address === host || address === "*" || address === "::") return true;
+  return address === "0.0.0.0" && host === "127.0.0.1";
 }
 
 /**
