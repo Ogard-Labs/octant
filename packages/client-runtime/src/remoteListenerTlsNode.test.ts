@@ -98,11 +98,15 @@ function dialLoopback(port: number): Promise<Socket> {
 async function secureOverLoopback(
   port: number,
   trust: ListenerOriginTrust,
-  overrides: { readonly now?: () => number; readonly handshakeTimeoutMs?: number } = {},
+  overrides: {
+    readonly now?: () => number;
+    readonly handshakeTimeoutMs?: number;
+    readonly hostname?: string;
+  } = {},
 ): Promise<ListenerConnection> {
   return testOnlyListenerTls.secureListenerSocket({
     socket: await dialLoopback(port),
-    hostname: HOSTNAME,
+    hostname: overrides.hostname ?? HOSTNAME,
     trust,
     now: overrides.now ?? (() => NOW),
     handshakeTimeoutMs: overrides.handshakeTimeoutMs ?? 5_000,
@@ -170,6 +174,22 @@ describe("a listener connection under its stored trust", () => {
     expect(listener.requestText()).toBe("");
   });
 
+  it("refuses a platform-trusted certificate that names another host than the origin", async () => {
+    const listener = await startListener({
+      cert: PLATFORM_TRUSTED_CERT,
+      key: PLATFORM_TRUSTED_KEY,
+    });
+
+    // An IP origin carries no SNI, so the name check cannot ride on it.
+    const connection = await secureOverLoopback(listener.port, platform, {
+      hostname: "100.101.102.103",
+    });
+
+    expect(connection).toEqual({ status: "refused", reason: "platform-untrusted" });
+    await listener.allClosed();
+    expect(listener.requestText()).toBe("");
+  });
+
   it("refuses a self-made certificate for an origin with no pin", async () => {
     const listener = await startListener({ cert: SELF_MADE_CERT, key: SELF_MADE_KEY });
 
@@ -211,7 +231,10 @@ describe("a listener handshake that cannot be judged", () => {
       maxVersion: "TLSv1.2",
     });
 
-    await expect(secureOverLoopback(listener.port, pinned(SELF_MADE_PIN))).rejects.toThrow();
+    await expect(secureOverLoopback(listener.port, pinned(SELF_MADE_PIN))).resolves.toEqual({
+      status: "failed",
+      reason: "handshake-failed",
+    });
     await listener.allClosed();
     expect(listener.requestText()).toBe("");
   });
@@ -225,7 +248,7 @@ describe("a listener handshake that cannot be judged", () => {
           throw new Error("No clock.");
         },
       }),
-    ).rejects.toThrow("No clock.");
+    ).resolves.toEqual({ status: "failed", reason: "handshake-failed" });
     await listener.allClosed();
     expect(listener.requestText()).toBe("");
   });
@@ -245,7 +268,7 @@ describe("a listener handshake that cannot be judged", () => {
 
     await expect(
       secureOverLoopback(address.port, pinned(SELF_MADE_PIN), { handshakeTimeoutMs: 100 }),
-    ).rejects.toThrow(/handshake in time/);
+    ).resolves.toEqual({ status: "failed", reason: "handshake-failed" });
   });
 });
 
@@ -310,6 +333,30 @@ describe("the address a listener connection reaches", () => {
     expect(connection).toEqual({ status: "refused", reason: "not-private-address" });
     await listener.allClosed();
     expect(listener.rawByteCount()).toBe(0);
+  });
+
+  it("reports a name that does not resolve, or an address that does not answer, as unreachable", async () => {
+    const options = {
+      origin: "https://listener.example-tailnet.ts.net:8443",
+      trust: pinned(SELF_MADE_PIN),
+    };
+
+    await expect(
+      connectOver(options, {
+        resolve: async () => {
+          throw new Error("ENOTFOUND");
+        },
+        dial: dialLoopback.bind(undefined, 1),
+      }),
+    ).resolves.toEqual({ status: "failed", reason: "unreachable" });
+    await expect(
+      connectOver(options, {
+        resolve: async () => ["100.101.102.103"],
+        dial: async () => {
+          throw new Error("ECONNREFUSED");
+        },
+      }),
+    ).resolves.toEqual({ status: "failed", reason: "unreachable" });
   });
 
   it("refuses an origin whose address is public before dialling it", async () => {

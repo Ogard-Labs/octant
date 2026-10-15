@@ -5788,7 +5788,11 @@ mechanisms are:
       hands over the socket only when the rule accepts. It requires TLS 1.3,
       because TLS 1.2 renegotiation could present a second certificate after
       the judged one, gives a handshake 10 seconds, and closes the connection
-      when the judgement itself fails. Only its tests can replace name
+      when the judgement itself fails. For platform trust it also checks the
+      certificate names the origin's host or address itself, since an IP
+      origin carries no server name. A name that does not resolve, an
+      address that does not answer, and a failed handshake come back as a
+      failure value, not a refusal, and nothing was sent. Only its tests can replace name
       resolution, dialling, or trust roots. No other client runtime or CLI
       source turns platform validation off or accepts every server name, and
       a test refuses any that does. No `octant` command connects to another

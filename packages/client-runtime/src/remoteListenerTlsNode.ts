@@ -4,7 +4,7 @@
 // `remoteListenerTrust`. It imports Node modules, so the package barrel does
 // not export it and browser and phone bundles never load it.
 
-import { createHash } from "node:crypto";
+import { createHash, type X509Certificate } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { connect as connectTcp, isIP, type Socket } from "node:net";
 import { connect as connectTls, type TLSSocket } from "node:tls";
@@ -27,7 +27,12 @@ export type ListenerConnection =
       /** The trust to store for the origin from now on; a staged trust that passed is now current. */
       readonly trust: ListenerOriginTrust;
     }
-  | { readonly status: "refused"; readonly reason: ListenerTrustRefusal };
+  | { readonly status: "refused"; readonly reason: ListenerTrustRefusal }
+  /**
+   * The listener could not be reached or did not complete a TLS 1.3
+   * handshake the client could judge; nothing was sent. Retrying is safe.
+   */
+  | { readonly status: "failed"; readonly reason: "unreachable" | "handshake-failed" };
 
 export interface ListenerConnectionOptions {
   /** Exactly an HTTPS origin, as stored with the pairing record. */
@@ -58,9 +63,9 @@ const SYSTEM_NETWORK: ListenerNetwork = {
 };
 
 /**
- * Connects to a listener origin under its stored trust. A refusal is a value
- * and the socket is already closed; a network failure, a handshake that does
- * not finish in time, or a listener that cannot speak TLS 1.3 rejects.
+ * Connects to a listener origin under its stored trust. A refusal or a
+ * failure is a value and the socket is already closed; only an origin that is
+ * not exactly an HTTPS origin, which no pairing record holds, throws.
  */
 export function connectListener(options: ListenerConnectionOptions): Promise<ListenerConnection> {
   return connectListenerOver(options, SYSTEM_NETWORK);
@@ -85,12 +90,22 @@ async function connectListenerOver(
   }
   const hostname = url.hostname.replace(/^\[(.*)\]$/, "$1");
   const port = url.port === "" ? 443 : Number(url.port);
-  const addresses = isIP(hostname) === 0 ? await network.resolve(hostname) : [hostname];
+  let addresses: ReadonlyArray<string>;
+  try {
+    addresses = isIP(hostname) === 0 ? await network.resolve(hostname) : [hostname];
+  } catch {
+    return { status: "failed", reason: "unreachable" };
+  }
   const resolved = judgeListenerAddresses(addresses);
   if (resolved.status === "refused") return resolved;
   // The judged address is dialled, never the name, so a second lookup cannot
   // answer differently.
-  const socket = await network.dial(resolved.address, port);
+  let socket: Socket;
+  try {
+    socket = await network.dial(resolved.address, port);
+  } catch {
+    return { status: "failed", reason: "unreachable" };
+  }
   const peer = judgeListenerAddresses([socket.remoteAddress]);
   if (peer.status === "refused") {
     socket.destroy();
@@ -119,7 +134,7 @@ function secureListenerSocket(input: {
   readonly handshakeTimeoutMs: number;
   readonly platformRoots?: ReadonlyArray<string>;
 }): Promise<ListenerConnection> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const tlsSocket = connectTls({
       socket: input.socket,
       host: input.hostname,
@@ -137,29 +152,29 @@ function secureListenerSocket(input: {
       rejectUnauthorized: false,
       ...(input.platformRoots === undefined ? {} : { ca: [...input.platformRoots] }),
     });
-    const fail = (error: Error): void => {
+    const fail = (): void => {
       clearTimeout(timer);
       tlsSocket.off("secureConnect", judge);
       tlsSocket.destroy();
-      reject(error);
+      resolve({ status: "failed", reason: "handshake-failed" });
     };
     const judge = (): void => {
       clearTimeout(timer);
       tlsSocket.off("error", fail);
       let judgement: ListenerCertificateJudgement;
       try {
+        // Read once: Node hands out the peer certificate only on the first call.
+        const certificate = tlsSocket.getPeerX509Certificate();
         judgement = judgeListenerCertificate({
           trust: input.trust,
-          servedPin: servedPin(tlsSocket),
-          platformTrusted: tlsSocket.authorized,
+          servedPin: servedPin(certificate),
+          platformTrusted: platformTrusted(tlsSocket.authorized, certificate, input.hostname),
           now: input.now(),
         });
-      } catch (error) {
-        // A certificate the client cannot read is never accepted.
+      } catch {
+        // A certificate or clock the client cannot read never accepts.
         tlsSocket.destroy();
-        reject(
-          error instanceof Error ? error : new Error("The listener's certificate is unreadable."),
-        );
+        resolve({ status: "failed", reason: "handshake-failed" });
         return;
       }
       if (judgement.status === "refused") {
@@ -169,17 +184,30 @@ function secureListenerSocket(input: {
       }
       resolve({ status: "connected", socket: tlsSocket, trust: judgement.trust });
     };
-    const timer = setTimeout(
-      () => fail(new Error("The listener did not finish the TLS handshake in time.")),
-      input.handshakeTimeoutMs,
-    );
+    const timer = setTimeout(fail, input.handshakeTimeoutMs);
     tlsSocket.once("error", fail);
     tlsSocket.once("secureConnect", judge);
   });
 }
 
-function servedPin(socket: TLSSocket): string | undefined {
-  const certificate = socket.getPeerX509Certificate();
+/**
+ * Platform validation, with the server identity checked here as well: Bun
+ * reported `authorized` for a preconnected socket whose certificate named
+ * another host when the origin was an IP address, which carries no SNI.
+ */
+function platformTrusted(
+  authorized: boolean,
+  certificate: X509Certificate | undefined,
+  hostname: string,
+): boolean {
+  if (!authorized || certificate === undefined) return false;
+  return (
+    (isIP(hostname) === 0 ? certificate.checkHost(hostname) : certificate.checkIP(hostname)) !==
+    undefined
+  );
+}
+
+function servedPin(certificate: X509Certificate | undefined): string | undefined {
   if (certificate === undefined) return undefined;
   const spki = certificate.publicKey.export({ type: "spki", format: "der" });
   return listenerPinFromSha256(createHash("sha256").update(spki).digest());
