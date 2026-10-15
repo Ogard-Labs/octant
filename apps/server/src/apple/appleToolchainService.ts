@@ -321,6 +321,8 @@ export class AppleToolchainService {
       readonly finished: Promise<AppleProcessResult>;
     }
   >();
+  // Simulators whose recorder is still starting; a second start must not launch another.
+  readonly #recordingStarts = new Set<string>();
   #stateChangesDuringDiscovery: Array<{
     readonly simulatorId: AppleSimulatorRecord["simulatorId"];
     readonly state: AppleSimulatorRecord["state"];
@@ -814,7 +816,9 @@ export class AppleToolchainService {
           request.timeoutMs,
           signal,
         );
-        await this.#discardRecording(request.simulatorId);
+        // Only a confirmed shutdown ends the recording; a failed one leaves the
+        // Simulator booted and the recording still stoppable.
+        if (succeeded(terminal)) await this.#discardRecording(request.simulatorId);
       } else if (request.kind === "terminate") {
         this.#advance(active, "terminating");
         terminal = await this.#command(
@@ -1206,9 +1210,22 @@ export class AppleToolchainService {
     context: AppleExecutionContext,
   ): Promise<{ readonly started: true } | { readonly started: false; readonly reason: string }> {
     const key = String(request.simulatorId);
-    if (this.#recordings.has(key)) {
+    if (this.#recordings.has(key) || this.#recordingStarts.has(key)) {
       return { started: false, reason: "This Simulator is already being recorded." };
     }
+    this.#recordingStarts.add(key);
+    try {
+      return await this.#launchRecording(request, context, key);
+    } finally {
+      this.#recordingStarts.delete(key);
+    }
+  }
+
+  async #launchRecording(
+    request: AppleSimulatorRequest,
+    context: AppleExecutionContext,
+    key: string,
+  ): Promise<{ readonly started: true } | { readonly started: false; readonly reason: string }> {
     try {
       await mkdir(this.#captureDirectory, { recursive: true, mode: 0o700 });
     } catch {

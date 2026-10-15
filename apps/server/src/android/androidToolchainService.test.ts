@@ -615,6 +615,7 @@ describe("AndroidToolchainService", () => {
             });
             return processResult("");
           }
+          if (input.argv.includes("reboot")) return processResult("");
           if (input.argv.includes("cat")) return { ...processResult(""), stdout: video };
           if (input.argv.includes("rm")) return processResult("");
           return await discovery(input);
@@ -670,6 +671,57 @@ describe("AndroidToolchainService", () => {
       expect(argvs.some((line) => line.includes("shell rm -f /sdcard/octant-recording-"))).toBe(
         true,
       );
+    });
+
+    it("launches one recorder when two starts arrive together", async () => {
+      const { service, execute } = recordingService();
+      await service.discover(discoveryRequest, context);
+
+      const [one, two] = await Promise.all([
+        service.execute(
+          action("start-recording", { actionId: startId, requestedBy: actor }),
+          context,
+        ),
+        service.execute(
+          action("start-recording", {
+            actionId: "30000000-0000-4000-8000-0000000000a3",
+            requestedBy: actor,
+          }),
+          context,
+        ),
+      ]);
+
+      expect([one.outcome, two.outcome].sort()).toEqual(["failed", "succeeded"]);
+      expect(
+        execute.mock.calls.filter(
+          ([input]) => input.argv.includes("screenrecord") && input.argv.includes("--time-limit"),
+        ),
+      ).toHaveLength(1);
+      await service.close();
+    });
+
+    it("finishes the recording and deletes its device file before a shutdown or close", async () => {
+      const removed = (execute: ReturnType<typeof recordingService>["execute"]) =>
+        execute.mock.calls.filter(([input]) => input.argv.includes("rm")).length;
+
+      const shuttingDown = recordingService();
+      await shuttingDown.service.discover(discoveryRequest, context);
+      await shuttingDown.service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor }),
+        context,
+      );
+      await shuttingDown.service.execute(action("shutdown"), context);
+      expect(removed(shuttingDown.execute)).toBe(1);
+      expect(shuttingDown.service.snapshot(context).recordings).toEqual([]);
+
+      const closing = recordingService();
+      await closing.service.discover(discoveryRequest, context);
+      await closing.service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor }),
+        context,
+      );
+      await closing.service.close();
+      expect(removed(closing.execute)).toBe(1);
     });
 
     it("reports a recording that never started and a stop with nothing to stop", async () => {

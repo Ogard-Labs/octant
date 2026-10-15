@@ -1981,13 +1981,18 @@ describe("AppleToolchainService screen recording", () => {
   const startId = "30000000-0000-4000-8000-0000000000a1" as never;
   const stopId = "30000000-0000-4000-8000-0000000000a2" as never;
 
-  async function recordingService(options: { readonly endsAtOnce?: boolean } = {}) {
+  async function recordingService(
+    options: { readonly endsAtOnce?: boolean; readonly shutdownExitCode?: number } = {},
+  ) {
     const discovery = discoveryExecutor();
     const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-recording-test-"));
     const artifacts = new Map<string, Uint8Array>();
     let recordedPath: string | undefined;
     const execute = vi.fn(
       async (input: { readonly argv: ReadonlyArray<string> }, signal?: AbortSignal) => {
+        if (input.argv[2] === "shutdown") {
+          return processResult("", { exitCode: options.shutdownExitCode ?? 0 });
+        }
         if (input.argv[3] !== "io" && input.argv[2] !== "io") {
           return await discovery(input as Parameters<typeof discovery>[0]);
         }
@@ -2054,6 +2059,46 @@ describe("AppleToolchainService screen recording", () => {
     });
     expect(artifacts.get(`apple-recording-${stopId}`)?.byteLength).toBe(16);
     expect(service.snapshot(gated).recordings).toEqual([]);
+  });
+
+  it("launches one recorder when two starts arrive together", async () => {
+    const { service, execute } = await recordingService();
+    await service.discover(discoveryRequest, context);
+    const second = "30000000-0000-4000-8000-0000000000a3" as never;
+
+    const [one, two] = await Promise.all([
+      service.execute(recording("start-recording", startId), context),
+      service.execute(recording("start-recording", second), context),
+    ]);
+
+    expect([one.outcome, two.outcome].sort()).toEqual(["failed", "succeeded"]);
+    expect(execute.mock.calls.filter(([input]) => input.argv.includes("recordVideo"))).toHaveLength(
+      1,
+    );
+    await service.close();
+  });
+
+  it("keeps a recording when the Simulator fails to shut down, and drops it when it does", async () => {
+    const shutdown = (actionId: never) =>
+      recording("stop-recording", actionId, { kind: "shutdown", requestedBy: undefined });
+    const failing = await recordingService({ shutdownExitCode: 1 });
+    await failing.service.discover(discoveryRequest, context);
+    await failing.service.execute(recording("start-recording", startId), context);
+    await failing.service.execute(
+      shutdown("30000000-0000-4000-8000-0000000000a4" as never),
+      context,
+    );
+    expect(failing.service.snapshot(context).recordings).toHaveLength(1);
+    await failing.service.close();
+
+    const working = await recordingService();
+    await working.service.discover(discoveryRequest, context);
+    await working.service.execute(recording("start-recording", startId), context);
+    await working.service.execute(
+      shutdown("30000000-0000-4000-8000-0000000000a4" as never),
+      context,
+    );
+    expect(working.service.snapshot(context).recordings).toEqual([]);
   });
 
   it("reports a recording that never started and a stop with nothing to stop", async () => {
