@@ -29,7 +29,7 @@ import {
   decodeBase64Image,
   decodeOpenAiImageResponse,
   safetyMessageFromUnknown,
-} from "./openAiImageResponseCodec";
+} from "./openAiImageAdapter";
 
 const DEFAULT_LIMITS: CompatibleHttpLimits = {
   connectionTimeoutMs: 120_000,

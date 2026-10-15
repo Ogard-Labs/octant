@@ -227,6 +227,14 @@ describe("Simulator input delivery", () => {
     ]);
   });
 
+  it("passes on which way the Simulator sits after a rotation", async () => {
+    const { fake } = helpers(() => ({ status: "delivered", orientation: "landscape" }));
+
+    await expect(
+      createSimulatorInputDelivery(fake)({ kind: "rotate", udid, budgetMs: 30_000 }),
+    ).resolves.toEqual({ kind: "delivered", orientation: "landscape" });
+  });
+
   it("asks the helper for the screen again after a rotation, since its size turned", async () => {
     const screens = [
       { width: 1206, height: 2622 },
@@ -437,6 +445,26 @@ describe("the Simulator screen stream", () => {
 
     frame([0xff, 0xd8, 0x02, 0x03, 0xff, 0xd9]);
     expect(await readBytes(reader, 10)).toEqual([0, 0, 0, 6, 0xff, 0xd8, 0x02, 0x03, 0xff, 0xd9]);
+    abort.abort();
+  });
+
+  it("names which way the Simulator sat when the watch began", async () => {
+    const { watching } = watchable();
+    const turned: SimulatorDeviceHelpers = {
+      ...watching,
+      watch: async (...args) => {
+        const started = await watching.watch(...args);
+        return started.status === "watching" ? { ...started, orientation: "landscape" } : started;
+      },
+    };
+    const url = await serve(turned);
+    const abort = new AbortController();
+    const response = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify({ watch }),
+      signal: abort.signal,
+    });
+    expect(response.headers.get("x-octant-simulator-orientation")).toBe("landscape");
     abort.abort();
   });
 

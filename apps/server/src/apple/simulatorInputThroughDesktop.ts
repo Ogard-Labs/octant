@@ -19,7 +19,8 @@ export function simulatorInputThroughDesktop(
     if (input.kind === "unavailable") return unavailable(input.message);
     try {
       const result = await desktop.deliver(input.input, signal);
-      if (result.kind === "delivered") return exited(0, "");
+      // A rotate says which way the Simulator sits now, as its output.
+      if (result.kind === "delivered") return exited(0, "", result.orientation ?? "");
       return result.kind === "refused"
         ? exited(1, `${result.reason}: ${result.message}`)
         : unavailable(`${result.reason}: ${result.message}`);
@@ -100,11 +101,11 @@ export function simulatorDeviceInput(
   return { kind: "unavailable", message: "Simulator input request is incomplete." };
 }
 
-function exited(exitCode: number, stderr: string): AppleProcessResult {
+function exited(exitCode: number, stderr: string, stdout = ""): AppleProcessResult {
   return {
     termination: "exited",
     exitCode,
-    stdout: new Uint8Array(),
+    stdout: new TextEncoder().encode(stdout),
     stderr: new TextEncoder().encode(stderr),
     parserFailed: false,
     cleanupUncertain: false,

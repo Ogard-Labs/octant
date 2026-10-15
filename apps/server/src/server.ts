@@ -21,7 +21,7 @@ import {
 } from "@octant/contracts/computer-use-plugin";
 import { GitHistoryPort } from "./code/gitHistoryPort";
 import { MINIMUM_GIT_VERSION, type RepositoryIdentityObservation } from "./code/repositoryIdentity";
-import { IMAGE_LIBRARY_SCOPE_ID } from "@octant/contracts";
+import { IMAGE_LIBRARY_SCOPE_ID, type AppleSimulatorId } from "@octant/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
@@ -5991,11 +5991,19 @@ export function startOctantServer(
         : {
             // A pane is a few hundred points tall; 30 frames a second of a
             // screen scaled to 1100 pixels is sharp there and about 1 MB/s.
-            watchSimulator: (simulatorId: string, signal: AbortSignal) =>
-              simulatorDevice.watch(
+            watchSimulator: async (simulatorId: string, signal: AbortSignal) => {
+              const watch = await simulatorDevice.watch(
                 { udid: simulatorId, maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
                 signal,
-              ),
+              );
+              if (watch.kind === "watching" && watch.orientation !== undefined) {
+                appleToolchainService.noteOrientation(
+                  simulatorId as AppleSimulatorId,
+                  watch.orientation,
+                );
+              }
+              return watch;
+            },
           }),
       recordEvidence: recordAppleEvidence,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
@@ -6442,8 +6450,12 @@ export function startOctantServer(
                     ? {}
                     : { parentThreadId: decodeEgressAggregateId(scope.parentThreadId) }),
                 },
-                startLaunch: (launch) =>
-                  toolEgressRules.startLaunch({ launch, endpoint: harnessEgressEndpoint }),
+                startLaunch: (launch, confirmed) =>
+                  toolEgressRules.startLaunch({
+                    launch,
+                    endpoint: harnessEgressEndpoint,
+                    confirmed,
+                  }),
                 launchId: () => decodeEgressLaunchId(randomUUID()),
               },
             });
@@ -6642,8 +6654,8 @@ export function startOctantServer(
       followUps: followUpActions,
       answerQuestion: ({ threadId, questionId, answer }) =>
         nativeHarnessQuestionsLive.answer(threadId, questionId, answer),
-      decideApproval: ({ threadId, approvalId, decision }) =>
-        nativeHarnessApprovals.decide(threadId, approvalId, decision),
+      decideApproval: ({ threadId, approvalId, decision, answer }) =>
+        nativeHarnessApprovals.decide(threadId, approvalId, decision, answer),
       steer: ({ threadId, command }) => {
         if (command.kind === "clear") {
           nativeHarnessSessionsLive.clearSteering(threadId, "all");
@@ -6745,7 +6757,12 @@ export function startOctantServer(
         process: harnessOfflineProcessPort,
         scriptDirectory: harnessScriptDirectory,
       }),
-      ...(harnessProxiedShell === undefined ? {} : { proxiedShell: harnessProxiedShell }),
+      ...(harnessProxiedShell === undefined
+        ? {}
+        : {
+            proxiedShell: harnessProxiedShell,
+            commandHosts: (threadId: string) => toolEgressRules.commandConfirmationHosts(threadId),
+          }),
       // The posture a command's network follows is the one its turn may use:
       // the window's session grant, clamped to the running turn's posture, so
       // a thread widened mid-turn keeps that turn's commands on `proxied`.

@@ -12,6 +12,31 @@ describe("reading a pointer gesture on the Simulator screen", () => {
     ).toEqual({ kind: "tap", point: { x: 603, y: 1311 } });
   });
 
+  it("turns a point on a landscape picture back into the portrait frame's pixels", () => {
+    // The same frame drawn a quarter turn clockwise: 874 wide and 402 tall.
+    const landscape = { left: 300, top: 20, width: 874, height: 402 };
+    // Its top-right corner is the frame's top-left corner.
+    expect(
+      gestureFrom(
+        { x: 1174, y: 20, atMs: 0 },
+        { x: 1174, y: 20, atMs: 50 },
+        landscape,
+        screen,
+        true,
+      ),
+    ).toEqual({ kind: "tap", point: { x: 0, y: 0 } });
+    // A fifth across and half way down is half way across the frame, four fifths down.
+    expect(
+      gestureFrom(
+        { x: 474.8, y: 221, atMs: 0 },
+        { x: 474.8, y: 221, atMs: 50 },
+        landscape,
+        screen,
+        true,
+      ),
+    ).toEqual({ kind: "tap", point: { x: 603, y: 2098 } });
+  });
+
   it("reads a drag as a swipe that takes as long as the drag did", () => {
     expect(
       gestureFrom({ x: 501, y: 800, atMs: 0 }, { x: 501, y: 300, atMs: 240 }, box, screen),

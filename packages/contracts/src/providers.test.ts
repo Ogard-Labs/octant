@@ -367,7 +367,7 @@ describe("provider registry contracts", () => {
     expect(decodeProviderInstanceConfigurationChanged({ instance })).toEqual({ instance });
   });
 
-  it("decodes a BFL image profile without a base URL or secret", () => {
+  it("decodes a BFL image profile without a secret, and with or without a base URL", () => {
     const instance = decodeProviderInstance({
       id: "80000000-0000-4000-8000-000000000433",
       displayName: "FLUX",
@@ -386,10 +386,16 @@ describe("provider registry contracts", () => {
 
     expect(instance.driverKind).toBe("bfl-image");
     expect(JSON.stringify(instance)).not.toMatch(/api.?key|credential|token|baseUrl/i);
+    expect(
+      decodeProviderInstance({
+        ...instance,
+        configuration: { ...instance.configuration, baseUrl: "https://proxy.example.test/" },
+      }).configuration,
+    ).toMatchObject({ baseUrl: "https://proxy.example.test/" });
     expect(() =>
       decodeProviderInstance({
         ...instance,
-        configuration: { ...instance.configuration, baseUrl: "https://api.bfl.ai" },
+        configuration: { ...instance.configuration, baseUrl: "" },
       }),
     ).toThrow();
     expect(() =>
@@ -408,7 +414,7 @@ describe("provider registry contracts", () => {
     expect(() => decodeProviderInstanceBinaryChanged({ instance })).toThrow();
   });
 
-  it("decodes an Ideogram image profile without a base URL or secret", () => {
+  it("decodes an Ideogram image profile without a secret, and with or without a base URL", () => {
     const instance = decodeProviderInstance({
       id: "80000000-0000-4000-8000-000000000434",
       displayName: "Ideogram",
@@ -427,10 +433,16 @@ describe("provider registry contracts", () => {
 
     expect(instance.driverKind).toBe("ideogram-image");
     expect(JSON.stringify(instance)).not.toMatch(/api.?key|credential|token|baseUrl/i);
+    expect(
+      decodeProviderInstance({
+        ...instance,
+        configuration: { ...instance.configuration, baseUrl: "https://proxy.example.test/" },
+      }).configuration,
+    ).toMatchObject({ baseUrl: "https://proxy.example.test/" });
     expect(() =>
       decodeProviderInstance({
         ...instance,
-        configuration: { ...instance.configuration, baseUrl: "https://api.ideogram.ai" },
+        configuration: { ...instance.configuration, baseUrl: "" },
       }),
     ).toThrow();
     expect(() =>
@@ -1667,7 +1679,7 @@ describe("provider registry contracts", () => {
         instanceId: ids.instance,
         expectedVersion: 0,
         displayName: "FLUX",
-        configuration: { ...bflImageConfiguration, baseUrl: "https://api.bfl.ai" },
+        configuration: { ...bflImageConfiguration, baseUrl: " " },
       }),
     ).toThrow();
     expect(() =>
@@ -1711,7 +1723,7 @@ describe("provider registry contracts", () => {
         instanceId: ids.instance,
         expectedVersion: 0,
         displayName: "Ideogram",
-        configuration: { ...ideogramImageConfiguration, baseUrl: "https://api.ideogram.ai" },
+        configuration: { ...ideogramImageConfiguration, baseUrl: " " },
       }),
     ).toThrow();
     expect(() =>

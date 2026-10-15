@@ -91,6 +91,7 @@ export const IPC_CHANNELS = {
   pairedComputerPair: "octant:paired-computers:pair",
   pairedComputerList: "octant:paired-computers:list",
   pairedComputerOpen: "octant:paired-computers:open",
+  pairedComputerForget: "octant:paired-computers:forget",
 } as const;
 
 type ResolvedSidebarMaterial = "opaque" | "translucent";
@@ -321,6 +322,10 @@ export type PairedComputerOutcome =
   | { readonly status: "opened"; readonly computer: PairedComputer }
   | { readonly status: "refused"; readonly message: string };
 
+export type ForgetPairedComputerOutcome =
+  | { readonly status: "forgotten" }
+  | { readonly status: "refused"; readonly message: string };
+
 export interface RemoteHostIdentityRotationResult {
   readonly status: "rotated";
   readonly fingerprint: string;
@@ -537,6 +542,7 @@ export interface OctantHostBridge {
   readonly pairWithPairingCode: (code: string) => Promise<PairedComputerOutcome>;
   readonly listPairedComputers: () => Promise<ReadonlyArray<PairedComputer>>;
   readonly openPairedComputer: (origin: string) => Promise<PairedComputerOutcome>;
+  readonly forgetPairedComputer: (origin: string) => Promise<ForgetPairedComputerOutcome>;
   readonly getPrivateListenerStatus: () => Promise<PrivateListenerPublicStatus>;
   readonly enablePrivateListener: (
     request: PrivateListenerEnableBridgeRequest,
@@ -1157,6 +1163,10 @@ export function createHostBridge(
       decodePairedComputers(await ipc.invoke(IPC_CHANNELS.pairedComputerList)),
     openPairedComputer: async (origin: string) =>
       decodePairedComputerOutcome(await ipc.invoke(IPC_CHANNELS.pairedComputerOpen, origin)),
+    forgetPairedComputer: async (origin: string) =>
+      decodeForgetPairedComputerOutcome(
+        await ipc.invoke(IPC_CHANNELS.pairedComputerForget, origin),
+      ),
   });
 }
 
@@ -1174,6 +1184,17 @@ function decodePairedComputer(value: unknown): PairedComputer {
 function decodePairedComputers(value: unknown): ReadonlyArray<PairedComputer> {
   if (!Array.isArray(value)) throw new Error("Octant returned an invalid paired computer.");
   return Object.freeze(value.map(decodePairedComputer));
+}
+
+function decodeForgetPairedComputerOutcome(value: unknown): ForgetPairedComputerOutcome {
+  if (typeof value === "object" && value !== null) {
+    const outcome = value as Record<string, unknown>;
+    if (outcome.status === "forgotten") return Object.freeze({ status: "forgotten" });
+    if (outcome.status === "refused" && typeof outcome.message === "string") {
+      return Object.freeze({ status: "refused", message: outcome.message });
+    }
+  }
+  throw new Error("Octant returned an invalid paired-computer answer.");
 }
 
 function decodePairedComputerOutcome(value: unknown): PairedComputerOutcome {

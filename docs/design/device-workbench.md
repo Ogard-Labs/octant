@@ -220,6 +220,29 @@ the emulator the host turns auto-rotate off and sets the rotation through adb
 (`settings put system accelerometer_rotation 0`, then `user_rotation` to `0`
 for portrait or `1` for landscape), so the sensor cannot undo it.
 
+**The Simulator's picture follows the turn.** serve-sim keeps sending
+portrait-sized frames, and takes touches in the portrait frame's own space,
+after the Simulator turns (measured on serve-sim 0.1.46 and 0.1.48: in
+landscape the content sits sideways in the frame, and a touch at frame
+fraction `(x, y)` lands at `x` of the way down the landscape screen and `y`
+from its right edge). The desktop's answer to a Rotate carries the orientation
+it left the Simulator in, the host keeps it per Simulator until shutdown, and
+the runtime snapshot lists it as `orientations`; a Simulator not listed is
+taken to sit in portrait. When that says `landscape` and the frames are
+portrait-sized, the pane draws each frame a quarter turn clockwise (`landscape`
+is `landscape_left`), so the picture, its bezel and the side keys sit the way
+the device does, and a pointer or touch on it is turned back a quarter
+counter-clockwise into the frame's pixel space before it is sent. Frames that
+arrive already wide are drawn as they are. The host learns the orientation when
+it rotates and once when a Simulator's stream starts: the desktop reads the real
+screen (the same screenshot-size read Rotate uses, never one per frame), names
+it in the watch response, the host records it like a rotate does, and the
+stream's own response carries it to the pane (the snapshot is not polled while
+no action runs), so a
+Simulator already in landscape when the pane opens, or turned from outside
+Octant, is drawn upright. A turn made outside Octant while a stream is running
+shows after the next stream start or Rotate. The Android emulator streams rotated frames and needs none of this.
+
 Rotate is an effect, not input. Only a person (`local-user` or
 `remote-device` in `requestedBy`) may ask for it; an agent or the host is
 refused. Plan refuses it; Full access sends it unasked; on an approval-gated

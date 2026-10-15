@@ -89,7 +89,8 @@ or the validation-evidence dump — those stay on the Apple workbench command.
   origin (`https://example.com`), never its path or query.
 - **Rotate.** **More** offers **Rotate** when the host supports it. It turns
   the Simulator away from the orientation it shows now, so each press
-  alternates between portrait and landscape. It needs the Octant desktop app
+  alternates between portrait and landscape, and the pane shows the Simulator
+  upright either way. It needs the Octant desktop app
   and its managed streaming tool (a development build does not include it and
   says so), asks first
   on an approval-gated thread, and **Allow input** does not cover it.

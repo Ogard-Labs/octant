@@ -64,14 +64,14 @@ import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
-import { makeBflImageAdapter } from "./bflImageAdapter";
-import { makeGeminiImageAdapter } from "./geminiImageAdapter";
+import { bflImageDriver } from "./bflImageAdapter";
+import { geminiImageDriver } from "./geminiImageAdapter";
 import type { GeneratedImageStore } from "./generatedImageStore";
-import { makeIdeogramImageAdapter } from "./ideogramImageAdapter";
+import { ideogramImageDriver } from "./ideogramImageAdapter";
 import { makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
 import { ImageJobProjection } from "./imageJobProjection";
+import { openAiImageDriver } from "./openAiImageAdapter";
 import { makeOpenAiCompatibleImageAdapter } from "./openAiCompatibleImageAdapter";
-import { makeOpenAiImageAdapter } from "./openAiImageAdapter";
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -80,6 +80,14 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 
 type JournalPort = Pick<Journal, "append">;
+
+/** Image providers that ship in-tree but reach this service only through the image seam. */
+const BUNDLED_IMAGE_DRIVERS: ReadonlyArray<ImageGenerationDriver> = [
+  openAiImageDriver,
+  geminiImageDriver,
+  bflImageDriver,
+  ideogramImageDriver,
+];
 
 /**
  * What a profile gets when its image driver plugin is disabled: every job
@@ -179,7 +187,7 @@ export class ImageJobService {
     this.#actor = decodeActor(options.actor);
     this.#fetch = options.fetch;
     this.#createAdapter = options.createAdapter ?? ((instance) => this.#defaultAdapter(instance));
-    this.#imageDrivers = options.imageDrivers ?? [];
+    this.#imageDrivers = options.imageDrivers ?? BUNDLED_IMAGE_DRIVERS;
     this.#admittedImageDriverKinds =
       options.admittedImageDriverKinds ?? admittedBundledImageDriverKinds();
     this.#concurrency = options.concurrency ?? IMAGE_JOB_HOST_CONCURRENCY;
@@ -433,23 +441,6 @@ export class ImageJobService {
           ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
         }),
       });
-    }
-    const options = {
-      instanceId: instance.id,
-      credentialResolver: this.#credentialResolver,
-      ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
-    };
-    if (instance.configuration.kind === "openai-image-http") {
-      return makeOpenAiImageAdapter(options);
-    }
-    if (instance.configuration.kind === "gemini-native-image-http") {
-      return makeGeminiImageAdapter(options);
-    }
-    if (instance.configuration.kind === "bfl-image-http") {
-      return makeBflImageAdapter(options);
-    }
-    if (instance.configuration.kind === "ideogram-image-http") {
-      return makeIdeogramImageAdapter(options);
     }
     if (instance.configuration.kind === "openai-compatible-http") {
       return makeOpenAiCompatibleImageAdapter({

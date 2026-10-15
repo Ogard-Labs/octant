@@ -35,6 +35,12 @@ export type DeviceScreenSource =
       readonly kind: "stream";
       readonly size: { readonly width: number; readonly height: number };
       readonly attach: (canvas: HTMLCanvasElement | null) => void;
+      /**
+       * The picture is drawn turned a quarter clockwise, because the Simulator
+       * sits in landscape while its frames stay portrait-sized. `size` stays
+       * the frame's own pixel space, which is the space a tap is sent in.
+       */
+      readonly turned?: boolean;
     }
   | { readonly kind: "still"; readonly url: string }
   | { readonly kind: "connecting" }
@@ -122,6 +128,19 @@ export function screenFacing(
   return screen.width > screen.height === frame.width > frame.height
     ? screen
     : { width: screen.height, height: screen.width };
+}
+
+/**
+ * Whether a streamed picture has to be turned a quarter clockwise to sit the
+ * way the device does. The streamed frames keep the size of a portrait screen
+ * after the device turns, so a landscape device shows up as a sideways
+ * portrait frame. A frame that is already wide needs no turn.
+ */
+export function pictureIsTurned(
+  orientation: "portrait" | "landscape" | undefined,
+  frame: { readonly width: number; readonly height: number },
+): boolean {
+  return orientation === "landscape" && frame.height > frame.width;
 }
 
 /** One sentence and at most one way to fix it. */

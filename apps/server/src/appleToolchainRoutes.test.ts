@@ -698,6 +698,7 @@ describe("Apple toolchain routes", () => {
       const watchSimulator = vi.fn(async (_simulatorId: string, _signal: AbortSignal) => ({
         kind: "watching" as const,
         screen: { width: 1206, height: 2622 },
+        orientation: "landscape" as const,
         frames,
       }));
       const handler = createAppleToolchainRouteHandler({
@@ -714,6 +715,11 @@ describe("Apple toolchain routes", () => {
       expect(response?.headers.get("x-octant-simulator-screen")).toBe("1206x2622");
       expect(response?.headers.get("access-control-expose-headers")).toContain(
         "x-octant-simulator-screen",
+      );
+      // The pane is not told by a snapshot poll when it opens on a turned Simulator.
+      expect(response?.headers.get("x-octant-simulator-orientation")).toBe("landscape");
+      expect(response?.headers.get("access-control-expose-headers")).toContain(
+        "x-octant-simulator-orientation",
       );
       expect([...new Uint8Array(await response!.arrayBuffer())]).toEqual([0, 0, 0, 2, 0xff, 0xd8]);
       expect(watchSimulator.mock.calls[0]?.[0]).toBe(simulatorId);
