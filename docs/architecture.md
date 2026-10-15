@@ -3163,9 +3163,10 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   of a turn is its own breakdown (Claude Code) carries no `sentContext`, and the
   journaled compaction still makes the next turn `uncounted` / `compacted`
   rather than `history-unknown`. A runtime's automatic compaction inside a turn
-  lands before that turn's closing usage report, so the report itself already
-  says `compacted` when the turn had Octant-sent copies to uncount, and the next
-  turn carries it. When neither the session nor the turn holds any such copy,
+  lands before that turn's closing usage report, and the runner marks that
+  report `compacted` (a runtime-owned breakdown gets the field added) when the
+  turn had Octant-sent copies to uncount or the runtime reported its own
+  categories, so the next turn carries it. When neither the session nor the turn holds any such copy,
   the breakdown stays `counted` with no sent parts, because nothing is left to
   uncount.
 - A request with no terminal event when the host starts is closed as

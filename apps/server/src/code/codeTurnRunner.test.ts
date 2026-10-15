@@ -963,6 +963,46 @@ describe("CodeTurnRunner", () => {
       });
     });
 
+    it("marks the runtime's own breakdown compacted when the runtime compacted earlier in the turn", async () => {
+      const reported = {
+        parts: [{ kind: "messages", tokens: 900, accuracy: "provider-reported" }],
+      } as const;
+      const observed: CodeTurnEvent[] = [];
+      await Effect.runPromise(
+        Effect.scoped(
+          new CodeTurnRunner().run(
+            input({
+              provider: {
+                acquire: () =>
+                  Effect.succeed(
+                    fakeConnection({
+                      subscribe: Effect.succeed(
+                        Stream.fromIterable([
+                          event({ kind: "context-compacted", trigger: "automatic", sequence: 1 }),
+                          event({
+                            kind: "usage",
+                            inputTokens: 10,
+                            outputTokens: 20,
+                            contextBreakdown: reported,
+                            sequence: 2,
+                          }),
+                          event({ kind: "completed", sequence: 3 }),
+                        ]),
+                      ),
+                    }),
+                  ),
+              },
+              persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            }),
+          ),
+        ),
+      );
+
+      expect(
+        observed.flatMap((entry) => (entry.category === "usage" ? [entry.contextBreakdown] : [])),
+      ).toEqual([{ ...reported, sentContext: { status: "uncounted", reason: "compacted" } }]);
+    });
+
     it("stops counting what Octant sent once the runtime compacts during the turn, and reports each compaction it made by itself once", async () => {
       const usage = (sequence: number, contextTokens: number) =>
         event({
