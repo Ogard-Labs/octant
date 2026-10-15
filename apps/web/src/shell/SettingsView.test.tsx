@@ -339,6 +339,16 @@ describe("SettingsView", () => {
     expect(within(header).getByLabelText("Scope: Selected host")).toBeInTheDocument();
   });
 
+  it("keeps pairing codes on the host: a client without the local administration bridge gets none", () => {
+    renderSettings({ initialDeepLink: { section: "remote-access" } });
+
+    const section = screen.getByRole("region", { name: "Remote access" });
+    expect(section).toHaveTextContent(/happen on the host machine/);
+    expect(screen.queryByRole("button", { name: "Create pairing code" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create pairing link" })).toBeNull();
+    expect(screen.queryByRole("img", { name: "Pairing code QR" })).toBeNull();
+  });
+
   it("takes the Add a model endpoint button on a harness slot to the add-endpoint row", async () => {
     const user = userEvent.setup();
     const nativeHarnessClient = {

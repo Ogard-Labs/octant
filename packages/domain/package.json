@@ -66,6 +66,7 @@
     "./multi-model-pool-policy": "./src/multiModelPoolPolicy.ts",
     "./composer-pool-policy": "./src/composerPoolPolicy.ts",
     "./remote-access-policy": "./src/remoteAccessPolicy.ts",
+    "./remote-pairing-code": "./src/remotePairingCode.ts",
     "./remote-clock-recovery-policy": "./src/remoteClockRecoveryPolicy.ts",
     "./remote-credential-policy": "./src/remoteCredentialPolicy.ts",
     "./remote-protocol-policy": "./src/remoteProtocolPolicy.ts",

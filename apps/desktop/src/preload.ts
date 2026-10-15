@@ -223,6 +223,8 @@ export interface PrivateListenerPublicStatus {
   readonly certificateFingerprint: string | null;
   readonly certificateReady: boolean;
   readonly certificateSource: "self-made" | "pasted" | null;
+  /** The self-made certificate's key pin, which a pairing code carries; null otherwise. */
+  readonly tlsPin: string | null;
   readonly errorCode?: PrivateListenerControlFailureCode;
 }
 
@@ -2093,6 +2095,7 @@ function decodePrivateListenerStatus(value: unknown): PrivateListenerPublicStatu
     "origin",
     "port",
     "state",
+    "tlsPin",
   ]);
   if (keys.some((key) => !allowed.has(key))) {
     throw new TypeError("Invalid private listener status.");
@@ -2122,6 +2125,11 @@ function decodePrivateListenerStatus(value: unknown): PrivateListenerPublicStatu
       value.certificateSource === "self-made" ||
       value.certificateSource === "pasted"
     ) ||
+    !(
+      value.tlsPin === undefined ||
+      value.tlsPin === null ||
+      (typeof value.tlsPin === "string" && /^sha256-[A-Za-z0-9_-]{43}$/.test(value.tlsPin))
+    ) ||
     (value.errorCode !== undefined &&
       ![
         "local-confirmation-required",
@@ -2148,6 +2156,7 @@ function decodePrivateListenerStatus(value: unknown): PrivateListenerPublicStatu
     certificateFingerprint: value.certificateFingerprint,
     certificateReady: value.certificateReady,
     certificateSource: value.certificateSource ?? null,
+    tlsPin: value.tlsPin ?? null,
     ...(value.errorCode === undefined
       ? {}
       : { errorCode: value.errorCode as PrivateListenerControlFailureCode }),

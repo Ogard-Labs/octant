@@ -26,6 +26,7 @@ describe("private listener control service", () => {
       certificateFingerprint: null,
       certificateReady: false,
       certificateSource: null,
+      tlsPin: null,
     });
     expect(JSON.stringify(status)).not.toMatch(
       /BEGIN (CERTIFICATE|PRIVATE KEY)|privateKey|secret/i,
@@ -76,6 +77,7 @@ describe("private listener control service", () => {
         certificateFingerprint: fingerprint,
         certificateReady: true,
         certificateSource: "pasted" as const,
+        tlsPin: null,
       })),
       stop: vi.fn(async () => undefined),
     };
@@ -106,6 +108,7 @@ describe("private listener control service", () => {
       certificateFingerprint: fingerprint,
       certificateReady: true,
       certificateSource: "pasted" as const,
+      tlsPin: null,
     });
     expect(JSON.stringify(status)).not.toContain("PRIVATE KEY");
     expect(JSON.stringify(status)).not.toContain("certificatePem");
@@ -121,6 +124,7 @@ describe("private listener control service", () => {
         certificateFingerprint: "cd".repeat(32),
         certificateReady: true,
         certificateSource: "pasted" as const,
+        tlsPin: null,
       })),
       stop: vi.fn(async () => undefined),
     };
@@ -146,6 +150,7 @@ describe("private listener control service", () => {
       certificateFingerprint: null,
       certificateReady: false,
       certificateSource: null,
+      tlsPin: null,
     });
   });
 
@@ -187,6 +192,7 @@ describe("private listener control service", () => {
       certificateFingerprint: "ab".repeat(32),
       certificateReady: true,
       certificateSource: "pasted" as const,
+      tlsPin: null,
     }));
     const service = createPrivateListenerControlService({
       runtime: { start: vi.fn(), stop: vi.fn(async () => undefined), restart },
@@ -219,6 +225,7 @@ describe("private listener control service", () => {
             certificateFingerprint: "cd".repeat(32),
             certificateReady: true,
             certificateSource: "pasted" as const,
+            tlsPin: null,
           };
         }),
         stop: vi.fn(async () => {
@@ -262,6 +269,7 @@ describe("private listener control service", () => {
       certificateFingerprint: "ab".repeat(32),
       certificateReady: true,
       certificateSource: "pasted" as const,
+      tlsPin: null,
     };
     const service = createPrivateListenerControlService({
       runtime: {
@@ -321,6 +329,7 @@ describe("private listener host runtime (loopback bridge)", () => {
       certificateFingerprint: "ab".repeat(32),
       certificateReady: true,
       certificateSource: "pasted" as const,
+      tlsPin: null,
     };
   }
 
@@ -354,6 +363,7 @@ describe("private listener host runtime (loopback bridge)", () => {
       certificateFingerprint: "ab".repeat(32),
       certificateReady: true,
       certificateSource: "pasted" as const,
+      tlsPin: null,
     });
     const [url, init] = fetchImpl.mock.calls[0]!;
     expect(String(url)).toBe("http://127.0.0.1:8123/api/desktop/private-listener/enable");
@@ -403,8 +413,9 @@ describe("private listener host runtime (loopback bridge)", () => {
     expect(status).toEqual(readyStatus());
   });
 
-  it("keeps a self-made certificate's source through status sync, and reads an older host as unknown", async () => {
-    const selfMade = { ...readyStatus(), certificateSource: "self-made", tlsPin: "sha256-x" };
+  it("keeps a self-made certificate's source and key pin through status sync, and reads an older host as unknown", async () => {
+    const tlsPin = `sha256-${"Q".repeat(42)}A`;
+    const selfMade = { ...readyStatus(), certificateSource: "self-made", tlsPin };
     const host = runtime(
       vi.fn(async () => jsonResponse({ status: selfMade })) as unknown as typeof globalThis.fetch,
     );
@@ -412,13 +423,23 @@ describe("private listener host runtime (loopback bridge)", () => {
     await expect(service.syncStatus()).resolves.toEqual({
       ...readyStatus(),
       certificateSource: "self-made",
+      tlsPin,
     });
+    // Settings builds the pairing code from this pin, so a malformed one is refused here.
+    await expect(
+      runtime(
+        vi.fn(async () =>
+          jsonResponse({ status: { ...selfMade, tlsPin: "sha256-x" } }),
+        ) as unknown as typeof globalThis.fetch,
+      ).getStatus!(),
+    ).rejects.toMatchObject({ code: "unavailable" });
 
-    const { certificateSource: _absent, ...older } = readyStatus();
+    const { certificateSource: _absent, tlsPin: _noPin, ...older } = readyStatus();
     const status = await runtime(
       vi.fn(async () => jsonResponse({ status: older })) as unknown as typeof globalThis.fetch,
     ).getStatus!();
     expect(status.certificateSource).toBeNull();
+    expect(status.tlsPin).toBeNull();
   });
 });
 

@@ -21,7 +21,8 @@
     "@octant/domain": "workspace:*",
     "@octant/host-runtime": "workspace:*",
     "@octant/theme": "workspace:*",
-    "@opentui/core": "0.5.10"
+    "@opentui/core": "0.5.10",
+    "lean-qr": "2.7.4"
   },
   "devDependencies": {
     "@types/bun": "catalog:",

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readPairingCode } from "@octant/domain";
+import { generate } from "lean-qr";
 import type {
   PrivateListenerPublicStatus,
   RemoteAccessAdministrationBridge,
@@ -21,6 +23,7 @@ const off: PrivateListenerPublicStatus = {
   certificateFingerprint: null,
   certificateReady: false,
   certificateSource: null,
+  tlsPin: null,
 };
 const listening: PrivateListenerPublicStatus = {
   enabled: true,
@@ -32,7 +35,18 @@ const listening: PrivateListenerPublicStatus = {
   certificateFingerprint: "f".repeat(64),
   certificateReady: true,
   certificateSource: "pasted",
+  tlsPin: null,
 };
+const tlsPin = `sha256-${"Q".repeat(42)}A`;
+const selfMade: PrivateListenerPublicStatus = {
+  ...listening,
+  hostname: "100.101.102.103",
+  port: 8443,
+  origin: "https://100.101.102.103:8443",
+  certificateSource: "self-made",
+  tlsPin,
+};
+const canonicalProof = `${"p".repeat(42)}A`;
 const pending: RemotePendingPairingRequest = {
   kind: "pending",
   ticketId,
@@ -361,21 +375,126 @@ describe("RemoteAccessSettingsSection", () => {
   });
 
   it("offers no browser pairing link for a listener serving its own certificate", async () => {
-    const host = bridge({ ...listening, certificateSource: "self-made" });
+    const host = bridge(selfMade);
     render(<RemoteAccessSettingsSection bridge={host} />);
     expect(await screen.findByText("Listening")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create pairing link" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Pairing link")).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Pairing network" })).not.toBeInTheDocument();
     expect(
       screen.getByText(/A browser can't check this computer's own certificate/),
     ).toBeInTheDocument();
     expect(host.mintRemotePairingTicket).not.toHaveBeenCalled();
   });
 
+  it("shows a pairing code and a QR of exactly that code for a listener serving its own certificate", async () => {
+    const user = userEvent.setup();
+    const host = bridge(selfMade, {
+      mintRemotePairingTicket: vi.fn(async (sourceClass) => ({
+        ticketId,
+        ticketProof: canonicalProof,
+        expiresAt: Date.parse("2026-08-01T10:05:00.000Z"),
+        sourceClass,
+      })),
+    });
+    render(
+      <RemoteAccessSettingsSection
+        bridge={host}
+        now={() => Date.parse("2026-08-01T10:01:00.000Z")}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Create pairing code" }));
+    const code = (await screen.findByLabelText("Pairing code")).textContent ?? "";
+    // The device claims over the listener itself, so the ticket names its network.
+    expect(host.mintRemotePairingTicket).toHaveBeenCalledWith("tailscale");
+    expect(readPairingCode(code)).toEqual({
+      status: "read",
+      contents: {
+        origin: "https://100.101.102.103:8443",
+        ticketId,
+        ticketProof: canonicalProof,
+        pin: tlsPin,
+      },
+    });
+
+    const qr = screen.getByRole("img", { name: "Pairing code QR" });
+    const symbol = generate(code);
+    const dark: string[] = [];
+    for (let y = 0; y < symbol.size; y += 1) {
+      for (let x = 0; x < symbol.size; x += 1) {
+        if (symbol.get(x, y)) dark.push(`${x + 4},${y + 4}`);
+      }
+    }
+    const drawn = [
+      ...(qr.querySelector("path")?.getAttribute("d") ?? "").matchAll(/M(\d+) (\d+)h1v1h-1z/g),
+    ].map(([, x, y]) => `${x},${y}`);
+    expect(drawn).toEqual(dark);
+    expect(qr.getAttribute("viewBox")).toBe(`0 0 ${symbol.size + 8} ${symbol.size + 8}`);
+    expect(screen.queryByLabelText("Pairing link")).not.toBeInTheDocument();
+    expect(screen.getByText(/can't read pairing codes yet/)).toBeInTheDocument();
+  });
+
+  it("drops an expired pairing code and the code of a listener that moved", async () => {
+    const user = userEvent.setup();
+    let now = Date.parse("2026-08-01T10:01:00.000Z");
+    const host = bridge(selfMade, {
+      mintRemotePairingTicket: vi.fn(async (sourceClass) => ({
+        ticketId,
+        ticketProof: canonicalProof,
+        expiresAt: Date.parse("2026-08-01T10:05:00.000Z"),
+        sourceClass,
+      })),
+      restartPrivateListener: vi.fn(async () => selfMade),
+    });
+    const view = render(<RemoteAccessSettingsSection bridge={host} now={() => now} />);
+    await user.click(await screen.findByRole("button", { name: "Create pairing code" }));
+    expect(await screen.findByLabelText("Pairing code")).toBeInTheDocument();
+
+    // A code names the listener's origin and pin, so moving the listener drops it.
+    await user.type(screen.getByLabelText("Hostname"), "100.101.102.104");
+    await user.type(screen.getByLabelText("Certificate (PEM)"), "certificate");
+    await user.type(screen.getByLabelText("Private key (PEM)"), "private-key");
+    await user.click(screen.getByRole("button", { name: "Move listener…" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: "Move remote listener?" })).getByRole("button", {
+        name: "Confirm move",
+      }),
+    );
+    await waitFor(() => expect(host.restartPrivateListener).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByLabelText("Pairing code")).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Create pairing code" }));
+    expect(await screen.findByLabelText("Pairing code")).toBeInTheDocument();
+    now = Date.parse("2026-08-01T10:05:00.000Z");
+    view.rerender(<RemoteAccessSettingsSection bridge={host} now={() => now} />);
+    expect(screen.queryByLabelText("Pairing code")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Pairing code QR" })).not.toBeInTheDocument();
+    expect(screen.getByText("That pairing code expired. Create a new one.")).toBeInTheDocument();
+  });
+
+  it("refuses to show a code the host's ticket could not make, with its copy", async () => {
+    const user = userEvent.setup();
+    const host = bridge(selfMade);
+    render(<RemoteAccessSettingsSection bridge={host} />);
+    await user.click(await screen.findByRole("button", { name: "Create pairing code" }));
+    expect(
+      await screen.findByText(/This pairing code is incomplete or damaged/),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Pairing code")).not.toBeInTheDocument();
+  });
+
+  it("offers no pairing code for a listener serving a pasted certificate", async () => {
+    render(<RemoteAccessSettingsSection bridge={bridge(listening)} />);
+    expect(await screen.findByRole("button", { name: "Create pairing link" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create pairing code" })).not.toBeInTheDocument();
+  });
+
   it("does not offer pairing while the listener is off", async () => {
     render(<RemoteAccessSettingsSection bridge={bridge(off)} />);
     expect(await screen.findByText("Off")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create pairing link" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create pairing code" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disable listener" })).not.toBeInTheDocument();
     expect(screen.getByText(/Enable the remote listener before pairing/i)).toBeInTheDocument();
   });

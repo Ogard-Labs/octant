@@ -1,4 +1,9 @@
-import { classifyRemoteListenerAddress, remoteListenerOrigin } from "@octant/domain";
+import {
+  buildPairingCode,
+  classifyRemoteListenerAddress,
+  PAIRING_CODE_REFUSAL_COPY,
+  remoteListenerOrigin,
+} from "@octant/domain";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
 import {
@@ -24,6 +29,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { PairingCodeQr } from "./PairingCodeQr";
 
 /**
  * Listener, pairing, and paired-device administration for the packaged host.
@@ -93,6 +99,9 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
   const [devices, setDevices] = useState<ReadonlyArray<RemoteDeviceInventoryEntry>>([]);
   const [inventoryMessage, setInventoryMessage] = useState<string>();
   const [ticket, setTicket] = useState<RemoteMintedPairingTicket>();
+  // The app pairing code minted with `ticket` for a self-made listener, built
+  // from the listener status that was current when the ticket was minted.
+  const [pairingCode, setPairingCode] = useState<string>();
   const [ticketSource, setTicketSource] = useState<RemotePairingTicketSourceClass>("lan-private");
   const [pairingMessage, setPairingMessage] = useState<string>();
   const [renameDraft, setRenameDraft] = useState<{ deviceId: string; label: string }>();
@@ -176,6 +185,10 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
           ? await bridge.restartPrivateListener(request)
           : await bridge.enablePrivateListener(request);
       setListener({ kind: "ready", status: next });
+      // A code names the listener's origin and key pin, so one minted before
+      // the move would point the device at the old listener.
+      setTicket(undefined);
+      setPairingCode(undefined);
       if (next.state === "failed") {
         setListenerMessage(
           LISTENER_FAILURE_COPY[next.errorCode ?? ""] ?? "The remote listener could not start.",
@@ -199,6 +212,7 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
     try {
       setListener({ kind: "ready", status: await bridge.disablePrivateListener() });
       setTicket(undefined);
+      setPairingCode(undefined);
     } catch (error) {
       setListenerMessage(failureMessage(error, "The remote listener could not be disabled."));
     } finally {
@@ -210,8 +224,34 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
     setPairingMessage(undefined);
     try {
       setTicket(await bridge.mintRemotePairingTicket(ticketSource));
+      setPairingCode(undefined);
     } catch (error) {
       setPairingMessage(failureMessage(error, "Octant could not create a pairing link."));
+    }
+  };
+
+  const mintPairingCode = async (listenerForCode: PairingCodeListener) => {
+    setPairingMessage(undefined);
+    setTicket(undefined);
+    setPairingCode(undefined);
+    try {
+      // The device claims the ticket over the listener itself, so the ticket
+      // names the listener's own network rather than a network the person picks.
+      const minted = await bridge.mintRemotePairingTicket(listenerForCode.exposureClass);
+      const built = buildPairingCode({
+        origin: listenerForCode.origin,
+        ticketId: minted.ticketId,
+        ticketProof: minted.ticketProof,
+        pin: listenerForCode.pin,
+      });
+      if (built.status === "refused") {
+        setPairingMessage(PAIRING_CODE_REFUSAL_COPY[built.reason]);
+        return;
+      }
+      setTicket(minted);
+      setPairingCode(built.code);
+    } catch (error) {
+      setPairingMessage(failureMessage(error, "Octant could not create a pairing code."));
     }
   };
 
@@ -269,6 +309,7 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
   // loads, and it cannot check a certificate the host made itself, so a
   // browser pairing link is never offered for one.
   const browserCannotVerify = status?.certificateSource === "self-made";
+  const codeListener = pairingCodeListenerOf(status);
   const activeDevices = devices.filter((device) => device.state === "active");
 
   return (
@@ -454,54 +495,115 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
       </SettingsSection>
 
       <SettingsSection title="Pair a device">
-        <div className="setgroup">
-          <SettingRow
-            description="A pairing link is single-use and expires in five minutes. Open it on the other device, then approve the request that appears below."
-            label="Pairing link"
-            scope="host"
-            settingId="remote-pairing"
-          >
-            <div className="settings-panel__stack">
-              <OctantSelectField
-                aria-label="Pairing network"
-                id={sourceId}
-                onValueChange={(value) => {
-                  if (value === "loopback" || value === "lan-private" || value === "tailscale") {
-                    setTicketSource(value);
-                  }
-                }}
-                options={Object.entries(SOURCE_CLASS_LABELS).map(([id, label]) => ({
-                  id,
-                  label,
-                }))}
-                value={ticketSource}
-              />
-              <div className="host-settings__controls">
-                {status?.state === "ready" && !browserCannotVerify ? (
-                  <OctantButton
-                    onClick={() => void mintTicket()}
-                    size="sm"
-                    type="button"
-                    variant="secondary"
-                  >
-                    Create pairing link
-                  </OctantButton>
+        {browserCannotVerify ? (
+          <div className="setgroup">
+            <SettingRow
+              description="A pairing code is single-use and expires in five minutes. It carries a fingerprint of this computer's own certificate key, so an Octant app can tell it is talking to this computer. Approve the request that appears below."
+              label="Pairing code"
+              scope="host"
+              settingId="remote-pairing-code"
+            >
+              <div className="settings-panel__stack">
+                {codeListener === undefined ? null : (
+                  <div className="host-settings__controls">
+                    <OctantButton
+                      onClick={() => void mintPairingCode(codeListener)}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      Create pairing code
+                    </OctantButton>
+                  </div>
+                )}
+                {status?.state !== "ready" ? (
+                  <p className="settings-section-line">
+                    Enable the remote listener before pairing a device.
+                  </p>
                 ) : null}
-              </div>
-              {status?.state !== "ready" ? (
-                <p className="settings-section-line">
-                  Enable the remote listener before pairing a device.
-                </p>
-              ) : browserCannotVerify ? (
                 <p className="settings-section-line">
                   A browser can't check this computer's own certificate, so there is no pairing link
                   for it. To pair a browser, give the listener a Tailscale certificate or your own.
                 </p>
-              ) : null}
+              </div>
+            </SettingRow>
+          </div>
+        ) : (
+          <div className="setgroup">
+            <SettingRow
+              description="A pairing link is single-use and expires in five minutes. Open it on the other device, then approve the request that appears below."
+              label="Pairing link"
+              scope="host"
+              settingId="remote-pairing"
+            >
+              <div className="settings-panel__stack">
+                <OctantSelectField
+                  aria-label="Pairing network"
+                  id={sourceId}
+                  onValueChange={(value) => {
+                    if (value === "loopback" || value === "lan-private" || value === "tailscale") {
+                      setTicketSource(value);
+                    }
+                  }}
+                  options={Object.entries(SOURCE_CLASS_LABELS).map(([id, label]) => ({
+                    id,
+                    label,
+                  }))}
+                  value={ticketSource}
+                />
+                <div className="host-settings__controls">
+                  {status?.state === "ready" ? (
+                    <OctantButton
+                      onClick={() => void mintTicket()}
+                      size="sm"
+                      type="button"
+                      variant="secondary"
+                    >
+                      Create pairing link
+                    </OctantButton>
+                  ) : null}
+                </div>
+                {status?.state !== "ready" ? (
+                  <p className="settings-section-line">
+                    Enable the remote listener before pairing a device.
+                  </p>
+                ) : null}
+              </div>
+            </SettingRow>
+          </div>
+        )}
+        {ticket !== undefined && pairingCode !== undefined && browserCannotVerify ? (
+          ticketLive ? (
+            <div className="settings-panel__stack">
+              <PairingCodeQr code={pairingCode} />
+              <SettingsFactList
+                facts={[
+                  {
+                    label: "Code",
+                    value: (
+                      <code
+                        aria-label="Pairing code"
+                        className="oct-meta--mono remote-pairing-code"
+                      >
+                        {pairingCode}
+                      </code>
+                    ),
+                  },
+                  { label: "Network", value: SOURCE_CLASS_LABELS[ticket.sourceClass] },
+                  { label: "Expires", value: new Date(ticket.expiresAt).toLocaleTimeString() },
+                ]}
+              />
+              <p className="settings-section-line">
+                Octant's phone and desktop apps can't read pairing codes yet. Until they can, pair
+                them with a listener that uses a Tailscale certificate or your own.
+              </p>
             </div>
-          </SettingRow>
-        </div>
+          ) : (
+            <SettingsState kind="empty">That pairing code expired. Create a new one.</SettingsState>
+          )
+        ) : null}
         {ticket !== undefined &&
+        pairingCode === undefined &&
         !browserCannotVerify &&
         status?.origin !== null &&
         status?.origin !== undefined ? (
@@ -680,4 +782,26 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
       </SettingsPanel>
     </section>
   );
+}
+
+interface PairingCodeListener {
+  readonly origin: string;
+  readonly pin: string;
+  readonly exposureClass: RemotePairingTicketSourceClass;
+}
+
+/** A listener a pairing code can name: up, serving its own certificate, with its pin known. */
+function pairingCodeListenerOf(
+  status: PrivateListenerPublicStatus | undefined,
+): PairingCodeListener | undefined {
+  if (
+    status?.state !== "ready" ||
+    status.certificateSource !== "self-made" ||
+    status.origin === null ||
+    status.tlsPin === null ||
+    status.exposureClass === null
+  ) {
+    return undefined;
+  }
+  return { origin: status.origin, pin: status.tlsPin, exposureClass: status.exposureClass };
 }

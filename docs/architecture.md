@@ -5666,17 +5666,44 @@ mechanisms are:
     PEM text and is not a pin. Only the loopback administration status
     carries the pin; `octant listener status` prints it.
   - **No client pins yet.** A self-made listener is served, but no Octant
-    client takes or checks a pin, and a client that relies on platform trust
-    refuses the certificate, so only a pasted certificate can be reached by
-    a client today. Settings still asks for a certificate and key, and
-    `octant listener`'s usage line still names them.
+    client reads a pairing code or takes or checks a pin, and a client that
+    relies on platform trust refuses the certificate, so only a pasted
+    certificate can be reached by a client today. Settings still asks for a
+    certificate and key, and `octant listener`'s usage line still names them.
   - **No browser link.** A browser decides whether to trust the listener
     before any Octant page loads and cannot check a certificate the host made
     itself, so Settings offers no browser pairing link for a self-made
     listener and says why; a browser pairs only with a pasted certificate.
-- **Adding a computer in one step.** Partly built: the host certificate above.
-  The pairing code that carries the pin, the client pin rule, and the rest are
-  planned in [the plan](plans/one-step-pairing.md).
+  - **Pairing code.** For a self-made listener that is up, Settings → Remote
+    access and `octant pair` offer an app pairing code instead:
+    `octant-pair-1.` followed by the unpadded base64url of the JSON object
+    `{"origin","ticketId","ticketProof","pin"}`, in that key order with no
+    whitespace, holding the listener's origin, a pairing ticket's id and
+    proof, and its `tlsPin`. It carries no key material, and it has no URL
+    scheme, so no operating system hands it to an app that registered one.
+    The ticket is an ordinary pairing ticket — five minutes, single use,
+    approved on the host — minted for the listener's own network class,
+    because the device claims it over the listener; `octant pair --source`
+    naming another class is refused, and a pasted-certificate listener keeps
+    the browser link and `octant pair`'s bare ticket. Settings drops a code
+    when the listener moves or turns off, since it names the old origin.
+    Both show the same text as a QR code, dark on light with a four-module
+    quiet zone, drawn by `lean-qr` (MIT, no dependencies), the one QR encoder
+    Settings and the CLI share: an in-tree encoder would be more code than
+    the rest of one-step pairing. Settings shows the code only in the host's
+    own window, the only one with the loopback administration bridge.
+  - **Reading a code.** A reader accepts only the exact text the builder
+    makes, so one ticket has one code. A later code version or a pin
+    algorithm other than `sha256` is refused as needing a newer Octant,
+    never skipped. A missing, extra, or repeated field, a malformed id,
+    proof, or pin, a non-canonical base64url spelling, or an origin that is
+    not exactly an HTTPS origin is refused as damaged, and an origin outside
+    a private LAN or Tailscale address is refused as such. The builder
+    refuses the same contents, so the host never shows a code a client would
+    refuse.
+- **Adding a computer in one step.** Partly built: the host certificate and
+  pairing code above. The client pin rule, reading the code on each client,
+  and the rest are planned in [the plan](plans/one-step-pairing.md).
 - **Provider keys on a host without the desktop app.** _Designed, not yet
   built._ The desktop saves an endpoint's API key or bearer token over
   native IPC from its own renderer, so a browser client — local or paired —
