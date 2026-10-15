@@ -42,17 +42,17 @@ import {
 import { addTurnToSessionMetrics, addTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
-const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
 /** Enough to catch a client's retries of its recent notes; older ids are long settled. */
 const MAX_REMEMBERED_STEERING_IDS = 64;
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
 
 export interface NativeHarnessSessionStoreOptions {
   readonly journal: JournalPort;
@@ -618,19 +618,10 @@ export class NativeHarnessSessionStore {
   }
 
   #hydrate(): void {
-    let afterSequence = 0;
-    for (;;) {
-      const batch = this.#journal.replay({
-        afterSequence: afterSequence as never,
-        limit: JOURNAL_REPLAY_BATCH_SIZE,
-      });
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        if (envelope.aggregateType !== NATIVE_HARNESS_SESSION_AGGREGATE_TYPE) continue;
-        this.#apply(String(envelope.aggregateId), envelope.eventName, envelope.payload);
-      }
-      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
+    ])) {
+      this.#apply(String(envelope.aggregateId), envelope.eventName, envelope.payload);
     }
   }
 

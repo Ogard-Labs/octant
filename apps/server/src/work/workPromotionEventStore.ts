@@ -14,6 +14,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 
 export const WORK_PROMOTION_RECORDED = "work.promotion-recorded@1";
@@ -29,7 +30,7 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replay" | "replayAggregateType">;
 
 export class WorkPromotionEventStoreError extends Error {
   override readonly name = "WorkPromotionEventStoreError";
@@ -248,54 +249,37 @@ export class WorkPromotionEventStore {
    * journal, in version order per proposal. Used to hydrate the in-memory
    * projection after restart or reconnect before the service serves commands.
    * Frames are grouped by proposalId and sorted by version within each group.
-   * Returns `snapshot-required` with reason `scan-limit` if the global journal
-   * exceeds `MAX_JOURNAL_SCAN_EVENTS` before all promotion frames are collected,
-   * so hydration fails closed instead of silently truncating.
+   * Reads only `work-promotion` rows, so other journal growth never counts.
+   * Returns `snapshot-required` with reason `scan-limit` if the promotion
+   * history itself exceeds `MAX_JOURNAL_SCAN_EVENTS`, so hydration fails closed
+   * instead of silently truncating. Every frame is a person's decision and is
+   * held in memory until hydration ends, so the bound stays at 100,000.
    */
   replayAll(): WorkPromotionReplayAll {
     const byProposal = new Map<WorkPromotionProposalId, Array<WorkPromotionFrame>>();
-    let afterSequence = 0;
     let scannedEvents = 0;
-    let hitScanLimit = false;
 
-    for (;;) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
-      if (batch.length === 0) break;
-
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        scannedEvents += 1;
-        if (scannedEvents > MAX_JOURNAL_SCAN_EVENTS) {
-          hitScanLimit = true;
-          break;
-        }
-        if (envelope.aggregateType !== "work-promotion") continue;
-        if (envelope.eventName !== WORK_PROMOTION_RECORDED || envelope.eventVersion !== 1) {
-          continue;
-        }
-        let frame: WorkPromotionFrame;
-        try {
-          frame = decodeWorkPromotionFrame(envelope.payload);
-        } catch {
-          continue;
-        }
-        const proposalId = frame.proposal.proposalId;
-        let list = byProposal.get(proposalId);
-        if (list === undefined) {
-          list = [];
-          byProposal.set(proposalId, list);
-        }
-        list.push(frame);
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, ["work-promotion"])) {
+      scannedEvents += 1;
+      if (scannedEvents > MAX_JOURNAL_SCAN_EVENTS) {
+        return { status: "snapshot-required", reason: "scan-limit" };
       }
-
-      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
-      if (hitScanLimit) break;
-    }
-
-    if (hitScanLimit) {
-      return { status: "snapshot-required", reason: "scan-limit" };
+      if (envelope.eventName !== WORK_PROMOTION_RECORDED || envelope.eventVersion !== 1) {
+        continue;
+      }
+      let frame: WorkPromotionFrame;
+      try {
+        frame = decodeWorkPromotionFrame(envelope.payload);
+      } catch {
+        continue;
+      }
+      const proposalId = frame.proposal.proposalId;
+      let list = byProposal.get(proposalId);
+      if (list === undefined) {
+        list = [];
+        byProposal.set(proposalId, list);
+      }
+      list.push(frame);
     }
 
     const all: Array<WorkPromotionFrame> = [];

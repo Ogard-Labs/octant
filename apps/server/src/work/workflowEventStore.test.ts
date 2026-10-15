@@ -94,7 +94,7 @@ interface JournalLike {
       readonly payload: unknown;
     }>;
   }) => unknown;
-  replay: Journal["replay"];
+  replayAggregateType: Journal["replayAggregateType"];
 }
 
 function createJournal(): JournalLike {
@@ -399,20 +399,17 @@ describe("WorkflowEventStore", () => {
     expect(result).toEqual({ status: "snapshot-required", reason: "identity-mismatch" });
   });
 
-  it("does not apply the scan limit to unrelated global journal history", () => {
-    let calls = 0;
+  it("never reads other aggregate types, so unrelated history cannot count against the scan limit", () => {
+    const asked: Array<string> = [];
     const journal: JournalLike = {
       append: () => undefined,
-      replay: (cursor) => {
-        calls += 1;
-        if (calls > 100) return [];
-        return Array.from({ length: 1_000 }, (_, index) => ({
-          globalSequence: cursor.afterSequence + index + 1,
-          aggregateType: "other-aggregate",
-        })) as never;
+      replayAggregateType: (cursor) => {
+        asked.push(cursor.aggregateType);
+        return [];
       },
     };
 
     expect(createStore(journal).replayAll()).toEqual({ status: "ok", frames: [] });
+    expect(asked).toEqual(["work-workflow"]);
   });
 });

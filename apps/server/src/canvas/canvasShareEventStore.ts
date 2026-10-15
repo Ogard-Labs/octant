@@ -6,7 +6,6 @@ import {
   CorrelationId,
   EventActor,
   EventId,
-  ReplayCursor,
   decodeCanvasShareAccessLogged,
   decodeCanvasShareSnapshotCreated,
   decodeCanvasShareSnapshotRecord,
@@ -19,6 +18,7 @@ import {
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import { ConcurrencyConflict, DuplicateEventIdentity } from "../persistence/journalErrors";
 
 export const CANVAS_SHARE_AGGREGATE_TYPE = "canvas-share";
@@ -27,13 +27,10 @@ export const CANVAS_SHARE_SNAPSHOT_REVOKED = "canvas.share-snapshot-revoked@1";
 export const CANVAS_SHARE_ACCESS_AGGREGATE_TYPE = "canvas-share-access";
 export const CANVAS_SHARE_ACCESS_LOGGED = "canvas.share-access-logged@1";
 
-const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
-
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
-const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 
 /** Register the Canvas share journal frames so they can be appended and replayed. */
 export function registerCanvasShareEvents(registry: EventRegistry): EventRegistry {
@@ -53,7 +50,7 @@ export class CanvasShareEventStoreError extends Error {
   }
 }
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
 
 export interface CanvasShareEventStoreOptions {
   readonly journal: JournalPort;
@@ -155,44 +152,38 @@ export class CanvasShareEventStore {
   replay(): CanvasShareReplay {
     const records = new Map<string, CanvasShareSnapshotRecord>();
     const accessEvents: CanvasShareAccessLogEvent[] = [];
-    let afterSequence = 0;
-    while (true) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        try {
-          if (envelope.eventName === CANVAS_SHARE_SNAPSHOT_CREATED) {
-            const record = decodeCanvasShareSnapshotCreated(envelope.payload).record;
-            records.set(String(record.snapshotId), record);
-            continue;
-          }
-          if (envelope.eventName === CANVAS_SHARE_SNAPSHOT_REVOKED) {
-            const revocation = decodeCanvasShareSnapshotRevoked(envelope.payload);
-            const record = records.get(String(revocation.snapshotId));
-            // A revocation without its created frame revokes nothing: the shared
-            // document only ever enters state through an admitted create.
-            if (record === undefined) continue;
-            records.set(
-              String(revocation.snapshotId),
-              decodeCanvasShareSnapshotRecord({
-                ...record,
-                status: "revoked",
-                revokedAt: revocation.revokedAt,
-              }),
-            );
-            continue;
-          }
-          if (envelope.eventName === CANVAS_SHARE_ACCESS_LOGGED) {
-            accessEvents.push(decodeCanvasShareAccessLogged(envelope.payload).event);
-          }
-        } catch {
-          // Ignore undecodable frames; the journal remains authoritative.
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      CANVAS_SHARE_AGGREGATE_TYPE,
+      CANVAS_SHARE_ACCESS_AGGREGATE_TYPE,
+    ])) {
+      try {
+        if (envelope.eventName === CANVAS_SHARE_SNAPSHOT_CREATED) {
+          const record = decodeCanvasShareSnapshotCreated(envelope.payload).record;
+          records.set(String(record.snapshotId), record);
+          continue;
         }
+        if (envelope.eventName === CANVAS_SHARE_SNAPSHOT_REVOKED) {
+          const revocation = decodeCanvasShareSnapshotRevoked(envelope.payload);
+          const record = records.get(String(revocation.snapshotId));
+          // A revocation without its created frame revokes nothing: the shared
+          // document only ever enters state through an admitted create.
+          if (record === undefined) continue;
+          records.set(
+            String(revocation.snapshotId),
+            decodeCanvasShareSnapshotRecord({
+              ...record,
+              status: "revoked",
+              revokedAt: revocation.revokedAt,
+            }),
+          );
+          continue;
+        }
+        if (envelope.eventName === CANVAS_SHARE_ACCESS_LOGGED) {
+          accessEvents.push(decodeCanvasShareAccessLogged(envelope.payload).event);
+        }
+      } catch {
+        // Ignore undecodable frames; the journal remains authoritative.
       }
-      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
     return { records: [...records.values()], accessEvents };
   }

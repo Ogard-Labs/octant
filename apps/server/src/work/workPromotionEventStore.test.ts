@@ -96,8 +96,7 @@ function approvedFrame(version = 2): WorkPromotionFrame {
   });
 }
 
-function createStore(): WorkPromotionEventStore {
-  const connection = openConnection();
+function createStore(connection: SqliteConnection = openConnection()): WorkPromotionEventStore {
   const registry = new EventRegistry().register("work.promotion-recorded@1", 1, Schema.Unknown);
   const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
   const journal = new Journal({
@@ -234,5 +233,60 @@ describe("WorkPromotionEventStore", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     expect(result.frames).toHaveLength(0);
+  });
+
+  it("rebuilds every proposal when other aggregate types hold more rows than the scan cap", () => {
+    const connection = openConnection();
+    const store = createStore(connection);
+    store.append({ proposalId: ids.proposal, expectedVersion: 0, frame: proposedFrame(1) });
+    // A Code turn journals a row per streamed delta, so other types outgrow
+    // promotions by orders of magnitude. The rows carry an event name nothing
+    // registers: reading even one of them would fail the replay.
+    connection
+      .prepare(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 100001)
+         INSERT INTO event_journal (
+           event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+           event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+         )
+         SELECT printf('other-%d', i), 'code-operation', printf('operation-%d', i), 1,
+           'unregistered.frame@1', 1, 'correlation', 'local-user', 'actor', ?, '{}'
+         FROM n`,
+      )
+      .run(now);
+    store.append({ proposalId: ids.proposal, expectedVersion: 1, frame: approvedFrame(2) });
+
+    const result = store.replayAll();
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.frames.map((frame) => frame.kind)).toEqual(["proposed", "approved"]);
+  });
+
+  it("refuses a rebuild once the promotion history itself passes the scan cap", () => {
+    const frame = proposedFrame(1);
+    const journal = {
+      append: () => {
+        throw new Error("not used");
+      },
+      replay: () => [],
+      replayAggregateType: (cursor: { readonly afterSequence: number; readonly limit: number }) =>
+        Array.from({ length: cursor.limit }, (_, index) => ({
+          globalSequence: cursor.afterSequence + index + 1,
+          aggregateType: "work-promotion",
+          aggregateId: ids.proposal,
+          aggregateVersion: 1,
+          eventName: "work.promotion-recorded@1",
+          eventVersion: 1,
+          payload: frame,
+        })),
+    };
+    const store = new WorkPromotionEventStore({
+      journal: journal as never,
+      uuid: () => "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+      actor,
+    });
+
+    expect(store.replayAll()).toEqual({ status: "snapshot-required", reason: "scan-limit" });
   });
 });

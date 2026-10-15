@@ -192,6 +192,60 @@ describe("projection replay", () => {
     connection.close();
   });
 
+  it("rebuilds an in-memory projection from its own aggregate types and stands at the journal head", () => {
+    const connection = openConnection();
+    const journal = createJournal(connection);
+    append(journal, [pendingEvent(ids.event1, "one"), pendingEvent(ids.event2, "two")]);
+    // Another type's row carries an event name nothing registers: reading it
+    // would fail the catch-up, so passing proves it was never read.
+    connection
+      .prepare(
+        `INSERT INTO event_journal (
+           event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+           event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+         ) VALUES ('other-row', 'other-fixture', 'other', 1, 'unregistered.frame@1', 1,
+           'correlation', 'system', 'actor', ?, '{}')`,
+      )
+      .run(now);
+    const projection = fixtureProjection({ holdsStateInMemory: true, aggregateTypes: ["fixture"] });
+
+    const first = catchUpProjection({ connection, journal, projection, clock: () => now });
+    const second = catchUpProjection({ connection, journal, projection, clock: () => now });
+
+    expect(rows(connection)).toEqual([
+      { global_sequence: 1, value: "one" },
+      { global_sequence: 2, value: "two" },
+    ]);
+    expect(first).toEqual({
+      projectionName: "fixture-projection",
+      lastSequence: 3,
+      updatedAt: now,
+    });
+    expect(second).toEqual(first);
+    connection.close();
+  });
+
+  it("still quarantines a corrupt row of its own type when rebuilt from its aggregate types", () => {
+    const connection = openConnection();
+    const journal = createJournal(connection);
+    append(journal, [pendingEvent(ids.event1, "one"), pendingEvent(ids.event2, "two")]);
+    connection.exec("PRAGMA ignore_check_constraints = ON");
+    connection
+      .prepare("UPDATE event_journal SET payload_json = ? WHERE global_sequence = ?")
+      .run("{private-malformed", 2);
+    connection.exec("PRAGMA ignore_check_constraints = OFF");
+    const projection = fixtureProjection({ holdsStateInMemory: true, aggregateTypes: ["fixture"] });
+
+    expect(() => catchUpProjection({ connection, journal, projection, clock: () => now })).toThrow(
+      ProjectionQuarantined,
+    );
+    expect(rows(connection)).toEqual([{ global_sequence: 1, value: "one" }]);
+    expect(
+      connection.prepare("SELECT global_sequence, reason FROM event_quarantine").get(),
+    ).toEqual({ global_sequence: 2, reason: "malformed-json" });
+    connection.close();
+  });
+
   it("does not quarantine a checkpoint storage failure as an event failure", () => {
     const connection = openConnection();
     const journal = createJournal(connection);
