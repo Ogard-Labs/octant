@@ -382,7 +382,7 @@ import {
 } from "./persistence/persistenceService";
 import { readAgentRunAdmittedContext } from "./persistence/agentRunContentStore";
 import { purgeThreadArtifacts, removeMirrorFiles } from "./persistence/threadArtifactPurge";
-import { readHostIdentity } from "./persistence/remoteAccessProjection";
+import { readDeviceRegistration, readHostIdentity } from "./persistence/remoteAccessProjection";
 import { createProjectBindingRouteHandler } from "./projectBindingRoutes";
 import { createProjectRouteHandler } from "./projectRoutes";
 import { createAgentProfileRouteHandler } from "./agentProfileRoutes";
@@ -713,6 +713,10 @@ import { AgentPluginMcpSessionManager } from "./extensions/agentPluginMcpSession
 import { LocalPluginFolderRegistry } from "./extensions/localPluginFolderRegistry";
 import { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
 import { ExtensionToolApprovalService } from "./extensions/extensionToolApprovalService";
+import {
+  chatThreadStandsInProject,
+  isDeviceRegistrationCurrent,
+} from "./extensions/pairedDeviceApprovalAuthority";
 import { createExtensionToolCallAuthorizer } from "./extensions/extensionToolCallAuthorizer";
 import { ExtensionToolGrantStore } from "./extensions/extensionToolGrantStore";
 import {
@@ -1882,9 +1886,38 @@ export function startOctantServer(
       now: Date.now,
       clampNow: processAuthorityNow,
     });
+    // A paired device's service scope is its device id. Only a device still
+    // paired counts: a revoked or expired one's prompts are answered by
+    // nobody else and run out.
+    const isPairedDeviceScope = (scopeId: WindowId): boolean =>
+      isDeviceRegistrationCurrent(
+        readDeviceRegistration(persistence.connection, String(scopeId)),
+        Date.now(),
+      );
     const extensionToolApprovalService = new ExtensionToolApprovalService({
       uuid: randomUUID,
       now: Date.now,
+      isPairedDeviceScope,
+      // The thread must still be active and in the Project the prompt
+      // recorded, which is what a paired device's turn was admitted under. A
+      // prompt with no Project is a Chat thread's, which must still have none.
+      threadAuthorityIsCurrent: (threadId, projectId) => {
+        const chatThread = () => {
+          try {
+            return persistence.readChatThread(decodeChatThreadId(threadId));
+          } catch {
+            return undefined;
+          }
+        };
+        if (projectId === undefined) return chatThreadStandsInProject(chatThread(), undefined);
+        const project = persistence.readProject(decodeProjectId(projectId));
+        if (project === undefined || project.lifecycle !== "active") return false;
+        if (project.type !== "work" && project.type !== "code") {
+          return chatThreadStandsInProject(chatThread(), projectId);
+        }
+        const authority = browserAuthority.resolve(decodeBrowserThreadId(threadId), project.type);
+        return authority !== undefined && String(authority.projectId) === String(project.id);
+      },
       // A usage-limit resume replays its stopped Work turn's extension
       // selections as the host, so that turn's tool prompts go to the windows
       // bound to the thread's Project, as a routine's browser prompts do.
@@ -4091,6 +4124,7 @@ export function startOctantServer(
           grants: extensionToolGrantStore,
           approvals: extensionToolApprovalService,
           isHostScope: isRoutineHostScope,
+          isPairedDeviceScope,
           threadTainted: (threadId) =>
             readThreadExternalContentTaint(persistence.connection, threadId)
               .externalContentIngested,

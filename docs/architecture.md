@@ -4707,7 +4707,22 @@ prompt, schema, tool, route, model, or capability.
   that scope, offers only the selected tools, and refuses the turn when the
   provider or model cannot carry Octant's tools. Every call waits for an
   approval in the turn's window, shown in the open thread, unless a
-  remembered approval covers it (next item). At most 32 of those approvals
+  remembered approval covers it (next item). Who may answer:
+  - A local window answers its own turns' prompts, and any prompt raised by
+    a host-owned turn or by a paired device's turn on a thread that window
+    may drive (bound to the Project the prompt recorded).
+  - A paired device answers only the prompts its own turns raised, approve
+    once or deny, and only while the thread is still active and bound in
+    that Project (a Chat thread: still active and in the same Chat Project,
+    or still in none). It never sees or answers a local window's, another
+    device's, or the host's prompt. `/api/extensions/tool-approvals` is
+    forwarded to paired devices as `extension.tool-call.answer-once`; the
+    approval service, not the route policy, applies these rules.
+  - A prompt raised by a device that is no longer paired (revoked, or past
+    its registration's deadline even before the expiry is reconciled) goes
+    to nobody else and runs out.
+
+  At most 32 of those approvals
   wait at once across the whole host; the cap is shared by every thread and
   window, not counted per thread. A call past that cap is denied immediately
   with the refusal a declined call already uses, and answering or expiry
@@ -4719,6 +4734,7 @@ prompt, schema, tool, route, model, or capability.
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
   carried it.
+
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
   that one Project (`extension.tool-grant-recorded@1` on the Project's
@@ -4733,13 +4749,17 @@ prompt, schema, tool, route, model, or capability.
   update or a changed listing is a new question
   (`decideExtensionToolGrant` in `@octant/domain`). The payloads hold
   identifiers and digests, never a call's arguments or result.
-  - A grant grows only through that answer from a local window. No route,
-    command, manifest field, structured reference, tool call, model output,
-    paired device, or host-owned turn (a routine, a goal loop, a usage-limit
-    resume, a child-run delivery) can create one. A host-owned turn in the
-    Project may use one, but the prompt it raises is approved once and is
-    never remembered, even when a person at a local window answers it:
-    nobody chose to send that turn.
+  - A grant grows only through that answer from the local window whose own
+    turn raised the prompt. No route, command, manifest field, structured
+    reference, tool call, model output, paired device, or host-owned turn (a
+    routine, a goal loop, a usage-limit resume, a child-run delivery) can
+    create one. A host-owned turn in the Project may use one, but the prompt
+    it raises is approved once and is never remembered, even when a person
+    at a local window answers it: nobody chose to send that turn. A paired
+    device's turn is treated the same way: it may use a grant, and its prompt
+    is approved once, whether the device or a local window answers.
+    Remembering is an answer at the machine, and the person who sent that
+    turn is not at it.
   - A thread with no Project and a Plan turn are asked for every call, and
     the answer covers that call alone. An answer that asks to be remembered
     where it cannot be is refused and the call keeps waiting.
