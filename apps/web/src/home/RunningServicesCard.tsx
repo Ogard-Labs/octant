@@ -167,6 +167,7 @@ function RunningServiceRow(props: {
   const { service } = props;
   const [openFailed, setOpenFailed] = useState(false);
   const [liveRefusal, setLiveRefusal] = useState<string>();
+  const [liveNotice, setLiveNotice] = useState<string>();
   const [liveBusy, setLiveBusy] = useState(false);
   const live = props.remote?.offer?.kind === "live" ? props.remote : undefined;
   const openLive = async (mode: RemoteOpenMode) => {
@@ -176,6 +177,7 @@ function RunningServiceRow(props: {
     try {
       const outcome = await live.openLive(mode);
       if (outcome.kind === "refused") setLiveRefusal(outcome.message);
+      else if (outcome.notice !== undefined) setLiveNotice(outcome.notice);
     } catch {
       setLiveRefusal("Octant could not open this server.");
     } finally {
@@ -224,6 +226,11 @@ function RunningServiceRow(props: {
         {live === undefined ? null : (
           <span className="oct-meta running-services__detail">
             <span className="running-services__detail-text">{REMOTE_OPEN_LIMITS}</span>
+          </span>
+        )}
+        {liveNotice === undefined ? null : (
+          <span className="oct-meta running-services__detail">
+            <span className="running-services__detail-text">{liveNotice}</span>
           </span>
         )}
         {liveRefusal === undefined ? null : (

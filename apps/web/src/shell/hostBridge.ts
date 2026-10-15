@@ -404,6 +404,21 @@ export function remoteAccessAdministrationOf(
 
 export interface OctantHostBridge
   extends Partial<RemoteAccessAdministrationBridge>, Partial<PairedComputersBridge> {
+  /**
+   * Shows a server another paired computer granted this device, served by
+   * the desktop's loopback forwarder, in Octant's browser or the default one.
+   * Absent outside the desktop app.
+   */
+  readonly openRemoteServerPage?: (
+    request: unknown,
+  ) => Promise<
+    | { readonly kind: "opened"; readonly notice?: string }
+    | { readonly kind: "refused"; readonly message: string }
+  >;
+  /** Makes this window the signer for the pages it opened. Absent outside the desktop app. */
+  readonly subscribeRemoteServerPageSigning?: (
+    signer: (request: unknown) => Promise<unknown>,
+  ) => () => void;
   readonly popupNativeMenu?: (request: NativeMenuRequest) => Promise<NativeMenuOutcome>;
   readonly getComputerUseStatus?: () => Promise<unknown>;
   readonly requestComputerUsePermissions?: () => Promise<unknown>;

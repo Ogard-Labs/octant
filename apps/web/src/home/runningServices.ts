@@ -52,12 +52,13 @@ export type RemoteOpenMode = "octant-browser" | "default-browser";
 
 /** What the live opener answers; a refusal carries words fit for the row. */
 export type RemoteOpenOutcome =
-  | { readonly kind: "opened" }
+  /** `notice`: something the person should know about pages opened earlier, said once. */
+  | { readonly kind: "opened"; readonly notice?: string }
   | { readonly kind: "refused"; readonly message: string };
 
 /** One line, because the page runs on this computer and its dev server does not. */
 export const REMOTE_OPEN_LIMITS =
-  "Links to localhost inside the page won't load, and a dev server with a fixed reload port can't reach live updates.";
+  "Links to localhost inside the page won't load, and live reload doesn't connect yet.";
 
 /**
  * What a row on another computer offers once this window can open a page live.

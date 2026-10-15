@@ -6477,10 +6477,12 @@ mechanisms are:
   does not own needs the confirmation naming process, folder and port, and a
   paired device may stop only a server Octant owns; the actor comes
   from the request's authenticated principal. A window reads the host it is
-  connected to; All Hosts federation does not carry these rows.
-  Opening such a server live on a paired computer is being built in
-  [the plan](plans/open-a-dev-server-from-another-computer.md); today the
-  host can grant it, and nothing forwards a request yet.
+  connected to; All Hosts federation does not carry these rows, with one
+  exception: a desktop window whose Environments filter is narrowed to one
+  connected paired computer reads that computer's Running services over its
+  paired session, as that device, and opens its servers only live (below),
+  never as one of its own Browser tabs; while that computer is not connected
+  the card reads nothing and says so, never this computer's rows.
 - **Proxy sessions and server grants.** A paired device asks for a grant to
   open one dev server from its own computer, under a proxy session that is
   separate from its product session. The rules in force:
@@ -6602,6 +6604,36 @@ mechanisms are:
     the grant, and the socket. The listener's transport (Node or Bun) switches
     a connection only when the route's answer carries an accepted upgrade, so
     an answer that does not is written as plain HTTP and the connection closed.
+  - **Forwarder and signer on the device.** Only the desktop app opens a
+    page live. Its main process starts a forwarder on the first Open that
+    binds `127.0.0.1` and `::1` only, on the port it recorded, else the next
+    free one in 47610–47619 (said once; all taken refuses Open with that
+    range), and serves each granted server at
+    `<port>-<label>.octant.localhost`, `<label>` the first 10 bytes of a
+    SHA-256 over the host and thread in base32, so the same server keeps its
+    name. It routes by the exact `Host`, refuses an unknown name, and admits a
+    request only with that name's secret (a header Octant's browser adds for
+    the exact origin only, or an `HttpOnly`, `SameSite=Strict`, host-only
+    cookie the default browser gets from a one-time claim token in a URL
+    fragment) and, where the browser sends them, `Sec-Fetch-Site`
+    `same-origin` or `none` and the page's own `Origin`. It holds no key: for
+    each request it sends the method, full proxy path, and body digest (8 MiB
+    cap, 413 above) to the Octant window that opened the page, which refuses
+    unless the canonical path is under the proxy route of a grant it holds and
+    builds and signs the envelope itself; the main process takes back only
+    Octant's own headers, from that window only. The window holds its proxy
+    session (minted by `issueServerProxySession`, which never clears the
+    product session) and its grants in memory. The forwarder reaches the host
+    through the listener trust rule with no cookie jar, rewrites the page's
+    origin and `Referer` to the listener's and the grant's path, never sends
+    the page's secret, and hands the page only a response marked relayed, with
+    a `Location` naming the dev server's own origin moved to the name, a
+    loopback `Set-Cookie` `Domain` dropped, and HSTS dropped; anything else
+    becomes a failure page in the plan's copy. Octant's browser is a sandboxed
+    window per name in a persistent partition, with every permission refused,
+    kept on the page's origin, and not a Browser tab, so no agent can drive
+    it. The forwarder answers a WebSocket upgrade 501: the proxy route carries
+    upgrades, and the forwarder does not pass them on yet.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and
