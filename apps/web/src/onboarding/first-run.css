@@ -306,14 +306,10 @@
 button.first-run__fact-action {
   margin: 0;
   padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
   font: inherit;
   text-align: start;
   text-decoration: underline;
   text-underline-offset: 0.15em;
-  cursor: pointer;
 }
 
 /* The state word rides at the control edge, where a fact row's value sits. It

@@ -423,7 +423,6 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   justify-content: flex-start;
   gap: var(--oct-space-2);
   padding-inline: 8px;
-  color: var(--oct-fg-2);
 }
 
 /* ── Thread Goal panel ─────────────────────────────────────────── */

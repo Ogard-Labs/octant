@@ -104,7 +104,7 @@ export function CanvasVersionHistoryPanel(props: CanvasVersionHistoryPanelProps)
                 data-testid={`canvas-version-${entry.sequence}`}
                 aria-current={isSelected ? "true" : undefined}
                 onClick={() => props.onSelect(String(entry.versionId))}
-                variant="ghost"
+                variant="bare"
               >
                 <span className="canvas-version-history__sequence">v{entry.sequence}</span>
                 <span className="canvas-version-history__label">

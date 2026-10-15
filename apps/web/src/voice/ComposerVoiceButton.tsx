@@ -122,7 +122,7 @@ export function ComposerVoiceButton(props: ComposerVoiceButtonProps) {
         size="icon"
         title={label}
         type="button"
-        variant="ghost"
+        variant={recording ? "destructive" : "ghost"}
       >
         {busy ? (
           <LoaderCircle
