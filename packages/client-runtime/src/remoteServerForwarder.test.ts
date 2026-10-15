@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { createServer, type Server } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +8,8 @@ import {
   type RemoteServerForwarder,
   type RemoteServerForwarderOptions,
   type RemoteServerHostRequest,
+  type RemoteServerHostUpgradeRequest,
+  type RemoteServerForwarderSignRequest,
 } from "./remoteServerForwarder";
 
 const HOST_ID = "11111111-1111-4111-8111-111111111111";
@@ -62,6 +65,8 @@ interface Harness {
   readonly port: number;
   readonly sent: RemoteServerHostRequest[];
   readonly signed: string[];
+  readonly signings: RemoteServerForwarderSignRequest[];
+  readonly upgrades: RemoteServerHostUpgradeRequest[];
 }
 
 async function harness(
@@ -72,11 +77,14 @@ async function harness(
   const first = await freePorts(3);
   const sent: RemoteServerHostRequest[] = [];
   const signed: string[] = [];
+  const signings: RemoteServerForwarderSignRequest[] = [];
+  const upgrades: RemoteServerHostUpgradeRequest[] = [];
   const forwarder = createRemoteServerForwarder({
     ports: { first, count: 3 },
     addresses: ["127.0.0.1"],
     sign: async (request) => {
       signed.push(request.pathQuery);
+      signings.push(request);
       return {
         status: "signed",
         headers: {
@@ -96,12 +104,22 @@ async function harness(
         })
       );
     },
+    upgradeToHost: async (_target, request) => {
+      upgrades.push(request);
+      return {
+        status: "answered",
+        response: Response.json(
+          { kind: "remote-server-proxy-refused", reason: "grant-closed" },
+          { status: 410 },
+        ),
+      };
+    },
     ...overrides,
   });
   started.push(forwarder);
   const start = await forwarder.start();
   if (start.status !== "listening") throw new Error("Forwarder did not start.");
-  return { forwarder, port: start.port, sent, signed };
+  return { forwarder, port: start.port, sent, signed, signings, upgrades };
 }
 
 interface Reply {
@@ -290,6 +308,7 @@ describe("the desktop's forwarder for another computer's dev server", () => {
       addresses: ["127.0.0.1"],
       sign: async () => ({ status: "refused", reason: "no-window" }),
       sendToHost: async () => new Response(),
+      upgradeToHost: async () => Promise.reject(new Error("No host.")),
     });
     started.push(forwarder);
     expect(await forwarder.start()).toEqual({ status: "listening", port: first + 1, moved: true });
@@ -302,6 +321,7 @@ describe("the desktop's forwarder for another computer's dev server", () => {
       addresses: ["127.0.0.1"],
       sign: async () => ({ status: "refused", reason: "no-window" }),
       sendToHost: async () => new Response(),
+      upgradeToHost: async () => Promise.reject(new Error("No host.")),
     });
     started.push(crowded);
     expect(await crowded.start()).toEqual({
@@ -368,6 +388,59 @@ describe("the desktop's forwarder for another computer's dev server", () => {
     });
     expect(reply.status).toBe(413);
     expect(signed).toEqual([]);
+  });
+
+  it("signs a page's WebSocket upgrade as a bodiless GET under its grant and answers the host's refusal", async () => {
+    const { forwarder, port, signings, upgrades } = await harness();
+    const { host, access } = opened(forwarder);
+    const reply = await get(port, host, {
+      path: "/hmr?token=1",
+      headers: {
+        "x-octant-page-access": access,
+        origin: `http://${host}`,
+        connection: "Upgrade",
+        upgrade: "websocket",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        "sec-websocket-version": "13",
+      },
+    });
+    expect(reply.status).toBe(410);
+    const path = `/api/server-proxy/${GRANT.grantId}/hmr?token=1`;
+    expect(signings).toEqual([
+      {
+        hostId: HOST_ID,
+        grantId: GRANT.grantId,
+        method: "GET",
+        pathQuery: path,
+        bodyDigest: createHash("sha256").digest("hex"),
+      },
+    ]);
+    expect(upgrades).toHaveLength(1);
+    const headers = new Map(upgrades[0]?.headers);
+    expect(upgrades[0]?.pathQuery).toBe(path);
+    expect(headers.get("upgrade")).toBe("websocket");
+    expect(headers.get("connection")).toBe("Upgrade");
+    expect(headers.get("sec-websocket-key")).toBe("dGhlIHNhbXBsZSBub25jZQ==");
+    expect(headers.get("origin")).toBe(LISTENER);
+    expect(headers.get("x-octant-device-proof")).toBe("proof");
+    expect(headers.has("x-octant-page-access")).toBe(false);
+  });
+
+  it("refuses a WebSocket upgrade without the page's secret before signing it", async () => {
+    const { forwarder, port, signed, upgrades } = await harness();
+    const { host } = opened(forwarder);
+    const reply = await get(port, host, {
+      path: "/hmr",
+      headers: {
+        connection: "Upgrade",
+        upgrade: "websocket",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        "sec-websocket-version": "13",
+      },
+    });
+    expect(reply.status).toBe(403);
+    expect(signed).toEqual([]);
+    expect(upgrades).toEqual([]);
   });
 
   it("stops serving a host's pages when the host is closed", async () => {

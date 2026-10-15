@@ -2,7 +2,8 @@
 
 **Status: approved by the maintainer on 2026-10-14; slices 1 to 4 built: the
 host relays HTTP and WebSockets; slice 5 built for the Running services card
-in the desktop app, without passing WebSockets on, and its rules are in the
+in the desktop app, its forwarder passing WebSockets on so live reload works,
+and its rules are in the
 [architecture](../architecture.md); the user guide is written.** The parts of
 slice 5 listed under it as not built are still plans. A paired browser and the
 phone keep the host's picture of the page. merging or releasing anything.
@@ -567,6 +568,15 @@ dark; slice 5 makes the feature reachable.
    - **Responses.** Only a response the host marks relayed reaches the page,
      with `Location`, `Set-Cookie`, and HSTS handled as the design says;
      anything else is the host's answer and becomes the failure page.
+   - **WebSockets.** The forwarder takes a page's upgrade through the same
+     admission and window signature (a `GET` with an empty body) and sends it
+     to the proxy route; when the host switches with the accept value for the
+     page's own key, it answers the page 101 and passes bytes through both
+     ways unchanged, so the host's slice 4 bounds and close codes hold. The
+     host closes it when the grant closes; the forwarder closes it when it
+     stops serving the host's pages. Octant's browser adds the page's secret
+     to a `ws:` request on the page's own name and port as it does to the
+     page's `http:` requests.
    - **Decision 4 check.** On macOS 27 the system resolver answers
      `*.localhost` with `127.0.0.1` and `::1` (checked with `dscacheutil`), so
      Safari and other browsers that use it reach the name; Chromium resolves it
@@ -574,8 +584,7 @@ dark; slice 5 makes the feature reachable.
      cookies on `http://*.localhost` is part of the live check.
 
    **Not built in this slice:** a Local servers row's Open (its listing carries
-   no ownership), the live-updates indicator, passing WebSockets on (the
-   forwarder answers an upgrade 501, though slice 4 carries them on the host), clearing a page's
+   no ownership), the live-updates indicator, clearing a page's
    partition when its host is removed or the device unpaired (decision 8),
    and signing when the opening window has closed. The stopped-or-changed
    copy names Running services, since Local servers does not offer Open yet;

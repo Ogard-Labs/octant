@@ -4,7 +4,10 @@
 // connection that mints its proxy session, the proxy client that holds its
 // grants and signs, and the desktop's loopback forwarder that a page reaches.
 // The host's listener is called in memory with synthetic transport facts, as
-// the gateway's own suites do; the page and the dev server speak real HTTP.
+// the gateway's own suites do; the page and the dev server speak real HTTP. A
+// WebSocket the host accepts is finished over a loopback socket pair the way
+// the listener's transport finishes one, so the page's frames cross the
+// forwarder, the host's relay, and the dev server as real bytes.
 
 import { createHash, generateKeyPairSync, randomUUID, sign as cryptoSign } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -14,7 +17,12 @@ import {
   type IncomingHttpHeaders,
   type Server,
 } from "node:http";
-import type { AddressInfo } from "node:net";
+import {
+  connect as connectTcp,
+  createServer as createTcpServer,
+  type AddressInfo,
+  type Socket,
+} from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -46,6 +54,14 @@ import {
   PRIVATE_LISTENER_TEST_KEY,
 } from "../privateListener.test-certs";
 import type { RequestTransportFacts, Serve } from "../server";
+import {
+  WEBSOCKET_RELAY_MAX_MESSAGE_BYTES,
+  WebSocketEndpoint,
+  newWebSocketKey,
+  takeWebSocketUpgrade,
+  webSocketAcceptFor,
+  type WebSocketMessage,
+} from "../webSocketRelay";
 import { createRemoteGateway, type RemoteGateway } from "./remoteGateway";
 import { RemoteServerGrantService } from "./remoteServerGrantService";
 
@@ -86,8 +102,19 @@ interface DevRequest {
   readonly headers: IncomingHttpHeaders;
 }
 
-async function startDevServer(): Promise<{ readonly port: number; readonly seen: DevRequest[] }> {
+/** Connections that switched to WebSocket, which closing a server does not reach. */
+const switchedSockets: Socket[] = [];
+afterEach(() => {
+  for (const socket of switchedSockets.splice(0)) socket.destroy();
+});
+
+async function startDevServer(): Promise<{
+  readonly port: number;
+  readonly seen: DevRequest[];
+  readonly upgrades: DevRequest[];
+}> {
   const seen: DevRequest[] = [];
+  const upgrades: DevRequest[] = [];
   const server: Server = createHttpServer((request, response) => {
     seen.push({ url: request.url ?? "", headers: request.headers });
     response.writeHead(200, {
@@ -95,6 +122,22 @@ async function startDevServer(): Promise<{ readonly port: number; readonly seen:
       "set-cookie": "sid=1; Domain=localhost; Path=/",
     });
     response.end("<h1>the dev server's page</h1>");
+  });
+  // A hot-reload endpoint that echoes every message back.
+  server.on("upgrade", (request, socket: Socket, head: Buffer) => {
+    upgrades.push({ url: request.url ?? "", headers: request.headers });
+    switchedSockets.push(socket);
+    const key = request.headers["sec-websocket-key"];
+    socket.write(
+      [
+        "HTTP/1.1 101 Switching Protocols",
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        `Sec-WebSocket-Accept: ${webSocketAcceptFor(typeof key === "string" ? key : "")}`,
+      ].join("\r\n") + "\r\n\r\n",
+    );
+    const endpoint = new WebSocketEndpoint(socket, "server", WEBSOCKET_RELAY_MAX_MESSAGE_BYTES);
+    endpoint.start({ message: (message) => endpoint.send(message), closed: () => undefined }, head);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   cleanups.push(
@@ -104,7 +147,20 @@ async function startDevServer(): Promise<{ readonly port: number; readonly seen:
         server.close(() => resolve());
       }),
   );
-  return { port: (server.address() as AddressInfo).port, seen };
+  return { port: (server.address() as AddressInfo).port, seen, upgrades };
+}
+
+/** Two ends of one loopback TCP connection. */
+async function socketPair(): Promise<readonly [Socket, Socket]> {
+  const server = createTcpServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const accepted = new Promise<Socket>((resolve) => server.once("connection", resolve));
+  const near = connectTcp((server.address() as AddressInfo).port, "127.0.0.1");
+  await new Promise<void>((resolve) => near.once("connect", () => resolve()));
+  const far = await accepted;
+  server.close();
+  switchedSockets.push(near, far);
+  return [near, far];
 }
 
 function makeSigning() {
@@ -375,6 +431,33 @@ async function startClient(host: Awaited<ReturnType<typeof startHost>>) {
         ...(request.body === undefined ? {} : { body: request.body }),
         signal: request.signal,
       }),
+    // What the listener's transport does with an accepted upgrade: answer 101
+    // for the request's key and frame the connection as the server end.
+    upgradeToHost: async (_target, request) => {
+      const response = await host.fetch(`${ORIGIN}${request.pathQuery}`, {
+        method: "GET",
+        headers: request.headers.map(([name, value]): [string, string] => [name, value]),
+      });
+      const acceptance = takeWebSocketUpgrade(response);
+      if (acceptance === undefined) return { status: "answered", response };
+      const key = new Map(request.headers).get("sec-websocket-key") ?? "";
+      const [near, far] = await socketPair();
+      const endpoint = new WebSocketEndpoint(far, "server", WEBSOCKET_RELAY_MAX_MESSAGE_BYTES);
+      endpoint.start(acceptance.open(endpoint), new Uint8Array());
+      return {
+        status: "switched",
+        headers: [
+          ["upgrade", "websocket"],
+          ["connection", "Upgrade"],
+          ["sec-websocket-accept", webSocketAcceptFor(key)],
+          ...(acceptance.protocol === undefined
+            ? []
+            : [["sec-websocket-protocol", acceptance.protocol] as const]),
+        ],
+        socket: near,
+        head: new Uint8Array(),
+      };
+    },
   });
   const started = await forwarder.start();
   if (started.status !== "listening") throw new Error("Forwarder did not start.");
@@ -415,6 +498,88 @@ function pageGet(
     request.on("error", reject);
     request.end();
   });
+}
+
+type PageSocket =
+  | {
+      readonly status: 101;
+      readonly send: (text: string) => void;
+      readonly next: () => Promise<string>;
+      /** Resolves with the close code once the connection ends. */
+      readonly closed: Promise<number>;
+    }
+  | { readonly status: number };
+
+/** A page's WebSocket to the forwarder, as a browser opens one on the page's own name. */
+function pageSocket(
+  port: number,
+  host: string,
+  access: string | undefined,
+  path = "/hmr",
+): Promise<PageSocket> {
+  const key = newWebSocketKey();
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      host: "127.0.0.1",
+      port,
+      path,
+      headers: {
+        host,
+        origin: `http://${host}`,
+        "sec-fetch-site": "same-origin",
+        connection: "Upgrade",
+        upgrade: "websocket",
+        "sec-websocket-key": key,
+        "sec-websocket-version": "13",
+        ...(access === undefined ? {} : { "x-octant-page-access": access }),
+      },
+    });
+    request.on("response", (response) => {
+      response.resume();
+      resolve({ status: response.statusCode ?? 0 });
+    });
+    request.on("upgrade", (response, socket: Socket, head: Buffer) => {
+      switchedSockets.push(socket);
+      expect(response.headers["sec-websocket-accept"]).toBe(webSocketAcceptFor(key));
+      const received: string[] = [];
+      const waiting: Array<(text: string) => void> = [];
+      let close: (code: number) => void = () => undefined;
+      const closed = new Promise<number>((done) => {
+        close = done;
+      });
+      const endpoint = new WebSocketEndpoint(socket, "client", WEBSOCKET_RELAY_MAX_MESSAGE_BYTES);
+      endpoint.start(
+        {
+          message: (message: WebSocketMessage) => {
+            const text = new TextDecoder().decode(message.data);
+            const reader = waiting.shift();
+            if (reader === undefined) received.push(text);
+            else reader(text);
+          },
+          closed: (code) => close(code),
+        },
+        head,
+      );
+      resolve({
+        status: 101,
+        send: (text) => endpoint.send({ text: true, data: new TextEncoder().encode(text) }),
+        next: () => {
+          const ready = received.shift();
+          return ready === undefined
+            ? new Promise<string>((done) => waiting.push(done))
+            : Promise.resolve(ready);
+        },
+        closed,
+      });
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+function opened(socket: PageSocket): Extract<PageSocket, { readonly status: 101 }> {
+  if (!("send" in socket)) throw new Error(`upgrade answered ${String(socket.status)}`);
+  return socket;
 }
 
 const runningService = (listenerId: string) =>
@@ -514,5 +679,97 @@ describe("opening a dev server on another paired computer", () => {
       status: "refused",
       reason: "device-revoked",
     });
+  });
+});
+
+describe("live reload from a dev server on another paired computer", () => {
+  it("echoes a page's WebSocket through the forwarder, the host's relay, and the dev server", async () => {
+    const dev = await startDevServer();
+    const host = await startHost(dev.port);
+    const client = await startClient(host);
+    const { host: pageHost, access } = await openPage(client);
+
+    const socket = opened(await pageSocket(client.port, pageHost, access, "/hmr?token=1"));
+    socket.send("reload?");
+    expect(await socket.next()).toBe("reload?");
+    socket.send("again");
+    expect(await socket.next()).toBe("again");
+    expect(dev.upgrades).toHaveLength(1);
+    expect(dev.upgrades[0]?.url).toBe("/hmr?token=1");
+    expect(dev.upgrades[0]?.headers.host).toBe(`localhost:${String(dev.port)}`);
+    expect(
+      Object.keys(dev.upgrades[0]?.headers ?? {}).some((name) => name.startsWith("x-octant-")),
+    ).toBe(false);
+  });
+
+  it("refuses an upgrade without the page's secret before it reaches the host", async () => {
+    const dev = await startDevServer();
+    const host = await startHost(dev.port);
+    const client = await startClient(host);
+    const { host: pageHost } = await openPage(client);
+    expect((await pageSocket(client.port, pageHost, undefined)).status).toBe(403);
+    expect((await pageSocket(client.port, pageHost, "not-the-secret")).status).toBe(403);
+    expect(dev.upgrades).toEqual([]);
+  });
+
+  it("refuses an upgrade for a grant this computer never got", async () => {
+    const dev = await startDevServer();
+    const host = await startHost(dev.port);
+    const client = await startClient(host);
+    const page = client.forwarder.open({
+      hostId: String(hostId),
+      hostName: "Studio Mac",
+      listenerOrigin: ORIGIN,
+      grant: {
+        grantId: decodeRemoteServerGrantId(`rsg_${"ef".repeat(32)}`),
+        threadId,
+        port: decodeLocalServerPort(dev.port),
+      },
+    });
+    const answer = await pageSocket(
+      client.port,
+      new URL(page.pageOrigin).host,
+      client.forwarder.accessFor(page.pageOrigin),
+    );
+    expect(answer.status).toBe(503);
+    expect(dev.upgrades).toEqual([]);
+  });
+
+  it("refuses an upgrade once the host closes the grant", async () => {
+    const dev = await startDevServer();
+    const host = await startHost(dev.port);
+    const client = await startClient(host);
+    const { host: pageHost, access } = await openPage(client);
+    host.holding.value = "stopped";
+    expect((await pageSocket(client.port, pageHost, access)).status).toBe(410);
+    expect(dev.upgrades).toEqual([]);
+  });
+
+  it("refuses an upgrade after the host revokes this computer, and closes the one already open", async () => {
+    const dev = await startDevServer();
+    const host = await startHost(dev.port);
+    const client = await startClient(host);
+    const { host: pageHost, access } = await openPage(client);
+    const socket = opened(await pageSocket(client.port, pageHost, access));
+    socket.send("before");
+    expect(await socket.next()).toBe("before");
+
+    host.gateway.localDeviceAdministration()?.revokeDevice({ deviceId: client.deviceId });
+    expect(await socket.closed).toBe(1008);
+    expect((await pageSocket(client.port, pageHost, access)).status).toBe(403);
+    expect(dev.upgrades).toHaveLength(1);
+  });
+
+  it("closes a page's open WebSocket when Octant stops serving the page", async () => {
+    const dev = await startDevServer();
+    const host = await startHost(dev.port);
+    const client = await startClient(host);
+    const { host: pageHost, access } = await openPage(client);
+    const socket = opened(await pageSocket(client.port, pageHost, access));
+    socket.send("before");
+    expect(await socket.next()).toBe("before");
+
+    client.forwarder.closeHost(String(hostId));
+    expect(await socket.closed).toBe(1006);
   });
 });

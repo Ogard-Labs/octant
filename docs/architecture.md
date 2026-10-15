@@ -6650,8 +6650,16 @@ mechanisms are:
     becomes a failure page in the plan's copy. Octant's browser is a sandboxed
     window per name in a persistent partition, with every permission refused,
     kept on the page's origin, and not a Browser tab, so no agent can drive
-    it. The forwarder answers a WebSocket upgrade 501: the proxy route carries
-    upgrades, and the forwarder does not pass them on yet.
+    it. A page's WebSocket upgrade (live reload) takes the same admission,
+    secret, and window signature as any request, signed as a `GET` with an
+    empty body, and goes to the proxy route through the same listener trust.
+    Once the host switches protocols with the accept value for the page's own
+    key and no extension, the forwarder answers the page 101 and passes bytes
+    through both ways unchanged, so the host's message cap, buffer bound, and
+    close codes apply as on any relayed socket; a closed grant, a revoke, or a
+    session's end closes it from the host, and closing the host's pages or
+    stopping the forwarder closes it here. Any other answer reaches the page as
+    the request's failure status, and no frame is sent.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and
