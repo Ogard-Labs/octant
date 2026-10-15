@@ -5,7 +5,9 @@ import {
   type ProviderInstance,
 } from "@octant/contracts";
 import {
+  configuredImageBaseUrl,
   imageFailure,
+  isImageEndpointAllowed,
   type ImageAdapterRequest,
   type ImageAdapterResult,
   type ImageGenerationDriver,
@@ -32,6 +34,7 @@ export interface ImageGenerationConformanceEvidence {
   readonly unexpectedErrorContained: true;
   readonly completedWithHostMediaTypes: true;
   readonly hostMediaRefusalHonored: true;
+  readonly calledOnlyDeclaredEndpoints: true;
 }
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
@@ -43,6 +46,7 @@ function isPng(bytes: Uint8Array): boolean {
 interface RecordingPorts {
   readonly ports: ImageGenerationPorts;
   readonly calls: () => number;
+  readonly urls: () => ReadonlyArray<string>;
 }
 
 function recordingPorts(options: {
@@ -51,10 +55,12 @@ function recordingPorts(options: {
   readonly sniff: ImageGenerationPorts["sniffMediaType"];
 }): RecordingPorts {
   let calls = 0;
+  const urls: Array<string> = [];
   return {
     ports: {
       request: async (request) => {
         calls += 1;
+        urls.push(request.url);
         return options.request(request);
       },
       fetchApprovedImageUrl: async () => {
@@ -64,6 +70,7 @@ function recordingPorts(options: {
       sniffMediaType: options.sniff,
     },
     calls: () => calls,
+    urls: () => urls,
   };
 }
 
@@ -101,7 +108,8 @@ function failureCategory(result: ImageAdapterResult): ProviderFailureCategory | 
  * Proves an image driver keeps the seam's promises with ports the harness
  * controls: it stops before calling out when cancelled or given an empty
  * prompt, turns an unreachable provider and an unexpected error into recorded
- * failures, and returns only bytes the host's media-type check accepted.
+ * failures, returns only bytes the host's media-type check accepted, and
+ * sends authenticated calls only to the hosts it declares.
  */
 export async function runImageGenerationConformance(
   fixture: ImageGenerationConformanceFixture,
@@ -184,6 +192,16 @@ export async function runImageGenerationConformance(
     completed.images.every((image) => image.mediaType === sniffPng(image.bytes)),
     "a completed image carries a media type the host did not assign",
   );
+  const baseUrl = configuredImageBaseUrl(fixture.instance);
+  assertConformance(
+    successful.urls().every((url) =>
+      isImageEndpointAllowed(url, {
+        providerHosts: fixture.driver.providerHosts,
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+      }),
+    ),
+    "an authenticated call went outside the driver's declared provider hosts",
+  );
 
   const refusing = recordingPorts({
     request: async (request) => fixture.respond(request),
@@ -203,5 +221,6 @@ export async function runImageGenerationConformance(
     unexpectedErrorContained: true,
     completedWithHostMediaTypes: true,
     hostMediaRefusalHonored: true,
+    calledOnlyDeclaredEndpoints: true,
   };
 }

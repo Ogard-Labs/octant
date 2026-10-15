@@ -6,8 +6,10 @@ import {
 import {
   imageFailure,
   imageInterrupted,
+  isImageEndpointAllowed,
   isProviderFailure,
   type ApprovedImageFetch,
+  type ImageGenerationEndpoint,
   type ImageGenerationPorts,
   type ImageHttpAuth,
 } from "@octant/provider-sdk/image-generation";
@@ -144,12 +146,15 @@ export async function performImageHttpRequest(
 
 /**
  * The host's bounds for one image call when an adapter names none: room for
- * every variant at the stored-image ceiling plus a JSON envelope.
+ * every variant at the stored-image ceiling plus a JSON envelope. Providers
+ * that answer inline send base64, which expands bytes by 4/3, so the
+ * response bound allows that expansion or a valid maximal answer would be
+ * cut off before the adapter decodes it.
  */
 export const IMAGE_HTTP_DEFAULT_LIMITS: ImageHttpLimits = {
   connectionTimeoutMs: 120_000,
   requestBodyBytes: MAX_GENERATED_IMAGE_BYTES * 2,
-  responseBodyBytes: MAX_GENERATED_IMAGE_BYTES * MAX_IMAGE_VARIANTS + 262_144,
+  responseBodyBytes: 4 * Math.ceil(MAX_GENERATED_IMAGE_BYTES / 3) * MAX_IMAGE_VARIANTS + 262_144,
 };
 
 /**
@@ -160,20 +165,30 @@ export const IMAGE_HTTP_DEFAULT_LIMITS: ImageHttpLimits = {
 export function makeImageGenerationPorts(options: {
   readonly instanceId: string;
   readonly credentialResolver: ProviderCredentialResolver;
+  readonly endpoint: ImageGenerationEndpoint;
   readonly fetch?: ImageHttpFetch;
   readonly limits?: Partial<ImageHttpLimits>;
 }): ImageGenerationPorts {
   const fetch = options.fetch ?? globalThis.fetch;
   const limits: ImageHttpLimits = { ...IMAGE_HTTP_DEFAULT_LIMITS, ...options.limits };
   return {
-    request: (request) =>
-      performImageHttpRequest({
+    request: async (request) => {
+      // Checked before any credential is read: a driver chooses the URL, so
+      // the host decides where the profile's key may go.
+      if (!isImageEndpointAllowed(request.url, options.endpoint)) {
+        throw imageFailure(
+          "unauthorized",
+          "The image provider asked to send its credential outside its own endpoint.",
+        );
+      }
+      return performImageHttpRequest({
         ...request,
         instanceId: options.instanceId,
         credentialResolver: options.credentialResolver,
         fetch,
         limits,
-      }),
+      });
+    },
     fetchApprovedImageUrl: (input) =>
       fetchApprovedImageUrl({
         url: input.url,

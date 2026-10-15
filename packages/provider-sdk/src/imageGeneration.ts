@@ -92,8 +92,9 @@ export type ApprovedImageFetch =
  */
 export interface ImageGenerationPorts {
   /**
-   * One authenticated call to the provider. The host leases a key from the
-   * profile's key pool, sets it as `auth` names, enforces the request and
+   * One authenticated call to the provider. The host refuses a URL outside
+   * the driver's declared endpoint before it reads any credential, leases a
+   * key from the profile's key pool, sets it as `auth` names, enforces the request and
    * response size and time limits, refuses redirects, and records a refused
    * key so the next attempt uses another. Rejects with a `ProviderFailure`
    * when the call cannot be made; an HTTP error status resolves normally.
@@ -125,7 +126,60 @@ export interface ImageGenerationDriverContext {
  */
 export interface ImageGenerationDriver {
   readonly driverKind: ProviderDriverKind;
+  /**
+   * The hosts the provider's own API answers on, fixed in the driver rather
+   * than chosen per call. `*.example.com` also matches every subdomain. The
+   * host sends the profile's credential only to these over HTTPS, or to the
+   * origin of a base URL the person configured on the profile.
+   */
+  readonly providerHosts: ReadonlyArray<string>;
   readonly create: (context: ImageGenerationDriverContext) => ImageGenerationAdapter;
+}
+
+export interface ImageGenerationEndpoint {
+  readonly providerHosts: ReadonlyArray<string>;
+  /** The profile's configured base URL, when the person set one. */
+  readonly baseUrl?: string;
+}
+
+/**
+ * Whether an authenticated call may go to `url`: the configured base URL's
+ * own origin, or HTTPS to one of the driver's declared provider hosts. A
+ * driver cannot send the credential anywhere else, internal services and
+ * loopback included unless the person configured that base URL.
+ */
+export function isImageEndpointAllowed(url: string, endpoint: ImageGenerationEndpoint): boolean {
+  let target: URL;
+  try {
+    target = new URL(url);
+  } catch {
+    return false;
+  }
+  if (target.username !== "" || target.password !== "") return false;
+  if (endpoint.baseUrl !== undefined) {
+    try {
+      if (target.origin === new URL(endpoint.baseUrl).origin) return true;
+    } catch {
+      // An unparseable base URL approves nothing; the provider hosts still apply.
+    }
+  }
+  if (target.protocol !== "https:" || target.port !== "") return false;
+  const hostname = target.hostname.toLowerCase();
+  return endpoint.providerHosts.some((entry) => {
+    const host = entry.toLowerCase();
+    if (host.startsWith("*.")) {
+      const domain = host.slice(2);
+      return hostname === domain || hostname.endsWith(`.${domain}`);
+    }
+    return hostname === host;
+  });
+}
+
+/** The base URL a profile's configuration names, for kinds that have one. */
+export function configuredImageBaseUrl(instance: ProviderInstance): string | undefined {
+  const configuration: object = instance.configuration;
+  if (!("baseUrl" in configuration)) return undefined;
+  return typeof configuration.baseUrl === "string" ? configuration.baseUrl : undefined;
 }
 
 export function imageFailure(
