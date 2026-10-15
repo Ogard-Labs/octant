@@ -306,6 +306,29 @@ describe("host-local provider key routes", () => {
     expect(unknown?.status).toBe(404);
   });
 
+  it("clears a key it just wrote when the endpoint was reconfigured during the write", async () => {
+    const instances = [gateway(GATEWAY_ID, "Private gateway")];
+    const { handle, stored } = setup({
+      instances,
+      onSet: () => {
+        const [current] = instances;
+        if (current === undefined) return;
+        instances[0] = decodeProviderInstance({
+          ...current,
+          configuration: { ...current.configuration, baseUrl: "https://other.example/v1/" },
+          version: 2,
+        });
+      },
+    });
+
+    const result = await json(
+      await handle(hostLocal(SET, { instance: GATEWAY_ID, credential: KEY, replace: false })),
+    );
+
+    expect(result).toMatchObject({ status: 409, body: { category: "changed" } });
+    expect(stored.size).toBe(0);
+  });
+
   it("clears a key it just wrote when the instance was removed during the write", async () => {
     const instances = [gateway(GATEWAY_ID, "Private gateway")];
     const { handle, stored } = setup({ instances, onSet: () => instances.splice(0) });

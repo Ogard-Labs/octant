@@ -45,6 +45,7 @@ export type ProviderCredentialRefusal =
   | "no-stored-key-authentication"
   | "already-stored"
   | "several-keys"
+  | "changed"
   | "credential-store-unavailable";
 
 const REFUSAL_STATUS: Readonly<Record<ProviderCredentialRefusal, number>> = {
@@ -56,6 +57,7 @@ const REFUSAL_STATUS: Readonly<Record<ProviderCredentialRefusal, number>> = {
   "no-stored-key-authentication": 409,
   "already-stored": 409,
   "several-keys": 409,
+  changed: 409,
   "credential-store-unavailable": 503,
 };
 
@@ -84,8 +86,8 @@ export function createProviderCredentialRouteHandler(
   options: ProviderCredentialRouteOptions,
 ): (request: Request) => Promise<Response | undefined> {
   const now = options.now ?? Date.now;
-  // One change at a time: a `set` checks that the instance exists, stores, and
-  // checks again, and no other key change can run in between.
+  // One change at a time: a `set` reads the instance, stores, and reads it
+  // again, and no other key change from these routes can run in between.
   let queue: Promise<unknown> = Promise.resolve();
   const serialized = <T>(task: () => Promise<T>): Promise<T> => {
     const run = queue.then(task);
@@ -160,7 +162,7 @@ export function createProviderCredentialRouteHandler(
         if (route === ROUTES.status) {
           return answer((await credentials.store.has(id)) ? "stored" : "missing", target);
         }
-        if (decoded.kind !== "set") return refuse("invalid");
+        if (decoded.kind !== "set" || target.kind !== "existing") return refuse("invalid");
         if (await credentials.store.has(id)) {
           if (!decoded.replace) return refuse("already-stored");
           // Replacing a pool with one key would drop keys the person cannot see
@@ -170,11 +172,17 @@ export function createProviderCredentialRouteHandler(
           }
         }
         await credentials.store.set(id, decoded.credential);
-        // A removal that landed while the key was being written would leave a
-        // key for no instance. Clear it rather than keep an orphaned secret.
-        if (!options.readProviderInstances().some((instance) => String(instance.id) === id)) {
+        // Settings can remove or reconfigure the instance while the key is
+        // being written. A removal would leave a key for no instance, and a new
+        // base URL or authentication would send a key entered for the old
+        // endpoint to the new one, because the service clears the old key
+        // before it commits the change. Any version change clears the key.
+        const current = options
+          .readProviderInstances()
+          .find((instance) => String(instance.id) === id);
+        if (current === undefined || current.version !== target.instance.version) {
           await credentials.store.delete(id);
-          return refuse("not-found");
+          return refuse(current === undefined ? "not-found" : "changed");
         }
         return answer("stored", target);
       } catch {
@@ -286,6 +294,7 @@ const REFUSAL_MESSAGE: Readonly<Record<ProviderCredentialRefusal, string>> = {
   "no-stored-key-authentication": "That provider does not use an API key or bearer token.",
   "already-stored": "That provider already has a stored key.",
   "several-keys": "That provider holds several keys.",
+  changed: "That provider changed while the key was being saved, so the key was not kept.",
   "credential-store-unavailable": "The host credential store is unavailable.",
 };
 

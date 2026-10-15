@@ -3,6 +3,13 @@ import { failureMessage, type OpenedLocalControlSession } from "./localControl";
 /** The credential broker's bound; a larger key is refused before it is sent. */
 const MAX_KEY_BYTES = 12 * 1_024;
 
+// Spelled out so each served route has a caller the wiring check can find.
+const PROVIDER_KEY_ROUTES = {
+  set: "/api/desktop/provider-credentials/set",
+  status: "/api/desktop/provider-credentials/status",
+  remove: "/api/desktop/provider-credentials/remove",
+} as const;
+
 export type ProviderKeyCliCommand =
   | {
       readonly action: "set";
@@ -76,7 +83,7 @@ export async function runProviderKeyCliCommand(
     body = { instance: command.instance, credential: read.key, replace: command.replace };
   }
   const response = await session.send({
-    path: `/api/desktop/provider-credentials/${command.action}`,
+    path: PROVIDER_KEY_ROUTES[command.action],
     method: "POST",
     body,
   });

@@ -5993,10 +5993,12 @@ mechanisms are:
     `key remove` clears the key and leaves the instance configured and
     unauthenticated. It also accepts the id of a removed instance, so a key a
     removal left behind can be cleared, because clearing a secret is never a
-    widening. The routes run one key change at a time, and a `set` checks the
-    registry again after the store: if the instance was removed while the key
-    was being written, it clears the key and refuses as `not-found`, so a
-    concurrent removal cannot leave a new orphaned secret behind.
+    widening. The routes run one key change at a time, and a `set` reads the
+    instance again after the store: if it was removed, or its version moved
+    (a new base URL or authentication from Settings) while the key was being
+    written, the key is cleared and the `set` refuses as `not-found` or
+    `changed`, so a concurrent change can neither leave an orphaned secret
+    nor send a key entered for one endpoint to another.
   - **Not built yet.** An `octant provider remove <instance>` that removes an
     instance and then clears its key, and journaling each store, replace, and
     remove as `requested` then `completed`/`failed` provider credential
