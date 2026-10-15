@@ -531,6 +531,7 @@ import type { CompatibleFetch } from "./providers/openAiCompatibleEndpoint";
 import { makeClaudeAgentSdkPort, type ClaudeAgentSdkPort } from "./providers/claudeAgentSdkPort";
 import type { ClaudeResumeIdentityPort } from "./providers/claudeDriver";
 import { makeClaudeProcessLive, type ClaudeProcessPort } from "./providers/claudeProcess";
+import { ClaudeResumeIdentityJournal } from "./providers/claudeResumeIdentityJournal";
 import { ClaudeResumeIdentityStore } from "./providers/claudeResumeIdentityStore";
 import { makeCodexProcessLive } from "./providers/codexProcess";
 import type { CodexProcessPort } from "./providers/codexProcess";
@@ -4326,7 +4327,14 @@ export function startOctantServer(
     const claudeSdk =
       options.claudeSdk ?? makeClaudeAgentSdkPort({ spawnClaudeCodeProcess: claudeProcess.spawn });
     const claudeResumeIdentityStore =
-      options.claudeResumeIdentityStore ?? new ClaudeResumeIdentityStore();
+      options.claudeResumeIdentityStore ??
+      new ClaudeResumeIdentityStore({
+        journal: new ClaudeResumeIdentityJournal({
+          persistence,
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        }),
+      });
     const ollamaHistoryStore =
       options.ollamaHistoryStore ??
       new JournalOllamaHistoryStore({
