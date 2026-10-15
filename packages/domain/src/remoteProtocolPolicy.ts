@@ -17,10 +17,44 @@ export interface HostHelloSignatureFacts {
   readonly securityFloor: number;
   readonly remoteOrigin: string;
   readonly nonce: string;
+  /** The nonce the client sent with its hello request, echoed by the host. */
+  readonly clientNonce?: string | undefined;
   readonly expiresAt: string;
 }
 
+/**
+ * The bytes a host signs for its hello. A hello that answers a client nonce
+ * is signed as version 2; one without (the reply to a client built before
+ * client nonces) keeps version 1, so those clients still verify it.
+ *
+ * Version 1 joins the fields with newlines. `displayName` and
+ * `serverBuildVersion` may themselves hold a newline, and the protocol
+ * version list has no fixed length, so two different hellos can join to the
+ * same text. Version 2 encodes the fields as one JSON array after the label:
+ * every string is quoted and escaped and the list is nested, so each payload
+ * decodes to exactly one hello.
+ */
 export function buildHostHelloSignaturePayload(hello: HostHelloSignatureFacts): string {
+  if (hello.clientNonce !== undefined) {
+    return [
+      "octant.host-hello.v2",
+      JSON.stringify([
+        hello.productId,
+        hello.hostId,
+        hello.displayName,
+        hello.hostKeyFingerprint,
+        hello.serverBuildVersion,
+        hello.supportedProtocolRange.min,
+        hello.supportedProtocolRange.max,
+        [...hello.authenticationProtocolVersions],
+        hello.securityFloor,
+        hello.remoteOrigin,
+        hello.nonce,
+        hello.clientNonce,
+        hello.expiresAt,
+      ]),
+    ].join("\n");
+  }
   return [
     "octant.host-hello.v1",
     hello.productId,

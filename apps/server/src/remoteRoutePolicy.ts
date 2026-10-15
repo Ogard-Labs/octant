@@ -107,7 +107,8 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     match: { kind: "exact", path: "/api/remote/hello" },
     surface: "pre-auth",
     methods: ["GET", "HEAD"],
-    allowQuery: false,
+    // Only the client's hello nonce; the gateway refuses any other query.
+    allowQuery: true,
     allowedRequestHeaders: [],
     maxResponseBytes: 4_096,
   },

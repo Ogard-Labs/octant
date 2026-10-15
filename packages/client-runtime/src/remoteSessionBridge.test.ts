@@ -345,6 +345,55 @@ describe("RemoteSessionBridge", () => {
     await expect(pairingStore.get(deviceKeyId)).resolves.toBeDefined();
   });
 
+  it("refuses a genuine, unexpired hello recorded from an earlier request and keeps the pairing", async () => {
+    // Something at the paired origin answers every hello with one the real
+    // host signed moments ago for another request, and passes the rest on.
+    let recorded: Record<string, unknown> | undefined;
+    const server = createFakeRemoteServer({ tamperHello: (hello) => recorded ?? hello });
+    recorded = await (
+      await server.fetch(`${ORIGIN}/api/remote/hello?clientNonce=${"r".repeat(43)}`)
+    ).json();
+    const pairingStore = createInMemoryDeviceKeyStore();
+    const { deviceKeyId, deviceId } = await registerWebCryptoDevice(server, pairingStore);
+    await pairingStore.updateMetadata(deviceKeyId, {
+      deviceId,
+      credentialGeneration: 1,
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
+    });
+    const bridge = createRemoteSessionBridge({ fetch: server.fetch, deviceKeyStore: pairingStore });
+    bridge.resume(ORIGIN);
+
+    await waitUntil(() => bridge.getState().kind === "unavailable");
+    expect(bridge.getState()).toMatchObject({
+      kind: "unavailable",
+      reason: "This host could not prove its identity, so Octant did not connect.",
+    });
+    expect(server.fetch).not.toHaveBeenCalledWith(
+      "https://mac.example.test/api/remote/auth/challenge",
+      expect.anything(),
+    );
+    await expect(pairingStore.get(deviceKeyId)).resolves.toBeDefined();
+  });
+
+  it("asks to update a host built before client nonces and keeps the pairing", async () => {
+    const { server, pairingStore, deviceKeyId, bridge } = await resumePairedDevice({
+      predatesClientNonces: true,
+    });
+
+    await waitUntil(() => bridge.getState().kind === "incompatible");
+    expect(bridge.getState()).toMatchObject({
+      kind: "incompatible",
+      reason:
+        "This host runs an older Octant that cannot prove its identity. Update Octant on the host, then connect again.",
+    });
+    expect(server.fetch).not.toHaveBeenCalledWith(
+      "https://mac.example.test/api/remote/hello",
+      expect.anything(),
+    );
+    await expect(pairingStore.get(deviceKeyId)).resolves.toBeDefined();
+  });
+
   it("connects a device paired before hellos carried a key, whose record holds only the fingerprint", async () => {
     // Records written before hellos were verified hold the fingerprint the
     // host stated; the host has always computed it as SHA-256 of the key's

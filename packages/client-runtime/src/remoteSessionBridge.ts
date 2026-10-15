@@ -7,6 +7,12 @@ import {
   type RemotePairingApproval,
 } from "./remotePairingClient";
 import { bindFetchPort } from "./bindFetchPort";
+import {
+  createHelloClientNonce,
+  HOST_HELLO_OUTDATED_STATUS,
+  HOST_OUTDATED_MESSAGE,
+  hostHelloUrl,
+} from "./hostHelloVerification";
 import { createPairingDeviceKeyAdapter } from "./pairingDeviceKeyAdapter";
 import type { ListenerOriginTrust } from "./remoteListenerTrust";
 import {
@@ -217,9 +223,13 @@ export function createRemoteSessionBridge(
   };
 
   const establishConnection = async (approval: RemotePairingApproval): Promise<void> => {
-    const helloResponse = await fetch(new URL("/api/remote/hello", approval.origin).toString(), {
+    const clientNonce = createHelloClientNonce();
+    const helloResponse = await fetch(hostHelloUrl(approval.origin, clientNonce), {
       method: "GET",
     });
+    if (helloResponse.status === HOST_HELLO_OUTDATED_STATUS) {
+      throw new RemoteConnectionError("incompatible", HOST_OUTDATED_MESSAGE);
+    }
     if (!helloResponse.ok) {
       throw new RemoteConnectionError("unavailable", "Remote host hello failed.");
     }
@@ -231,6 +241,7 @@ export function createRemoteSessionBridge(
       hello,
       { hostId: approval.hostId, hostKeyFingerprint: approval.hostKeyFingerprint },
       Date.now(),
+      clientNonce,
     );
     const facts = factsFromHello(hello);
     hostFacts = facts;

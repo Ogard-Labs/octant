@@ -150,14 +150,16 @@ own metadata and can sign out or self-revoke.
 
 Disconnected host data is explicitly stale and read-only; there are no
 offline authority queues and no durable offline browser cache. On reconnect,
-the client checks the host's signed hello against the host key fingerprint it
-recorded at pairing, re-negotiates, re-authenticates, fetches an authoritative
+the client asks for a hello signed over a one-time value it chose, checks it
+against the host key fingerprint it recorded at pairing, re-negotiates, re-authenticates, fetches an authoritative
 snapshot, and resumes streams from the last applied cursor. Gaps stop the
 stream and require a fresh snapshot — never skip ahead. A host restart renews
 and replays; a host ID or key change requires re-pairing. A host that cannot
 prove it holds the paired key is refused ("This host could not prove its
-identity") and the pairing is kept; a host too old to send its key is refused
-with a request to update it. Revocation or expiry cancels streams and blocks
+identity") and the pairing is kept, and so is a copy of an earlier hello
+replayed by something at the host's address. A host too old to sign the
+client's value is refused with a request to update it, so update the host
+with or before the devices that reach it. Revocation or expiry cancels streams and blocks
 background reconnect until the user starts a new pairing flow. Remote
 authentication failures remain generic to avoid revealing device lifecycle
 state over the network.
