@@ -1,6 +1,7 @@
 import { decodeUtcTimestamp } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  approvalPanelOutsideContent,
   paletteFor,
   retryFooterText,
   statusLineFrom,
@@ -214,5 +215,36 @@ describe("agent terminal UI model", () => {
         { title: "Later", status: "pending" },
       ],
     });
+  });
+});
+
+describe("approval panel outside content", () => {
+  const source = (sourceLabel: string) => ({
+    sourceLabel,
+    ingestionCount: 2,
+    firstIngestedAt: decodeUtcTimestamp("2026-09-05T11:00:00.000Z"),
+    lastIngestedAt: decodeUtcTimestamp("2026-09-05T11:30:00.000Z"),
+  });
+
+  it("keeps the note to the reason and one run of source names however many sources there are", () => {
+    const text = approvalPanelOutsideContent({
+      sourceCount: 11,
+      sources: [
+        "web-fetch",
+        "bash",
+        "read",
+        "grep",
+        "glob",
+        "mcp-tool",
+        "canvas",
+        "octant_browser",
+      ].map(source),
+    });
+    const lines = text.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("This thread took in outside content");
+    expect(lines[1]).toContain("Web pages (2x)");
+    expect(lines[1]).toContain("Pages seen in the browser (2x)");
+    expect(lines[1]).toContain("and 3 more");
   });
 });

@@ -17,7 +17,6 @@ import {
   commandAgentSession,
   contextPercent,
   approvalMayBeRemembered,
-  approvalOutsideContentText,
   decideAgentApproval,
   listAgentModels,
   listAgentThreads,
@@ -57,6 +56,7 @@ import {
   type TuiThemeId,
   type TuiToolLine,
   type TuiTranscriptEntry,
+  approvalPanelOutsideContent,
 } from "./agentTuiModel";
 import type { ChatNavigationThread } from "@octant/contracts";
 import type { OpenedLocalControlSession } from "./localControl";
@@ -652,7 +652,10 @@ class AgentScreen {
       this.#panel.title = " Approval ";
       this.#panel.borderColor = p.warning;
       const summary = approval.summary.replace(/^[a-z-]+: /, "");
-      const outside = approvalOutsideContentText(approval).join("\n");
+      const outside =
+        approval.outsideContent === undefined
+          ? ""
+          : approvalPanelOutsideContent(approval.outsideContent);
       const outsideBlock = outside === "" ? "" : `${outside}\n`;
       // A child's ask and a single-use ask (the thread took in outside content)
       // have no session-wide choice: the host would take it as a single approval.

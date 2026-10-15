@@ -1787,6 +1787,9 @@ flowchart LR
   web, phone, and terminal prompts say the thread took in outside content,
   so the call is approved once, and list them in the words the Clear review
   uses (one definition in `@octant/domain`), ahead of the answer controls.
+  The full-screen terminal panel cannot scroll, so it runs the source names
+  and counts together on a few wrapped lines and leaves times to the plain
+  prompt and `--json`.
   The collapsed Computer use strip never offers Approve for a marked
   approval: it offers a review that opens the full prompt. A
   Computer use approval the host gates as marked but whose sources it cannot
