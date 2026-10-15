@@ -221,6 +221,44 @@ thread each Rotate raises its own confirmation, and Allow input never covers
 it. Evidence and its log record `rotate to <orientation> completed` and
 nothing from the device. The agent tools do not offer Rotate.
 
+## Record screen
+
+The More menu offers **Record screen** only when the host's runtime snapshot
+lists `capabilities.recordScreen`; a host that predates the flag omits it and
+the item is left out, never shown disabled. While the snapshot's `recordings`
+lists this device the same item reads **Stop recording**. Both the Simulator
+and emulator hosts report it; the Simulator host does not wait on the desktop's
+device helper, because `simctl` alone records.
+
+Recording is two actions, `start-recording` and `stop-recording`. Starting
+launches the recorder and returns once it is running; the recorder outlives
+the action, and the host holds it until a stop, the time limit
+(`DEVICE_RECORDING_LIMIT_SECONDS`, 60 seconds), the device shutting down, or
+the host closing. On the Simulator the recorder is `xcrun simctl io <udid>
+recordVideo --codec=h264 --force <file>`, writing into the same host-private
+`0700` capture directory a screenshot uses, with that directory granted to
+this launch alone. On the emulator it is `adb shell screenrecord` with a time
+limit and a 1.5 Mbit/s bit rate, so a full-length recording stays under the
+artifact store's 16 MiB bound; stopping sends it SIGINT (`pkill -2`) so the
+device finishes the file, then reads it with `exec-out cat` and deletes the
+device copy. A recorder that ends within the first moments never started and
+reports `failed`.
+
+Stopping stores the video as a `recording` evidence artifact beside the log,
+under the same rules as a screenshot: the same artifact store and size bound,
+a file that is not an ordinary single-link media file, empty, or too large is
+refused as `failed` with a reason, and the raw file is removed whatever the
+outcome. A recording left by a host that stopped is swept with stale captures.
+
+Authority follows Open URL: only a person (`local-user` or `remote-device`)
+may ask for either action, an agent or the host is refused, `octant_apple`
+does not offer them, and the contract requires `requestedBy`. Starting is an
+effect: Plan refuses it, Full access starts it unasked, and an approval-gated
+thread confirms it ("Record this Simulator's screen?"); Allow input never
+covers it. Stopping ends what a person already approved, so it never asks
+again. Serving a saved recording back to the pane is not specified yet; the
+pane reports a stopped recording as saved evidence only.
+
 ## Managed device tools
 
 The iOS Simulator and Android emulator panes ride

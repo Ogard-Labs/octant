@@ -1,5 +1,8 @@
 import { Schema } from "effect";
 
+/** The longest a screen recording runs; one that long still fits the artifact store. */
+export const DEVICE_RECORDING_LIMIT_SECONDS = 60;
+
 /** The longest address Open URL sends to a device. */
 export const DEVICE_OPEN_URL_MAX_LENGTH = 2_048;
 
@@ -55,6 +58,7 @@ export type DeviceOrientation = typeof DeviceOrientation.Type;
  */
 export const DeviceHostCapabilities = Schema.Struct({
   openUrl: Schema.optional(Schema.Boolean),
+  recordScreen: Schema.optional(Schema.Boolean),
   /** Volume up and down, sent as the `volume-up` and `volume-down` hardware keys. */
   volume: Schema.optional(Schema.Boolean),
   rotate: Schema.optional(Schema.Boolean),

@@ -327,6 +327,92 @@ describe("Android toolchain routes", () => {
     });
   });
 
+  describe("Screen recording", () => {
+    const recording = {
+      actionId: "60000000-0000-4000-8000-000000000018",
+      correlationId: "60000000-0000-4000-8000-000000000019",
+      authority,
+      ...scope,
+      kind: "start-recording",
+      emulatorId: "Pixel_8_API_34",
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      timeoutMs: 30_000,
+      approval: { kind: "approved", approvalId: "60000000-0000-4000-8000-00000000001b" },
+    };
+    function routes(resolveContext: ReturnType<typeof vi.fn>) {
+      const service = {
+        discover: vi.fn(),
+        execute: vi.fn(async () => ({
+          actionId: recording.actionId,
+          correlationId: recording.correlationId,
+          authority,
+          kind: "start-recording",
+          outcome: "succeeded",
+          emulatorId: recording.emulatorId,
+          requestedBy: recording.requestedBy,
+          diagnostics: [],
+          artifacts: [],
+          cleanup: "complete",
+          durationMs: 5,
+          completedAt: "2026-10-14T20:00:01.000Z",
+        })),
+        cancel: vi.fn(),
+        snapshot: vi.fn(),
+        readScreenshotArtifact: vi.fn(),
+        watchScreen: vi.fn(),
+      };
+      const handler = createAndroidToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        resolveContext,
+        service,
+        now: () => 2,
+      });
+      return { handler, service };
+    }
+
+    it("hands start and stop to the host with the window's authority", async () => {
+      const { handler, service } = routes(vi.fn(async () => context));
+
+      for (const kind of ["start-recording", "stop-recording"]) {
+        const response = await handler(
+          request({ kind: "android-action-request", request: { ...recording, kind } }),
+        );
+        expect(response?.status, kind).toBe(200);
+        expect(service.execute).toHaveBeenLastCalledWith(
+          expect.objectContaining({ kind }),
+          context,
+        );
+      }
+    });
+
+    it("refuses a recording nobody asked for before authority is checked or the host is reached", async () => {
+      const resolveContext = vi.fn(async () => context);
+      const { handler, service } = routes(resolveContext);
+
+      const response = await handler(
+        request({
+          kind: "android-action-request",
+          request: { ...recording, requestedBy: undefined },
+        }),
+      );
+
+      expect(response?.status).toBe(400);
+      expect(resolveContext).not.toHaveBeenCalled();
+      expect(service.execute).not.toHaveBeenCalled();
+    });
+
+    it("refuses a recording for a thread the window has no authority over", async () => {
+      const { handler, service } = routes(vi.fn(async () => undefined));
+
+      const response = await handler(
+        request({ kind: "android-action-request", request: recording }),
+      );
+
+      expect(response?.status).toBe(403);
+      expect(service.execute).not.toHaveBeenCalled();
+    });
+  });
+
   it("tells the pane which emulators the thread may send input to without a new approval", async () => {
     const snapshot = {
       sequence: 4,

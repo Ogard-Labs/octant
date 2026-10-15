@@ -103,6 +103,10 @@ export function evaluateAppleBuildRequest(
   return { kind: "allowed" };
 }
 
+export function isAppleScreenRecordingKind(kind: AppleSimulatorRequest["kind"]): boolean {
+  return kind === "start-recording" || kind === "stop-recording";
+}
+
 export function evaluateAppleSimulatorRequest(
   request: AppleSimulatorRequest,
   scope: AppleExecutionScope,
@@ -112,7 +116,10 @@ export function evaluateAppleSimulatorRequest(
   // stay available under a read-only posture. Booting, shutting down,
   // terminating an app, and injecting tap/text/keys do change it, and go
   // through approval like any other Code effect.
-  const readOnly = request.kind === "logs" || request.kind === "screenshot";
+  // Stopping a recording ends what a person already approved starting, so it
+  // never asks again; starting one writes the screen to disk and does.
+  const readOnly =
+    request.kind === "logs" || request.kind === "screenshot" || request.kind === "stop-recording";
   const scoped = evaluateScope(
     request,
     scope,
@@ -124,16 +131,21 @@ export function evaluateAppleSimulatorRequest(
     (isAppleSimulatorInputKind(request.kind) ||
       isAppleSimulatorOpenInputKind(request.kind) ||
       request.kind === "open-url" ||
-      request.kind === "rotate") &&
+      request.kind === "rotate" ||
+      isAppleScreenRecordingKind(request.kind)) &&
     request.requestedBy === undefined
   ) {
     return { kind: "denied", reason: "actor-required" };
   }
   // Repairing input restarts the Simulator's home screen and closes its apps,
-  // and Open URL and Rotate are offered only in the pane. Only a person may
-  // ask for any of them; an agent or the host never does it for them.
+  // and Open URL, Rotate and screen recording are offered only in the pane.
+  // Only a person may ask for any of them; an agent or the host never does it
+  // for them.
   if (
-    (request.kind === "repair-input" || request.kind === "open-url" || request.kind === "rotate") &&
+    (request.kind === "repair-input" ||
+      request.kind === "open-url" ||
+      request.kind === "rotate" ||
+      isAppleScreenRecordingKind(request.kind)) &&
     request.requestedBy?.kind !== "local-user" &&
     request.requestedBy?.kind !== "remote-device"
   ) {
@@ -159,6 +171,7 @@ export function evaluateAppleSimulatorRequest(
       request.kind === "logs" ||
       request.kind === "screenshot" ||
       request.kind === "open-url" ||
+      request.kind === "start-recording" ||
       request.kind === "rotate" ||
       isAppleSimulatorInputKind(request.kind) ||
       isAppleSimulatorOpenInputKind(request.kind)) &&

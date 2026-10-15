@@ -435,6 +435,53 @@ describe("Apple runtime contracts", () => {
     expect(() => decode({ ...rotate, orientation: "upside-down" })).toThrow();
   });
 
+  it("decodes screen recording only with the person who asked, and lists live recordings", () => {
+    const decode = contracts.decodeAppleSimulatorRequest as (value: unknown) => any;
+    const base = {
+      actionId: "10000000-0000-4000-8000-000000000001",
+      correlationId: "10000000-0000-4000-8000-000000000002",
+      authority: {
+        hostId: "10000000-0000-4000-8000-000000000003",
+        mode: "code",
+        projectId: "10000000-0000-4000-8000-000000000004",
+        providerInstanceId: "10000000-0000-4000-8000-000000000007",
+        extension: { kind: "core" },
+      },
+      threadId: "10000000-0000-4000-8000-000000000008",
+      checkoutId: "10000000-0000-4000-8000-000000000009",
+      simulatorId: "10000000-0000-4000-8000-000000000010",
+      timeoutMs: 30000,
+      approval: { kind: "approved", approvalId: "10000000-0000-4000-8000-000000000011" },
+      requestedBy: { kind: "local-user", actorId: "10000000-0000-4000-8000-000000000012" },
+    };
+    for (const kind of ["start-recording", "stop-recording"]) {
+      expect(decode({ ...base, kind }).kind).toBe(kind);
+      expect(() => decode({ ...base, kind, requestedBy: undefined })).toThrow();
+    }
+    const decodeSnapshot = contracts.decodeAppleRuntimeSnapshot as (value: unknown) => any;
+    const snapshot = {
+      sequence: 1,
+      snapshotAt: "2026-10-14T20:00:00.000Z",
+      toolchain: {
+        toolchainId: "10000000-0000-4000-8000-000000000012",
+        available: true,
+        discoveredAt: "2026-10-14T20:00:00.000Z",
+      },
+      simulators: [],
+      active: [],
+      recentEvidence: [],
+      capabilities: { recordScreen: true },
+      recordings: [
+        {
+          simulatorId: "10000000-0000-4000-8000-000000000010",
+          startedAt: "2026-10-14T20:00:00.000Z",
+        },
+      ],
+    };
+    expect(decodeSnapshot(snapshot).recordings).toHaveLength(1);
+    expect(decodeSnapshot(snapshot).capabilities).toEqual({ recordScreen: true });
+  });
+
   it("tells the pane which newer device actions the host performs", () => {
     const decodeSnapshot = contracts.decodeAppleRuntimeSnapshot as (value: unknown) => any;
     const older = {

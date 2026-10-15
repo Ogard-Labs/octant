@@ -99,4 +99,13 @@ describe("AndroidEmulatorRequest", () => {
       decodeAndroidEmulatorRequest({ ...openUrl, url: "content://contacts/people/1" }),
     ).toThrow();
   });
+
+  it("decodes screen recording only with the person who asked", () => {
+    for (const kind of ["start-recording", "stop-recording"]) {
+      expect(decodeAndroidEmulatorRequest({ ...base, kind }).kind).toBe(kind);
+      expect(() =>
+        decodeAndroidEmulatorRequest({ ...base, kind, requestedBy: undefined }),
+      ).toThrow();
+    }
+  });
 });

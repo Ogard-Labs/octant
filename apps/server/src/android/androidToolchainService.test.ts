@@ -591,6 +591,7 @@ describe("AndroidToolchainService", () => {
       const { service } = openUrlService();
       expect(service.snapshot(context).capabilities).toEqual({
         openUrl: true,
+        recordScreen: true,
         volume: true,
         rotate: true,
       });
@@ -684,6 +685,194 @@ describe("AndroidToolchainService", () => {
       );
       expect(byHost.outcome).toBe("unauthorized");
       expect(rotated()).toEqual([]);
+    });
+  });
+
+  describe("Screen recording", () => {
+    const video = Uint8Array.from([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 1, 2, 3, 4, 5, 6, 7, 8]);
+    const startId = "30000000-0000-4000-8000-0000000000a1";
+    const stopId = "30000000-0000-4000-8000-0000000000a2";
+
+    function recordingService(options: { readonly endsAtOnce?: boolean } = {}) {
+      const discovery = discoveryExecutor();
+      let finishRecording: (() => void) | undefined;
+      const execute = vi.fn(
+        async (input: { readonly argv: ReadonlyArray<string> }, signal?: AbortSignal) => {
+          if (input.argv.includes("pkill")) {
+            finishRecording?.();
+            return processResult("");
+          }
+          if (input.argv.includes("screenrecord")) {
+            if (options.endsAtOnce === true) return { ...processResult(""), exitCode: 1 };
+            await new Promise<void>((resolve) => {
+              finishRecording = resolve;
+              signal?.addEventListener("abort", () => resolve());
+            });
+            return processResult("");
+          }
+          if (input.argv.includes("reboot")) return processResult("");
+          if (input.argv.includes("cat")) return { ...processResult(""), stdout: video };
+          if (input.argv.includes("rm")) return processResult("");
+          return await discovery(input);
+        },
+      );
+      const artifacts = new Map<string, Uint8Array>();
+      const service = new AndroidToolchainService({
+        execute: execute as never,
+        access: async () => undefined,
+        environment: () => ({ ANDROID_HOME: "/sdk" }),
+        writeArtifact: async (reference: string, bytes: Uint8Array) => {
+          artifacts.set(reference, bytes);
+        },
+        readArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-10-14T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      return { service, artifacts, execute };
+    }
+
+    const approved = { kind: "approved", approvalId: ids.approval };
+
+    it("records until stopped, then keeps the video as evidence like a screenshot", async () => {
+      const { service, artifacts, execute } = recordingService();
+      const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: true };
+      await service.discover(discoveryRequest, gated);
+
+      const started = await service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor, approval: approved }),
+        gated,
+      );
+      expect(started.outcome).toBe("succeeded");
+      expect(service.snapshot(gated).recordings).toEqual([
+        { emulatorId: "Pixel_8_API_34", startedAt: "2026-10-14T20:00:00.000Z" },
+      ]);
+
+      const stopped = await service.execute(
+        action("stop-recording", { actionId: stopId, requestedBy: actor }),
+        gated,
+      );
+
+      expect(stopped.outcome).toBe("succeeded");
+      expect(stopped.artifacts).toContainEqual({
+        kind: "recording",
+        reference: `android-recording-${stopId}`,
+      });
+      expect(artifacts.get(`android-recording-${stopId}`)).toEqual(video);
+      expect(service.snapshot(gated).recordings).toEqual([]);
+      // The device copy is removed, and the recording was asked to finish, not killed.
+      const argvs = execute.mock.calls.map(([input]) => input.argv.join(" "));
+      expect(argvs.some((line) => line.includes("shell pkill -2 screenrecord"))).toBe(true);
+      expect(argvs.some((line) => line.includes("shell rm -f /sdcard/octant-recording-"))).toBe(
+        true,
+      );
+    });
+
+    it("launches one recorder when two starts arrive together", async () => {
+      const { service, execute } = recordingService();
+      await service.discover(discoveryRequest, context);
+
+      const [one, two] = await Promise.all([
+        service.execute(
+          action("start-recording", { actionId: startId, requestedBy: actor }),
+          context,
+        ),
+        service.execute(
+          action("start-recording", {
+            actionId: "30000000-0000-4000-8000-0000000000a3",
+            requestedBy: actor,
+          }),
+          context,
+        ),
+      ]);
+
+      expect([one.outcome, two.outcome].sort()).toEqual(["failed", "succeeded"]);
+      expect(
+        execute.mock.calls.filter(
+          ([input]) => input.argv.includes("screenrecord") && input.argv.includes("--time-limit"),
+        ),
+      ).toHaveLength(1);
+      await service.close();
+    });
+
+    it("finishes the recording and deletes its device file before a shutdown or close", async () => {
+      const removed = (execute: ReturnType<typeof recordingService>["execute"]) =>
+        execute.mock.calls.filter(([input]) => input.argv.includes("rm")).length;
+
+      const shuttingDown = recordingService();
+      await shuttingDown.service.discover(discoveryRequest, context);
+      await shuttingDown.service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor }),
+        context,
+      );
+      await shuttingDown.service.execute(action("shutdown"), context);
+      expect(removed(shuttingDown.execute)).toBe(1);
+      expect(shuttingDown.service.snapshot(context).recordings).toEqual([]);
+
+      const closing = recordingService();
+      await closing.service.discover(discoveryRequest, context);
+      await closing.service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor }),
+        context,
+      );
+      await closing.service.close();
+      expect(removed(closing.execute)).toBe(1);
+    });
+
+    it("reports a recording that never started and a stop with nothing to stop", async () => {
+      const { service } = recordingService({ endsAtOnce: true });
+      await service.discover(discoveryRequest, context);
+
+      const started = await service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor }),
+        context,
+      );
+      expect(started.outcome).toBe("failed");
+      expect(service.snapshot(context).recordings).toEqual([]);
+
+      const stopped = await service.execute(
+        action("stop-recording", { actionId: stopId, requestedBy: actor }),
+        context,
+      );
+      expect(stopped.outcome).toBe("failed");
+    });
+
+    it("asks before starting, refuses Plan and anyone but a person, and never asks again to stop", async () => {
+      const { service, execute } = recordingService();
+      const gated = {
+        ...context,
+        executionPolicy: "approval-gated" as const,
+        approvalValid: false,
+      };
+      await service.discover(discoveryRequest, gated);
+
+      const unapproved = await service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor }),
+        gated,
+      );
+      expect(unapproved.outcome).toBe("unauthorized");
+
+      const planned = await service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor, approval: approved }),
+        { ...context, executionPolicy: "plan" as const },
+      );
+      expect(planned.outcome).toBe("unauthorized");
+
+      const byHost = await service.execute(
+        action("start-recording", {
+          actionId: startId,
+          requestedBy: { ...actor, kind: "system" },
+        }),
+        context,
+      );
+      expect(byHost.outcome).toBe("unauthorized");
+      expect(execute.mock.calls.some(([input]) => input.argv.includes("screenrecord"))).toBe(false);
+
+      const stop = await service.execute(
+        action("stop-recording", { actionId: stopId, requestedBy: actor }),
+        gated,
+      );
+      expect(stop.outcome).not.toBe("unauthorized");
     });
   });
 

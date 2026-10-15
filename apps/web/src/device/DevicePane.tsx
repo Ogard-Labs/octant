@@ -40,6 +40,13 @@ export interface DevicePaneProps {
    * More has no Open URL at all; it is never shown disabled.
    */
   readonly canOpenUrl?: boolean;
+  /**
+   * The host reported that it can record this device's screen. Without it More
+   * has no Record screen at all; it is never shown disabled.
+   */
+  readonly canRecordScreen?: boolean;
+  /** The host is recording this device now, so More offers Stop recording. */
+  readonly recording?: boolean;
   /** The host reported that it can rotate this device; absent, More has no Rotate. */
   readonly canRotate?: boolean;
   /**
@@ -97,6 +104,7 @@ export function DevicePane(props: DevicePaneProps) {
 
   const act = (action: DeviceAction) => props.onAction?.(action);
   const canOpenUrl = live !== undefined && canAct && props.canOpenUrl === true;
+  const canRecordScreen = live !== undefined && canAct && props.canRecordScreen === true;
   const canRotate = live !== undefined && canAct && props.canRotate === true;
   const approvalWanted = props.needsApproval && live !== undefined && canAct;
   const line = lineFor({
@@ -162,6 +170,8 @@ export function DevicePane(props: DevicePaneProps) {
         view.screen.kind === "stream" &&
         view.screen.size.width > view.screen.size.height;
       act({ kind: "rotate", orientation: sitsWide ? "portrait" : "landscape" });
+    } else if (item === "record-screen") {
+      act({ kind: props.recording === true ? "stop-recording" : "start-recording" });
     } else if (item === "lock") enqueue({ kind: "key-press", key: "lock" }, false);
     else if (item === "volume-up" || item === "volume-down") {
       enqueue({ kind: "key-press", key: item }, false);
@@ -188,6 +198,8 @@ export function DevicePane(props: DevicePaneProps) {
           openUrl: canOpenUrl,
           rotate: canRotate,
           volume: hardware && props.canVolume === true,
+          recordScreen: canRecordScreen,
+          recording: props.recording === true,
           switchDevice: canAct && choosable.length > 0 && view.kind !== "setup",
           stopLiveView:
             live !== undefined &&

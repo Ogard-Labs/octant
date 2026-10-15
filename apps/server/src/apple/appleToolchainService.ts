@@ -9,6 +9,7 @@ import {
   decodeAppleSimulatorRecord,
   decodeAppleToolchainDiscovery,
   decodeAppleWorkspaceDiscovery,
+  DEVICE_RECORDING_LIMIT_SECONDS,
   sameToolActionAuthority,
   type AppleActionProgress,
   type AppleActionRequest,
@@ -306,6 +307,22 @@ export class AppleToolchainService {
   // devices and then probes the project, which can take seconds; a boot or
   // shutdown that finishes in between is newer than that list and must not be
   // put back by it.
+  // Screen recordings this host is making. The `simctl` process outlives the
+  // action that started it; stopping aborts it and collects the file.
+  readonly #recordings = new Map<
+    string,
+    {
+      readonly simulatorId: AppleSimulatorRecord["simulatorId"];
+      readonly threadId: AppleExecutionContext["threadId"];
+      readonly checkoutId: AppleExecutionContext["checkoutId"];
+      readonly startedAt: string;
+      readonly path: string;
+      readonly controller: AbortController;
+      readonly finished: Promise<AppleProcessResult>;
+    }
+  >();
+  // Simulators whose recorder is still starting; a second start must not launch another.
+  readonly #recordingStarts = new Set<string>();
   #stateChangesDuringDiscovery: Array<{
     readonly simulatorId: AppleSimulatorRecord["simulatorId"];
     readonly state: AppleSimulatorRecord["state"];
@@ -574,10 +591,19 @@ export class AppleToolchainService {
       // What this host can do beyond the original actions; the pane offers
       // an item only once it is listed here.
       // Volume and Rotate ride the desktop's device helper, like every hardware key.
+      // Recording is `simctl` alone, so it does not wait on that helper.
       capabilities: {
         openUrl: true,
+        recordScreen: true,
         ...(this.#options.injectSimulatorInput === undefined ? {} : { volume: true, rotate: true }),
       },
+      recordings: [...this.#recordings.values()]
+        .filter(
+          (recording) =>
+            String(recording.threadId) === String(context.threadId) &&
+            String(recording.checkoutId) === String(context.checkoutId),
+        )
+        .map(({ simulatorId, startedAt }) => ({ simulatorId, startedAt })),
       active: [...this.#active.values()]
         .filter((active) => contextMatches(active.context, context))
         .map(({ progress }) => progress),
@@ -688,7 +714,20 @@ export class AppleToolchainService {
   async close(): Promise<void> {
     const activeActions = [...this.#active.values()];
     for (const active of activeActions) active.controller.abort();
-    await Promise.allSettled(activeActions.map(({ done }) => done));
+    const recordings = [...this.#recordings.values()];
+    this.#recordings.clear();
+    for (const recording of recordings) recording.controller.abort();
+    await Promise.allSettled([
+      ...activeActions.map(({ done }) => done),
+      ...recordings.map(({ finished }) => finished),
+    ]);
+    // An unfinished recording is the person's screen on disk; none outlives the host.
+    await Promise.allSettled(
+      recordings.map(async ({ path }) => {
+        this.#capturesInProgress.delete(path);
+        await rm(path, { force: true });
+      }),
+    );
   }
 
   #findDiscovery(
@@ -783,6 +822,9 @@ export class AppleToolchainService {
           request.timeoutMs,
           signal,
         );
+        // Only a confirmed shutdown ends the recording; a failed one leaves the
+        // Simulator booted and the recording still stoppable.
+        if (succeeded(terminal)) await this.#discardRecording(request.simulatorId);
       } else if (request.kind === "terminate") {
         this.#advance(active, "terminating");
         terminal = await this.#command(
@@ -842,7 +884,7 @@ export class AppleToolchainService {
             : unavailableInputResult("The screen-capture directory is unavailable on this host.");
           exitedCleanly = terminal.termination === "exited" && !terminal.cleanupUncertain;
           if (succeeded(terminal)) {
-            const bytes = await readCapture(capturePath);
+            const bytes = await readCapture(capturePath, "png");
             if (bytes === undefined) {
               // simctl exited 0 without the file it was asked for: an empty
               // frame would render as nothing and taps on it would be dropped.
@@ -919,6 +961,49 @@ export class AppleToolchainService {
           context,
           request.timeoutMs,
           signal,
+        );
+      } else if (request.kind === "start-recording") {
+        this.#advance(active, "capturing-screen");
+        const started = await this.#startRecording(request, context);
+        const note = {
+          severity: "note" as const,
+          message: started.started ? "start-recording completed" : started.reason,
+        };
+        const logReference = `apple-log-${request.actionId}`;
+        await this.#writeArtifact(logReference, [new TextEncoder().encode(`${note.message}\n`)]);
+        this.#advance(active, "completed", "completed");
+        return evidence(
+          request,
+          started.started ? "succeeded" : "failed",
+          startedAt,
+          this.#options.now(),
+          [note],
+          [{ kind: "log", reference: logReference }],
+          "complete",
+        );
+      } else if (request.kind === "stop-recording") {
+        this.#advance(active, "capturing-screen");
+        const stopped = await this.#stopRecording(request, context);
+        const note = {
+          severity: "note" as const,
+          message: stopped.saved ? "stop-recording completed" : stopped.reason,
+        };
+        const logReference = `apple-log-${request.actionId}`;
+        await this.#writeArtifact(logReference, [new TextEncoder().encode(`${note.message}\n`)]);
+        this.#advance(active, "completed", "completed");
+        return evidence(
+          request,
+          stopped.saved ? "succeeded" : "failed",
+          startedAt,
+          this.#options.now(),
+          [note],
+          [
+            { kind: "log", reference: logReference },
+            ...(stopped.saved
+              ? [{ kind: "recording" as const, reference: stopped.reference }]
+              : []),
+          ],
+          "complete",
         );
       } else if (request.kind === "open-url") {
         const url = request.url;
@@ -1149,6 +1234,126 @@ export class AppleToolchainService {
         [{ kind: "log", reference: logReference }],
         "uncertain",
       );
+    }
+  }
+
+  async #startRecording(
+    request: AppleSimulatorRequest,
+    context: AppleExecutionContext,
+  ): Promise<{ readonly started: true } | { readonly started: false; readonly reason: string }> {
+    const key = String(request.simulatorId);
+    if (this.#recordings.has(key) || this.#recordingStarts.has(key)) {
+      return { started: false, reason: "This Simulator is already being recorded." };
+    }
+    this.#recordingStarts.add(key);
+    try {
+      return await this.#launchRecording(request, context, key);
+    } finally {
+      this.#recordingStarts.delete(key);
+    }
+  }
+
+  async #launchRecording(
+    request: AppleSimulatorRequest,
+    context: AppleExecutionContext,
+    key: string,
+  ): Promise<{ readonly started: true } | { readonly started: false; readonly reason: string }> {
+    try {
+      await mkdir(this.#captureDirectory, { recursive: true, mode: 0o700 });
+    } catch {
+      return { started: false, reason: "The recording directory is unavailable on this host." };
+    }
+    // Same host-private directory as a screenshot, so a recording of the raw
+    // screen is never readable by an unrelated confined command.
+    const path = join(
+      this.#captureDirectory,
+      `${this.#capturePrefix}${request.actionId}-${randomUUID()}.mov`,
+    );
+    this.#capturesInProgress.add(path);
+    const controller = new AbortController();
+    const finished = this.#command(
+      [
+        "xcrun",
+        "simctl",
+        "io",
+        request.simulatorId,
+        "recordVideo",
+        "--codec=h264",
+        "--force",
+        path,
+      ],
+      context,
+      DEVICE_RECORDING_LIMIT_SECONDS * 1_000,
+      controller.signal,
+      { additionalWriteRoots: [this.#captureDirectory] },
+    ).catch(() => unavailableInputResult("The recording could not be started."));
+    // A recording that ends at once never started: report why, keep nothing.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const early = await Promise.race([
+      finished,
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), RECORDING_START_GRACE_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (early !== undefined) {
+      this.#capturesInProgress.delete(path);
+      await rm(path, { force: true }).catch(() => undefined);
+      return { started: false, reason: "The Simulator did not start recording." };
+    }
+    this.#recordings.set(key, {
+      simulatorId: request.simulatorId,
+      threadId: context.threadId,
+      checkoutId: context.checkoutId,
+      startedAt: this.#options.now(),
+      path,
+      controller,
+      finished,
+    });
+    return { started: true };
+  }
+
+  /** A Simulator that shut down took its recording with it; nothing of it is kept. */
+  async #discardRecording(simulatorId: AppleSimulatorRecord["simulatorId"]): Promise<void> {
+    const recording = this.#recordings.get(String(simulatorId));
+    if (recording === undefined) return;
+    this.#recordings.delete(String(simulatorId));
+    recording.controller.abort();
+    await recording.finished;
+    this.#capturesInProgress.delete(recording.path);
+    await rm(recording.path, { force: true }).catch(() => undefined);
+  }
+
+  async #stopRecording(
+    request: AppleSimulatorRequest,
+    context: AppleExecutionContext,
+  ): Promise<
+    | { readonly saved: true; readonly reference: string }
+    | { readonly saved: false; readonly reason: string }
+  > {
+    const key = String(request.simulatorId);
+    const recording = this.#recordings.get(key);
+    if (
+      recording === undefined ||
+      String(recording.threadId) !== String(context.threadId) ||
+      String(recording.checkoutId) !== String(context.checkoutId)
+    ) {
+      return { saved: false, reason: "No recording is running on this Simulator." };
+    }
+    this.#recordings.delete(key);
+    recording.controller.abort();
+    try {
+      await recording.finished;
+      const bytes = await readCapture(recording.path, "recording");
+      if (bytes === undefined) {
+        return { saved: false, reason: "The recording was empty or larger than Octant keeps." };
+      }
+      const reference = `apple-recording-${request.actionId}`;
+      await this.#writeArtifact(reference, [bytes]);
+      return { saved: true, reference };
+    } finally {
+      this.#capturesInProgress.delete(recording.path);
+      await rm(recording.path, { force: true }).catch(() => undefined);
     }
   }
 
@@ -1990,7 +2195,7 @@ async function sweepStaleCaptures(
   }
   await Promise.all(
     names
-      .filter((name) => name.startsWith(prefix) && name.endsWith(".png"))
+      .filter((name) => name.startsWith(prefix) && /\.(png|mov)$/.test(name))
       .map(async (name) => {
         const path = join(directory, name);
         if (inProgress.has(path)) return;
@@ -2010,6 +2215,9 @@ async function sweepStaleCaptures(
  * rather than thrown past the action as "interrupted".
  */
 const MAX_CAPTURE_BYTES = MAX_APPLE_ARTIFACT_BYTES;
+const MEDIA_SIGNATURE = [0x66, 0x74, 0x79, 0x70] as const;
+const MINIMUM_CAPTURE_BYTES = 16;
+const RECORDING_START_GRACE_MS = 750;
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
 
 /**
@@ -2021,7 +2229,10 @@ const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
  * descriptor; and only a PNG is kept. A link to a host file, a second name for
  * someone else's file, or any other content reads as no capture at all.
  */
-async function readCapture(path: string): Promise<Uint8Array | undefined> {
+async function readCapture(
+  path: string,
+  content: "png" | "recording",
+): Promise<Uint8Array | undefined> {
   let handle: FileHandle | undefined;
   try {
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -2048,7 +2259,13 @@ async function readCapture(path: string): Promise<Uint8Array | undefined> {
     }
     const beyond = await handle.read(new Uint8Array(1), 0, 1, filled);
     if (beyond.bytesRead > 0) return undefined;
-    return PNG_SIGNATURE.every((byte, index) => bytes[index] === byte) ? bytes : undefined;
+    // Only the content that was asked for is kept: a PNG for a screenshot, an
+    // ISO media file (`ftyp` box) for a recording.
+    const expected =
+      content === "png"
+        ? PNG_SIGNATURE.every((byte, index) => bytes[index] === byte)
+        : MEDIA_SIGNATURE.every((byte, index) => bytes[index + 4] === byte);
+    return expected ? bytes : undefined;
   } catch {
     return undefined;
   } finally {

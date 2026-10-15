@@ -66,6 +66,8 @@ export const AndroidEmulatorActionKind = Schema.Literal(
   "install",
   "launch",
   "open-url",
+  "start-recording",
+  "stop-recording",
   "rotate",
 );
 export type AndroidEmulatorActionKind = typeof AndroidEmulatorActionKind.Type;
@@ -154,6 +156,9 @@ export const AndroidEmulatorRequest = Schema.Struct({
       if (request.kind === "rotate") {
         return request.requestedBy !== undefined && request.orientation !== undefined;
       }
+      if (request.kind === "start-recording" || request.kind === "stop-recording") {
+        return request.requestedBy !== undefined;
+      }
       return true;
     }),
   );
@@ -188,7 +193,7 @@ export const AndroidDiagnostic = Schema.Struct({
 export type AndroidDiagnostic = typeof AndroidDiagnostic.Type;
 
 export const AndroidEvidenceArtifact = Schema.Struct({
-  kind: Schema.Literal("log", "screenshot", "application"),
+  kind: Schema.Literal("log", "screenshot", "application", "recording"),
   reference: opaqueReference,
 }).annotations(strict);
 export type AndroidEvidenceArtifact = typeof AndroidEvidenceArtifact.Type;
@@ -220,7 +225,9 @@ export const AndroidEmulatorEvidence = Schema.Struct({
         evidence.kind === "type-text" ||
         evidence.kind === "key-press" ||
         evidence.kind === "open-url" ||
-        evidence.kind === "rotate"
+        evidence.kind === "rotate" ||
+        evidence.kind === "start-recording" ||
+        evidence.kind === "stop-recording"
       ) {
         return evidence.requestedBy !== undefined;
       }
@@ -271,6 +278,12 @@ export const AndroidRuntimeSnapshot = Schema.Struct({
     }).annotations(strict),
   ),
   capabilities: Schema.optional(DeviceHostCapabilities),
+  /** Emulators this host is recording right now, so the pane offers Stop instead of Record. */
+  recordings: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ emulatorId: AndroidEmulatorId, startedAt: UtcTimestamp }).annotations(strict),
+    ).pipe(Schema.maxItems(256)),
+  ),
 }).annotations(strict);
 export type AndroidRuntimeSnapshot = typeof AndroidRuntimeSnapshot.Type;
 

@@ -7,11 +7,13 @@ import {
   EyeOff,
   House,
   Keyboard,
+  Circle,
   Link,
   Lock,
   Power,
   RotateCw,
   Smartphone,
+  Square,
   Volume1,
   Volume2,
 } from "lucide-react";
@@ -34,6 +36,10 @@ export interface DeviceToolbarControls {
   readonly typeText: boolean;
   /** Only once the host reports that it can open an address on this device. */
   readonly openUrl: boolean;
+  /** Only once the host reports that it can record this device's screen. */
+  readonly recordScreen: boolean;
+  /** A recording is running, so the item stops it instead of starting one. */
+  readonly recording: boolean;
   /** Only once the host reports that it can rotate this device. */
   readonly rotate: boolean;
   /** Only once the host reports that it can press the volume keys. */
@@ -137,6 +143,7 @@ export function DeviceToolbar(props: {
 export type DeviceMenuItem =
   | "type-text"
   | "open-url"
+  | "record-screen"
   | "rotate"
   | "lock"
   | "volume-up"
@@ -163,6 +170,13 @@ function deviceMenuItems(props: {
   }
   if (controls.rotate) {
     items.push({ value: "rotate", label: "Rotate", icon: <RotateCw size={16} /> });
+  }
+  if (controls.recordScreen) {
+    items.push({
+      value: "record-screen",
+      label: controls.recording ? "Stop recording" : "Record screen",
+      icon: controls.recording ? <Square size={16} /> : <Circle size={16} />,
+    });
   }
   if (controls.hardware && !props.wide) {
     items.push({ value: "lock", label: "Lock", icon: <Lock size={16} /> });

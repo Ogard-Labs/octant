@@ -1970,9 +1970,187 @@ describe("AppleToolchainService Open URL", () => {
     expect(openedWith()).toEqual([]);
   });
 
-  it("tells the pane this host can open an address", async () => {
+  it("tells the pane this host can open an address and record the screen", async () => {
     const { service } = openUrlService({});
-    expect(service.snapshot(context).capabilities).toEqual({ openUrl: true });
+    expect(service.snapshot(context).capabilities).toEqual({ openUrl: true, recordScreen: true });
+  });
+});
+
+describe("AppleToolchainService screen recording", () => {
+  const actor = {
+    kind: "local-user" as const,
+    actorId: "30000000-0000-4000-8000-000000000099" as never,
+  };
+  const startId = "30000000-0000-4000-8000-0000000000a1" as never;
+  const stopId = "30000000-0000-4000-8000-0000000000a2" as never;
+
+  async function recordingService(
+    options: { readonly endsAtOnce?: boolean; readonly shutdownExitCode?: number } = {},
+  ) {
+    const discovery = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-recording-test-"));
+    const artifacts = new Map<string, Uint8Array>();
+    let recordedPath: string | undefined;
+    const execute = vi.fn(
+      async (input: { readonly argv: ReadonlyArray<string> }, signal?: AbortSignal) => {
+        if (input.argv[2] === "shutdown") {
+          return processResult("", { exitCode: options.shutdownExitCode ?? 0 });
+        }
+        if (input.argv[3] !== "io" && input.argv[2] !== "io") {
+          return await discovery(input as Parameters<typeof discovery>[0]);
+        }
+        recordedPath = input.argv.at(-1);
+        if (options.endsAtOnce === true) return processResult("", { exitCode: 1 });
+        // simctl keeps recording until it is told to stop, then closes the file.
+        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve()));
+        await writeFile(
+          recordedPath!,
+          Uint8Array.from([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 1, 2, 3, 4, 5, 6, 7, 8]),
+        );
+        return processResult("", { termination: "cancelled", exitCode: null });
+      },
+    );
+    const service = new AppleToolchainService({
+      execute: execute as never,
+      captureDirectory,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-10-14T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    return { service, artifacts, execute, recordedPath: () => recordedPath };
+  }
+
+  function recording(kind: "start-recording" | "stop-recording", actionId: never, extra = {}) {
+    return simulatorRequest({
+      kind,
+      actionId,
+      bundleIdentifier: undefined,
+      requestedBy: actor,
+      approval: { kind: "approved", approvalId: ids.approval as never },
+      ...extra,
+    });
+  }
+
+  it("records until stopped, then keeps the video as evidence like a screenshot", async () => {
+    const { service, artifacts, execute } = await recordingService();
+    const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: true };
+    await service.discover(discoveryRequest, gated);
+
+    const started = await service.execute(recording("start-recording", startId), gated);
+    expect(started.outcome).toBe("succeeded");
+    expect(service.snapshot(gated).recordings).toEqual([
+      { simulatorId: ids.simulator, startedAt: "2026-10-14T20:00:00.000Z" },
+    ]);
+    const command = execute.mock.calls.find(([input]) => input.argv.includes("recordVideo"))?.[0];
+    expect(command?.argv.slice(0, 5)).toEqual([
+      "xcrun",
+      "simctl",
+      "io",
+      ids.simulator,
+      "recordVideo",
+    ]);
+
+    const stopped = await service.execute(recording("stop-recording", stopId), gated);
+
+    expect(stopped.outcome).toBe("succeeded");
+    expect(stopped.artifacts).toContainEqual({
+      kind: "recording",
+      reference: `apple-recording-${stopId}`,
+    });
+    expect(artifacts.get(`apple-recording-${stopId}`)?.byteLength).toBe(16);
+    expect(service.snapshot(gated).recordings).toEqual([]);
+  });
+
+  it("launches one recorder when two starts arrive together", async () => {
+    const { service, execute } = await recordingService();
+    await service.discover(discoveryRequest, context);
+    const second = "30000000-0000-4000-8000-0000000000a3" as never;
+
+    const [one, two] = await Promise.all([
+      service.execute(recording("start-recording", startId), context),
+      service.execute(recording("start-recording", second), context),
+    ]);
+
+    expect([one.outcome, two.outcome].sort()).toEqual(["failed", "succeeded"]);
+    expect(execute.mock.calls.filter(([input]) => input.argv.includes("recordVideo"))).toHaveLength(
+      1,
+    );
+    await service.close();
+  });
+
+  it("keeps a recording when the Simulator fails to shut down, and drops it when it does", async () => {
+    const shutdown = (actionId: never) =>
+      recording("stop-recording", actionId, { kind: "shutdown", requestedBy: undefined });
+    const failing = await recordingService({ shutdownExitCode: 1 });
+    await failing.service.discover(discoveryRequest, context);
+    await failing.service.execute(recording("start-recording", startId), context);
+    await failing.service.execute(
+      shutdown("30000000-0000-4000-8000-0000000000a4" as never),
+      context,
+    );
+    expect(failing.service.snapshot(context).recordings).toHaveLength(1);
+    await failing.service.close();
+
+    const working = await recordingService();
+    await working.service.discover(discoveryRequest, context);
+    await working.service.execute(recording("start-recording", startId), context);
+    await working.service.execute(
+      shutdown("30000000-0000-4000-8000-0000000000a4" as never),
+      context,
+    );
+    expect(working.service.snapshot(context).recordings).toEqual([]);
+  });
+
+  it("reports a recording that never started and a stop with nothing to stop", async () => {
+    const { service } = await recordingService({ endsAtOnce: true });
+    await service.discover(discoveryRequest, context);
+
+    const started = await service.execute(recording("start-recording", startId), context);
+    expect(started.outcome).toBe("failed");
+    expect(service.snapshot(context).recordings).toEqual([]);
+
+    const stopped = await service.execute(recording("stop-recording", stopId), context);
+    expect(stopped.outcome).toBe("failed");
+    expect(
+      stopped.artifacts.some((artifact: { kind: string }) => artifact.kind === "recording"),
+    ).toBe(false);
+  });
+
+  it("asks before starting, refuses Plan and anyone but a person, and never asks again to stop", async () => {
+    const { service, execute } = await recordingService();
+    const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: false };
+    await service.discover(discoveryRequest, gated);
+
+    const unapproved = await service.execute(
+      recording("start-recording", startId, { approval: { kind: "not-required" } }),
+      gated,
+    );
+    expect(unapproved.outcome).toBe("unauthorized");
+
+    const planned = await service.execute(recording("start-recording", startId), {
+      ...context,
+      executionPolicy: "plan" as const,
+    });
+    expect(planned.outcome).toBe("unauthorized");
+
+    const byAgent = await service.execute(
+      recording("start-recording", startId, {
+        requestedBy: { kind: "system", actorId: actor.actorId },
+      }),
+      context,
+    );
+    expect(byAgent.outcome).toBe("unauthorized");
+    expect(execute.mock.calls.some(([input]) => input.argv.includes("recordVideo"))).toBe(false);
+
+    // Stopping ends what a person already approved starting.
+    const stop = await service.execute(
+      recording("stop-recording", stopId, { approval: { kind: "not-required" } }),
+      gated,
+    );
+    expect(stop.outcome).not.toBe("unauthorized");
   });
 });
 
@@ -2081,6 +2259,7 @@ describe("AppleToolchainService Rotate", () => {
     const { service } = rotateService();
     expect(service.snapshot(context).capabilities).toEqual({
       openUrl: true,
+      recordScreen: true,
       volume: true,
       rotate: true,
     });
@@ -2103,9 +2282,11 @@ describe("AppleToolchainService Simulator input", () => {
         now: () => "2026-10-14T20:00:00.000Z",
         newId: () => "30000000-0000-4000-8000-000000000012",
       });
-    expect(make().snapshot(context).capabilities).toEqual({ openUrl: true });
+    // Recording is `simctl` alone, so it does not wait on the helper.
+    expect(make().snapshot(context).capabilities).toEqual({ openUrl: true, recordScreen: true });
     expect(make(async () => processResult("ok\n")).snapshot(context).capabilities).toEqual({
       openUrl: true,
+      recordScreen: true,
       volume: true,
       rotate: true,
     });

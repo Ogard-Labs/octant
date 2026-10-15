@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deviceProblemFor, type DeviceChoice, type DeviceView } from "./deviceModel";
@@ -338,6 +338,32 @@ describe("DevicePane", () => {
     await user.keyboard("{Enter}");
     await screen.findAllByRole("menuitem");
     expect(screen.queryByRole("menuitem", { name: /Rotate/ })).not.toBeInTheDocument();
+  });
+
+  it("offers Record screen in More once the host reports it, and Stop recording while it records", async () => {
+    const user = userEvent.setup();
+    const first = pane({ canRecordScreen: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Record screen" }));
+    expect(first.onAction).toHaveBeenCalledExactlyOnceWith({ kind: "start-recording" });
+    cleanup();
+
+    const second = pane({ canRecordScreen: true, recording: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("menuitem", { name: "Record screen" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("menuitem", { name: "Stop recording" }));
+    expect(second.onAction).toHaveBeenCalledExactlyOnceWith({ kind: "stop-recording" });
+  });
+
+  it("leaves Record screen out of More on a host that has not reported it", async () => {
+    const user = userEvent.setup();
+    pane({ canRecordScreen: false });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Record screen|Stop recording/ })).toBeNull();
   });
 
   it("types text from More through the same queue", async () => {

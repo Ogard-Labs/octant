@@ -114,6 +114,77 @@ describe("AndroidEmulatorPane", () => {
     );
   });
 
+  it("offers Record screen only once the host reports it, and confirms starting but not stopping", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup();
+    const requestApproval = vi.fn(async () => ids.approval);
+    const execute = vi.fn(async () => ({ outcome: "succeeded" }));
+    const snapshot = (extra: Record<string, unknown>) => ({
+      sequence: 1,
+      snapshotAt: "2026-10-14T20:00:03.000Z",
+      sdk: discovery.sdk,
+      emulators: discovery.emulators,
+      active: [],
+      recentEvidence: [],
+      ...extra,
+    });
+    const props = (extra: Record<string, unknown>) => ({
+      checkoutId: ids.checkout as never,
+      client: client({ execute, snapshot: vi.fn(async () => snapshot(extra)) }) as never,
+      createUuid: uuidFactory(),
+      hostBridge: {
+        getHostCapabilities: () => ({
+          sidebarVibrancySupported: false,
+          liveAndroidFrameSupported: true,
+        }),
+      } as never,
+      requestApproval,
+      thread: thread as never,
+    });
+    const openMore = async () => {
+      await screen.findByRole("button", { name: "Home" });
+      screen.getByRole("button", { name: "More" }).focus();
+      await user.keyboard("{Enter}");
+    };
+
+    const older = render(<AndroidEmulatorPane {...props({})} />);
+    await openMore();
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Record screen|Stop recording/ })).toBeNull();
+    older.unmount();
+
+    const idle = render(
+      <AndroidEmulatorPane {...props({ capabilities: { recordScreen: true } })} />,
+    );
+    await openMore();
+    await user.click(await screen.findByRole("menuitem", { name: "Record screen" }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(requestApproval).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ kind: "start-recording" }),
+    );
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: "start-recording",
+        approval: { kind: "approved", approvalId: ids.approval },
+      }),
+    );
+    idle.unmount();
+
+    render(
+      <AndroidEmulatorPane
+        {...props({
+          capabilities: { recordScreen: true },
+          recordings: [{ emulatorId: "Pixel_8_API_34", startedAt: "2026-10-14T20:00:00.000Z" }],
+        })}
+      />,
+    );
+    await openMore();
+    await user.click(await screen.findByRole("menuitem", { name: "Stop recording" }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(requestApproval).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "stop-recording" }));
+  });
+
   it("offers Open URL only once the host reports it, and confirms each address before sending it", async () => {
     const userEvent = (await import("@testing-library/user-event")).default;
     const user = userEvent.setup();
