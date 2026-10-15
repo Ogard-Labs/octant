@@ -484,7 +484,7 @@ function refuseStateOverlappingCheckout(
 /**
  * The account's state directories: the configuration directory, and the
  * secure-storage directory when the host names one. A Plan launch reads them
- * whole and writes only {@link CLAUDE_PLAN_RUNTIME_STATE_FOLDERS} inside the
+ * whole and writes only what {@link planStateWriteRoots} grants inside the
  * configuration directory.
  */
 function claudeAccountStateDirectories(environment: SpawnOptions["env"]): {
@@ -504,29 +504,93 @@ function claudeAccountStateDirectories(environment: SpawnOptions["env"]): {
 }
 
 /**
- * The folders of the configuration directory a Plan launch may write.
+ * What a Plan launch may write in the configuration directory.
  *
  * Measured on macOS 27 with Claude Code 2.1.299, one Plan turn (its start,
  * three read-tool calls, the answer) wrote exactly these under `CLAUDE_CONFIG_DIR`:
  * `sessions/<pid>.json` and its `.key` files, the transcript under
  * `projects/<checkout>/<session>.jsonl`, plus `.claude.json` (through a lock,
  * a temporary file and a copy in `backups/`) and `.last-cleanup` at the top.
- * Only the two folders are granted. The top-level files are refused: the
- * global `.claude.json` carries per-project MCP servers, `settings.json` its
- * hooks, and `skills/`, `plugins/`, `agents/` and `commands/` what a later
- * session loads, so a Plan launch able to write any of them could plant code
- * that runs on a later turn outside this sandbox. A second measured Plan turn
- * under this grant answered and completed with its `.claude.json` saves and
- * `.last-cleanup` refused, and its transcript still written to `projects/`.
+ * Only `sessions/` and the launch's own session in `projects/` are granted.
+ * The top-level files are refused: the global `.claude.json` carries
+ * per-project MCP servers, `settings.json` its hooks, and `skills/`,
+ * `plugins/`, `agents/` and `commands/` what a later session loads, so a Plan
+ * launch able to write any of them could plant code that runs on a later turn
+ * outside this sandbox. A second measured Plan turn, under the earlier grant
+ * of all of `projects/`, answered and completed with its `.claude.json` saves
+ * and `.last-cleanup` refused, and its transcript still written to `projects/`.
+ *
+ * The rest of `projects/` holds other sessions' transcripts and the
+ * per-project `memory/` folders a later session reads as instructions, so
+ * none of it is granted. The grant is the session, not the checkout's folder,
+ * because the runtime's folder name is not unique to a checkout:
+ * `/tmp/team-project` and `/tmp/team/project` both become `-tmp-team-project`,
+ * so a folder grant would let one checkout's Plan launch rewrite the other's
+ * transcripts. A session's own folder `<session>/` beside its transcript holds
+ * its subagent transcripts and saved tool results.
  */
-const CLAUDE_PLAN_RUNTIME_STATE_FOLDERS = ["sessions", "projects"] as const;
+const CLAUDE_PLAN_SESSIONS_FOLDER = "sessions";
+const CLAUDE_PROJECTS_FOLDER = "projects";
 
 /**
- * Where a Plan launch may write outside the checkout, created when missing.
+ * The session a launch writes, from the arguments the Agent SDK composes.
+ *
+ * Octant opens every session under an id it chose (`--session-id <id>`) or
+ * resumes one (`--resume=<id>`), so the transcript's name is known before the
+ * launch. Only a UUID is accepted, as the runtime itself requires, so an
+ * argument cannot name a path. A launch that carries neither is granted no
+ * session at all and its transcript write is refused.
+ */
+function claudeLaunchSessionIds(args: ReadonlyArray<string>): ReadonlyArray<string> {
+  const ids = new Set<string>();
+  for (const [index, arg] of args.entries()) {
+    const value =
+      arg === "--session-id" || arg === "--resume"
+        ? args[index + 1]
+        : arg.startsWith("--session-id=") || arg.startsWith("--resume=")
+          ? arg.slice(arg.indexOf("=") + 1)
+          : undefined;
+    if (
+      value !== undefined &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+    ) {
+      ids.add(value);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * The runtime's folder name under `projects/` for a working directory.
+ *
+ * The runtime keys a session's folder by the canonical, NFC-normalized working
+ * directory it started in, with every character outside `[a-zA-Z0-9]` replaced
+ * by `-`. A name longer than 200 characters keeps its first 200 and gains `-`
+ * and a base-36 hash of the full path. Read from the bundled runtime of Claude
+ * Code 2.1.300 (Agent SDK 0.3.211), whose CLI and SDK share this rule; the
+ * hash is the 32-bit `h * 31 + code unit` string hash both spell out.
+ */
+function claudeProjectFolderName(workingDirectory: string): string {
+  const sanitized = workingDirectory.replace(/[^a-zA-Z0-9]/g, "-");
+  if (sanitized.length <= 200) return sanitized;
+  let hash = 0;
+  for (let index = 0; index < workingDirectory.length; index += 1) {
+    hash = (hash << 5) - hash + workingDirectory.charCodeAt(index);
+    hash |= 0;
+  }
+  return `${sanitized.slice(0, 200)}-${Math.abs(hash).toString(36)}`;
+}
+
+/**
+ * Where a Plan launch may write outside the checkout.
  *
  * The folders are made here, outside the sandbox, because the configuration
  * directory itself is no longer writable to the launch, and Bubblewrap can bind
- * only a folder that exists. On a host that keeps the subscription sign-in in
+ * only a folder that exists. The session's transcript file is not made: the
+ * runtime refuses a new `--session-id` whose transcript already exists.
+ * Seatbelt grants the path before it exists; Bubblewrap binds only what
+ * exists, so on Linux a new session's transcript is refused and a resumed
+ * one's is written. On a host that keeps the subscription sign-in in
  * a file rather than the macOS Keychain, the runtime refreshes that one file,
  * `.credentials.json` in the secure-storage directory (the configuration
  * directory when none is named), and it stays writable so a refreshed login
@@ -536,6 +600,8 @@ const CLAUDE_PLAN_RUNTIME_STATE_FOLDERS = ["sessions", "projects"] as const;
  */
 function planStateWriteRoots(
   boundRoot: string,
+  workingDirectory: string,
+  sessionIds: ReadonlyArray<string>,
   environment: SpawnOptions["env"],
   readsSignInFromKeychain: boolean,
 ): { readonly readRoots: ReadonlyArray<string>; readonly writeRoots: ReadonlyArray<string> } {
@@ -545,15 +611,35 @@ function planStateWriteRoots(
     [configuration, secureStorage].filter((path): path is string => path !== undefined),
   );
   if (configuration === undefined) return { readRoots, writeRoots: [] };
-  const folders = CLAUDE_PLAN_RUNTIME_STATE_FOLDERS.map((folder) => join(configuration, folder));
+  // The runtime names the folder after the directory it starts in. Seatbelt
+  // starts it in the launch's `cwd`, and Bubblewrap in the bound root, so both
+  // names are used when they differ.
+  const projectFolders = [
+    ...new Set(
+      [workingDirectory, boundRoot].map((directory) =>
+        join(
+          configuration,
+          CLAUDE_PROJECTS_FOLDER,
+          claudeProjectFolderName(directory.normalize("NFC")),
+        ),
+      ),
+    ),
+  ];
+  const sessionFolders = projectFolders.flatMap((folder) =>
+    sessionIds.map((id) => join(folder, id)),
+  );
+  const sessionsFolder = join(configuration, CLAUDE_PLAN_SESSIONS_FOLDER);
   try {
-    for (const folder of folders) mkdirSync(folder, { recursive: true, mode: 0o700 });
+    for (const folder of [sessionsFolder, ...sessionFolders]) {
+      mkdirSync(folder, { recursive: true, mode: 0o700 });
+    }
   } catch {
     throw new ProcessConfinementError(
       "invalid-configuration",
       "Claude Plan confinement could not create the runtime's session folders.",
     );
   }
+  const transcripts = sessionFolders.map((folder) => `${folder}.jsonl`);
   const credentialsFile =
     readsSignInFromKeychain || environment.ANTHROPIC_API_KEY !== undefined
       ? []
@@ -562,7 +648,12 @@ function planStateWriteRoots(
   // is refused like the configuration directory itself.
   return {
     readRoots,
-    writeRoots: refuseStateOverlappingCheckout(boundRoot, [...folders, ...credentialsFile]),
+    writeRoots: refuseStateOverlappingCheckout(boundRoot, [
+      sessionsFolder,
+      ...transcripts,
+      ...sessionFolders,
+      ...credentialsFile,
+    ]),
   };
 }
 
@@ -667,7 +758,28 @@ function confineClaudeLaunch(
     // Seatbelt rules do not apply there.
     const readsSignInFromKeychain =
       process.platform === "darwin" && spawnOptions.env.ANTHROPIC_API_KEY === undefined;
-    const stateRoots = planStateWriteRoots(boundRoot, spawnOptions.env, readsSignInFromKeychain);
+    let workingDirectory = boundRoot;
+    try {
+      if (spawnOptions.cwd !== undefined) workingDirectory = realpathSync(spawnOptions.cwd);
+    } catch {
+      // A working directory that does not resolve cannot start the runtime,
+      // which then names no transcript folder; the bound root's stays granted.
+    }
+    const stateRoots = planStateWriteRoots(
+      boundRoot,
+      workingDirectory,
+      claudeLaunchSessionIds(spawnOptions.args),
+      spawnOptions.env,
+      readsSignInFromKeychain,
+    );
+    const keychainRules = readsSignInFromKeychain
+      ? [
+          seatbeltExecRule("/usr/bin/security"),
+          '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+          '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+          seatbeltAllowLiteralReadRule(claudeLoginKeychainPath()),
+        ]
+      : [];
     const launch = options.confinement.prepare({
       executable: spawnOptions.command,
       args: spawnOptions.args,
@@ -694,16 +806,7 @@ function confineClaudeLaunch(
       allowProcessExec: false,
       allowProcessFork: readsSignInFromKeychain,
       allowFileReadStar: true,
-      ...(readsSignInFromKeychain
-        ? {
-            extraRules: [
-              seatbeltExecRule("/usr/bin/security"),
-              '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
-              '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
-              seatbeltAllowLiteralReadRule(claudeLoginKeychainPath()),
-            ],
-          }
-        : {}),
+      ...(keychainRules.length === 0 ? {} : { extraRules: keychainRules }),
     });
     return {
       spawnOptions: {
