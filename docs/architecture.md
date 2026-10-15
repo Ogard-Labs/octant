@@ -551,7 +551,9 @@ never clamped or guessed. Octant does not script Simulator.app, and an agent
 must not launch Simulator.app, `serve-sim`, or `serve-avd`. **Repair input**
 runs only when a person requests it. **Open URL** opens a credential-free
 `http`/`https` address a person asked for; it is an effect confirmed per
-address (Allow input never covers it), and evidence keeps only the origin. Pane states, discovery, capture, input
+address (Allow input never covers it), and evidence keeps only the origin. **Rotate** turns the device between portrait
+and landscape for a person who asked; it is an effect confirmed on its own
+(Allow input never covers it). Pane states, discovery, capture, input
 delivery, keyboard layouts, and the managed streaming tools are specified in
 [Device workbench](design/device-workbench.md).
 

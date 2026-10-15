@@ -180,6 +180,87 @@ describe("Android toolchain routes", () => {
     });
   });
 
+  describe("Rotate", () => {
+    const rotate = {
+      actionId: "60000000-0000-4000-8000-000000000008",
+      correlationId: "60000000-0000-4000-8000-000000000009",
+      authority,
+      ...scope,
+      kind: "rotate",
+      emulatorId: "Pixel_8_API_34",
+      orientation: "landscape",
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      timeoutMs: 30_000,
+      approval: { kind: "approved", approvalId: "60000000-0000-4000-8000-00000000000b" },
+    };
+    function routes(resolveContext: ReturnType<typeof vi.fn>) {
+      const service = {
+        discover: vi.fn(),
+        execute: vi.fn(async () => ({
+          actionId: rotate.actionId,
+          correlationId: rotate.correlationId,
+          authority,
+          kind: "rotate",
+          outcome: "succeeded",
+          emulatorId: rotate.emulatorId,
+          requestedBy: rotate.requestedBy,
+          diagnostics: [],
+          artifacts: [],
+          cleanup: "complete",
+          durationMs: 5,
+          completedAt: "2026-10-14T20:00:01.000Z",
+        })),
+        cancel: vi.fn(),
+        snapshot: vi.fn(),
+        readScreenshotArtifact: vi.fn(),
+        watchScreen: vi.fn(),
+      };
+      const handler = createAndroidToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        resolveContext,
+        service,
+        now: () => 2,
+      });
+      return { handler, service };
+    }
+
+    it("hands a rotation the window may make to the host with that window's authority", async () => {
+      const { handler, service } = routes(vi.fn(async () => context));
+
+      const response = await handler(request({ kind: "android-action-request", request: rotate }));
+
+      expect(response?.status).toBe(200);
+      expect(service.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "rotate", orientation: "landscape" }),
+        context,
+      );
+    });
+
+    it("refuses a rotation without a known orientation before authority is checked", async () => {
+      for (const orientation of [undefined, "upside-down"]) {
+        const resolveContext = vi.fn(async () => context);
+        const { handler, service } = routes(resolveContext);
+
+        const response = await handler(
+          request({ kind: "android-action-request", request: { ...rotate, orientation } }),
+        );
+
+        expect(response?.status, String(orientation)).toBe(400);
+        expect(resolveContext).not.toHaveBeenCalled();
+        expect(service.execute).not.toHaveBeenCalled();
+      }
+    });
+
+    it("refuses a rotation for a thread the window has no authority over", async () => {
+      const { handler, service } = routes(vi.fn(async () => undefined));
+
+      const response = await handler(request({ kind: "android-action-request", request: rotate }));
+
+      expect(response?.status).toBe(403);
+      expect(service.execute).not.toHaveBeenCalled();
+    });
+  });
+
   it("tells the pane which emulators the thread may send input to without a new approval", async () => {
     const snapshot = {
       sequence: 4,

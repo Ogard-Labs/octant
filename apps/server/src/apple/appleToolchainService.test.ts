@@ -12,7 +12,10 @@ import { link, mkdir, mkdtemp, stat, symlink, utimes, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { SimulatorDeviceInput } from "@octant/contracts/simulator-device";
+import type {
+  SimulatorDeviceInput,
+  SimulatorDeviceInputResult,
+} from "@octant/contracts/simulator-device";
 import { simulatorInputThroughDesktop } from "./simulatorInputThroughDesktop";
 
 const artifactFixture = mkdtempSync(join(tmpdir(), "octant-apple-build-"));
@@ -1969,7 +1972,114 @@ describe("AppleToolchainService Open URL", () => {
 
   it("tells the pane this host can open an address", async () => {
     const { service } = openUrlService({});
-    expect(service.snapshot(context).capabilities).toEqual({ openUrl: true });
+    expect(service.snapshot(context).capabilities).toEqual({ openUrl: true, rotate: true });
+  });
+});
+
+describe("AppleToolchainService Rotate", () => {
+  const actor = {
+    kind: "local-user" as const,
+    actorId: "30000000-0000-4000-8000-000000000099" as never,
+  };
+
+  function rotateService(reply: SimulatorDeviceInputResult = { kind: "delivered" }) {
+    const deliver = vi.fn(async (_input: SimulatorDeviceInput, _signal?: AbortSignal) => reply);
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput: simulatorInputThroughDesktop({ deliver }),
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-10-14T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    return { service, deliver };
+  }
+
+  function rotateRequest(overrides: Partial<AppleSimulatorRequest> = {}) {
+    return simulatorRequest({
+      kind: "rotate",
+      bundleIdentifier: undefined,
+      requestedBy: actor,
+      orientation: "landscape",
+      approval: { kind: "approved", approvalId: ids.approval as never },
+      ...overrides,
+    });
+  }
+
+  it("hands the approved orientation to the desktop helper for that Simulator", async () => {
+    const { service, deliver } = rotateService();
+    const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: true };
+    await service.discover(discoveryRequest, gated);
+
+    const evidence = await service.execute(rotateRequest(), gated);
+
+    expect(evidence.outcome).toBe("succeeded");
+    expect(evidence.requestedBy).toEqual(actor);
+    expect(deliver.mock.calls.map(([input]) => input)).toEqual([
+      expect.objectContaining({
+        kind: "rotate",
+        udid: ids.simulator,
+        orientation: "landscape",
+      }),
+    ]);
+  });
+
+  it("reports a rotation the helper refused as failed and says why", async () => {
+    const { service } = rotateService({
+      kind: "refused",
+      reason: "rotate-unavailable",
+      message: "Rotate needs the managed serve-sim tool, and it is not installed.",
+    });
+    await service.discover(discoveryRequest, context);
+
+    const evidence = await service.execute(rotateRequest(), context);
+
+    expect(evidence.outcome).toBe("failed");
+    expect(evidence.diagnostics[0]?.message).toContain("rotate-unavailable");
+  });
+
+  it("asks before every Rotate: no approval, Plan, or an input grant never sends it", async () => {
+    const { service, deliver } = rotateService();
+    const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: false };
+    await service.discover(discoveryRequest, gated);
+
+    const unapproved = await service.execute(
+      rotateRequest({ approval: { kind: "not-required" } }),
+      gated,
+    );
+    expect(unapproved.outcome).toBe("unauthorized");
+
+    // Allow input covers taps and typing, not turning the device.
+    const underGrant = await service.execute(
+      rotateRequest({
+        actionId: "30000000-0000-4000-8000-000000000013" as never,
+        approval: { kind: "not-required" },
+      }),
+      { ...gated, approvalValid: true, inputGranted: true },
+    );
+    expect(underGrant.outcome).toBe("unauthorized");
+
+    const planned = await service.execute(
+      rotateRequest({ actionId: "30000000-0000-4000-8000-000000000014" as never }),
+      { ...context, executionPolicy: "plan" as const },
+    );
+    expect(planned.outcome).toBe("unauthorized");
+
+    // Only a person rotates the device, never the host, even under Full access.
+    const byHost = await service.execute(
+      rotateRequest({
+        actionId: "30000000-0000-4000-8000-000000000015" as never,
+        requestedBy: { kind: "system", actorId: actor.actorId },
+      }),
+      context,
+    );
+    expect(byHost.outcome).toBe("unauthorized");
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("tells the pane this host can rotate", async () => {
+    const { service } = rotateService();
+    expect(service.snapshot(context).capabilities).toEqual({ openUrl: true, rotate: true });
   });
 });
 

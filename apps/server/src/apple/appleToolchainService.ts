@@ -573,7 +573,7 @@ export class AppleToolchainService {
       simulators: this.#lastSimulators,
       // What this host can do beyond the original actions; the pane offers
       // an item only once it is listed here.
-      capabilities: { openUrl: true },
+      capabilities: { openUrl: true, rotate: true },
       active: [...this.#active.values()]
         .filter((active) => contextMatches(active.context, context))
         .map(({ progress }) => progress),
@@ -931,6 +931,32 @@ export class AppleToolchainService {
         // evidence keep only the note, which names the origin.
         const outcome = outcomeFor(terminal);
         const note = deviceOpenUrlDiagnostic(url, outcome === "succeeded" ? "completed" : outcome);
+        cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
+        const logReference = `apple-log-${request.actionId}`;
+        await this.#writeArtifact(logReference, [new TextEncoder().encode(`${note.message}\n`)]);
+        this.#advance(active, "completed", "completed");
+        return evidence(
+          request,
+          outcome,
+          startedAt,
+          this.#options.now(),
+          [note],
+          [{ kind: "log", reference: logReference }],
+          cleanup,
+        );
+      } else if (request.kind === "rotate") {
+        this.#advance(active, "injecting-input");
+        // Rotating is the desktop helper's job, like input: simctl has no
+        // rotate command, and Octant never scripts Simulator.app.
+        terminal = await this.#injectInput(request, context, signal);
+        const outcome = outcomeFor(terminal);
+        const note = {
+          severity: "note" as const,
+          message:
+            outcome === "succeeded"
+              ? `rotate to ${request.orientation ?? "unknown"} completed`
+              : `rotate ${outcome}: ${text(terminal.stderr).trim()}`.trimEnd(),
+        };
         cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
         const logReference = `apple-log-${request.actionId}`;
         await this.#writeArtifact(logReference, [new TextEncoder().encode(`${note.message}\n`)]);

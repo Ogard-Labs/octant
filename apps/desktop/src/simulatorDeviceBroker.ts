@@ -105,6 +105,16 @@ export function createSimulatorInputDelivery(
     if (command.kind === "repair-input") {
       return result(await helpers.send(command.udid, { op: "repair-input" }, budgetMs, cancelled));
     }
+    if (command.kind === "rotate") {
+      return result(
+        await helpers.send(
+          command.udid,
+          { op: "rotate", orientation: command.orientation },
+          budgetMs,
+          cancelled,
+        ),
+      );
+    }
     if (command.kind === "key-press") {
       const key = command.key.toLowerCase();
       return result(

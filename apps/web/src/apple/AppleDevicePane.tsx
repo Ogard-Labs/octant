@@ -47,6 +47,15 @@ export function AppleDevicePane(props: AppleWorkbenchPaneProps) {
                 onRun({ kind: "open-url", simulatorId: live.simulatorId, url: action.url });
               }
               return;
+            case "rotate":
+              if (live !== undefined) {
+                onRun({
+                  kind: "rotate",
+                  simulatorId: live.simulatorId,
+                  orientation: action.orientation,
+                });
+              }
+              return;
             case "boot":
             case "select": {
               const simulator = simulatorFor(action.deviceId);
@@ -116,6 +125,7 @@ export function AppleDevicePane(props: AppleWorkbenchPaneProps) {
     <DevicePane
       busy={props.busy === true}
       canOpenUrl={props.runtime?.capabilities?.openUrl === true}
+      canRotate={props.runtime?.capabilities?.rotate === true}
       devices={devices}
       diagnostics={appleDiagnostics(props)}
       inputAllowed={props.inputAllowed !== false}

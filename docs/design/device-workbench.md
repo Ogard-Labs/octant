@@ -172,6 +172,35 @@ is bound to it, and Allow input never covers it. Evidence and its log keep only
 output can quote the address, so none of it is kept, for the same reason typed
 text is redacted. The agent tools do not offer Open URL.
 
+## Rotate
+
+The device pane's More menu offers **Rotate** only when the host's runtime
+snapshot lists `capabilities.rotate`; a host that predates the flag omits it
+and the item is left out, never shown disabled. Both the Simulator and
+emulator hosts report it.
+
+The request names the orientation to set, `portrait` or `landscape`
+(`DeviceOrientation`), not a turn, so a repeated request is idempotent. The
+pane names the one the device is not showing: it reads the streamed picture,
+and with no picture it asks for `landscape`. There is no upside-down or
+reverse-landscape choice.
+
+On the Simulator, `simctl` has no rotate command and Octant does not script
+Simulator.app, so the host hands the request to the desktop's device broker
+like input, and the desktop runs `serve-sim rotate` against the managed
+stream, starting it when needed (`landscape` is `landscape_left`). Without the
+desktop app or the managed `serve-sim` tool the action is `unavailable`. On
+the emulator the host turns auto-rotate off and sets the rotation through adb
+(`settings put system accelerometer_rotation 0`, then `user_rotation` to `0`
+for portrait or `1` for landscape), so the sensor cannot undo it.
+
+Rotate is an effect, not input. Only a person (`local-user` or
+`remote-device` in `requestedBy`) may ask for it; an agent or the host is
+refused. Plan refuses it; Full access sends it unasked; on an approval-gated
+thread each Rotate raises its own confirmation, and Allow input never covers
+it. Evidence and its log record `rotate to <orientation> completed` and
+nothing from the device. The agent tools do not offer Rotate.
+
 ## Managed device tools
 
 The iOS Simulator and Android emulator panes ride

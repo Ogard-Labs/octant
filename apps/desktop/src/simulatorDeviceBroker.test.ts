@@ -197,6 +197,23 @@ describe("Simulator input delivery", () => {
     expect(send.mock.calls.map(([, sent]) => sent)).toEqual([{ op: "repair-input" }]);
   });
 
+  it("asks the helpers to rotate to the named orientation without first looking up the screen", async () => {
+    const { fake, send } = helpers(() => ({ status: "delivered" }));
+
+    await expect(
+      createSimulatorInputDelivery(fake)({
+        kind: "rotate",
+        udid,
+        budgetMs: 30_000,
+        orientation: "landscape",
+      }),
+    ).resolves.toEqual({ kind: "delivered" });
+
+    expect(send.mock.calls.map(([, sent]) => sent)).toEqual([
+      { op: "rotate", orientation: "landscape" },
+    ]);
+  });
+
   it("answers inside the action's deadline so the server hears the helper's own reason", async () => {
     const { fake, send } = helpers(() => ({ status: "delivered" }));
     await createSimulatorInputDelivery(fake)({

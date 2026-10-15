@@ -83,7 +83,9 @@ export type DeviceAction =
   | { readonly kind: "reconnect" }
   | { readonly kind: "stop-live-view" }
   /** An address the host checks again and confirms whole before the device opens it. */
-  | { readonly kind: "open-url"; readonly url: string };
+  | { readonly kind: "open-url"; readonly url: string }
+  /** The orientation the device is not showing now; the host sets it. */
+  | { readonly kind: "rotate"; readonly orientation: "portrait" | "landscape" };
 
 /**
  * What a person typed into Open URL, as the address the device would receive,
@@ -253,6 +255,7 @@ export function deviceProblemFor<Intent extends { readonly kind: string }>(
         screenshot: `The screenshot of ${name} wasn't saved.`,
         "open-input": `Input on ${name} couldn't be turned on.`,
         "open-url": `${name} didn't open that address.`,
+        rotate: `${name} didn't rotate.`,
         run: `The app didn't launch on ${name}.`,
       };
       return {

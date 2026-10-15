@@ -56,7 +56,12 @@ export type AndroidEmulatorIntent =
     }
   | { readonly kind: "type-text"; readonly emulatorId: AndroidEmulatorId; readonly text: string }
   | { readonly kind: "key-press"; readonly emulatorId: AndroidEmulatorId; readonly key: string }
-  | { readonly kind: "open-url"; readonly emulatorId: AndroidEmulatorId; readonly url: string };
+  | { readonly kind: "open-url"; readonly emulatorId: AndroidEmulatorId; readonly url: string }
+  | {
+      readonly kind: "rotate";
+      readonly emulatorId: AndroidEmulatorId;
+      readonly orientation: "portrait" | "landscape";
+    };
 
 export function AndroidEmulatorPane(props: {
   readonly client: AndroidToolchainClient;
@@ -307,6 +312,14 @@ export function AndroidEmulatorPane(props: {
         if (liveEmulatorId !== undefined)
           void run({ kind: "open-url", emulatorId: liveEmulatorId, url: action.url });
         return;
+      case "rotate":
+        if (liveEmulatorId !== undefined)
+          void run({
+            kind: "rotate",
+            emulatorId: liveEmulatorId,
+            orientation: action.orientation,
+          });
+        return;
       case "boot":
       case "select": {
         const emulator = emulators.find((one) => String(one.emulatorId) === action.deviceId);
@@ -346,6 +359,7 @@ export function AndroidEmulatorPane(props: {
     <DevicePane
       busy={busy}
       canOpenUrl={controller.runtime?.capabilities?.openUrl === true}
+      canRotate={controller.runtime?.capabilities?.rotate === true}
       devices={devices}
       diagnostics={androidDiagnostics({
         controller,
@@ -600,6 +614,14 @@ function androidActionRequest(input: {
         kind: "open-url",
         requestedBy: localUserActor(),
         url: intent.url,
+        timeoutMs: 30_000,
+      };
+    case "rotate":
+      return {
+        ...base,
+        kind: "rotate",
+        requestedBy: localUserActor(),
+        orientation: intent.orientation,
         timeoutMs: 30_000,
       };
   }

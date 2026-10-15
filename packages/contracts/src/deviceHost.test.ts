@@ -45,6 +45,7 @@ describe("DeviceHostCapabilities", () => {
   it("reads the flags a host reports and ignores ones this renderer does not know", () => {
     expect(decode({ openUrl: true })).toEqual({ openUrl: true });
     expect(decode({ openUrl: true, recordScreen: true })).toEqual({ openUrl: true });
+    expect(decode({ rotate: true })).toEqual({ rotate: true });
     expect(decode({})).toEqual({});
   });
 });
