@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -34,6 +34,26 @@ describe("remembered private listener setting", () => {
     expect(mode & 0o077).toBe(0);
   });
 
+  it("remembers a self-made listener without any key or certificate", () => {
+    const directory = dataDirectory();
+    const selfMade = {
+      hostname: "100.64.0.7",
+      port: 8443,
+      origin: "https://100.64.0.7:8443",
+      tls: "self-made",
+    } as const;
+    createPrivateListenerSetting(directory).save(selfMade);
+    expect(createPrivateListenerSetting(directory).load()).toEqual(selfMade);
+    const path = join(directory, "remote", "private-listener-setting.json");
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      hostname: "100.64.0.7",
+      port: 8443,
+      origin: "https://100.64.0.7:8443",
+      certificate: "self-made",
+    });
+    expect(statSync(path).mode & 0o077).toBe(0);
+  });
+
   it("forgets the listener once cleared", () => {
     const setting = createPrivateListenerSetting(dataDirectory());
     setting.save(CONFIG);
@@ -49,6 +69,19 @@ describe("remembered private listener setting", () => {
     writeFileSync(path, "{not json");
     expect(createPrivateListenerSetting(directory).load()).toBeUndefined();
     writeFileSync(path, JSON.stringify({ hostname: "station.example.ts.net", port: "8455" }));
+    expect(createPrivateListenerSetting(directory).load()).toBeUndefined();
+    // A setting that names both a self-made and a pasted certificate is neither.
+    writeFileSync(
+      path,
+      JSON.stringify({
+        hostname: "100.64.0.7",
+        port: 8443,
+        origin: "https://100.64.0.7:8443",
+        certificate: "self-made",
+        certificatePem: "certificate pem",
+        privateKeyPem: "private key pem",
+      }),
+    );
     expect(createPrivateListenerSetting(directory).load()).toBeUndefined();
   });
 });

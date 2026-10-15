@@ -19,8 +19,8 @@ export type RemoteAccessCliCommand =
       readonly action: "listener-enable";
       readonly hostname: string;
       readonly port: number;
-      readonly certificatePath: string;
-      readonly privateKeyPath: string;
+      /** Absent: the host serves the certificate it makes itself. */
+      readonly pasted?: { readonly certificatePath: string; readonly privateKeyPath: string };
     }
   | { readonly action: "listener-disable" };
 
@@ -83,23 +83,22 @@ export function resolveListenerCliCommand(
   const allowed = new Set(["hostname", "port", "cert", "key"]);
   if (Object.keys(flags).some((flag) => !allowed.has(flag))) return undefined;
   const { hostname, port, cert, key } = flags;
-  if (
-    typeof hostname !== "string" ||
-    typeof port !== "string" ||
-    typeof cert !== "string" ||
-    typeof key !== "string" ||
-    !/^\d{1,5}$/.test(port)
-  ) {
+  if (typeof hostname !== "string" || typeof port !== "string" || !/^\d{1,5}$/.test(port)) {
     return undefined;
   }
   const portNumber = Number(port);
   if (portNumber < 1 || portNumber > 65_535) return undefined;
+  // Both files name the person's own certificate; neither asks the host to
+  // make one. One without the other is a usage error, never a fallback.
+  if (cert === undefined && key === undefined) {
+    return { action: "listener-enable", hostname, port: portNumber };
+  }
+  if (typeof cert !== "string" || typeof key !== "string") return undefined;
   return {
     action: "listener-enable",
     hostname,
     port: portNumber,
-    certificatePath: cert,
-    privateKeyPath: key,
+    pasted: { certificatePath: cert, privateKeyPath: key },
   };
 }
 
@@ -215,19 +214,25 @@ async function runListenerCommand(
   let response: LocalControlResponse;
   if (command.action === "listener-enable") {
     const read = input.readTextFile ?? ((path: string) => readFile(path, "utf8"));
-    let certificatePem: string;
-    let privateKeyPem: string;
-    try {
-      certificatePem = await read(command.certificatePath);
-    } catch {
-      input.stderr.write(`Could not read the certificate at ${command.certificatePath}.\n`);
-      return 1;
-    }
-    try {
-      privateKeyPem = await read(command.privateKeyPath);
-    } catch {
-      input.stderr.write(`Could not read the private key at ${command.privateKeyPath}.\n`);
-      return 1;
+    let pems: { certificatePem: string; privateKeyPem: string } | undefined;
+    if (command.pasted !== undefined) {
+      let certificatePem: string;
+      let privateKeyPem: string;
+      try {
+        certificatePem = await read(command.pasted.certificatePath);
+      } catch {
+        input.stderr.write(
+          `Could not read the certificate at ${command.pasted.certificatePath}.\n`,
+        );
+        return 1;
+      }
+      try {
+        privateKeyPem = await read(command.pasted.privateKeyPath);
+      } catch {
+        input.stderr.write(`Could not read the private key at ${command.pasted.privateKeyPath}.\n`);
+        return 1;
+      }
+      pems = { certificatePem, privateKeyPem };
     }
     response = await input.session.send({
       path: "/api/desktop/private-listener/enable",
@@ -239,8 +244,7 @@ async function runListenerCommand(
         // the host refuses unless they match the bind; an IPv6 address must be
         // bracketed to be a valid URL authority.
         origin: remoteListenerOrigin(command.hostname, command.port),
-        certificatePem,
-        privateKeyPem,
+        ...pems,
       },
     });
   } else if (command.action === "listener-disable") {
@@ -271,6 +275,10 @@ async function runListenerCommand(
   if (status.certificateFingerprint !== null) {
     input.stdout.write(`Certificate ${status.certificateFingerprint}\n`);
   }
+  if (status.certificateSource !== null) {
+    input.stdout.write(`Certificate source ${status.certificateSource}\n`);
+  }
+  if (status.tlsPin !== null) input.stdout.write(`Key pin ${status.tlsPin}\n`);
   if (status.errorCode !== undefined) input.stdout.write(`Error ${status.errorCode}\n`);
   return 0;
 }
@@ -359,6 +367,8 @@ interface ListenerStatusOutput {
   readonly origin: string | null;
   readonly exposureClass: string | null;
   readonly certificateFingerprint: string | null;
+  readonly certificateSource: string | null;
+  readonly tlsPin: string | null;
   readonly errorCode?: string;
 }
 
@@ -368,12 +378,17 @@ function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
   const origin = fieldOf(status, "origin");
   const exposureClass = fieldOf(status, "exposureClass");
   const certificateFingerprint = fieldOf(status, "certificateFingerprint");
+  // A host from before self-made certificates sends neither field.
+  const certificateSource = fieldOf(status, "certificateSource") ?? null;
+  const tlsPin = fieldOf(status, "tlsPin") ?? null;
   const errorCode = fieldOf(status, "errorCode");
   if (
     typeof state !== "string" ||
     !nullableString(origin) ||
     !nullableString(exposureClass) ||
-    !nullableString(certificateFingerprint)
+    !nullableString(certificateFingerprint) ||
+    !nullableString(certificateSource) ||
+    !nullableString(tlsPin)
   ) {
     return undefined;
   }
@@ -382,6 +397,8 @@ function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
     origin,
     exposureClass,
     certificateFingerprint,
+    certificateSource,
+    tlsPin,
     ...(typeof errorCode === "string" ? { errorCode } : {}),
   };
 }

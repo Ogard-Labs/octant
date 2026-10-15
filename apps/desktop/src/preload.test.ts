@@ -883,6 +883,7 @@ describe("desktop preload bridge", () => {
       exposureClass: null,
       certificateFingerprint: null,
       certificateReady: false,
+      certificateSource: null,
     };
     const ready = {
       enabled: true,
@@ -893,6 +894,7 @@ describe("desktop preload bridge", () => {
       exposureClass: "lan-private",
       certificateFingerprint: "ab".repeat(32),
       certificateReady: true,
+      certificateSource: "pasted",
     };
     const invoke = vi
       .fn()

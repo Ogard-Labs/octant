@@ -728,6 +728,7 @@ import {
   ExternalContentIngestionStore,
   type RecordExternalContentIngestionInput,
 } from "./context/externalContentIngestionStore";
+import { RuntimeOutsideContentMarks } from "./context/runtimeOutsideContentMark";
 import {
   AgentMessageProjection,
   hydrateAgentMessageProjectionFromJournal,
@@ -942,7 +943,11 @@ import {
 import { createSyncedArtifactRouteHandler } from "./replica/syncedArtifactRoutes";
 import { decideReplicaArtifactBinding } from "@octant/domain/replica-entry-policy";
 import { createReplicaMembershipJournal } from "./replica/replicaMembershipProjection";
-import { createReplicaDeviceKey, makeReplicaDeviceSigner } from "./replica/replicaDeviceKeyService";
+import {
+  createReplicaDeviceKey,
+  makeReplicaDeviceSigner,
+  removeReplicaDeviceKey,
+} from "./replica/replicaDeviceKeyService";
 import { createHostResourceRouteHandler } from "./hostResourceRoutes";
 import { desktopCredentialStore } from "./hostDataMap";
 import { ThreadRetentionService } from "./threadRetentionService";
@@ -952,6 +957,7 @@ import { createPrivateListenerLifecycleController } from "./remote/privateListen
 import { resolvePrivateListenerHostIdentity } from "./remote/privateListenerHostIdentity";
 import { createPrivateListenerAdministrationRouteHandler } from "./remote/privateListenerAdministrationRoutes";
 import { createPrivateListenerSetting } from "./remote/privateListenerSetting";
+import { createSelfMadeListenerCertificateStore } from "./remote/selfMadeListenerCertificate";
 import {
   boundHostRuntimeDiagnostics,
   type HostRuntimeDiagnostics,
@@ -2138,12 +2144,23 @@ export function startOctantServer(
     const agentRunLiveConversations = new AgentRunLiveConversationStore({
       persistence: agentRunSessionStore.conversations,
     });
+    const externalContentIngestionStore = new ExternalContentIngestionStore({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const runtimeOutsideContentMarks = new RuntimeOutsideContentMarks((input) =>
+      externalContentIngestionStore.record(input),
+    );
     // Managed subagent execution. A managed child runs as an in-process
     // provider session, not a spawned process, so authority is re-derived from
     // the run rather than inherited from the parent thread at execution time.
     const agentRunSessionSupervisor = new AgentRunSessionSupervisor({
       port: createAgentRunSessionRuntime({
         reviewCapture: createAgentRunReviewCapture(),
+        outsideContentMarks: runtimeOutsideContentMarks,
         canCaptureReview: (run) => {
           const thread = persistence.readCodeThread(decodeCodeThreadId(String(run.parentThreadId)));
           return thread?.lifecycle === "active" && thread.executionPolicy !== "plan";
@@ -2797,13 +2814,6 @@ export function startOctantServer(
       port: githubCataloguePort,
       snapshot: (signal) => githubCapabilityService.snapshot(signal),
       cacheStats,
-    });
-    const externalContentIngestionStore = new ExternalContentIngestionStore({
-      journal: persistence.journal,
-      connection: persistence.connection,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
     // Harness tool egress rules, proposals, and launch records. Recovery runs
     // here, before any route admits a turn: a launch the last run never
@@ -5487,6 +5497,7 @@ export function startOctantServer(
                 port: canvasAgentToolPort,
               }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        outsideContentMarks: runtimeOutsideContentMarks,
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
         resolveProviderCapabilities: (thread) =>
@@ -6804,6 +6815,7 @@ export function startOctantServer(
     const chatService = new ChatService({
       liveTurns,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+      outsideContentMarks: runtimeOutsideContentMarks,
       attachmentStore: chatAttachmentStore,
       beforeAttachmentPurge: async (threadId) => {
         if (purgeQueuedChatMessages === undefined)
@@ -7304,6 +7316,7 @@ export function startOctantServer(
     let workRequestService: WorkRequestService | undefined;
     const workTurnService = new WorkTurnService({
       liveTurns,
+      outsideContentMarks: runtimeOutsideContentMarks,
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
       contextHarness,
@@ -10922,6 +10935,9 @@ export function startOctantServer(
         currentRemoteGateway = gateway;
         return gateway;
       },
+      selfMadeCertificate: createSelfMadeListenerCertificateStore({
+        dataDirectory: providerDataDirectory,
+      }),
     });
     const localDeviceAdministrationRoutes = createLocalDeviceAdministrationRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
@@ -11209,6 +11225,10 @@ export function startOctantServer(
           if (replicaDeviceKeys === undefined) return { status: "refused", reason: "unavailable" };
           return makeReplicaDeviceSigner(replicaDeviceKeys, instanceId).sign(payload);
         },
+        remove: async (instanceId) => {
+          if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
+          await removeReplicaDeviceKey(replicaDeviceKeys, instanceId);
+        },
       },
       journal: replicaJournal,
       // A pull reconciles each valid artifact entry and journals what it did.
@@ -11233,6 +11253,8 @@ export function startOctantServer(
       localHostId: LOCAL_HOST_ID,
       clock: () => Date.now(),
       restoreStopped: () => replicaArtifactSync.service?.restoreProgress()?.state === "stopped",
+      // A computer that left its replica says so on the switch too.
+      syncOff: () => replicaStoreSettingsService.turnSyncOff(),
     });
     // Publish and pull for artifacts. With sync off, or no identity in a
     // replica, nothing is queued and no store is called; a Code thread under
@@ -11563,6 +11585,9 @@ export function startOctantServer(
           // only once the host is serving; with sync off each pass returns
           // before any store call.
           stopArtifactSync = artifactSyncService.start();
+          // A leave the host stopped in the middle of finishes its cleanup:
+          // sync off and the device key deleted.
+          void replicaMembershipService.finishLeaving().catch(() => undefined);
           return {
             url: localServer.url,
             ...(remoteListener === undefined ? {} : { remoteListener }),

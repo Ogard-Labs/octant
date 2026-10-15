@@ -178,9 +178,10 @@ function membership(
     instance.status === "revoked" ? [instance.lastAcceptedSequence] : [],
   );
   if (cuts.length === 0) return "member";
-  if (sequence !== undefined && sequence <= Math.min(...cuts)) {
-    return records.some((instance) => instance.status === "member") ? "member" : "revoked";
-  }
+  // A revoke cuts at the last entry the revoker read so that what the computer
+  // already signed keeps counting, and leaving cuts just before the left
+  // record; refusing those entries would drop history the cut kept.
+  if (sequence !== undefined && sequence <= Math.min(...cuts)) return "member";
   return "revoked";
 }
 

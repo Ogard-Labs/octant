@@ -495,7 +495,7 @@ describe("mapCodexMessage", () => {
     expect(JSON.stringify(results)).not.toMatch(/raw command|raw output|provider-command/);
   });
 
-  it("maps a web search item as a visible tool step and completes it with the query", () => {
+  it("maps a web search item as a visible tool step that marks the thread, and completes it with the query", () => {
     const ctx = context();
     const started = map(
       ctx,
@@ -511,8 +511,19 @@ describe("mapCodexMessage", () => {
         kind: "event",
         event: { kind: "tool-start", toolCallId: "tool-1", toolName: "Web search" },
       },
+      // Codex hands the model what it found, so the start already marks the thread.
+      {
+        kind: "event",
+        event: {
+          kind: "outside-content-read",
+          toolCallId: "tool-1",
+          toolName: "webSearch",
+          source: "web-search",
+        },
+      },
       { kind: "event", event: { kind: "tool-progress", toolCallId: "tool-1" } },
     ]);
+    expect(started[1]).not.toHaveProperty("event.target");
 
     const completed = map(
       ctx,

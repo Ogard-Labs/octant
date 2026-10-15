@@ -154,6 +154,7 @@ function host(
     credentials: {
       create: () => createReplicaDeviceKey(deviceKeys),
       sign: (instanceId, payload) => makeReplicaDeviceSigner(deviceKeys, instanceId).sign(payload),
+      remove: (instanceId) => deviceKeys.delete(instanceId),
     },
     journal: createReplicaMembershipJournal({
       journal,
@@ -164,12 +165,15 @@ function host(
     state: () => membershipProjection.state(),
     localHostId: LOCAL_HOST_ID,
     clock: () => Date.parse(NOW),
+    syncOff: async () => {
+      await settings.turnSyncOff();
+    },
   });
   const journalText = () =>
     JSON.stringify(
       journal.replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 1_000 })),
     );
-  return { settings, membership, journal, journalText };
+  return { settings, membership, journal, journalText, deviceKeys };
 }
 
 function expectView(result: ReplicaStoreSettingsResult) {
@@ -736,6 +740,58 @@ describe("replica store settings", () => {
     expect(
       expectView(await settings.setSync({ syncOn: true, expectedVersion: off.version })).syncOn,
     ).toBe(true);
+  });
+
+  it("lets a computer that left its replica choose another store and set up a replica there", async () => {
+    const first = syncFolder();
+    const second = syncFolder();
+    const { settings, membership, deviceKeys } = host(connection());
+    const chosen = expectView(await settings.chooseFolder({ folder: first, expectedVersion: 0 }));
+    await settings.setSync({ syncOn: true, expectedVersion: chosen.version });
+    const founded = await membership.execute({ kind: "create-replica", displayName: "MacBook" });
+    if (founded.kind !== "replica-created") throw new Error(JSON.stringify(founded));
+    expect(await deviceKeys.has(String(founded.instanceId))).toBe(true);
+
+    expect(await membership.execute({ kind: "leave" })).toEqual({
+      kind: "left",
+      instanceId: founded.instanceId,
+      toldStore: true,
+      keyRemoved: true,
+    });
+    // Sync is off, the old key is gone, and the store can change.
+    const after = await settings.view();
+    expect(after).toMatchObject({ syncOn: false, replicaMember: false });
+    expect(await deviceKeys.has(String(founded.instanceId))).toBe(false);
+    const moved = expectView(
+      await settings.chooseFolder({ folder: second, expectedVersion: after.version }),
+    );
+    await settings.setSync({ syncOn: true, expectedVersion: moved.version });
+    const again = await membership.execute({ kind: "create-replica", displayName: "MacBook" });
+    if (again.kind !== "replica-created") throw new Error(JSON.stringify(again));
+    // A new key, so a new identity, written into the new store only.
+    expect(String(again.instanceId)).not.toBe(String(founded.instanceId));
+    expect(existsSync(join(second, "Octant Sync", String(again.instanceId), "1.json"))).toBe(true);
+    expect(existsSync(join(first, "Octant Sync", String(again.instanceId)))).toBe(false);
+    expect(existsSync(join(first, "Octant Sync", String(founded.instanceId), "2.json"))).toBe(true);
+  });
+
+  it("refuses to report sync off when another window changed the settings first", async () => {
+    const opened = connection();
+    const first = host(opened);
+    const chosen = expectView(
+      await first.settings.chooseFolder({ folder: syncFolder(), expectedVersion: 0 }),
+    );
+    await first.settings.setSync({ syncOn: true, expectedVersion: chosen.version });
+    // A second host on the same journal read the settings before the first changed them again.
+    const second = host(opened);
+    const off = expectView(
+      await first.settings.setSync({ syncOn: false, expectedVersion: chosen.version + 1 }),
+    );
+    await first.settings.setSync({ syncOn: true, expectedVersion: off.version });
+
+    await expect(second.settings.turnSyncOff()).rejects.toThrow("stale-version");
+    await first.settings.turnSyncOff();
+    expect(first.settings.settings().syncOn).toBe(false);
   });
 
   it("lets a replica member rotate its bucket's key pair but not move the bucket", async () => {

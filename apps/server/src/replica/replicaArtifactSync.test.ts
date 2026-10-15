@@ -239,6 +239,7 @@ function computer(
       create: () => createReplicaDeviceKey(saved.deviceKeys),
       sign: (instanceId, payload) =>
         makeReplicaDeviceSigner(saved.deviceKeys, instanceId).sign(payload),
+      remove: (instanceId) => saved.deviceKeys.delete(instanceId),
     },
     journal: replicaJournal,
     artifacts: new ReplicaArtifactImport({
@@ -259,6 +260,7 @@ function computer(
     state: () => membershipProjection.state(),
     localHostId: LOCAL_HOST_ID,
     clock: () => Date.parse(NOW),
+    syncOff: () => settings.turnSyncOff(),
     restoreStopped: () => {
       const local = membershipProjection.state().local;
       return (
@@ -854,6 +856,110 @@ describe("artifact sync", () => {
       memory.files.has(`${String(restarted.id())}/${String(firstSlot)}.json`) &&
         memory.files.has(`${String(restarted.id())}/${String(secondSlot)}.json`),
     ).toBe(true);
+  });
+
+  it("keeps the library after leaving, makes no store call, and leaves what it wrote counting elsewhere", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    await studio.commit(canvasVersion({ versionId: ids.v1, sequence: 1, text: "From the studio" }));
+    await laptop.sync.sync();
+    await laptop.commit(
+      canvasVersion({
+        canvasId: ids.second,
+        versionId: ids.v2a,
+        sequence: 1,
+        text: "From the laptop",
+      }),
+    );
+    // A version that could not publish yet stays here, and is not carried out under the identity that left.
+    memory.state.offline = true;
+    await laptop.commit(
+      canvasVersion({ canvasId: ids.second, versionId: ids.v2b, sequence: 2, text: "Unsent" }),
+    );
+    expect(laptop.artifactProjection.state().queue).toHaveLength(1);
+    memory.state.offline = false;
+    const library = laptop.artifactProjection.state().artifacts;
+    const canvases = new Map(laptop.canvases);
+
+    expect(await laptop.membership.execute({ kind: "leave" })).toMatchObject({
+      kind: "left",
+      toldStore: true,
+    });
+    expect(laptop.artifactProjection.state().artifacts).toEqual(library);
+    expect(laptop.artifactProjection.state().queue).toEqual([]);
+    expect(laptop.canvases).toEqual(canvases);
+
+    const calls = memory.state.calls;
+    await laptop.sync.sync();
+    await laptop.commit(
+      canvasVersion({
+        canvasId: ids.second,
+        versionId: ids.v1.replace(/1$/, "9"),
+        sequence: 3,
+        text: "After",
+      }),
+    );
+    await laptop.sync.artifactDeleted(ids.second);
+    await laptop.sync.drain();
+    expect(await laptop.sync.pull()).toBeUndefined();
+    expect(memory.state.calls).toBe(calls);
+    expect(laptop.artifactProjection.state().queue).toEqual([]);
+
+    // The studio still holds what the laptop wrote before it left, and shows it as left.
+    await studio.sync.sync();
+    expect(headsOf(studio, ids.second)).toEqual([{ kind: "version", versionId: ids.v2a }]);
+    const laptopNode = studio.membershipProjection
+      .state()
+      .members.find((member) => member.displayName === laptop.name);
+    expect(laptopNode).toMatchObject({ left: true });
+  });
+
+  it("cuts a revoked computer below a slot it left empty, so what it writes there later is refused", async () => {
+    const memory = memoryStore();
+    const shared: SharedStore = {
+      kind: "direct",
+      selection: () => ({ status: "selected", store: memory.store }),
+    };
+    const { studio, laptop } = await pair(shared);
+    const local = laptop.membershipProjection.state().local;
+    if (local === undefined) throw new Error("no identity");
+    const writer = (sequence: number) => ({
+      keys: laptop.disk.deviceKeys,
+      instanceId: String(local.instanceId),
+      displayName: local.displayName,
+      publicKey: local.publicKey,
+      sequence,
+    });
+    // The laptop's key writes at 4 and leaves 3 empty.
+    await writeArtifactEntry(
+      memory.files,
+      writer(4),
+      canvasVersion({ canvasId: ids.second, versionId: ids.v2a, sequence: 1, text: "Above" }),
+    );
+    const revoked = expectKind(
+      await studio.membership.execute({ kind: "revoke", subject: local.instanceId }),
+      "revoked",
+    );
+    expect(revoked.entry.cut).toBe(2);
+
+    // Written into the empty slot after the revocation: past the cut.
+    await writeArtifactEntry(
+      memory.files,
+      writer(3),
+      canvasVersion({ canvasId: ids.third, versionId: ids.v2b, sequence: 1, text: "Filled in" }),
+    );
+    const pulled = expectKind(await studio.sync.pull(), "pulled");
+    expect(pulled.refused).toContainEqual({
+      instanceId: local.instanceId,
+      sequence: 3,
+      reason: "revoked-instance",
+    });
+    expect(studio.artifactProjection.state().artifact(ids.third)).toBeUndefined();
+    expect(studio.artifactProjection.state().artifact(ids.second)).toBeUndefined();
   });
 
   it("journals a refused pull once and holds no content from it", async () => {

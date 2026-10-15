@@ -172,6 +172,30 @@ describe("artifact bundle contract", () => {
     );
   });
 
+  it("holds leaving to a record after the writer's first, naming the founder it leaves", () => {
+    const left = { format: REPLICA_ENTRY_FORMAT, kind: "replica-left", founder: ids.otherVersion };
+    expect(() => decodeReplicaMembershipEntry({ ...left, origin: origin(1) })).toThrow();
+    expect(() =>
+      decodeReplicaMembershipEntry({ kind: "replica-left", origin: origin(2) }),
+    ).toThrow();
+    const decoded = decodeReplicaMembershipEntry({ ...left, origin: origin(2) });
+    expect(isReplicaMembershipEntry(decoded)).toBe(true);
+    expect(decodeReplicaMembershipCommand({ kind: "leave" })).toEqual({ kind: "leave" });
+    expect(decodeReplicaMembershipCommand({ kind: "leave", withoutStore: true })).toEqual({
+      kind: "leave",
+      withoutStore: true,
+    });
+    expect(() => decodeReplicaMembershipCommand({ kind: "leave", withoutStore: false })).toThrow();
+    expect(
+      decodeReplicaMembershipResult({
+        kind: "left",
+        instanceId: ids.instance,
+        toldStore: true,
+        keyRemoved: true,
+      }),
+    ).toMatchObject({ kind: "left", toldStore: true });
+  });
+
   it("refuses a join request that does not say when it was written", () => {
     expect(() =>
       decodeReplicaMembershipEntry({
@@ -339,6 +363,12 @@ describe("replica entry contract", () => {
         approver: ids.otherVersion,
         approvalSequence: 3,
         approvalHash: hash,
+        founder: ids.otherVersion,
+      },
+      {
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "replica-left",
+        origin: origin(3),
         founder: ids.otherVersion,
       },
     ];

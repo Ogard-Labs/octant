@@ -239,6 +239,7 @@ function answerProduct(seen: ProductRequest[]) {
             displayName: "Studio Mac",
             role: { kind: "founder" },
             revoked: false,
+            left: false,
             thisComputer: true,
           },
         ],

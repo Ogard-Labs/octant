@@ -294,6 +294,22 @@ describe("reconciling a replica entry", () => {
     });
   });
 
+  it("keeps an entry a revoked or departed computer signed at or before its cut", () => {
+    const value = entry({ instanceId: ids.revoked, displayName: "Revoked", sequence: 3 });
+    const cutAt = (lastAcceptedSequence: number) =>
+      state({
+        instances: [
+          { instanceId: ids.local, status: "member" },
+          { instanceId: ids.revoked, status: "revoked", lastAcceptedSequence },
+        ],
+      });
+    expect(reconcileReplicaEntry(cutAt(3), value)).toEqual({ outcome: "append-version" });
+    expect(reconcileReplicaEntry(cutAt(2), value)).toEqual({
+      outcome: "refused",
+      reason: "revoked-instance",
+    });
+  });
+
   it("appends a later version after a tombstone and keeps the tombstone", () => {
     const first = entry({ sequence: 1, versionId: ids.version, contentHash: hashA, parents: [] });
     const tombstone = entry({

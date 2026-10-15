@@ -83,6 +83,14 @@ const revocation = (
     cut,
   });
 
+const left = (by: ReplicaInstanceId, sequence: number, founder: ReplicaInstanceId = ids.founder) =>
+  held({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "replica-left",
+    origin: origin(by, sequence),
+    founder,
+  });
+
 /** The founder approves South at 2 and East at 3; South approves West at 3. */
 function tree() {
   const southApproval = approval(ids.founder, 2, ids.south);
@@ -106,6 +114,7 @@ function standing(membership: ReplicaDerivedMembership, id: ReplicaInstanceId): 
   const node = replicaMembershipNode(membership, id);
   if (node === undefined) return "absent";
   if (!node.admitted) return "not admitted";
+  if (node.left) return `left@${String(node.cut)}`;
   return node.cut === undefined ? "member" : `cut@${node.cut}`;
 }
 
@@ -300,11 +309,72 @@ describe("replica membership derivation", () => {
     expect(String(replicaMembershipNode(membership, ids.west)?.parent)).toBe(ids.south);
   });
 
+  it("counts what a computer signed before it left and nothing after, and keeps the computers it approved", () => {
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...tree().records,
+      left(ids.south, 4),
+      // Written with South's key after it left: neither counts.
+      revocation(ids.south, 5, ids.west, 0),
+      approval(ids.south, 6, ids.other),
+    ]);
+    expect(standing(membership, ids.south)).toBe("left@3");
+    expect(standing(membership, ids.west)).toBe("member");
+    expect(replicaEntryCounts(membership, ids.south, 3)).toBe(true);
+    expect(replicaEntryCounts(membership, ids.south, 4)).toBe(false);
+    expect(decideReplicaJoinApproval({ membership, local: ids.south, subject: ids.other })).toEqual(
+      { status: "refused", reason: "not-a-member" },
+    );
+    // The founder can still revoke the computer South brought in.
+    expect(decideReplicaRevocation({ membership, local: ids.founder, subject: ids.west })).toEqual({
+      status: "revoked",
+    });
+  });
+
+  it("shows a computer revoked before it left as revoked, and one revoked after it left as left", () => {
+    const { records } = tree();
+    const revokedFirst = deriveReplicaMembership(ids.founder, [
+      ...records,
+      revocation(ids.founder, 4, ids.south, 2),
+      left(ids.south, 4),
+    ]);
+    expect(standing(revokedFirst, ids.south)).toBe("cut@2");
+    // A revoke after reading the left record cuts at that record at the earliest.
+    const leftFirst = deriveReplicaMembership(ids.founder, [
+      ...records,
+      left(ids.south, 4),
+      revocation(ids.founder, 4, ids.south, 4),
+    ]);
+    expect(standing(leftFirst, ids.south)).toBe("left@3");
+  });
+
+  it("ignores a left record that names another founder, and one from a computer that is not a member", () => {
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...tree().records,
+      left(ids.south, 4, ids.other),
+      left(ids.ghost, 2),
+    ]);
+    expect(standing(membership, ids.south)).toBe("member");
+    expect(standing(membership, ids.ghost)).toBe("absent");
+  });
+
+  it("lets the founder leave without taking the computers it approved with it", () => {
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...tree().records,
+      left(ids.founder, 4),
+      revocation(ids.founder, 5, ids.east, 0),
+    ]);
+    expect(standing(membership, ids.founder)).toBe("left@3");
+    expect(standing(membership, ids.south)).toBe("member");
+    expect(standing(membership, ids.east)).toBe("member");
+    expect(standing(membership, ids.west)).toBe("member");
+  });
+
   it("derives the same members and cuts for every order and duplicate of the same records", () => {
     const all = [
       ...tree().records,
       revocation(ids.founder, 4, ids.west, 2),
       revocation(ids.west, 3, ids.south, 0),
+      left(ids.east, 3),
     ];
     const expected = deriveReplicaMembership(ids.founder, all);
     for (let shift = 0; shift < all.length; shift += 1) {

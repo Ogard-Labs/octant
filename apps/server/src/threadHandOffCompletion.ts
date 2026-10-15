@@ -68,6 +68,8 @@ interface CompletionState {
   text: string;
   handled: number;
   terminal: ProviderRuntimeEvent | undefined;
+  /** The runtime read outside content with its own tools while writing. */
+  readOutsideContent?: true;
 }
 
 function runCompletion(
@@ -107,6 +109,7 @@ function runCompletion(
               state.handled += 1;
               if (state.handled > MAX_EVENTS) return;
               if (event.kind === "text-delta") state.text += event.text;
+              if (event.kind === "outside-content-read") state.readOutsideContent = true;
               if (isTerminal(event)) state.terminal = event;
             }),
           ),
@@ -120,6 +123,15 @@ function runCompletion(
       }),
     });
     yield* Fiber.join(events);
+    // The document seeds a new thread with no mark to say a page the runtime
+    // read may have steered it, so it is not used.
+    if (state.readOutsideContent === true) {
+      return yield* Effect.fail(
+        new ThreadHandOffCompletionFailed(
+          "The provider read outside content while writing the hand-off, so it was not used.",
+        ),
+      );
+    }
     if (state.terminal?.kind !== "completed" || state.text.trim().length === 0) {
       return yield* Effect.fail(
         new ThreadHandOffCompletionFailed("The provider did not finish a hand-off document."),
