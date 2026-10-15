@@ -3826,7 +3826,7 @@ function canvasPrototypeOwner(sender: WebContents): CanvasPrototypeOwner {
   };
 }
 
-/** A window's prototypes close with it, and with the page that opened them. */
+/** A window's prototypes close with it, and with the page or renderer that opened them. */
 function closeCanvasPrototypesWith(window: BrowserWindow): void {
   const contentsId = window.webContents.id;
   const close = () => canvasPrototypeSurface?.closeOwnedBy(contentsId);
@@ -3834,6 +3834,9 @@ function closeCanvasPrototypesWith(window: BrowserWindow): void {
   window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
     if (isMainFrame && !isInPlace) close();
   });
+  // A renderer that crashed leaves the window open with no page to own them.
+  window.webContents.on("render-process-gone", close);
+  window.webContents.once("destroyed", close);
   window.once("closed", close);
 }
 

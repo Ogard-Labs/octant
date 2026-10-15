@@ -747,8 +747,9 @@ answers every name with not-found among them:
   the page's size, under a surface id it chose. The main process refuses any
   other address and opens a prototype only once the host is ready. Each
   prototype belongs to the window that opened it: only that window hears its
-  events or may send it input, and its prototypes close when it closes or
-  loads another page.
+  events or may send it input, and its prototypes close when it closes, loads
+  another page, or its renderer exits. An open still waiting on the page when
+  that happens is dropped.
 - **The page.** The main process asks the host for the ticketed design page
   itself and hands the prototype host the page with its content type and
   policy. The host serves it once, under an `octant-prototype:` scheme of its

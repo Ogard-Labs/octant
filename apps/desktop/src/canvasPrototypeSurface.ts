@@ -260,6 +260,9 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
   let ready = false;
   let preparing: Promise<CanvasPrototypeSurfacePreparation> | undefined;
   const owners = new Map<string, CanvasPrototypeOwner>();
+  // How many times each window's prototypes were closed. An open that waited
+  // on the page across a close belongs to a page that is gone, and is dropped.
+  const closings = new Map<number, number>();
 
   /** The host is gone: every prototype it drew is gone with it. */
   const forget = () => {
@@ -365,14 +368,24 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
       if (owners.has(request.surfaceId)) {
         return { status: "refused", reason: "That prototype is already open." };
       }
+      const hostAsked = host;
+      const closingsAsked = closings.get(owner.id) ?? 0;
       let page;
       try {
         page = await fetchPage(ticket, server);
       } catch {
         return { status: "refused", reason: "Octant could not reach the host for the page." };
       }
+      if ((closings.get(owner.id) ?? 0) !== closingsAsked) {
+        return { status: "refused", reason: "The window that asked for the prototype is gone." };
+      }
       const current = host;
-      if (!ready || current === undefined || owners.has(request.surfaceId)) {
+      if (
+        !ready ||
+        current === undefined ||
+        current !== hostAsked ||
+        owners.has(request.surfaceId)
+      ) {
         return { status: "refused", reason: "The prototype surface is not ready." };
       }
       owners.set(request.surfaceId, owner);
@@ -413,6 +426,7 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
 
     /** Closes every prototype a window opened, as the window goes away. */
     closeOwnedBy: (ownerId: number): void => {
+      closings.set(ownerId, (closings.get(ownerId) ?? 0) + 1);
       for (const [surfaceId, owner] of owners) {
         if (owner.id !== ownerId) continue;
         owners.delete(surfaceId);

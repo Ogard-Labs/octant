@@ -262,6 +262,31 @@ describe("a prototype's window", () => {
   });
 });
 
+describe("a prototype whose window goes while it opens", () => {
+  it("is not opened once the page arrives, so no prototype outlives the window that asked", async () => {
+    let deliver: ((response: Response) => void) | undefined;
+    const fetchPage = vi.fn<typeof fetch>(
+      () =>
+        new Promise<Response>((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    const { surface: made, host } = await readySurface({ fetch: fetchPage });
+    const window = owner(1);
+    const opening = made.open(window.port, request());
+    await vi.waitFor(() => expect(deliver).toBeDefined());
+    made.closeOwnedBy(1);
+    deliver?.(new Response("page"));
+    await expect(opening).resolves.toMatchObject({ status: "refused" });
+    expect(host.sent).toEqual([]);
+
+    // A later open from a new page in the same window still works.
+    const reopened = made.open(window.port, request({ surfaceId: other }));
+    deliver?.(new Response("page"));
+    await expect(reopened).resolves.toEqual({ status: "open" });
+  });
+});
+
 describe("a person's input", () => {
   it("never hands the page the reserved shortcut: Command-Escape on macOS, Control-Escape elsewhere", () => {
     const key = (modifiers: ReadonlyArray<string>) => ({
