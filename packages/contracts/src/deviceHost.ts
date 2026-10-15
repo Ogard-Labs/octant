@@ -1,5 +1,8 @@
 import { Schema } from "effect";
 
+/** The longest a screen recording runs; one that long still fits the artifact store. */
+export const DEVICE_RECORDING_LIMIT_SECONDS = 60;
+
 /** The longest address Open URL sends to a device. */
 export const DEVICE_OPEN_URL_MAX_LENGTH = 2_048;
 
@@ -48,5 +51,6 @@ export const decodeDeviceOpenUrl = Schema.decodeUnknownSync(DeviceOpenUrl);
  */
 export const DeviceHostCapabilities = Schema.Struct({
   openUrl: Schema.optional(Schema.Boolean),
+  recordScreen: Schema.optional(Schema.Boolean),
 }).annotations({ parseOptions: { onExcessProperty: "ignore" } });
 export type DeviceHostCapabilities = typeof DeviceHostCapabilities.Type;

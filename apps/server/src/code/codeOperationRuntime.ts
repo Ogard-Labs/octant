@@ -1721,7 +1721,9 @@ function approvalPrompt(
       ? "Allow input to this Simulator?"
       : url !== undefined
         ? "Open this URL on the Simulator?"
-        : `Allow Apple ${effect.request.kind}?`;
+        : effect.request.kind === "start-recording"
+          ? "Record this Simulator's screen?"
+          : `Allow Apple ${effect.request.kind}?`;
     effectDetail = [
       // The whole address, exactly as the device receives it: the approval
       // binds to it, and the evidence later keeps only its origin.
@@ -1750,7 +1752,9 @@ function approvalPrompt(
       ? "Allow input to this emulator?"
       : url !== undefined
         ? "Open this URL on the emulator?"
-        : `Allow Android ${effect.request.kind}?`;
+        : effect.request.kind === "start-recording"
+          ? "Record this emulator's screen?"
+          : `Allow Android ${effect.request.kind}?`;
     effectDetail = [
       ...(url === undefined ? [] : [`URL: ${url}`]),
       ...(input

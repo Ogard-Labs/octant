@@ -34,7 +34,14 @@ export type AppleWorkbenchStatus =
 export type AppleWorkbenchIntent =
   | { readonly kind: "build" | "test" }
   | {
-      readonly kind: "run" | "boot" | "shutdown" | "screenshot" | "open-input";
+      readonly kind:
+        | "run"
+        | "boot"
+        | "shutdown"
+        | "screenshot"
+        | "open-input"
+        | "start-recording"
+        | "stop-recording";
       readonly simulatorId: AppleSimulatorId;
     }
   | {

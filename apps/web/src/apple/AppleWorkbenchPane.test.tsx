@@ -451,6 +451,49 @@ describe("AppleWorkbenchPane", () => {
     expect(screen.getByRole("button", { name: "Check again" })).toBeVisible();
   });
 
+  it("offers Record screen only when the host reports it, and stops the recording it reports", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const { vi } = await import("vitest");
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    const simulatorId = discovery.simulators[0]!.simulatorId;
+    const pane = (runtime: AppleRuntimeSnapshot) => (
+      <AppleWorkbenchPane
+        discovery={discovery}
+        liveFrame={liveFrame()}
+        onRun={onRun}
+        runtime={runtime}
+        status="ready"
+        variant="device"
+      />
+    );
+    const { rerender } = render(pane(runtimeSnapshot()));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Record screen|Stop recording/ })).toBeNull();
+    await user.keyboard("{Escape}");
+
+    rerender(pane({ ...runtimeSnapshot(), capabilities: { recordScreen: true } }));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Record screen" }));
+    expect(onRun).toHaveBeenLastCalledWith({ kind: "start-recording", simulatorId });
+
+    rerender(
+      pane({
+        ...runtimeSnapshot(),
+        capabilities: { recordScreen: true },
+        recordings: [{ simulatorId, startedAt: "2026-10-14T20:00:00.000Z" as never }],
+      }),
+    );
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Stop recording" }));
+    expect(onRun).toHaveBeenLastCalledWith({ kind: "stop-recording", simulatorId });
+  });
+
   it("offers Open URL only when the host reports it, and asks the surface to open that Simulator", async () => {
     const { render, screen } = await import("@testing-library/react");
     const userEvent = (await import("@testing-library/user-event")).default;

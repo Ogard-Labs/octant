@@ -549,7 +549,9 @@ channel with actor attribution and the remote/headless fail-closed attach gate;
 an input whose delivery is unknown is reported `interrupted`, not `failed`, and an off-screen point or unsupported keyboard layout is refused,
 never clamped or guessed. Octant does not script Simulator.app, and an agent
 must not launch Simulator.app, `serve-sim`, or `serve-avd`. **Repair input**
-runs only when a person requests it. **Open URL** opens a credential-free
+runs only when a person requests it. **Record screen** starts and stops a time-limited recording a person asked for;
+the video is stored as evidence under the screenshot rules and starting is an
+effect confirmed per recording. **Open URL** opens a credential-free
 `http`/`https` address a person asked for; it is an effect confirmed per
 address (Allow input never covers it), and evidence keeps only the origin. Pane states, discovery, capture, input
 delivery, keyboard layouts, and the managed streaming tools are specified in

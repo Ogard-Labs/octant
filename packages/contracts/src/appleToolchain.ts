@@ -100,6 +100,8 @@ export const AppleSimulatorActionKind = Schema.Literal(
   "key-press",
   "repair-input",
   "open-url",
+  "start-recording",
+  "stop-recording",
 );
 export type AppleSimulatorActionKind = typeof AppleSimulatorActionKind.Type;
 
@@ -121,6 +123,8 @@ export const AppleActionKind = Schema.Literal(
   "key-press",
   "repair-input",
   "open-url",
+  "start-recording",
+  "stop-recording",
 );
 export type AppleActionKind = typeof AppleActionKind.Type;
 
@@ -235,6 +239,9 @@ export const AppleSimulatorRequest = Schema.Struct({
       if (request.kind === "open-url") {
         return request.requestedBy !== undefined && request.url !== undefined;
       }
+      if (request.kind === "start-recording" || request.kind === "stop-recording") {
+        return request.requestedBy !== undefined;
+      }
       return true;
     }),
   );
@@ -294,7 +301,7 @@ export const AppleDiagnostic = Schema.Struct({
 export type AppleDiagnostic = typeof AppleDiagnostic.Type;
 
 export const AppleEvidenceArtifact = Schema.Struct({
-  kind: Schema.Literal("log", "xcresult", "application", "screenshot"),
+  kind: Schema.Literal("log", "xcresult", "application", "screenshot", "recording"),
   reference: opaqueReference,
 }).annotations(strict);
 export type AppleEvidenceArtifact = typeof AppleEvidenceArtifact.Type;
@@ -326,7 +333,9 @@ export const AppleBuildEvidence = Schema.Struct({
         evidence.kind === "type-text" ||
         evidence.kind === "key-press" ||
         evidence.kind === "repair-input" ||
-        evidence.kind === "open-url"
+        evidence.kind === "open-url" ||
+        evidence.kind === "start-recording" ||
+        evidence.kind === "stop-recording"
       ) {
         return evidence.requestedBy !== undefined;
       }
@@ -392,6 +401,12 @@ export const AppleRuntimeSnapshot = Schema.Struct({
     }).annotations(strict),
   ),
   capabilities: Schema.optional(DeviceHostCapabilities),
+  /** Simulators this host is recording right now, so the pane offers Stop instead of Record. */
+  recordings: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ simulatorId: AppleSimulatorId, startedAt: UtcTimestamp }).annotations(strict),
+    ).pipe(Schema.maxItems(256)),
+  ),
 }).annotations(strict);
 export type AppleRuntimeSnapshot = typeof AppleRuntimeSnapshot.Type;
 

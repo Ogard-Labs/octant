@@ -40,6 +40,13 @@ export interface DevicePaneProps {
    * More has no Open URL at all; it is never shown disabled.
    */
   readonly canOpenUrl?: boolean;
+  /**
+   * The host reported that it can record this device's screen. Without it More
+   * has no Record screen at all; it is never shown disabled.
+   */
+  readonly canRecordScreen?: boolean;
+  /** The host is recording this device now, so More offers Stop recording. */
+  readonly recording?: boolean;
 }
 
 /**
@@ -90,6 +97,7 @@ export function DevicePane(props: DevicePaneProps) {
 
   const act = (action: DeviceAction) => props.onAction?.(action);
   const canOpenUrl = live !== undefined && canAct && props.canOpenUrl === true;
+  const canRecordScreen = live !== undefined && canAct && props.canRecordScreen === true;
   const approvalWanted = props.needsApproval && live !== undefined && canAct;
   const line = lineFor({
     view,
@@ -146,6 +154,8 @@ export function DevicePane(props: DevicePaneProps) {
     } else if (item === "open-url") {
       setTyping(false);
       setOpeningUrl(true);
+    } else if (item === "record-screen") {
+      act({ kind: props.recording === true ? "stop-recording" : "start-recording" });
     } else if (item === "lock") enqueue({ kind: "key-press", key: "lock" }, false);
     else if (item === "switch-device") setPicking(true);
     else if (item === "diagnostics") setDiagnosticsOpen(true);
@@ -168,6 +178,8 @@ export function DevicePane(props: DevicePaneProps) {
           screenshot: live !== undefined && canAct && !props.busy,
           typeText: hardware,
           openUrl: canOpenUrl,
+          recordScreen: canRecordScreen,
+          recording: props.recording === true,
           switchDevice: canAct && choosable.length > 0 && view.kind !== "setup",
           stopLiveView:
             live !== undefined &&

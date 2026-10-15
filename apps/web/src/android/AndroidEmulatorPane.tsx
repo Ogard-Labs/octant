@@ -39,7 +39,13 @@ import {
 
 export type AndroidEmulatorIntent =
   | {
-      readonly kind: "boot" | "shutdown" | "screenshot" | "open-input";
+      readonly kind:
+        | "boot"
+        | "shutdown"
+        | "screenshot"
+        | "open-input"
+        | "start-recording"
+        | "stop-recording";
       readonly emulatorId: AndroidEmulatorId;
     }
   | {
@@ -231,6 +237,7 @@ export function AndroidEmulatorPane(props: {
         if (
           approvalGated &&
           intent.kind !== "screenshot" &&
+          intent.kind !== "stop-recording" &&
           !(isAndroidEmulatorInputKind(intent.kind) && grantLive)
         ) {
           if (props.requestApproval === undefined) {
@@ -303,6 +310,11 @@ export function AndroidEmulatorPane(props: {
         if (liveEmulatorId !== undefined)
           void run({ kind: "shutdown", emulatorId: liveEmulatorId });
         return;
+      case "start-recording":
+      case "stop-recording":
+        if (liveEmulatorId !== undefined)
+          void run({ kind: action.kind, emulatorId: liveEmulatorId });
+        return;
       case "open-url":
         if (liveEmulatorId !== undefined)
           void run({ kind: "open-url", emulatorId: liveEmulatorId, url: action.url });
@@ -346,6 +358,13 @@ export function AndroidEmulatorPane(props: {
     <DevicePane
       busy={busy}
       canOpenUrl={controller.runtime?.capabilities?.openUrl === true}
+      canRecordScreen={controller.runtime?.capabilities?.recordScreen === true}
+      recording={
+        liveEmulatorId !== undefined &&
+        (controller.runtime?.recordings ?? []).some(
+          (one) => String(one.emulatorId) === String(liveEmulatorId),
+        )
+      }
       devices={devices}
       diagnostics={androidDiagnostics({
         controller,
@@ -553,6 +572,9 @@ function androidActionRequest(input: {
       return { ...base, kind: "shutdown", timeoutMs: 30_000 };
     case "screenshot":
       return { ...base, kind: "screenshot", timeoutMs: 30_000 };
+    case "start-recording":
+    case "stop-recording":
+      return { ...base, kind: intent.kind, requestedBy: localUserActor(), timeoutMs: 60_000 };
     case "open-input":
       return {
         ...base,

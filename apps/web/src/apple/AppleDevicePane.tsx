@@ -42,6 +42,10 @@ export function AppleDevicePane(props: AppleWorkbenchPaneProps) {
             case "shutdown":
               if (live !== undefined) onRun({ kind: "shutdown", simulatorId: live.simulatorId });
               return;
+            case "start-recording":
+            case "stop-recording":
+              if (live !== undefined) onRun({ kind: action.kind, simulatorId: live.simulatorId });
+              return;
             case "open-url":
               if (live !== undefined) {
                 onRun({ kind: "open-url", simulatorId: live.simulatorId, url: action.url });
@@ -116,6 +120,13 @@ export function AppleDevicePane(props: AppleWorkbenchPaneProps) {
     <DevicePane
       busy={props.busy === true}
       canOpenUrl={props.runtime?.capabilities?.openUrl === true}
+      canRecordScreen={props.runtime?.capabilities?.recordScreen === true}
+      recording={
+        live !== undefined &&
+        (props.runtime?.recordings ?? []).some(
+          (one) => String(one.simulatorId) === String(live.simulatorId),
+        )
+      }
       devices={devices}
       diagnostics={appleDiagnostics(props)}
       inputAllowed={props.inputAllowed !== false}

@@ -12,6 +12,7 @@ import {
   decodeAndroidRuntimeSnapshot,
   decodeAndroidSdkDiscovery,
   decodeAndroidSdkId,
+  DEVICE_RECORDING_LIMIT_SECONDS,
   type AndroidActionProgress,
   type AndroidDiscoveryRequest,
   type AndroidEmulatorEvidence,
@@ -111,6 +112,12 @@ const MAX_RECENT = 64;
 const MAX_DIAGNOSTICS = 16;
 const SCREEN_POLL_MS = 400;
 const MAXIMUM_FRAME_BYTES = 8 * 1024 * 1024;
+/** The artifact store's own bound; a recording it would refuse is a failed recording with a reason. */
+const MAXIMUM_RECORDING_BYTES = 16 * 1024 * 1024;
+/** Low enough that a recording at the time limit stays under the bound above. */
+const RECORDING_BIT_RATE = 1_500_000;
+const RECORDING_START_GRACE_MS = 750;
+const RECORDING_FINISH_MS = 10_000;
 
 export class AndroidToolchainService {
   readonly #options: AndroidToolchainServiceOptions;
@@ -136,6 +143,20 @@ export class AndroidToolchainService {
       readonly done: Promise<void>;
       readonly markDone: () => void;
       progress: AndroidActionProgress;
+    }
+  >();
+  // Screen recordings this host is making. `screenrecord` outlives the action
+  // that started it; stopping asks it to finish, then collects the file.
+  readonly #recordings = new Map<
+    string,
+    {
+      readonly emulatorId: AndroidEmulatorRecord["emulatorId"];
+      readonly threadId: AndroidExecutionContext["threadId"];
+      readonly checkoutId: AndroidExecutionContext["checkoutId"];
+      readonly startedAt: string;
+      readonly devicePath: string;
+      readonly controller: AbortController;
+      readonly finished: Promise<AndroidProcessResult>;
     }
   >();
   readonly #paneOpenRequests = new Map<
@@ -326,7 +347,14 @@ export class AndroidToolchainService {
       emulators: this.#emulators,
       // What this host can do beyond the original actions; the pane offers
       // an item only once it is listed here.
-      capabilities: { openUrl: true },
+      capabilities: { openUrl: true, recordScreen: true },
+      recordings: [...this.#recordings.values()]
+        .filter(
+          (recording) =>
+            String(recording.threadId) === String(context.threadId) &&
+            String(recording.checkoutId) === String(context.checkoutId),
+        )
+        .map(({ emulatorId, startedAt }) => ({ emulatorId, startedAt })),
       active: [...this.#active.values()]
         .filter((entry) => androidContextMatches(entry.context, context))
         .map((entry) => entry.progress),
@@ -583,7 +611,12 @@ export class AndroidToolchainService {
         request.timeoutMs,
         signal,
       );
-      if (succeeded(result)) this.#setState(request.emulatorId, "shutdown", true);
+      if (succeeded(result)) {
+        this.#setState(request.emulatorId, "shutdown", true);
+        // Powering off ends the recording with it; the pane must not keep offering Stop.
+        this.#recordings.get(String(request.emulatorId))?.controller.abort();
+        this.#recordings.delete(String(request.emulatorId));
+      }
       return await this.#fromProcess(request, result, startedAt);
     }
     if (request.kind === "screenshot") {
@@ -634,6 +667,152 @@ export class AndroidToolchainService {
         startedAt,
         [note],
         result.cleanupUncertain ? "uncertain" : "complete",
+      );
+    }
+    if (request.kind === "start-recording") {
+      const key = String(request.emulatorId);
+      if (this.#recordings.has(key)) {
+        return await this.#logged(
+          request,
+          "failed",
+          startedAt,
+          [{ severity: "note", message: "This emulator is already being recorded." }],
+          "complete",
+        );
+      }
+      const devicePath = `/sdcard/octant-recording-${request.actionId}.mp4`;
+      const controller = new AbortController();
+      const finished = this.#command(
+        [
+          adb,
+          "-s",
+          serial,
+          "shell",
+          "screenrecord",
+          "--time-limit",
+          String(DEVICE_RECORDING_LIMIT_SECONDS),
+          "--bit-rate",
+          String(RECORDING_BIT_RATE),
+          devicePath,
+        ],
+        context,
+        (DEVICE_RECORDING_LIMIT_SECONDS + 15) * 1_000,
+        controller.signal,
+      );
+      // A recording that ends at once never started: report why, keep nothing.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const early = await Promise.race([
+        finished,
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), RECORDING_START_GRACE_MS);
+        }),
+      ]);
+      clearTimeout(timer);
+      if (early !== undefined) {
+        return await this.#logged(
+          request,
+          "failed",
+          startedAt,
+          [{ severity: "note", message: "The emulator did not start recording." }],
+          "complete",
+        );
+      }
+      this.#recordings.set(key, {
+        emulatorId: request.emulatorId,
+        threadId: context.threadId,
+        checkoutId: context.checkoutId,
+        startedAt: this.#options.now(),
+        devicePath,
+        controller,
+        finished,
+      });
+      return await this.#logged(
+        request,
+        "succeeded",
+        startedAt,
+        [{ severity: "note", message: "start-recording completed" }],
+        "complete",
+      );
+    }
+    if (request.kind === "stop-recording") {
+      const key = String(request.emulatorId);
+      const recording = this.#recordings.get(key);
+      if (
+        recording === undefined ||
+        String(recording.threadId) !== String(context.threadId) ||
+        String(recording.checkoutId) !== String(context.checkoutId)
+      ) {
+        return await this.#logged(
+          request,
+          "failed",
+          startedAt,
+          [{ severity: "note", message: "No recording is running on this emulator." }],
+          "complete",
+        );
+      }
+      this.#recordings.delete(key);
+      // SIGINT lets `screenrecord` finish the file; killing the adb client
+      // alone would leave the device process writing an unfinished one.
+      await this.#command(
+        [adb, "-s", serial, "shell", "pkill", "-2", "screenrecord"],
+        context,
+        15_000,
+        signal,
+      );
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        recording.finished,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, RECORDING_FINISH_MS);
+        }),
+      ]);
+      clearTimeout(timer);
+      recording.controller.abort();
+      const pulled = await this.#command(
+        [adb, "-s", serial, "exec-out", "cat", recording.devicePath],
+        context,
+        60_000,
+        signal,
+      );
+      await this.#command(
+        [adb, "-s", serial, "shell", "rm", "-f", recording.devicePath],
+        context,
+        15_000,
+        signal,
+      );
+      const bytes = pulled.stdout;
+      const isMedia =
+        bytes.byteLength >= 16 &&
+        bytes.byteLength <= MAXIMUM_RECORDING_BYTES &&
+        [0x66, 0x74, 0x79, 0x70].every((byte, index) => bytes[index + 4] === byte);
+      if (!succeeded(pulled) || !isMedia) {
+        return await this.#logged(
+          request,
+          "failed",
+          startedAt,
+          [{ severity: "note", message: "The recording was empty or larger than Octant keeps." }],
+          "complete",
+        );
+      }
+      const reference = `android-recording-${request.actionId}`;
+      await this.#storeArtifact(reference, bytes, context);
+      const logReference = `android-log-${request.actionId}`;
+      await this.#options.writeArtifact(
+        logReference,
+        new TextEncoder().encode("stop-recording completed\n"),
+        request,
+      );
+      return evidence(
+        request,
+        "succeeded",
+        startedAt,
+        this.#options.now(),
+        [{ severity: "note", message: "stop-recording completed" }],
+        [
+          { kind: "log", reference: logReference },
+          { kind: "recording", reference },
+        ],
+        "complete",
       );
     }
     if (request.kind === "open-url") {
@@ -1357,7 +1536,9 @@ function androidKey(key: string): string | undefined {
 
 function stepFor(kind: AndroidEmulatorRequest["kind"]): AndroidActionProgress["step"] {
   if (kind === "boot") return "preparing-destination";
-  if (kind === "screenshot") return "capturing-screen";
+  if (kind === "screenshot" || kind === "start-recording" || kind === "stop-recording") {
+    return "capturing-screen";
+  }
   if (kind === "install") return "installing";
   if (kind === "launch") return "launching";
   if (isAndroidEmulatorInputKind(kind) || isAndroidEmulatorOpenInputKind(kind)) {
