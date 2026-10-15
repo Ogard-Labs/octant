@@ -192,6 +192,40 @@ describe("DevicePane", () => {
     expect(onInput).toHaveBeenNthCalledWith(2, { kind: "key-press", key: "home" });
   });
 
+  it("sends a tap on a landscape picture in the frame's own portrait pixels", () => {
+    const { onInput } = pane({
+      view: {
+        kind: "live",
+        device: iphone,
+        // The frames stay portrait-sized after the Simulator turns; the pane
+        // draws them a quarter turn clockwise, so the canvas is wide.
+        screen: {
+          kind: "stream",
+          size: { width: 1206, height: 2622 },
+          attach: () => undefined,
+          turned: true,
+        },
+        liveView: "streaming",
+      },
+    });
+    const canvas = screen.getByRole("img", { name: "iPhone 17 live screen" });
+    canvas.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 437, height: 201, right: 437, bottom: 201 }) as DOMRect;
+    const screenControl = screen.getByRole("button", { name: /iPhone 17 screen/ });
+    // A fifth of the way across and half way down the picture the person sees.
+    fireEvent.pointerDown(screenControl, {
+      button: 0,
+      isPrimary: true,
+      pointerId: 1,
+      clientX: 87.4,
+      clientY: 100.5,
+    });
+    fireEvent.pointerUp(screenControl, { pointerId: 1, clientX: 87.4, clientY: 100.5 });
+    // The frame's top edge is on the right, so across runs up the frame.
+    expect(onInput).toHaveBeenCalledWith({ kind: "tap", point: { x: 603, y: 2098 } });
+    expect(screenControl.closest(".device-body")).toHaveAttribute("data-orientation", "landscape");
+  });
+
   it("sends a press and release on the screen as one tap in the device's pixels", () => {
     const { onInput } = pane();
     placeCanvas();
@@ -331,6 +365,17 @@ describe("DevicePane", () => {
     expect(onAction).toHaveBeenLastCalledWith({ kind: "rotate", orientation: "portrait" });
   });
 
+  it("leaves the orientation to a host that knows which way the device sits", async () => {
+    const user = userEvent.setup();
+    // A Simulator keeps streaming portrait-sized frames after it turns, so the
+    // picture's size must not decide.
+    const { onAction } = pane({ canRotate: true, hostTurnsRotation: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Rotate" }));
+    expect(onAction).toHaveBeenLastCalledWith({ kind: "rotate" });
+  });
+
   it("leaves Rotate out of More on a host that has not reported it", async () => {
     const user = userEvent.setup();
     pane({ canRotate: false });
@@ -431,6 +476,15 @@ describe("DevicePane", () => {
     expect(unknown.message).toBe("iPhone 17 refused that action.");
     unknown.fix?.run();
     expect(retry).toHaveBeenCalledWith(intent);
+  });
+
+  it("says Rotate needs the device tool when a build does not have it installed", () => {
+    const problem = deviceProblemFor(
+      { kind: "refused", intent: { kind: "rotate" }, reason: "rotate-unavailable" },
+      { platform: "ios", deviceName: "iPhone 17e", retry: vi.fn() },
+    );
+    expect(problem.message).toContain("device tool isn't installed");
+    expect(problem.fix).toBeUndefined();
   });
 
   it("keeps a dismissed error hidden until that failure clears and a new one comes", () => {

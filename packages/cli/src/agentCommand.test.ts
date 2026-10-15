@@ -427,6 +427,36 @@ describe("octant agent approval prompt", () => {
     expect(sent).toMatchObject([{ body: { decision: "approve-always" } }]);
   });
 
+  it("prints why a marked thread asks and what marked it before the question", async () => {
+    const { prompt } = await answer(
+      {
+        ...leadRequest,
+        singleUse: true,
+        outsideContent: {
+          sourceCount: 3,
+          sources: [
+            {
+              sourceLabel: "web-fetch",
+              ingestionCount: 2,
+              firstIngestedAt: "2026-10-13T11:00:00.000Z",
+              lastIngestedAt: "2026-10-13T11:30:00.000Z",
+            },
+          ],
+        },
+      },
+      "n",
+    );
+    expect(prompt).toContain("This thread took in outside content, so this call is approved once.");
+    expect(prompt).toContain("- Web pages: Read 2 times");
+    expect(prompt).toContain("and 2 more sources");
+    expect(prompt.indexOf("Web pages")).toBeLessThan(prompt.indexOf("allow?"));
+  });
+
+  it("prints no outside content note for a clean thread", async () => {
+    const { prompt } = await answer(leadRequest, "n");
+    expect(prompt).not.toContain("outside content");
+  });
+
   it.each([
     ["a child's request", { ...leadRequest, source: childSource }],
     ["a request after the thread took in outside content", { ...leadRequest, singleUse: true }],

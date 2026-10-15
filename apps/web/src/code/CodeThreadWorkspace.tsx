@@ -1,3 +1,4 @@
+import { threadCompactionSubject } from "../context/CompactionDivider";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import type { ProviderModelOptionValues } from "@octant/contracts";
 import {
@@ -1317,6 +1318,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           className="code-thread-workspace__conversation transcript-scroll"
           estimateSize={96}
           gap={20}
+          compactionSubject={threadCompactionSubject("code-thread", String(props.threadId))}
           itemAt={messageHappenedAt}
           itemKey={(message) => message.id}
           items={messages}

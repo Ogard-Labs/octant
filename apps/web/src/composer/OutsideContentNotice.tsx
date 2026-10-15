@@ -10,7 +10,7 @@ import { absoluteTimeFormatter } from "../lib/relativeTime";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
-import { describeSource } from "./outsideContentSources";
+import { describeOutsideContentReads, describeSource } from "@octant/domain";
 import "./outside-content-notice.css";
 
 /**
@@ -227,18 +227,7 @@ const REFUSAL_COPY: Record<ThreadExternalContentClearRefusal, string> = {
 
 /** How often and when a source was read; a row recorded before times were kept shows none. */
 export function describeReads(source: ThreadExternalContentSource): string {
-  const reads = source.ingestionCount === 1 ? "Read once" : `Read ${source.ingestionCount} times`;
-  const first = time(source.firstIngestedAt);
-  const last = time(source.lastIngestedAt);
-  if (first === undefined && last === undefined) return reads;
-  if (source.ingestionCount === 1 || first === last) return `${reads}, ${last ?? first}`;
-  return [
-    reads,
-    first === undefined ? undefined : `first ${first}`,
-    last === undefined ? undefined : `last ${last}`,
-  ]
-    .filter((part) => part !== undefined)
-    .join(", ");
+  return describeOutsideContentReads(source, time);
 }
 
 function time(at: string | undefined): string | undefined {

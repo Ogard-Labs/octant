@@ -1,7 +1,13 @@
 import type { ApprovalOutsideContent } from "@octant/contracts";
-import { describeReads } from "./OutsideContentNotice";
-import { describeSource } from "./outsideContentSources";
+import { approvalOutsideContentLines } from "@octant/domain";
+import { absoluteTimeFormatter } from "../lib/relativeTime";
 import "./outside-content-notice.css";
+
+function time(at: string | undefined): string | undefined {
+  if (at === undefined) return undefined;
+  const parsed = new Date(at);
+  return Number.isNaN(parsed.getTime()) ? undefined : absoluteTimeFormatter.format(parsed);
+}
 
 /**
  * Why an approval on a marked thread asks for this one call, and what marked
@@ -11,34 +17,24 @@ import "./outside-content-notice.css";
 export function ApprovalOutsideContentNote(props: {
   readonly outsideContent: ApprovalOutsideContent;
 }) {
-  const { sources, sourceCount } = props.outsideContent;
-  const unnamed = sourceCount - sources.length;
+  const { reason, rows, more } = approvalOutsideContentLines(props.outsideContent, time);
   return (
     <div className="approval-outside-content">
-      <p className="approval-outside-content__reason">
-        This thread took in outside content, so this call is approved once. Check that it is
-        something you asked for.
-      </p>
-      {sources.length === 0 ? null : (
+      <p className="approval-outside-content__reason">{reason}</p>
+      {rows.length === 0 ? null : (
         <ul
           aria-label="Outside content that marked this thread"
           className="outside-content-sources"
         >
-          {sources.map((source) => (
-            <li className="outside-content-sources__row" key={source.sourceLabel}>
-              <span className="outside-content-sources__name">
-                {describeSource(source.sourceLabel)}
-              </span>
-              <span className="outside-content-sources__meta">{describeReads(source)}</span>
+          {rows.map((row) => (
+            <li className="outside-content-sources__row" key={row.sourceLabel}>
+              <span className="outside-content-sources__name">{row.name}</span>
+              <span className="outside-content-sources__meta">{row.reads}</span>
             </li>
           ))}
         </ul>
       )}
-      {unnamed > 0 ? (
-        <p className="outside-content-sources__meta">
-          {unnamed === 1 ? "and 1 more source" : `and ${unnamed} more sources`}
-        </p>
-      ) : null}
+      {more === undefined ? null : <p className="outside-content-sources__meta">{more}</p>}
     </div>
   );
 }

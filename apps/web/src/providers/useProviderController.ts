@@ -58,6 +58,10 @@ import {
 } from "../shell/hostBridge";
 
 const PROVIDER_UNAVAILABLE = "Octant Provider service is unavailable.";
+// A browser never holds the host's bridge secret, so only the host-local
+// command or the desktop's own window can put a key in the credential store.
+const BROWSER_CANNOT_SAVE_KEYS =
+  "This window cannot save provider keys. On the host, run `octant provider key set <provider>`, or use the desktop app.";
 
 export type ProviderControllerStatus = "loading" | "ready" | "disconnected";
 
@@ -520,7 +524,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -570,7 +574,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -603,7 +607,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           // rather than silently dropped.
           if (hostBridge === undefined && credentialValue.length > 0) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -657,7 +661,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         withTransientCredential(credential, async (credentialValue) => {
           if (hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -710,7 +714,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         withTransientCredential(credential, async (credentialValue) => {
           if (hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -763,7 +767,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         withTransientCredential(credential, async (credentialValue) => {
           if (hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -816,7 +820,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         withTransientCredential(credential, async (credentialValue) => {
           if (hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -880,7 +884,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         withTransientCredential(credential, async (credentialValue) => {
           if (configuration.authentication === "api-key" && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -936,7 +940,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         withTransientCredential(credential, async (credentialValue) => {
           if (configuration.authentication === "api-key" && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -992,7 +996,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         withTransientCredential(credential, async (credentialValue) => {
           if (configuration.authentication === "api-key" && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -1048,7 +1052,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         withTransientCredential(credential, async (credentialValue) => {
           if (configuration.authentication === "api-key" && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -1106,7 +1110,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         withTransientCredential(credential, async (credentialValue) => {
           if (configuration.authentication === "api-key" && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -1163,7 +1167,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         withTransientCredential(credential, async (credentialValue) => {
           if (configuration.authentication === "api-key" && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -1220,7 +1224,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         withTransientCredential(credential, async (credentialValue) => {
           if (configuration.authentication === "api-key" && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -1278,7 +1282,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         withTransientCredential(credential, async (credentialValue) => {
           if (hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -1484,7 +1488,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -1625,7 +1629,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -1721,7 +1725,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -1831,7 +1835,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -1935,7 +1939,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -2039,7 +2043,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -2143,7 +2147,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -2234,7 +2238,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           const mustSet = credentialValue.length > 0;
           if (mustSet && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -2448,7 +2452,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           if (hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -2502,7 +2506,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (credentialValue.length === 0) return true;
           if (hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -2556,7 +2560,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (credentialValue.length === 0) return true;
           if (hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -2610,7 +2614,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (credentialValue.length === 0) return true;
           if (hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -2664,7 +2668,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           if (credentialValue.length === 0) return true;
           if (hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -2726,7 +2730,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             mustSet && configuration.baseUrl !== instance.configuration.baseUrl;
           if ((mustClear || mustSet) && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -2796,7 +2800,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           const mustSet = credentialValue.length > 0;
           if (mustSet && hostBridge === undefined) {
             if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
+              setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
@@ -2977,7 +2981,7 @@ export function useProviderController(options: ProviderControllerOptions) {
         const bridge = hostBridge;
         if (mustClear && bridge === undefined) {
           if (mounted.current) {
-            setMessage("Provider credential management is unavailable on this host.");
+            setMessage(BROWSER_CANNOT_SAVE_KEYS);
           }
           return false;
         }
@@ -3050,7 +3054,7 @@ export function useProviderController(options: ProviderControllerOptions) {
       queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, async () => {
         if (hostBridge === undefined) {
           if (mounted.current) {
-            setMessage("Provider credential management is unavailable on this host.");
+            setMessage(BROWSER_CANNOT_SAVE_KEYS);
           }
           return false;
         }

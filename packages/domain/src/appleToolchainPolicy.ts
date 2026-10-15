@@ -154,9 +154,6 @@ export function evaluateAppleSimulatorRequest(
   if (request.kind === "open-url" && request.url === undefined) {
     return { kind: "denied", reason: "url-required" };
   }
-  if (request.kind === "rotate" && request.orientation === undefined) {
-    return { kind: "denied", reason: "orientation-required" };
-  }
   const simulator = simulators.find((candidate) => candidate.simulatorId === request.simulatorId);
   if (simulator === undefined) return { kind: "denied", reason: "invalid-destination" };
   if (simulator.state === "unavailable") {

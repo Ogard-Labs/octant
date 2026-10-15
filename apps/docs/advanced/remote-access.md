@@ -68,7 +68,10 @@ recovery phrase, or localStorage fallback.
 ## Security properties
 
 - **HTTPS only**, with a browser-trusted certificate (a Tailscale certificate
-  or an admin-provided LAN certificate). Certificate validation is never
+  or an admin-provided LAN certificate), or a certificate the host makes for
+  itself, which only the Octant desktop app can check (see
+  [Pairing the desktop app with another computer](#pairing-the-desktop-app-with-another-computer)).
+  Certificate validation is never
   disabled and no trust root is silently installed; there is no plaintext
   fallback. The browser holds the same line before it sends anything: a launch
   address that is plain HTTP to any host other than loopback is refused with an
@@ -174,9 +177,41 @@ again, which is why Tailscale is tried first.
 The pairing code carries a fingerprint of the host's own key, which Octant's
 own clients pin. A browser cannot check a certificate the host made itself, so
 there is no browser link for it; if a browser opens the address anyway and
-shows a certificate warning, stop there. Octant's phone and desktop apps
-cannot read the code yet, so today only a listener with a pasted certificate
-can be reached by a client.
+shows a certificate warning, stop there. Pair the Octant desktop app with
+the code as described next; the phone app cannot use the code yet.
+
+## Pairing the desktop app with another computer
+
+When the other computer's listener serves a certificate it made itself
+(enabled without a certificate and key), it shows an **app pairing code**
+instead of a pairing link: a line starting `octant-pair-1.`, with a QR code of
+the same text, in its Settings → Remote access or from `octant pair`. The code
+carries that computer's address, a single-use five-minute ticket, and a
+fingerprint (pin) of its certificate key. A browser cannot check that
+certificate, so there is no browser link for it.
+
+1. On the other computer, create a pairing code.
+2. In the Octant desktop app on this computer, open **Settings → Remote
+   access → Other computers**, paste the whole code, and choose **Pair**.
+3. Octant checks the code, checks that the address is on your private network
+   or Tailscale, connects, and compares the computer's certificate key with
+   the pin before it sends anything. It then checks the computer's signed
+   hello and opens that computer's pairing page in a window.
+4. Confirm there, then approve on the other computer when its comparison code
+   matches the one the window shows.
+
+The window for a paired computer trusts only the key the code pinned. If that
+computer's key changes, Octant refuses with "This isn't the computer you
+paired with: its security key has changed." and sends nothing; if the key was
+replaced on purpose, pair again with a new code. A changed, damaged, or
+non-private code is refused before Octant contacts anything. Paired computers
+are listed under **Other computers** with an **Open** action, which checks the
+key again before the window loads.
+
+The phone app accepts a pasted pairing code but cannot check a computer's own
+certificate yet, so it refuses the code before sending anything. To pair a
+phone, give the listener a Tailscale certificate or your own and use its
+pairing link or ticket. The phone has no QR scanner for pairing codes yet.
 
 ## Device management
 

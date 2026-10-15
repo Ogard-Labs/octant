@@ -74,6 +74,7 @@ export function AppleSimulatorLiveFrameView(props: AppleSimulatorLiveFrameProps)
           }
           pictureLabel={`${frame.name} live screen`}
           screen={streamed.screen}
+          turned={streamed.turned === true}
         />
       ) : frame.status === "live" && props.screenUrl !== undefined ? (
         <StillScreen

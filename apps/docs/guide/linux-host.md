@@ -26,8 +26,9 @@ does not work yet.
   credential is available to a provider.
 - **A provider.** Use a provider CLI that keeps its own login (install it under
   `~/.local/bin` and point the provider at that absolute path), or an endpoint
-  that needs no key, such as a model server on the same machine. See
-  [what does not work yet](#what-does-not-work-yet) for API-key endpoints.
+  that needs no key, such as a model server on the same machine. An endpoint
+  that needs an API key or bearer token takes it from
+  [`octant provider key set`](#save-an-api-key-for-an-endpoint).
 
 `scripts/ade/install-linux-host-deps.sh` installs Bubblewrap, `secret-tool`,
 the GNOME keyring, and a recent Git with `sudo`. If you install packages
@@ -66,6 +67,47 @@ artifact built by `bun scripts/package-headless.ts linux-x64` under
 `~/.local/state/octant/install`, keeping versions side by side for
 `octant server upgrade` and rollback. The artifact carries the packages its
 CLI and server import, so it runs without a checkout.
+
+## Save an API key for an endpoint
+
+A browser cannot save a provider key, not even one running on the host. Add
+the endpoint in Settings from the browser without a key, then save its key in
+a terminal on the host itself (an SSH session is fine):
+
+```sh
+octant provider key set "My gateway"
+```
+
+The command prompts for the key and does not echo it. Name the provider by
+its display name or its id; if two providers share a name, the command lists
+their ids. To read the key from another program or a file instead, give
+`--stdin` and send it on standard input (one trailing newline is dropped):
+
+```sh
+octant provider key set "My gateway" --stdin < ~/gateway.key
+```
+
+The key is never taken as an argument or an environment variable, because
+other processes and your shell history can read those.
+
+- `octant provider key status <provider>` says whether a key is stored.
+- `octant provider key set <provider> --replace` overwrites a stored key. A
+  provider that holds several keys refuses; remove them first.
+- `octant provider key remove <provider>` clears the key and leaves the
+  provider configured. It also takes the id of a provider you already removed,
+  to clear a key it left behind.
+
+The key goes to the running server over its loopback administration session,
+which only processes running as your user can open, and the server stores it
+in Secret Service. The next connection check or turn uses it without a
+restart.
+
+If the server started without Secret Service, the command says
+`Nothing was saved: the Octant server has no credential store.` Start and
+unlock the keyring (see
+[Installation](./installation#headless-linux-for-ade-testing)), then run
+`octant server restart` and try again. Octant never falls back to a file or
+an environment variable.
 
 ## Pair a laptop over Tailscale
 
@@ -136,7 +178,6 @@ Each item is a known gap on a Linux host, not a permanent limit.
 | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Enabling the remote listener and approving pairing        | No command exists, and Settings → Remote access, which does both, is only in the desktop app.                                                                                                                               |
 | The listener after a server restart                       | It comes back disabled.                                                                                                                                                                                                     |
-| Saving an API key or bearer token for an endpoint         | The browser client says `Provider credential management is unavailable on this host.` A Secret Service session does not change that yet.                                                                                    |
 | Terminals and other Full-access tools from `octant agent` | `octant agent` opens Code threads approval-gated, so the tool answers `This tool needs Full access for the thread.` Remembered Full access (`octant project access <name> full-access`) applies to threads that ask for it. |
 | Raising a thread to Full access for one session           | Refused by design on a host with no native confirmation; use the remembered Project decision above.                                                                                                                         |
 | Browser tool from `octant agent`                          | The site approval is not shown in the terminal, so the turn waits.                                                                                                                                                          |

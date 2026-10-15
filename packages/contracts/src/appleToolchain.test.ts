@@ -408,7 +408,7 @@ describe("Apple runtime contracts", () => {
     expect(() => decode({ ...openUrl, url: "file:///etc/hosts" })).toThrow();
   });
 
-  it("decodes Rotate only with an orientation and the person who asked", () => {
+  it("decodes Rotate only with the person who asked, and an orientation when one is named", () => {
     const decode = contracts.decodeAppleSimulatorRequest as (value: unknown) => any;
     const rotate = {
       actionId: "10000000-0000-4000-8000-000000000001",
@@ -430,7 +430,8 @@ describe("Apple runtime contracts", () => {
       orientation: "landscape",
     };
     expect(decode(rotate).orientation).toBe("landscape");
-    expect(() => decode({ ...rotate, orientation: undefined })).toThrow();
+    // Without one, the host turns the Simulator the other way.
+    expect(decode({ ...rotate, orientation: undefined }).orientation).toBeUndefined();
     expect(() => decode({ ...rotate, requestedBy: undefined })).toThrow();
     expect(() => decode({ ...rotate, orientation: "upside-down" })).toThrow();
   });

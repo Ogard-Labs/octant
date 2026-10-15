@@ -74,6 +74,37 @@ describe("the live Simulator screen", () => {
     expect(watchScreen.mock.calls[0]?.[0]).toBe(request);
   });
 
+  it("draws the portrait frames turned when the host says the Simulator is in landscape", async () => {
+    const stream = feed();
+    const client = clientWatching(
+      vi.fn(async (_request: unknown, _signal?: AbortSignal) => ({
+        status: "watching" as const,
+        screen: { width: 1206, height: 2622 },
+        frames: stream.frames,
+      })),
+    );
+    const { result, rerender } = renderHook(
+      ({ orientation }: { orientation: "portrait" | "landscape" }) =>
+        useAppleSimulatorLiveScreen({ client, request, enabled: true, decode, orientation }),
+      { initialProps: { orientation: "portrait" } },
+    );
+    stream.push(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]));
+    await waitFor(() => expect(result.current.status).toBe("live"));
+    const canvas = document.createElement("canvas");
+    if (result.current.status !== "live") return;
+    result.current.attach(canvas);
+    expect(result.current.turned).toBe(false);
+    expect([canvas.width, canvas.height]).toEqual([506, 1_100]);
+
+    // A still screen sends no new frame; the picture it has is redrawn.
+    rerender({ orientation: "landscape" });
+    await waitFor(() => expect([canvas.width, canvas.height]).toEqual([1_100, 506]));
+    // The reported size stays the frame's own: it is the space taps are sent in.
+    if (result.current.status !== "live") return;
+    expect(result.current.screen).toEqual({ width: 1206, height: 2622 });
+    expect(result.current.turned).toBe(true);
+  });
+
   it("turns the reported size with the frames when the device rotates", async () => {
     const stream = feed();
     const watchScreen = vi.fn(async (_request: unknown, _signal?: AbortSignal) => ({

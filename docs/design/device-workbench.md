@@ -199,26 +199,50 @@ snapshot lists `capabilities.rotate`; a host that predates the flag omits it
 and the item is left out, never shown disabled. Both the Simulator and
 emulator hosts report it.
 
-The request names the orientation to set, `portrait` or `landscape`
+The Android request names the orientation to set, `portrait` or `landscape`
 (`DeviceOrientation`), not a turn, so a repeated request is idempotent. The
-pane names the one the device is not showing: it reads the streamed picture,
-and with no picture it asks for `landscape`. There is no upside-down or
-reverse-landscape choice.
+pane names the one the emulator is not showing: it reads the streamed picture,
+and with no picture it asks for `landscape`. The Apple request names none
+(`orientation` is optional): the Simulator keeps streaming portrait-sized
+frames after it turns, so the picture cannot say which way it sits, and the
+desktop reads the Simulator's real screen (a screenshot's size, captured into the host-private capture directory and deleted at once) and turns it
+the other way, so every Rotate alternates however the pane was opened. A request that does name one still sets it. There is no
+upside-down or reverse-landscape choice.
 
 On the Simulator, `simctl` has no rotate command and Octant does not script
 Simulator.app, so the host hands the request to the desktop's device broker
 like input, and the desktop runs `serve-sim rotate` against the managed
 stream, starting it when needed (`landscape` is `landscape_left`). Without the
-desktop app or the managed `serve-sim` tool the action is `unavailable`. On
+desktop app the action is `unavailable`; without the managed `serve-sim` tool
+(dev builds do not vendor it) the desktop refuses with `rotate-unavailable`
+and the pane says the device tool is not installed. On
 the emulator the host turns auto-rotate off and sets the rotation through adb
 (`settings put system accelerometer_rotation 0`, then `user_rotation` to `0`
 for portrait or `1` for landscape), so the sensor cannot undo it.
+
+**The Simulator's picture follows the turn.** serve-sim keeps sending
+portrait-sized frames, and takes touches in the portrait frame's own space,
+after the Simulator turns (measured on serve-sim 0.1.46 and 0.1.48: in
+landscape the content sits sideways in the frame, and a touch at frame
+fraction `(x, y)` lands at `x` of the way down the landscape screen and `y`
+from its right edge). The desktop's answer to a Rotate carries the orientation
+it left the Simulator in, the host keeps it per Simulator until shutdown, and
+the runtime snapshot lists it as `orientations`; a Simulator not listed is
+taken to sit in portrait. When that says `landscape` and the frames are
+portrait-sized, the pane draws each frame a quarter turn clockwise (`landscape`
+is `landscape_left`), so the picture, its bezel and the side keys sit the way
+the device does, and a pointer or touch on it is turned back a quarter
+counter-clockwise into the frame's pixel space before it is sent. Frames that
+arrive already wide are drawn as they are. The host learns the orientation
+only when it rotates: a Simulator turned from outside Octant, or already in
+landscape when the pane opens, is drawn as the frames arrive until the next
+Rotate. The Android emulator streams rotated frames and needs none of this.
 
 Rotate is an effect, not input. Only a person (`local-user` or
 `remote-device` in `requestedBy`) may ask for it; an agent or the host is
 refused. Plan refuses it; Full access sends it unasked; on an approval-gated
 thread each Rotate raises its own confirmation, and Allow input never covers
-it. Evidence and its log record `rotate to <orientation> completed` and
+it. Evidence and its log record `rotate to <orientation> completed` (`rotate completed` when the host chose) and
 nothing from the device. The agent tools do not offer Rotate.
 
 ## Record screen

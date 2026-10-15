@@ -63,6 +63,20 @@ export const LISTENER_TRUST_REFUSAL_COPY: Readonly<Record<ListenerTrustRefusal, 
     "This computer's address isn't on a private network or Tailscale, so Octant stopped before sending anything.",
 };
 
+/**
+ * What a pinned transport's `fetch` throws when the rule refuses a connection,
+ * so a caller can tell a refusal from an unreachable host. Nothing was sent.
+ */
+export class ListenerTrustRefused extends Error {
+  readonly reason: ListenerTrustRefusal;
+
+  constructor(reason: ListenerTrustRefusal) {
+    super(LISTENER_TRUST_REFUSAL_COPY[reason]);
+    this.name = "ListenerTrustRefused";
+    this.reason = reason;
+  }
+}
+
 export type ListenerAddressJudgement =
   | { readonly status: "private"; readonly address: string }
   | { readonly status: "refused"; readonly reason: "not-private-address" };

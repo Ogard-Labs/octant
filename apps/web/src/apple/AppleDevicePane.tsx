@@ -56,7 +56,7 @@ export function AppleDevicePane(props: AppleWorkbenchPaneProps) {
                 onRun({
                   kind: "rotate",
                   simulatorId: live.simulatorId,
-                  orientation: action.orientation,
+                  ...(action.orientation === undefined ? {} : { orientation: action.orientation }),
                 });
               }
               return;
@@ -130,6 +130,7 @@ export function AppleDevicePane(props: AppleWorkbenchPaneProps) {
       busy={props.busy === true}
       canOpenUrl={props.runtime?.capabilities?.openUrl === true}
       canRotate={props.runtime?.capabilities?.rotate === true}
+      hostTurnsRotation
       canVolume={props.runtime?.capabilities?.volume === true}
       canRecordScreen={props.runtime?.capabilities?.recordScreen === true}
       recording={
@@ -225,7 +226,12 @@ function liveScreenOf(props: AppleWorkbenchPaneProps): {
   const stream = props.liveScreen;
   if (stream?.status === "live") {
     return {
-      screen: { kind: "stream", size: stream.screen, attach: stream.attach },
+      screen: {
+        kind: "stream",
+        size: stream.screen,
+        attach: stream.attach,
+        ...(stream.turned === true ? { turned: true } : {}),
+      },
       liveView: "streaming",
     };
   }

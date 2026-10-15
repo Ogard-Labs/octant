@@ -438,8 +438,8 @@ describe("Apple toolchain routes", () => {
       );
     });
 
-    it("refuses a rotation without a known orientation before authority is checked", async () => {
-      for (const orientation of [undefined, "upside-down"]) {
+    it("refuses a rotation to an orientation it does not know before authority is checked", async () => {
+      for (const orientation of ["upside-down"]) {
         const resolveContext = vi.fn(async () => context);
         const { handler, service } = routes(resolveContext);
 

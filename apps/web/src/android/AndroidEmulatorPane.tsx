@@ -329,7 +329,7 @@ export function AndroidEmulatorPane(props: {
           void run({
             kind: "rotate",
             emulatorId: liveEmulatorId,
-            orientation: action.orientation,
+            orientation: action.orientation ?? "landscape",
           });
         return;
       case "boot":

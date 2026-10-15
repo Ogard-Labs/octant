@@ -19,6 +19,7 @@ import {
 } from "@octant/client-runtime";
 import type { NativeHarnessFollowUpPreview, NativeHarnessSessionView } from "@octant/contracts";
 import { GlassChip, useTheme } from "../../design-system";
+import { OutsideContentNote } from "./OutsideContentNote";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 
 export interface NativeHarnessSessionPanelProps {
@@ -216,6 +217,9 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
               ? `Needs your say-so (${pendingApproval.approvalClass}).`
               : "Allow this request for this child."}
           </Text>
+          {pendingApproval.outsideContent === undefined ? null : (
+            <OutsideContentNote outsideContent={pendingApproval.outsideContent} />
+          )}
           {listedHosts === undefined ? null : (
             <>
               <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
