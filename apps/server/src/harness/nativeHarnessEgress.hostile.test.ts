@@ -4,7 +4,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { connect as netConnect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import {
   AggregateId,
@@ -2044,18 +2044,24 @@ describe("native harness tool egress proxy", () => {
     });
 
     it("closes an idle tunnel when its rule expires", async () => {
-      const { harness, tunnel } = await openAllowedTunnel({
-        clock: () => new Date().toISOString(),
-        rules: [
-          threadRule("registry.example.com", 443, {
-            expiresAt: new Date(Date.now() + 300).toISOString(),
-          }),
-        ],
-      });
-      await new Promise<void>((resolve) => tunnel.socket.once("close", () => resolve()));
-      expect(await summaryEntries(harness)).toContainEqual(
-        expect.objectContaining({ decision: "refused", reason: "expired" }),
-      );
+      // Only the proxy's expiry timer is faked, so the rule's lifetime follows
+      // the host clock instead of how long a loaded machine takes to open the
+      // tunnel.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const { harness, tunnel } = await openAllowedTunnel({
+          rules: [threadRule("registry.example.com", 443)],
+        });
+        const closed = new Promise<void>((resolve) => tunnel.socket.once("close", () => resolve()));
+        harness.advance(3_600_000);
+        vi.advanceTimersByTime(3_600_000);
+        await closed;
+        expect(await summaryEntries(harness)).toContainEqual(
+          expect.objectContaining({ decision: "refused", reason: "expired" }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("closes the tunnel at once when its rule is revoked", async () => {
