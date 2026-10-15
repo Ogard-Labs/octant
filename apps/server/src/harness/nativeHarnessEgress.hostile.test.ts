@@ -1068,6 +1068,7 @@ describe("native harness command network", () => {
     const proxiedScopes: HarnessEgressScope[] = [];
     const proxiedCommands: string[] = [];
     const postures = new Map<string, ProviderExecutionPolicy | undefined>();
+    const postureReads: Array<{ threadId: string; windowId: string | undefined }> = [];
     const threadId = randomUUID();
     const checkoutRoot = temporaryDirectory("octant-egress-posture-");
     const composition = createNativeHarnessComposition({
@@ -1104,7 +1105,10 @@ describe("native harness command network", () => {
             },
           }
         : {}),
-      readCodeExecutionPolicy: (subject) => postures.get(subject),
+      readCodeExecutionPolicy: (subject, windowId) => {
+        postureReads.push({ threadId: subject, windowId });
+        return postures.get(subject);
+      },
       hostId: authority.hostId,
       readThreadTaint: () => false,
       recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
@@ -1160,6 +1164,7 @@ describe("native harness command network", () => {
         proxied: proxiedCommands,
       }),
       proxiedScopes,
+      postureReads,
     };
   }
 
@@ -1187,6 +1192,13 @@ describe("native harness command network", () => {
       offline: ["curl https://example.org/"],
       proxied: [],
     });
+  });
+
+  it("follows the posture the running window holds, not the stored one", async () => {
+    const code = postureCode({ proxied: true });
+    code.setPosture("approval-gated");
+    await code.bash(code.lead, "npm install");
+    expect(code.postureReads).toContainEqual({ threadId: code.threadId, windowId: "window-1" });
   });
 
   it("applies a posture changed mid-turn to the next command", async () => {

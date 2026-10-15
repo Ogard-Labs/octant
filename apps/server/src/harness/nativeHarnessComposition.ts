@@ -69,8 +69,15 @@ export interface NativeHarnessCompositionOptions {
    * did before the rules existed.
    */
   readonly proxiedShell?: (scope: HarnessEgressScope) => NativeHarnessShellPort;
-  /** A Code thread's access posture now, or nothing for a thread that is not one. */
-  readonly readCodeExecutionPolicy?: (threadId: string) => ProviderExecutionPolicy | undefined;
+  /**
+   * A Code thread's access posture now, as the window running it holds it and
+   * clamped to its running turn's, or nothing for a thread that is not one.
+   * Without a window it is the stored posture clamped to the running turn's.
+   */
+  readonly readCodeExecutionPolicy?: (
+    threadId: string,
+    windowId?: string,
+  ) => ProviderExecutionPolicy | undefined;
   /**
    * The web search a turn may use, resolved each time a turn's tools are
    * composed: its backing endpoint is a live setting, not a startup fact.
@@ -293,16 +300,19 @@ export function createNativeHarnessComposition(
       return (shell ?? unavailableShell).run(input);
     },
   });
-  const codeEgress = (threadId: string) => {
-    const executionPolicy = options.readCodeExecutionPolicy?.(threadId);
+  const codeEgress = (threadId: string, windowId?: string) => {
+    const executionPolicy = options.readCodeExecutionPolicy?.(threadId, windowId);
     return executionPolicy === undefined
       ? "none"
       : resolveDefaultThreadEgressPolicy({ mode: "code", executionPolicy });
   };
-  const codeShell = (scope: HarnessEgressScope): NativeHarnessShellPort | undefined =>
+  const codeShell = (
+    scope: HarnessEgressScope,
+    windowId: string,
+  ): NativeHarnessShellPort | undefined =>
     options.proxiedShell === undefined
       ? options.shell
-      : postureShell(options.proxiedShell(scope), () => codeEgress(scope.threadId));
+      : postureShell(options.proxiedShell(scope), () => codeEgress(scope.threadId, windowId));
   const delegateFor = (scope: {
     readonly parentThreadId: string;
     readonly windowId: string;
@@ -376,7 +386,7 @@ export function createNativeHarnessComposition(
     forCode: ({ thread, checkoutRoot, windowId }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
-      const shell = codeShell({ threadId, projectId: String(thread.projectId) });
+      const shell = codeShell({ threadId, projectId: String(thread.projectId) }, windowId);
       return compose({
         threadId,
         mode: "code",
