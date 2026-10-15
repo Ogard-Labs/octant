@@ -192,6 +192,40 @@ describe("DevicePane", () => {
     expect(onInput).toHaveBeenNthCalledWith(2, { kind: "key-press", key: "home" });
   });
 
+  it("sends a tap on a landscape picture in the frame's own portrait pixels", () => {
+    const { onInput } = pane({
+      view: {
+        kind: "live",
+        device: iphone,
+        // The frames stay portrait-sized after the Simulator turns; the pane
+        // draws them a quarter turn clockwise, so the canvas is wide.
+        screen: {
+          kind: "stream",
+          size: { width: 1206, height: 2622 },
+          attach: () => undefined,
+          turned: true,
+        },
+        liveView: "streaming",
+      },
+    });
+    const canvas = screen.getByRole("img", { name: "iPhone 17 live screen" });
+    canvas.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 437, height: 201, right: 437, bottom: 201 }) as DOMRect;
+    const screenControl = screen.getByRole("button", { name: /iPhone 17 screen/ });
+    // A fifth of the way across and half way down the picture the person sees.
+    fireEvent.pointerDown(screenControl, {
+      button: 0,
+      isPrimary: true,
+      pointerId: 1,
+      clientX: 87.4,
+      clientY: 100.5,
+    });
+    fireEvent.pointerUp(screenControl, { pointerId: 1, clientX: 87.4, clientY: 100.5 });
+    // The frame's top edge is on the right, so across runs up the frame.
+    expect(onInput).toHaveBeenCalledWith({ kind: "tap", point: { x: 603, y: 2098 } });
+    expect(screenControl.closest(".device-body")).toHaveAttribute("data-orientation", "landscape");
+  });
+
   it("sends a press and release on the screen as one tap in the device's pixels", () => {
     const { onInput } = pane();
     placeCanvas();

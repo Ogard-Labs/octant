@@ -14,6 +14,8 @@ export function StreamedScreen(props: {
   readonly label: string;
   readonly pictureLabel: string;
   readonly screen: { readonly width: number; readonly height: number };
+  /** The drawn picture is the frame turned a quarter clockwise. */
+  readonly turned?: boolean;
   readonly attach: (canvas: HTMLCanvasElement | null) => void;
   readonly active: boolean;
   readonly enqueue: EnqueueDeviceInput;
@@ -76,6 +78,7 @@ export function StreamedScreen(props: {
           { x: event.clientX, y: event.clientY, atMs: event.timeStamp },
           canvas.getBoundingClientRect(),
           props.screen,
+          props.turned === true,
         );
         if (gesture !== undefined) enqueue(gesture, false);
       }}

@@ -545,7 +545,7 @@ export function createManagedSimulatorHelpers(
     if (outcome !== "ok") {
       return { status: "unavailable", message: "The Simulator did not rotate." };
     }
-    return { status: "delivered" };
+    return { status: "delivered", orientation: target };
   }
 
   async function ensureFrames(session: StreamSession): Promise<void> {

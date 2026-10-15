@@ -299,9 +299,11 @@ describe("managed simulator streams", () => {
     try {
       await expect(
         helpers.send(udid, { op: "rotate", orientation: "landscape" }, 2_000),
-      ).resolves.toEqual({ status: "delivered" });
+      ).resolves.toEqual({ status: "delivered", orientation: "landscape" });
       expect(managed.commands).toContainEqual(["rotate", "landscape_left", "-d", udid]);
-      await helpers.send(udid, { op: "rotate", orientation: "portrait" }, 2_000);
+      await expect(
+        helpers.send(udid, { op: "rotate", orientation: "portrait" }, 2_000),
+      ).resolves.toEqual({ status: "delivered", orientation: "portrait" });
       expect(managed.commands).toContainEqual(["rotate", "portrait", "-d", udid]);
       expect(native.send).not.toHaveBeenCalled();
     } finally {
@@ -318,9 +320,13 @@ describe("managed simulator streams", () => {
       sitsWide: async () => wide,
     });
     try {
-      await helpers.send(udid, { op: "rotate" }, 2_000);
+      await expect(helpers.send(udid, { op: "rotate" }, 2_000)).resolves.toMatchObject({
+        orientation: "landscape",
+      });
       wide = true;
-      await helpers.send(udid, { op: "rotate" }, 2_000);
+      await expect(helpers.send(udid, { op: "rotate" }, 2_000)).resolves.toMatchObject({
+        orientation: "portrait",
+      });
       wide = false;
       await helpers.send(udid, { op: "rotate" }, 2_000);
       expect(managed.commands.filter((command) => command[0] === "rotate")).toEqual([
