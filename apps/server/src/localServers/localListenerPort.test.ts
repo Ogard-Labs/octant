@@ -1,6 +1,7 @@
 import { MAX_LOCAL_SERVER_LISTENERS } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
+  createLiveLocalListenerHoldingProbe,
   createLiveLocalListenerPort,
   createLsofWorkingDirectoryResolver,
   createPsProcessTableReader,
@@ -501,5 +502,77 @@ describe("process table reads", () => {
       new Map([[4213, { parentPid: 1, commandName: "node" }]]),
     );
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("re-observing the port a grant forwards to", () => {
+  const holder = { port: 5173, pid: 4213, processName: "node" } as const;
+  // 4213 runs under the Octant terminal shell 300.
+  const psTable = ["  300     1 zsh", " 4213   300 node", " 5000     1 node"].join("\n");
+  const listing = (pid: number, name = "node") =>
+    [`p${pid}`, `c${name}`, "u501", "n127.0.0.1:5173"].join("\n");
+
+  function probe(lsof: () => Promise<string>, options: { roots?: ReadonlySet<number> } = {}) {
+    const calls: string[][] = [];
+    const check = createLiveLocalListenerHoldingProbe({
+      currentUid: 501,
+      ownedProcessRoots: async () => options.roots ?? new Set([300]),
+      execute: async (command, args) => {
+        calls.push([command, ...args]);
+        return command === "lsof" ? lsof() : psTable;
+      },
+    });
+    return { check, calls };
+  }
+
+  function lsofExit1(): Promise<string> {
+    return Promise.reject(Object.assign(new Error("exit 1"), { code: 1, stdout: "" }));
+  }
+
+  it("answers held for the same process, still under an Octant terminal", async () => {
+    const { check, calls } = probe(async () => listing(4213));
+    expect(await check(holder)).toBe("held");
+    expect(calls).toContainEqual([
+      "lsof",
+      "-nP",
+      "+c",
+      "0",
+      "-a",
+      "-u",
+      "501",
+      "-iTCP:5173",
+      "-sTCP:LISTEN",
+      "-FpcnLu",
+    ]);
+  });
+
+  it("answers stopped when nobody of this user listens on the port", async () => {
+    expect(await probe(lsofExit1).check(holder)).toBe("stopped");
+    expect(await probe(async () => "").check(holder)).toBe("stopped");
+  });
+
+  it("answers changed-hands for another pid, a reused pid, or a server no longer Octant's", async () => {
+    expect(await probe(async () => listing(5000)).check(holder)).toBe("changed-hands");
+    expect(await probe(async () => listing(4213, "python3")).check(holder)).toBe("changed-hands");
+    expect(await probe(async () => listing(4213), { roots: new Set([999]) }).check(holder)).toBe(
+      "changed-hands",
+    );
+  });
+
+  it("answers unavailable when the host could not look, never stopped", async () => {
+    const missing = () => Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+    expect(await probe(missing).check(holder)).toBe("unavailable");
+    const failedWithOutput = () =>
+      Promise.reject(Object.assign(new Error("exit 1"), { code: 1, stdout: "partial" }));
+    expect(await probe(failedWithOutput).check(holder)).toBe("unavailable");
+    const noTable = createLiveLocalListenerHoldingProbe({
+      currentUid: 501,
+      ownedProcessRoots: async () => new Set([300]),
+      execute: async (command) => {
+        if (command === "ps") throw new Error("ps failed");
+        return listing(4213);
+      },
+    });
+    expect(await noTable(holder)).toBe("unavailable");
   });
 });

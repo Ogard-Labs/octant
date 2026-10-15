@@ -1,7 +1,7 @@
 # Open a dev server from another computer
 
-**Status: approved by the maintainer on 2026-10-14; slices 1 and 2 built,
-nothing forwarded.** Nothing here is in force. [Architecture](../architecture.md) holds
+**Status: approved by the maintainer on 2026-10-14; slices 1 to 3 built: the
+host relays HTTP, and no client calls it yet.** Nothing here is in force. [Architecture](../architecture.md) holds
 only the rules that are true today; each slice below moves its rules there when
 it lands. Today a paired device that opens a server from Local servers or
 Running services gets a Browser tab on the host and sees the host browser's
@@ -404,9 +404,9 @@ dark; slice 5 makes the feature reachable.
      forwarder, so the wiring check lists them as uncalled, each with the
      reason.
 
-   Not yet closed by this slice, left to slice 3's per-request checks: a server
-   that exits or changes hands without Octant stopping it, read access lost
-   other than by archive, and Code turned off.
+   Not closed by this slice, and closed by slice 3's per-request checks: a
+   server that exits or changes hands without Octant stopping it, read access
+   lost other than by archive, and Code turned off.
 
 3. **HTTP proxy route on the private listener.** Per-request proof against
    the proxy session, endpoint identity re-check, header handling, budgets,
@@ -417,6 +417,37 @@ dark; slice 5 makes the feature reachable.
    proof, and CSRF headers never reach the upstream server; `Host` is
    `localhost:<port>`; the body cap answers 413 and the concurrency cap 503
    with `Retry-After`, apart from the product budget.
+
+   **Built.** The relay is `apps/server/src/remote/remoteServerProxyRelay.ts`,
+   its checks and revocation registry live in the grant service, its header
+   rules are `packages/domain/src/remoteServerProxyRelayPolicy.ts`, and the
+   port re-observation is `createLiveLocalListenerHoldingProbe`. The rules now
+   in force are in the [architecture](../architecture.md) under the relay.
+   Rules this slice resolved, which later slices must keep:
+   - The forwarder reaches the host the way any proxy request does: the
+     listener's own `Origin` (required on unsafe methods) and `Sec-Fetch-Site`
+     `same-origin` or none. The host turns that `Origin` into the dev server's
+     origin and a `Referer` under the grant's path into the dev server's path,
+     so the forwarder rewrites the page's origin to the listener's and its
+     paths to the grant's, never to the dev server's.
+   - The per-open secret stays between the page and the forwarder. The host
+     never sees it: any cookie named `octant-` (after an optional `__Secure-`
+     or `__Host-`) is Octant's and crosses neither way, so the claim cookie
+     uses that prefix.
+   - Only a response carrying `x-octant-server-proxy: relayed` is the dev
+     server's; the host strips that header from the dev server, so every other
+     response on the route is the host's own refusal or budget.
+   - Each request gets its own upstream connection, so the plan's two-second
+     re-check on a reused connection does not arise. Ownership is re-walked
+     from the Octant terminal roots on every check, so a server that left its
+     terminal closes its grant as `server-changed-hands`.
+   - `Authorization` and the page's own cookies reach the dev server: they are
+     the page's credentials for its own server and carry no Octant authority.
+   - Code is always on today, so `code-disabled` cannot occur yet; the check
+     exists so a later switch reaches open grants.
+   - A server's port and scheme come from the grant's endpoint only, which is
+     a loopback IP literal; a `localhost` endpoint is refused rather than
+     looked up.
 
 4. **WebSocket upgrade on the proxy route only.**
    Tests: every other route still refuses an upgrade; an upgrade without a

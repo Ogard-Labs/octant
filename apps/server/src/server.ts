@@ -622,7 +622,10 @@ import { FileMentionService, fileMentionContextBlocks } from "./fileMentionServi
 import { createLocalServerRouteHandler } from "./localServerRoutes";
 import { createRemoteServerGrantLocalRouteHandler } from "./remoteServerGrantLocalRoutes";
 import { RemoteServerGrantService } from "./remote/remoteServerGrantService";
-import { createLiveLocalListenerPort } from "./localServers/localListenerPort";
+import {
+  createLiveLocalListenerHoldingProbe,
+  createLiveLocalListenerPort,
+} from "./localServers/localListenerPort";
 import {
   createLiveLocalServerHealthProbe,
   createLiveLocalServerStopPort,
@@ -6131,11 +6134,10 @@ export function startOctantServer(
     // process, so it is bound to the same authoritative thread, checkout, and
     // root resolution the Code workspace already uses. The live observer verifies
     // terminal roots and their descendants; unknown processes remain leftovers.
+    const ownedTerminalProcessRoots = async () =>
+      (await terminalProcessPort?.ownedProcessRoots()) ?? new Set<number>();
     const localServerService = new LocalServerService({
-      listeners: createLiveLocalListenerPort({
-        ownedProcessRoots: async () =>
-          (await terminalProcessPort?.ownedProcessRoots()) ?? new Set<number>(),
-      }),
+      listeners: createLiveLocalListenerPort({ ownedProcessRoots: ownedTerminalProcessRoots }),
       health: createLiveLocalServerHealthProbe(),
       stopPort: createLiveLocalServerStopPort(),
       scopes: createCodeThreadLocalServerScopeResolver({
@@ -6197,6 +6199,13 @@ export function startOctantServer(
         (await routeCodeService.read(scopeId, threadId)) !== undefined,
       readThread: persistence.readCodeThread,
       readOpenGrants: persistence.readOpenRemoteServerGrants,
+      confirmEndpoint: createLiveLocalListenerHoldingProbe({
+        ownedProcessRoots: ownedTerminalProcessRoots,
+      }),
+      isCodeEnabled: () =>
+        enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+          "code",
+        ),
       journal: persistence.journal,
       hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
       uuid: randomUUID,
@@ -10846,6 +10855,31 @@ export function startOctantServer(
             },
             scopeId: context.scopeId,
             request: input.grantRequest,
+            stillAuthorized: input.stillAuthorized,
+            signal: input.signal,
+          }),
+        );
+      },
+      relay: (input) => {
+        const context = resolvePrincipalRouteContext({
+          request: input.request,
+          principal: input.principal,
+          abortSignal: input.signal,
+        });
+        return codeProjectAccess.run(context, () =>
+          remoteServerGrants.relay({
+            principal: {
+              deviceId: String(input.principal.deviceId),
+              credentialGeneration: input.principal.credentialGeneration,
+              sessionIdDigest: input.sessionIdDigest,
+              origin: input.principal.origin,
+            },
+            scopeId: context.scopeId,
+            grantId: input.grantId,
+            method: input.method,
+            pathQuery: input.pathQuery,
+            headers: input.headers,
+            body: input.body,
             stillAuthorized: input.stillAuthorized,
             signal: input.signal,
           }),

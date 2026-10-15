@@ -1,5 +1,7 @@
 import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
+import { REMOTE_SERVER_PROXY_RELAYED, REMOTE_SERVER_PROXY_RELAYED_HEADER } from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
+import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
 
 const DEFAULT_BODY_BYTES = 1_048_576;
 const DEFAULT_RESPONSE_BYTES = 8 * 1_024 * 1_024;
@@ -11,6 +13,12 @@ const DEFAULT_CONCURRENT_REQUESTS = 32;
  */
 const DEFAULT_CONCURRENT_SERVER_PROXY_REQUESTS = 64;
 const SERVER_PROXY_PREFIX = "/api/server-proxy/";
+/**
+ * A request a paired device relays to its dev server may carry an upload this
+ * large. The forwarder hashes the body for the request's proof before sending
+ * it, so it is bounded rather than streamed.
+ */
+export const REMOTE_SERVER_PROXY_RELAY_MAX_BODY_BYTES = 8 * 1_024 * 1_024;
 
 const REMOTE_REQUEST_HEADERS = [
   "accept",
@@ -179,6 +187,18 @@ const DEFAULT_SERVER_PROXY_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 4_096,
     maxResponseBytes: 4_096,
+  },
+  {
+    // `/api/server-proxy/<grant id>/<the dev server's path>`. Matched after the
+    // grants route, so that exact path never reaches a dev server.
+    id: "server-proxy-relay",
+    match: { kind: "prefix", path: SERVER_PROXY_PREFIX },
+    surface: "server-proxy",
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    maxBodyBytes: REMOTE_SERVER_PROXY_RELAY_MAX_BODY_BYTES,
+    relaysDevServer: true,
   },
 ];
 
@@ -392,6 +412,16 @@ export interface RemoteRouteDefinition {
   readonly maxResponseBytes?: number;
   /** The Content-Security-Policy this route's responses carry instead of the default. */
   readonly responsePolicy?: string;
+  /**
+   * Set only on the proxy route that relays a paired device's request to its
+   * dev server. The route's body budget is its own, above the listener's
+   * default; any media type passes, since the dev server decides what it
+   * accepts; and a response the relay marks as the dev server's own passes
+   * with its headers unchanged and no size cap (the relay bounds it by idle
+   * time). The host's own answers on the route keep the listener's headers
+   * and budget.
+   */
+  readonly relaysDevServer?: true;
 }
 
 export type RemoteRouteResponse = Response | undefined;
@@ -592,6 +622,14 @@ export function createRemoteRouteHandler(
       release();
       return rejectionResponse(404, decision.headers);
     }
+    if (
+      decision.route?.relaysDevServer === true &&
+      response.headers.get(REMOTE_SERVER_PROXY_RELAYED_HEADER) === REMOTE_SERVER_PROXY_RELAYED
+    ) {
+      // The dev server's own response: its headers stand and its body streams
+      // uncapped, holding this request's slot until it ends.
+      return withAdmissionRelease(response, release);
+    }
     return limitResponse(response, decision.headers, decision.maxResponseBytes, release);
   };
 }
@@ -660,14 +698,19 @@ function inspectRequest(
   const route = routes.find((candidate) => matches(candidate.match, url.pathname));
   if (route === undefined || !routeAllowsQuery(route, url)) return reject(404, facts);
   if (!route.methods.includes(method as RemoteHttpMethod)) return reject(405, facts);
-  const bodyLimit = Math.min(route.maxBodyBytes ?? defaultMaxBodyBytes, defaultMaxBodyBytes);
+  const bodyLimit =
+    route.relaysDevServer === true && route.maxBodyBytes !== undefined
+      ? route.maxBodyBytes
+      : Math.min(route.maxBodyBytes ?? defaultMaxBodyBytes, defaultMaxBodyBytes);
   if (
     declaredBodyBytes(request) > bodyLimit ||
     (hasBody(request) && (method === "GET" || method === "HEAD"))
   ) {
     return reject(413, facts);
   }
-  if (hasBody(request) && !contentTypeAllowed(request, route)) return reject(415, facts);
+  if (route.relaysDevServer !== true && hasBody(request) && !contentTypeAllowed(request, route)) {
+    return reject(415, facts);
+  }
   const headers = remoteHeaders(
     headerOrigin === null ? undefined : headerOrigin,
     route.allowedRequestHeaders ?? REMOTE_REQUEST_HEADERS,
@@ -745,6 +788,8 @@ function validateRoutes(
       !validRouteBudget(route.maxResponseBytes) ||
       (surface === "authenticated-product" && !route.match.path.startsWith("/api/")) ||
       (surface === "server-proxy") !== pathMatchesPrefix(route.match.path, SERVER_PROXY_PREFIX) ||
+      (route.relaysDevServer === true &&
+        (surface !== "server-proxy" || route.maxBodyBytes === undefined)) ||
       isLocalOnlyMatch(route.match)
     ) {
       throw new Error("Remote route definition is invalid or local-only.");

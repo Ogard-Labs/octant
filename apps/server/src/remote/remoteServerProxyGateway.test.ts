@@ -1,10 +1,21 @@
-// The proxy session and the grant route, driven through the real gateway
-// composition in memory: a capturing `serve` records the production boundary
-// fetch (admission, route policy, authentication) and each case calls it with
-// synthetic transport facts, as the hostile security matrix does.
+// The proxy session, the grant route, and the relay to a dev server, driven
+// through the real gateway composition in memory: a capturing `serve` records
+// the production boundary fetch (admission, route policy, authentication) and
+// each case calls it with synthetic transport facts, as the hostile security
+// matrix does. Dev servers are real HTTP and HTTPS servers on this machine's
+// loopback.
 
 import { createHash, generateKeyPairSync, randomUUID, sign as cryptoSign } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
+import {
+  createServer as createHttpServer,
+  type IncomingHttpHeaders,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
+import { createServer as createHttpsServer } from "node:https";
+import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +28,11 @@ import {
   type CodeThread,
   type RemoteServerGrantResult,
 } from "@octant/contracts";
+import {
+  REMOTE_SERVER_PROXY_RELAYED,
+  REMOTE_SERVER_PROXY_RELAYED_HEADER,
+  decodeRemoteServerProxyRefusal,
+} from "@octant/contracts";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { decodeRemoteSessionResponseV1 } from "@octant/contracts/remote-request-proof";
 import {
@@ -26,6 +42,7 @@ import {
   canonicalizeRemotePathQuery,
   sessionExpiry,
 } from "@octant/domain";
+import type { LocalListenerHolding } from "../localServers/localListenerPort";
 import type { RemoteServerGrantTarget } from "../localServers/localServerService";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -39,6 +56,7 @@ import {
 import type { RequestTransportFacts, Serve } from "../server";
 import { createRemoteGateway, type RemoteGateway } from "./remoteGateway";
 import { RemoteServerGrantService } from "./remoteServerGrantService";
+import { createSelfMadeListenerCertificateStore } from "./selfMadeListenerCertificate";
 
 // The pairing lifecycle the gateway builds, captured so the harness can create
 // and approve tickets the way the host's local device panel does.
@@ -71,8 +89,13 @@ const projectId = "88888888-8888-4888-8888-888888888888";
 const PROXY_COOKIE = "__Secure-octant-server-proxy-session";
 const PRODUCT_COOKIE = "__Secure-octant-remote-session";
 const directories: string[] = [];
+const devServers: Server[] = [];
 
-afterEach(() => {
+afterEach(async () => {
+  for (const server of devServers.splice(0)) {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
   capturedLifecycles.length = 0;
@@ -91,11 +114,17 @@ interface Harness {
   readonly targets: Map<string, RemoteServerGrantTarget | (() => Promise<RemoteServerGrantTarget>)>;
   readonly readable: Set<string>;
   readonly dispatched: string[];
+  /** What re-observing a grant's port answers, and how often the host asked. */
+  readonly holding: {
+    value: LocalListenerHolding | (() => Promise<LocalListenerHolding>);
+    asked: number;
+  };
+  readonly code: { enabled: boolean };
   /** Holds product requests open while set, to fill the product budget. */
   hold: Promise<void> | undefined;
 }
 
-async function setup(): Promise<Harness> {
+async function setup(options: { readonly idleTimeoutMs?: number } = {}): Promise<Harness> {
   const directory = mkdtempSync(join(tmpdir(), "octant-server-proxy-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "store.sqlite3"));
@@ -131,6 +160,8 @@ async function setup(): Promise<Harness> {
 
   const targets: Harness["targets"] = new Map();
   const readable = new Set<string>([String(threadId)]);
+  const holding: Harness["holding"] = { value: "held", asked: 0 };
+  const code = { enabled: true };
   const threads = new Map<string, Pick<CodeThread, "lifecycle" | "executionPolicy">>([
     [String(threadId), { lifecycle: "active", executionPolicy: "approval-gated" }],
   ]);
@@ -143,6 +174,11 @@ async function setup(): Promise<Harness> {
     canOpenThread: async (_scope, id) => readable.has(String(id)),
     readThread: (id) => threads.get(String(id)),
     readOpenGrants: () => readOpenRemoteServerGrants(connection),
+    confirmEndpoint: async () => {
+      holding.asked += 1;
+      return typeof holding.value === "function" ? await holding.value() : holding.value;
+    },
+    isCodeEnabled: () => code.enabled,
     journal,
     hostActor: decodeEventActor({
       kind: "system",
@@ -150,6 +186,9 @@ async function setup(): Promise<Harness> {
     }),
     uuid: randomUUID,
     clock: () => nowIso,
+    ...(options.idleTimeoutMs === undefined
+      ? {}
+      : { relayLimits: { idleTimeoutMs: options.idleTimeoutMs } }),
   });
 
   const { serve, getFetch } = createCapturingServe();
@@ -185,6 +224,23 @@ async function setup(): Promise<Harness> {
           stillAuthorized: input.stillAuthorized,
           signal: input.signal,
         }),
+      relay: (input) =>
+        grants.relay({
+          principal: {
+            deviceId: String(input.principal.deviceId),
+            credentialGeneration: input.principal.credentialGeneration,
+            sessionIdDigest: input.sessionIdDigest,
+            origin: input.principal.origin,
+          },
+          scopeId: decodeWindowId(String(input.principal.deviceId)),
+          grantId: input.grantId,
+          method: input.method,
+          pathQuery: input.pathQuery,
+          headers: input.headers,
+          body: input.body,
+          stillAuthorized: input.stillAuthorized,
+          signal: input.signal,
+        }),
       closeSession: (digest, reason) => grants.closeSession(digest, reason),
     },
     serve,
@@ -216,6 +272,8 @@ async function setup(): Promise<Harness> {
     targets,
     readable,
     dispatched,
+    holding,
+    code,
   });
 }
 
@@ -844,5 +902,603 @@ describe("proxy session and grant route on the private listener", () => {
     releaseProxy();
     expect(result(await pending).kind).toBe("remote-server-grant-opened");
     expect(result(await openGrant(harness, proxy, 50)).kind).toBe("remote-server-grant-opened");
+  });
+});
+
+interface DevServer {
+  readonly port: number;
+  readonly requests: Array<{
+    readonly method: string;
+    readonly url: string;
+    readonly headers: IncomingHttpHeaders;
+    readonly body: string;
+  }>;
+  /** Sockets the dev server accepted, so a case can see the host close one. */
+  readonly sockets: Socket[];
+}
+
+type DevHandler = (request: IncomingMessage, response: ServerResponse) => void;
+
+async function devServer(
+  handle: DevHandler,
+  tls?: { readonly cert: string | Buffer; readonly key: string | Buffer },
+  port = 0,
+): Promise<DevServer> {
+  const requests: DevServer["requests"] = [];
+  const sockets: Socket[] = [];
+  const listener = (request: IncomingMessage, response: ServerResponse) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      requests.push({
+        method: request.method ?? "",
+        url: request.url ?? "",
+        headers: request.headers,
+        body: Buffer.concat(chunks).toString("utf8"),
+      });
+      handle(request, response);
+    });
+  };
+  const server = tls === undefined ? createHttpServer(listener) : createHttpsServer(tls, listener);
+  server.on(tls === undefined ? "connection" : "secureConnection", (socket: Socket) =>
+    sockets.push(socket),
+  );
+  devServers.push(server);
+  await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", () => resolve()));
+  return { port: (server.address() as AddressInfo).port, requests, sockets };
+}
+
+function listedAt(index: number, server: { readonly port: number }, scheme = "http") {
+  return listed(index, {
+    endpoint: {
+      url: `${scheme}://127.0.0.1:${server.port}/`,
+      port: server.port,
+      pid: 4000 + index,
+      processName: "node",
+    },
+  });
+}
+
+async function grantTo(harness: Harness, proxy: Session, index: number): Promise<string> {
+  const opened = result(await openGrant(harness, proxy, index));
+  if (opened.kind !== "remote-server-grant-opened") throw new Error("grant refused");
+  return String(opened.grant.grantId);
+}
+
+function relayRequest(
+  proxy: Session,
+  grantId: string,
+  init: {
+    readonly path?: string;
+    readonly method?: string;
+    readonly body?: string;
+    readonly headers?: Record<string, string>;
+  } = {},
+) {
+  const request = signed(proxy, {
+    path: `/api/server-proxy/${grantId}${init.path ?? "/"}`,
+    method: init.method ?? "GET",
+    ...(init.body === undefined ? {} : { body: init.body }),
+  });
+  return { ...request, headers: { ...request.headers, ...init.headers } };
+}
+
+async function send(
+  harness: Harness,
+  init: ReturnType<typeof relayRequest>,
+  url = `${ORIGIN}${init.path}`,
+): Promise<Response> {
+  const request = new Request(url, {
+    method: init.method,
+    headers: new Headers({ host: HOST_HEADER, ...init.headers }),
+    ...(init.body === undefined ? {} : { body: init.body }),
+  });
+  return harness.fetch(request, facts(init.sourceKey));
+}
+
+function refusalReason(answer: Answer): string {
+  return decodeRemoteServerProxyRefusal(answer.json()).reason;
+}
+
+/** A dev server that sends one chunk and then holds the response open. */
+function streaming(): DevHandler {
+  return (_request, response) => {
+    response.writeHead(200, { "content-type": "text/plain" });
+    response.write("first\n");
+  };
+}
+
+describe("relay from a paired device to its granted dev server", () => {
+  it("forwards to the loopback endpoint as localhost and never lets Octant's credentials cross either way", async () => {
+    const harness = await setup();
+    const server = await devServer((_request, response) => {
+      response.writeHead(201, {
+        "content-type": "text/html",
+        "content-security-policy": "script-src 'self'",
+        connection: "keep-alive, x-hop",
+        "x-hop": "1",
+        "x-octant-server-proxy": "forged",
+        "x-octant-device-proof": "forged",
+        "set-cookie": [
+          "__Secure-octant-server-proxy-session=forged; Path=/",
+          "app_session=next; Path=/; HttpOnly",
+        ],
+      });
+      response.end("<p>dev page</p>");
+    });
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const paired = await pair(harness);
+    const proxy = await session(harness, paired, "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+
+    const answer = await call(
+      harness,
+      relayRequest(proxy, grantId, {
+        method: "POST",
+        path: "/api/items?b=2&a=1&flag",
+        body: "name=one",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: `${proxy.cookie}; app_session=abc; __Host-octant-claim=secret`,
+          referer: `${ORIGIN}/api/server-proxy/${grantId}/form?x=1`,
+          authorization: "Bearer dev-token",
+          "x-dev": "kept",
+        },
+      }),
+    );
+
+    expect(answer.status).toBe(201);
+    expect(server.requests).toHaveLength(1);
+    const seen = server.requests[0]!;
+    expect(seen.method).toBe("POST");
+    expect(seen.url).toBe("/api/items?b=2&a=1&flag");
+    expect(seen.body).toBe("name=one");
+    expect(seen.headers.host).toBe(`localhost:${server.port}`);
+    expect(seen.headers.origin).toBe(`http://localhost:${server.port}`);
+    expect(seen.headers.referer).toBe(`http://localhost:${server.port}/form?x=1`);
+    expect(seen.headers.cookie).toBe("app_session=abc");
+    expect(seen.headers.authorization).toBe("Bearer dev-token");
+    expect(seen.headers["x-dev"]).toBe("kept");
+    expect(seen.headers["content-type"]).toBe("application/x-www-form-urlencoded");
+    for (const name of Object.keys(seen.headers)) {
+      expect(name.startsWith("x-octant-")).toBe(false);
+      expect(name.startsWith("sec-fetch-")).toBe(false);
+      expect(name.startsWith("x-forwarded-")).toBe(false);
+    }
+    expect(seen.headers.forwarded).toBeUndefined();
+
+    expect(answer.headers.get(REMOTE_SERVER_PROXY_RELAYED_HEADER)).toBe(
+      REMOTE_SERVER_PROXY_RELAYED,
+    );
+    expect(answer.headers.get("content-security-policy")).toBe("script-src 'self'");
+    expect(answer.headers.get("x-hop")).toBeNull();
+    expect(answer.headers.get("x-octant-device-proof")).toBeNull();
+    expect(answer.headers.getSetCookie()).toEqual(["app_session=next; Path=/; HttpOnly"]);
+    expect(harness.dispatched).toEqual([]);
+  });
+
+  it("refuses every request without its own session's proof before connecting", async () => {
+    const harness = await setup();
+    const server = await devServer((_request, response) => response.end("ok"));
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const paired = await pair(harness);
+    const proxy = await session(harness, paired, "server-proxy");
+    const product = await session(harness, paired, "product");
+    const grantId = await grantTo(harness, proxy, 1);
+    const good = relayRequest(proxy, grantId);
+
+    const noCookie = await call(harness, {
+      ...good,
+      headers: Object.fromEntries(
+        Object.entries(good.headers).filter(([name]) => name !== "cookie"),
+      ),
+    });
+    expect(noCookie.status).toBe(401);
+    const noProof = await call(harness, {
+      ...good,
+      headers: Object.fromEntries(
+        Object.entries(good.headers).filter(([name]) => name !== "x-octant-device-proof"),
+      ),
+    });
+    expect(noProof.status).toBe(401);
+    const invented = await call(
+      harness,
+      relayRequest(proxy, grantId, { headers: { cookie: `${PROXY_COOKIE}=${randomUUID()}` } }),
+    );
+    expect(invented.status).toBe(401);
+    const productSession = await call(
+      harness,
+      signed(product, { method: "GET", path: `/api/server-proxy/${grantId}/` }),
+    );
+    expect(productSession.status).toBe(401);
+    const otherPath = await call(
+      harness,
+      signed(proxy, {
+        method: "GET",
+        path: `/api/server-proxy/${grantId}/private`,
+        signedPath: `/api/server-proxy/${grantId}/public`,
+      }),
+    );
+    expect(otherPath.status).toBe(400);
+    const otherKey = await call(
+      harness,
+      signed(proxy, {
+        method: "GET",
+        path: `/api/server-proxy/${grantId}/`,
+        signWith: deviceKeypair("Other").privateKeyPem,
+      }),
+    );
+    expect(otherKey.status).toBe(401);
+    const crossSite = await call(
+      harness,
+      relayRequest(proxy, grantId, { headers: { "sec-fetch-site": "cross-site" } }),
+    );
+    expect(crossSite.status).toBe(403);
+    const foreignOrigin = await call(
+      harness,
+      relayRequest(proxy, grantId, { headers: { origin: "https://evil.example" } }),
+    );
+    expect(foreignOrigin.status).toBe(403);
+    expect(server.requests).toHaveLength(0);
+    expect((await call(harness, good)).status).toBe(200);
+    expect(server.requests).toHaveLength(1);
+  });
+
+  it("refuses a replayed request", async () => {
+    const harness = await setup();
+    const server = await devServer((_request, response) => response.end("ok"));
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const paired = await pair(harness);
+    const proxy = await session(harness, paired, "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const once = relayRequest(proxy, grantId, { method: "POST", body: "{}" });
+    expect((await call(harness, once)).status).toBe(200);
+    const replayed = await call(harness, once);
+    expect(replayed.status).not.toBe(200);
+    expect(replayed.headers.get(REMOTE_SERVER_PROXY_RELAYED_HEADER)).toBeNull();
+    expect(server.requests).toHaveLength(1);
+  });
+
+  it("refuses a grant held by another device exactly as one that never existed", async () => {
+    const harness = await setup();
+    const server = await devServer((_request, response) => response.end("ok"));
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const owner = await session(harness, await pair(harness, "source-owner"), "server-proxy");
+    const other = await session(harness, await pair(harness, "source-other"), "server-proxy");
+    const grantId = await grantTo(harness, owner, 1);
+    const borrowed = await call(harness, relayRequest(other, grantId));
+    const invented = await call(harness, relayRequest(other, `rsg_${"0".repeat(64)}`));
+    expect(borrowed.status).toBe(404);
+    expect(invented.status).toBe(404);
+    expect(borrowed.json()).toEqual(invented.json());
+    expect(refusalReason(borrowed)).toBe("grant-closed");
+    // A second session of the owning device is not the session the grant was minted under.
+    const secondSession = await session(harness, owner.paired, "server-proxy");
+    expect((await call(harness, relayRequest(secondSession, grantId))).status).toBe(404);
+    expect(server.requests).toHaveLength(0);
+    expect(harness.grants.openCount()).toBe(1);
+  });
+
+  it("closes the grant and refuses when a check before the request fails", async () => {
+    const cases: ReadonlyArray<
+      readonly [title: string, lose: (harness: Harness) => void, reason: string]
+    > = [
+      ["the server exited", (harness) => (harness.holding.value = "stopped"), "server-stopped"],
+      [
+        "another process holds the port",
+        (harness) => (harness.holding.value = "changed-hands"),
+        "server-changed-hands",
+      ],
+      ["Code is off", (harness) => (harness.code.enabled = false), "code-disabled"],
+      [
+        "the device can no longer read the thread",
+        (harness) => harness.readable.delete(String(threadId)),
+        "thread-unreadable",
+      ],
+    ];
+    for (const [title, lose, reason] of cases) {
+      const harness = await setup();
+      const server = await devServer((_request, response) => response.end("ok"));
+      harness.targets.set(listenerKey(1), listedAt(1, server));
+      const proxy = await session(harness, await pair(harness), "server-proxy");
+      const grantId = await grantTo(harness, proxy, 1);
+      expect((await call(harness, relayRequest(proxy, grantId))).status, title).toBe(200);
+      lose(harness);
+      const refused = await call(harness, relayRequest(proxy, grantId));
+      expect(refused.status, title).toBe(404);
+      expect(refusalReason(refused), title).toBe("grant-closed");
+      expect(closedReasons(harness.connection), title).toEqual([reason]);
+      expect(harness.grants.openCount(), title).toBe(0);
+      expect(server.requests, title).toHaveLength(1);
+    }
+  });
+
+  it("refuses without closing the grant when the host cannot check the server", async () => {
+    const harness = await setup();
+    const server = await devServer((_request, response) => response.end("ok"));
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    harness.holding.value = "unavailable";
+    expect((await call(harness, relayRequest(proxy, grantId))).status).toBe(503);
+    expect(harness.grants.openCount()).toBe(1);
+    harness.holding.value = "held";
+    expect((await call(harness, relayRequest(proxy, grantId))).status).toBe(200);
+    expect(server.requests).toHaveLength(1);
+  });
+
+  it("checks the server again for every request, never on a check that began before it", async () => {
+    const harness = await setup();
+    const server = await devServer((_request, response) => response.end("ok"));
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    let open = () => {};
+    const gate = new Promise<void>((resolve) => {
+      open = resolve;
+    });
+    harness.holding.value = async () => {
+      await gate;
+      return "held";
+    };
+    const first = call(harness, relayRequest(proxy, grantId));
+    await vi.waitFor(() => expect(harness.holding.asked).toBe(1));
+    const burst = Array.from({ length: 6 }, () => call(harness, relayRequest(proxy, grantId)));
+    open();
+    const answers = await Promise.all([first, ...burst]);
+    expect(answers.map((answer) => answer.status)).toEqual(Array(7).fill(200));
+    // The first request's check, then one more that began after the burst arrived.
+    expect(harness.holding.asked).toBe(2);
+  });
+
+  it("cuts a streaming response before a revoke returns, and refuses the device's next request", async () => {
+    const harness = await setup();
+    const server = await devServer(streaming());
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const paired = await pair(harness);
+    const proxy = await session(harness, paired, "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const response = await send(harness, relayRequest(proxy, grantId));
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe("first\n");
+    const upstream = server.sockets[0]!;
+
+    harness.gateway.localDeviceAdministration()?.revokeDevice({ deviceId: paired.deviceId });
+    // The host closed its end of the dev server connection inside the revoke.
+    expect(harness.grants.openCount()).toBe(0);
+    await expect(reader.read()).rejects.toThrow();
+    await vi.waitFor(() => expect(upstream.destroyed || upstream.readableEnded).toBe(true));
+    expect(closedReasons(harness.connection)).toEqual(["device-revoked"]);
+    expect((await call(harness, relayRequest(proxy, grantId))).status).toBe(401);
+    expect(server.requests).toHaveLength(1);
+  });
+
+  it("cuts a streaming response when its thread is archived mid-stream", async () => {
+    const harness = await setup();
+    const server = await devServer(streaming());
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const response = await send(harness, relayRequest(proxy, grantId));
+    const reader = response.body!.getReader();
+    await reader.read();
+    harness.grants.closeThread(String(threadId), "thread-archived");
+    await expect(reader.read()).rejects.toThrow();
+    await vi.waitFor(() => expect(server.sockets[0]!.destroyed).toBe(true));
+    expect(closedReasons(harness.connection)).toEqual(["thread-archived"]);
+  });
+
+  it("connects only to the grant's loopback endpoint, whatever the request names", async () => {
+    const harness = await setup();
+    const elsewhere = await devServer((_request, response) => response.end("elsewhere"));
+    const server = await devServer((request, response) => {
+      if (request.url === "/redirect") {
+        response.writeHead(302, { location: `http://127.0.0.1:${elsewhere.port}/steal` });
+        response.end();
+        return;
+      }
+      response.end("dev");
+    });
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+
+    // A redirect is relayed as it is and never followed.
+    const redirected = await call(harness, relayRequest(proxy, grantId, { path: "/redirect" }));
+    expect(redirected.status).toBe(302);
+    expect(redirected.headers.get("location")).toBe(`http://127.0.0.1:${elsewhere.port}/steal`);
+
+    // A target that looks like another host stays a path on the dev server.
+    const pathTrick = await call(
+      harness,
+      relayRequest(proxy, grantId, { path: `//127.0.0.1:${elsewhere.port}/steal` }),
+    );
+    expect(pathTrick.status).toBe(200);
+    expect(server.requests.at(-1)?.url).toBe(`//127.0.0.1:${elsewhere.port}/steal`);
+    expect(server.requests.at(-1)?.headers.host).toBe(`localhost:${server.port}`);
+
+    // The listener refuses another Host, a forwarded host, and an absolute
+    // target naming another origin before anything is checked.
+    const otherHost = await send(
+      harness,
+      relayRequest(proxy, grantId, { headers: { host: `127.0.0.1:${elsewhere.port}` } }),
+    );
+    expect(otherHost.status).toBe(400);
+    const forwardedHost = await send(
+      harness,
+      relayRequest(proxy, grantId, { headers: { "x-forwarded-host": "127.0.0.1" } }),
+    );
+    expect(forwardedHost.status).toBe(400);
+    const absolute = relayRequest(proxy, grantId);
+    expect(
+      (await send(harness, absolute, `http://127.0.0.1:${elsewhere.port}${absolute.path}`)).status,
+    ).toBe(400);
+    expect(elsewhere.requests).toHaveLength(0);
+  });
+
+  it("refuses an endpoint that is not a loopback address literal", async () => {
+    const harness = await setup();
+    const server = await devServer((_request, response) => response.end("dev"));
+    harness.targets.set(
+      listenerKey(1),
+      listed(1, {
+        endpoint: {
+          url: `http://localhost:${server.port}/`,
+          port: server.port,
+          pid: 4001,
+          processName: "node",
+        },
+      }),
+    );
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const refused = await call(harness, relayRequest(proxy, grantId));
+    expect(refused.status).toBe(502);
+    expect(refusalReason(refused)).toBe("server-unreachable");
+    expect(server.requests).toHaveLength(0);
+  });
+
+  it("answers unreachable when nothing accepts the connection", async () => {
+    const harness = await setup();
+    const server = await devServer((_request, response) => response.end("dev"));
+    const port = server.port;
+    const closing = devServers.splice(devServers.length - 1, 1)[0]!;
+    await new Promise<void>((resolve) => closing.close(() => resolve()));
+    harness.targets.set(listenerKey(1), listedAt(1, { port }));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const refused = await call(harness, relayRequest(proxy, grantId));
+    expect(refused.status).toBe(502);
+    expect(refusalReason(refused)).toBe("server-unreachable");
+    expect(harness.grants.openCount()).toBe(1);
+  });
+
+  it("refuses a connection upgrade without connecting", async () => {
+    const harness = await setup();
+    const server = await devServer((_request, response) => response.end("dev"));
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const upgrade = await call(
+      harness,
+      relayRequest(proxy, grantId, { headers: { upgrade: "websocket", connection: "Upgrade" } }),
+    );
+    expect(upgrade.status).toBe(501);
+    expect(refusalReason(upgrade)).toBe("upgrade-refused");
+    expect(server.requests).toHaveLength(0);
+  });
+
+  it("relays an upload up to 8 MiB and refuses a larger one with 413", async () => {
+    const harness = await setup();
+    const server = await devServer((_request, response) => response.end("stored"));
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const large = "x".repeat(2 * 1_024 * 1_024);
+    const accepted = await call(
+      harness,
+      relayRequest(proxy, grantId, {
+        method: "PUT",
+        body: large,
+        headers: { "content-type": "application/octet-stream" },
+      }),
+    );
+    expect(accepted.status).toBe(200);
+    expect(server.requests[0]?.body.length).toBe(large.length);
+    const tooLarge = await call(
+      harness,
+      relayRequest(proxy, grantId, {
+        method: "PUT",
+        body: "x".repeat(8 * 1_024 * 1_024 + 1),
+        headers: { "content-type": "application/octet-stream" },
+      }),
+    );
+    expect(tooLarge.status).toBe(413);
+    expect(server.requests).toHaveLength(1);
+  });
+
+  it("streams a response larger than the listener's own budget", async () => {
+    const harness = await setup();
+    const size = 9 * 1_024 * 1_024;
+    const server = await devServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/octet-stream" });
+      response.end(Buffer.alloc(size, 1));
+    });
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const response = await send(harness, relayRequest(proxy, grantId));
+    expect((await response.arrayBuffer()).byteLength).toBe(size);
+  });
+
+  it("closes a response the dev server leaves silent past the idle bound", async () => {
+    const harness = await setup({ idleTimeoutMs: 200 });
+    const server = await devServer(streaming());
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const response = await send(harness, relayRequest(proxy, grantId));
+    const reader = response.body!.getReader();
+    await reader.read();
+    await expect(reader.read()).rejects.toThrow();
+    await vi.waitFor(() => expect(server.sockets[0]!.destroyed).toBe(true));
+    // An idle dev server is not a lost grant.
+    expect(harness.grants.openCount()).toBe(1);
+  });
+
+  it("answers past the device's proxy budget with 503 and a one-second Retry-After", async () => {
+    const harness = await setup();
+    const server = await devServer(streaming());
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const held = await Promise.all(
+      Array.from({ length: 32 }, () => send(harness, relayRequest(proxy, grantId))),
+    );
+    expect(held.every((response) => response.status === 200)).toBe(true);
+    const over = await call(harness, relayRequest(proxy, grantId));
+    expect(over.status).toBe(503);
+    expect(over.headers.get("retry-after")).toBe("1");
+    // A finished response gives its place back.
+    await held[0]!.body!.cancel();
+    expect((await send(harness, relayRequest(proxy, grantId))).status).toBe(200);
+  });
+
+  it("pins an HTTPS dev server's certificate for the grant's life", async () => {
+    const harness = await setup();
+    const first = await devServer((_request, response) => response.end("secure"), {
+      cert: PRIVATE_LISTENER_TEST_CERT,
+      key: PRIVATE_LISTENER_TEST_KEY,
+    });
+    harness.targets.set(listenerKey(1), listedAt(1, first, "https"));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const answer = await call(harness, relayRequest(proxy, grantId));
+      expect(answer.status).toBe(200);
+      expect(first.requests.at(-1)?.headers.origin).toBe(`https://localhost:${first.port}`);
+    }
+
+    // Another server takes the same port with another certificate.
+    const closing = devServers.splice(devServers.length - 1, 1)[0]!;
+    closing.closeAllConnections();
+    await new Promise<void>((resolve) => closing.close(() => resolve()));
+    const directory = mkdtempSync(join(tmpdir(), "octant-dev-cert-"));
+    directories.push(directory);
+    const made = createSelfMadeListenerCertificateStore({ dataDirectory: directory }).ensure(
+      "127.0.0.1",
+    );
+    if (made.status !== "ready") throw new Error("no certificate");
+    const second = await devServer(
+      (_request, response) => response.end("other"),
+      made.tls,
+      first.port,
+    );
+    const refused = await call(harness, relayRequest(proxy, grantId));
+    expect(refused.status).toBe(404);
+    expect(refusalReason(refused)).toBe("grant-closed");
+    expect(second.requests).toHaveLength(0);
+    expect(closedReasons(harness.connection)).toEqual(["server-changed-hands"]);
   });
 });

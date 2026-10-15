@@ -208,6 +208,98 @@ export function createLiveLocalListenerPort(
   };
 }
 
+/** The process a grant was minted for, holding its port. */
+export interface LocalListenerHolder {
+  readonly port: number;
+  readonly pid: number;
+  readonly processName: string;
+}
+
+/**
+ * Whether that process still holds the port as Octant's: `held`; nobody of
+ * this user listens there (`stopped`); or another process listens there, or the
+ * process is no longer a descendant of an Octant terminal (`changed-hands`).
+ * `unavailable` means the host could not look, which says nothing either way.
+ */
+export type LocalListenerHolding = "held" | "stopped" | "changed-hands" | "unavailable";
+
+export interface LiveLocalListenerHoldingProbeOptions {
+  readonly ownedProcessRoots: () => Promise<ReadonlySet<number>>;
+  readonly execute?: ListenerCommandExecutor;
+  readonly currentUid?: number;
+}
+
+/**
+ * Re-observe one port before the host relays a request to it, far cheaper than
+ * a listing scan: one `lsof` narrowed to the port and one `ps` snapshot, no
+ * working directories and no health probe.
+ *
+ * The pid, the untruncated process name, and the port together name the
+ * process the grant was minted for; a pid reused by another program shows a
+ * different name. Its Octant ownership is walked again from the same terminal
+ * roots the listing uses, so a server that left its terminal is no longer
+ * Octant's here either.
+ */
+export function createLiveLocalListenerHoldingProbe(
+  options: LiveLocalListenerHoldingProbeOptions,
+): (holder: LocalListenerHolder, signal?: AbortSignal) => Promise<LocalListenerHolding> {
+  const execute = options.execute ?? defaultExecute;
+  const uid = options.currentUid ?? process.getuid?.();
+
+  return async (holder, signal) => {
+    if (uid === undefined || !Number.isSafeInteger(holder.port) || holder.port <= 0) {
+      return "unavailable";
+    }
+    const [listing, ownership] = await Promise.allSettled([
+      execute(
+        "lsof",
+        [
+          "-nP",
+          "+c",
+          "0",
+          "-a",
+          "-u",
+          String(uid),
+          `-iTCP:${holder.port}`,
+          "-sTCP:LISTEN",
+          "-FpcnLu",
+        ],
+        signal,
+      ),
+      Promise.all([
+        execute("ps", ["-axo", "pid=,ppid=,comm="], signal),
+        options.ownedProcessRoots(),
+      ]),
+    ]);
+    let output: string;
+    if (listing.status === "fulfilled") output = listing.value;
+    else if (lsofFoundNothing(listing.reason)) return "stopped";
+    else return "unavailable";
+
+    const holders = parseLsofFields(output, uid).filter((entry) => entry.port === holder.port);
+    if (holders.length === 0) return "stopped";
+    if (
+      !holders.some((entry) => entry.pid === holder.pid && entry.processName === holder.processName)
+    ) {
+      return "changed-hands";
+    }
+    if (ownership.status === "rejected") return "unavailable";
+    const [table, roots] = ownership.value;
+    return hasOwnedAncestor(parsePsTable(table), holder.pid, roots) ? "held" : "changed-hands";
+  };
+}
+
+/**
+ * `lsof` exits 1 with no output when nothing matches the query. Any other
+ * failure (a missing tool, a timeout, output on a failed run) established
+ * nothing.
+ */
+function lsofFoundNothing(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const { code, stdout } = error as { readonly code?: unknown; readonly stdout?: unknown };
+  return code === 1 && (stdout === undefined || stdout === "");
+}
+
 /**
  * Working directory of one process via `lsof -a -p <pid> -d cwd`. This is the
  * fact that lets the classifier corroborate a bare `node`/`python` against a

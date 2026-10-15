@@ -19,7 +19,9 @@ import {
   decodeRemotePushTokenRegistrationV1,
   decodeRemoteServerGrantRequest,
   encodeRemoteServerGrantResult,
+  encodeRemoteServerProxyRefusal,
   type RemoteServerGrantRequest,
+  type RemoteServerProxyRefusalReason,
 } from "@octant/contracts";
 import type { RemoteAuthenticatedRequestResultV1 } from "@octant/contracts/remote-request-proof";
 import { buildRemoteSessionMetadataPayload, canonicalizeRemotePathQuery } from "@octant/domain";
@@ -30,7 +32,11 @@ import {
 } from "../remoteRequestProofService";
 import type { RemoteRouteDefinition } from "../remoteRoutePolicy";
 import type { PushNotificationTokenStore } from "./pushNotificationTokenStore";
-import type { RemoteServerGrantOpening } from "./remoteServerGrantService";
+import { withAdmissionRelease } from "./remoteAdmissionPolicy";
+import type {
+  RemoteServerGrantOpening,
+  RemoteServerRelayOutcome,
+} from "./remoteServerGrantService";
 import {
   REMOTE_SERVER_PROXY_PATH,
   REMOTE_SERVER_PROXY_SESSION_COOKIE,
@@ -54,7 +60,29 @@ export const REMOTE_AUTH_ROUTE_IDS = {
 /** Routes a proxy session reaches, and nothing else does. */
 export const REMOTE_SERVER_PROXY_ROUTE_IDS = {
   grants: "server-proxy-grants",
+  relay: "server-proxy-relay",
 } as const;
+
+/** `/api/server-proxy/<grant id>` and the dev server's own path after it. */
+const RELAY_PATH_PATTERN = new RegExp(`^${REMOTE_SERVER_PROXY_PATH}(rsg_[a-f0-9]{64})(/.*)?$`);
+
+const RELAY_REFUSAL: Record<
+  RemoteServerProxyRefusalReason,
+  { readonly status: number; readonly message: string }
+> = {
+  "grant-closed": {
+    status: 404,
+    message: "That server stopped or changed. Open it again from its list.",
+  },
+  "server-unreachable": {
+    status: 502,
+    message: "The server did not answer on its own computer.",
+  },
+  "upgrade-refused": {
+    status: 501,
+    message: "This route does not carry connection upgrades.",
+  },
+};
 
 const SELF_SERVICE_ROUTE_IDS: ReadonlySet<string> = new Set([
   REMOTE_AUTH_ROUTE_IDS.signOut,
@@ -200,6 +228,21 @@ export interface RemoteServerProxyGrantPort {
     readonly stillAuthorized: () => boolean;
     readonly signal: AbortSignal;
   }) => Promise<RemoteServerGrantOpening>;
+  /** Relay one authenticated request under a grant to its dev server. */
+  readonly relay: (input: {
+    readonly request: Request;
+    readonly principal: Extract<RemoteClientPrincipal, { readonly kind: "remote-device" }>;
+    readonly sessionIdDigest: string;
+    readonly grantId: string;
+    readonly method: string;
+    /** The dev server's own path and query. */
+    readonly pathQuery: string;
+    /** The request's headers as they reached the proxy route. */
+    readonly headers: ReadonlyArray<readonly [string, string]>;
+    readonly body: Uint8Array | undefined;
+    readonly stillAuthorized: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<RemoteServerRelayOutcome>;
 }
 
 export interface RemoteServerProxyAuthentication {
@@ -592,6 +635,15 @@ export function createRemoteHttpAuthentication(
       if (handoff.principal.kind !== "remote-device") {
         throw new RemoteHttpAuthFailure(403, "invalid");
       }
+      if (route.id === REMOTE_SERVER_PROXY_ROUTE_IDS.relay) {
+        const relayed = await relayToGrant(request, handoff, sessionId, proxy);
+        if (relayed.kind !== "relayed") return relayed.response;
+        // The request keeps its place in the device's proxy budget until the
+        // dev server's response has finished streaming.
+        const held = release;
+        release = undefined;
+        return held === undefined ? relayed.response : withAdmissionRelease(relayed.response, held);
+      }
       if (route.id !== REMOTE_SERVER_PROXY_ROUTE_IDS.grants) {
         throw new RemoteHttpAuthFailure(404, "invalid");
       }
@@ -623,6 +675,67 @@ export function createRemoteHttpAuthentication(
   };
 
   return { handlePreAuthRoute, handleAuthenticated, handleServerProxy };
+}
+
+/**
+ * Relay a request whose proof the proxy session accepted. The grant id comes
+ * from the path the proof signed; the grant service decides whether it opens
+ * anything. A connection upgrade is refused here, before any check or
+ * connection, because this route carries none.
+ */
+async function relayToGrant(
+  request: Request,
+  handoff: RemoteClientPrincipalHandoff & { readonly body: Uint8Array },
+  sessionId: string,
+  proxy: RemoteServerProxyAuthentication,
+): Promise<
+  | { readonly kind: "relayed"; readonly response: Response }
+  | { readonly kind: "answered"; readonly response: Response }
+> {
+  const principal = handoff.principal;
+  if (principal.kind !== "remote-device") throw new RemoteHttpAuthFailure(403, "invalid");
+  if (request.headers.has("upgrade")) return refusedRelay("upgrade-refused");
+  const url = new URL(request.url);
+  const target = RELAY_PATH_PATTERN.exec(url.pathname);
+  const grantId = target?.[1];
+  if (grantId === undefined) throw new RemoteHttpAuthFailure(404, "invalid");
+  const method = handoff.requestFacts.method;
+  const outcome = await proxy.grants.relay({
+    request: handoff.request,
+    principal,
+    sessionIdDigest: digestRemoteServerProxySessionId(sessionId),
+    grantId,
+    method,
+    pathQuery: `${target?.[2] ?? "/"}${url.search}`,
+    headers: [...request.headers],
+    body: method === "GET" || method === "HEAD" ? undefined : handoff.body,
+    stillAuthorized: () => proxy.sessions.describe(sessionId) !== undefined,
+    signal: request.signal,
+  });
+  switch (outcome.kind) {
+    case "relayed":
+      return { kind: "relayed", response: outcome.response };
+    case "refused":
+      return refusedRelay(outcome.reason);
+    case "session-ended":
+      throw new RemoteHttpAuthFailure(401, "unauthorized", true);
+    case "unavailable":
+      throw new RemoteHttpAuthFailure(503, "unavailable");
+  }
+}
+
+function refusedRelay(reason: RemoteServerProxyRefusalReason): {
+  readonly kind: "answered";
+  readonly response: Response;
+} {
+  const { status, message } = RELAY_REFUSAL[reason];
+  return {
+    kind: "answered",
+    response: jsonResponse(
+      status,
+      encodeRemoteServerProxyRefusal({ kind: "remote-server-proxy-refused", reason, message }),
+    ),
+  };
 }
 
 async function handleOwnDeviceRoute(
@@ -956,7 +1069,11 @@ async function authenticateRequest(
   transport: RequestTransportFacts,
   verifier: RemoteRequestVerifier,
   route: RemoteRouteDefinition | undefined,
-): Promise<RemoteClientPrincipalHandoff> {
+): Promise<RemoteClientPrincipalHandoff & { readonly body: Uint8Array }> {
+  // A request relayed to a dev server is the page's own: its query keeps the
+  // order and form the page wrote (the proof signs the canonical form), any
+  // media type passes, and its body budget is the relay route's.
+  const relay = route?.relaysDevServer === true;
   const method = request.method.toUpperCase();
   if (!/^[A-Z][A-Z0-9-]{0,15}$/.test(method)) throw new RemoteHttpAuthFailure(400, "invalid");
   const safe = SAFE_METHODS.has(method);
@@ -978,7 +1095,12 @@ async function authenticateRequest(
 
   const url = new URL(request.url);
   const canonicalPathQuery = canonicalizeRemotePathQuery(`${url.pathname}${url.search}`);
-  if (canonicalPathQuery === undefined || canonicalPathQuery !== `${url.pathname}${url.search}`) {
+  if (
+    canonicalPathQuery === undefined ||
+    (!relay && canonicalPathQuery !== `${url.pathname}${url.search}`) ||
+    // The path itself is already canonical; only a query may differ in form.
+    (relay && canonicalPathQuery.split("?", 1)[0] !== url.pathname)
+  ) {
     throw new RemoteHttpAuthFailure(400, "invalid");
   }
 
@@ -1002,11 +1124,11 @@ async function authenticateRequest(
 
   const body = await readBoundedBody(
     request,
-    safe ? 0 : MAX_AUTHENTICATED_BODY_BYTES,
+    safe ? 0 : relay ? (route?.maxBodyBytes ?? 0) : MAX_AUTHENTICATED_BODY_BYTES,
     safe ? 400 : 413,
   );
   if (safe && body.byteLength > 0) throw new RemoteHttpAuthFailure(400, "invalid");
-  if (!safe) {
+  if (!safe && !relay) {
     const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
     // The outer route policy owns per-route media types (Code evidence is text).
     // Keep the conservative defaults for callers without a classified route.
@@ -1072,7 +1194,7 @@ async function authenticateRequest(
   const forwardInit: RequestInit = { headers: strippedHeaders(request.headers) };
   if (!safe) forwardInit.body = body as BodyInit;
   const forwarded = new Request(request, forwardInit);
-  return { request: forwarded, principal, freshness: result.freshness, requestFacts };
+  return { request: forwarded, principal, freshness: result.freshness, requestFacts, body };
 }
 
 const SOURCE_CLASSES: ReadonlySet<string> = new Set(["loopback", "lan-private", "tailscale"]);
