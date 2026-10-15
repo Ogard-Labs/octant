@@ -10,6 +10,7 @@ import {
   Link,
   Lock,
   Power,
+  RotateCw,
   Smartphone,
   Volume1,
   Volume2,
@@ -33,6 +34,8 @@ export interface DeviceToolbarControls {
   readonly typeText: boolean;
   /** Only once the host reports that it can open an address on this device. */
   readonly openUrl: boolean;
+  /** Only once the host reports that it can rotate this device. */
+  readonly rotate: boolean;
   /** Only once the host reports that it can press the volume keys. */
   readonly volume: boolean;
   readonly switchDevice: boolean;
@@ -134,6 +137,7 @@ export function DeviceToolbar(props: {
 export type DeviceMenuItem =
   | "type-text"
   | "open-url"
+  | "rotate"
   | "lock"
   | "volume-up"
   | "volume-down"
@@ -156,6 +160,9 @@ function deviceMenuItems(props: {
   }
   if (controls.openUrl) {
     items.push({ value: "open-url", label: "Open URL…", icon: <Link size={16} /> });
+  }
+  if (controls.rotate) {
+    items.push({ value: "rotate", label: "Rotate", icon: <RotateCw size={16} /> });
   }
   if (controls.hardware && !props.wide) {
     items.push({ value: "lock", label: "Lock", icon: <Lock size={16} /> });

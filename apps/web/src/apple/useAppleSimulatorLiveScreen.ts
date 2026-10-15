@@ -1,6 +1,7 @@
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { AppleScreenStreamRequest } from "@octant/contracts/apple-toolchain-rpc";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { screenFacing } from "../device/deviceModel";
 
 export type AppleSimulatorLiveScreen =
   /** Not asked for: the frame is not live, or this client cannot attach one. */
@@ -102,6 +103,7 @@ export function useAppleSimulatorLiveScreen(options: {
         const watch = await client.watchScreen(request, view.signal);
         if (signal.aborted) return;
         let painted = false;
+        let shown: { readonly width: number; readonly height: number } | undefined;
         const startedAt = Date.now();
         if (watch.status === "failed") {
           // On the first request a refusal is the host's answer — no desktop
@@ -150,11 +152,13 @@ export function useAppleSimulatorLiveScreen(options: {
               latestRef.current?.frame.close();
               latestRef.current = { key, frame };
               if (canvasRef.current !== null) paint(canvasRef.current, frame);
-              if (!painted) {
+              const facing = screenFacing(shown ?? watch.screen, frame);
+              if (!painted || facing !== shown) {
                 painted = true;
                 everLive = true;
+                shown = facing;
                 clearTimeout(noPicture);
-                setState({ status: "live", screen: watch.screen });
+                setState({ status: "live", screen: facing });
               }
             }
           } finally {

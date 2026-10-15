@@ -589,7 +589,101 @@ describe("AndroidToolchainService", () => {
 
     it("tells the pane this host can open an address", () => {
       const { service } = openUrlService();
-      expect(service.snapshot(context).capabilities).toEqual({ openUrl: true, volume: true });
+      expect(service.snapshot(context).capabilities).toEqual({
+        openUrl: true,
+        volume: true,
+        rotate: true,
+      });
+    });
+  });
+
+  describe("Rotate", () => {
+    function rotateService() {
+      const discovery = discoveryExecutor();
+      const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) =>
+        input.argv.includes("settings") ? processResult("") : await discovery(input),
+      );
+      const service = new AndroidToolchainService({
+        execute,
+        access: async () => undefined,
+        environment: () => ({ ANDROID_HOME: "/sdk" }),
+        writeArtifact: async () => undefined,
+        readArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-10-14T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      const rotated = () => execute.mock.calls.filter(([input]) => input.argv.includes("settings"));
+      return { service, rotated };
+    }
+
+    it("turns auto-rotate off and sets the approved orientation through adb", async () => {
+      const { service, rotated } = rotateService();
+      const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: true };
+      await service.discover(discoveryRequest, gated);
+
+      const evidence = await service.execute(
+        action("rotate", {
+          requestedBy: actor,
+          orientation: "landscape",
+          approval: { kind: "approved", approvalId: ids.approval },
+        }),
+        gated,
+      );
+
+      expect(evidence.outcome).toBe("succeeded");
+      expect(rotated().map(([input]) => input.argv.slice(3))).toEqual([
+        ["shell", "settings", "put", "system", "accelerometer_rotation", "0"],
+        ["shell", "settings", "put", "system", "user_rotation", "1"],
+      ]);
+    });
+
+    it("asks before every Rotate: no approval, Plan, an input grant, or a non-person never sends it", async () => {
+      const { service, rotated } = rotateService();
+      const gated = {
+        ...context,
+        executionPolicy: "approval-gated" as const,
+        approvalValid: false,
+      };
+      await service.discover(discoveryRequest, gated);
+
+      const unapproved = await service.execute(
+        action("rotate", { requestedBy: actor, orientation: "portrait" }),
+        gated,
+      );
+      expect(unapproved.outcome).toBe("unauthorized");
+
+      const underGrant = await service.execute(
+        action("rotate", {
+          actionId: "30000000-0000-4000-8000-000000000013",
+          requestedBy: actor,
+          orientation: "portrait",
+        }),
+        { ...gated, approvalValid: true, inputGranted: true },
+      );
+      expect(underGrant.outcome).toBe("unauthorized");
+
+      const planned = await service.execute(
+        action("rotate", {
+          actionId: "30000000-0000-4000-8000-000000000014",
+          requestedBy: actor,
+          orientation: "portrait",
+          approval: { kind: "approved", approvalId: ids.approval },
+        }),
+        { ...context, executionPolicy: "plan" as const },
+      );
+      expect(planned.outcome).toBe("unauthorized");
+
+      const byHost = await service.execute(
+        action("rotate", {
+          actionId: "30000000-0000-4000-8000-000000000015",
+          requestedBy: { ...actor, kind: "system" },
+          orientation: "portrait",
+        }),
+        context,
+      );
+      expect(byHost.outcome).toBe("unauthorized");
+      expect(rotated()).toEqual([]);
     });
   });
 

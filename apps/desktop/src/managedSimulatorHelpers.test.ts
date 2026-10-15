@@ -289,6 +289,43 @@ describe("managed simulator streams", () => {
     }
   });
 
+  it("rotates the Simulator through the serve-sim stream, never the native helper", async () => {
+    const native = nativeHelpers();
+    const managed = tools();
+    const helpers = createManagedSimulatorHelpers(native, managed, {
+      fetch: fetchStream,
+      inputConnection: connected,
+    });
+    try {
+      await expect(
+        helpers.send(udid, { op: "rotate", orientation: "landscape" }, 2_000),
+      ).resolves.toEqual({ status: "delivered" });
+      expect(managed.commands).toContainEqual(["rotate", "landscape_left", "-d", udid]);
+      await helpers.send(udid, { op: "rotate", orientation: "portrait" }, 2_000);
+      expect(managed.commands).toContainEqual(["rotate", "portrait", "-d", udid]);
+      expect(native.send).not.toHaveBeenCalled();
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("says Rotate is unavailable without the managed serve-sim stream", async () => {
+    const native = nativeHelpers();
+    const helpers = createManagedSimulatorHelpers(
+      native,
+      { launchSpec: async () => undefined, trackProcess: vi.fn() },
+      { inputConnection: connected },
+    );
+    try {
+      await expect(
+        helpers.send(udid, { op: "rotate", orientation: "landscape" }, 1_000),
+      ).resolves.toEqual(expect.objectContaining({ status: "unavailable" }));
+      expect(native.send).not.toHaveBeenCalled();
+    } finally {
+      helpers.dispose();
+    }
+  });
+
   it("refuses to repair input without the managed serve-sim tool", async () => {
     const native = nativeHelpers();
     const helpers = createManagedSimulatorHelpers(

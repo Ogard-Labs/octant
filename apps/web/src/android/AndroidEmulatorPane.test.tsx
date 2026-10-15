@@ -177,6 +177,64 @@ describe("AndroidEmulatorPane", () => {
     );
   });
 
+  it("offers Rotate only once the host reports it, and confirms it before sending", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const user = userEvent.setup();
+    const requestApproval = vi.fn(async () => ids.approval);
+    const execute = vi.fn(async () => ({ outcome: "succeeded" }));
+    const snapshot = (reported: boolean) => ({
+      sequence: 1,
+      snapshotAt: "2026-10-14T20:00:03.000Z",
+      sdk: discovery.sdk,
+      emulators: discovery.emulators,
+      active: [],
+      recentEvidence: [],
+      ...(reported ? { capabilities: { rotate: true } } : {}),
+    });
+    const props = (reported: boolean) => ({
+      checkoutId: ids.checkout as never,
+      client: client({
+        execute,
+        snapshot: vi.fn(async () => snapshot(reported)),
+      }) as never,
+      createUuid: uuidFactory(),
+      hostBridge: {
+        getHostCapabilities: () => ({
+          sidebarVibrancySupported: false,
+          liveAndroidFrameSupported: true,
+        }),
+      } as never,
+      requestApproval,
+      thread: thread as never,
+    });
+
+    const older = render(<AndroidEmulatorPane {...props(false)} />);
+    await screen.findByRole("button", { name: "Home" });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: "Rotate" })).not.toBeInTheDocument();
+    older.unmount();
+
+    render(<AndroidEmulatorPane {...props(true)} />);
+    await screen.findByRole("button", { name: "Home" });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Rotate" }));
+
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(requestApproval).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ kind: "rotate", orientation: "landscape" }),
+    );
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "rotate",
+        orientation: "landscape",
+        approval: { kind: "approved", approvalId: ids.approval },
+      }),
+    );
+  });
+
   it("keeps showing an emulator the person chose to boot while several others run", async () => {
     const sdk = discovery.sdk;
     let emulators = [

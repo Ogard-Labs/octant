@@ -84,7 +84,8 @@ export function evaluateAndroidEmulatorRequest(
   if (
     (isAndroidEmulatorInputKind(request.kind) ||
       isAndroidEmulatorOpenInputKind(request.kind) ||
-      request.kind === "open-url") &&
+      request.kind === "open-url" ||
+      request.kind === "rotate") &&
     request.requestedBy === undefined
   ) {
     return { kind: "denied", reason: "actor-required" };
@@ -92,10 +93,13 @@ export function evaluateAndroidEmulatorRequest(
   if (request.kind === "open-url" && request.url === undefined) {
     return { kind: "denied", reason: "url-required" };
   }
-  // Open URL is offered only in the pane: a person asks for it, never an
-  // agent or the host on their behalf.
+  if (request.kind === "rotate" && request.orientation === undefined) {
+    return { kind: "denied", reason: "orientation-required" };
+  }
+  // Open URL and Rotate are offered only in the pane: a person asks for them,
+  // never an agent or the host on their behalf.
   if (
-    request.kind === "open-url" &&
+    (request.kind === "open-url" || request.kind === "rotate") &&
     request.requestedBy?.kind !== "local-user" &&
     request.requestedBy?.kind !== "remote-device"
   ) {
@@ -116,6 +120,7 @@ export function evaluateAndroidEmulatorRequest(
       request.kind === "install" ||
       request.kind === "launch" ||
       request.kind === "open-url" ||
+      request.kind === "rotate" ||
       isAndroidEmulatorInputKind(request.kind) ||
       isAndroidEmulatorOpenInputKind(request.kind)) &&
     emulator.state !== "booted"

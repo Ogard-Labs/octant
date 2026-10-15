@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { CodeCheckoutId, CodeThreadId } from "./code";
-import { DeviceHostCapabilities, DeviceOpenUrl } from "./deviceHost";
+import { DeviceHostCapabilities, DeviceOpenUrl, DeviceOrientation } from "./deviceHost";
 import { CorrelationId, EventActor, UtcTimestamp } from "./events";
 import { ToolActionApproval, ToolActionAuthority, ToolActionId } from "./toolActions";
 
@@ -66,6 +66,7 @@ export const AndroidEmulatorActionKind = Schema.Literal(
   "install",
   "launch",
   "open-url",
+  "rotate",
 );
 export type AndroidEmulatorActionKind = typeof AndroidEmulatorActionKind.Type;
 
@@ -116,6 +117,8 @@ export const AndroidEmulatorRequest = Schema.Struct({
   ),
   /** The address `open-url` opens. Shown whole in its confirmation; evidence keeps the origin. */
   url: Schema.optional(DeviceOpenUrl),
+  /** The orientation `rotate` sets. */
+  orientation: Schema.optional(DeviceOrientation),
   timeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(10 * 60 * 1000)),
   approval: ToolActionApproval,
 })
@@ -147,6 +150,9 @@ export const AndroidEmulatorRequest = Schema.Struct({
       if (request.kind === "launch") return request.packageName !== undefined;
       if (request.kind === "open-url") {
         return request.requestedBy !== undefined && request.url !== undefined;
+      }
+      if (request.kind === "rotate") {
+        return request.requestedBy !== undefined && request.orientation !== undefined;
       }
       return true;
     }),
@@ -213,7 +219,8 @@ export const AndroidEmulatorEvidence = Schema.Struct({
         evidence.kind === "swipe" ||
         evidence.kind === "type-text" ||
         evidence.kind === "key-press" ||
-        evidence.kind === "open-url"
+        evidence.kind === "open-url" ||
+        evidence.kind === "rotate"
       ) {
         return evidence.requestedBy !== undefined;
       }

@@ -326,7 +326,7 @@ export class AndroidToolchainService {
       emulators: this.#emulators,
       // What this host can do beyond the original actions; the pane offers
       // an item only once it is listed here.
-      capabilities: { openUrl: true, volume: true },
+      capabilities: { openUrl: true, volume: true, rotate: true },
       active: [...this.#active.values()]
         .filter((entry) => androidContextMatches(entry.context, context))
         .map((entry) => entry.progress),
@@ -671,6 +671,41 @@ export class AndroidToolchainService {
         outcome,
         startedAt,
         [deviceOpenUrlDiagnostic(request.url, outcome === "succeeded" ? "completed" : outcome)],
+        result.cleanupUncertain ? "uncertain" : "complete",
+      );
+    }
+    if (request.kind === "rotate") {
+      if (request.orientation === undefined) {
+        return deniedEvidence(request, "orientation-required", startedAt, this.#options.now());
+      }
+      // Turning auto-rotate off first keeps the sensor from undoing the
+      // setting; the emulator keeps the chosen rotation until it is changed.
+      const settings = [
+        ["accelerometer_rotation", "0"],
+        ["user_rotation", request.orientation === "landscape" ? "1" : "0"],
+      ] as const;
+      let result: AndroidProcessResult | undefined;
+      for (const [key, value] of settings) {
+        result = await this.#command(
+          [adb, "-s", serial, "shell", "settings", "put", "system", key, value],
+          context,
+          request.timeoutMs,
+          signal,
+        );
+        if (!succeeded(result)) break;
+      }
+      if (result === undefined) throw new Error("rotate ran no command.");
+      const outcome = lostServerMidCommand(result) ? "interrupted" : outcomeFor(result);
+      return await this.#logged(
+        request,
+        outcome,
+        startedAt,
+        [
+          {
+            severity: "note",
+            message: `rotate to ${request.orientation} ${outcome === "succeeded" ? "completed" : outcome}`,
+          },
+        ],
         result.cleanupUncertain ? "uncertain" : "complete",
       );
     }

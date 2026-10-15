@@ -52,8 +52,9 @@ one is running and nobody has chosen, the pane asks instead of guessing.
 `http` or `https` address on the emulator with Android's view intent, asks
 first on an approval-gated thread with the whole address in the confirmation,
 and records only the address's origin as evidence; other kinds of address are
-refused. When the SDK or an AVD is missing, a short
-checklist says what to install or create.
+refused. **Rotate** turns the emulator between portrait and landscape and
+asks first on an approval-gated thread. When the SDK or an AVD is missing, a
+short checklist says what to install or create.
 
 Octant finds the SDK through `ANDROID_HOME` or `ANDROID_SDK_ROOT`. Without
 either, macOS hosts look in `~/Library/Android/sdk` (Android Studio) and then in

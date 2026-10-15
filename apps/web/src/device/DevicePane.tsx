@@ -40,6 +40,8 @@ export interface DevicePaneProps {
    * More has no Open URL at all; it is never shown disabled.
    */
   readonly canOpenUrl?: boolean;
+  /** The host reported that it can rotate this device; absent, More has no Rotate. */
+  readonly canRotate?: boolean;
   /**
    * The host reported that it can press this device's volume keys. Without it
    * More has no Volume up or down at all; they are never shown disabled.
@@ -95,6 +97,7 @@ export function DevicePane(props: DevicePaneProps) {
 
   const act = (action: DeviceAction) => props.onAction?.(action);
   const canOpenUrl = live !== undefined && canAct && props.canOpenUrl === true;
+  const canRotate = live !== undefined && canAct && props.canRotate === true;
   const approvalWanted = props.needsApproval && live !== undefined && canAct;
   const line = lineFor({
     view,
@@ -151,6 +154,14 @@ export function DevicePane(props: DevicePaneProps) {
     } else if (item === "open-url") {
       setTyping(false);
       setOpeningUrl(true);
+    } else if (item === "rotate") {
+      // The streamed picture says which way the device sits now; with none,
+      // landscape is the change a person most often wants.
+      const sitsWide =
+        view.kind === "live" &&
+        view.screen.kind === "stream" &&
+        view.screen.size.width > view.screen.size.height;
+      act({ kind: "rotate", orientation: sitsWide ? "portrait" : "landscape" });
     } else if (item === "lock") enqueue({ kind: "key-press", key: "lock" }, false);
     else if (item === "volume-up" || item === "volume-down") {
       enqueue({ kind: "key-press", key: item }, false);
@@ -175,6 +186,7 @@ export function DevicePane(props: DevicePaneProps) {
           screenshot: live !== undefined && canAct && !props.busy,
           typeText: hardware,
           openUrl: canOpenUrl,
+          rotate: canRotate,
           volume: hardware && props.canVolume === true,
           switchDevice: canAct && choosable.length > 0 && view.kind !== "setup",
           stopLiveView:

@@ -40,7 +40,9 @@ export type DeviceHelperRequest =
    * after Xcode's Device Hub took them. This restarts the guest's home screen
    * and closes running apps, so it runs only when a person asks for it.
    */
-  | { readonly op: "repair-input" };
+  | { readonly op: "repair-input" }
+  /** Sets the Simulator's orientation through the managed serve-sim stream. */
+  | { readonly op: "rotate"; readonly orientation: "portrait" | "landscape" };
 
 export type DeviceHelperReply =
   | {

@@ -408,6 +408,33 @@ describe("Apple runtime contracts", () => {
     expect(() => decode({ ...openUrl, url: "file:///etc/hosts" })).toThrow();
   });
 
+  it("decodes Rotate only with an orientation and the person who asked", () => {
+    const decode = contracts.decodeAppleSimulatorRequest as (value: unknown) => any;
+    const rotate = {
+      actionId: "10000000-0000-4000-8000-000000000001",
+      correlationId: "10000000-0000-4000-8000-000000000002",
+      authority: {
+        hostId: "10000000-0000-4000-8000-000000000003",
+        mode: "code",
+        projectId: "10000000-0000-4000-8000-000000000004",
+        providerInstanceId: "10000000-0000-4000-8000-000000000007",
+        extension: { kind: "core" },
+      },
+      threadId: "10000000-0000-4000-8000-000000000008",
+      checkoutId: "10000000-0000-4000-8000-000000000009",
+      simulatorId: "10000000-0000-4000-8000-000000000010",
+      timeoutMs: 30000,
+      approval: { kind: "approved", approvalId: "10000000-0000-4000-8000-000000000011" },
+      requestedBy: { kind: "local-user", actorId: "10000000-0000-4000-8000-000000000012" },
+      kind: "rotate",
+      orientation: "landscape",
+    };
+    expect(decode(rotate).orientation).toBe("landscape");
+    expect(() => decode({ ...rotate, orientation: undefined })).toThrow();
+    expect(() => decode({ ...rotate, requestedBy: undefined })).toThrow();
+    expect(() => decode({ ...rotate, orientation: "upside-down" })).toThrow();
+  });
+
   it("tells the pane which newer device actions the host performs", () => {
     const decodeSnapshot = contracts.decodeAppleRuntimeSnapshot as (value: unknown) => any;
     const older = {
@@ -426,6 +453,9 @@ describe("Apple runtime contracts", () => {
     expect(decodeSnapshot(older).capabilities).toBeUndefined();
     expect(decodeSnapshot({ ...older, capabilities: { openUrl: true } }).capabilities).toEqual({
       openUrl: true,
+    });
+    expect(decodeSnapshot({ ...older, capabilities: { rotate: true } }).capabilities).toEqual({
+      rotate: true,
     });
   });
 
