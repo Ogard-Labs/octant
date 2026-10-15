@@ -10,6 +10,7 @@ import {
   ORIGIN,
   TICKET_ID,
 } from "./remoteConnectionFixtures";
+import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const hostId = decodeStableHostId(HOST_ID);
 
@@ -74,6 +75,7 @@ describe("RemoteSessionBridge", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
 
     expect(bridge.getState()).toMatchObject({
@@ -94,6 +96,34 @@ describe("RemoteSessionBridge", () => {
     });
   });
 
+  it("keeps the origin's listener pin when the device key is replaced", async () => {
+    const server = createFakeRemoteServer({});
+    const pairingStore = createInMemoryDeviceKeyStore();
+    const { deviceKeyId, deviceId } = await registerWebCryptoDevice(server, pairingStore);
+    const listenerTrust = {
+      current: { kind: "pinned", pin: `sha256-${"A".repeat(43)}` },
+    } as const;
+    const bridge = createRemoteSessionBridge({ fetch: server.fetch, deviceKeyStore: pairingStore });
+    bridge.connect({
+      ticketId: TICKET_ID,
+      hostId,
+      deviceId,
+      credentialGeneration: 1,
+      deviceKeyId,
+      origin: ORIGIN,
+      listenerTrust,
+    });
+    await waitUntil(() => bridge.getState().kind === "ready");
+
+    const staged = await bridge.stageDeviceKeyRotation();
+    await staged.adopt({ credentialGeneration: 2 });
+
+    await expect(pairingStore.findByOrigin(ORIGIN)).resolves.toMatchObject({
+      credentialGeneration: 2,
+      listenerTrust,
+    });
+  });
+
   it("maps incompatible protocol failures", async () => {
     const server = createFakeRemoteServer({ incompatibleProtocol: true });
     const pairingStore = createInMemoryDeviceKeyStore();
@@ -110,6 +140,7 @@ describe("RemoteSessionBridge", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
 
     await waitUntil(() => bridge.getState().kind === "incompatible");
@@ -132,6 +163,7 @@ describe("RemoteSessionBridge", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await waitUntil(() => bridge.getState().kind === "ready");
     bridge.disconnect();
@@ -154,6 +186,7 @@ describe("RemoteSessionBridge", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await waitUntil(() => bridge.getState().kind === "ready");
     bridge.connection()?.disconnect();
@@ -171,6 +204,7 @@ describe("RemoteSessionBridge", () => {
       deviceId,
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const bridge = createRemoteSessionBridge({
       fetch: server.fetch,
@@ -206,6 +240,7 @@ describe("RemoteSessionBridge", () => {
       deviceId,
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const bridge = createRemoteSessionBridge({
       fetch: server.fetch,
@@ -230,6 +265,7 @@ describe("RemoteSessionBridge", () => {
       deviceId: server.deviceId() ?? "22222222-2222-4222-8222-222222222222",
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     if (failure === undefined) {
       vi.spyOn(pairingStore, "get").mockResolvedValue(undefined);
@@ -253,6 +289,7 @@ describe("RemoteSessionBridge", () => {
       deviceId,
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input.toString());
@@ -281,6 +318,7 @@ describe("RemoteSessionBridge", () => {
       deviceId,
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const bridge = createRemoteSessionBridge({
       fetch: server.fetch,
@@ -312,6 +350,7 @@ describe("RemoteSessionBridge", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await waitUntil(() => bridge.getState().kind === "ready");
 
@@ -331,6 +370,7 @@ describe("RemoteSessionBridge", () => {
       deviceId,
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const bridge = createRemoteSessionBridge({
       fetch: server.fetch,
@@ -352,6 +392,7 @@ describe("RemoteSessionBridge", () => {
       deviceId,
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     vi.spyOn(pairingStore, "get").mockRejectedValue(new Error("IndexedDB temporarily unavailable"));
     const bridge = createRemoteSessionBridge({
@@ -377,6 +418,7 @@ describe("RemoteSessionBridge", () => {
       deviceId,
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const bridge = createRemoteSessionBridge({
       fetch: server.fetch,

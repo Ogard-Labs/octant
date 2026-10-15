@@ -5687,11 +5687,13 @@ mechanisms are:
     DER SubjectPublicKeyInfo. The existing `certificateFingerprint` hashes the
     PEM text and is not a pin. Only the loopback administration status
     carries the pin; `octant listener status` prints it.
-  - **No client pins yet.** A self-made listener is served, but no Octant
-    client reads a pairing code or takes or checks a pin, and a client that
-    relies on platform trust refuses the certificate, so only a pasted
-    certificate can be reached by a client today. Settings still asks for a
-    certificate and key, and `octant listener`'s usage line still names them.
+  - **No app pins yet.** A self-made listener is served, and the client
+    runtime holds the trust rule below, but neither the desktop app nor the
+    phone app reads a pairing code or connects through a pinned transport
+    yet, and a client that relies on platform trust refuses the certificate,
+    so only a pasted certificate can be reached by a client today. Settings
+    still asks for a certificate and key, and `octant listener`'s usage line
+    still names them.
   - **No browser link.** A browser decides whether to trust the listener
     before any Octant page loads and cannot check a certificate the host made
     itself, so Settings offers no browser pairing link for a self-made
@@ -5731,12 +5733,74 @@ mechanisms are:
     parsed address, never its text prefix. A name is judged by its spelling
     only, so the reader cannot prove a named origin is private: any
     `*.ts.net` name passes, and public Tailscale Funnel names are `*.ts.net`
-    too. The plan's client rule closes that before a client sends anything.
-    The builder refuses the same contents, so the host never shows a code a
-    client would refuse.
-- **Adding a computer in one step.** Partly built: the host certificate and
-  pairing code above. The client pin rule, reading the code on each client,
-  and the rest are planned in [the plan](plans/one-step-pairing.md).
+    too. The client trust rule below closes that before a client sends
+    anything. The builder refuses the same contents, so the host never shows
+    a code a client would refuse.
+  - **Client trust rule.** The client runtime holds one rule every client
+    that reaches another host as a paired device applies; each platform's TLS
+    layer gathers the facts and sends no request bytes until the rule
+    accepts.
+    - **What a client keeps.** Each origin's pairing record (the device key's
+      metadata and the client host registry) holds that origin's trust:
+      `platform`, or `pinned` with a `sha256-` pin taken only from a pairing
+      code. A record from before pins, or for a pasted certificate, holds
+      `platform`. A stored trust that cannot be read is never read as a
+      weaker one: the device-key record stops resolving, so the device pairs
+      again, and the host registry refuses to load. Replacing the device key
+      keeps the origin's trust.
+    - **Certificate.** A pinned origin passes only when the served leaf
+      certificate's SubjectPublicKeyInfo hashes to the pin. That check
+      replaces platform chain, name, and date validation and never falls back
+      to it, so a certificate a public authority issued for the same name
+      does not pass, and the certificate's dates are not checked: anyone
+      holding the key can make a fresh certificate, and a device with a wrong
+      clock would be locked out. An origin with no pin passes only on
+      platform validation, so it never accepts a self-made certificate. A pin
+      naming another hash is refused as needing a newer Octant.
+    - **Address.** Before connecting, a client resolves the origin's name and
+      refuses unless every address it resolves to is an IP address the
+      listener address classifier calls private LAN or Tailscale; one public
+      answer refuses the whole name. It connects to the judged address, not
+      the name, and judges the connected peer address the same way before the
+      TLS handshake starts. An IPv4-mapped IPv6 form or a zone is refused, not
+      unwrapped, and so is a zero-padded IPv4 address such as `010.0.0.1`,
+      which a URL parser and the system resolver read as octal; the listener
+      address classifier refuses it everywhere for the same reason.
+    - **Staged trust.** An origin's trust may carry a staged next trust and
+      the end of its window. Until then either trust passes, and the first
+      connection that passes only the staged one makes it current and drops
+      the old; after it, only the current trust passes. A window ending more
+      than 30 days after the client's now is ignored, since the host never
+      announces a longer one. Nothing records a staged trust yet: the host's
+      announcement route is planned.
+    - **Copy.** A pin mismatch says "This isn't the computer you paired with:
+      its security key has changed. Octant stopped before sending anything.
+      If its key was replaced on purpose, pair again from that computer."; a
+      certificate platform validation refuses says "Octant couldn't verify
+      this computer's certificate. Pair with the full pairing code or QR code
+      from that computer."; an address outside the private network says
+      "This computer's address isn't on a private network or Tailscale, so
+      Octant stopped before sending anything."
+    - **Node.** The Node implementation, a module the client runtime's
+      barrel does not export so browser and phone bundles never load it,
+      resolves and judges the address, dials it, judges the peer, and runs
+      the handshake with Node's own refusal off, so the rule decides; it
+      hands over the socket only when the rule accepts. It requires TLS 1.3,
+      because TLS 1.2 renegotiation could present a second certificate after
+      the judged one, gives a handshake 10 seconds, and closes the connection
+      when the judgement itself fails. For platform trust it also checks the
+      certificate names the origin's host or address itself, since an IP
+      origin carries no server name. A name that does not resolve, an
+      address that does not answer, and a failed handshake come back as a
+      failure value, not a refusal, and nothing was sent. Only its tests can replace name
+      resolution, dialling, or trust roots. No other client runtime or CLI
+      source turns platform validation off or accepts every server name, and
+      a test refuses any that does. No `octant` command connects to another
+      host yet, so only tests use it.
+- **Adding a computer in one step.** Partly built: the host certificate,
+  pairing code, and client trust rule above. Reading the code and pinning on
+  the desktop and phone apps, and the rest, are planned in
+  [the plan](plans/one-step-pairing.md).
 - **Provider keys on a host without the desktop app.** _Designed, not yet
   built._ The desktop saves an endpoint's API key or bearer token over
   native IPC from its own renderer, so a browser client — local or paired —

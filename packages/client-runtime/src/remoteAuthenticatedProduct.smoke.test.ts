@@ -26,6 +26,7 @@ import {
   ORIGIN,
   TICKET_ID,
 } from "./remoteConnectionFixtures";
+import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const hostId = decodeStableHostId(HOST_ID);
 
@@ -123,6 +124,7 @@ describe("remote authenticated product smoke", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await waitUntil(() => bridge.getState().kind === "ready");
     expect(server.productProofVerified()).toBe(false);

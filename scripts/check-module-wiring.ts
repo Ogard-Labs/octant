@@ -113,6 +113,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
+  [
+    "packages/client-runtime/src/remoteListenerTlsNode.ts",
+    "The Node implementation of the listener trust rule; its real-TLS tests are the evidence that a pinned origin refuses before any request byte, and docs/plans/one-step-pairing.md ships it ahead of any `octant` command that connects to another host. Remove once such a command imports it.",
+  ],
 ]);
 
 /** Route modules exempt from Rule A, with the reason they are not registered. */

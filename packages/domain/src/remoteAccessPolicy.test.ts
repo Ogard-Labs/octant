@@ -72,6 +72,13 @@ describe("remote access policy", () => {
     expect(classifyRemoteListenerAddress("100.64.999.999")).toBe("public");
   });
 
+  it("refuses a zero-padded IPv4 address that another parser reads as octal", () => {
+    for (const address of ["010.0.0.1", "192.168.01.1", "100.064.0.1", "10.0.0.01"]) {
+      expect(classifyRemoteListenerAddress(address)).toBe("public");
+    }
+    expect(classifyRemoteListenerAddress("10.0.0.0")).toBe("lan-private");
+  });
+
   it("judges IPv6 private ranges on the expanded address, not its text prefix", () => {
     // Each of these starts with the letters of a private prefix but expands to
     // a first group outside fc00::/7 and fe80::/10.
