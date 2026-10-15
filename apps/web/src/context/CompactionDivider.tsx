@@ -3,9 +3,14 @@ import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { useComposerContextMeterScope } from "./composerContextMeterScope";
 import { compactionResultLine } from "./sessionCompactionPresentation";
 
-/** The compactions the host journaled for the open thread, oldest first. */
+/**
+ * The compactions the host journaled for the open thread, oldest first. The
+ * controller answers for the active pane's thread only, so a transcript in any
+ * other pane gets none rather than another thread's receipts.
+ */
 export function useCompactionReceipts(): ReadonlyArray<ContextCompactionReceipt> {
-  return useComposerContextMeterScope().compaction?.controller.state?.completedCompactions ?? [];
+  const scope = useComposerContextMeterScope();
+  return scope.visible ? (scope.compaction?.controller.state?.completedCompactions ?? []) : [];
 }
 
 /**

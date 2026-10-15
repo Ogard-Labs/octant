@@ -3,7 +3,10 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { placeCompactions } from "./CompactionDivider";
-import { ComposerContextMeterProvider } from "./composerContextMeterScope";
+import {
+  ComposerContextMeterGate,
+  ComposerContextMeterProvider,
+} from "./composerContextMeterScope";
 import { compactionStateFixture, contextFixture } from "./contextFixtures";
 import type { SessionCompactionController } from "./useSessionCompaction";
 
@@ -96,7 +99,7 @@ describe("placeCompactions", () => {
 });
 
 describe("compaction divider in a transcript", () => {
-  function renderTranscript(completed: ReturnType<typeof receipt>[]) {
+  function renderTranscript(completed: ReturnType<typeof receipt>[], active = true) {
     const controller: SessionCompactionController = {
       state: compactionStateFixture(subject, { completedCompactions: completed }),
       starting: false,
@@ -108,14 +111,16 @@ describe("compaction divider in a transcript", () => {
         compaction={{ controller, names: { provider: () => "Codex", model: () => undefined } }}
         status="not-planned"
       >
-        <TranscriptWindow
-          itemAt={rowAt}
-          itemKey={(row) => row.id}
-          items={rows}
-          listLabel="Transcript"
-          renderItem={(row) => <p>{`Row ${row.id}`}</p>}
-          restoreKey="thread-a"
-        />
+        <ComposerContextMeterGate enabled={active}>
+          <TranscriptWindow
+            itemAt={rowAt}
+            itemKey={(row) => row.id}
+            items={rows}
+            listLabel="Transcript"
+            renderItem={(row) => <p>{`Row ${row.id}`}</p>}
+            restoreKey="thread-a"
+          />
+        </ComposerContextMeterGate>
       </ComposerContextMeterProvider>,
     );
   }
@@ -134,6 +139,11 @@ describe("compaction divider in a transcript", () => {
     expect(first.compareDocumentPosition(screen.getByText("Row b"))).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+  });
+
+  it("shows no divider in a pane that is not the active thread's", () => {
+    renderTranscript([manual, automatic], false);
+    expect(screen.queryAllByRole("separator")).toEqual([]);
   });
 
   it("shows no divider for a thread that was never compacted", () => {
