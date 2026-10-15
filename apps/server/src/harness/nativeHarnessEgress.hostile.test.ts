@@ -31,7 +31,10 @@ import { ExternalContentClearStore } from "../context/externalContentClearStore"
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  readApprovalOutsideContent,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -268,6 +271,7 @@ async function hostileCodeLead(options: {
     readonly summary: string;
     readonly approvalClass: string;
     readonly singleUse: boolean;
+    readonly outsideSources?: ReadonlyArray<string>;
   }> = [];
   const answers = options.answers;
   let approvals: NativeHarnessApprovalStore | undefined;
@@ -280,12 +284,18 @@ async function hostileCodeLead(options: {
       },
       uuid: randomUUID,
       clock: () => now,
+      outsideContent: (subject) => readApprovalOutsideContent(connection, subject),
       onAsked: ({ approval }) => {
         asked.push({
           toolName: approval.toolName,
           summary: approval.summary,
           approvalClass: approval.approvalClass,
           singleUse: approval.singleUse === true,
+          ...(approval.outsideContent === undefined
+            ? {}
+            : {
+                outsideSources: approval.outsideContent.sources.map((source) => source.sourceLabel),
+              }),
         });
         const answer = answers.shift() ?? "deny";
         setImmediate(() => approvals?.decide(threadId, String(approval.id), answer));
@@ -466,6 +476,7 @@ describe("native harness hostile content", () => {
     expect(await lead.call("bash", { command: "bun run lint" })).toMatchObject({ isError: false });
     expect(lead.asked).toHaveLength(1);
     expect(lead.asked[0]).toMatchObject({ approvalClass: "shell-commands", singleUse: false });
+    expect(lead.asked[0]?.outsideSources).toBeUndefined();
 
     await lead.call("web-fetch", { url: lead.pageUrl });
     expect(lead.tainted()).toBe(true);
@@ -476,6 +487,8 @@ describe("native harness hostile content", () => {
     });
     expect(lead.asked).toHaveLength(2);
     expect(lead.asked[1]).toMatchObject({ approvalClass: "shell-commands", singleUse: true });
+    // It names what marked the thread, so the person knows why it asks.
+    expect(lead.asked[1]?.outsideSources).toEqual(["web-fetch"]);
 
     // An "always" answered on the tainted thread covers only that one command.
     expect(await lead.call("bash", { command: "bun test" })).toMatchObject({ isError: false });

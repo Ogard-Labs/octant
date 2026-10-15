@@ -747,7 +747,10 @@ import {
   SiblingThreadsService,
   createSiblingThreadTools,
 } from "./siblingThreads/siblingThreadTools";
-import { readThreadExternalContentTaint } from "./context/externalContentTaintProjection";
+import {
+  readApprovalOutsideContent,
+  readThreadExternalContentTaint,
+} from "./context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "./harness/nativeHarnessAuthority";
 import {
   createNativeHarnessComposition,
@@ -3120,6 +3123,8 @@ export function startOctantServer(
             externalContentIngested: (owner) =>
               readThreadExternalContentTaint(persistence.connection, owner.threadId)
                 .externalContentIngested,
+            outsideContent: (owner) =>
+              readApprovalOutsideContent(persistence.connection, owner.threadId),
             threadTitle: (owner) =>
               (owner.mode === "chat"
                 ? persistence.readChatThread(decodeChatThreadId(owner.threadId))?.title
@@ -4094,6 +4099,8 @@ export function startOctantServer(
           threadTainted: (threadId) =>
             readThreadExternalContentTaint(persistence.connection, threadId)
               .externalContentIngested,
+          outsideContent: (threadId) =>
+            readApprovalOutsideContent(persistence.connection, threadId),
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         ...(extensionSupervisor instanceof ExtensionSupervisor
@@ -6384,6 +6391,7 @@ export function startOctantServer(
       sessions: nativeHarnessSessionsLive,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+      outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
     });
     agentRunInteractions = createAgentRunInteractions({
       getById: (id) => agentRunPersistence.getById(id),

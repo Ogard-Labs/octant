@@ -1777,6 +1777,18 @@ flowchart LR
   destructive, credential, outside-Project, or privilege-expansion class
   without that flag. A Code Git action a person takes from a window is that
   person's own per-action act, and no agent tool issues one.
+  The prompt that asks says why. A harness approval asked for the thread's
+  own call (`singleUse`), an MCP tool prompt, and a Computer use approval on
+  a marked thread carry `outsideContent`: the sources that marked it, most
+  recently read first, each with its read count and first and last read
+  time, at most eight, and the total number of sources. The host reads them
+  from the ingestion projection when it asks; no client supplies them, and
+  they hold labels and times only, never content or a content reference. The
+  web prompt says the thread took in outside content, so the call is
+  approved once, and lists them in the words the Clear review uses. A
+  Computer use approval the host gates as marked but whose sources it cannot
+  read carries an empty list, so it still says so. A child run's approval
+  names no sources: it is never remembered in the first place.
 - **Provider runtimes' own web tools.** A runtime's built-in web search or page
   fetch, or a tool the model's provider runs on its own servers, hands its
   result to the model without Octant seeing it. The adapter reports the call
@@ -3791,7 +3803,8 @@ native harness in `apps/server/src/harness`:
   confirmation is single-use: a remembered "always" approval stops covering
   its class the moment the thread is tainted, and an "always" answered then
   covers only that call, so surfaces offer no "for this session" choice
-  (`singleUse` on the approval). A person's clear ends this until the next
+  (`singleUse` on the approval, which then also names the sources that marked
+  the thread; [Persistence](#persistence), Untrusted-content taint). A person's clear ends this until the next
   result that taints ([Persistence](#persistence), Clearing taint).
   `web-search` does not ask under taint: it
   reaches only the search endpoint the person configured, so the tool-call

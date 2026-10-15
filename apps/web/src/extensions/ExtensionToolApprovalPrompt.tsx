@@ -3,6 +3,7 @@ import type { ExtensionToolApproval } from "@octant/contracts/extension-rpc";
 import { useEffect, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { samePollingData } from "../polling/samePollingData";
+import { ApprovalOutsideContentNote } from "../composer/ApprovalOutsideContentNote";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { OctantButton } from "../ui/base/OctantButton";
 import { pluginNameIn, UNNAMED_PLUGIN } from "./toolGrantLabels";
@@ -153,6 +154,9 @@ export function ExtensionToolApprovalPrompt(props: {
       label="Extension tool approval"
       summary={`Allow ${pending.mcpToolName} from ${pluginName ?? UNNAMED_PLUGIN}?`}
     >
+      {pending.outsideContent === undefined ? null : (
+        <ApprovalOutsideContentNote outsideContent={pending.outsideContent} />
+      )}
       <code className="approval-row__code">
         {pending.inputJson === "" ? "(empty input)" : pending.inputJson}
       </code>

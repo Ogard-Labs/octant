@@ -1,4 +1,4 @@
-import type { WindowId } from "@octant/contracts";
+import type { ApprovalOutsideContent, WindowId } from "@octant/contracts";
 import {
   decodeExtensionToolApproval,
   type ExtensionToolApproval,
@@ -68,6 +68,8 @@ export class ExtensionToolApprovalService {
     readonly providerToolName: string;
     readonly mcpToolName: string;
     readonly inputJson: string;
+    /** The sources that marked the thread, read by the host when it asks. */
+    readonly outsideContent?: ApprovalOutsideContent;
     /**
      * Records "always allow in this Project" for this tool and says whether it
      * was recorded. Absent when this call can only be approved once; the
@@ -94,6 +96,7 @@ export class ExtensionToolApprovalService {
       inputJson: input.inputJson,
       requestedAt: new Date(requestedAt).toISOString(),
       rememberable: input.remember !== undefined,
+      ...(input.outsideContent === undefined ? {} : { outsideContent: input.outsideContent }),
     });
     return new Promise<boolean>((resolve) => {
       const settle = (approved: boolean) => {

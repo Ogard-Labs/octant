@@ -1,6 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
+import { decodeApprovalOutsideContent } from "@octant/contracts";
 import type { ExtensionToolApproval } from "@octant/contracts/extension-rpc";
 import { describe, expect, it, vi } from "vitest";
 import { ExtensionToolApprovalPrompt } from "./ExtensionToolApprovalPrompt";
@@ -53,6 +54,38 @@ function renderPrompt(extensionClient: ExtensionClient) {
 }
 
 describe("ExtensionToolApprovalPrompt", () => {
+  it("says why a marked thread's call is approved once and names what marked it", async () => {
+    renderPrompt(
+      client([
+        approval({
+          rememberable: false,
+          outsideContent: decodeApprovalOutsideContent({
+            sources: [
+              {
+                sourceLabel: "mcp-tool",
+                ingestionCount: 1,
+                lastIngestedAt: "2026-10-12T09:58:00.000Z",
+              },
+            ],
+            sourceCount: 1,
+          }),
+        }),
+      ]),
+    );
+
+    const card = await screen.findByRole("group", { name: "Extension tool approval" });
+    expect(card).toHaveTextContent("This thread took in outside content");
+    expect(
+      within(card).getByRole("list", { name: "Outside content that marked this thread" }),
+    ).toHaveTextContent("Results from connected tools");
+  });
+
+  it("names no outside content on a clean thread's call", async () => {
+    renderPrompt(client([approval()]));
+    const card = await screen.findByRole("group", { name: "Extension tool approval" });
+    expect(card).not.toHaveTextContent("outside content");
+  });
+
   it("names the plugin, the server and the tool that is waiting", async () => {
     renderPrompt(client([approval()]));
 
