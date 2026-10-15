@@ -180,6 +180,61 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 
+  it("reads a thread's history again only from the rows appended since the last read", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    store.append({ threadId, operationId, expectedCursor: 0, event: stateEvent("running") });
+    store.append({ threadId, operationId, expectedCursor: 1, event: stateEvent("running") });
+    expect(store.historyForThread(threadId)).toMatchObject({ status: "ok", frames: [{}, {}] });
+    const replay = vi.spyOn(fixture.journal, "replayAggregateTypeForThread");
+
+    // The board and the sidebar read every thread's history every few
+    // seconds; an unchanged thread must not be read or decoded again.
+    expect(store.historyForThread(threadId)).toMatchObject({ status: "ok", frames: [{}, {}] });
+    expect(replay).not.toHaveBeenCalled();
+
+    store.append({ threadId, operationId, expectedCursor: 2, event: stateEvent("completed") });
+    expect(store.historyForThread(threadId)).toMatchObject({
+      status: "ok",
+      frames: [{ cursor: 1 }, { cursor: 2 }, { cursor: 3, event: { state: "completed" } }],
+    });
+    expect(replay.mock.calls.map(([cursor]) => cursor.afterSequence)).toEqual([2]);
+    fixture.connection.close();
+  });
+
+  it("stops answering with a thread's history once its rows are purged from the journal", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    store.append({ threadId, operationId, expectedCursor: 0, event: stateEvent("running") });
+    store.append({
+      threadId,
+      operationId: otherOperationId,
+      expectedCursor: 0,
+      event: stateEvent("running"),
+    });
+    store.append({ threadId, operationId, expectedCursor: 1, event: stateEvent("completed") });
+    expect(store.historyForThread(threadId)).toMatchObject({
+      status: "ok",
+      frames: [{}, {}, {}],
+    });
+
+    // A purge deletes an operation's rows in place; the newest row survives
+    // here, so only the slice's size says the remembered history is stale.
+    for (const table of ["aggregate_heads", "event_journal"])
+      fixture.connection
+        .prepare(`DELETE FROM ${table} WHERE aggregate_id = ?`)
+        .run(String(otherOperationId));
+
+    expect(store.historyForThread(threadId)).toMatchObject({
+      status: "ok",
+      frames: [
+        { operationId, cursor: 1 },
+        { operationId, cursor: 2 },
+      ],
+    });
+    fixture.connection.close();
+  });
+
   it("recovers the latest native binding without replaying conversation history", () => {
     const fixture = openJournal();
     const store = createStore(fixture.journal);

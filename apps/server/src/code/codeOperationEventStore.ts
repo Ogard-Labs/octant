@@ -54,6 +54,17 @@ const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
  * hostile stream's decode work.
  */
 const MAX_STREAM_SCAN_EVENTS = 100_000;
+/**
+ * How many decoded frames, across threads, the store keeps between history
+ * reads. The board, the sidebar's pull-request join, and child observations
+ * each read whole thread histories every few seconds while a window is open,
+ * and decoding a 2,000-turn thread's 28,000 frames again for every read held
+ * the event loop for 0.7 to 1.6 s at a time on a loaded machine. A remembered
+ * frame measured about 425 bytes, so this bound (one thread at the scan
+ * ceiling) holds the memory near 45 MB; past it the least recently read
+ * threads are decoded afresh on their next read.
+ */
+const MAX_REMEMBERED_HISTORY_FRAMES = MAX_STREAM_SCAN_EVENTS;
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
@@ -67,6 +78,7 @@ type JournalPort = Pick<
   | "append"
   | "replayAggregate"
   | "replayAggregateTypeForThread"
+  | "aggregateTypeThreadHead"
   | "replayThreadAnchoredRows"
   | "latestThreadEvents"
   | "latestThreadResults"
@@ -165,11 +177,21 @@ export type CodeOperationEventReplay =
         | "scan-limit";
     };
 
+/** A thread's decoded history as of its newest row, and how many rows it read. */
+interface RememberedHistory {
+  readonly lastSequence: number;
+  readonly eventCount: number;
+  readonly frames: ReadonlyArray<typeof CodeOperationEventFrame.Type>;
+}
+
 export class CodeOperationEventStore {
   readonly #journal: JournalPort;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #actor: typeof EventActor.Type;
+  /** Least recently read first. */
+  readonly #histories = new Map<string, RememberedHistory>();
+  #rememberedFrames = 0;
 
   constructor(options: CodeOperationEventStoreOptions) {
     this.#journal = options.journal;
@@ -568,9 +590,50 @@ export class CodeOperationEventStore {
       return { status: "rebuild-required" };
     }
 
-    const frames: Array<typeof CodeOperationEventFrame.Type> = [];
-    let afterSequence = 0;
-    let scannedEvents = 0;
+    // A thread's rows are only ever appended, until a purge removes them. So
+    // a remembered history is current while the slice's size and newest row
+    // match it, is extended by reading only the rows after it while it is
+    // still a whole prefix of the slice, and is read afresh otherwise.
+    const key = String(threadId);
+    const head = this.#journal.aggregateTypeThreadHead({
+      aggregateType: "code-operation",
+      threadId: key,
+    });
+    if (head.eventCount > MAX_STREAM_SCAN_EVENTS) {
+      this.#forget(key);
+      return { status: "rebuild-required" };
+    }
+    const remembered = this.#histories.get(key);
+    if (
+      remembered !== undefined &&
+      remembered.lastSequence === head.lastSequence &&
+      remembered.eventCount === head.eventCount
+    ) {
+      this.#remember(key, remembered);
+      return { status: "ok", frames: remembered.frames };
+    }
+    let read =
+      remembered !== undefined && remembered.lastSequence < head.lastSequence
+        ? this.#readHistory(threadId, remembered)
+        : undefined;
+    if (read === undefined || (read.status === "ok" && read.eventCount !== head.eventCount)) {
+      read = this.#readHistory(threadId, undefined);
+    }
+    if (read.status !== "ok") {
+      this.#forget(key);
+      return read;
+    }
+    this.#remember(key, read);
+    return { status: "ok", frames: read.frames };
+  }
+
+  #readHistory(
+    threadId: CodeThreadId,
+    from: RememberedHistory | undefined,
+  ): ({ readonly status: "ok" } & RememberedHistory) | { readonly status: "rebuild-required" } {
+    const frames: Array<typeof CodeOperationEventFrame.Type> = [...(from?.frames ?? [])];
+    let afterSequence = from?.lastSequence ?? 0;
+    let scannedEvents = from?.eventCount ?? 0;
 
     for (;;) {
       const batch = this.#journal.replayAggregateTypeForThread({
@@ -608,7 +671,25 @@ export class CodeOperationEventStore {
       if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
 
-    return { status: "ok", frames };
+    return { status: "ok", lastSequence: afterSequence, eventCount: scannedEvents, frames };
+  }
+
+  #remember(key: string, history: RememberedHistory): void {
+    this.#forget(key);
+    this.#histories.set(key, history);
+    this.#rememberedFrames += history.frames.length;
+    for (const [oldestKey, oldest] of this.#histories) {
+      if (this.#rememberedFrames <= MAX_REMEMBERED_HISTORY_FRAMES || oldestKey === key) break;
+      this.#histories.delete(oldestKey);
+      this.#rememberedFrames -= oldest.frames.length;
+    }
+  }
+
+  #forget(key: string): void {
+    const remembered = this.#histories.get(key);
+    if (remembered === undefined) return;
+    this.#histories.delete(key);
+    this.#rememberedFrames -= remembered.frames.length;
   }
 
   conversation(input: ReadCodeConversationInput): CodeConversationPage {

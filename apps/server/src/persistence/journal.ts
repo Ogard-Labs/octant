@@ -133,6 +133,7 @@ export class Journal {
   readonly #replayNarrowedAggregateTypeRows: SqliteStatement;
   readonly #aggregateVersionRows: SqliteStatement;
   readonly #replayAggregateTypeThreadRows: SqliteStatement;
+  readonly #aggregateTypeThreadHead: SqliteStatement;
   readonly #replayThreadAnchoredRows: SqliteStatement;
   readonly #replayAggregateRows: SqliteStatement;
   readonly #latestThreadKindRows: SqliteStatement;
@@ -326,12 +327,13 @@ export class Journal {
       ORDER BY aggregate_version ASC
       LIMIT 1
     `);
-    // The thread predicate is spelled exactly as the expression in
-    // `event_journal_thread_kind_sequence`, because SQLite only uses an
-    // expression index for a textually identical expression. The bare
-    // `json_extract` form this replaced searched on `aggregate_type` alone and
-    // read every code-operation row's payload, on every batch of every
-    // thread's history read.
+    // The thread predicate is spelled exactly as the expression in the thread
+    // indexes, because SQLite only uses an expression index for a textually
+    // identical expression. The bare `json_extract` form this replaced
+    // searched on `aggregate_type` alone and read every code-operation row's
+    // payload, on every batch of every thread's history read. The
+    // (type, thread, sequence) index (migration 80) returns the rows after the
+    // cursor already in order.
     this.#replayAggregateTypeThreadRows = options.connection.prepare(`
       SELECT
         global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
@@ -343,6 +345,14 @@ export class Journal {
         AND global_sequence > ?
       ORDER BY global_sequence ASC
       LIMIT ?
+    `);
+    // The size and newest row of the same thread slice, counted on the index
+    // alone without reading a payload.
+    this.#aggregateTypeThreadHead = options.connection.prepare(`
+      SELECT count(*) AS event_count, coalesce(max(global_sequence), 0) AS last_sequence
+      FROM event_journal
+      WHERE aggregate_type = ?
+        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
     `);
     // The same thread slice, narrowed in SQL to the aggregates that recorded
     // an event of one kind, plus rows whose event carries a result of one
@@ -795,6 +805,26 @@ export class Journal {
         cursor.limit,
       ) as Array<JournalRow>
     ).map((row) => this.#decodeRow(row));
+  }
+
+  /**
+   * How many rows `replayAggregateTypeForThread` would return for a thread
+   * from the start, and the newest one's sequence (0 for none). A reader that
+   * keeps a thread's history compares these with what it read to tell whether
+   * rows were appended or removed since, without reading any of them.
+   */
+  aggregateTypeThreadHead(slice: { readonly aggregateType: string; readonly threadId: string }): {
+    readonly eventCount: number;
+    readonly lastSequence: number;
+  } {
+    if (slice.aggregateType.trim().length === 0 || slice.threadId.trim().length === 0) {
+      throw new JournalInputInvalid({ operation: "replay" });
+    }
+    const row = this.#aggregateTypeThreadHead.get(slice.aggregateType, slice.threadId) as {
+      readonly event_count: number;
+      readonly last_sequence: number;
+    };
+    return { eventCount: row.event_count, lastSequence: row.last_sequence };
   }
 
   /**
