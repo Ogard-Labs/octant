@@ -25,6 +25,7 @@ import {
   type ReplicaCommentEntry,
   type ReplicaContentHash,
   type ReplicaInstanceId,
+  type ReplicaSequenceRun,
   type ReplicaSignatureVerdict,
 } from "@octant/contracts/replica-entry";
 import {
@@ -35,6 +36,7 @@ import {
   type CanvasVersionId,
 } from "@octant/contracts/canvas";
 import { sourceIdsForBlock } from "./canvasPolicy";
+import { replicaRunsInclude } from "./replicaMembershipPolicy";
 import type { HostId } from "@octant/contracts/host";
 
 export const REPLICA_RECONCILE_OUTCOMES = [
@@ -68,7 +70,9 @@ export const replicaReconcileCannotOverwrite: [OverwriteName] extends [never] ? 
 
 /**
  * A revoked instance carries the cut its revocation named: entries it signed
- * at or before that sequence keep counting, and later ones are refused.
+ * at or before that sequence keep counting, and later ones are refused. When
+ * the revocation named the slots its writer read, `kept` lists them, and an
+ * entry at or before the cut in any other slot is refused too.
  */
 export type ReplicaInstanceMembership =
   | { readonly instanceId: ReplicaInstanceId; readonly status: "member" }
@@ -76,6 +80,7 @@ export type ReplicaInstanceMembership =
       readonly instanceId: ReplicaInstanceId;
       readonly status: "revoked";
       readonly lastAcceptedSequence: number;
+      readonly kept?: ReadonlyArray<ReplicaSequenceRun>;
     };
 
 /** One write-once slot of one instance in the store. */
@@ -180,8 +185,22 @@ function membership(
   if (cuts.length === 0) return "member";
   // A revoke cuts at the last entry the revoker read so that what the computer
   // already signed keeps counting, and leaving cuts just before the left
-  // record; refusing those entries would drop history the cut kept.
-  if (sequence !== undefined && sequence <= Math.min(...cuts)) return "member";
+  // record; refusing those entries would drop history the cut kept. A slot
+  // below the cut the revoker did not read as the computer's own was empty
+  // or held something else then, so a file there now was written later -
+  // with the revoked key, by someone who can write the store.
+  if (
+    sequence !== undefined &&
+    sequence <= Math.min(...cuts) &&
+    records.every(
+      (instance) =>
+        instance.status !== "revoked" ||
+        instance.kept === undefined ||
+        replicaRunsInclude(instance.kept, sequence),
+    )
+  ) {
+    return "member";
+  }
   return "revoked";
 }
 
@@ -208,7 +227,9 @@ function atSequence(state: ReplicaLocalState, entry: ReplicaCanvasEntry) {
 // unsettled here: applying it would let a reader skip an entry it can still
 // read. A slot the store does not list - a squatted slot whose file was
 // removed, or one a sync client has not delivered yet - does not hold it back,
-// because a writer's sequence has gaps by design.
+// because a writer's sequence has gaps by design. Nor does a slot whose entry
+// the writer's revocation refuses: nothing there can ever apply, and waiting
+// on it would hold back the slots the revocation kept.
 function waitsOnEarlierSlot(state: ReplicaLocalState, entry: ReplicaCanvasEntry): boolean {
   const writer = String(entry.origin.instanceId);
   const settled = new Set<number>();
@@ -219,7 +240,8 @@ function waitsOnEarlierSlot(state: ReplicaLocalState, entry: ReplicaCanvasEntry)
     (slot) =>
       String(slot.instanceId) === writer &&
       slot.sequence < entry.origin.sequence &&
-      !settled.has(slot.sequence),
+      !settled.has(slot.sequence) &&
+      membership(state, entry.origin.instanceId, slot.sequence) !== "revoked",
   );
 }
 

@@ -38,6 +38,7 @@ import {
   type ReplicaReadRefusal,
   type ReplicaRestoreProgress,
   type ReplicaRevocationEntry,
+  type ReplicaSequenceRun,
 } from "@octant/contracts";
 import {
   buildReplicaJoinMatchingPreimage,
@@ -51,6 +52,7 @@ import {
   replicaInGoodStanding,
   replicaJoinRequestIsFresh,
   replicaMembershipNode,
+  replicaRevocationKeeps,
   type ReplicaJoinRequestFacts,
 } from "@octant/domain/replica-membership-policy";
 import type { ReplicaStore } from "@octant/plugin-api/replica-store";
@@ -1062,8 +1064,8 @@ export class ReplicaMembershipService {
       }
     }
     const targets = [
-      { subject, cut: requestedCut ?? highest },
-      ...alsoRevoke.map((other) => ({ subject: other, cut: checked.unbrokenRun(other) })),
+      checked.keeps(subject, requestedCut ?? highest),
+      ...alsoRevoke.map((other) => checked.keeps(other, checked.unbrokenRun(other))),
     ];
     const entries: ReplicaRevocationEntry[] = [];
     for (const [index, target] of targets.entries()) {
@@ -1074,6 +1076,7 @@ export class ReplicaMembershipService {
           origin,
           subject: target.subject,
           cut: target.cut,
+          kept: { version: 1, runs: target.runs },
         }),
       );
       if (publish.status === "stopped") {
@@ -1117,6 +1120,20 @@ export class ReplicaMembershipService {
          * default cut, and the latest a requested cut may fall.
          */
         readonly unbrokenRun: (instanceId: ReplicaInstanceId) => number;
+        /**
+         * The revocation of an instance at a cut: the slots at or before it
+         * this host read as that instance's own valid signed entries, and
+         * the cut, moved earlier only when those slots need more runs than
+         * one record carries.
+         */
+        readonly keeps: (
+          instanceId: ReplicaInstanceId,
+          cut: number,
+        ) => {
+          readonly subject: ReplicaInstanceId;
+          readonly cut: number;
+          readonly runs: ReadonlyArray<ReplicaSequenceRun>;
+        };
       }
   > {
     const local = this.#ports.state().local;
@@ -1165,6 +1182,21 @@ export class ReplicaMembershipService {
         let run = 0;
         while (sequences.has(run + 1)) run += 1;
         return run;
+      },
+      // Only a slot whose file this host verified under the instance's own
+      // key is kept: a membership record held, an artifact entry published
+      // or settled, or a valid entry about a Canvas this read met that waits
+      // on something. A listed slot it did not read as the instance's - not
+      // downloaded yet, unreadable, or another writer's file - is left out,
+      // so a file put there later with a stolen key counts on no computer.
+      keeps: (instanceId, cut) => {
+        const read = (pulled.status === "read" ? pulled.artifacts : []).flatMap((artifact) =>
+          same(artifact.instanceId, instanceId) ? [artifact.sequence] : [],
+        );
+        for (let sequence = 1; sequence <= cut; sequence += 1) {
+          if (state.holds(instanceId, sequence)) read.push(sequence);
+        }
+        return { subject: instanceId, ...replicaRevocationKeeps(read, cut) };
       },
     };
   }

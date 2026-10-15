@@ -310,6 +310,41 @@ describe("reconciling a replica entry", () => {
     });
   });
 
+  it("refuses an entry in a slot below the cut that the revocation did not keep, and keeps the rest", () => {
+    // The revoker read Revoked's slots 1-3 and 5; slot 4 was listed but held
+    // another writer's file, so someone with the revoked key filled it later.
+    const kept = [
+      { from: 1, to: 3 },
+      { from: 5, to: 5 },
+    ];
+    const revokedAt = (withKept: boolean) =>
+      state({
+        instances: [
+          { instanceId: ids.local, status: "member" },
+          {
+            instanceId: ids.revoked,
+            status: "revoked",
+            lastAcceptedSequence: 5,
+            ...(withKept ? { kept } : {}),
+          },
+        ],
+        listedSlots: [1, 2, 3, 4, 5].map((sequence) => slot(ids.revoked, sequence)),
+        settledSlots: [1, 2, 3].map((sequence) => slot(ids.revoked, sequence)),
+      });
+    const filled = entry({ instanceId: ids.revoked, displayName: "Revoked", sequence: 4 });
+    const after = entry({ instanceId: ids.revoked, displayName: "Revoked", sequence: 5 });
+    expect(reconcileReplicaEntry(revokedAt(true), filled)).toEqual({
+      outcome: "refused",
+      reason: "revoked-instance",
+    });
+    // The refused slot does not hold back the slot the revocation kept.
+    expect(reconcileReplicaEntry(revokedAt(true), after)).toEqual({ outcome: "append-version" });
+    // A revocation that names no slots keeps every slot at or before its cut.
+    expect(reconcileReplicaEntry(revokedAt(false), filled)).toEqual({
+      outcome: "append-version",
+    });
+  });
+
   it("appends a later version after a tombstone and keeps the tombstone", () => {
     const first = entry({ sequence: 1, versionId: ids.version, contentHash: hashA, parents: [] });
     const tombstone = entry({

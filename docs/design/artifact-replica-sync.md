@@ -108,9 +108,25 @@ them in.
   `join-accepted` (signed by the joiner, naming the one approval it
   accepted by writer, sequence, and SHA-256 of the approval file's bytes,
   and the founder it pinned), `revocation` (subject and cut, the last of
-  the subject's sequences that still counts; 0 means none), and
-  `replica-left` (signed by a member leaving, at a sequence after its first,
-  naming the founder it pinned). Version 1 entries fail closed.
+  the subject's sequences that still counts, 0 meaning none, and `kept`,
+  described below), and `replica-left` (signed by a member leaving, at a
+  sequence after its first, naming the founder it pinned). Version 1
+  entries fail closed.
+- **Kept slots.** A revocation names, as `kept`, which of the subject's
+  slots at or before its cut its writer read as the subject's own valid
+  signed entries: membership records it held, and artifact and comment
+  entries it published, settled, or read in the revoke's own read. `kept`
+  is an encoding version (1) and ascending runs of sequences that never
+  touch or overlap, all at or before the cut, at most 1,024 of them. A slot
+  the revoker did not read as the subject's (empty, listed but not
+  downloaded, a file that is not a valid record, or another writer's file)
+  is not kept, and an entry the subject's key signed there does not count
+  on any computer, whatever its kind; an artifact entry after it does not
+  wait on it. A revoker whose view needs more runs moves the cut earlier,
+  to the end of the last run that fits. A reader that does not know the
+  encoding version fails closed on the whole record. A revocation without
+  `kept`, as written before it existed, keeps every slot at or before its
+  cut, as it always did.
 - **Derivation.** Two different records in one slot can only both be signed
   by the key holder, so a second one is evidence the key was stolen: that
   computer is capped just before the slot, and records at or after it do
@@ -118,18 +134,22 @@ them in.
   `join-accepted`, and only when the approval it names is held, approves
   that computer, and is not past such a cap. The parents form a tree from
   the founder; nothing reaches a computer that is not in it. Standing is
-  then weighed top-down in one pass: a computer is admitted when its parent
-  is admitted and signed the approval at or before the parent's cut, and
-  its cut is the lowest cut named by a revocation that a strict ancestor
-  signed while admitted and at or before its own cut. An admitted computer
-  whose lowest `replica-left` record names the pinned founder and sits at
-  or before that cut left: its cut is then just before that record, and it
-  shows as left rather than revoked. A revocation that cut it before the
+  then weighed top-down in one pass. A record of a computer counts when it
+  sits at or before that computer's cut and, when a counting revocation
+  named kept slots, in every such revocation's kept slots. A computer is
+  admitted when its parent is admitted and the approval counts as the
+  parent's, and its cut is the lowest cut named by a revocation that a
+  strict ancestor signed while admitted and that counts as that ancestor's.
+  Its kept slots are the slots every such revocation that names them keeps,
+  so two revocations narrow each other in any order. An admitted computer
+  whose lowest counting `replica-left` record names the pinned founder
+  left: its cut is then just before that record, and it shows as left
+  rather than revoked. A revocation that cut it before the
   record came first, so it stays revoked; a left record naming another
   founder is a copy from another replica and is inert. An entry counts when
-  its writer is admitted and it sits at or before the writer's cut, so a
-  computer approved after its approver's cut is not admitted, and nothing
-  below it is either. Leaving cuts nobody below: computers a leaver approved
+  its writer is admitted and the entry counts as its writer's, so a
+  computer approved after its approver's cut, or in a slot its approver's
+  revocation did not keep, is not admitted, and nothing below it is either. Leaving cuts nobody below: computers a leaver approved
   before it left stay admitted, and only its ancestors can revoke them. Records the pass does not use - an approval nobody
   accepted, a descendant's revocation of an ancestor, a ghost's records -
   are inert. The founder cannot be revoked; losing its key means moving to
@@ -196,9 +216,12 @@ them in.
   subject already signed keeps counting. A slot missing from the run ends
   it, so a stolen key cannot fill a hole below the cut after the
   revocation; a slot the store does not list yet (a lagging sync client)
-  moves the cut earlier, never later. A store that cannot be read leaves
-  that cut at the slots this computer already holds or settled, and the
-  result says so. A revoke
+  moves the cut earlier, never later. Every revocation it writes carries the
+  kept slots for its subject at its cut, so a slot the run counted because
+  the store listed it, though this computer did not read it as the
+  subject's, stays closed too. A store that cannot be read leaves
+  that cut and those slots at what this computer already holds or settled,
+  and the result says so. A revoke
   preview returns that cut, the computers the subject brought in that are
   not revoked yet, each with its parent and the parent's sequence of its
   approval, and the revocations the subject itself already wrote, each at
@@ -285,15 +308,28 @@ them in.
   listing does not end inside its bound is refused rather than read in
   part. Approvals a stolen key made before the revoker read the store
   still count under the default cut, which is why the revoke preview lists
-  them. The default cut closes the holes the revoker can see in the
-  subject's own slots, but a revocation names only its cut, not the slots
-  the revoker saw. A slot below the cut whose file the revoker counted as
-  present without reading it as the subject's - another writer's file, or
-  one the sync client had not downloaded - can be replaced by someone
-  holding the subject's key and write access to the store, and a computer
-  that reads the replacement first counts it, membership records
-  included. Committing a revocation to the slot set its writer saw is a
-  follow-up.
+  them. Kept slots close every slot below the cut the revoker did not read
+  as the subject's, but only on computers that hold the revocation: until a
+  computer reads it, it counts what it reads in the gap, as the lag limit
+  above says. Once it arrives, a membership record taken in from the gap
+  stops counting, since membership is derived again on every read; an
+  artifact or comment entry already imported from it stays. A slot the
+  revoker did read keeps the file it read; someone holding the subject's
+  key and write access to the store who swaps that file for another is the
+  slot rewrite above, seen only by a computer that holds both. A revocation
+  written before kept slots existed keeps every slot at or before its cut,
+  so its gaps stay open to the subject's key: an ancestor cannot revoke a
+  computer that already has a cut, so nothing closes them short of moving
+  to a new store. A computer running a build
+  from before kept slots fails closed on a revocation that carries them, as
+  on any record it cannot read, so the revocation does not count there
+  until it updates. Kept slots do not cover the subject's own
+  `join-accepted`: a computer's parent is fixed from its lowest accept
+  before any revocation is weighed, so a stolen key that writes an earlier
+  accept into a gap, naming a second approval of the same key by another
+  member, would move it under that member. A member approves only a fresh
+  request from a computer that is not in the tree, so this takes a second
+  member acting against the person.
 - **Keys.** Device signing keys live per instance in their own namespace of
   the host credential store - a separate macOS Keychain service,
   `app.octant.replica-device-keys.v1`, or a separate Secret Service
