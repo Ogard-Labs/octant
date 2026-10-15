@@ -908,21 +908,21 @@ describe("custom image sources", () => {
 });
 
 describe("image providers behind the image seam", () => {
-  it.each(["bflImageAdapter.ts", "ideogramImageAdapter.ts"])(
-    "keeps %s to the imports a third-party image plugin could make",
-    (file) => {
-      const source = readFileSync(join(import.meta.dirname, file), "utf8");
-      const specifiers = [
-        ...source.matchAll(
-          /\bfrom\s+"([^"]+)"|\bimport\s*\(?\s*"([^"]+)"|\brequire\(\s*"([^"]+)"/g,
-        ),
-      ].map((match) => match[1] ?? match[2] ?? match[3]);
-      expect(specifiers.length).toBeGreaterThan(0);
-      for (const specifier of specifiers) {
-        expect(["@octant/contracts", "@octant/provider-sdk/image-generation"]).toContain(specifier);
-      }
-    },
-  );
+  it.each([
+    "openAiImageAdapter.ts",
+    "geminiImageAdapter.ts",
+    "bflImageAdapter.ts",
+    "ideogramImageAdapter.ts",
+  ])("keeps %s to the imports a third-party image plugin could make", (file) => {
+    const source = readFileSync(join(import.meta.dirname, file), "utf8");
+    const specifiers = [
+      ...source.matchAll(/\bfrom\s+"([^"]+)"|\bimport\s*\(?\s*"([^"]+)"|\brequire\(\s*"([^"]+)"/g),
+    ].map((match) => match[1] ?? match[2] ?? match[3]);
+    expect(specifiers.length).toBeGreaterThan(0);
+    for (const specifier of specifiers) {
+      expect(["@octant/contracts", "@octant/provider-sdk/image-generation"]).toContain(specifier);
+    }
+  });
 
   it("builds a registered image driver's adapter with ports that carry the profile's credential", async () => {
     const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {

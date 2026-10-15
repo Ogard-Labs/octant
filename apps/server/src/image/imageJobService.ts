@@ -65,13 +65,13 @@ import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import { bflImageDriver } from "./bflImageAdapter";
-import { makeGeminiImageAdapter } from "./geminiImageAdapter";
+import { geminiImageDriver } from "./geminiImageAdapter";
 import type { GeneratedImageStore } from "./generatedImageStore";
 import { ideogramImageDriver } from "./ideogramImageAdapter";
 import { makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
 import { ImageJobProjection } from "./imageJobProjection";
+import { openAiImageDriver } from "./openAiImageAdapter";
 import { makeOpenAiCompatibleImageAdapter } from "./openAiCompatibleImageAdapter";
-import { makeOpenAiImageAdapter } from "./openAiImageAdapter";
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -83,6 +83,8 @@ type JournalPort = Pick<Journal, "append">;
 
 /** Image providers that ship in-tree but reach this service only through the image seam. */
 const BUNDLED_IMAGE_DRIVERS: ReadonlyArray<ImageGenerationDriver> = [
+  openAiImageDriver,
+  geminiImageDriver,
   bflImageDriver,
   ideogramImageDriver,
 ];
@@ -439,17 +441,6 @@ export class ImageJobService {
           ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
         }),
       });
-    }
-    const options = {
-      instanceId: instance.id,
-      credentialResolver: this.#credentialResolver,
-      ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
-    };
-    if (instance.configuration.kind === "openai-image-http") {
-      return makeOpenAiImageAdapter(options);
-    }
-    if (instance.configuration.kind === "gemini-native-image-http") {
-      return makeGeminiImageAdapter(options);
     }
     if (instance.configuration.kind === "openai-compatible-http") {
       return makeOpenAiCompatibleImageAdapter({

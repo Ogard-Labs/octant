@@ -1,8 +1,17 @@
-import { decodeProviderInstanceId, type ProviderModelId } from "@octant/contracts";
+import {
+  decodeProviderInstance,
+  decodeProviderInstanceId,
+  type ProviderModelId,
+} from "@octant/contracts";
+import { runImageGenerationConformance } from "@octant/provider-sdk/image-generation-conformance";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
-import { GEMINI_IMAGE_API_BASE_URL, type ImageHttpFetch } from "./imageHttp";
-import { makeGeminiImageAdapter } from "./geminiImageAdapter";
+import { makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
+import {
+  GEMINI_IMAGE_API_BASE_URL,
+  geminiImageDriver,
+  makeGeminiImageAdapter,
+} from "./geminiImageAdapter";
 
 const SECRET = "gemini-fixture-super-secret";
 const instanceId = decodeProviderInstanceId("a2000000-0000-4000-8000-000000000011");
@@ -22,12 +31,18 @@ function resolver(credential = SECRET): ProviderCredentialResolver {
   };
 }
 
-function adapter(fetch: ImageHttpFetch, limits?: { connectionTimeoutMs?: number }) {
+function adapter(
+  fetch: ImageHttpFetch,
+  limits?: { connectionTimeoutMs?: number; requestBodyBytes?: number },
+) {
   return makeGeminiImageAdapter({
-    instanceId,
-    credentialResolver: resolver(),
-    fetch,
-    ...(limits === undefined ? {} : { limits }),
+    ports: makeImageGenerationPorts({
+      instanceId: String(instanceId),
+      credentialResolver: resolver(),
+      endpoint: { providerHosts: geminiImageDriver.providerHosts },
+      fetch,
+      ...(limits === undefined ? {} : { limits }),
+    }),
   });
 }
 
@@ -210,5 +225,33 @@ describe("Gemini image adapter", () => {
     const result = await adapter(fetch).generate({ instanceId, modelId, prompt: "a cube" });
     expect(result.status).toBe("failed");
     expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+});
+
+describe("Gemini image driver behind the image seam", () => {
+  it("keeps the image seam's conformance promises", async () => {
+    await expect(
+      runImageGenerationConformance({
+        driver: geminiImageDriver,
+        instance: decodeProviderInstance({
+          id: instanceId,
+          displayName: "Gemini",
+          enabled: true,
+          environmentPolicy: "inherit-host",
+          version: 1,
+          createdAt: "2026-10-15T00:00:00.000Z",
+          updatedAt: "2026-10-15T00:00:00.000Z",
+          driverKind: "gemini-native-image",
+          configuration: {
+            kind: "gemini-native-image-http",
+            modelAllowlist: [modelId],
+            defaultModel: modelId,
+          },
+        }),
+        request: { instanceId, modelId, prompt: "a red cube" },
+        respond: () => inlineResponse(pngB64),
+        expectedImageCount: 1,
+      }),
+    ).resolves.toMatchObject({ completedWithHostMediaTypes: true });
   });
 });
