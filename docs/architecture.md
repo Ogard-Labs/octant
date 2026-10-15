@@ -4420,7 +4420,9 @@ where it was or narrows it:
   `goal-check` on a tainted Code thread will run on `proxied`, its single-use
   approval lists the hosts the thread's live thread and Project rules name,
   preselected, then the thread's open proposals, unticked, at most 192 entries
-  and none of them a `call` rule. The person answers with the listed hosts
+  and none of them a `call` rule; an aggregate whose revocations cannot be read
+  offers neither its rules nor, for the thread's, its proposals, as nothing can
+  be granted there. The person answers with the listed hosts
   they keep; the host canonicalizes each like a rule host and refuses the
   whole answer (`host-not-offered`) when one was not listed, or when hosts
   come with "always" or a denial. Approving with no hosts, as a surface that

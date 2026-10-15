@@ -4399,6 +4399,43 @@ describe("native harness tool egress grants and learn mode", () => {
       ]);
     });
 
+    it("offers no proposal on a thread whose revocations cannot be read, as nothing can be granted there", async () => {
+      const host = egressHost();
+      const granted = grantThreadRule(host, "registry.example.com");
+      const proposing = await startLaunch(host);
+      expect(await ask(proposing, "cdn.example.com:443")).toContain("no-rule");
+      await proposing.finish();
+      const ruleId = granted.kind === "answered" ? String(granted.ruleIds[0]) : "";
+      host.rules.revoke({ threadId: String(egressThread), principal: person, ruleId });
+      host.taint(String(egressThread));
+      const restarted = egressHost({
+        base: {
+          connection: host.connection,
+          journal: host.journal,
+          store: host.store,
+          clears: host.clears,
+        },
+        journal: (journal) => ({
+          append: (input, options) => journal.append(input, options),
+          transaction: (body) => journal.transaction(body),
+          aggregateVersions: (aggregateType) => journal.aggregateVersions(aggregateType),
+          replayAggregateType: (cursor) =>
+            journal
+              .replayAggregateType(cursor)
+              .map((envelope) =>
+                envelope.eventName === TOOL_EGRESS_EVENT_NAMES.threadRuleRevoked
+                  ? { ...envelope, payload: { unreadable: true } }
+                  : envelope,
+              ),
+        }),
+      });
+
+      expect(host.rules.commandConfirmationHosts(String(egressThread))).toEqual([
+        { host: "cdn.example.com", port: 443, from: "proposal", preselected: false },
+      ]);
+      expect(restarted.rules.commandConfirmationHosts(String(egressThread))).toEqual([]);
+    });
+
     it("leaves an unmarked thread's command as it was: no hosts listed, standing rules apply", async () => {
       const host = egressHost();
       expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });

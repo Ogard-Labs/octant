@@ -503,7 +503,14 @@ export class ToolEgressRules {
       this.#projectRules.get(thread.projectId),
       "project-rule",
     );
-    for (const { payload } of this.#proposals.get(threadId)?.values() ?? []) {
+    // A proposal is granted on the thread's aggregate, which grants nothing
+    // while its revocations cannot be read, so it is not offered either.
+    const proposals = this.#unreadableAggregates.has(
+      aggregateKey(TOOL_EGRESS_THREAD_AGGREGATE, threadId),
+    )
+      ? []
+      : (this.#proposals.get(threadId)?.values() ?? []);
+    for (const { payload } of proposals) {
       const host = Option.getOrUndefined(decodeRuleHostOption(payload.host));
       if (host === undefined) continue;
       add({ host, port: payload.port, from: "proposal", preselected: false });

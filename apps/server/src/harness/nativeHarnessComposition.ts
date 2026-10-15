@@ -247,10 +247,9 @@ export function createNativeHarnessComposition(
   });
   /**
    * Hosts a person confirmed for one command, held from the answer until the
-   * shell starts that command's launch, which takes them out. They are keyed
-   * by the call's own id, which no other call has, so an entry a call never
-   * took (a check that stopped before running) can never reach another
-   * command.
+   * shell starts that command's launch, which takes them out, or until the
+   * call ends without running one (a check that stopped first). They are
+   * keyed by the call's own id, which no other call has.
    */
   const confirmedCommandHosts = new Map<string, ToolEgressCallConfirmation>();
   const approvalStore = options.approvals;
@@ -261,7 +260,10 @@ export function createNativeHarnessComposition(
     readonly lead: NativeHarnessSlotCandidate;
     /** The window a Code turn runs in, whose grant its commands' network follows. */
     readonly windowId?: string;
-  }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering"> => ({
+  }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering" | "callEnded"> => ({
+    callEnded: (callId) => {
+      confirmedCommandHosts.delete(callId);
+    },
     ...(options.questions === undefined
       ? {}
       : {

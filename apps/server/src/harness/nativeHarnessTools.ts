@@ -204,6 +204,8 @@ export interface NativeHarnessToolPorts {
   readonly goal?: NativeHarnessGoalPort;
   /** Queued notes from the person, handed to the lead inside the next tool result. */
   readonly steering?: () => ReadonlyArray<string>;
+  /** Told when an authorized call has finished, whether or not it ran a command. */
+  readonly callEnded?: (callId: string) => void;
   /** Asks the person and waits; resolves with the answer or how the wait ended. */
   readonly askUser?: (input: {
     readonly prompt: string;
@@ -401,6 +403,10 @@ export function createNativeHarnessTools(
           : await execute(name, args, options.ports, signal, String(request.actionId));
     } catch {
       return { ...refused("tool-execution-failed"), refused: false };
+    } finally {
+      // A check can stop before its command runs, so whatever its approval
+      // left for the command is let go here rather than when a shell starts.
+      options.ports.callEnded?.(String(request.actionId));
     }
     // A collected child reply was budgeted to fit the provider limit exactly, so
     // a note added now could push it into a lossy preview and be lost with it.
