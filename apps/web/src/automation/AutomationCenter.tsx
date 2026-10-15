@@ -291,7 +291,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
                   className="automation-center__creation-path automation-center__creation-path--featured"
                   onClick={() => setDescribeRequest("")}
                   type="button"
-                  variant="ghost"
+                  variant="bare"
                 >
                   <Sparkles aria-hidden="true" size={16} strokeWidth={1.5} />
                   <span>
@@ -306,7 +306,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
                     setEditor({ kind: "create" });
                   }}
                   type="button"
-                  variant="ghost"
+                  variant="bare"
                 >
                   <Pencil aria-hidden="true" size={16} strokeWidth={1.5} />
                   <span>
@@ -342,7 +342,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
                       key={suggestion.label}
                       onClick={() => setDescribeRequest(suggestion.request)}
                       type="button"
-                      variant="ghost"
+                      variant="bare"
                     >
                       <strong>{suggestion.label}</strong>
                       <span>{suggestion.request}</span>
@@ -606,7 +606,7 @@ function AutomationListBody(props: {
                   data-automation-row={String(summary.id)}
                   onClick={() => props.onSelect(String(summary.id))}
                   type="button"
-                  variant="ghost"
+                  variant="bare"
                 >
                   <span className="automation-row__name">{summary.displayName}</span>
                 </OctantButton>
