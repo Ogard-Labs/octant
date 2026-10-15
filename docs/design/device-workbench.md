@@ -205,7 +205,7 @@ pane names the one the emulator is not showing: it reads the streamed picture,
 and with no picture it asks for `landscape`. The Apple request names none
 (`orientation` is optional): the Simulator keeps streaming portrait-sized
 frames after it turns, so the picture cannot say which way it sits, and the
-desktop reads the Simulator's real screen (a screenshot's size) and turns it
+desktop reads the Simulator's real screen (a screenshot's size, captured into the host-private capture directory and deleted at once) and turns it
 the other way, so every Rotate alternates however the pane was opened. A request that does name one still sets it. There is no
 upside-down or reverse-landscape choice.
 

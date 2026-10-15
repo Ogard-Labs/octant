@@ -22,7 +22,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
@@ -1754,6 +1754,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
                 ? createSimulatorDeviceHelpers({ helperPath: deviceHelperPath })
                 : createUnavailableSimulatorHelpers(),
               startingManagedToolService,
+              { captureDirectory: join(desktopDataDirectory, "apple-runtime", "captures") },
             ),
           )
         : undefined;
