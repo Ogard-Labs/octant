@@ -106,7 +106,7 @@ describe("the app pairing code", () => {
       JSON.stringify([contents]),
       JSON.stringify(contents, null, 1),
       // A repeated key parses as its last value; the code still is not the canonical one.
-      JSON.stringify(contents).replace("{", `{"pin":"sha256-x",`),
+      `{"pin":"sha256-x",${JSON.stringify(contents).slice(1)}`,
       "not json",
     ];
     for (const json of cases) {
