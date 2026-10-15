@@ -42,6 +42,7 @@ import { Schema } from "effect";
 import { decodeToolActionRequest } from "@octant/contracts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ToolCallAuthorityService } from "../toolCallAuthorityService";
+import type { ToolEgressCallConfirmation } from "./nativeHarnessEgressRules";
 import type { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { nativeHarnessGoalSummary, type NativeHarnessGoalPort } from "./nativeHarnessGoal";
 
@@ -74,6 +75,11 @@ export interface NativeHarnessShellPort {
     readonly timeoutMs: number;
     /** The authorized call this command runs for; it names the launch's egress records. */
     readonly callId?: string;
+    /**
+     * Hosts a person confirmed for this one command on a marked thread. Only
+     * a proxied shell reads them, as `call` rules for this launch.
+     */
+    readonly confirmedHosts?: ToolEgressCallConfirmation;
     readonly signal?: AbortSignal;
   }): Promise<NativeHarnessShellRun>;
 }
@@ -190,6 +196,8 @@ export interface NativeHarnessToolPorts {
      * in outside content. A remembered "always" approval does not answer it.
      */
     readonly freshConfirmation: boolean;
+    /** The call being approved; a command it runs names its launch by it. */
+    readonly callId: string;
     readonly signal?: AbortSignal;
   }) => Promise<"approved" | "denied" | "expired" | "cancelled" | "too-many-waiting">;
   /** The thread's goal, when the host can reach it. */
@@ -363,6 +371,7 @@ export function createNativeHarnessTools(
         summary: request.intent,
         approvalClass: decision.policy.approvalClass,
         freshConfirmation: decision.reason === "taint-requires-fresh-confirmation",
+        callId: String(request.actionId),
         ...(signal === undefined ? {} : { signal }),
       });
       if (outcome !== "approved") {

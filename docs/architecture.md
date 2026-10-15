@@ -4040,7 +4040,8 @@ the `proxied` level in the Seatbelt builder (`process/seatbeltProfile.ts`) and
 the bubblewrap capsule with its forwarder (`process/linuxConfinement.ts`,
 `process/proxiedNetworkEgress.ts`), chosen per command by the harness
 composition (`nativeHarnessComposition.ts`) and launched by
-`nativeHarnessShell.ts`.** What is not yet verified or wired is listed under
+`nativeHarnessShell.ts`, and the tainted thread's command confirmation that
+grants `call` rules (`nativeHarnessApprovals.ts`).** What is not yet verified or wired is listed under
 **Phase 4 settled** below. The design's approval replaces the "no local egress
 proxy in this release" decision in the
 [threat model](security/security-architecture-threat-model.md#approved-decisions-henrik-2026-08-12)
@@ -4415,12 +4416,30 @@ where it was or narrows it:
   Linux host with `/usr/bin/bwrap`. The forwarder's relay and exit behaviour
   run on every host as plain Node. The bubblewrap arguments are checked as
   strings.
-- _What is not wired._ The tainted thread's single-use confirmation does not
-  yet list the thread's and Project's hosts, so no `call` rule can be granted
-  and a tainted thread's commands reach no host until a person clears the
-  thread's outside-content mark. A tainted proposal shows on the card and
-  cannot be granted there. The reviewer that may answer a per-call
-  `network-access` prompt is not built. Both fail closed.
+- _The tainted thread's command confirmation._ When a lead's `bash` or
+  `goal-check` on a tainted Code thread will run on `proxied`, its single-use
+  approval lists the hosts the thread's live thread and Project rules name,
+  preselected, then the thread's open proposals, unticked, at most 192 entries
+  and none of them a `call` rule. The person answers with the listed hosts
+  they keep; the host canonicalizes each like a rule host and refuses the
+  whole answer (`host-not-offered`) when one was not listed, or when hosts
+  come with "always" or a denial. Approving with no hosts, as a surface that
+  shows none does, lets the command reach none. The answering principal comes
+  from the authenticated request. The confirmed hosts are held under the
+  call's own id until its command starts; the launch's start is journaled
+  first, then they are granted as `call` rules naming that launch and the
+  approval, before the command runs. A grant that cannot be appended, or would
+  pass the 64-rule limit, ends the launch and the command reports
+  `unavailable`. The rules retire when the launch is summarized, so the next
+  command lists the same hosts afresh and reaches nothing it was not given. A
+  confirmation whose command never runs on `proxied` (the posture changed
+  meanwhile, or a check stopped first) is dropped and grants nothing.
+- _What is not wired._ A child's command on a tainted parent asks on the
+  parent's thread without a host list, so it reaches no host. A tainted
+  proposal shows on the card and cannot be granted there; the command
+  confirmation is where it is granted. The CLI approves without hosts. The
+  reviewer that may answer a per-call `network-access` prompt is not built.
+  Each fails closed.
 
 **Failure modes.** Each fails closed:
 

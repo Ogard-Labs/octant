@@ -42,7 +42,7 @@
     "apps/server/src/extensions/skillPackageBuilder.ts": 1,
     "apps/server/src/github/ghAuthenticationPort.ts": 4,
     "apps/server/src/github/managedCloneService.ts": 1,
-    "apps/server/src/harness/nativeHarnessComposition.ts": 4,
+    "apps/server/src/harness/nativeHarnessComposition.ts": 3,
     "apps/server/src/harness/nativeHarnessFileSystem.ts": 6,
     "apps/server/src/harness/nativeHarnessSessionStore.ts": 2,
     "apps/server/src/harness/nativeHarnessTools.ts": 14,

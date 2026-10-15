@@ -5,6 +5,7 @@ import {
   type ChatThread,
   type CodeThread,
   type ContextSubjectRef,
+  type NativeHarnessCommandHost,
   type NativeHarnessContextRemaining,
   type NativeHarnessSlotCandidate,
   type OctantMode,
@@ -35,6 +36,7 @@ import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
 import type { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
+import type { ToolEgressCallConfirmation } from "./nativeHarnessEgressRules";
 import type { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 import { createNativeHarnessTodoPort } from "./nativeHarnessTodo";
@@ -92,7 +94,14 @@ export interface NativeHarnessCompositionOptions {
   readonly questions?: Pick<NativeHarnessQuestionStore, "ask">;
   /** Where each lead tool call is noted while its turn runs. */
   readonly activity?: Pick<NativeHarnessSessionStore, "noteToolCall" | "deliverSteering">;
-  readonly approvals?: Pick<NativeHarnessApprovalStore, "ask">;
+  readonly approvals?: Pick<NativeHarnessApprovalStore, "ask"> &
+    Partial<Pick<NativeHarnessApprovalStore, "askCommand">>;
+  /**
+   * The hosts a marked Code thread's command confirmation lists: its thread
+   * and Project rules, and its open proposals. Absent, a marked thread's
+   * proxied command reaches no host.
+   */
+  readonly commandHosts?: (threadId: string) => ReadonlyArray<NativeHarnessCommandHost>;
   readonly childInteractions?: (
     run: AgentRun,
   ) => Pick<NativeHarnessToolPorts, "approvals" | "askUser">;
@@ -229,6 +238,15 @@ export function createNativeHarnessComposition(
     providerInstanceId: thread.providerInstanceId,
     modelId: thread.modelId as never,
   });
+  /**
+   * Hosts a person confirmed for one command, held from the answer until the
+   * shell starts that command's launch, which takes them out. They are keyed
+   * by the call's own id, which no other call has, so an entry a call never
+   * took (a check that stopped before running) can never reach another
+   * command.
+   */
+  const confirmedCommandHosts = new Map<string, ToolEgressCallConfirmation>();
+  const approvalStore = options.approvals;
   const askUserFor = (scope: {
     readonly parentThreadId: string;
     readonly mode: OctantMode;
@@ -249,11 +267,11 @@ export function createNativeHarnessComposition(
               signal: input.signal,
             }),
         }),
-    ...(options.approvals === undefined
+    ...(approvalStore === undefined
       ? {}
       : {
-          approvals: (input) =>
-            options.approvals!.ask({
+          approvals: async (input) => {
+            const ask = {
               threadId: scope.parentThreadId,
               mode: scope.mode,
               projectId: scope.projectId,
@@ -263,7 +281,31 @@ export function createNativeHarnessComposition(
               approvalClass: input.approvalClass,
               singleUse: input.freshConfirmation,
               signal: input.signal,
-            }),
+            };
+            // A marked thread's command that will run through the egress
+            // rules lists the hosts it may reach, so the person picks them
+            // for this one command.
+            const askCommand = approvalStore.askCommand;
+            if (
+              !input.freshConfirmation ||
+              scope.mode !== "code" ||
+              (input.toolName !== "bash" && input.toolName !== "goal-check") ||
+              askCommand === undefined ||
+              options.commandHosts === undefined ||
+              options.proxiedShell === undefined ||
+              materializeHarnessToolNetwork(codeEgress(scope.parentThreadId)) !== "proxied"
+            ) {
+              return approvalStore.ask(ask);
+            }
+            const answered = await askCommand.call(approvalStore, {
+              ...ask,
+              commandHosts: options.commandHosts(scope.parentThreadId),
+            });
+            if (answered.outcome === "approved" && answered.confirmed !== undefined) {
+              confirmedCommandHosts.set(input.callId, answered.confirmed);
+            }
+            return answered.outcome;
+          },
         }),
     ...(options.activity === undefined
       ? {}
@@ -284,12 +326,17 @@ export function createNativeHarnessComposition(
   ): NativeHarnessShellPort => ({
     run: (input) => {
       const network = materializeHarnessToolNetwork(resolveEgress());
-      const shell =
-        network === "proxied"
-          ? proxied
-          : network === "allow"
-            ? options.shell
-            : options.offlineShell;
+      // Taken whatever network the command runs on, so a confirmation is
+      // used by its own command or by none.
+      const confirmed =
+        input.callId === undefined ? undefined : confirmedCommandHosts.get(input.callId);
+      if (input.callId !== undefined) confirmedCommandHosts.delete(input.callId);
+      if (network === "proxied") {
+        return proxied.run(
+          confirmed === undefined ? input : { ...input, confirmedHosts: confirmed },
+        );
+      }
+      const shell = network === "allow" ? options.shell : options.offlineShell;
       return (shell ?? unavailableShell).run(input);
     },
   });

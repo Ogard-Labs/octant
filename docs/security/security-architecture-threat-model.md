@@ -503,9 +503,10 @@ guidance instead.
   standing rules, and learn mode only proposes. The design, its audit events, failure modes, and
   phased acceptance live in
   [`docs/architecture.md`, Harness tool egress rules](../architecture.md#harness-tool-egress-rules);
-  its approval supersedes decision 4 below for those processes only. The Linux native probes
-  have not run, and a tainted thread cannot yet grant a single-use `call` rule, so its commands
-  reach no host until a person clears its mark; both are listed in that section.
+  its approval supersedes decision 4 below for those processes only. On a tainted thread a
+  command's single-use confirmation lists the thread's and Project's hosts, and what the person
+  ticks becomes `call` rules for that one launch. The Linux native probes have not run, and a
+  child's command confirmation lists no hosts yet; both are listed in that section.
 - **Equal-or-narrower child sandboxes.** A child agent's sandbox profile derives from its clamped
   authority, never from its parent's raw profile: a child without `network` gets a no-egress
   profile even if the parent had egress; a child's write scope is its own isolated worktree, never

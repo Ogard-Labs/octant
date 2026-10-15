@@ -6392,8 +6392,12 @@ export function startOctantServer(
                     ? {}
                     : { parentThreadId: decodeEgressAggregateId(scope.parentThreadId) }),
                 },
-                startLaunch: (launch) =>
-                  toolEgressRules.startLaunch({ launch, endpoint: harnessEgressEndpoint }),
+                startLaunch: (launch, confirmed) =>
+                  toolEgressRules.startLaunch({
+                    launch,
+                    endpoint: harnessEgressEndpoint,
+                    confirmed,
+                  }),
                 launchId: () => decodeEgressLaunchId(randomUUID()),
               },
             });
@@ -6591,8 +6595,8 @@ export function startOctantServer(
       followUps: followUpActions,
       answerQuestion: ({ threadId, questionId, answer }) =>
         nativeHarnessQuestionsLive.answer(threadId, questionId, answer),
-      decideApproval: ({ threadId, approvalId, decision }) =>
-        nativeHarnessApprovals.decide(threadId, approvalId, decision),
+      decideApproval: ({ threadId, approvalId, decision, answer }) =>
+        nativeHarnessApprovals.decide(threadId, approvalId, decision, answer),
       steer: ({ threadId, command }) => {
         if (command.kind === "clear") {
           nativeHarnessSessionsLive.clearSteering(threadId, "all");
@@ -6694,7 +6698,12 @@ export function startOctantServer(
         process: harnessOfflineProcessPort,
         scriptDirectory: harnessScriptDirectory,
       }),
-      ...(harnessProxiedShell === undefined ? {} : { proxiedShell: harnessProxiedShell }),
+      ...(harnessProxiedShell === undefined
+        ? {}
+        : {
+            proxiedShell: harnessProxiedShell,
+            commandHosts: (threadId: string) => toolEgressRules.commandConfirmationHosts(threadId),
+          }),
       readCodeExecutionPolicy: (threadId) => {
         try {
           return persistence.readCodeThread(decodeCodeThreadId(threadId))?.executionPolicy;
