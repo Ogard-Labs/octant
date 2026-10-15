@@ -367,6 +367,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       className="chat-transcript transcript-scroll"
       estimateSize={160}
       gap={20}
+      itemAt={turnEndedAt}
       itemKey={(turn) => String(turn.id)}
       items={turns}
       {...(props.afterTurn === undefined ? {} : { afterItem: props.afterTurn })}
@@ -1191,4 +1192,11 @@ function groupCitationsByAttempt(citations: ChatThreadView["citations"]) {
     grouped.set(key, [...(grouped.get(key) ?? []), citation]);
   }
   return grouped;
+}
+
+function turnEndedAt(turn: ChatThreadView["turns"][number]): string {
+  return turn.attempts.reduce(
+    (latest, attempt) => (attempt.updatedAt > latest ? attempt.updatedAt : latest),
+    turn.createdAt,
+  );
 }

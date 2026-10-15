@@ -2873,8 +2873,8 @@ result line, and the composer's held send, read from a per-thread compaction
 state every thread kind answers, Code included; and the Chat, Work and Code turn
 runners journal a runtime's own compactions on the same ledger, which, with the
 requested ones, now decide when a Code window breakdown stops counting Octant's
-per-turn context as held. Not built yet: the compaction divider on the thread's
-timeline. No compaction, requested or automatic, has been run against a real
+per-turn context as held; and the compaction divider on the thread's timeline in
+Chat, Work and Code. No compaction, requested or automatic, has been run against a real
 runtime yet. **Compact session** replaces
 what the model sees from the next turn on with a summary of the earlier
 conversation and a recent tail, when the person asks, outside a turn. It never
@@ -3151,7 +3151,16 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   a Code connection offers `compact`: Chat and Work send the host's planned
   history.
 - The thread's timeline shows a compaction divider from the completed event.
-  Everything above it stays visible, searchable and exported.
+  Everything above it stays visible, searchable and exported. The compaction
+  state read carries every completed receipt, oldest first
+  (`completedCompactions`), and the window draws one quiet labelled rule per
+  receipt, in the muted text and rule colours with no accent, in Chat, Work and
+  Code alike. It sits before the first row that ended after the compaction
+  completed, so a requested compaction falls between two turns and a runtime's
+  own sits ahead of the reply it happened in (Work rows carry a time only on
+  the person's messages, so there it falls before the next message of theirs).
+  A compaction older than the loaded history is not drawn until that history
+  loads.
 - A completed compaction marks a runtime's session `compacted`, so the window
   breakdown goes `uncounted` with that reason under the existing rule. Within
   a turn, the runner that sees `context-compacted` reports the turn's later
@@ -3282,7 +3291,7 @@ watched has ended.
   reads in a row (a host that went away, or a window that lost the thread) it
   stops holding send and reads "Compaction state unknown: the host stopped
   answering. It may still be compacting, and refuses a send until it ends."
-- The result line, in the popover and the inspector (and, once built, on the
+- The result line, in the popover and the inspector (and on the
   timeline divider): "Compacted · 41.2K freed · summary by Codex", "Compacted ·
   freed amount shows after the next reply · summary by Codex", "Compacted ·
   freed amount not reported · summary by Codex", "Compacted · nothing freed ·
