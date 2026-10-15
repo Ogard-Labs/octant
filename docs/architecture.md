@@ -5230,12 +5230,12 @@ mechanisms are:
   because Bubblewrap would create it in the person's own Project (see
   [Extensions and skills](#extensions-and-skills)).
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                                                        |
-  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                                                      |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder |
-  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                                                     |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                                        |
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                                                                                                                                                                               |
+  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
+  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                                                                                                                                                                            |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                                                                                                                                                               |
 
   Codex is unwrapped because its app-server is leased once per provider
   instance: `providerRuntimeRegistry` keys runtimes by `instanceId`, so one
@@ -5318,16 +5318,74 @@ mechanisms are:
   `~/Library/Keychains/login.keychain-db`, and the two security-server
   lookups. With any one missing the runtime is signed out, so the launch
   takes all four, as Seatbelt `extraRules` and the fork switch, the same
-  way an OpenCode launch may exec `/usr/bin/false`. No shell, no Keychain
-  write, and no other file in that folder is granted: `/bin/sh` and every
-  other exec stay refused, which keeps hooks and the Bash tool out. The
-  cost: the confined runtime may fork, may run `security`, which returns
-  any keychain item that trusts that tool, and may read the encrypted
-  login keychain file. The driver refuses a file tool that names that
-  folder, so the grant serves the runtime's sign-in read and not the
-  model. A launch on an API key takes none of it. Linux keeps the login in
+  way an OpenCode launch may exec `/usr/bin/false`. No Keychain write and
+  no other file in that folder is granted, and `/bin/sh` stays refused,
+  which keeps hooks out. The cost: the confined runtime may fork, may run
+  `security`, which returns any keychain item that trusts that tool, and
+  may read the encrypted login keychain file. The driver refuses a file
+  tool that names that folder, and the profile refuses both `security` and
+  that file to every process but the runtime (and the file to `security`),
+  so the grant serves the runtime's sign-in read and not the model. A
+  launch on an API key takes none of it.
+  Linux keeps the login in
   a file inside the account directory, which the launch already holds, and
-  Seatbelt rules do not apply there. Before a confined launch starts, the
+  Seatbelt rules do not apply there.
+  A Code Plan turn on macOS may run read-only commands through the Bash
+  tool (`claudePlanRunsCommands`, `planCommandRules`). Only a launch that
+  offers the Bash tool gets the grants below; a Chat or Work Plan launch
+  and the readiness probes keep no fork and no exec but their own. The
+  launch may fork,
+  and may exec exactly these programs, by literal and resolved path:
+  `/bin/zsh` (pinned as the tool's shell through `CLAUDE_CODE_SHELL`;
+  without bash or zsh the tool refuses to start), `cat`, `ls`, `realpath`,
+  `awk`, `basename`, `cut`, `diff`, `dirname`, `file`, `find`, `grep`,
+  `head`, `sed`, `sort`, `stat`, `tail`, `tr`, `uniq`, `wc` and `xargs`
+  from `/bin` and `/usr/bin`, and the first `git` and `rg` on the launch's
+  `PATH`. A program on `PATH` that resolves into the checkout or a folder
+  the launch may write is not listed. `/usr/bin/git` is a developer-tools
+  shim that, measured on macOS 27.0.1 under this profile, failed every call
+  (it reads `/var/select/developer_dir` under the `/private` denial and
+  then starts `xcodebuild`), so the shim is not listed: the real Git of the
+  active developer folder is, and a `git` link to it in the launch's
+  temporary directory goes first on `PATH`. Everything else stays refused,
+  `/bin/sh` and `/bin/bash` included, so a Git command a repository
+  configures with arguments (`core.fsmonitor`, `core.pager`, a textconv, a
+  `!` alias), which Git starts through `/bin/sh -c`, cannot start, and a
+  configured program in the checkout cannot either. The shell also starts
+  with Git's system and global files skipped, the fsmonitor off, the
+  per-user ignore and attributes files at `/dev/null`, no optional index
+  lock, `cat` as pager and no credential prompt; the model can set that
+  environment aside, and the profile still holds. A Seatbelt rule's
+  `process-path` names the program asking (measured on macOS 27.0.1), and
+  the profile uses that to keep the runtime's reach with the runtime:
+  only the runtime's own program has network, so the shell and what it
+  starts reach no host (`git ls-remote git://…` and zsh's `ztcp` are
+  refused); only `sandbox-exec` and the runtime may start the runtime's
+  program, so a shell cannot start a second runtime with that network and
+  an endpoint of its choosing. Writes are the runtime's too: a
+  command writes only the launch's temporary directory, where the Bash
+  tool keeps its output. `git log --output=` into the account's
+  `settings.json`, `.claude.json`, `skills/`, `plugins/`, any `memory/`
+  folder, another session's transcript or another checkout's folder, or
+  into the checkout and its `.git/hooks`, is refused, and so is the same
+  command into this session's own transcript or `sessions/`: those grants
+  serve the runtime, and a command that rewrote the transcript could put
+  words in the person's mouth for a later turn that resumes it with
+  write access. Measured on
+  macOS 27.0.1 with Claude Code 2.1.300, the real runtime under this
+  profile, driven by a local scripted Messages endpoint with a fake
+  key, ran `git log`, `git diff`, `git status`, `rg`, `ls`, `cat`, `grep`
+  and `find` in the checkout, and every refusal above held. A Plan turn
+  has no approvals, so a Plan command runs unasked: the profile, not a
+  person, keeps it read-only. The account's state directories, which hold
+  every session's transcript from every checkout, are the runtime's to read
+  and refused to a command. What a command can still do: read whatever
+  else the launch may read, checkout secrets and files outside the home
+  folder included, into the model's context (which goes only to the
+  provider), and write the launch's temporary
+  directory, which is removed when the runtime exits. On Linux the Plan
+  launch keeps its fork-denying seccomp filter, and Plan offers no Bash
+  tool there. Before a confined launch starts, the
   `claude auth status` check that readiness uses runs inside that launch's
   sandbox: a sign-in the sandbox cannot read refuses the turn with the step
   that fixes it, instead of failing after the turn has started. Octant
