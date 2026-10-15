@@ -60,7 +60,15 @@ export const MOBILE_COPY = {
     "A host was removed, but its device key could not be deleted from this phone's secure storage.",
   hostsHint: "Enter the host HTTPS origin and pairing ticket from the desktop host.",
   pairCodeHint:
-    "Paste the pairing code a computer shows for its own certificate, or leave it empty and enter the origin and ticket below.",
+    "Scan the QR code a computer shows for its own certificate, or paste its pairing code. Leave it empty to enter the origin and ticket below.",
+  pairScanTitle: "Scan pairing code",
+  pairScanHint: "Point the camera at the QR code in Settings → Remote access or in the terminal.",
+  pairScanOtherCode:
+    "That QR code isn't an Octant pairing code. Scan the one the other computer shows.",
+  pairScanCameraAsk:
+    "Octant needs the camera to scan the pairing QR code. You can paste the code instead.",
+  pairScanCameraDenied:
+    "Camera access is off for Octant. Turn it on in the system settings, or paste the pairing code instead.",
   pairHostTitle: "Pair a host",
   pairHostBody: "Connect your laptop to create and follow Chat, Work, and Code threads.",
   pairHostCta: "Pair host",
