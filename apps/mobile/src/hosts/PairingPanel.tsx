@@ -5,10 +5,13 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   createRemotePairingClient,
   isRemotePairingFailure,
+  openAppPairingCode,
   type RemoteDeviceKeyStore,
   type RemotePairingClaim,
+  type RemotePairingClient,
   type RemoteSessionBridge,
 } from "@octant/client-runtime";
+import { mobilePinnedListenerTransport } from "../runtime/mobilePinnedListenerTransport";
 import { MOBILE_COPY, MOBILE_PRODUCT_NAME } from "../copy";
 import { GlassSurface, useTheme } from "../../design-system";
 import { mobileRadii, mobileSpacing, mobileTypography } from "../theme/tokens";
@@ -28,13 +31,20 @@ export interface PairingPanelProps {
 type PairingPhase =
   | { readonly kind: "idle" }
   | { readonly kind: "working"; readonly message: string }
-  | { readonly kind: "pending"; readonly claim: RemotePairingClaim; readonly ticketProof: string }
+  | {
+      readonly kind: "pending";
+      readonly claim: RemotePairingClaim;
+      readonly ticketProof: string;
+      /** The client a pairing code opened, held to the code's pin. */
+      readonly client?: RemotePairingClient;
+    }
   | { readonly kind: "approved"; readonly message: string }
   | { readonly kind: "failed"; readonly message: string };
 
 export function PairingPanel(props: PairingPanelProps) {
   const { colors } = useTheme();
   const focused = props.focused !== false;
+  const [pairingCode, setPairingCode] = useState("");
   const [originInput, setOriginInput] = useState("");
   const [ticketId, setTicketId] = useState("");
   const [ticketProof, setTicketProof] = useState("");
@@ -150,7 +160,36 @@ export function PairingPanel(props: PairingPanelProps) {
     [colors],
   );
 
+  const startPairingFromCode = async () => {
+    setPhase({ kind: "working", message: "Contacting host…" });
+    const opened = await openAppPairingCode({
+      code: pairingCode,
+      transport: mobilePinnedListenerTransport,
+      webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
+      deviceKeyStore,
+    });
+    if (opened.status !== "opened") {
+      setPhase({ kind: "failed", message: opened.message });
+      return;
+    }
+    const claimed = await opened.claim(props.deviceLabel ?? `${MOBILE_PRODUCT_NAME} Mobile`);
+    if (claimed.status !== "claimed") {
+      setPhase({ kind: "failed", message: claimed.message });
+      return;
+    }
+    setPhase({
+      kind: "pending",
+      claim: claimed.claim,
+      ticketProof: opened.ticket.ticketProof,
+      client: opened.client,
+    });
+  };
+
   const startPairing = async () => {
+    if (pairingCode.trim().length > 0) {
+      await startPairingFromCode();
+      return;
+    }
     const origin = originInput.trim().replace(/\/$/, "");
     if (!origin.startsWith("https://")) {
       setPhase({ kind: "failed", message: "Host origin must be an https:// URL." });
@@ -192,12 +231,14 @@ export function PairingPanel(props: PairingPanelProps) {
     setPhase({ kind: "working", message: "Checking approval…" });
     try {
       const origin = phase.claim.origin;
-      const client = createRemotePairingClient({
-        baseUrl: `${origin}/`,
-        fetch: mobileRemoteFetch,
-        webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
-        deviceKeyStore,
-      });
+      const client =
+        phase.client ??
+        createRemotePairingClient({
+          baseUrl: `${origin}/`,
+          fetch: mobileRemoteFetch,
+          webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
+          deviceKeyStore,
+        });
       const status = await client.pollPairingStatus({
         ticket: { ticketId: phase.claim.ticketId, ticketProof: phase.ticketProof },
         claim: phase.claim,
@@ -240,6 +281,23 @@ export function PairingPanel(props: PairingPanelProps) {
 
   const fields = (
     <>
+      <View style={styles.field}>
+        <Text style={styles.label}>Pairing code</Text>
+        <View style={styles.inputRow}>
+          <Ionicons color={colors.textTertiary} name="key-outline" size={18} />
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            onChangeText={setPairingCode}
+            placeholder="Paste the octant-pair-1 code"
+            placeholderTextColor={colors.textTertiary}
+            style={styles.input}
+            testID="mobile-pairing-code"
+            value={pairingCode}
+          />
+        </View>
+        <Text style={styles.help}>{MOBILE_COPY.pairCodeHint}</Text>
+      </View>
       <View style={styles.field}>
         <Text style={styles.label}>Origin</Text>
         <View style={styles.inputRow}>

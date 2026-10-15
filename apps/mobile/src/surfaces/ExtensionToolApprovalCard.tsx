@@ -7,6 +7,7 @@ import {
 } from "@octant/client-runtime";
 import type { ExtensionToolApproval } from "@octant/contracts/extension-rpc";
 import { GlassChip, useTheme } from "../../design-system";
+import { OutsideContentNote } from "./OutsideContentNote";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 
 export interface ExtensionToolApprovalCardProps {
@@ -91,6 +92,9 @@ export function ExtensionToolApprovalCard(props: ExtensionToolApprovalCardProps)
       >
         {pending.inputJson === "" ? "(empty input)" : pending.inputJson}
       </Text>
+      {pending.outsideContent === undefined ? null : (
+        <OutsideContentNote outsideContent={pending.outsideContent} />
+      )}
       <View style={styles.chips}>
         <GlassChip active={false} label="Approve once" onPress={() => decide("approved")} />
         <GlassChip active={false} label="Deny" onPress={() => decide("denied")} />

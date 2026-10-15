@@ -998,6 +998,52 @@ describe("provider instance policy", () => {
     );
   });
 
+  it("keeps a BFL or Ideogram image profile's own base URL only when it is HTTPS or loopback", () => {
+    const bfl = createBflImageProvider({
+      id: ids.local,
+      displayName: "FLUX proxy",
+      configuration: {
+        kind: "bfl-image-http",
+        modelAllowlist: ["flux-dev"],
+        defaultModel: "flux-dev",
+        baseUrl: " https://proxy.example.test/bfl ",
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(bfl.configuration.baseUrl).toBe("https://proxy.example.test/bfl/");
+    const ideogram = createIdeogramImageProvider({
+      id: ids.local,
+      displayName: "Ideogram local",
+      configuration: {
+        kind: "ideogram-image-http",
+        modelAllowlist: ["ideogram-v3"],
+        defaultModel: "ideogram-v3",
+        baseUrl: "http://127.0.0.1:8080",
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(ideogram.configuration.baseUrl).toBe("http://127.0.0.1:8080/");
+    expect(() =>
+      createBflImageProvider({
+        id: ids.local,
+        displayName: "FLUX",
+        configuration: {
+          kind: "bfl-image-http",
+          modelAllowlist: ["flux-dev"],
+          defaultModel: "flux-dev",
+          baseUrl: "http://proxy.example.test",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Provider base URL must use HTTPS or loopback HTTP.");
+  });
+
   it("rejects a BFL image profile whose default model is not in the allowlist", () => {
     expect(() =>
       createBflImageProvider({

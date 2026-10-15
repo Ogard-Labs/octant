@@ -19,6 +19,7 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/extensions/lifecycle", method: "POST" },
   { path: "/api/extensions/tool-grants", method: "POST" },
   { path: "/api/desktop/window-authorities", method: "GET" },
+  { path: "/api/desktop/provider-credentials/set", method: "POST" },
   { path: "/api/replica-store/commands", method: "POST" },
   { path: "/api/replica-membership/commands", method: "POST" },
   { path: "/api/replica-membership/state", method: "GET" },

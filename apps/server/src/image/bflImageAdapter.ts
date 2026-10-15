@@ -1,9 +1,7 @@
 import {
-  MAX_GENERATED_IMAGE_BYTES,
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_VARIANTS,
   type ProviderFailure,
-  type ProviderInstanceId,
 } from "@octant/contracts";
 import {
   imageFailure,
@@ -15,23 +13,11 @@ import {
   type ImageAdapterRequest,
   type ImageAdapterResult,
   type ImageGenerationAdapter,
+  type ImageGenerationDriver,
+  type ImageGenerationPorts,
 } from "@octant/provider-sdk/image-generation";
-import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
-import { sniffGeneratedImageMediaType } from "./generatedImageStore";
-import {
-  BFL_IMAGE_API_BASE_URL,
-  fetchApprovedImageUrl,
-  performImageHttpRequest,
-  type ImageHttpFetch,
-  type ImageHttpLimits,
-} from "./imageHttp";
-import { isRecord } from "./openAiImageResponseCodec";
 
-const DEFAULT_LIMITS: ImageHttpLimits = {
-  connectionTimeoutMs: 120_000,
-  requestBodyBytes: MAX_GENERATED_IMAGE_BYTES * 2,
-  responseBodyBytes: MAX_GENERATED_IMAGE_BYTES * MAX_IMAGE_VARIANTS + 262_144,
-};
+export const BFL_IMAGE_API_BASE_URL = "https://api.bfl.ai/";
 
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_MAX_POLL_ATTEMPTS = 120;
@@ -41,10 +27,9 @@ const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const BFL_AUTH = { header: "x-key" } as const;
 
 export interface BflImageAdapterOptions {
-  readonly instanceId: ProviderInstanceId;
-  readonly credentialResolver: ProviderCredentialResolver;
-  readonly fetch?: ImageHttpFetch;
-  readonly limits?: Partial<ImageHttpLimits>;
+  readonly ports: ImageGenerationPorts;
+  /** The profile's configured endpoint; the provider's own when absent. */
+  readonly baseUrl?: string;
   /** Overridable only so tests do not wait out the real 1s cadence. */
   readonly pollIntervalMs?: number;
   readonly maxPollAttempts?: number;
@@ -55,29 +40,26 @@ export interface BflImageAdapterOptions {
  * a model-named path, not a body field; the result arrives only after polling
  * a `polling_url` the submit call returned. The one image byte payload is
  * never inline — it is a signed URL the adapter fetches exactly once, through
- * the bounded `fetchApprovedImageUrl` exception, and then discards.
+ * the host's bounded approved-URL port, and then discards. It reaches the
+ * host only through the provider-sdk image seam.
  */
 export function makeBflImageAdapter(options: BflImageAdapterOptions): ImageGenerationAdapter {
-  const fetch = options.fetch ?? globalThis.fetch;
-  const limits: ImageHttpLimits = { ...DEFAULT_LIMITS, ...options.limits };
+  const baseUrl = withTrailingSlash(options.baseUrl ?? BFL_IMAGE_API_BASE_URL);
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const maxPollAttempts = options.maxPollAttempts ?? DEFAULT_MAX_POLL_ATTEMPTS;
   return {
     generate: async (request) => {
       try {
         return await generateBflImage({
-          adapterInstanceId: options.instanceId,
-          credentialResolver: options.credentialResolver,
-          fetch,
-          limits,
+          ports: options.ports,
+          baseUrl,
           pollIntervalMs,
           maxPollAttempts,
           request,
         });
       } catch (error) {
-        if (isProviderFailure(error)) {
-          if (error.category === "interrupted") return { status: "failed", providerFailure: error };
-          return { status: "failed", providerFailure: sanitizeImageFailure(error) };
+        if (isProviderFailure(error) && error.category === "interrupted") {
+          return { status: "failed", providerFailure: error };
         }
         return { status: "failed", providerFailure: sanitizeImageFailure(error) };
       }
@@ -85,11 +67,20 @@ export function makeBflImageAdapter(options: BflImageAdapterOptions): ImageGener
   };
 }
 
+export const bflImageDriver: ImageGenerationDriver = {
+  driverKind: "bfl-image",
+  // Polling and result URLs come from regional subdomains of the API host.
+  providerHosts: ["*.bfl.ai"],
+  create: ({ instance, ports }) => {
+    const baseUrl =
+      instance.configuration.kind === "bfl-image-http" ? instance.configuration.baseUrl : undefined;
+    return makeBflImageAdapter({ ports, ...(baseUrl === undefined ? {} : { baseUrl }) });
+  },
+};
+
 async function generateBflImage(input: {
-  readonly adapterInstanceId: ProviderInstanceId;
-  readonly credentialResolver: ProviderCredentialResolver;
-  readonly fetch: ImageHttpFetch;
-  readonly limits: ImageHttpLimits;
+  readonly ports: ImageGenerationPorts;
+  readonly baseUrl: string;
   readonly pollIntervalMs: number;
   readonly maxPollAttempts: number;
   readonly request: ImageAdapterRequest;
@@ -153,15 +144,11 @@ async function generateBflImage(input: {
     };
   }
 
-  const submitResponse = await performImageHttpRequest({
-    url: `${BFL_IMAGE_API_BASE_URL}/v1/${encodeURIComponent(modelId)}`,
+  const submitResponse = await input.ports.request({
+    url: new URL(`v1/${encodeURIComponent(modelId)}`, input.baseUrl).toString(),
     method: "POST",
     auth: BFL_AUTH,
-    instanceId: String(input.adapterInstanceId),
-    credentialResolver: input.credentialResolver,
     body: JSON.stringify({ prompt: input.request.prompt }),
-    fetch: input.fetch,
-    limits: input.limits,
     ...(signal === undefined ? {} : { signal }),
   });
   if (!submitResponse.ok) {
@@ -186,14 +173,10 @@ async function generateBflImage(input: {
     if (attempt > 0) await delay(input.pollIntervalMs, signal);
     if (signal?.aborted) throw imageInterrupted();
 
-    const pollResponse = await performImageHttpRequest({
+    const pollResponse = await input.ports.request({
       url: submitted.pollingUrl,
       method: "GET",
       auth: BFL_AUTH,
-      instanceId: String(input.adapterInstanceId),
-      credentialResolver: input.credentialResolver,
-      fetch: input.fetch,
-      limits: input.limits,
       ...(signal === undefined ? {} : { signal }),
     });
     if (!pollResponse.ok) {
@@ -232,17 +215,17 @@ async function generateBflImage(input: {
     };
   }
 
-  const fetched = await fetchApprovedImageUrl({
+  // The signed URL is fetched exactly as the provider's result named it: a
+  // configured base URL never rewrites or widens it, and it never carries
+  // the credential.
+  const fetched = await input.ports.fetchApprovedImageUrl({
     url: sampleUrl,
-    fetch: input.fetch,
-    maxBytes: MAX_GENERATED_IMAGE_BYTES,
-    timeoutMs: input.limits.connectionTimeoutMs,
     ...(signal === undefined ? {} : { signal }),
   });
   if ("failure" in fetched) {
     return { status: "failed", providerFailure: sanitizeImageFailure(fetched.failure) };
   }
-  const mediaType = sniffGeneratedImageMediaType(fetched.bytes);
+  const mediaType = input.ports.sniffMediaType(fetched.bytes);
   if (mediaType === undefined) {
     return {
       status: "failed",
@@ -349,4 +332,13 @@ function delay(ms: number, signal: AbortSignal | undefined): Promise<void> {
     }, ms);
     signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/** A base URL's path is kept: `v1/...` resolves below it, never beside it. */
+function withTrailingSlash(baseUrl: string): string {
+  return baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
 }

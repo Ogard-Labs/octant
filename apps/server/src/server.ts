@@ -523,6 +523,7 @@ import {
   type ProviderCredentialResolver,
 } from "./providers/credentialBrokerClient";
 import { makeProviderApiKeyPool } from "./providers/providerApiKeyPool";
+import { createProviderCredentialRouteHandler } from "./providers/providerCredentialRoutes";
 import { createHostOAuthService, extAgentHostIdFor } from "./providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "./providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "./providers/oauth/hostOAuthEventJournal";
@@ -11151,6 +11152,16 @@ export function startOctantServer(
       control: () => currentRemoteGateway?.localDeviceAdministration(),
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
+    const providerCredentialRoutes = createProviderCredentialRouteHandler({
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      windowAuthorityStore,
+      readProviderInstances: () => persistence.readProviderInstances(),
+      readRemovedProviderInstanceIds: () => persistence.readRemovedProviderInstanceIds?.() ?? [],
+      credentials:
+        credentialBroker === undefined || credentialResolver === undefined
+          ? undefined
+          : { store: credentialResolver, readStored: (id) => credentialBroker.resolve(id) },
+    });
     const privateListenerSetting = createPrivateListenerSetting(providerDataDirectory);
     const privateListenerAdministrationRoutes = createPrivateListenerAdministrationRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
@@ -11745,6 +11756,7 @@ export function startOctantServer(
               }
               return (
                 (await privateListenerAdministrationRoutes(request)) ??
+                (await providerCredentialRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
                 (await externalContentRoutes(request)) ??

@@ -70,7 +70,9 @@
   for the listener's name and can reach the real host can relay the live hello
   and answer or forward the rest. First contact pins the key from the first
   verified hello over TLS. Pinning the listener certificate closes the relay;
-  the client trust rule exists, but the phone does not pin through it yet (one-step
+  the desktop app pins a computer it paired with from its pairing code, but
+  the phone has no transport that can check a pin yet, so it refuses such a
+  code and reaches only a listener with a pasted certificate (one-step
   pairing).
 - A phone updated before its host refuses that host ("Update Octant on the
   host") until the host is updated, and keeps the pairing.
