@@ -1687,17 +1687,28 @@ flowchart LR
   from the start of the journal at every host start, because its stored
   checkpoint describes the previous process rather than this one. It names
   the aggregate types it applies, and that replay reads only those rows.
-  Automations are also in memory; the host rebuilds them with a fail-closed
-  hydration after catch-up instead.
+  Automations are also in memory; the host rebuilds them with their own
+  hydration after catch-up instead, which leaves them empty rather than
+  partial when it cannot finish (see the next item).
 - **Startup hydration reads a store's own rows.** Every in-memory store and
   projection rebuilds at start from its own aggregate types, read in journal
   order through the (type, sequence) index, so no store reads, decodes, or
   counts another store's rows: a journal dominated by Code turn frames (one
   row per streamed provider delta) cannot lock out an unrelated store or slow
-  its start. A hydration that passes its scan cap refuses rather than serve a
-  partial rebuild, and the cap counts only the store's own rows. The start-up
-  compatibility check still decodes every row, so a row that no longer
-  decodes stops the start as before.
+  its start. The start-up compatibility check still decodes every row, so a
+  row that no longer decodes stops the start as before. Each scan cap counts
+  only the store's own rows, and what passing it does differs by store:
+  - Work threads, Work settings, Work turns, Work artifacts, and agent
+    messages apply rows one batch at a time under a 1,000,000-row cap, and
+    refuse to start the host past it.
+  - Work promotions and workflows collect every frame in memory before
+    applying them, keep a 100,000-row cap, and refuse to start the host past
+    it.
+  - Work research keeps a 100,000-row cap; past it the host starts and
+    research reports unavailable.
+  - Automations keep a 100,000-row cap; past it the host currently starts
+    with no automations and no warning (tracked as a follow-up).
+  - Work requests and the uncapped stores read all of their own rows.
 - **Migrations.** Ordered, forward-only, checksum-verified, applied in
   transactions before the server reports ready. A changed checksum or an
   unknown newer migration fails closed; a store backup is taken before a

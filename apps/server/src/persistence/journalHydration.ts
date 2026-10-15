@@ -10,11 +10,14 @@ import type { Journal } from "./journal";
  * counting against the cap, so an ordinary long-lived host does not abort a
  * small projection's restart.
  *
- * The cap counts only the projection's own rows and bounds start-up time, not
- * memory: rows are applied one batch at a time, so a rebuild holds no more
- * than the state the projection keeps while running anyway. Decoding a
+ * This cap is for `hydrateJournalProjection` only. It counts only the
+ * projection's own rows and bounds start-up time, not memory: rows are applied
+ * one batch at a time, so a rebuild holds no more than the state the
+ * projection keeps while running anyway. Decoding a
  * million rows takes about 15 s. At 100,000, a Work user some 25,000 turns in
- * (a few turn rows each) would have found the host refusing to start.
+ * (a few turn rows each) would have found the host refusing to start. Stores
+ * that collect every frame before applying them (Work promotions, workflows,
+ * Automations) keep their own 100,000-row caps.
  */
 export const JOURNAL_HYDRATION_MAX_SCAN = 1_000_000;
 export const JOURNAL_HYDRATION_BATCH_SIZE = 1_000;
