@@ -11,6 +11,7 @@ import {
   resolveHeadlessArtifactCliCommand,
   runHeadlessArtifactCliCommand,
 } from "./artifactCommand";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
 import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
@@ -194,11 +195,10 @@ async function main(): Promise<number> {
         stderr: process.stderr,
       });
       if (installed !== 0 || split.pairing === undefined) return installed;
-      const notStarted = await startHostForCommand();
-      if (notStarted !== undefined) {
-        process.stderr.write(`${notStarted}\n`);
-        return 1;
-      }
+      // The service must run the installed copy, not the unpacked download this
+      // process came from: the managed unit records the CLI that writes it.
+      const started = await startInstalledHost(artifactCommand.installRoot);
+      if (started !== 0) return started;
       return await runPairFlow(split.pairing);
     } catch (error) {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
@@ -328,6 +328,20 @@ async function withLocalControlSession(
   } finally {
     await session.close();
   }
+}
+
+/** Runs `server start` from `<install-root>/current`, so the service records that copy. */
+function startInstalledHost(installRoot: string): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn(join(installRoot, "current", "bin", "octant"), ["server", "start"], {
+      stdio: "inherit",
+    });
+    child.once("error", (error) => {
+      process.stderr.write(`${error.message}\n`);
+      resolve(1);
+    });
+    child.once("exit", (code) => resolve(code ?? 1));
+  });
 }
 
 /** The host half of `--pair`, once the service is running. */
