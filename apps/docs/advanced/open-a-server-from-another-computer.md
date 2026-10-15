@@ -35,7 +35,8 @@ in browser**.
 
 The page gets its own name on your computer, `<port>-<label>.octant.localhost`,
 so its cookies and storage stay apart from your own `localhost` servers and from
-Octant. The same server keeps the same name across reopens and restarts.
+Octant. The same server keeps the same name across reopens and restarts, as long as
+Octant gets the same local port it used before.
 
 ## Limits
 
@@ -48,6 +49,11 @@ Octant. The same server keeps the same name across reopens and restarts.
   WebSocket connections, so a dev server's hot-reload socket is refused and the
   page needs a manual reload until that lands. A dev server that polls instead
   keeps working.
+- **A taken local port changes the page's origin.** Octant keeps one local port
+  for these pages. If another program holds it at launch, Octant moves to the
+  next free port in a range of ten, and pages opened earlier start with empty
+  storage because their origin changed. If the whole range is taken, Open is
+  refused and says so; nothing else in Octant is affected.
 - **Octant must be open.** Each request is signed by an open Octant window.
   With none open, the page says an Octant window must be open.
 - **Open in browser has one residual risk.** Browsers send a name's cookies to
@@ -61,8 +67,15 @@ Octant. The same server keeps the same name across reopens and restarts.
 
 ## Ending access
 
-Access ends at once, on the host, when you revoke the device, when the device
-signs out, when the thread is archived or you lose access to it, or when the
-server stops or another process takes its port. Open pages then show that this
-computer no longer has access, and the next request is refused. Revoking a
+Some losses end access the moment they happen, on the host, before the change
+returns: revoking or rotating the device, the device signing out, its
+credential expiring, archiving or deleting the thread, and turning the listener
+off. Open pages then show that this computer no longer has access, and the next
+request is refused.
+
+Other changes are found when the next request arrives: you lose read access to
+the thread another way, the server stops, or another process takes its port.
+The host checks before each request and closes the access then. A process that
+takes the port in the milliseconds between that check and the connection can
+receive that one request before the following check closes it. Revoking a
 device is in [Remote Access](./remote-access#device-management).
