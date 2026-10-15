@@ -75,7 +75,12 @@ export interface DeviceViewer {
 }
 
 export type DeviceWatch =
-  | { readonly status: "watching"; readonly stop: () => void }
+  | {
+      readonly status: "watching";
+      readonly stop: () => void;
+      /** Which way the Simulator sat when the watch began, when the helper read it. */
+      readonly orientation?: "portrait" | "landscape";
+    }
   | { readonly status: "refused"; readonly code: string; readonly message: string }
   | { readonly status: "unavailable"; readonly message: string };
 

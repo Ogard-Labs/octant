@@ -36,6 +36,8 @@ export type AppleScreenWatchResult =
       readonly status: "watching";
       /** The device's screen in pixels; a tap is a point in this space. */
       readonly screen: { readonly width: number; readonly height: number };
+      /** Which way the Simulator sat when the view began, when the host read it. */
+      readonly orientation?: "portrait" | "landscape";
       /** One JPEG per change of the screen. Ends when the host stops or `signal` aborts. */
       readonly frames: AsyncIterable<Uint8Array>;
     }
@@ -108,6 +110,7 @@ export function createAppleToolchainClient(
 }
 
 const SCREEN_HEADER = "x-octant-simulator-screen";
+const ORIENTATION_HEADER = "x-octant-simulator-orientation";
 /** A full-size capture is a few megabytes as PNG; no JPEG frame comes near this. */
 const MAXIMUM_FRAME_BYTES = 8 * 1024 * 1024;
 
@@ -138,10 +141,12 @@ async function watchScreen(
     };
   }
   const size = /^(\d{1,5})x(\d{1,5})$/.exec(response.headers.get(SCREEN_HEADER) ?? "");
+  const orientation = response.headers.get(ORIENTATION_HEADER);
   if (response.ok && response.body !== null && size !== null) {
     return {
       status: "watching",
       screen: { width: Number(size[1]), height: Number(size[2]) },
+      ...(orientation === "portrait" || orientation === "landscape" ? { orientation } : {}),
       frames: framesOf(response.body),
     };
   }

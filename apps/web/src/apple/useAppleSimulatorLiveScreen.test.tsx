@@ -105,6 +105,41 @@ describe("the live Simulator screen", () => {
     expect(result.current.turned).toBe(true);
   });
 
+  it("draws turned a Simulator that was already in landscape when the view began", async () => {
+    const stream = feed();
+    const client = clientWatching(
+      vi.fn(async (_request: unknown, _signal?: AbortSignal) => ({
+        status: "watching" as const,
+        screen: { width: 1206, height: 2622 },
+        orientation: "landscape" as const,
+        frames: stream.frames,
+      })),
+    );
+    const { result, rerender } = renderHook(
+      ({ orientation }: { orientation?: "portrait" | "landscape" }) =>
+        useAppleSimulatorLiveScreen({
+          client,
+          request,
+          enabled: true,
+          decode,
+          ...(orientation === undefined ? {} : { orientation }),
+        }),
+      { initialProps: {} as { orientation?: "portrait" | "landscape" } },
+    );
+    stream.push(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]));
+    await waitFor(() => expect(result.current.status).toBe("live"));
+    const canvas = document.createElement("canvas");
+    if (result.current.status !== "live") return;
+    result.current.attach(canvas);
+    // No rotate and no snapshot entry: the view's own start says landscape.
+    expect(result.current.turned).toBe(true);
+    expect([canvas.width, canvas.height]).toEqual([1_100, 506]);
+
+    // A turn the host reports afterwards outranks what the view started with.
+    rerender({ orientation: "portrait" });
+    await waitFor(() => expect([canvas.width, canvas.height]).toEqual([506, 1_100]));
+  });
+
   it("turns the reported size with the frames when the device rotates", async () => {
     const stream = feed();
     const watchScreen = vi.fn(async (_request: unknown, _signal?: AbortSignal) => ({
