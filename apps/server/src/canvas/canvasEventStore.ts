@@ -15,6 +15,9 @@ import {
   decodeCanvasId,
   decodeCanvasVersion,
   decodeCanvasVersionAppended,
+  decodeContentIngestedPayload,
+  THREAD_EXTERNAL_CONTENT_AGGREGATE,
+  THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
   type CanvasActionReceipt,
   type CanvasCreated,
   type CanvasRefreshReceipt,
@@ -477,6 +480,66 @@ export class CanvasEventStore {
       return false;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Records the synced author of each version this computer took from another
+   * one before such versions carried their own author. Those versions name the
+   * thread they landed in as their writer, so a person's Clear on that thread
+   * would let it read the synced text unmarked. The thread's journaled
+   * ingestion of the version (`replica-artifact:<canvas>:<version>`) survives
+   * a Clear, so it identifies them. Idempotent: a version already named is
+   * skipped, and a version the Canvas does not hold (or a purged Canvas) adds
+   * nothing.
+   */
+  carryAdoptedVersionWriters(input: {
+    readonly versionIdsOf: (canvasId: string) => ReadonlyArray<string> | undefined;
+    readonly occurredAt: UtcTimestamp;
+  }): void {
+    const journal = this.#journal;
+    if (!recordsMarks(journal)) return;
+    let afterSequence = 0;
+    while (true) {
+      const page = journal.replayAggregateType({
+        aggregateType: THREAD_EXTERNAL_CONTENT_AGGREGATE,
+        afterSequence,
+        limit: 1_000,
+        eventName: THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested,
+        payloadPrefix: { path: "contentReference", prefix: "replica-artifact:" },
+      });
+      for (const event of page) {
+        afterSequence = event.globalSequence;
+        const reference = decodeContentIngestedPayload(event.payload).contentReference;
+        const [, canvasId, versionId] = reference.split(":");
+        if (canvasId === undefined || versionId === undefined) continue;
+        if (input.versionIdsOf(canvasId)?.includes(versionId) !== true) continue;
+        const recorded = canvasOutsideContentWriters(journal, canvasId);
+        if (recorded.includes(versionId)) continue;
+        journal.append({
+          aggregate: {
+            aggregateType: CANVAS_OUTSIDE_CONTENT_AGGREGATE_TYPE,
+            aggregateId: decodeAggregateId(canvasId),
+          },
+          expectedVersion: decodeAggregateVersion(recorded.length),
+          events: [
+            {
+              eventId: decodeEventId(this.#uuid()),
+              eventName: CANVAS_OUTSIDE_CONTENT_CARRIED,
+              eventVersion: 1,
+              correlationId: decodeCorrelationId(this.#uuid()),
+              actor: this.#actor,
+              occurredAt: input.occurredAt,
+              payload: decodeCanvasOutsideContentCarried({
+                canvasId,
+                versionId,
+                writerId: versionId,
+              }),
+            },
+          ],
+        });
+      }
+      if (page.length < 1_000) return;
     }
   }
 

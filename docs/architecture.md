@@ -874,7 +874,7 @@ edit, and a version taken from another computer, which marks the thread it
 lands in first (`Synced from …`). A version taken from another computer is
 recorded under its own author, an agent whose id is the version's id, and the
 Canvas carries that author whenever the thread it lands in is marked, so a
-person's clear of that thread never makes the synced text the thread's own. The Canvas tool's `read` and `preview` are how
+person's clear of that thread never makes the synced text the thread's own. A version taken before it recorded its own author is named the same way at host start, from the thread's journaled ingestion of it (`replica-artifact:<canvas>:<version>`), which a clear does not erase. The Canvas tool's `read` and `preview` are how
 another thread's model reaches a Canvas (any Canvas of its Project, by id), so
 both mark the reader (label `canvas`, content reference `canvas-<canvas>`)
 after the Canvas is read and before anything from it is returned, when the

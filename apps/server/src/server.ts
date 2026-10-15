@@ -852,6 +852,7 @@ import {
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import {
   decodeCanvasDefinition,
+  decodeCanvasId,
   decodeProjectId,
   type ProjectId,
   type UtcTimestamp,
@@ -9129,6 +9130,19 @@ export function startOctantServer(
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       writerMarked: threadOutsideContentMarks.isMarked,
     });
+    // Versions taken from another computer before they recorded their own
+    // author still name the thread they landed in, which a Clear exempts.
+    try {
+      canvasEventStore.carryAdoptedVersionWriters({
+        versionIdsOf: (canvasId) =>
+          persistence.canvasProjection
+            .getById(decodeCanvasId(canvasId))
+            ?.versions.map((version) => String(version.versionId)),
+        occurredAt: new Date().toISOString() as UtcTimestamp,
+      });
+    } catch {
+      // The next start tries again; a read refuses when the mark is unreadable.
+    }
     // One server-owned Canvas authority, shared by every Canvas mutation
     // including sharing, so a share can never be admitted under weaker checks
     // than a revise or a refresh.

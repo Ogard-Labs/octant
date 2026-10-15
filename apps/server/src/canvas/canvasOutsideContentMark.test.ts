@@ -95,6 +95,14 @@ function host(connection: SqliteConnection, options: { readonly marksUnreadable?
   return {
     marked,
     canvases,
+    markThreadWith: (threadId: string, contentReference: string) =>
+      ingestions.record({
+        threadId,
+        provenance: { origin: "tool-result", sourceLabel: "Synced from Studio Mac" },
+        contentReference,
+        correlationId: uuid(),
+        authorized: true,
+      }),
     markThread: (threadId: string) =>
       ingestions.record({
         threadId,
@@ -273,6 +281,29 @@ describe("a version adopted from another computer", () => {
 
     expect(first.writers()).toEqual([]);
     expect(first.read(writerThreadId)).toEqual({ status: "nothing-to-mark" });
+  });
+});
+
+describe("a version adopted before it recorded its own author", () => {
+  it("is named at start, so a Clear no longer lets its thread read it unmarked, and naming it twice adds nothing", () => {
+    const first = host(openDatabase());
+    const versionId = "00000000-0000-4000-8000-000000000001";
+    first.markThreadWith(writerThreadId, `replica-artifact:${String(canvasId)}:${versionId}`);
+    // As written before: the thread is the writer and the author is a person.
+    first.write();
+    first.clearThread(writerThreadId);
+    expect(first.read(writerThreadId)).toEqual({ status: "nothing-to-mark" });
+
+    const carry = () =>
+      first.canvases.carryAdoptedVersionWriters({
+        versionIdsOf: (id) => (id === String(canvasId) ? [versionId] : undefined),
+        occurredAt: now as never,
+      });
+    carry();
+    carry();
+
+    expect(first.writers()).toEqual([writerThreadId, versionId]);
+    expect(first.read(writerThreadId)).toEqual({ status: "marked" });
   });
 });
 
