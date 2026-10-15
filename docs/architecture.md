@@ -6019,13 +6019,11 @@ mechanisms are:
     lowercase hex of the same hash, shown for comparison, and no client reads
     it as a pin. Only the loopback administration status
     carries the pin; `octant listener status` prints it.
-  - **Which apps pin.** The desktop app pairs with another computer from its
-    app pairing code and pins it (below). The phone app reads a pasted code
-    but has no transport that can check a pin yet, so it refuses the code
-    before sending anything; a phone reaches only a listener serving a pasted
-    certificate. The phone's QR scanner is not built either. Settings still
-    asks for a certificate and key, and `octant listener`'s usage line still
-    names them.
+  - **Which apps pin.** The desktop app and the phone app pair with another
+    computer from its app pairing code and pin it (below). The phone app's
+    web build has no native module that can check a pin, so it refuses a
+    code before sending anything. Settings still asks for a certificate and
+    key, and `octant listener`'s usage line still names them.
   - **No browser link.** A browser decides whether to trust the listener
     before any Octant page loads and cannot check a certificate the host made
     itself, so Settings offers no browser pairing link for a self-made
@@ -6160,10 +6158,37 @@ mechanisms are:
       transport; Chromium then resolves the name itself, so the pin, not the
       address, is what that window relies on. Settings → Remote access lists
       paired computers with an Open action.
+    - **Phone.** The pairing screen reads a code from the app's own QR
+      scanner or its paste field; typing the origin and ticket stays for a
+      listener with a pasted certificate. The scanner takes only text that
+      starts `octant-pair-1.` and ignores any other QR code; the camera
+      permission names that one use. Every request to an origin whose
+      pairing record holds a pin, the pairing flow's included, goes through
+      the client runtime's exchange fetch over an in-tree native module
+      (`apps/mobile/modules/octant-pinned-tls`), never the platform `fetch`;
+      a record the phone cannot read refuses the request rather than falling
+      back, and an origin without a pin keeps the platform `fetch`, which
+      never accepts a self-made certificate. The exchange fetch applies the
+      rule in JavaScript: it refuses a URL on another origin, a trust with
+      no pin it may accept, and a name with any non-private address before
+      the module is called, hands the module only the judged address, the
+      server name for a named origin, the accepted pins, and the whole
+      HTTP/1.1 request, and frames and reads the reply itself, so native code
+      parses nothing the listener sends. The module dials that address,
+      requires TLS 1.3, decides the handshake only by whether the leaf's
+      SubjectPublicKeyInfo hashes to one of the pins (on iOS in
+      Network.framework's verify block, which the platform's transport
+      security rules do not govern, so the app needs no arbitrary-loads
+      exception; on Android in its own trust manager after checking the
+      connected peer is the dialled address), and writes the request only
+      after the handshake passed. A reply is read whole when the listener
+      closes the connection, up to 16 MiB, so a long-lived stream from a
+      pinned host delivers nothing until it ends. A truncated or
+      inconsistent reply is refused whole.
 - **Adding a computer in one step.** Partly built: the host certificate,
-  pairing code, client trust rule, and desktop pinning above, and the
-  one-line start. The phone's pinned transport and scanner, and key rotation,
-  are planned in [the plan](plans/one-step-pairing.md).
+  pairing code, client trust rule, desktop and phone pinning above, and the
+  one-line start. Key rotation is planned in
+  [the plan](plans/one-step-pairing.md).
   - **One-line start.** `octant server install --artifact <path> --pair` and
     `octant server start --pair` install and start the service as without
     the flag, then make only the loopback administration calls

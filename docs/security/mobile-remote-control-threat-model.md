@@ -69,11 +69,10 @@
   `hostSignature`: an attacker who can present a certificate the phone trusts
   for the listener's name and can reach the real host can relay the live hello
   and answer or forward the rest. First contact pins the key from the first
-  verified hello over TLS. Pinning the listener certificate closes the relay;
-  the desktop app pins a computer it paired with from its pairing code, but
-  the phone has no transport that can check a pin yet, so it refuses such a
-  code and reaches only a listener with a pasted certificate (one-step
-  pairing).
+  verified hello over TLS. Pinning the listener certificate closes the relay
+  for a listener paired from its pairing code: the desktop app and the phone
+  app pin its key and check it during the handshake, before any request. A
+  listener with a pasted certificate is still reached under platform trust.
 - A phone updated before its host refuses that host ("Update Octant on the
   host") until the host is updated, and keeps the pairing.
 - Anything that answers at the paired address can still deny service: a hello

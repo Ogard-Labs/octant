@@ -1,14 +1,13 @@
 # One-step pairing with a self-made listener certificate
 
-**Status: approved by the maintainer on 2026-10-14; slices 1 to 4 and 6 are
-built (6's live check is open), and of slice 5 only the phone's pasted-code
-reading; the rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
+**Status: approved by the maintainer on 2026-10-14; slices 1 to 6 are
+built (the live checks of 4, 5, and 6 are open); slice 7 is not.** Nothing else here is in force. [Architecture](../architecture.md)
 holds only the rules that are true today, and each slice below moves its rules
 there when it lands; the host certificate, the pairing code, the client trust
-rule, pairing from a code, and the desktop's pins are already there. Today the
-desktop app pairs with a computer that serves its own certificate from that
-computer's pairing code alone, but the phone refuses such a code because it
-has no transport that can check a pin. `octant server install --pair` sets
+rule, pairing from a code, and the desktop's and phone's pins are already
+there. Today the desktop app and the phone app pair with a computer that
+serves its own certificate from that computer's pairing code alone, the phone
+from its own QR scanner or a paste. `octant server install --pair` sets
 up the listener and shows the code on the new computer. This plan lets
 the host make its own certificate and has the pairing code carry a fingerprint
 of its key, which Octant's own clients pin, so adding a computer takes one
@@ -67,18 +66,9 @@ anything.
   origin, the first hello included. The reader keeps accepting names,
   because a self-made certificate may name a DNS name; the address check
   is what refuses a public one.
-  - **Phone.** The phone reads a pasted code with the shared reader, which
-    now judges the origin's shape by pattern because the phone's `URL` only
-    matches patterns. Its tests have not yet run on the phone's JavaScript
-    engine itself; they run under Node with a pattern-only `URL` stand-in.
-  - **Phone transport.** Requests to a pinned origin go through a small in-tree native
-    module that checks the pins in the platform's TLS trust callback on iOS
-    and Android; the app's ordinary fetch is not used for those origins. It
-    must work under the platform's transport security rules without an
-    arbitrary-loads exception. The pairing screen reads the pairing code
-    from the app's own QR scanner, which needs camera permission, or from
-    a paste; typing the origin and ticket by hand stays for hosts with a
-    pasted certificate.
+  - **Phone.** Built; its rules are in Architecture. Not yet done: the
+    shared reader's tests run under Node with a pattern-only `URL`
+    stand-in, not on the phone's JavaScript engine itself.
   - **Desktop to host.** Built; its rules are in Architecture.
   - **CLI.** No `octant` command connects to another host as a paired device
     today; the CLI talks only to its own host over loopback. A future one
@@ -252,11 +242,12 @@ and the plan shrinks accordingly.
    route in slice 7.
 4. _Desktop._ **Built**; its rules are in Architecture. Not yet done: the
    packaged-app smoke and a live pairing of a second machine.
-5. _Phone._ The native module, in-app scanner, and pasted code. The pasted
-   code is read and refused until the native module exists. Tests: module
-   tests on both platforms and the device pass from the
+5. _Phone._ **Built**; its rules are in Architecture. The native module,
+   in-app scanner, and pasted code. The iOS exchange is tested on a Mac
+   against a host-made certificate; the Android exchange has not been
+   compiled or run. Not yet done: the device pass from the
    [TestFlight runbook](../mobile-testflight.md) against a self-made host,
-   including a refused mismatch.
+   including a refused mismatch, on both platforms.
 6. _One-line start._ **Built**; its rules are in Architecture. `--pair`. Tests: Tailscale is chosen over LAN,
    several candidates refuse and list them, a public address is never
    chosen, and approval needs a typed `y`. Live: pair a second machine over

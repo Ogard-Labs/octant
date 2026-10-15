@@ -4,6 +4,9 @@ const configuredMockScenario = process.env.OCTANT_MOBILE_MOCK_SCENARIO?.trim();
 const allowMockScenario =
   process.env.NODE_ENV !== "production" && process.env.EAS_BUILD_PROFILE !== "production";
 
+const PAIRING_SCANNER_CAMERA_PERMISSION =
+  "Octant uses the camera only to scan the pairing QR code another computer shows.";
+
 const config: ExpoConfig = {
   name: "Octant",
   slug: "octant-mobile",
@@ -39,12 +42,23 @@ const config: ExpoConfig = {
     "expo-local-authentication",
     "expo-font",
     "expo-system-ui",
+    // The image picker reads only the photo library, but its plugin would
+    // block the camera permission the pairing scanner needs, so both name
+    // the scanner's reason.
     [
       "expo-image-picker",
       {
         photosPermission: "Octant uses your photo library only to set a local app background.",
-        cameraPermission: false,
+        cameraPermission: PAIRING_SCANNER_CAMERA_PERMISSION,
         microphonePermission: false,
+      },
+    ],
+    [
+      "expo-camera",
+      {
+        cameraPermission: PAIRING_SCANNER_CAMERA_PERMISSION,
+        microphonePermission: false,
+        recordAudioAndroid: false,
       },
     ],
   ],

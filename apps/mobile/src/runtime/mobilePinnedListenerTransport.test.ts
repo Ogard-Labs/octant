@@ -3,8 +3,8 @@ import { NO_PINNED_TRANSPORT_COPY, openAppPairingCode } from "@octant/client-run
 import { buildPairingCode } from "@octant/domain";
 import { mobilePinnedListenerTransport } from "./mobilePinnedListenerTransport";
 
-describe("a pasted pairing code on the phone", () => {
-  it("stops before sending anything, since the phone cannot hold a connection to a pin yet", async () => {
+describe("a pairing code in the phone app's web build", () => {
+  it("stops before sending anything, since no native module can hold a connection to the pin", async () => {
     const built = buildPairingCode({
       origin: "https://100.101.102.103:8443",
       ticketId: "3f6c1d2e-8a4b-4c5d-9e6f-7a8b9c0d1e2f",

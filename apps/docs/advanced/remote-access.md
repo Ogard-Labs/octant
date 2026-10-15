@@ -177,8 +177,8 @@ again, which is why Tailscale is tried first.
 The pairing code carries a fingerprint of the host's own key, which Octant's
 own clients pin. A browser cannot check a certificate the host made itself, so
 there is no browser link for it; if a browser opens the address anyway and
-shows a certificate warning, stop there. Pair the Octant desktop app with
-the code as described next; the phone app cannot use the code yet.
+shows a certificate warning, stop there. Pair the Octant desktop app or the
+phone app with the code as described next.
 
 ## Pairing the desktop app with another computer
 
@@ -208,10 +208,30 @@ non-private code is refused before Octant contacts anything. Paired computers
 are listed under **Other computers** with an **Open** action, which checks the
 key again before the window loads.
 
-The phone app accepts a pasted pairing code but cannot check a computer's own
-certificate yet, so it refuses the code before sending anything. To pair a
-phone, give the listener a Tailscale certificate or your own and use its
-pairing link or ticket. The phone has no QR scanner for pairing codes yet.
+## Pairing the phone app with a computer
+
+The phone app pairs from the same app pairing code.
+
+1. On the computer, create a pairing code in Settings → Remote access or with
+   `octant pair` (or `octant server install --pair`).
+2. In the Octant phone app, open the pairing screen and choose **Scan QR
+   code**, then point the camera at the QR code. The first time, the app asks
+   for the camera; it uses it only to scan this code. You can paste the code
+   into **Pairing code** and choose **Start pairing** instead.
+3. Octant checks the code, checks that the address is on your private network
+   or Tailscale, and compares the computer's certificate key with the pin
+   during the connection, before it sends anything. It then checks the
+   computer's signed hello and shows a comparison code.
+4. Approve on the computer when its comparison code matches the one the phone
+   shows, then choose **Check approval** on the phone.
+
+The phone app reads a pairing code only from its own scanner or a paste. The
+phone's camera app shows the code as text and opens nothing, so no other app
+receives the ticket. Every later connection to that computer is held to the
+same key: if it changes, the phone refuses with "This isn't the computer you
+paired with: its security key has changed." and sends nothing. Pair again
+with a new code if the key was replaced on purpose. Typing the origin and
+ticket by hand stays for a listener with a Tailscale certificate or your own.
 
 ## Device management
 

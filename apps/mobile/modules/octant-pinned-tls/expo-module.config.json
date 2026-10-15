@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["OctantPinnedTlsModule"]
+  },
+  "android": {
+    "modules": ["sh.octant.pinnedtls.OctantPinnedTlsModule"]
+  }
+}

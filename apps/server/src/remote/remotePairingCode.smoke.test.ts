@@ -5,17 +5,24 @@
 // app's main process uses them. Only the network seams differ from a real
 // pairing: the listener's Tailscale address is dialled on loopback.
 
+import { execFileSync, spawn } from "node:child_process";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer as createHttpsServer, type Server } from "node:https";
 import { connect as connectTcp, type Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { join, resolve } from "node:path";
+import { connect as connectTls } from "node:tls";
+import { fileURLToPath } from "node:url";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  createExchangeListenerFetch,
   createInMemoryDeviceKeyStore,
   createRemoteSessionBridge,
   openAppPairingCode,
+  type PinnedListenerExchangeOutcome,
+  type PinnedListenerExchangePort,
+  type PinnedListenerExchangeRequest,
   type PinnedListenerTransportPort,
 } from "@octant/client-runtime";
 import { testOnlyListenerTls } from "@octant/client-runtime/remote-listener-tls-node";
@@ -314,4 +321,251 @@ describe("pairing from an app pairing code with a host that made its own certifi
     expect(transport).not.toHaveBeenCalled();
     expect(host.requests).toEqual([]);
   });
+});
+
+// The phone's transport: the shared exchange fetch over a native exchange
+// that dials the judged address, refuses a key outside the pins during the
+// handshake, and only then writes the request. Two exchanges keep that
+// contract here: one in Node, and the phone's own iOS exchange source built
+// for this Mac with swiftc, which runs only where swiftc exists.
+
+const PHONE_MODULE = resolve(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "../../../mobile/modules/octant-pinned-tls",
+);
+
+type Exchange = PinnedListenerExchangePort["exchange"];
+
+/** The native contract kept in Node: the pin decides inside the handshake, before any write. */
+function nodeExchange(listenerPort: number): Exchange {
+  return (request) =>
+    new Promise<PinnedListenerExchangeOutcome>((resolveOutcome) => {
+      expect(request.address).toBe(ADDRESS);
+      const socket = connectTls({
+        host: "127.0.0.1",
+        port: listenerPort,
+        minVersion: "TLSv1.3",
+        rejectUnauthorized: false,
+      });
+      const chunks: Buffer[] = [];
+      let servedPin: string | undefined;
+      socket.once("secureConnect", () => {
+        const spki = socket
+          .getPeerX509Certificate()
+          ?.publicKey.export({ type: "spki", format: "der" });
+        servedPin =
+          spki === undefined
+            ? undefined
+            : `sha256-${createHash("sha256").update(spki).digest("base64url")}`;
+        if (servedPin === undefined || !request.pins.includes(servedPin)) {
+          socket.destroy();
+          resolveOutcome({ status: "refused", servedPin });
+          return;
+        }
+        socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+        socket.once("end", () => {
+          resolveOutcome({
+            status: "responded",
+            servedPin: servedPin ?? "",
+            response: new Uint8Array(Buffer.concat(chunks)),
+          });
+        });
+        socket.write(request.request);
+      });
+      socket.once("error", () => resolveOutcome({ status: "failed", reason: "connection-failed" }));
+    });
+}
+
+/** The phone's iOS exchange, run as a command built from the app's own Swift source. */
+function swiftExchange(binary: string, listenerPort: number): Exchange {
+  return (request: PinnedListenerExchangeRequest) =>
+    new Promise<PinnedListenerExchangeOutcome>((resolveOutcome, reject) => {
+      expect(request.address).toBe(ADDRESS);
+      const child = spawn(binary, [], { stdio: ["pipe", "pipe", "inherit"] });
+      const output: Buffer[] = [];
+      child.stdout.on("data", (chunk: Buffer) => output.push(chunk));
+      child.once("error", reject);
+      child.once("close", () => {
+        const answer = JSON.parse(Buffer.concat(output).toString("utf8")) as {
+          readonly status: string;
+          readonly servedPin?: string;
+          readonly response?: string;
+          readonly reason?: string;
+        };
+        if (answer.status === "responded" && answer.servedPin !== undefined) {
+          resolveOutcome({
+            status: "responded",
+            servedPin: answer.servedPin,
+            response: new Uint8Array(Buffer.from(answer.response ?? "", "base64")),
+          });
+        } else if (answer.status === "refused") {
+          resolveOutcome({ status: "refused", servedPin: answer.servedPin });
+        } else {
+          resolveOutcome({ status: "failed", reason: "connection-failed" });
+        }
+      });
+      child.stdin.end(
+        JSON.stringify({
+          // The listener's Tailscale address is dialled on loopback, as above.
+          address: "127.0.0.1",
+          port: listenerPort,
+          serverName: request.serverName ?? null,
+          pins: request.pins,
+          request: Buffer.from(request.request).toString("base64"),
+        }),
+      );
+    });
+}
+
+function phoneTransport(exchange: Exchange): PinnedListenerTransportPort {
+  return ({ origin, trust }) => ({
+    status: "available",
+    fetch: createExchangeListenerFetch({
+      origin,
+      trust,
+      port: { resolve: async () => [ADDRESS], exchange },
+    }),
+  });
+}
+
+function hasSwiftc(): boolean {
+  if (process.platform !== "darwin") return false;
+  try {
+    execFileSync("xcrun", ["--find", "swiftc"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+let swiftBinary: string | undefined;
+const swiftBuild = mkdtempSync(join(tmpdir(), "octant-pinned-tls-"));
+
+beforeAll(() => {
+  if (!hasSwiftc()) return;
+  const binary = join(swiftBuild, "pinned-tls-exchange");
+  execFileSync(
+    "xcrun",
+    [
+      "swiftc",
+      "-o",
+      binary,
+      join(PHONE_MODULE, "ios/PinnedTlsExchange.swift"),
+      join(PHONE_MODULE, "test/main.swift"),
+    ],
+    { stdio: "inherit", timeout: 240_000 },
+  );
+  if (existsSync(binary)) swiftBinary = binary;
+}, 240_000);
+
+afterAll(() => {
+  rmSync(swiftBuild, { recursive: true, force: true });
+});
+
+const phoneExchanges: ReadonlyArray<{
+  readonly name: string;
+  readonly exchange: (listenerPort: number) => Exchange;
+  readonly runs: () => boolean;
+}> = [
+  { name: "the native contract in Node", exchange: nodeExchange, runs: () => true },
+  {
+    name: "the phone's iOS exchange",
+    exchange: (listenerPort) => {
+      if (swiftBinary === undefined) throw new Error("The iOS exchange was not built.");
+      return swiftExchange(swiftBinary, listenerPort);
+    },
+    runs: hasSwiftc,
+  },
+];
+
+describe.each(phoneExchanges)("pairing a phone from a code over $name", ({ exchange, runs }) => {
+  it.runIf(runs())(
+    "pairs from the code alone, pinned to the host-made certificate, and opens a session",
+    async () => {
+      const host = await startHost({ now: () => Date.now() });
+      const ticket = host.administration.createPairingTicket({ sourceClass: "tailscale" });
+      const deviceKeyStore = createInMemoryDeviceKeyStore();
+      const transport = phoneTransport(exchange(host.port));
+
+      const opened = await openAppPairingCode({
+        code: pairingCode({ ...ticket, pin: host.pin }),
+        transport,
+        webBuildVersion: "0.1.0",
+        deviceKeyStore,
+      });
+      if (opened.status !== "opened") throw new Error(opened.message);
+      const claimed = await opened.claim("Ada's phone");
+      if (claimed.status !== "claimed") throw new Error(claimed.message);
+      host.administration.approvePairing({ ticketId: ticket.ticketId });
+      const status = await opened.client.pollPairingStatus({
+        ticket: opened.ticket,
+        claim: claimed.claim,
+      });
+      if (status.kind !== "approved") throw new Error(`pairing ${status.kind}`);
+      expect(status.approval.listenerTrust).toEqual({
+        current: { kind: "pinned", pin: host.pin },
+      });
+
+      const sessionTransport = transport({ origin: ORIGIN, trust: status.approval.listenerTrust });
+      if (sessionTransport.status !== "available") throw new Error("No pinned transport.");
+      const bridge = createRemoteSessionBridge({ fetch: sessionTransport.fetch, deviceKeyStore });
+      bridge.connect(status.approval);
+      await vi.waitFor(() => expect(bridge.getState().kind).toBe("ready"), { timeout: 15_000 });
+      bridge.disconnect();
+    },
+    30_000,
+  );
+
+  it.runIf(runs())(
+    "refuses a code whose pin is not the listener's key before any request reaches the host",
+    async () => {
+      const host = await startHost({ now: () => Date.now() });
+      const ticket = host.administration.createPairingTicket({ sourceClass: "tailscale" });
+      const wrongPin = `sha256-${Buffer.alloc(32, 9).toString("base64url")}`;
+
+      const opened = await openAppPairingCode({
+        code: pairingCode({ ...ticket, pin: wrongPin }),
+        transport: phoneTransport(exchange(host.port)),
+        webBuildVersion: "0.1.0",
+      });
+
+      expect(opened).toMatchObject({ status: "refused", reason: "pin-mismatch" });
+      expect(host.requests).toEqual([]);
+      expect(host.administration.listPendingPairings()).toEqual([]);
+    },
+    30_000,
+  );
+
+  it.runIf(runs())(
+    "refuses an expired ticket at the host and leaves no claim to approve",
+    async () => {
+      let now = Date.now();
+      const host = await startHost({ now: () => now });
+      const ticket = host.administration.createPairingTicket({ sourceClass: "tailscale" });
+      const transport = phoneTransport(exchange(host.port));
+      const hello = transport({
+        origin: ORIGIN,
+        trust: { current: { kind: "pinned", pin: host.pin } },
+      });
+      if (hello.status !== "available") throw new Error("No pinned transport.");
+      // The host's clock refuses a forward jump larger than two minutes.
+      for (let step = 0; step < 4; step += 1) {
+        now += 90_000;
+        await hello.fetch(`${ORIGIN}/api/remote/hello`);
+      }
+
+      const opened = await openAppPairingCode({
+        code: pairingCode({ ...ticket, pin: host.pin }),
+        transport,
+        webBuildVersion: "0.1.0",
+        now: () => now,
+      });
+      if (opened.status !== "opened") throw new Error(opened.message);
+      const claimed = await opened.claim("Ada's phone");
+
+      expect(claimed.status).toBe("failed");
+      expect(host.administration.listPendingPairings()).toEqual([]);
+    },
+    30_000,
+  );
 });
