@@ -4,6 +4,7 @@ import { connect as netConnect, type Socket } from "node:net";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
 import { REMOTE_SERVER_PROXY_RELAYED, REMOTE_SERVER_PROXY_RELAYED_HEADER } from "@octant/contracts";
 import { relayResponseHeaders, type RemoteServerRelayHeader } from "@octant/domain";
+import { webSocketAcceptFor } from "../webSocketRelay";
 
 /** The upstream connection's own bounds; the request body's is the route's. */
 export interface RemoteServerRelayLimits {
@@ -169,6 +170,156 @@ function exchange(
     }
     upstream.end(request.body === undefined ? undefined : Buffer.from(request.body));
   });
+}
+
+/** The most of a dev server's handshake answer the host reads before giving up on it. */
+const MAX_HANDSHAKE_ANSWER_BYTES = 16 * 1024;
+
+export interface RemoteServerWebSocketInput {
+  /** The loopback URL the grant was minted for; the only place this connects. */
+  readonly endpointUrl: string;
+  /** The dev server's own path and query. */
+  readonly pathQuery: string;
+  /** The handshake's headers, already made the host's own, with this key. */
+  readonly headers: ReadonlyArray<RemoteServerRelayHeader>;
+  readonly key: string;
+  /** The subprotocols the page offered; the dev server may choose only one of these. */
+  readonly protocols: ReadonlyArray<string>;
+  readonly acceptCertificate: (fingerprint: string) => boolean;
+  /** Aborting it before the handshake ends closes the connection unused. */
+  readonly signal: AbortSignal;
+  readonly limits: RemoteServerRelayLimits;
+}
+
+export type RemoteServerWebSocketAttempt =
+  | {
+      readonly kind: "opened";
+      readonly socket: Socket | TLSSocket;
+      /** Bytes the dev server sent after its handshake answer: its first frames. */
+      readonly head: Uint8Array;
+      readonly protocol: string | undefined;
+    }
+  /** The dev server answered, but not with a WebSocket the host can relay. */
+  | { readonly kind: "declined" }
+  | { readonly kind: "unreachable" }
+  | { readonly kind: "certificate-changed" }
+  | { readonly kind: "aborted" };
+
+/**
+ * Open a WebSocket to a dev server on this host's loopback, for a page's
+ * upgrade the host has accepted under a grant. Like {@link relayToDevServer},
+ * it connects to the grant's endpoint literal and nowhere else, and pins an
+ * HTTPS dev server's certificate. The dev server must answer 101 with the
+ * accept value for the host's own key, no extension, and either no
+ * subprotocol or one the page offered; any other answer is declined and the
+ * connection closed. The whole answer must arrive within the connect bound.
+ */
+export async function openDevServerWebSocket(
+  input: RemoteServerWebSocketInput,
+): Promise<RemoteServerWebSocketAttempt> {
+  const target = loopbackTarget(input.endpointUrl);
+  if (target === undefined) return { kind: "unreachable" };
+  if (input.signal.aborted) return { kind: "aborted" };
+  // The handshake is written by hand, so nothing in it may end a line early.
+  if (
+    !/^\/[!-~]*$/.test(input.pathQuery) ||
+    input.headers.some(
+      ([name, value]) =>
+        !/^[!-9;-~]+$/.test(name) || /[\r\n]/.test(value) || value.includes("\u0000"),
+    )
+  ) {
+    return { kind: "declined" };
+  }
+  let socket: Socket | TLSSocket;
+  try {
+    socket = await connect(target, input.limits.connectTimeoutMs, input.signal);
+  } catch {
+    return { kind: input.signal.aborted ? "aborted" : "unreachable" };
+  }
+  if (target.scheme === "https") {
+    const raw = (socket as TLSSocket).getPeerCertificate(true).raw;
+    if (raw === undefined || !input.acceptCertificate(sha256(raw))) {
+      socket.destroy();
+      return { kind: raw === undefined ? "unreachable" : "certificate-changed" };
+    }
+  }
+  return handshake(socket, input);
+}
+
+function handshake(
+  socket: Socket | TLSSocket,
+  input: RemoteServerWebSocketInput,
+): Promise<RemoteServerWebSocketAttempt> {
+  return new Promise((resolve) => {
+    let received = Buffer.alloc(0);
+    const finish = (attempt: RemoteServerWebSocketAttempt) => {
+      clearTimeout(timer);
+      input.signal.removeEventListener("abort", onAbort);
+      socket.off("data", onData);
+      socket.off("close", onClose);
+      if (attempt.kind === "opened") socket.pause();
+      else socket.destroy();
+      resolve(attempt);
+    };
+    const onAbort = () => finish({ kind: "aborted" });
+    const onClose = () => finish({ kind: "unreachable" });
+    const onData = (chunk: Buffer) => {
+      received = Buffer.concat([received, chunk]);
+      const end = received.indexOf("\r\n\r\n");
+      if (end < 0) {
+        if (received.byteLength > MAX_HANDSHAKE_ANSWER_BYTES) finish({ kind: "declined" });
+        return;
+      }
+      const answer = parseHandshakeAnswer(received.subarray(0, end).toString("latin1"));
+      const protocol = answer.headers.get("sec-websocket-protocol");
+      const opened =
+        answer.status === 101 &&
+        answer.headers.get("upgrade")?.toLowerCase() === "websocket" &&
+        answer.headers.get("sec-websocket-accept") === webSocketAcceptFor(input.key) &&
+        !answer.headers.has("sec-websocket-extensions") &&
+        (protocol === undefined || input.protocols.includes(protocol));
+      finish(
+        opened
+          ? {
+              kind: "opened",
+              socket,
+              head: Uint8Array.from(received.subarray(end + 4)),
+              protocol,
+            }
+          : { kind: "declined" },
+      );
+    };
+    const timer = setTimeout(() => finish({ kind: "unreachable" }), input.limits.connectTimeoutMs);
+    socket.on("error", () => undefined);
+    socket.on("data", onData);
+    socket.once("close", onClose);
+    input.signal.addEventListener("abort", onAbort, { once: true });
+    if (input.signal.aborted) {
+      onAbort();
+      return;
+    }
+    const lines = [`GET ${input.pathQuery} HTTP/1.1`];
+    for (const [name, value] of input.headers) lines.push(`${name}: ${value}`);
+    socket.write(`${lines.join("\r\n")}\r\n\r\n`);
+  });
+}
+
+function parseHandshakeAnswer(text: string): {
+  readonly status: number;
+  readonly headers: ReadonlyMap<string, string>;
+} {
+  const [statusLine = "", ...fields] = text.split("\r\n");
+  const status = /^HTTP\/1\.1 (\d{3})(?: |$)/.exec(statusLine)?.[1];
+  const headers = new Map<string, string>();
+  for (const field of fields) {
+    const colon = field.indexOf(":");
+    if (colon <= 0) continue;
+    const name = field.slice(0, colon).trim().toLowerCase();
+    const value = field.slice(colon + 1).trim();
+    const existing = headers.get(name);
+    headers.set(name, existing === undefined ? value : `${existing}, ${value}`);
+  }
+  return { status: status === undefined ? 0 : Number(status), headers };
 }
 
 /** Statuses and methods whose response has no body to relay. */

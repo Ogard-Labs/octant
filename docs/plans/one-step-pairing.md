@@ -1,7 +1,7 @@
 # One-step pairing with a self-made listener certificate
 
-**Status: approved by the maintainer on 2026-10-14; slices 1, 2, and 3 are
-built, the rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
+**Status: approved by the maintainer on 2026-10-14; slices 1, 2, 3, and 6 are built (6's live
+check is open), the rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
 holds only the rules that are true today, and each slice below moves its rules
 there when it lands; the host certificate's key, storage, renewal, pin format,
 and status fields, the pairing code's format, QR code, and reading rules, and
@@ -30,10 +30,11 @@ anything.
   listener serves.
 - **Why the pin is required, not optional.** Today the certificate is the
   only thing that authenticates the host on first contact. The host hello
-  names the host identity key's fingerprint and carries a signature, but a
-  client holds no public key to check that signature against: it records the
-  fingerprint as the host states it at pairing and compares it on later
-  connections. A self-made certificate without a pin would leave first
+  carries the host identity public key, its fingerprint, and a signature, and
+  every client checks the key against the fingerprint and the signature
+  against the key (see the host identity rule in Architecture). That proves
+  the hello came from the key's holder, not that the holder is the host the
+  person meant, since a first contact has nothing to compare the key with. A self-made certificate without a pin would leave first
   contact unauthenticated, so the self-made path exists only together with
   a pin.
 - **Settings.** Settings makes the PEM fields optional behind "Use my own
@@ -266,7 +267,7 @@ and the plan shrinks accordingly.
    tests on both platforms and the device pass from the
    [TestFlight runbook](../mobile-testflight.md) against a self-made host,
    including a refused mismatch.
-6. _One-line start._ `--pair`. Tests: Tailscale is chosen over LAN,
+6. _One-line start._ **Built**; its rules are in Architecture. `--pair`. Tests: Tailscale is chosen over LAN,
    several candidates refuse and list them, a public address is never
    chosen, and approval needs a typed `y`. Live: pair a second machine over
    Tailscale with only the command and the host approval.

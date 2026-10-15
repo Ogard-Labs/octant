@@ -95,6 +95,10 @@ const REMOTE_APPROVABLE_ACTIONS = new Set([
   "simulator.observe",
   "terminal.read",
   "automation.manage",
+  // Answering an MCP tool prompt raised by the device's own turn, approve
+  // once or deny. Remembering the answer for the Project stays with a local
+  // window; the approval service refuses it from a paired device.
+  "extension.tool-call.answer-once",
   "preview.open-authorized",
   "settings.read-non-secret",
   "provider.list-models",

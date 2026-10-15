@@ -1,4 +1,5 @@
 import { bunServe } from "./bunServe";
+import { acceptWebSocketUpgrade } from "./webSocketRelay";
 
 const server = await bunServe({
   hostname: "127.0.0.1",
@@ -8,6 +9,17 @@ const server = await bunServe({
     // A provider check that waits on a slow upstream answers after Bun's own
     // ten-second idle default, which would drop the connection first.
     if (new URL(request.url).pathname === "/slow") await Bun.sleep(12_000);
+    // A route that accepts a WebSocket upgrade and echoes every message.
+    if (new URL(request.url).pathname === "/echo") {
+      return acceptWebSocketUpgrade(
+        {
+          protocol: "echo",
+          cancel: () => undefined,
+          open: (page) => ({ message: (message) => page.send(message), closed: () => undefined }),
+        },
+        {},
+      );
+    }
     return new Response(null, {
       status: 204,
       headers: {

@@ -842,8 +842,17 @@ function normalizeProviderEvent(
     case "usage": {
       // The runtime's own categories win. Octant counts what it adds only for
       // a runtime that reported none, so a part is never counted twice.
+      // A runtime-owned breakdown has no sent-context field, so a compaction the
+      // turn saw is recorded on it here; the next turn then carries it.
       const contextBreakdown =
-        event.contextBreakdown ??
+        (event.contextBreakdown !== undefined &&
+        compacted &&
+        event.contextBreakdown.sentContext === undefined
+          ? {
+              ...event.contextBreakdown,
+              sentContext: { status: "uncounted", reason: "compacted" } as const,
+            }
+          : event.contextBreakdown) ??
         octantWindowBreakdown({
           tools: input.appManagedTools?.definitions ?? [],
           account: input.contextAccount,

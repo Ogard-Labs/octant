@@ -363,6 +363,27 @@ describe("managed simulator streams", () => {
     }
   });
 
+  it("gives the orientation read the caller's cancellation", async () => {
+    let seen: AbortSignal | undefined;
+    const helpers = createManagedSimulatorHelpers(nativeHelpers(), tools(), {
+      fetch: fetchStream,
+      inputConnection: connected,
+      sitsWide: async (_udid, signal) => {
+        seen = signal;
+        return false;
+      },
+    });
+    try {
+      const cancel = new AbortController();
+      await helpers.send(udid, { op: "rotate" }, 2_000, cancel.signal);
+      expect(seen?.aborted).toBe(false);
+      cancel.abort();
+      expect(seen?.aborted).toBe(true);
+    } finally {
+      helpers.dispose();
+    }
+  });
+
   it("refuses Rotate and names the missing tool when serve-sim is not installed", async () => {
     const native = nativeHelpers();
     const helpers = createManagedSimulatorHelpers(

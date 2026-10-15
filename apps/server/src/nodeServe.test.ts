@@ -9,6 +9,11 @@ import {
 import { deriveTransportFactsFromPeer } from "./remoteRequestFacts";
 import { nodeServe } from "./nodeServe";
 import {
+  WEBSOCKET_RELAY_MAX_MESSAGE_BYTES,
+  acceptWebSocketUpgrade,
+  type WebSocketPeer,
+} from "./webSocketRelay";
+import {
   createRemoteAdmissionPolicy,
   createRemoteBoundaryFetch,
 } from "./remote/remoteAdmissionPolicy";
@@ -637,6 +642,97 @@ describe("nodeServe", () => {
       // ::ffff: prefix.
       expect(captured[0]?.sourceClass).toBe("loopback");
       expect(captured[0]?.sourceKey).toHaveLength(64);
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  it("switches a connection to a WebSocket only when the route accepts the upgrade", async () => {
+    const pages: WebSocketPeer[] = [];
+    const server = await nodeServe({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (incoming) => {
+        if (new URL(incoming.url).pathname !== "/echo") {
+          return new Response("not here", { status: 404 });
+        }
+        return acceptWebSocketUpgrade(
+          {
+            protocol: "echo",
+            cancel: () => undefined,
+            open: (page) => {
+              pages.push(page);
+              return { message: (message) => page.send(message), closed: () => undefined };
+            },
+          },
+          {},
+        );
+      },
+    });
+    try {
+      const url = new URL("/echo", server.url);
+      url.protocol = "ws:";
+      const socket = new WebSocket(url, ["echo", "other"]);
+      socket.binaryType = "arraybuffer";
+      const received: unknown[] = [];
+      socket.addEventListener("message", (event) => received.push(event.data));
+      await new Promise((resolve, reject) => {
+        socket.addEventListener("open", resolve);
+        socket.addEventListener("error", reject);
+      });
+      expect(socket.protocol).toBe("echo");
+      socket.send("hello");
+      socket.send(Uint8Array.from([7, 8]));
+      await vi.waitFor(() => expect(received).toHaveLength(2));
+      expect(received[0]).toBe("hello");
+      expect(Array.from(new Uint8Array(received[1] as ArrayBuffer))).toEqual([7, 8]);
+
+      const closed = new Promise<number>((resolve) =>
+        socket.addEventListener("close", (event) => resolve(event.code)),
+      );
+      pages[0]?.close(1008, "The grant for this server closed.");
+      expect(await closed).toBe(1008);
+
+      // A route that does not accept the upgrade answers as it always does.
+      const refused = await rawRequest(new URL("/elsewhere", server.url), {
+        method: "GET",
+        headers: {
+          connection: "Upgrade",
+          upgrade: "websocket",
+          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+          "sec-websocket-version": "13",
+        },
+      });
+      expect(refused).toEqual({ body: "not here", status: 404 });
+    } finally {
+      await server.stop(true);
+    }
+  });
+
+  it("closes a relayed WebSocket whose page sends a message over the cap with 1009", async () => {
+    const server = await nodeServe({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () =>
+        acceptWebSocketUpgrade(
+          {
+            protocol: undefined,
+            cancel: () => undefined,
+            open: () => ({ message: () => undefined, closed: () => undefined }),
+          },
+          {},
+        ),
+    });
+    try {
+      const url = new URL("/", server.url);
+      url.protocol = "ws:";
+      const socket = new WebSocket(url);
+      await new Promise((resolve) => socket.addEventListener("open", resolve));
+      const closed = new Promise<number>((resolve) =>
+        socket.addEventListener("close", (event) => resolve(event.code)),
+      );
+      socket.send(new Uint8Array(WEBSOCKET_RELAY_MAX_MESSAGE_BYTES + 1));
+      expect(await closed).toBe(1009);
     } finally {
       await server.stop(true);
     }

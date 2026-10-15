@@ -1,6 +1,6 @@
 import { spawn as spawnProcess, type ChildProcess } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { mkdir, open, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   readManagedDeviceEndpoint,
@@ -120,6 +120,8 @@ export interface ManagedSimulatorHelpersOptions {
   /** Puts text on the Simulator's pasteboard; resolves whether it did. */
   readonly copyToPasteboard?: (udid: string, text: string, signal: AbortSignal) => Promise<boolean>;
   /** Asks the guest whether Device Hub has taken its touch and buttons. */
+  /** The host-private directory a screen capture may land in; without it Rotate cannot read the orientation. */
+  readonly captureDirectory?: string;
   /** Whether the Simulator shows wider than tall now; nothing when it cannot be read. */
   readonly sitsWide?: (udid: string, signal: AbortSignal) => Promise<boolean | undefined>;
   readonly inputConnection?: (
@@ -183,7 +185,7 @@ export function createManagedSimulatorHelpers(
   const firstFrameMs = options.firstFrameMs ?? FIRST_FRAME_MS;
   const copyToPasteboard = options.copyToPasteboard ?? simctlPasteboardCopy;
   const inputConnection = options.inputConnection ?? simctlInputConnection;
-  const sitsWideOf = options.sitsWide ?? simctlSitsWide;
+  const sitsWideOf = options.sitsWide ?? simctlSitsWideIn(options.captureDirectory);
   const openTouchChannel = options.openTouchChannel ?? openServeSimTouchChannel;
   const sessions = new Map<string, Promise<StreamSession | undefined>>();
   const live = new Set<ChildProcess>();
@@ -521,7 +523,10 @@ export function createManagedSimulatorHelpers(
     if (target === undefined) {
       const sitsWide = await sitsWideOf(
         udid,
-        AbortSignal.timeout(Math.max(1, timeoutMs - (Date.now() - startedAt))),
+        AbortSignal.any([
+          AbortSignal.timeout(Math.max(1, timeoutMs - (Date.now() - startedAt))),
+          ...(cancelled === undefined ? [] : [cancelled]),
+        ]),
       );
       if (sitsWide === undefined) {
         return { status: "unavailable", message: "The Simulator's orientation could not be read." };
@@ -877,35 +882,53 @@ async function readConfig(
  * screenshot's size. serve-sim's own orientation is only what it last sent, and
  * is portrait again whenever its stream restarts; the streamed picture stays
  * portrait-sized after a turn. The screenshot is what the device shows.
+ *
+ * The capture lands in the host-private capture directory, which the
+ * confinement profile denies to every launch, and is deleted as soon as its
+ * header is read. `simctl` replaces a pipe at the path with a file, so a pipe
+ * cannot keep the pixels off disk.
  */
-async function simctlSitsWide(udid: string, signal: AbortSignal): Promise<boolean | undefined> {
-  const directory = await mkdtemp(join(tmpdir(), "octant-orientation-"));
-  const file = join(directory, "screen.png");
-  try {
-    const exited = await new Promise<boolean>((resolve) => {
-      let child: ChildProcess;
+function simctlSitsWideIn(
+  captureDirectory: string | undefined,
+): (udid: string, signal: AbortSignal) => Promise<boolean | undefined> {
+  return async (udid, signal) => {
+    if (captureDirectory === undefined) return undefined;
+    await mkdir(captureDirectory, { recursive: true, mode: 0o700 });
+    const file = join(captureDirectory, `orientation-${randomUUID()}.png`);
+    try {
+      const captured = await new Promise<boolean>((resolve) => {
+        let child: ChildProcess;
+        try {
+          child = spawnProcess("xcrun", ["simctl", "io", udid, "screenshot", "--type=png", file], {
+            stdio: "ignore",
+            signal,
+          });
+        } catch {
+          resolve(false);
+          return;
+        }
+        child.once("error", () => resolve(false));
+        child.once("close", (code) => resolve(code === 0));
+      });
+      if (!captured) return undefined;
+      const handle = await open(file, "r");
       try {
-        child = spawnProcess("xcrun", ["simctl", "io", udid, "screenshot", "--type=png", file], {
-          stdio: "ignore",
-          signal,
-        });
-      } catch {
-        resolve(false);
-        return;
+        const header = Buffer.alloc(24);
+        const { bytesRead } = await handle.read(header, 0, header.length, 0);
+        // A PNG's IHDR chunk starts at byte 8; width and height follow its name.
+        if (bytesRead < header.length || header.toString("latin1", 12, 16) !== "IHDR") {
+          return undefined;
+        }
+        return header.readUInt32BE(16) > header.readUInt32BE(20);
+      } finally {
+        await handle.close();
       }
-      child.once("error", () => resolve(false));
-      child.once("close", (code) => resolve(code === 0));
-    });
-    if (!exited) return undefined;
-    const png = await readFile(file);
-    // A PNG's IHDR chunk starts at byte 8; width and height follow its name.
-    if (png.length < 24 || png.toString("latin1", 12, 16) !== "IHDR") return undefined;
-    return png.readUInt32BE(16) > png.readUInt32BE(20);
-  } catch {
-    return undefined;
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+    } catch {
+      return undefined;
+    } finally {
+      await rm(file, { force: true });
+    }
+  };
 }
 
 /** `xcrun simctl pbcopy` reads the text from stdin, so it never reaches argv. */
