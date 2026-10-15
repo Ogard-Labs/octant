@@ -117,6 +117,30 @@ export const ThreadExternalContentState = Schema.Struct({
 }).annotations(strict);
 export type ThreadExternalContentState = typeof ThreadExternalContentState.Type;
 
+/** At most this many sources ride on one approval; `sourceCount` says how many there are. */
+export const MAX_APPROVAL_OUTSIDE_CONTENT_SOURCES = 8;
+
+/**
+ * Why an approval on a marked thread asks for this one call: the sources that
+ * marked the thread, most recently read first. The host reads them from the
+ * journal-derived projection when it asks; no client supplies them. An empty
+ * list means the thread is marked but no source is recorded, as when the mark
+ * could not be read and the host failed closed.
+ */
+export const ApprovalOutsideContent = Schema.Struct({
+  sources: Schema.Array(ThreadExternalContentSource).pipe(
+    Schema.maxItems(MAX_APPROVAL_OUTSIDE_CONTENT_SOURCES),
+  ),
+  sourceCount: Schema.Int.pipe(Schema.nonNegative()),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((reason) => reason.sourceCount >= reason.sources.length, {
+      message: () => "An approval's outside-content source count cannot be below its list.",
+    }),
+  );
+export type ApprovalOutsideContent = typeof ApprovalOutsideContent.Type;
+
 const threadScope = { mode: OctantMode, threadId: AggregateId };
 
 /**
@@ -181,3 +205,4 @@ export const decodeThreadExternalContentRequest = Schema.decodeUnknownSync(
 export const decodeThreadExternalContentClearOutcome = Schema.decodeUnknownSync(
   ThreadExternalContentClearOutcome,
 );
+export const decodeApprovalOutsideContent = Schema.decodeUnknownSync(ApprovalOutsideContent);

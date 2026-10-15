@@ -21,6 +21,7 @@ import type {
   RemoteDeviceInventoryEntry,
   RemoteMintedPairingTicket,
   RemotePairingTicketSourceClass,
+  PairedComputersBridge,
   RemotePendingPairingRequest,
 } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -30,6 +31,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { PairedComputersSettingsSection } from "./PairedComputersSettingsSection";
 import { PairingCodeQr } from "./PairingCodeQr";
 
 /**
@@ -42,6 +44,8 @@ import { PairingCodeQr } from "./PairingCodeQr";
  */
 export interface RemoteAccessSettingsSectionProps {
   readonly bridge: RemoteAccessAdministrationBridge;
+  /** Pairing this desktop app with another computer; absent outside the desktop app. */
+  readonly pairedComputers?: PairedComputersBridge | undefined;
   /** Reads the clock so a test can freeze ticket expiry. */
   readonly now?: () => number;
 }
@@ -89,7 +93,11 @@ function pairingLink(origin: string, ticket: RemoteMintedPairingTicket): string 
   return `${origin}/#ticketId=${encodeURIComponent(ticket.ticketId)}&ticketProof=${encodeURIComponent(ticket.ticketProof)}`;
 }
 
-export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSettingsSectionProps) {
+export function RemoteAccessSettingsSection({
+  bridge,
+  pairedComputers,
+  now,
+}: RemoteAccessSettingsSectionProps) {
   const clock = now ?? (() => Date.now());
   const [listener, setListener] = useState<ListenerState>({ kind: "loading" });
   const [listenerMessage, setListenerMessage] = useState<string>();
@@ -837,6 +845,9 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
           )}
         </div>
       </SettingsPanel>
+      {pairedComputers === undefined ? null : (
+        <PairedComputersSettingsSection bridge={pairedComputers} />
+      )}
     </section>
   );
 }

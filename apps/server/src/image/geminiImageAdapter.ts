@@ -2,41 +2,26 @@ import {
   MAX_GENERATED_IMAGE_BYTES,
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_VARIANTS,
-  type ProviderInstanceId,
 } from "@octant/contracts";
-import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
-import { sniffGeneratedImageMediaType } from "./generatedImageStore";
-import type {
-  ImageAdapterRequest,
-  ImageAdapterResult,
-  ImageGenerationAdapter,
-} from "./imageAdapter";
 import {
-  GEMINI_IMAGE_API_BASE_URL,
   classifyImageHttpFailure,
-  fail,
-  interrupted,
+  imageFailure,
+  imageInterrupted,
   isProviderFailure,
-  performImageHttpRequest,
   readImageJson,
   sanitizeImageFailure,
-  type ImageHttpFetch,
-  type ImageHttpLimits,
-} from "./imageHttp";
-
-const DEFAULT_LIMITS: ImageHttpLimits = {
-  connectionTimeoutMs: 120_000,
-  requestBodyBytes: MAX_GENERATED_IMAGE_BYTES * 2,
-  responseBodyBytes: MAX_GENERATED_IMAGE_BYTES * MAX_IMAGE_VARIANTS + 262_144,
-};
+  type ImageAdapterRequest,
+  type ImageAdapterResult,
+  type ImageGenerationAdapter,
+  type ImageGenerationDriver,
+  type ImageGenerationPorts,
+} from "@octant/provider-sdk/image-generation";
+export const GEMINI_IMAGE_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 export interface GeminiImageAdapterOptions {
-  readonly instanceId: ProviderInstanceId;
-  readonly credentialResolver: ProviderCredentialResolver;
-  readonly fetch?: ImageHttpFetch;
-  readonly limits?: Partial<ImageHttpLimits>;
+  readonly ports: ImageGenerationPorts;
 }
 
 /**
@@ -45,22 +30,13 @@ export interface GeminiImageAdapterOptions {
  * never journaled.
  */
 export function makeGeminiImageAdapter(options: GeminiImageAdapterOptions): ImageGenerationAdapter {
-  const fetch = options.fetch ?? globalThis.fetch;
-  const limits: ImageHttpLimits = { ...DEFAULT_LIMITS, ...options.limits };
   return {
     generate: async (request) => {
       try {
-        return await generateGeminiImage({
-          adapterInstanceId: options.instanceId,
-          credentialResolver: options.credentialResolver,
-          fetch,
-          limits,
-          request,
-        });
+        return await generateGeminiImage({ ports: options.ports, request });
       } catch (error) {
-        if (isProviderFailure(error)) {
-          if (error.category === "interrupted") return { status: "failed", providerFailure: error };
-          return { status: "failed", providerFailure: sanitizeImageFailure(error) };
+        if (isProviderFailure(error) && error.category === "interrupted") {
+          return { status: "failed", providerFailure: error };
         }
         return { status: "failed", providerFailure: sanitizeImageFailure(error) };
       }
@@ -68,33 +44,39 @@ export function makeGeminiImageAdapter(options: GeminiImageAdapterOptions): Imag
   };
 }
 
+export const geminiImageDriver: ImageGenerationDriver = {
+  driverKind: "gemini-native-image",
+  providerHosts: ["generativelanguage.googleapis.com"],
+  create: ({ ports }) => makeGeminiImageAdapter({ ports }),
+};
+
 async function generateGeminiImage(input: {
-  readonly adapterInstanceId: ProviderInstanceId;
-  readonly credentialResolver: ProviderCredentialResolver;
-  readonly fetch: ImageHttpFetch;
-  readonly limits: ImageHttpLimits;
+  readonly ports: ImageGenerationPorts;
   readonly request: ImageAdapterRequest;
 }): Promise<ImageAdapterResult> {
   if (input.request.signal?.aborted) {
-    return { status: "failed", providerFailure: interrupted() };
+    return { status: "failed", providerFailure: imageInterrupted() };
   }
   if (input.request.prompt.trim().length === 0) {
     return {
       status: "failed",
-      providerFailure: fail("invalid-configuration", "The image prompt must not be empty."),
+      providerFailure: imageFailure("invalid-configuration", "The image prompt must not be empty."),
     };
   }
   if (input.request.prompt.length > MAX_IMAGE_PROMPT_CHARACTERS) {
     return {
       status: "failed",
-      providerFailure: fail("invalid-configuration", "The image prompt exceeded the length limit."),
+      providerFailure: imageFailure(
+        "invalid-configuration",
+        "The image prompt exceeded the length limit.",
+      ),
     };
   }
   const modelId = String(input.request.modelId);
   if (!MODEL_ID_PATTERN.test(modelId)) {
     return {
       status: "failed",
-      providerFailure: fail("invalid-configuration", "The selected model id is not valid."),
+      providerFailure: imageFailure("invalid-configuration", "The selected model id is not valid."),
     };
   }
   const variantCount = input.request.variantCount ?? 1;
@@ -105,7 +87,7 @@ async function generateGeminiImage(input: {
   ) {
     return {
       status: "failed",
-      providerFailure: fail(
+      providerFailure: imageFailure(
         "invalid-configuration",
         "The requested variant count is not supported.",
       ),
@@ -135,15 +117,11 @@ async function generateGeminiImage(input: {
     generationConfig,
   };
 
-  const response = await performImageHttpRequest({
+  const response = await input.ports.request({
     url: `${GEMINI_IMAGE_API_BASE_URL}/models/${encodeURIComponent(modelId)}:generateContent`,
     method: "POST",
     auth: { header: "x-goog-api-key" },
-    instanceId: String(input.adapterInstanceId),
-    credentialResolver: input.credentialResolver,
     body: JSON.stringify(body),
-    fetch: input.fetch,
-    limits: input.limits,
     ...(input.request.signal === undefined ? {} : { signal: input.request.signal }),
   });
 
@@ -161,7 +139,7 @@ async function generateGeminiImage(input: {
   if (decoded.kind === "url-rejected") {
     return {
       status: "failed",
-      providerFailure: fail(
+      providerFailure: imageFailure(
         "protocol",
         "The provider returned an image URL instead of inline image bytes.",
       ),
@@ -173,13 +151,16 @@ async function generateGeminiImage(input: {
   if (decoded.kind === "invalid") {
     return {
       status: "failed",
-      providerFailure: fail("protocol", "The provider returned an invalid image response."),
+      providerFailure: imageFailure("protocol", "The provider returned an invalid image response."),
     };
   }
   if (decoded.images.length > maxImages) {
     return {
       status: "failed",
-      providerFailure: fail("protocol", "The provider returned more images than requested."),
+      providerFailure: imageFailure(
+        "protocol",
+        "The provider returned more images than requested.",
+      ),
     };
   }
 
@@ -189,23 +170,23 @@ async function generateGeminiImage(input: {
     if (bytes === undefined) {
       return {
         status: "failed",
-        providerFailure: fail("protocol", "The provider returned malformed image bytes."),
+        providerFailure: imageFailure("protocol", "The provider returned malformed image bytes."),
       };
     }
     if (bytes.byteLength > MAX_GENERATED_IMAGE_BYTES) {
       return {
         status: "failed",
-        providerFailure: fail(
+        providerFailure: imageFailure(
           "protocol",
           "The provider response exceeded the configured size limit.",
         ),
       };
     }
-    const mediaType = sniffGeneratedImageMediaType(bytes);
+    const mediaType = input.ports.sniffMediaType(bytes);
     if (mediaType === undefined) {
       return {
         status: "failed",
-        providerFailure: fail("protocol", "The provider returned malformed image bytes."),
+        providerFailure: imageFailure("protocol", "The provider returned malformed image bytes."),
       };
     }
     images.push({ bytes, mediaType });
@@ -213,7 +194,7 @@ async function generateGeminiImage(input: {
   if (images.length === 0) {
     return {
       status: "failed",
-      providerFailure: fail("protocol", "The provider returned an invalid image response."),
+      providerFailure: imageFailure("protocol", "The provider returned an invalid image response."),
     };
   }
   return { status: "completed", images };

@@ -305,6 +305,7 @@ describe("a person's clear of a thread's outside-content mark", () => {
       decideExtensionToolGrant({
         inProject: true,
         hostOwnedTurn: false,
+        pairedDeviceTurn: false,
         planTurn: false,
         threadTainted: taint.externalContentIngested,
         reach: "network",

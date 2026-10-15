@@ -1,4 +1,6 @@
 import { mobileRemoteFetch } from "../runtime/mobileRemoteFetch";
+import { createMobileListenerFetch } from "../runtime/mobileListenerFetch";
+import { mobilePinnedListenerTransport } from "../runtime/mobilePinnedListenerTransport";
 import {
   createContext,
   useCallback,
@@ -95,24 +97,33 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     [secureStorage],
   );
   const registry = useMemo(() => createMobileHostRegistry(registryStorage), [registryStorage]);
+  const listenerFetch = useMemo(
+    () =>
+      createMobileListenerFetch({
+        deviceKeyStore,
+        pinnedTransport: mobilePinnedListenerTransport,
+        platformFetch: mobileRemoteFetch,
+      }),
+    [deviceKeyStore],
+  );
   const hub = useMemo(
     () =>
       createMobileHostSessionHub({
-        fetch: mobileRemoteFetch,
+        fetch: listenerFetch,
         webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
         deviceKeyStore,
       }),
-    [deviceKeyStore],
+    [deviceKeyStore, listenerFetch],
   );
   /** Pairing flows still use a dedicated bridge that writes into the shared key store. */
   const bridge = useMemo(
     () =>
       createRemoteSessionBridge({
-        fetch: mobileRemoteFetch,
+        fetch: listenerFetch,
         webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
         deviceKeyStore,
       }),
-    [deviceKeyStore],
+    [deviceKeyStore, listenerFetch],
   );
   const lifetime = useRef(new AbortController());
   const [bridgeState, setBridgeState] = useState<RemoteSessionBridgeState>(bridge.getState);

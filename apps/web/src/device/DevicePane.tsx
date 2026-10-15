@@ -50,6 +50,12 @@ export interface DevicePaneProps {
   /** The host reported that it can rotate this device; absent, More has no Rotate. */
   readonly canRotate?: boolean;
   /**
+   * The host knows which way the device sits, so Rotate names no orientation
+   * and the host turns it. The streamed picture's size cannot say: a Simulator
+   * keeps streaming portrait-sized frames after it turns.
+   */
+  readonly hostTurnsRotation?: boolean;
+  /**
    * The host reported that it can press this device's volume keys. Without it
    * More has no Volume up or down at all; they are never shown disabled.
    */
@@ -163,8 +169,12 @@ export function DevicePane(props: DevicePaneProps) {
       setTyping(false);
       setOpeningUrl(true);
     } else if (item === "rotate") {
-      // The streamed picture says which way the device sits now; with none,
-      // landscape is the change a person most often wants.
+      // Otherwise the streamed picture says which way the device sits now;
+      // with none, landscape is the change a person most often wants.
+      if (props.hostTurnsRotation === true) {
+        act({ kind: "rotate" });
+        return;
+      }
       const sitsWide =
         view.kind === "live" &&
         view.screen.kind === "stream" &&

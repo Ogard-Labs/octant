@@ -39,6 +39,7 @@ import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
 import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
 import { ThreadSurfaceSwitcher } from "../surfaces/ThreadSurfaceSwitcher";
 import { NativeHarnessSessionPanel } from "../surfaces/NativeHarnessSessionPanel";
+import { ExtensionToolApprovalCard } from "../surfaces/ExtensionToolApprovalCard";
 import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
 import { MOBILE_COPY, mobileModelLabel, mobileThreadComposerCopy } from "../copy";
 import { PullRequestReviewPanel } from "../review/PullRequestReviewPanel";
@@ -810,6 +811,9 @@ export function ThreadScreen(props: ThreadScreenProps) {
         ) : null}
         {activeSurface === "browser" ? null : (
           <>
+            {transport === undefined ? null : (
+              <ExtensionToolApprovalCard threadId={props.selected.threadId} transport={transport} />
+            )}
             {transport === undefined ? null : (
               <NativeHarnessSessionPanel threadId={props.selected.threadId} transport={transport} />
             )}

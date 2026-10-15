@@ -56,6 +56,7 @@ import {
   type TuiThemeId,
   type TuiToolLine,
   type TuiTranscriptEntry,
+  approvalPanelOutsideContent,
 } from "./agentTuiModel";
 import type { ChatNavigationThread } from "@octant/contracts";
 import type { OpenedLocalControlSession } from "./localControl";
@@ -651,11 +652,16 @@ class AgentScreen {
       this.#panel.title = " Approval ";
       this.#panel.borderColor = p.warning;
       const summary = approval.summary.replace(/^[a-z-]+: /, "");
+      const outside =
+        approval.outsideContent === undefined
+          ? ""
+          : approvalPanelOutsideContent(approval.outsideContent);
+      const outsideBlock = outside === "" ? "" : `${outside}\n`;
       // A child's ask and a single-use ask (the thread took in outside content)
       // have no session-wide choice: the host would take it as a single approval.
       this.#panelText.content = !approvalMayBeRemembered(approval)
-        ? t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`
-        : t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" allow for this session · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
+        ? t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${fg(p.warning)(outsideBlock)}${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`
+        : t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${fg(p.warning)(outsideBlock)}${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" allow for this session · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
       this.#panel.visible = true;
     } else if (site !== undefined) {
       this.#panel.title = " Site approval ";

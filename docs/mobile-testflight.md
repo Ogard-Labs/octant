@@ -143,6 +143,11 @@ is dismissing waits for the active transition; backgrounding invalidates it.
 - Install from TestFlight, cold launch, terminate, and relaunch.
 - Pair with a real host over its supported HTTPS listener; refuse plain HTTP
   away from loopback.
+- Pair with a host whose listener made its own certificate by scanning its
+  pairing QR code, then again by pasting the code; grant and then deny the
+  camera. Pair with a code whose pin was changed and confirm the refusal and
+  that the host saw no request. Test both a Tailscale and a private LAN
+  address, on iOS and Android.
 - Lock and unlock the vault; exercise passcode fallback and cancel paths.
 - Read Chat, Work, and Code threads and send only mutations the host advertises
   as remotely available.

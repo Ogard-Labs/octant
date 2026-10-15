@@ -3,23 +3,34 @@ import { runStatusCommand } from "./status";
 import { runWebCommand } from "./web";
 import { resolveServerRunOptions, runServerRunCommand } from "./serverRun";
 import { resolveHostRuntimePaths, ServicePolicyStore } from "@octant/host-runtime";
-import { homedir, tmpdir } from "node:os";
+import { homedir, networkInterfaces, tmpdir } from "node:os";
+import { createInterface } from "node:readline/promises";
 import { runServerLifecycleCommand, type ServerLifecycleAction } from "./serverLifecycle";
 import {
   createHostHeadlessUpgradePorts,
   resolveHeadlessArtifactCliCommand,
   runHeadlessArtifactCliCommand,
 } from "./artifactCommand";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { openLocalControlSession, type OpenedLocalControlSession } from "./localControl";
 import { resolveProjectCliCommand, runProjectCliCommand } from "./projectCommand";
 import { resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
 import { runMcpCliCommand } from "./mcpCommand";
 import {
+  readAllStdin,
+  readHiddenLineFromTerminal,
+  resolveProviderKeyCliCommand,
+  runProviderKeyCliCommand,
+} from "./providerKeyCommand";
+import {
   resolveAuthCliCommand,
   resolveListenerCliCommand,
   resolvePairCliCommand,
+  resolveServerPairingFlags,
   runRemoteAccessCliCommand,
+  runServerPairing,
+  type ServerPairingOptions,
   type RemoteAccessCliCommand,
 } from "./remoteAccessCommand";
 
@@ -93,12 +104,19 @@ async function main(): Promise<number> {
     !(args.positional[0] === "status" && ("hostname" in args.flags || "port" in args.flags))
   ) {
     const action = args.positional[0];
-    const logs = action === "logs" ? parseLogOptions(args.flags) : undefined;
+    // `--pair` belongs to `start` alone; anywhere else it stays an unknown flag.
+    const split = action === "start" ? resolveServerPairingFlags(args.flags) : { rest: args.flags };
+    if (split === undefined) {
+      printUsage();
+      return 1;
+    }
+    const lifecycleFlags = split.rest;
+    const logs = action === "logs" ? parseLogOptions(lifecycleFlags) : undefined;
     if (action === "logs" && logs === undefined) {
       printUsage();
       return 1;
     }
-    if (action !== "logs" && Object.keys(args.flags).length > 0) {
+    if (action !== "logs" && Object.keys(lifecycleFlags).length > 0) {
       printUsage();
       return 1;
     }
@@ -126,12 +144,13 @@ async function main(): Promise<number> {
           process.removeListener("SIGTERM", stopFollowing);
         }
       }
-      return action === "logs" ||
+      const succeeded =
+        action === "logs" ||
         report.state === "ready" ||
         report.state === "stopped" ||
-        report.state === "disabled"
-        ? 0
-        : 1;
+        report.state === "disabled";
+      if (!succeeded) return 1;
+      return split.pairing === undefined ? 0 : await runPairFlow(split.pairing);
     } catch (error) {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
       return 1;
@@ -150,9 +169,18 @@ async function main(): Promise<number> {
       args.positional[0] === "upgrade" ||
       args.positional[0] === "uninstall")
   ) {
+    // `--pair` is `install`'s alone; `upgrade` and `uninstall` keep it unknown.
+    const split =
+      args.positional[0] === "install"
+        ? resolveServerPairingFlags(args.flags)
+        : { rest: args.flags };
+    if (split === undefined) {
+      printUsage();
+      return 1;
+    }
     try {
       const paths = resolveCliHostRuntimePaths();
-      const artifactCommand = resolveHeadlessArtifactCliCommand(args.positional, args.flags, {
+      const artifactCommand = resolveHeadlessArtifactCliCommand(args.positional, split.rest, {
         installRoot: process.env.OCTANT_INSTALL_ROOT ?? join(paths.stateDirectory, "install"),
         dataDirectory: paths.dataDirectory,
       });
@@ -160,7 +188,7 @@ async function main(): Promise<number> {
         printUsage();
         return 1;
       }
-      return await runHeadlessArtifactCliCommand({
+      const installed = await runHeadlessArtifactCliCommand({
         command: artifactCommand,
         runtime: {
           platform: process.platform,
@@ -172,6 +200,12 @@ async function main(): Promise<number> {
         stdout: process.stdout,
         stderr: process.stderr,
       });
+      if (installed !== 0 || split.pairing === undefined) return installed;
+      // The service must run the installed copy, not the unpacked download this
+      // process came from: the managed unit records the CLI that writes it.
+      const started = await startInstalledHost(artifactCommand.installRoot);
+      if (started !== 0) return started;
+      return await runPairFlow(split.pairing);
     } catch (error) {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
       return 1;
@@ -215,6 +249,27 @@ async function main(): Promise<number> {
         command,
         session,
         cwd: process.cwd(),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  }
+  if (args.command === "provider") {
+    const command = resolveProviderKeyCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    return await withLocalControlSession((session) =>
+      runProviderKeyCliCommand({
+        command,
+        session,
+        key: {
+          interactive: process.stdin.isTTY === true,
+          readHidden: (prompt) => readHiddenLineFromTerminal(process.stdin, process.stderr, prompt),
+          readStdin: () => readAllStdin(process.stdin),
+        },
+        platform: process.platform,
         stdout: process.stdout,
         stderr: process.stderr,
       }),
@@ -302,6 +357,45 @@ async function withLocalControlSession(
   }
 }
 
+/** Runs `server start` from `<install-root>/current`, so the service records that copy. */
+function startInstalledHost(installRoot: string): Promise<number> {
+  return new Promise((resolve) => {
+    const child = spawn(join(installRoot, "current", "bin", "octant"), ["server", "start"], {
+      stdio: "inherit",
+    });
+    child.once("error", (error) => {
+      process.stderr.write(`${error.message}\n`);
+      resolve(1);
+    });
+    child.once("exit", (code) => resolve(code ?? 1));
+  });
+}
+
+/** The host half of `--pair`, once the service is running. */
+async function runPairFlow(options: ServerPairingOptions): Promise<number> {
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  // Closing the input without an answer ends the question rather than hanging it.
+  const closed = new Promise<undefined>((resolve) =>
+    prompt.once("close", () => resolve(undefined)),
+  );
+  try {
+    return await withLocalControlSession(
+      (session) =>
+        runServerPairing({
+          options,
+          session,
+          stdout: process.stdout,
+          stderr: process.stderr,
+          networkInterfaces,
+          ask: (question) => Promise.race([prompt.question(question), closed]),
+        }),
+      { startHost: true },
+    );
+  } finally {
+    prompt.close();
+  }
+}
+
 function resolveCliHostRuntimePaths() {
   return resolveHostRuntimePaths({
     env: process.env,
@@ -321,9 +415,10 @@ function printUsage(): void {
       "  octant web [--no-open] [--dev] [--hostname <host>] [--port <port>]",
       "  octant server status [--hostname <host>] [--port <port>]",
       "  octant server run [--port <port>]",
-      "  octant server start|stop|restart|enable|disable",
+      "  octant server start [--pair [--hostname <address>] [--port <port>] [--cert <path> --key <path>]]",
+      "  octant server stop|restart|enable|disable",
       "  octant server logs [--since <ISO-8601>] [--limit <n>] [--follow]",
-      "  octant server install --artifact <path> [--install-root <path>]",
+      "  octant server install --artifact <path> [--install-root <path>] [--pair [--hostname <address>] [--port <port>] [--cert <path> --key <path>]]",
       "  octant server upgrade --artifact <path> [--install-root <path>]",
       "  octant server uninstall [--install-root <path>] [--data-dir <path>] [--remove-data --confirm <exact-data-dir>]",
       "  octant agent [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
@@ -333,6 +428,9 @@ function printUsage(): void {
       "  octant project remove <name>",
       "  octant project rename <name> <new name>",
       "  octant project access <name> full-access|approval-gated",
+      "  octant provider key set <instance> [--replace] [--stdin]",
+      "  octant provider key status|remove <instance>",
+      "  octant provider remove <instance>",
       "  octant listener [status]",
       "  octant listener enable --hostname <lan-or-tailscale-address> --port <port> --cert <path> --key <path>",
       "  octant listener disable",

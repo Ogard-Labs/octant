@@ -62,6 +62,7 @@ export interface AppleLaunchGrants {
   readonly allowPseudoTty?: boolean;
   readonly allowJobCreation?: boolean;
   readonly allowSignal?: boolean;
+  readonly interruptFirst?: boolean;
   readonly additionalReadRoots?: ReadonlyArray<string>;
   /**
    * Directories this launch may read and write on top of the port-wide set.
@@ -176,6 +177,7 @@ export interface AppleToolchainServiceOptions {
       readonly allowPseudoTty?: boolean;
       readonly allowJobCreation?: boolean;
       readonly allowSignal?: boolean;
+      readonly interruptFirst?: boolean;
       readonly additionalWriteRoots?: ReadonlyArray<string>;
       readonly additionalReadRoots?: ReadonlyArray<string>;
       readonly isolatedRoots?: ReadonlyArray<string>;
@@ -319,6 +321,16 @@ export class AppleToolchainService {
       readonly path: string;
       readonly controller: AbortController;
       readonly finished: Promise<AppleProcessResult>;
+    }
+  >();
+  // Which way each Simulator this host has turned sits. Only a rotate sets
+  // it, and a shutdown clears it: the desktop reads the real orientation when
+  // it rotates, and the streamed picture never shows it.
+  readonly #orientations = new Map<
+    string,
+    {
+      readonly simulatorId: AppleSimulatorRecord["simulatorId"];
+      readonly orientation: "portrait" | "landscape";
     }
   >();
   // Simulators whose recorder is still starting; a second start must not launch another.
@@ -581,6 +593,21 @@ export class AppleToolchainService {
     return { kind: "found", bytes };
   }
 
+  /**
+   * Records which way a Simulator sat when its live view began, as the desktop
+   * read it. A rotate says the same afterwards; this covers a Simulator that
+   * was already turned, or turned outside Octant.
+   */
+  noteOrientation(
+    simulatorId: AppleSimulatorRecord["simulatorId"],
+    orientation: "portrait" | "landscape",
+  ): void {
+    const known = this.#orientations.get(String(simulatorId))?.orientation;
+    if (known === orientation || (known === undefined && orientation === "portrait")) return;
+    this.#orientations.set(String(simulatorId), { simulatorId, orientation });
+    this.#sequence += 1;
+  }
+
   snapshot(context: AppleExecutionContext): AppleRuntimeSnapshot {
     const paneOpenRequest = this.#paneOpenRequests.get(String(context.threadId));
     return decodeAppleRuntimeSnapshot({
@@ -597,6 +624,13 @@ export class AppleToolchainService {
         recordScreen: true,
         ...(this.#options.injectSimulatorInput === undefined ? {} : { volume: true, rotate: true }),
       },
+      // Only Simulators still discovered: a deleted one would otherwise stay
+      // here for good and, past the contract's bound, fail every snapshot.
+      orientations: [...this.#orientations.values()].filter((turned) =>
+        this.#lastSimulators.some(
+          (simulator) => String(simulator.simulatorId) === String(turned.simulatorId),
+        ),
+      ),
       recordings: [...this.#recordings.values()]
         .filter(
           (recording) =>
@@ -1039,11 +1073,24 @@ export class AppleToolchainService {
         // rotate command, and Octant never scripts Simulator.app.
         terminal = await this.#injectInput(request, context, signal);
         const outcome = outcomeFor(terminal);
+        const turned = text(terminal.stdout).trim();
+        if (
+          outcome === "succeeded" &&
+          request.simulatorId !== undefined &&
+          (turned === "portrait" || turned === "landscape")
+        ) {
+          this.#orientations.set(String(request.simulatorId), {
+            simulatorId: request.simulatorId,
+            orientation: turned,
+          });
+        }
         const note = {
           severity: "note" as const,
           message:
             outcome === "succeeded"
-              ? `rotate to ${request.orientation ?? "unknown"} completed`
+              ? request.orientation === undefined
+                ? "rotate completed"
+                : `rotate to ${request.orientation} completed`
               : `rotate ${outcome}: ${text(terminal.stderr).trim()}`.trimEnd(),
         };
         cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
@@ -1195,6 +1242,7 @@ export class AppleToolchainService {
       outputs.push(terminal.stdout, terminal.stderr);
       if (succeeded(terminal) && request.kind === "shutdown") {
         this.#setSimulatorState(request.simulatorId, "shutdown");
+        this.#orientations.delete(String(request.simulatorId));
       }
       cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
       const logReference = `apple-log-${request.actionId}`;
@@ -1285,7 +1333,7 @@ export class AppleToolchainService {
       context,
       DEVICE_RECORDING_LIMIT_SECONDS * 1_000,
       controller.signal,
-      { additionalWriteRoots: [this.#captureDirectory] },
+      { additionalWriteRoots: [this.#captureDirectory], interruptFirst: true },
     ).catch(() => unavailableInputResult("The recording could not be started."));
     // A recording that ends at once never started: report why, keep nothing.
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1343,7 +1391,13 @@ export class AppleToolchainService {
     this.#recordings.delete(key);
     recording.controller.abort();
     try {
-      await recording.finished;
+      const ended = await recording.finished;
+      // The recorder writes its file when interrupted; one still alive leaves
+      // the device refusing a new recording, so say so rather than read a
+      // half-written file.
+      if (ended.cleanupUncertain) {
+        return { saved: false, reason: "The Simulator recorder did not stop." };
+      }
       const bytes = await readCapture(recording.path, "recording");
       if (bytes === undefined) {
         return { saved: false, reason: "The recording was empty or larger than Octant keeps." };

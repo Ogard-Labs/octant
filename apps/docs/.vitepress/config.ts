@@ -119,6 +119,10 @@ export default defineConfig({
             { text: "SCC Position", link: "/advanced/scc-position" },
             { text: "EULA Placeholders", link: "/advanced/eula-placeholders" },
             { text: "Remote Access", link: "/advanced/remote-access" },
+            {
+              text: "Open a server from another computer",
+              link: "/advanced/open-a-server-from-another-computer",
+            },
             { text: "Recovery", link: "/advanced/recovery" },
             { text: "Release Compatibility", link: "/advanced/release-compatibility" },
           ],

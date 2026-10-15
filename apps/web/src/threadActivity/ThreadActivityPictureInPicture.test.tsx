@@ -1,6 +1,7 @@
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
 import type { BrowserAutomationSnapshot } from "@octant/contracts/browser-automation-rpc";
+import type { ApprovalOutsideContent } from "@octant/contracts/content-provenance";
 import type { ComputerUseSessionView } from "@octant/contracts/computer-use";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -495,6 +496,48 @@ describe("ThreadActivityPictureInPicture", () => {
     await waitFor(() => expect(computerUse.stop).toHaveBeenCalledOnce());
   });
 
+  it("opens the full prompt, with its sources, before a marked approval can be given from the collapsed strip", async () => {
+    const user = userEvent.setup();
+    const waiting = computerSession(threadId, "waiting-for-approval", undefined, {
+      sourceCount: 1,
+      sources: [
+        {
+          sourceLabel: "web-fetch",
+          ingestionCount: 2,
+          firstIngestedAt: "2026-08-10T11:00:00.000Z" as never,
+          lastIngestedAt: "2026-08-10T11:30:00.000Z" as never,
+        },
+      ],
+    });
+    const computerUse = {
+      list: vi.fn(async () => [waiting]),
+      decide: vi.fn(async () => waiting),
+      stop: vi.fn(async () => waiting),
+      inspect: vi.fn(async () => waiting),
+    } as unknown as ComputerUseClient;
+
+    render(
+      <ThreadActivityPictureInPicture
+        computerUseClient={computerUse}
+        pollIntervalMs={60_000}
+        threadId={threadId as never}
+      >
+        <div>Conversation</div>
+      </ThreadActivityPictureInPicture>,
+    );
+
+    expect(await screen.findByText("Web pages")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Hide activity preview" }));
+
+    expect(screen.queryByRole("button", { name: "Approve once" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Web pages")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Review before approving" }));
+
+    expect(screen.getByText("Web pages")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Approve once" })).toBeVisible();
+    expect(computerUse.decide).not.toHaveBeenCalled();
+  });
+
   it("fails closed for another thread and never renders stale Browser pixels", async () => {
     const stale = {
       ...browserSnapshot(),
@@ -882,6 +925,7 @@ function computerSession(
   ownedThreadId: string,
   state: ComputerUseSessionView["state"],
   approvalScope?: "application-session",
+  outsideContent?: ApprovalOutsideContent,
 ): ComputerUseSessionView {
   const waiting = state === "waiting-for-approval";
   return {
@@ -909,6 +953,7 @@ function computerSession(
             expiresAt: "2026-08-10T12:05:00.000Z" as never,
             summary: "click in Preview",
             ...(approvalScope === undefined ? {} : { scope: approvalScope }),
+            ...(outsideContent === undefined ? {} : { outsideContent }),
           },
         }
       : {}),

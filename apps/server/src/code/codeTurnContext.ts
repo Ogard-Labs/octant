@@ -286,9 +286,12 @@ export function carriedSentContext(input: {
 }): CarriedSentContext {
   if (input.forkSeeded) return { status: "uncounted", reason: "history-unknown" };
   if (input.freshSession || !input.priorTurn) return { status: "counted", parts: [] };
+  // Before the missing-field check: a runtime that reports its own breakdown
+  // (Claude's last report of every turn) never carries the field, yet the
+  // journaled compaction already says why the session cannot be counted.
+  if (input.compactedSinceReport === true) return { status: "uncounted", reason: "compacted" };
   const accounting = input.previousBreakdown?.sentContext;
   if (accounting === undefined) return { status: "uncounted", reason: "history-unknown" };
-  if (input.compactedSinceReport === true) return { status: "uncounted", reason: "compacted" };
   if (accounting.status === "uncounted") return accounting;
   return {
     status: "counted",

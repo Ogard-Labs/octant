@@ -1,5 +1,6 @@
 import type { ProviderInstanceId } from "@octant/contracts";
 import type { ClaudeResumeIdentity } from "./claudeDriver";
+import type { ClaudeResumeIdentityJournal } from "./claudeResumeIdentityJournal";
 
 export class ClaudeResumeIdentityStoreClosed extends Error {
   override readonly name = "ClaudeResumeIdentityStoreClosed";
@@ -18,6 +19,8 @@ export class ClaudeResumeIdentityStoreCapacityExceeded extends Error {
 export interface ClaudeResumeIdentityStoreOptions {
   readonly maxIdentities?: number;
   readonly maxIdentitiesPerProvider?: number;
+  /** Keeps identities across a host restart; without it they live in memory only. */
+  readonly journal?: ClaudeResumeIdentityJournal;
 }
 
 const DEFAULT_MAX_IDENTITIES = 1_024;
@@ -27,6 +30,7 @@ export class ClaudeResumeIdentityStore {
   readonly #identities = new Map<ProviderInstanceId, Map<string, ClaudeResumeIdentity>>();
   readonly #maxIdentities: number;
   readonly #maxIdentitiesPerProvider: number;
+  readonly #journal: ClaudeResumeIdentityJournal | undefined;
   #identityCount = 0;
   #closed = false;
 
@@ -34,6 +38,7 @@ export class ClaudeResumeIdentityStore {
     this.#maxIdentities = options.maxIdentities ?? DEFAULT_MAX_IDENTITIES;
     this.#maxIdentitiesPerProvider =
       options.maxIdentitiesPerProvider ?? DEFAULT_MAX_IDENTITIES_PER_PROVIDER;
+    this.#journal = options.journal;
   }
 
   async lookup(
@@ -44,11 +49,19 @@ export class ClaudeResumeIdentityStore {
     signal: AbortSignal,
   ): Promise<ClaudeResumeIdentity | undefined> {
     await this.#checkpoint(signal);
-    return this.#identities.get(input.providerInstanceId)?.get(input.sdkSessionId);
+    const remembered = this.#identities.get(input.providerInstanceId)?.get(input.sdkSessionId);
+    if (remembered !== undefined || this.#journal === undefined) return remembered;
+    // The map starts empty after a restart; the journal still knows the session.
+    return this.#journal.load(input);
   }
 
   async put(identity: ClaudeResumeIdentity, signal: AbortSignal): Promise<void> {
     await this.#checkpoint(signal);
+    this.#remember(identity);
+    this.#journal?.save(identity);
+  }
+
+  #remember(identity: ClaudeResumeIdentity): void {
     const existingProviderIdentities = this.#identities.get(identity.providerInstanceId);
     const replacesExisting = existingProviderIdentities?.has(identity.sdkSessionId) ?? false;
     if (
@@ -73,6 +86,7 @@ export class ClaudeResumeIdentityStore {
     signal: AbortSignal,
   ): Promise<void> {
     await this.#checkpoint(signal);
+    this.#journal?.remove(input);
     const providerIdentities = this.#identities.get(input.providerInstanceId);
     if (providerIdentities?.delete(input.sdkSessionId)) this.#identityCount -= 1;
     if (providerIdentities?.size === 0) this.#identities.delete(input.providerInstanceId);
@@ -80,6 +94,7 @@ export class ClaudeResumeIdentityStore {
 
   async removeProvider(providerInstanceId: ProviderInstanceId, signal: AbortSignal): Promise<void> {
     await this.#checkpoint(signal);
+    this.#journal?.removeProvider(providerInstanceId);
     const providerIdentities = this.#identities.get(providerInstanceId);
     if (providerIdentities === undefined) return;
     this.#identities.delete(providerInstanceId);

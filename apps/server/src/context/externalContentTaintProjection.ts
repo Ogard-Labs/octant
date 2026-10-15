@@ -1,11 +1,14 @@
 import {
+  MAX_APPROVAL_OUTSIDE_CONTENT_SOURCES,
   MAX_NAMED_INGESTED_SOURCES,
   THREAD_EXTERNAL_CONTENT_AGGREGATE,
   THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
+  decodeApprovalOutsideContent,
   decodeContentClearedPayload,
   decodeContentIngestedPayload,
   decodeThreadExternalContentState,
   decodeThreadExternalContentTaint,
+  type ApprovalOutsideContent,
   type EventEnvelope,
   type ThreadExternalContentState,
   type ThreadExternalContentTaint,
@@ -225,6 +228,55 @@ export function readThreadExternalContentState(
       ...(row.first_ingested_at === null ? {} : { firstIngestedAt: row.first_ingested_at }),
       ...(row.last_ingested_at === null ? {} : { lastIngestedAt: row.last_ingested_at }),
     })),
+  });
+}
+
+/**
+ * The sources an approval on a marked thread names, most recently read first,
+ * or nothing when the thread is not marked. A prompt that says only "approve
+ * once" left a person unable to tell why the call could not be remembered or
+ * what it might be acting on.
+ */
+export function readApprovalOutsideContent(
+  connection: SqliteConnection,
+  threadId: string,
+): ApprovalOutsideContent | undefined {
+  if (!readThreadExternalContentTaint(connection, threadId).externalContentIngested) {
+    return undefined;
+  }
+  const tainting = "origin IN ('tool-result', 'external-content')";
+  const sources = connection
+    .prepare(
+      `
+      SELECT source_label,
+             COUNT(*) AS ingestion_count,
+             MIN(ingested_at) AS first_ingested_at,
+             MAX(ingested_at) AS last_ingested_at
+      FROM thread_external_content_ingestion_projection
+      WHERE thread_id = ? AND ${tainting}
+      GROUP BY source_label
+      ORDER BY MAX(last_sequence) DESC
+      LIMIT ?
+    `,
+    )
+    .all(String(threadId), MAX_APPROVAL_OUTSIDE_CONTENT_SOURCES) as ReadonlyArray<SourceRow>;
+  const total = connection
+    .prepare(
+      `
+      SELECT COUNT(DISTINCT source_label) AS source_count
+      FROM thread_external_content_ingestion_projection
+      WHERE thread_id = ? AND ${tainting}
+    `,
+    )
+    .get(String(threadId)) as { readonly source_count: number };
+  return decodeApprovalOutsideContent({
+    sources: sources.map((row) => ({
+      sourceLabel: row.source_label,
+      ingestionCount: row.ingestion_count,
+      ...(row.first_ingested_at === null ? {} : { firstIngestedAt: row.first_ingested_at }),
+      ...(row.last_ingested_at === null ? {} : { lastIngestedAt: row.last_ingested_at }),
+    })),
+    sourceCount: total.source_count,
   });
 }
 

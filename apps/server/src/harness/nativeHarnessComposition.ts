@@ -5,16 +5,23 @@ import {
   type ChatThread,
   type CodeThread,
   type ContextSubjectRef,
+  type NativeHarnessCommandHost,
   type NativeHarnessContextRemaining,
   type NativeHarnessSlotCandidate,
   type OctantMode,
   type ProjectId,
+  type ProviderExecutionPolicy,
   type ProviderInstanceId,
   type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
 import { hasKnownContextWindow } from "@octant/domain/context-policy";
 import { nativeHarnessResultTaintsThread } from "@octant/domain/untrusted-content-policy";
+import {
+  clampChildThreadEgressPolicy,
+  materializeHarnessToolNetwork,
+  resolveDefaultThreadEgressPolicy,
+} from "../process/threadEgressPolicy";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import type {
@@ -29,6 +36,7 @@ import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
 import type { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
+import type { ToolEgressCallConfirmation } from "./nativeHarnessEgressRules";
 import type { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 import { createNativeHarnessTodoPort } from "./nativeHarnessTodo";
@@ -55,6 +63,24 @@ export interface NativeHarnessCompositionOptions {
    */
   readonly offlineShell?: NativeHarnessShellPort;
   /**
+   * Code only: the sandboxed shell on `proxied` network, whose commands reach
+   * only the hosts the scope's egress rules name. With it, each command runs
+   * on the network its thread's live posture resolves: approval-gated and
+   * auto-accept-edits on `proxied`, Full access on `shell`, anything else on
+   * `offlineShell`. Without it every networked command runs on `shell`, as it
+   * did before the rules existed.
+   */
+  readonly proxiedShell?: (scope: HarnessEgressScope) => NativeHarnessShellPort;
+  /**
+   * A Code thread's access posture now, as the window running it holds it and
+   * clamped to its running turn's, or nothing for a thread that is not one.
+   * Without a window it is the stored posture clamped to the running turn's.
+   */
+  readonly readCodeExecutionPolicy?: (
+    threadId: string,
+    windowId?: string,
+  ) => ProviderExecutionPolicy | undefined;
+  /**
    * The web search a turn may use, resolved each time a turn's tools are
    * composed: its backing endpoint is a live setting, not a startup fact.
    */
@@ -75,7 +101,14 @@ export interface NativeHarnessCompositionOptions {
   readonly questions?: Pick<NativeHarnessQuestionStore, "ask">;
   /** Where each lead tool call is noted while its turn runs. */
   readonly activity?: Pick<NativeHarnessSessionStore, "noteToolCall" | "deliverSteering">;
-  readonly approvals?: Pick<NativeHarnessApprovalStore, "ask">;
+  readonly approvals?: Pick<NativeHarnessApprovalStore, "ask"> &
+    Partial<Pick<NativeHarnessApprovalStore, "askCommand">>;
+  /**
+   * The hosts a marked Code thread's command confirmation lists: its thread
+   * and Project rules, and its open proposals. Absent, a marked thread's
+   * proxied command reaches no host.
+   */
+  readonly commandHosts?: (threadId: string) => ReadonlyArray<NativeHarnessCommandHost>;
   readonly childInteractions?: (
     run: AgentRun,
   ) => Pick<NativeHarnessToolPorts, "approvals" | "askUser">;
@@ -85,6 +118,13 @@ export interface NativeHarnessCompositionOptions {
   ) => ExternalContentIngestionResult;
   readonly uuid: () => string;
   readonly clock: () => string;
+}
+
+/** Whose egress rules a proxied command runs under: a child runs under its parent's. */
+export interface HarnessEgressScope {
+  readonly threadId: string;
+  readonly projectId: string;
+  readonly parentThreadId?: string;
 }
 
 export interface NativeHarnessComposition {
@@ -205,12 +245,25 @@ export function createNativeHarnessComposition(
     providerInstanceId: thread.providerInstanceId,
     modelId: thread.modelId as never,
   });
+  /**
+   * Hosts a person confirmed for one command, held from the answer until the
+   * shell starts that command's launch, which takes them out, or until the
+   * call ends without running one (a check that stopped first). They are
+   * keyed by the call's own id, which no other call has.
+   */
+  const confirmedCommandHosts = new Map<string, ToolEgressCallConfirmation>();
+  const approvalStore = options.approvals;
   const askUserFor = (scope: {
     readonly parentThreadId: string;
     readonly mode: OctantMode;
     readonly projectId?: ProjectId | undefined;
     readonly lead: NativeHarnessSlotCandidate;
-  }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering"> => ({
+    /** The window a Code turn runs in, whose grant its commands' network follows. */
+    readonly windowId?: string;
+  }): Pick<NativeHarnessToolPorts, "askUser" | "approvals" | "steering" | "callEnded"> => ({
+    callEnded: (callId) => {
+      confirmedCommandHosts.delete(callId);
+    },
     ...(options.questions === undefined
       ? {}
       : {
@@ -225,11 +278,11 @@ export function createNativeHarnessComposition(
               signal: input.signal,
             }),
         }),
-    ...(options.approvals === undefined
+    ...(approvalStore === undefined
       ? {}
       : {
-          approvals: (input) =>
-            options.approvals!.ask({
+          approvals: async (input) => {
+            const ask = {
               threadId: scope.parentThreadId,
               mode: scope.mode,
               projectId: scope.projectId,
@@ -239,12 +292,79 @@ export function createNativeHarnessComposition(
               approvalClass: input.approvalClass,
               singleUse: input.freshConfirmation,
               signal: input.signal,
-            }),
+            };
+            // A marked thread's command that will run through the egress
+            // rules lists the hosts it may reach, so the person picks them
+            // for this one command.
+            const askCommand = approvalStore.askCommand;
+            if (
+              !input.freshConfirmation ||
+              scope.mode !== "code" ||
+              (input.toolName !== "bash" && input.toolName !== "goal-check") ||
+              askCommand === undefined ||
+              options.commandHosts === undefined ||
+              options.proxiedShell === undefined ||
+              materializeHarnessToolNetwork(codeEgress(scope.parentThreadId, scope.windowId)) !==
+                "proxied"
+            ) {
+              return approvalStore.ask(ask);
+            }
+            const answered = await askCommand.call(approvalStore, {
+              ...ask,
+              commandHosts: options.commandHosts(scope.parentThreadId),
+            });
+            if (answered.outcome === "approved" && answered.confirmed !== undefined) {
+              confirmedCommandHosts.set(input.callId, answered.confirmed);
+            }
+            return answered.outcome;
+          },
         }),
     ...(options.activity === undefined
       ? {}
       : { steering: () => options.activity!.deliverSteering(scope.parentThreadId) }),
   });
+  const unavailableShell: NativeHarnessShellPort = {
+    run: async () => ({ status: "unavailable", output: "", truncated: false }),
+  };
+  /**
+   * The shell a command runs on, chosen when it runs from the egress the
+   * posture resolves then, so a posture changed mid-turn applies to the next
+   * command. A posture that cannot be read runs offline; `proxied` never
+   * falls back to open network.
+   */
+  const postureShell = (
+    proxied: NativeHarnessShellPort,
+    resolveEgress: () => ReturnType<typeof resolveDefaultThreadEgressPolicy>,
+  ): NativeHarnessShellPort => ({
+    run: (input) => {
+      const network = materializeHarnessToolNetwork(resolveEgress());
+      // Taken whatever network the command runs on, so a confirmation is
+      // used by its own command or by none.
+      const confirmed =
+        input.callId === undefined ? undefined : confirmedCommandHosts.get(input.callId);
+      if (input.callId !== undefined) confirmedCommandHosts.delete(input.callId);
+      if (network === "proxied") {
+        return proxied.run(
+          confirmed === undefined ? input : { ...input, confirmedHosts: confirmed },
+        );
+      }
+      const shell = network === "allow" ? options.shell : options.offlineShell;
+      return (shell ?? unavailableShell).run(input);
+    },
+  });
+  const codeEgress = (threadId: string, windowId?: string) => {
+    const executionPolicy = options.readCodeExecutionPolicy?.(threadId, windowId);
+    return executionPolicy === undefined
+      ? "none"
+      : resolveDefaultThreadEgressPolicy({ mode: "code", executionPolicy });
+  };
+  const codeShell = (
+    scope: HarnessEgressScope,
+    windowId: string,
+  ): NativeHarnessShellPort | undefined =>
+    options.proxiedShell === undefined
+      ? options.shell
+      : postureShell(options.proxiedShell(scope), () => codeEgress(scope.threadId, windowId));
   const delegateFor = (scope: {
     readonly parentThreadId: string;
     readonly windowId: string;
@@ -318,6 +438,7 @@ export function createNativeHarnessComposition(
     forCode: ({ thread, checkoutRoot, windowId }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
+      const shell = codeShell({ threadId, projectId: String(thread.projectId) }, windowId);
       return compose({
         threadId,
         mode: "code",
@@ -335,9 +456,10 @@ export function createNativeHarnessComposition(
             mode: "code",
             projectId: thread.projectId,
             lead: leadOf(thread),
+            windowId,
           }),
           filesystem: new NativeHarnessFileSystem({ root: checkoutRoot }),
-          ...(options.shell === undefined ? {} : { shell: options.shell }),
+          ...(shell === undefined ? {} : { shell }),
           ...webPorts(),
         },
       });
@@ -371,8 +493,32 @@ export function createNativeHarnessComposition(
         }),
       });
       // A child without network authority must not reach it through a command
-      // either, so its shell is the one whose sandbox closes the network.
-      const shell = authority.network ? options.shell : options.offlineShell;
+      // either, so its shell is the one whose sandbox closes the network. A
+      // child with it is never wider than its parent's posture now, and on
+      // `proxied` it runs under its parent's rules.
+      const parentThreadId = String(run.parentThreadId);
+      const shell = !authority.network
+        ? options.offlineShell
+        : options.proxiedShell === undefined
+          ? options.shell
+          : projectId === undefined
+            ? unavailableShell
+            : postureShell(
+                options.proxiedShell({
+                  threadId: runId,
+                  projectId: String(projectId),
+                  parentThreadId,
+                }),
+                () =>
+                  clampChildThreadEgressPolicy({
+                    parent: codeEgress(parentThreadId),
+                    childNetworkAuthority: true,
+                    requested: resolveDefaultThreadEgressPolicy({
+                      mode: "code",
+                      executionPolicy: authority.executionPolicy,
+                    }),
+                  }),
+              );
       const tools = createNativeHarnessTools({
         threadId: runId,
         mode,

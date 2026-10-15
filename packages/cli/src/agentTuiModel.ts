@@ -1,7 +1,13 @@
-import type { NativeHarnessSessionView, ThreadGoal } from "@octant/contracts";
+import type {
+  ApprovalOutsideContent,
+  NativeHarnessSessionView,
+  ThreadGoal,
+} from "@octant/contracts";
 import type { AgentThreadSnapshot } from "./agentThread";
 import { BUILT_IN_THEME_PRESET_IDS, resolveThemePresetTokens } from "@octant/theme";
 import {
+  APPROVAL_OUTSIDE_CONTENT_REASON,
+  describeSource,
   nativeHarnessStatusLabel,
   harnessRetryStatusText,
   sessionStatsInputOf,
@@ -272,4 +278,21 @@ export function describeAgentGoal(goal: ThreadGoal): string {
 /** A checkpoint's default name: when it was marked, to the minute. */
 export function defaultCheckpointLabel(now: Date = new Date()): string {
   return `Checkpoint ${now.toISOString().slice(0, 16).replace("T", " ")}`;
+}
+
+/**
+ * The outside content note for the approval panel, which cannot scroll: a
+ * taller panel is clipped while y still answers it. Sources run together on
+ * wrapped lines, not one per row, so the panel stays short for the eight the
+ * host may name. Times are left to the plain prompt and `--json`.
+ */
+export function approvalPanelOutsideContent(outsideContent: ApprovalOutsideContent): string {
+  const named = outsideContent.sources.map(
+    (source) => `${describeSource(source.sourceLabel)} (${source.ingestionCount}x)`,
+  );
+  const unnamed = outsideContent.sourceCount - outsideContent.sources.length;
+  const more = unnamed <= 0 ? [] : [`and ${unnamed} more`];
+  return [APPROVAL_OUTSIDE_CONTENT_REASON, [...named, ...more].join(" · ")]
+    .filter((line) => line !== "")
+    .join("\n");
 }

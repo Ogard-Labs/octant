@@ -1,3 +1,4 @@
+import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ProviderContextBreakdown } from "@octant/contracts";
 import type { ContextEntryId } from "@octant/contracts/context";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
@@ -10,6 +11,8 @@ import type { SessionCompactionController } from "./useSessionCompaction";
 /** The thread's Compact session control, as the host answered it, and the names it shows. */
 export interface ComposerCompaction {
   readonly controller: SessionCompactionController;
+  /** Reads any thread's compaction state, so a pane that is not active still shows its own. */
+  readonly client?: ContextClient;
   readonly names: CompactionNames;
 }
 

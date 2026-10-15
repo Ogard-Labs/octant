@@ -39,6 +39,11 @@ export function gestureFrom(
   up: PointerSample,
   drawn: DrawnScreen,
   screen: { readonly width: number; readonly height: number },
+  /**
+   * The drawn picture is the device's frame turned a quarter clockwise, so a
+   * point on it is turned back into the frame's own pixel space.
+   */
+  turned = false,
 ): SimulatorGesture | undefined {
   if (drawn.width <= 0 || drawn.height <= 0) return undefined;
   const inside =
@@ -48,10 +53,14 @@ export function gestureFrom(
     down.y <= drawn.top + drawn.height;
   // A press that began beside the screen was not a touch on the device.
   if (!inside) return undefined;
-  const onDevice = (sample: PointerSample): DevicePoint => ({
-    x: Math.round((clamp(sample.x - drawn.left, 0, drawn.width) / drawn.width) * screen.width),
-    y: Math.round((clamp(sample.y - drawn.top, 0, drawn.height) / drawn.height) * screen.height),
-  });
+  const onDevice = (sample: PointerSample): DevicePoint => {
+    const across = clamp(sample.x - drawn.left, 0, drawn.width) / drawn.width;
+    const down = clamp(sample.y - drawn.top, 0, drawn.height) / drawn.height;
+    // A frame turned a quarter clockwise puts its top edge on the right, so
+    // the frame's x runs down the picture and its y runs from the right edge.
+    const [x, y] = turned ? [down, 1 - across] : [across, down];
+    return { x: Math.round(x * screen.width), y: Math.round(y * screen.height) };
+  };
   if (Math.hypot(up.x - down.x, up.y - down.y) < TAP_SLOP_PX) {
     return { kind: "tap", point: onDevice(down) };
   }

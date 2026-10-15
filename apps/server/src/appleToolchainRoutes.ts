@@ -3,6 +3,7 @@ import {
   decodeAppleRpcEnvelope,
   decodeAppleRuntimeSnapshot,
   decodeAppleScreenStreamRequest,
+  SIMULATOR_ORIENTATION_HEADER,
   SIMULATOR_SCREEN_HEADER,
   type AppleActionRequest,
   type AppleAuthorityScopeRequest,
@@ -289,10 +290,13 @@ async function handleScreenStreamRequest(input: {
     status: 200,
     headers: {
       ...corsHeaders(input.origin),
-      "access-control-expose-headers": SIMULATOR_SCREEN_HEADER,
+      "access-control-expose-headers": `${SIMULATOR_SCREEN_HEADER}, ${SIMULATOR_ORIENTATION_HEADER}`,
       "cache-control": "no-store",
       "content-type": "application/octet-stream",
       [SIMULATOR_SCREEN_HEADER]: `${watch.screen.width}x${watch.screen.height}`,
+      ...(watch.orientation === undefined
+        ? {}
+        : { [SIMULATOR_ORIENTATION_HEADER]: watch.orientation }),
     },
   });
 }

@@ -121,11 +121,17 @@ export async function decideMobileNativeHarnessApproval(input: {
   readonly threadId: string;
   readonly approvalId: string;
   readonly decision: "approve" | "approve-always" | "deny";
+  /** The listed hosts the person lets this one command reach. */
+  readonly commandHosts?: ReadonlyArray<{ readonly host: string; readonly port: number }>;
 }): Promise<NativeHarnessApprovalDecisionResult | undefined> {
   const response = await input.transport.authenticatedFetch({
     method: "POST",
     path: `/api/native-harness/sessions/${encodeURIComponent(input.threadId)}/approvals`,
-    body: JSON.stringify({ approvalId: input.approvalId, decision: input.decision }),
+    body: JSON.stringify({
+      approvalId: input.approvalId,
+      decision: input.decision,
+      ...(input.commandHosts === undefined ? {} : { commandHosts: input.commandHosts }),
+    }),
     contentType: "application/json",
   });
   try {

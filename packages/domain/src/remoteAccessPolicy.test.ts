@@ -235,6 +235,7 @@ describe("remote access policy", () => {
         "chat.send-turn",
         "code.create-thread",
         "project.overview.read",
+        "extension.tool-call.answer-once",
         "usage.spend-ceiling.read",
       ]),
     );

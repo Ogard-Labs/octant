@@ -5,7 +5,8 @@ import {
   OPENAI_IMAGE_MODEL_PRESETS,
   type ProviderInstance,
 } from "@octant/contracts";
-import { useRef, type ReactNode, type RefObject } from "react";
+import { normalizeOpenAiCompatibleBaseUrl } from "@octant/domain";
+import { useRef, useState, type ReactNode, type RefObject } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
@@ -277,6 +278,67 @@ export function GeminiImageFields(props: {
   );
 }
 
+/**
+ * An optional proxy or regional endpoint for a profile that calls its
+ * provider's own API by default. The host deletes the stored key when this
+ * address changes, so a key entered for one server never reaches another;
+ * say so before Save, as the endpoint forms do.
+ */
+function ImageBaseUrlField(props: {
+  readonly instance?: { readonly id: string; readonly displayName: string };
+  readonly savedBaseUrl: string | undefined;
+  readonly placeholder: string;
+}) {
+  const saved = props.savedBaseUrl ?? "";
+  const [value, setValue] = useState(saved);
+  const noteId =
+    props.instance === undefined ? undefined : `image-base-url-key-note-${props.instance.id}`;
+  const changed = props.instance !== undefined && !sameImageAddress(value, saved);
+  return (
+    <>
+      <ProviderField
+        label="Base URL (optional)"
+        settingId={
+          props.instance === undefined ? undefined : `provider-${props.instance.id}-base-url`
+        }
+      >
+        <OctantInput
+          {...(changed && noteId !== undefined ? { "aria-describedby": noteId } : {})}
+          aria-label={
+            props.instance === undefined ? "Base URL" : `Base URL for ${props.instance.displayName}`
+          }
+          className="settings-view__text-input window-no-drag"
+          name="baseUrl"
+          onChange={(event) => setValue(event.currentTarget.value)}
+          placeholder={props.placeholder}
+          spellCheck={false}
+          type="url"
+          value={value}
+        />
+      </ProviderField>
+      {changed ? (
+        <p className="provider-settings__field-guidance" id={noteId} role="status">
+          Saving a different address removes this profile&apos;s stored API key, so it is never sent
+          to the new server. Enter the key again to keep using the profile.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/** Blank means the provider's own endpoint; spellings the host normalises alike match. */
+function sameImageAddress(entered: string, saved: string): boolean {
+  const left = entered.trim();
+  const right = saved.trim();
+  if (left === right) return true;
+  if (left.length === 0 || right.length === 0) return false;
+  try {
+    return normalizeOpenAiCompatibleBaseUrl(left) === normalizeOpenAiCompatibleBaseUrl(right);
+  } catch {
+    return false;
+  }
+}
+
 export function BflImageFields(props: {
   readonly credentialInput: RefObject<HTMLInputElement | null>;
   readonly credentialManagementAvailable: boolean;
@@ -322,6 +384,11 @@ export function BflImageFields(props: {
           required
         />
       </ProviderField>
+      <ImageBaseUrlField
+        {...(props.instance === undefined ? {} : { instance: props.instance })}
+        placeholder="https://api.bfl.ai"
+        savedBaseUrl={configuration?.baseUrl}
+      />
       <ProviderField
         label={props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
         settingId={settingId("api-key")}
@@ -342,7 +409,8 @@ export function BflImageFields(props: {
       <p className="provider-settings__field-guidance">
         Suggested models are data, not a catalog Octant maintains:{" "}
         {BFL_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. The API key is stored write-only
-        in Keychain. This profile has no editable base URL, quality, or size — Black Forest Labs
+        in Keychain. Leave the base URL blank to call Black Forest Labs directly, or enter a proxy
+        (HTTPS, or HTTP on this Mac). This profile has no quality or size — Black Forest Labs
         generates one image per request with its own defaults.
       </p>
       {!props.credentialManagementAvailable ? (
@@ -400,6 +468,11 @@ export function IdeogramImageFields(props: {
           required
         />
       </ProviderField>
+      <ImageBaseUrlField
+        {...(props.instance === undefined ? {} : { instance: props.instance })}
+        placeholder="https://api.ideogram.ai"
+        savedBaseUrl={configuration?.baseUrl}
+      />
       <ProviderField
         label={props.instance === undefined ? "API key" : "API key (leave blank to preserve)"}
         settingId={settingId("api-key")}
@@ -420,8 +493,9 @@ export function IdeogramImageFields(props: {
       <p className="provider-settings__field-guidance">
         Suggested models are data, not a catalog Octant maintains:{" "}
         {IDEOGRAM_IMAGE_MODEL_PRESETS.join(", ")}. Enter any model IDs. The API key is stored
-        write-only in Keychain. This profile has no editable base URL, rendering speed, or aspect
-        ratio — Ideogram generates images with its own defaults.
+        write-only in Keychain. Leave the base URL blank to call Ideogram directly, or enter a proxy
+        (HTTPS, or HTTP on this Mac). This profile has no rendering speed or aspect ratio — Ideogram
+        generates images with its own defaults.
       </p>
       {!props.credentialManagementAvailable ? (
         <p className="provider-settings__field-guidance">
@@ -594,16 +668,23 @@ export function BflImageConfigurationForm(props: BflImageConfigurationFormProps)
         event.preventDefault();
         const configuration = bflImageConfigurationFrom(new FormData(event.currentTarget));
         const enteredCredential = transientCredential(credentialInput.current);
-        const generation =
-          enteredCredential.value.length > 0 ? props.credential.beginMutation() : undefined;
+        const keyEntered = enteredCredential.value.length > 0;
+        // The host deletes the stored key when the address moves, so a save
+        // without a new key ends with no key stored.
+        const moved = !sameImageAddress(
+          configuration.baseUrl ?? "",
+          props.instance.configuration.baseUrl ?? "",
+        );
+        const successStatus = keyEntered ? "stored" : "missing";
+        const generation = keyEntered || moved ? props.credential.beginMutation() : undefined;
         void props.onChange(props.instance.id, configuration, enteredCredential).then(
           (updated) => {
             if (generation !== undefined)
-              props.credential.finishMutation(generation, updated, "stored");
+              props.credential.finishMutation(generation, updated, successStatus);
           },
           () => {
             if (generation !== undefined)
-              props.credential.finishMutation(generation, false, "stored");
+              props.credential.finishMutation(generation, false, successStatus);
           },
         );
       }}
@@ -665,16 +746,23 @@ export function IdeogramImageConfigurationForm(props: IdeogramImageConfiguration
         event.preventDefault();
         const configuration = ideogramImageConfigurationFrom(new FormData(event.currentTarget));
         const enteredCredential = transientCredential(credentialInput.current);
-        const generation =
-          enteredCredential.value.length > 0 ? props.credential.beginMutation() : undefined;
+        const keyEntered = enteredCredential.value.length > 0;
+        // The host deletes the stored key when the address moves, so a save
+        // without a new key ends with no key stored.
+        const moved = !sameImageAddress(
+          configuration.baseUrl ?? "",
+          props.instance.configuration.baseUrl ?? "",
+        );
+        const successStatus = keyEntered ? "stored" : "missing";
+        const generation = keyEntered || moved ? props.credential.beginMutation() : undefined;
         void props.onChange(props.instance.id, configuration, enteredCredential).then(
           (updated) => {
             if (generation !== undefined)
-              props.credential.finishMutation(generation, updated, "stored");
+              props.credential.finishMutation(generation, updated, successStatus);
           },
           () => {
             if (generation !== undefined)
-              props.credential.finishMutation(generation, false, "stored");
+              props.credential.finishMutation(generation, false, successStatus);
           },
         );
       }}

@@ -6,6 +6,11 @@ export interface OctantApprovalCardProps {
   readonly label: string;
   readonly summary: ReactNode;
   readonly detail?: ReactNode;
+  /**
+   * What a person should read before answering, placed ahead of the answer
+   * controls in both layout and reading order.
+   */
+  readonly context?: ReactNode;
   readonly actions: ReactNode;
   readonly error?: string | undefined;
   readonly children?: ReactNode;
@@ -26,6 +31,7 @@ export function OctantApprovalCard(props: OctantApprovalCardProps) {
           <span className="approval-row__detail">{props.detail}</span>
         )}
       </span>
+      {props.context}
       <div className="approval-row__actions">{props.actions}</div>
       {props.children}
       {props.error === undefined ? null : (
