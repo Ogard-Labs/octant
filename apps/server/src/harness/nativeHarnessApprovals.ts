@@ -1,5 +1,6 @@
 import {
   decodeNativeHarnessApproval,
+  type ApprovalOutsideContent,
   decodeNativeHarnessApprovalId,
   decodeUtcTimestamp,
   type NativeHarnessApproval,
@@ -47,6 +48,11 @@ export interface NativeHarnessApprovalStoreOptions {
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly timeoutMs?: number;
+  /**
+   * The sources that marked a thread, read when its own single-use approval
+   * is asked so the prompt can say why it asks and what the thread read.
+   */
+  readonly outsideContent?: (threadId: string) => ApprovalOutsideContent | undefined;
   readonly onAsked?: (input: {
     readonly threadId: string;
     readonly mode: OctantMode;
@@ -120,6 +126,7 @@ export class NativeHarnessApprovalStore {
         : {}),
       approvalClass: input.approvalClass,
       ...(singleUse ? { singleUse: true } : {}),
+      ...this.#outsideContentFor(input.threadId, singleUse && input.source === undefined),
       status: "pending",
       askedAt,
     });
@@ -159,6 +166,15 @@ export class NativeHarnessApprovalStore {
       }
       input.signal?.addEventListener("abort", waiter.onAbort, { once: true });
     });
+  }
+
+  #outsideContentFor(
+    threadId: string,
+    named: boolean,
+  ): { readonly outsideContent?: ApprovalOutsideContent } {
+    if (!named) return {};
+    const outsideContent = this.#options.outsideContent?.(threadId);
+    return outsideContent === undefined ? {} : { outsideContent };
   }
 
   /**

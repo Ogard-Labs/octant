@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampChildThreadEgressPolicy,
+  materializeHarnessToolNetwork,
   materializeOsNetworkEgress,
   resolveDefaultThreadEgressPolicy,
   resolveProviderRuntimeEgressPolicy,
@@ -180,5 +181,13 @@ describe("thread egress policy", () => {
         expect(rank[clamped]).toBeLessThanOrEqual(rank[requested]);
       }
     }
+  });
+
+  it("puts a harness command on provider-endpoints-only threads behind the egress proxy", () => {
+    expect(materializeHarnessToolNetwork("none")).toBe("none");
+    expect(materializeHarnessToolNetwork("provider-endpoints-only")).toBe("proxied");
+    expect(materializeHarnessToolNetwork("unrestricted")).toBe("allow");
+    // Provider runtimes keep open network: their inference shares the process.
+    expect(materializeOsNetworkEgress("provider-endpoints-only")).toBe("allow");
   });
 });

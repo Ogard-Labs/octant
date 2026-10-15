@@ -55,8 +55,20 @@ import {
 } from "../privateListener.test-certs";
 import type { RequestTransportFacts, Serve } from "../server";
 import { createRemoteGateway, type RemoteGateway } from "./remoteGateway";
-import { RemoteServerGrantService } from "./remoteServerGrantService";
+import {
+  RemoteServerGrantService,
+  type RemoteServerSocketLimits,
+} from "./remoteServerGrantService";
+import {
+  WebSocketEndpoint,
+  newWebSocketKey,
+  takeWebSocketUpgrade,
+  webSocketAcceptFor,
+  type WebSocketMessage,
+  type WebSocketPeerEvents,
+} from "../webSocketRelay";
 import { createSelfMadeListenerCertificateStore } from "./selfMadeListenerCertificate";
+import { digestRemoteServerProxySessionId } from "./remoteServerProxySessions";
 
 // The pairing lifecycle the gateway builds, captured so the harness can create
 // and approve tickets the way the host's local device panel does.
@@ -90,8 +102,11 @@ const PROXY_COOKIE = "__Secure-octant-server-proxy-session";
 const PRODUCT_COOKIE = "__Secure-octant-remote-session";
 const directories: string[] = [];
 const devServers: Server[] = [];
+/** Sockets a dev server upgraded, which closing the server does not reach. */
+const upgradedSockets: Socket[] = [];
 
 afterEach(async () => {
+  for (const socket of upgradedSockets.splice(0)) socket.destroy();
   for (const server of devServers.splice(0)) {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -124,7 +139,12 @@ interface Harness {
   hold: Promise<void> | undefined;
 }
 
-async function setup(options: { readonly idleTimeoutMs?: number } = {}): Promise<Harness> {
+async function setup(
+  options: {
+    readonly idleTimeoutMs?: number;
+    readonly socketLimits?: Partial<RemoteServerSocketLimits>;
+  } = {},
+): Promise<Harness> {
   const directory = mkdtempSync(join(tmpdir(), "octant-server-proxy-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "store.sqlite3"));
@@ -189,6 +209,7 @@ async function setup(options: { readonly idleTimeoutMs?: number } = {}): Promise
     ...(options.idleTimeoutMs === undefined
       ? {}
       : { relayLimits: { idleTimeoutMs: options.idleTimeoutMs } }),
+    ...(options.socketLimits === undefined ? {} : { socketLimits: options.socketLimits }),
   });
 
   const { serve, getFetch } = createCapturingServe();
@@ -241,7 +262,23 @@ async function setup(options: { readonly idleTimeoutMs?: number } = {}): Promise
           stillAuthorized: input.stillAuthorized,
           signal: input.signal,
         }),
+      relayUpgrade: (input) =>
+        grants.relayUpgrade({
+          principal: {
+            deviceId: String(input.principal.deviceId),
+            credentialGeneration: input.principal.credentialGeneration,
+            sessionIdDigest: input.sessionIdDigest,
+            origin: input.principal.origin,
+          },
+          scopeId: decodeWindowId(String(input.principal.deviceId)),
+          grantId: input.grantId,
+          pathQuery: input.pathQuery,
+          headers: input.headers,
+          stillAuthorized: input.stillAuthorized,
+          signal: input.signal,
+        }),
       closeSession: (digest, reason) => grants.closeSession(digest, reason),
+      holdsOpenSockets: (digest) => grants.holdsOpenSockets(digest),
     },
     serve,
     now: () => nowMs,
@@ -916,8 +953,6 @@ interface DevServer {
   }>;
   /** Sockets the dev server accepted, so a case can see the host close one. */
   readonly sockets: Socket[];
-  /** Upgrade requests the dev server received, and answered like a hot-reload socket. */
-  readonly upgrades: string[];
 }
 
 type DevHandler = (request: IncomingMessage, response: ServerResponse) => void;
@@ -942,23 +977,13 @@ async function devServer(
       handle(request, response);
     });
   };
-  const upgrades: string[] = [];
   const server = tls === undefined ? createHttpServer(listener) : createHttpsServer(tls, listener);
-  server.on("upgrade", (request: IncomingMessage, socket: Socket) => {
-    upgrades.push(request.url ?? "");
-    const accept = createHash("sha1")
-      .update(`${String(request.headers["sec-websocket-key"])}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
-      .digest("base64");
-    socket.write(
-      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
-    );
-  });
   server.on(tls === undefined ? "connection" : "secureConnection", (socket: Socket) =>
     sockets.push(socket),
   );
   devServers.push(server);
   await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", () => resolve()));
-  return { port: (server.address() as AddressInfo).port, requests, sockets, upgrades };
+  return { port: (server.address() as AddressInfo).port, requests, sockets };
 }
 
 function listedAt(index: number, server: { readonly port: number }, scheme = "http") {
@@ -1387,32 +1412,6 @@ describe("relay from a paired device to its granted dev server", () => {
     expect(harness.grants.openCount()).toBe(1);
   });
 
-  it("does not carry a hot-reload WebSocket: a dev server that would accept the upgrade never sees it", async () => {
-    const harness = await setup();
-    const server = await devServer((_request, response) => response.end("dev"));
-    harness.targets.set(listenerKey(1), listedAt(1, server));
-    const proxy = await session(harness, await pair(harness), "server-proxy");
-    const grantId = await grantTo(harness, proxy, 1);
-    const upgrade = await call(
-      harness,
-      relayRequest(proxy, grantId, {
-        path: "/hmr",
-        headers: {
-          upgrade: "websocket",
-          connection: "Upgrade",
-          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
-          "sec-websocket-version": "13",
-          "sec-websocket-protocol": "vite-hmr",
-        },
-      }),
-    );
-    expect(upgrade.status).toBe(501);
-    expect(refusalReason(upgrade)).toBe("upgrade-refused");
-    expect(server.requests).toHaveLength(0);
-    expect(server.upgrades).toEqual([]);
-    expect(harness.grants.openCount()).toBe(1);
-  });
-
   it("reads at most 4 KiB of a proxy request without a live session, and few at once per source", async () => {
     const harness = await setup();
     const server = await devServer((_request, response) => response.end("stored"));
@@ -1604,3 +1603,333 @@ describe("relay from a paired device to its granted dev server", () => {
     expect(closedReasons(harness.connection)).toEqual(["server-changed-hands"]);
   });
 });
+
+interface WebSocketDevServer {
+  readonly port: number;
+  /** Each upgrade the dev server received: its path and headers. */
+  readonly upgrades: Array<{ readonly url: string; readonly headers: IncomingHttpHeaders }>;
+  /** Each accepted socket's closing code, once it closed. */
+  readonly closes: number[];
+  /** Messages the dev server should send once a socket opens. */
+  greeting?: WebSocketMessage;
+}
+
+/**
+ * A dev server that accepts WebSocket upgrades (choosing the first subprotocol
+ * offered) and echoes every message, or declines them with 404.
+ */
+async function webSocketDevServer(options: { readonly decline?: boolean } = {}) {
+  const server = createHttpServer((_request, response) => response.end("dev"));
+  const state: WebSocketDevServer = { port: 0, upgrades: [], closes: [] };
+  server.on("upgrade", (request: IncomingMessage, socket: Socket, head: Buffer) => {
+    state.upgrades.push({ url: request.url ?? "", headers: request.headers });
+    upgradedSockets.push(socket);
+    if (options.decline === true) {
+      socket.end("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n");
+      return;
+    }
+    const protocol = String(request.headers["sec-websocket-protocol"] ?? "")
+      .split(",")[0]
+      ?.trim();
+    socket.write(
+      [
+        "HTTP/1.1 101 Switching Protocols",
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        `Sec-WebSocket-Accept: ${webSocketAcceptFor(String(request.headers["sec-websocket-key"]))}`,
+        ...(protocol === undefined || protocol === ""
+          ? []
+          : [`Sec-WebSocket-Protocol: ${protocol}`]),
+        "",
+        "",
+      ].join("\r\n"),
+    );
+    const endpoint = new WebSocketEndpoint(socket, "server", 64 * 1024 * 1024);
+    endpoint.start(
+      {
+        message: (message) => endpoint.send(message),
+        closed: (code) => state.closes.push(code),
+      },
+      head,
+    );
+    if (state.greeting !== undefined) endpoint.send(state.greeting);
+  });
+  devServers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  return Object.assign(state, { port: (server.address() as AddressInfo).port });
+}
+
+/** The page's end of a relayed socket, as the listener's transport would drive it. */
+function pageSocket() {
+  const received: WebSocketMessage[] = [];
+  const closes: Array<readonly [number, string]> = [];
+  return {
+    received,
+    closes,
+    peer: {
+      send: (message: WebSocketMessage) => received.push(message),
+      close: (code: number, reason: string) => closes.push([code, reason]),
+    },
+  };
+}
+
+function upgradeRequest(
+  proxy: Session,
+  grantId: string,
+  init: { readonly path?: string; readonly headers?: Record<string, string> } = {},
+) {
+  return relayRequest(proxy, grantId, {
+    ...(init.path === undefined ? {} : { path: init.path }),
+    headers: {
+      upgrade: "websocket",
+      connection: "Upgrade",
+      "sec-websocket-key": newWebSocketKey(),
+      "sec-websocket-version": "13",
+      ...init.headers,
+    },
+  });
+}
+
+async function openSocket(
+  harness: Harness,
+  proxy: Session,
+  grantId: string,
+  init: Parameters<typeof upgradeRequest>[2] = {},
+) {
+  const response = await send(harness, upgradeRequest(proxy, grantId, init));
+  const acceptance = takeWebSocketUpgrade(response);
+  if (acceptance === undefined) throw new Error(`upgrade answered ${response.status}`);
+  const page = pageSocket();
+  const events: WebSocketPeerEvents = acceptance.open(page.peer);
+  return { acceptance, page, events };
+}
+
+function text(value: string): WebSocketMessage {
+  return { text: true, data: new TextEncoder().encode(value) };
+}
+
+function texts(messages: ReadonlyArray<WebSocketMessage>): string[] {
+  return messages.map((message) => new TextDecoder().decode(message.data));
+}
+
+describe("WebSocket upgrade on the proxy route", () => {
+  it("relays a WebSocket both ways under a grant, with the subprotocol the dev server chose", async () => {
+    const harness = await setup();
+    const server = await webSocketDevServer();
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const { acceptance, page, events } = await openSocket(harness, proxy, grantId, {
+      path: "/hmr?token=1",
+      headers: {
+        "sec-websocket-protocol": "vite-hmr, vite-ping",
+        "sec-websocket-extensions": "permessage-deflate",
+        cookie: `${PROXY_COOKIE}=${proxy.sessionId}; page=kept`,
+      },
+    });
+    expect(acceptance.protocol).toBe("vite-hmr");
+    events.message(text("hello"));
+    events.message({ text: false, data: Uint8Array.from([1, 2, 3]) });
+    await vi.waitFor(() => expect(page.received).toHaveLength(2));
+    expect(texts(page.received.slice(0, 1))).toEqual(["hello"]);
+    expect(page.received[1]?.text).toBe(false);
+    expect(Array.from(page.received[1]?.data ?? [])).toEqual([1, 2, 3]);
+
+    const upgrade = server.upgrades[0]!;
+    expect(upgrade.url).toBe("/hmr?token=1");
+    expect(upgrade.headers.host).toBe(`localhost:${server.port}`);
+    expect(upgrade.headers.origin).toBe(`http://localhost:${server.port}`);
+    expect(upgrade.headers.cookie).toBe("page=kept");
+    expect(upgrade.headers["sec-websocket-extensions"]).toBeUndefined();
+    expect(upgrade.headers["x-octant-device-proof"]).toBeUndefined();
+
+    events.closed(1000, "done");
+    await vi.waitFor(() => expect(server.closes).toEqual([1000]));
+    expect(harness.grants.holdsOpenSockets(digestOf(proxy))).toBe(false);
+  });
+
+  it("refuses an upgrade with no grant, a closed grant, another device's grant, or no proxy session", async () => {
+    const harness = await setup();
+    const server = await webSocketDevServer();
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    harness.targets.set(listenerKey(2), listedAt(2, server));
+    const owner = await session(harness, await pair(harness, "source-owner"), "server-proxy");
+    const other = await session(harness, await pair(harness, "source-other"), "server-proxy");
+    const grantId = await grantTo(harness, owner, 1);
+
+    const invented = await send(harness, upgradeRequest(owner, `rsg_${"0".repeat(64)}`));
+    expect(invented.status).toBe(404);
+    expect(takeWebSocketUpgrade(invented)).toBeUndefined();
+
+    const borrowed = await send(harness, upgradeRequest(other, grantId));
+    expect(borrowed.status).toBe(404);
+    expect(takeWebSocketUpgrade(borrowed)).toBeUndefined();
+
+    const product = await session(harness, owner.paired, "product");
+    const productSession = await send(harness, upgradeRequest(product, grantId));
+    expect(productSession.status).toBe(401);
+    expect(takeWebSocketUpgrade(productSession)).toBeUndefined();
+
+    const unsigned = upgradeRequest(owner, grantId);
+    const withoutProof = await send(harness, {
+      ...unsigned,
+      headers: Object.fromEntries(
+        Object.entries(unsigned.headers).filter(([name]) => name !== "x-octant-device-proof"),
+      ),
+    });
+    expect(withoutProof.status).toBeGreaterThanOrEqual(400);
+    expect(takeWebSocketUpgrade(withoutProof)).toBeUndefined();
+
+    // A grant that has ended, here because the server exited.
+    harness.holding.value = "stopped";
+    const ended = await send(harness, upgradeRequest(owner, grantId));
+    expect(ended.status).toBe(404);
+    expect(takeWebSocketUpgrade(ended)).toBeUndefined();
+    expect(closedReasons(harness.connection)).toEqual(["server-stopped"]);
+    expect(server.upgrades).toHaveLength(0);
+  });
+
+  it("connects only to the grant's port, whatever the upgrade names", async () => {
+    const harness = await setup();
+    const elsewhere = await webSocketDevServer();
+    const server = await webSocketDevServer();
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const { events, page } = await openSocket(harness, proxy, grantId, {
+      path: `/http://127.0.0.1:${elsewhere.port}/`,
+    });
+    events.message(text("ping"));
+    await vi.waitFor(() => expect(texts(page.received)).toEqual(["ping"]));
+    expect(server.upgrades).toHaveLength(1);
+    expect(elsewhere.upgrades).toHaveLength(0);
+  });
+
+  it("closes an open WebSocket with 1008 before a revoke returns", async () => {
+    const harness = await setup();
+    const server = await webSocketDevServer();
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const paired = await pair(harness);
+    const proxy = await session(harness, paired, "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const { page } = await openSocket(harness, proxy, grantId);
+    expect(harness.grants.holdsOpenSockets(digestOf(proxy))).toBe(true);
+
+    harness.gateway.localDeviceAdministration()?.revokeDevice({ deviceId: paired.deviceId });
+    expect(page.closes).toEqual([[1008, "The grant for this server closed."]]);
+    await vi.waitFor(() => expect(server.closes).toEqual([1001]));
+    expect(closedReasons(harness.connection)).toEqual(["device-revoked"]);
+    expect((await send(harness, upgradeRequest(proxy, grantId))).status).toBe(401);
+  });
+
+  it("closes an open WebSocket when its grant closes for any other reason", async () => {
+    const harness = await setup();
+    const server = await webSocketDevServer();
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const { page } = await openSocket(harness, proxy, grantId);
+    harness.grants.closeThread(String(threadId), "thread-archived");
+    expect(page.closes).toEqual([[1008, "The grant for this server closed."]]);
+    await vi.waitFor(() => expect(server.closes).toEqual([1001]));
+  });
+
+  it("holds a grant to four sockets and a device to sixteen, answering 503 past either", async () => {
+    const harness = await setup();
+    const server = await webSocketDevServer();
+    for (let index = 1; index <= 5; index += 1) {
+      harness.targets.set(listenerKey(index), listedAt(index, server));
+    }
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grants: string[] = [];
+    for (let index = 1; index <= 5; index += 1) grants.push(await grantTo(harness, proxy, index));
+
+    const first = [];
+    for (let count = 0; count < 4; count += 1)
+      first.push(await openSocket(harness, proxy, grants[0]!));
+    const fifth = await send(harness, upgradeRequest(proxy, grants[0]!));
+    expect(fifth.status).toBe(503);
+    expect(fifth.headers.get("retry-after")).toBe("1");
+    first[0]!.events.closed(1000, "");
+    await openSocket(harness, proxy, grants[0]!);
+
+    for (const grantId of grants.slice(1, 4)) {
+      for (let count = 0; count < 4; count += 1) await openSocket(harness, proxy, grantId);
+    }
+    const seventeenth = await send(harness, upgradeRequest(proxy, grants[4]!));
+    expect(seventeenth.status).toBe(503);
+    expect(server.upgrades).toHaveLength(17);
+  });
+
+  it("closes a socket whose dev server sends a message over the cap with 1009", async () => {
+    const harness = await setup({ socketLimits: { maxMessageBytes: 1024 } });
+    const server = await webSocketDevServer();
+    server.greeting = { text: false, data: new Uint8Array(2048) };
+    harness.targets.set(listenerKey(1), listedAt(1, server));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const { page } = await openSocket(harness, proxy, grantId);
+    await vi.waitFor(() => expect(page.closes).toEqual([[1009, ""]]));
+    expect(page.received).toHaveLength(0);
+    expect(harness.grants.openCount()).toBe(1);
+  });
+
+  it("refuses an upgrade the dev server declines, and any upgrade that is not a WebSocket", async () => {
+    const harness = await setup();
+    const declining = await webSocketDevServer({ decline: true });
+    harness.targets.set(listenerKey(1), listedAt(1, declining));
+    const proxy = await session(harness, await pair(harness), "server-proxy");
+    const grantId = await grantTo(harness, proxy, 1);
+    const declined = await call(harness, upgradeRequest(proxy, grantId));
+    expect(declined.status).toBe(501);
+    expect(refusalReason(declined)).toBe("upgrade-refused");
+    expect(declining.upgrades).toHaveLength(1);
+
+    const h2c = await call(
+      harness,
+      upgradeRequest(proxy, grantId, { headers: { upgrade: "h2c" } }),
+    );
+    expect(h2c.status).toBe(501);
+    expect(refusalReason(h2c)).toBe("upgrade-refused");
+    expect(declining.upgrades).toHaveLength(1);
+    expect(harness.grants.openCount()).toBe(1);
+  });
+
+  it("never upgrades on any other route", async () => {
+    const harness = await setup();
+    const paired = await pair(harness);
+    const proxy = await session(harness, paired, "server-proxy");
+    const product = await session(harness, paired, "product");
+    const upgradeHeaders = {
+      upgrade: "websocket",
+      connection: "Upgrade",
+      "sec-websocket-key": newWebSocketKey(),
+      "sec-websocket-version": "13",
+    };
+    const withUpgrade = (request: ReturnType<typeof signed>) => ({
+      ...request,
+      headers: { ...request.headers, ...upgradeHeaders },
+    });
+    const answers = [
+      await send(
+        harness,
+        withUpgrade(signed(proxy, { path: "/api/server-proxy/grants", body: grantBody(1) })),
+      ),
+      await send(
+        harness,
+        withUpgrade(signed(product, { path: "/api/remote/auth/device", method: "GET" })),
+      ),
+      await harness.fetch(
+        new Request(`${ORIGIN}/`, {
+          headers: new Headers({ host: HOST_HEADER, ...upgradeHeaders }),
+        }),
+        facts(),
+      ),
+    ];
+    for (const answer of answers) expect(takeWebSocketUpgrade(answer)).toBeUndefined();
+  });
+});
+
+function digestOf(proxy: Session): string {
+  return digestRemoteServerProxySessionId(proxy.sessionId);
+}

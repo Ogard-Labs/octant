@@ -57,7 +57,7 @@ export type RemoteOpenOutcome =
 
 /** One line, because the page runs on this computer and its dev server does not. */
 export const REMOTE_OPEN_LIMITS =
-  "Links to localhost inside the page won't load, and live reload may not connect.";
+  "Links to localhost inside the page won't load, and a dev server with a fixed reload port can't reach live updates.";
 
 /**
  * What a row on another computer offers once this window can open a page live.

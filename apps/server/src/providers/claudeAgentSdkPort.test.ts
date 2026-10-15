@@ -231,7 +231,12 @@ describe("Claude Agent SDK port", () => {
             spawnClaudeCodeProcess: expect.any(Function),
           });
           expect(harness.spawnConfinements).toEqual([
-            { projectRoot: openInput.projectRoot, executionPolicy: openInput.executionPolicy },
+            // The sandbox grants a shell only to a launch that offers Bash.
+            {
+              projectRoot: openInput.projectRoot,
+              executionPolicy: openInput.executionPolicy,
+              runsCommands: false,
+            },
           ]);
           expect(harness.invocation?.options).not.toHaveProperty("continue");
           expect(harness.invocation?.options).not.toHaveProperty("allowedTools");
@@ -2117,6 +2122,105 @@ describe("Claude Agent SDK port", () => {
     );
 
     expect(kinds).toEqual(["initialized"]);
+  });
+
+  // Recorded from Claude Code 2.1.300 resuming a session with `/compact` as its
+  // first input; ids are the fixture's, and the frame's `unifiedWindows` is cut
+  // where the recording was.
+  const compactingStatus = {
+    type: "system",
+    subtype: "status",
+    status: "compacting",
+    session_id: "session-1",
+    uuid: "7b0dd48f-ec15-43d3-b646-66525e4ad901",
+  };
+  const rateLimitFrame = {
+    type: "rate_limit_event",
+    rate_limit_info: {
+      status: "allowed",
+      resetsAt: 1792082400,
+      rateLimitType: "five_hour",
+      overageStatus: "rejected",
+      overageDisabledReason: "org_level_disabled",
+      isUsingOverage: false,
+      unifiedWindows: { five_hour: { utilization: 0.54, resetsAt: 1792082400 } },
+    },
+    uuid: "rate-limit-1",
+    session_id: "session-1",
+  };
+
+  async function refusalOf(output: readonly unknown[]) {
+    const harness = makeHarness(output);
+    return Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          return yield* Effect.flip(Stream.runDrain(query.messages));
+        }),
+      ),
+    );
+  }
+
+  test("delivers the status and rate-limit notes a resumed compaction sends before initializing, after the initialized message", async () => {
+    const messages = await collectMessages([
+      compactingStatus,
+      rateLimitFrame,
+      safeRuntimeInitialization,
+      {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { trigger: "manual", pre_tokens: 48_000, post_tokens: 6_000 },
+        uuid: "boundary-1",
+        session_id: "session-1",
+      },
+      {
+        type: "system",
+        subtype: "status",
+        status: null,
+        compact_result: "success",
+        uuid: "status-2",
+        session_id: "session-1",
+      },
+    ]);
+
+    expect(messages.map((message) => message.kind)).toEqual([
+      "initialized",
+      "status",
+      "rate-limit",
+      "compaction",
+      "status",
+    ]);
+    expect(messages[1]).toEqual({ kind: "status", sessionId: "session-1", status: "compacting" });
+    expect(messages[2]).toMatchObject({
+      kind: "rate-limit",
+      sessionId: "session-1",
+      status: "allowed",
+      rateLimitType: "five_hour",
+    });
+  });
+
+  test("refuses a note before initialization that names another session", async () => {
+    const failed = await refusalOf([
+      { ...compactingStatus, session_id: "session-2" },
+      safeRuntimeInitialization,
+    ]);
+
+    expect(failed).toMatchObject({ category: "protocol" });
+  });
+
+  test("still refuses a message the runtime only sends once initialized", async () => {
+    const failed = await refusalOf([
+      {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { trigger: "manual", pre_tokens: 48_000 },
+        uuid: "boundary-1",
+        session_id: "session-1",
+      },
+      safeRuntimeInitialization,
+    ]);
+
+    expect(failed).toMatchObject({ category: "protocol" });
   });
 
   test.each([

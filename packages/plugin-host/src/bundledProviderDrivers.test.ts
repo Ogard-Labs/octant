@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 import { ProviderDriverKind } from "@octant/contracts/providers";
 import {
+  admittedBundledImageDriverKinds,
   admittedBundledProviderDriverKinds,
+  BUNDLED_IMAGE_DRIVER_PLUGINS,
   BUNDLED_PROVIDER_DRIVER_PLUGINS,
   bundledProviderDriverCatalog,
   bundledProviderDriverComponent,
@@ -130,5 +132,27 @@ describe("bundled provider-driver plugins", () => {
     );
     expect(listing?.installed).toBe(true);
     expect(listing?.activation).toEqual({ kind: "blocked", reason: "plugin-disabled" });
+  });
+});
+
+describe("bundled image-driver plugins", () => {
+  const imageDriverKinds = ["openai-image", "gemini-native-image", "bfl-image", "ideogram-image"];
+
+  it("admits every bundled image provider by default, apart from the chat-driver catalog", () => {
+    expect([...admittedBundledImageDriverKinds()]).toEqual(imageDriverKinds);
+    expect(
+      bundledProviderDriverCatalog().some((listing) =>
+        imageDriverKinds.includes(listing.entry.driverKind),
+      ),
+    ).toBe(false);
+    const every = [...BUNDLED_PROVIDER_DRIVER_PLUGINS, ...BUNDLED_IMAGE_DRIVER_PLUGINS];
+    expect(new Set(every.map((plugin) => plugin.manifest.digest)).size).toBe(every.length);
+    expect(new Set(every.map((plugin) => plugin.manifest.extensionId)).size).toBe(every.length);
+  });
+
+  it("stops admitting an image provider whose plugin is disabled", () => {
+    const admitted = admittedBundledImageDriverKinds({ "bfl-image": { pluginDesired: false } });
+    expect(admitted.has("bfl-image")).toBe(false);
+    expect(admitted.has("ideogram-image")).toBe(true);
   });
 });

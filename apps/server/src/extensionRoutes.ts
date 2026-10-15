@@ -22,6 +22,7 @@ import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
 import type { LocalPluginFolderRegistry } from "./extensions/localPluginFolderRegistry";
 import type { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
+import type { ExtensionToolApprovalAnswerer } from "./extensions/extensionToolApprovalService";
 
 export interface ExtensionRouteService {
   snapshot(): ExtensionSnapshot;
@@ -36,10 +37,15 @@ export function createExtensionRouteHandler(options: {
   readonly desktopBridgeSecret?: string;
   readonly localPluginFolderRegistry?: LocalPluginFolderRegistry;
   readonly localPluginImportReceipts?: LocalPluginImportReceiptStore;
+  /**
+   * MCP tool prompts, listed and answered by a local window or a paired
+   * device. The service decides which prompts each may see and answer, and
+   * refuses a paired device's request to remember an answer.
+   */
   readonly toolApprovals?: {
-    list(windowId: ReturnType<typeof decodeWindowId>): ReadonlyArray<ExtensionToolApproval>;
+    list(answerer: ExtensionToolApprovalAnswerer): ReadonlyArray<ExtensionToolApproval>;
     decide(
-      windowId: ReturnType<typeof decodeWindowId>,
+      answerer: ExtensionToolApprovalAnswerer,
       decision: ExtensionToolApprovalDecision,
     ): boolean;
   };
@@ -128,10 +134,7 @@ export function createExtensionRouteHandler(options: {
       return response(failure("invalid", "Extension API requires POST."), 405, origin);
     }
     if (url.pathname === "/api/extensions/tool-approvals") {
-      if (
-        principalContext.principal.kind !== "local-window" ||
-        options.toolApprovals === undefined
-      ) {
+      if (options.toolApprovals === undefined) {
         return response(
           failure("unauthorized", "Extension tool approval is unavailable."),
           401,
@@ -145,12 +148,12 @@ export function createExtensionRouteHandler(options: {
       if (body.kind !== "ok") {
         return response(failure("invalid", "Extension approval request is invalid."), 400, origin);
       }
+      const answerer: ExtensionToolApprovalAnswerer = {
+        kind: principalContext.principal.kind,
+        scopeId: principalContext.scopeId,
+      };
       if (hasExactKeys(body.value, ["kind"]) && body.value.kind === "list") {
-        return response(
-          options.toolApprovals.list(decodeWindowId(principalContext.principal.windowId)),
-          200,
-          origin,
-        );
+        return response(options.toolApprovals.list(answerer), 200, origin);
       }
       try {
         if (
@@ -162,10 +165,7 @@ export function createExtensionRouteHandler(options: {
         }
         const { kind: _kind, ...rawDecision } = body.value as Record<string, unknown>;
         const decision = decodeExtensionToolApprovalDecision(rawDecision);
-        const accepted = options.toolApprovals.decide(
-          decodeWindowId(principalContext.principal.windowId),
-          decision,
-        );
+        const accepted = options.toolApprovals.decide(answerer, decision);
         return response({ accepted }, accepted ? 200 : 409, origin);
       } catch {
         return response(failure("invalid", "Extension approval decision is invalid."), 400, origin);

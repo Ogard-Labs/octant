@@ -103,6 +103,8 @@ const SERVER_PROXY_SWEEP_INTERVAL_MS = 60_000;
  */
 export interface RemoteServerGrantGatewayPort extends RemoteServerProxyGrantPort {
   readonly closeSession: (sessionIdDigest: string, reason: RemoteServerGrantCloseReason) => void;
+  /** Whether a proxy session has a relayed WebSocket open, which keeps it from idling out. */
+  readonly holdsOpenSockets: (sessionIdDigest: string) => boolean;
 }
 
 /**
@@ -510,6 +512,8 @@ function assembleServices(
           uuid,
           onSessionEnded: (ended) =>
             remoteServerGrants.closeSession(ended.sessionIdDigest, ended.reason),
+          holdsOpenSockets: (sessionIdDigest) =>
+            remoteServerGrants.holdsOpenSockets(sessionIdDigest),
         });
 
   // Credential lifecycle service — sign-out/rotate/revoke with session
