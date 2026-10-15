@@ -2,10 +2,14 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { Schema } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  CommittedAppend,
   REMOTE_SERVER_GRANT_CLOSED,
   REMOTE_SERVER_GRANT_OPENED,
+  THREAD_RETENTION_EVENT_NAMES,
+  decodeCodeThread,
   decodeCodeThreadId,
   decodeEventActor,
   decodeRemoteServerGrantRequest,
@@ -108,6 +112,8 @@ interface Harness {
   readonly threads: Map<string, Pick<CodeThread, "lifecycle" | "executionPolicy">>;
   readonly readable: Set<string>;
   readonly observed: RemoteServerGrantSource[];
+  /** While set, observation and the thread read wait for it; `throwOnRead` makes the read fail. */
+  readonly gates: { observe?: Promise<void>; canOpen?: Promise<void>; throwOnRead?: boolean };
 }
 
 function setup(
@@ -135,12 +141,18 @@ function setup(
   const readable = new Set<string>([String(threadId), String(otherThreadId)]);
   const observed: RemoteServerGrantSource[] = [];
   const conn = connection;
+  const gates: Harness["gates"] = {};
   const grants = new RemoteServerGrantService({
     observeTarget: async (_scope, source) => {
       observed.push(source);
+      if (gates.observe !== undefined) await gates.observe;
       return targets.get(String(source.listenerId)) ?? { status: "not-listed" };
     },
-    canOpenThread: async (_scope, id) => readable.has(String(id)),
+    canOpenThread: async (_scope, id) => {
+      if (gates.canOpen !== undefined) await gates.canOpen;
+      if (gates.throwOnRead === true) throw new Error("read failed");
+      return readable.has(String(id));
+    },
     readThread: (id) => threads.get(String(id)),
     readOpenGrants: () => readOpenRemoteServerGrants(conn),
     journal,
@@ -149,7 +161,78 @@ function setup(
     clock: () => now,
     ...(options.perHost === undefined ? {} : { limits: { perHost: options.perHost } }),
   });
-  return { connection, journal, grants, targets, threads, readable, observed };
+  return { connection, journal, grants, targets, threads, readable, observed, gates };
+}
+
+function deferred(): { readonly promise: Promise<void>; readonly release: () => void } {
+  let release = () => {};
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+const decodeAppend = Schema.decodeUnknownSync(CommittedAppend);
+
+function committed(event: {
+  readonly aggregateType: string;
+  readonly aggregateId: string;
+  readonly eventName: string;
+  readonly payload: unknown;
+}): CommittedAppend {
+  return decodeAppend({
+    events: [
+      {
+        eventId: randomUUID(),
+        globalSequence: 1,
+        aggregateVersion: 1,
+        eventVersion: 1,
+        hostId: "local",
+        correlationId: randomUUID(),
+        actor: { kind: "system", actorId: hostActorId },
+        occurredAt: now,
+        ...event,
+      },
+    ],
+    firstSequence: 1,
+    lastSequence: 1,
+    aggregateVersion: 1,
+  });
+}
+
+function archivedThreadEvent() {
+  return committed({
+    aggregateType: "code-thread",
+    aggregateId: threadId,
+    eventName: "code.thread-updated@1",
+    payload: {
+      kind: "thread-updated",
+      thread: decodeCodeThread({
+        id: threadId,
+        projectId,
+        bindingRevisionId: "99999999-9999-4999-8999-999999999991",
+        repositoryId: `repo_${"a".repeat(64)}`,
+        checkoutId: "99999999-9999-4999-8999-999999999993",
+        title: "Login",
+        lifecycle: "archived",
+        providerInstanceId: "99999999-9999-4999-8999-999999999994",
+        modelId: "model-a",
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        deliveryTarget: {
+          branchIntent: "feature/login",
+          remoteName: "origin",
+          proposedBaseRepository: "octant/octant",
+          proposedBaseBranch: "main",
+          outcomeKind: "opened-pr",
+          confirmedAt: now,
+        },
+        version: 2,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    },
+  });
 }
 
 function resultOf(opening: RemoteServerGrantOpening): RemoteServerGrantResult {
@@ -331,6 +414,151 @@ describe("RemoteServerGrantService", () => {
       ).reason,
     ).toBe("thread-unreadable");
     expect(archiving.openCount()).toBe(0);
+  });
+
+  it("mints nothing for a server Octant stopped while the host was looking", async () => {
+    const harness = setup();
+    harness.targets.set(listenerId(1), listed(1));
+    const gate = deferred();
+    harness.gates.observe = gate.promise;
+    const opening = harness.grants.open({
+      principal: device(),
+      scopeId: scopeA,
+      request: fromLocalServers(1),
+    });
+    await vi.waitFor(() => expect(harness.observed).toHaveLength(1));
+    harness.grants.closeServer({ pid: 4001, port: 5171 });
+    gate.release();
+    expect((await opening).kind).toBe("unavailable");
+    expect(harness.grants.openCount()).toBe(0);
+    expect(grantEvents(harness.connection)).toEqual([]);
+  });
+
+  it("mints nothing for a thread archived while its readability was read", async () => {
+    const harness = setup();
+    harness.targets.set(listenerId(1), listed(1));
+    const gate = deferred();
+    harness.gates.canOpen = gate.promise;
+    const opening = harness.grants.open({
+      principal: device(),
+      scopeId: scopeA,
+      request: fromRunningServices(1),
+    });
+    await vi.waitFor(() => expect(harness.observed).toHaveLength(1));
+    harness.threads.set(String(threadId), { lifecycle: "archived", executionPolicy: "plan" });
+    harness.grants.observeCommitted(archivedThreadEvent());
+    gate.release();
+    expect((await opening).kind).toBe("unavailable");
+    expect(grantEvents(harness.connection)).toEqual([]);
+  });
+
+  it("refuses a thread no longer active just before minting, even with no close recorded", async () => {
+    const harness = setup();
+    harness.targets.set(listenerId(1), listed(1));
+    const gate = deferred();
+    harness.gates.canOpen = gate.promise;
+    const opening = harness.grants.open({
+      principal: device(),
+      scopeId: scopeA,
+      request: fromRunningServices(1),
+    });
+    await vi.waitFor(() => expect(harness.observed).toHaveLength(1));
+    // The thread was read before `canOpenThread` was asked; it changes before the answer lands.
+    harness.threads.set(String(threadId), { lifecycle: "archived", executionPolicy: "plan" });
+    gate.release();
+    expect(refusalOf(await opening).reason).toBe("thread-unreadable");
+    expect(grantEvents(harness.connection)).toEqual([]);
+  });
+
+  it("leaves no record when a thread is purged while a grant was being decided", async () => {
+    const harness = setup();
+    harness.targets.set(listenerId(1), listed(1));
+    const gate = deferred();
+    harness.gates.canOpen = gate.promise;
+    const opening = harness.grants.open({
+      principal: device(),
+      scopeId: scopeA,
+      request: fromRunningServices(1),
+    });
+    await vi.waitFor(() => expect(harness.observed).toHaveLength(1));
+    harness.threads.delete(String(threadId));
+    harness.grants.observeCommitted(
+      committed({
+        aggregateType: "thread-retention",
+        aggregateId: randomUUID(),
+        eventName: THREAD_RETENTION_EVENT_NAMES.threadPurged,
+        payload: { kind: "thread-purged", mode: "code", threadId, purgedAt: now },
+      }),
+    );
+    erasePurgedThread({
+      connection: harness.connection,
+      mode: "code",
+      threadId: decodeThreadRetentionThreadId(String(threadId)),
+    });
+    gate.release();
+    expect((await opening).kind).toBe("unavailable");
+    expect(grantEvents(harness.connection)).toEqual([]);
+    expect(readOpenRemoteServerGrants(harness.connection)).toEqual([]);
+  });
+
+  it("closes a thread's grants from a committed archive or purge, and skips an event it cannot read", async () => {
+    const harness = setup();
+    harness.targets.set(listenerId(1), listed(1));
+    harness.targets.set(listenerId(2), listed(2, { threadId: otherThreadId }));
+    grantOf(
+      await harness.grants.open({
+        principal: device(),
+        scopeId: scopeA,
+        request: fromLocalServers(1),
+      }),
+    );
+    grantOf(
+      await harness.grants.open({
+        principal: device(),
+        scopeId: scopeA,
+        request: fromLocalServers(2, otherThreadId),
+      }),
+    );
+    const unreadable = committed({
+      aggregateType: "code-thread",
+      aggregateId: threadId,
+      eventName: "code.thread-updated@1",
+      payload: { kind: "thread-updated", thread: { id: threadId } },
+    });
+    const archive = archivedThreadEvent();
+    harness.grants.observeCommitted(
+      decodeAppend({ ...archive, events: [...unreadable.events, ...archive.events] }),
+    );
+    expect(harness.grants.openCount()).toBe(1);
+    harness.grants.observeCommitted(
+      committed({
+        aggregateType: "thread-retention",
+        aggregateId: randomUUID(),
+        eventName: THREAD_RETENTION_EVENT_NAMES.threadPurged,
+        payload: { kind: "thread-purged", mode: "code", threadId: otherThreadId, purgedAt: now },
+      }),
+    );
+    expect(harness.grants.openCount()).toBe(0);
+    expect(
+      grantEvents(harness.connection)
+        .filter((event) => event.event_name === REMOTE_SERVER_GRANT_CLOSED)
+        .map((event) => (JSON.parse(event.payload_json) as { reason: string }).reason),
+    ).toEqual(["thread-archived", "thread-unreadable"]);
+  });
+
+  it("answers unavailable, not unreadable, when the thread read fails", async () => {
+    const harness = setup();
+    harness.targets.set(listenerId(1), listed(1));
+    harness.gates.throwOnRead = true;
+    expect(
+      (
+        await harness.grants.open({
+          principal: device(),
+          scopeId: scopeA,
+          request: fromLocalServers(1),
+        })
+      ).kind,
+    ).toBe("unavailable");
   });
 
   it("answers unavailable, not a refusal, when the host cannot look", async () => {

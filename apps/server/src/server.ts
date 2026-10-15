@@ -6207,23 +6207,9 @@ export function startOctantServer(
     } catch {
       console.error("[remote-server-grants] Grants a past run left open could not be closed.");
     }
-    const unsubscribeRemoteServerGrants = persistence.journal.subscribeCommitted((append) => {
-      for (const event of append.events) {
-        if (event.eventName === "code.thread-updated@1" && event.aggregateType === "code-thread") {
-          const thread = persistence.readCodeThread(decodeCodeThreadId(event.aggregateId));
-          if (thread?.lifecycle !== "active") {
-            remoteServerGrants.closeThread(event.aggregateId, "thread-archived");
-          }
-        } else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
-          const purged = event.payload as { readonly mode?: unknown; readonly threadId?: unknown };
-          // Closed before the purge erases the thread's records, which takes
-          // these closings with it.
-          if (purged.mode === "code" && typeof purged.threadId === "string") {
-            remoteServerGrants.closeThread(purged.threadId, "thread-unreadable");
-          }
-        }
-      }
-    });
+    const unsubscribeRemoteServerGrants = persistence.journal.subscribeCommitted((append) =>
+      remoteServerGrants.observeCommitted(append),
+    );
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         unsubscribeRemoteServerGrants();

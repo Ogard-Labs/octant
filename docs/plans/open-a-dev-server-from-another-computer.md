@@ -391,6 +391,15 @@ dark; slice 5 makes the feature reachable.
      ends all its proxy sessions, as `device-signed-out`.
    - A Local servers row belongs to the thread only when the thread's checkout
      is a managed worktree whose root is not the Project folder.
+   - A thread or server closed while a grant request was being decided
+     mints nothing: closing either bumps a counter the request checks just
+     before minting, and the thread is re-read there too. A failed thread read
+     answers unavailable, never `thread-unreadable`.
+   - A device decides one grant request at a time, since each re-observes the
+     host's listeners.
+   - A host key recovery revokes every device the old key paired, so its
+     grants close as `device-revoked`; the device's record keeps the recovery
+     as the reason.
    - The grant and proxy-session endpoints have no caller until slice 5's
      forwarder, so the wiring check lists them as uncalled, each with the
      reason.

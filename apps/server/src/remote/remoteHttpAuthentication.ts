@@ -571,6 +571,7 @@ export function createRemoteHttpAuthentication(
     route: RemoteRouteDefinition,
   ): Promise<Response> => {
     let release: (() => void) | undefined;
+    let grantRelease: (() => void) | undefined;
     try {
       const facts = requireTransportFacts(transport);
       const proxy = options.serverProxy;
@@ -598,6 +599,8 @@ export function createRemoteHttpAuthentication(
         decodeRemoteServerGrantRequest,
         await readJsonObject(handoff.request),
       );
+      grantRelease = proxy.sessions.beginGrantRequest(session.deviceId);
+      if (grantRelease === undefined) throw new RemoteHttpAuthFailure(503, "rate-limited");
       const opening = await proxy.grants.open({
         request: handoff.request,
         principal: handoff.principal,
@@ -614,6 +617,7 @@ export function createRemoteHttpAuthentication(
     } catch (error) {
       return mapFailure(error, "server-proxy");
     } finally {
+      grantRelease?.();
       release?.();
     }
   };

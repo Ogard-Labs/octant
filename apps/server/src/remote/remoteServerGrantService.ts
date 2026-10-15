@@ -11,7 +11,11 @@ import {
   REMOTE_SERVER_GRANT_OPENED,
   REMOTE_SERVER_GRANTS_PER_DEVICE,
   REMOTE_SERVER_GRANTS_PER_HOST,
+  THREAD_RETENTION_EVENT_NAMES,
   UtcTimestamp,
+  decodeCodeThreadUpdated,
+  decodeThreadRetentionThreadPurged,
+  type CommittedAppend,
   decodeRemoteServerGrantClosedPayload,
   decodeRemoteServerGrantId,
   decodeRemoteServerGrantOpenedPayload,
@@ -142,6 +146,12 @@ export class RemoteServerGrantService {
   readonly #perDevice: number;
   readonly #perHost: number;
   readonly #grants = new Map<string, LiveGrant>();
+  /**
+   * Bumped whenever a thread or a server stops holding grants, whether or not
+   * one was open. A request that started before the bump may have read the
+   * thread or the listener before it changed, so it mints nothing.
+   */
+  #settlements = 0;
 
   constructor(options: RemoteServerGrantServiceOptions) {
     this.#options = options;
@@ -152,6 +162,7 @@ export class RemoteServerGrantService {
 
   async open(input: RemoteServerGrantOpenInput): Promise<RemoteServerGrantOpening> {
     const { principal, request } = input;
+    const settlementsAtStart = this.#settlements;
     if (principal.kind !== "remote-device") {
       // A local window opens the server directly; nothing about it is read.
       return this.#decided(request, { actor: "local-user", listener: { status: "not-listed" } });
@@ -163,6 +174,7 @@ export class RemoteServerGrantService {
       request.source.surface === "local-servers"
         ? await this.#threadFact(input.scopeId, request.source.threadId)
         : undefined;
+    if (named === "unavailable") return { kind: "unavailable" };
     if (named?.access === "unreadable") {
       return this.#decided(request, {
         actor: "remote-client",
@@ -192,6 +204,7 @@ export class RemoteServerGrantService {
     const threadId = target.threadId;
     const thread =
       threadId === undefined ? undefined : await this.#threadFact(input.scopeId, threadId);
+    if (thread === "unavailable") return { kind: "unavailable" };
     const decision = decideRemoteServerGrant({
       actor: "remote-client",
       ...(thread === undefined ? {} : { thread }),
@@ -206,6 +219,12 @@ export class RemoteServerGrantService {
 
     if (input.stillAuthorized !== undefined && !input.stillAuthorized()) {
       return { kind: "session-ended" };
+    }
+    // Everything from here to the journal append is synchronous, so no close
+    // can land between these checks and the grant existing.
+    if (this.#settlements !== settlementsAtStart) return { kind: "unavailable" };
+    if (this.#options.readThread(threadId)?.lifecycle !== "active") {
+      return refusedWith(request, { reason: "thread-unreadable" });
     }
 
     const reused = [...this.#grants.values()].find(
@@ -264,11 +283,38 @@ export class RemoteServerGrantService {
   }
 
   closeThread(threadId: string, reason: RemoteServerGrantCloseReason): void {
+    this.#settlements += 1;
     this.#closeWhere((grant) => String(grant.threadId) === String(threadId), reason);
+  }
+
+  /**
+   * Close grants a committed journal append ends: a Code thread that stops
+   * being active, and a Code thread that is purged. Each event is judged on its
+   * own payload, and one that cannot be read never stops the rest.
+   */
+  observeCommitted(append: CommittedAppend): void {
+    for (const event of append.events) {
+      try {
+        if (event.eventName === "code.thread-updated@1" && event.aggregateType === "code-thread") {
+          const { thread } = decodeCodeThreadUpdated(event.payload);
+          if (thread.lifecycle !== "active") this.closeThread(String(thread.id), "thread-archived");
+        } else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
+          const purged = decodeThreadRetentionThreadPurged(event.payload);
+          // Closed before the purge erases the thread's records, which takes
+          // these closings with it.
+          if (purged.mode === "code")
+            this.closeThread(String(purged.threadId), "thread-unreadable");
+        }
+      } catch {
+        // An event this service cannot read closes nothing; the next request
+        // re-reads the thread before minting.
+      }
+    }
   }
 
   /** A server Octant stopped: every grant to the process that held that port. */
   closeServer(stopped: { readonly pid: number; readonly port: number }): void {
+    this.#settlements += 1;
     this.#closeWhere(
       (grant) => grant.endpoint.pid === stopped.pid && grant.endpoint.port === stopped.port,
       "server-stopped",
@@ -303,7 +349,11 @@ export class RemoteServerGrantService {
     return [...this.#grants.values()].filter((grant) => grant.deviceId === deviceId).length;
   }
 
-  async #threadFact(scopeId: WindowId, threadId: CodeThreadId): Promise<RemoteServerGrantThread> {
+  /** `unavailable` is the host failing to answer, never a verdict on the thread. */
+  async #threadFact(
+    scopeId: WindowId,
+    threadId: CodeThreadId,
+  ): Promise<RemoteServerGrantThread | "unavailable"> {
     const thread = this.#options.readThread(threadId);
     // An archived thread holds no grant, since archiving closes one, so it is
     // refused as a thread this device cannot open servers in.
@@ -312,7 +362,7 @@ export class RemoteServerGrantService {
     try {
       readable = await this.#options.canOpenThread(scopeId, threadId);
     } catch {
-      readable = false;
+      return "unavailable";
     }
     return readable
       ? { access: "readable", posture: thread.executionPolicy }

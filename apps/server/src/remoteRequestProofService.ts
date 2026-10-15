@@ -107,6 +107,19 @@ export interface RemoteServerProxySessionFacts {
   readonly absoluteExpiresAt: string;
 }
 
+export interface RemoteDeviceStandingInput {
+  readonly hostId: string;
+  readonly deviceId: string;
+  readonly credentialGeneration: number;
+  readonly origin: string;
+}
+
+export type RemoteDeviceStanding =
+  | "current"
+  | "revoked"
+  | "credential-expired"
+  | "credential-rotated";
+
 type ChallengeTranscript = typeof buildRemoteChallengeProofPayload;
 
 interface AcceptedChallenge {
@@ -345,20 +358,23 @@ export class RemoteRequestProofService {
    * A proxy session asks on every request, so a revoke or rotation that commits
    * between two requests refuses the second.
    */
-  isDeviceCurrent(input: {
-    readonly hostId: string;
-    readonly deviceId: string;
-    readonly credentialGeneration: number;
-    readonly origin: string;
-  }): boolean {
+  isDeviceCurrent(input: RemoteDeviceStandingInput): boolean {
+    return this.deviceStanding(input) === "current";
+  }
+
+  /**
+   * Why a device no longer stands where a session was minted, when it does not:
+   * gone, revoked, or moved to another origin reads as revoked; an expired
+   * credential as expired; a later credential generation as rotated.
+   */
+  deviceStanding(input: RemoteDeviceStandingInput): RemoteDeviceStanding {
     const device = readDeviceRegistration(this.#connection, input.deviceId);
-    return (
-      device !== undefined &&
-      device.hostId === input.hostId &&
-      device.state === "active" &&
-      device.credentialGeneration === input.credentialGeneration &&
-      device.origin === input.origin
-    );
+    if (device === undefined || device.hostId !== input.hostId) return "revoked";
+    if (device.state === "revoked") return "revoked";
+    if (device.state === "expired") return "credential-expired";
+    if (device.credentialGeneration !== input.credentialGeneration) return "credential-rotated";
+    if (device.origin !== input.origin) return "revoked";
+    return "current";
   }
 
   /**

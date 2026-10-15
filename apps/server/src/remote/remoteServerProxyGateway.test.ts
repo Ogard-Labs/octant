@@ -818,23 +818,20 @@ describe("proxy session and grant route on the private listener", () => {
     harness.hold = undefined;
     await Promise.all(held);
 
-    // Fill the proxy budget for this device with grant requests that do not finish.
+    // Hold a grant request open; the device's next one waits its turn while
+    // the interface's product requests still go through.
     let releaseProxy = () => {};
     const waiting = new Promise<void>((resolve) => {
       releaseProxy = resolve;
     });
     let observing = 0;
-    for (let index = 10; index < 42; index += 1) {
-      harness.targets.set(listenerKey(index), async () => {
-        observing += 1;
-        await waiting;
-        return listed(index);
-      });
-    }
-    const pending = Array.from({ length: 32 }, (_, offset) =>
-      openGrant(harness, proxy, 10 + offset),
-    );
-    await vi.waitFor(() => expect(observing).toBe(32));
+    harness.targets.set(listenerKey(10), async () => {
+      observing += 1;
+      await waiting;
+      return listed(10);
+    });
+    const pending = openGrant(harness, proxy, 10);
+    await vi.waitFor(() => expect(observing).toBe(1));
     harness.targets.set(listenerKey(50), listed(50));
     const proxyOver = await openGrant(harness, proxy, 50);
     expect(proxyOver.status).toBe(503);
@@ -845,6 +842,7 @@ describe("proxy session and grant route on the private listener", () => {
     );
     expect(productStill.status).toBe(200);
     releaseProxy();
-    await Promise.all(pending);
+    expect(result(await pending).kind).toBe("remote-server-grant-opened");
+    expect(result(await openGrant(harness, proxy, 50)).kind).toBe("remote-server-grant-opened");
   });
 });

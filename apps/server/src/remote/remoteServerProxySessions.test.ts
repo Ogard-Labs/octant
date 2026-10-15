@@ -18,7 +18,7 @@ function harness(
   options: { readonly noncesPerSession?: number; readonly sessionsPerHost?: number } = {},
 ) {
   let now = issuedAtMs;
-  let deviceCurrent = true;
+  let standing: "current" | "revoked" | "credential-expired" | "credential-rotated" = "current";
   const ended: RemoteServerProxySessionEnded[] = [];
   const proofs: RemoteServerProxyProofPort = {
     issueServerProxySessionFacts: (input) => ({
@@ -31,7 +31,7 @@ function harness(
       capabilityDigest: "c".repeat(64),
       ...sessionExpiry(now),
     }),
-    isDeviceCurrent: () => deviceCurrent,
+    deviceStanding: () => standing,
     verifyDeviceRequestSignature: () => true,
   };
   const sessions = new RemoteServerProxySessions({
@@ -85,8 +85,8 @@ function harness(
     advance: (ms: number) => {
       now += ms;
     },
-    revokeDevice: () => {
-      deviceCurrent = false;
+    revokeDevice: (next: typeof standing = "revoked") => {
+      standing = next;
     },
   };
 }
@@ -131,13 +131,47 @@ describe("RemoteServerProxySessions", () => {
     );
   });
 
-  it("stops describing a session once its device no longer stands", () => {
-    const { issue, sessions, revokeDevice, verify } = harness();
+  it("ends a session, closing its grants, once its device no longer stands", () => {
+    const { issue, sessions, revokeDevice, verify, ended } = harness();
     const { sessionId, csrfToken } = issue();
     expect(sessions.describe(sessionId)).toBeDefined();
     revokeDevice();
     expect(sessions.describe(sessionId)).toBeUndefined();
     expect(refusal(() => verify(sessionId, csrfToken, "nonce_aaaaaaaaaaaaaaaa"))).toBe("invalid");
+    expect(sessions.size()).toBe(0);
+    expect(ended.map((session) => session.reason)).toEqual(["device-revoked"]);
+  });
+
+  it.each([
+    ["credential-expired", "device-credential-expired"],
+    ["credential-rotated", "device-credential-rotated"],
+    ["revoked", "device-revoked"],
+  ] as const)("sweeps a session whose device is %s as %s", (standing, reason) => {
+    const { issue, sessions, revokeDevice, ended } = harness();
+    issue();
+    revokeDevice(standing);
+    sessions.sweepExpired();
+    expect(sessions.size()).toBe(0);
+    expect(ended.map((session) => session.reason)).toEqual([reason]);
+  });
+
+  it("lets a device decide one grant request at a time", () => {
+    const { sessions } = harness();
+    const first = sessions.beginGrantRequest(deviceId);
+    expect(first).toBeDefined();
+    expect(sessions.beginGrantRequest(deviceId)).toBeUndefined();
+    expect(sessions.beginGrantRequest("33333333-3333-4333-8333-333333333333")).toBeDefined();
+    first?.();
+    expect(sessions.beginGrantRequest(deviceId)).toBeDefined();
+  });
+
+  it("forgets nonces past the retention window, oldest first", () => {
+    const { issue, verify, advance } = harness({ noncesPerSession: 2 });
+    const { sessionId, csrfToken } = issue();
+    verify(sessionId, csrfToken, "nonce_aaaaaaaaaaaaaaa1");
+    verify(sessionId, csrfToken, "nonce_aaaaaaaaaaaaaaa2");
+    advance(60_001);
+    expect(verify(sessionId, csrfToken, "nonce_aaaaaaaaaaaaaaa3").freshness).toBe("current");
   });
 
   it("ends an idle session, and says so, when the sweep finds it", () => {

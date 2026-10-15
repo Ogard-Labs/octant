@@ -5888,9 +5888,12 @@ mechanisms are:
     nonce from the session's own store (16,384 in the retention window). The
     proxy surface has its own concurrency: 64 on the listener and in the route
     policy, 32 per device in the session store, answered 503 with a one-second
-    `Retry-After`, apart from the product budget. A device holds at most four
-    proxy sessions (a fifth ends its oldest) and the host 64. A host restart
-    ends every proxy session.
+    `Retry-After`, apart from the product budget, and a device decides one
+    grant request at a time. A device holds at most four proxy sessions (a
+    fifth ends its oldest) and the host 64. A session whose device is found
+    revoked, expired, or rotated, by a request or by the minute sweep, ends at
+    once, as a backstop to the credential hooks. A host restart ends every
+    proxy session.
   - **Grant.** `POST /api/server-proxy/grants` names the listing its listener id
     came from. The host gathers every fact itself: the principal, whether the
     device can open the thread (an archived thread counts as unreadable), the
@@ -5898,7 +5901,9 @@ mechanisms are:
     the thread whose own worktree it runs in, and that thread's posture, and
     decides with the grant policy in its fixed order. A device holds at most 8
     open grants and the host 32, refused `grant-limit` after every other rule.
-    The same session opening the same server again gets the same grant. A
+    The thread is read again just before a grant is minted, and a thread or
+    server closed while the request was being decided mints nothing. The same
+    session opening the same server again gets the same grant. A
     listing the host could not finish answers 503, never a refusal. A local
     window reaching the route on the loopback listener is answered
     `local-principal` and nothing about the server is read.

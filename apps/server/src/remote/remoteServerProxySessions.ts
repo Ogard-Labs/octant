@@ -70,7 +70,7 @@ export interface RemoteServerProxySessionEnded {
 
 export type RemoteServerProxyProofPort = Pick<
   RemoteRequestProofService,
-  "issueServerProxySessionFacts" | "isDeviceCurrent" | "verifyDeviceRequestSignature"
+  "issueServerProxySessionFacts" | "deviceStanding" | "verifyDeviceRequestSignature"
 >;
 
 export interface RemoteServerProxySessionIssued {
@@ -136,6 +136,7 @@ export class RemoteServerProxySessions {
   readonly #limits: RemoteServerProxyLimits;
   readonly #sessions = new Map<string, LiveSession>();
   readonly #concurrentByDevice = new Map<string, number>();
+  readonly #grantRequests = new Set<string>();
   #concurrent = 0;
 
   constructor(options: RemoteServerProxySessionsOptions) {
@@ -193,7 +194,7 @@ export class RemoteServerProxySessions {
       this.#end(session, "proxy-session-ended");
       return undefined;
     }
-    if (!this.#proofs.isDeviceCurrent(session.facts)) return undefined;
+    if (!this.#stillStands(session)) return undefined;
     return view(session);
   }
 
@@ -223,7 +224,7 @@ export class RemoteServerProxySessions {
       session.facts.credentialGeneration !== facts.credentialGeneration ||
       session.facts.origin !== facts.origin ||
       session.facts.protocolVersion !== facts.protocolVersion ||
-      !this.#proofs.isDeviceCurrent(session.facts)
+      !this.#stillStands(session)
     ) {
       throw new RemoteRequestProofError("invalid");
     }
@@ -263,8 +264,12 @@ export class RemoteServerProxySessions {
       throw new RemoteRequestProofError("invalid");
     }
 
+    // Every nonce is kept for the same retention from a monotonic clock, so
+    // the map's insertion order is expiry order: prune from the front and stop
+    // at the first nonce still held, rather than walking the whole store.
     for (const [nonce, expiresAt] of session.nonces) {
-      if (expiresAt <= now) session.nonces.delete(nonce);
+      if (expiresAt > now) break;
+      session.nonces.delete(nonce);
     }
     const nonceDigest = digest(proof.nonce);
     if (session.nonces.has(nonceDigest)) throw new RemoteRequestProofError("replayed");
@@ -306,6 +311,22 @@ export class RemoteServerProxySessions {
     };
   }
 
+  /**
+   * Hold the device's one grant request slot. Each grant request re-observes the
+   * host's listeners, so a device asks for one grant at a time; `undefined`
+   * means one is already being decided.
+   */
+  beginGrantRequest(deviceId: string): (() => void) | undefined {
+    if (this.#grantRequests.has(deviceId)) return undefined;
+    this.#grantRequests.add(deviceId);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#grantRequests.delete(deviceId);
+    };
+  }
+
   /** End every proxy session a device holds. */
   endDevice(deviceId: string, reason: RemoteServerProxySessionEndReason): void {
     for (const session of this.#sessions.values()) {
@@ -317,18 +338,39 @@ export class RemoteServerProxySessions {
     for (const session of this.#sessions.values()) this.#end(session, reason);
   }
 
-  /** End every session past its idle or absolute expiry, so its grants close too. */
+  /**
+   * End every session past its idle or absolute expiry, or whose device no
+   * longer stands, so its grants close too. The credential hooks end a device's
+   * sessions as it changes; this catches one they missed.
+   */
   sweepExpired(): void {
     const now = this.#now();
     for (const session of this.#sessions.values()) {
       if (now >= session.idleExpiresAtMs || now >= session.absoluteExpiresAtMs) {
         this.#end(session, "proxy-session-ended");
+      } else {
+        this.#stillStands(session);
       }
     }
   }
 
   size(): number {
     return this.#sessions.size;
+  }
+
+  /** Whether the session's device still stands; ends the session, with why, when not. */
+  #stillStands(session: LiveSession): boolean {
+    const standing = this.#proofs.deviceStanding(session.facts);
+    if (standing === "current") return true;
+    this.#end(
+      session,
+      standing === "credential-expired"
+        ? "device-credential-expired"
+        : standing === "credential-rotated"
+          ? "device-credential-rotated"
+          : "device-revoked",
+    );
+    return false;
   }
 
   #end(session: LiveSession, reason: RemoteServerProxySessionEndReason): void {
@@ -385,6 +427,10 @@ export function proxySessionEndReasonForCredentialChange(
       return "device-credential-expired";
     case "listener-disabled":
       return "listener-disabled";
+    // A self-revoke, a local revoke of one device or all, and a host key
+    // recovery (which revokes every device the old key paired) all end the
+    // device's standing as a revoke does, and are journaled with their own
+    // reason on the device's record.
     default:
       return "device-revoked";
   }
