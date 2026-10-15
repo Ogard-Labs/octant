@@ -5698,37 +5698,68 @@ mechanisms are:
   and keys can still follow a link or submit a form within the context's
   approved origins; the host's navigation guards refuse any page outside them,
   so a paired client cannot take the host browser to a new origin.
-  - **Host identity on every connection.** The host hello carries the host
+  - **Host identity on every connection.** Every hello request a client
+    makes names a fresh client nonce, 32 random bytes in unpadded base64url:
+    `GET /api/remote/hello?clientNonce=…`. The host hello carries the host
     identity public key (DER SubjectPublicKeyInfo, base64url), its fingerprint
-    (SHA-256 of those bytes, lowercase hex), an expiry, and a signature over
-    the hello. Every client (phone, desktop window reaching another host, and
-    the paired browser page) checks that the key hashes to the stated
-    fingerprint, that the signature verifies, and that the hello has not
-    expired (allowing two minutes of clock skew) before it sends a pairing
-    claim or a challenge request. At pairing it records the proven
-    fingerprint with the device registration; on every later hello it also
-    requires the proven host id and fingerprint to equal that record.
-    Outcomes:
-    - A hello that states the paired fingerprint without proving the key, or
-      relabels another host's signed hello, is refused with "This host could
-      not prove its identity". An expired hello is refused the same way.
+    (SHA-256 of those bytes, lowercase hex), that client nonce, an expiry, and
+    a signature over the hello. Every client (phone, desktop window reaching
+    another host, and the paired browser page) checks that the key hashes to
+    the stated fingerprint, that the hello echoes the nonce it just sent, that
+    the signature verifies, and that the hello has not expired (allowing two
+    minutes of clock skew) before it sends a pairing claim or a challenge
+    request. At pairing it records the proven fingerprint with the device
+    registration; on every later hello it also requires the proven host id
+    and fingerprint to equal that record. The paired browser page claims a
+    ticket only through a hello answering a nonce it sent itself.
+    - **Signed payload.** A hello answering a client nonce is signed as
+      `octant.host-hello.v2`, a newline, then one JSON array of the hello's
+      fields in a fixed order (product id, host id, display name, key
+      fingerprint, build version, protocol range minimum and maximum, the
+      authentication versions as a nested array, security floor, remote
+      origin, host nonce, client nonce, expiry). Version 1 joined the fields
+      with newlines, and a display name or build version may itself hold a
+      newline, so two hellos could join to the same text; the JSON array
+      decodes to exactly one hello.
+    - **Hello route.** The route accepts no query or exactly one
+      `clientNonce` of 22 to 128 base64url characters and refuses anything
+      else with 400. A request without a nonce, from a client built before
+      client nonces, gets the version 1 hello it verifies, without the field.
+      Outcomes:
+    - A hello that states the paired fingerprint without proving the key,
+      relabels another host's signed hello, or answers another request's
+      nonce (a recorded hello replayed) is refused with "This host could not
+      prove its identity". An expired hello is refused the same way.
     - A proven hello from a different host id or key is "host identity
       changed".
-    - A hello with no key comes from a host built before this check. The
-      client refuses it as incompatible and asks to update the host.
+    - A hello with no key or no client nonce, or a 404 for the hello request
+      (a host built before client nonces treats a query on that route as an
+      unknown route), comes from a host built before these checks. The client
+      refuses it as incompatible and asks to update the host. It never asks
+      again without a nonce.
     - No refusal deletes the device key, and neither does a 401 naming the
       device revoked or expired: those answers arrive before the client has
       authenticated the live peer. The key goes only when the person pairs
       again (the new approval replaces the origin's other registrations),
       signs out, or removes the host from the desktop's federated hosts.
 
-    What this does not stop: the client authenticates only the hello, never
-    the live peer behind it, and does not check the negotiation record's
-    `hostSignature`. A genuine hello from the paired host can be replayed
-    until it expires, a relay that terminates TLS for the listener's name can
-    pass genuine hellos through, and anything that answers at the address can
-    still refuse service, for example by signing a hello with its own key or
-    answering 401. First contact is trust on first use over TLS.
+    What this does not stop: the client nonce proves the key holder answered
+    this hello request, but nothing after the hello is bound to that answer,
+    and the client does not check the negotiation record's `hostSignature`.
+    Something that can reach the real host while it answers at the paired
+    address (a relay that terminates TLS for the listener's name with a
+    certificate the client trusts) can pass the live hello through and
+    answer or forward the rest. Pinning the listener certificate, in the
+    client trust rule and one-step pairing below, is what closes that.
+    Anything that answers at the address can still refuse service, for
+    example by signing a hello with its own key, answering 404, or answering 401. First contact is trust on first use over TLS.
+
+    Rollout. The client nonce ships with hello verification, in one release.
+    Clients built before hello verification send no nonce and keep getting
+    version 1 hellos, so updating a host first never locks them out (apart
+    from the strict-decode limit below). An updated client refuses a host
+    built before client nonces as needing an update and keeps the pairing,
+    so the host should be updated with or before its clients.
 
     Records written before hellos were checked need no migration: the host has
     always stated the SHA-256 of the key's SubjectPublicKeyInfo, so those

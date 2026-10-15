@@ -17,8 +17,11 @@
 // closed and the listener still bound so a retry can complete finalization.
 
 import { randomUUID as defaultRandomUUID } from "node:crypto";
+import { Schema } from "effect";
 import type { StableHostId } from "@octant/contracts/remote-access";
 import {
+  HOST_HELLO_CLIENT_NONCE_PARAMETER,
+  HostHelloClientNonce,
   REMOTE_AUTHENTICATION_ONLY_CAPABILITY_VECTOR,
   REMOTE_AUTHENTICATION_PROTOCOL_VERSION,
   REMOTE_SECURITY_FLOOR,
@@ -764,7 +767,9 @@ async function handlePreAuthRoute(
   }
   try {
     if (route.id === REMOTE_PROTOCOL_ROUTE_IDS.hello) {
-      return Response.json(protocol.issueHostHello(), {
+      const helloRequest = readHostHelloRequest(request);
+      if (helloRequest === undefined) return protocolReject(400);
+      return Response.json(protocol.issueHostHello(helloRequest), {
         headers: { "content-type": "application/json; charset=utf-8" },
       });
     }
@@ -980,6 +985,25 @@ function clockRecoveryRejectResponse(): Response {
       },
     },
   );
+}
+
+/**
+ * The hello route's whole query: nothing, or exactly one `clientNonce` that is
+ * plain base64url. Anything else is refused rather than ignored: a client
+ * whose nonce was dropped would otherwise get a hello that answers none.
+ */
+function readHostHelloRequest(
+  request: Request,
+): { readonly clientNonce?: string | undefined } | undefined {
+  const url = new URL(request.url);
+  if (url.search === "") return {};
+  const entries = [...url.searchParams];
+  const only = entries[0];
+  if (entries.length !== 1 || only === undefined) return undefined;
+  const [name, value] = only;
+  if (name !== HOST_HELLO_CLIENT_NONCE_PARAMETER) return undefined;
+  if (!Schema.is(HostHelloClientNonce)(value)) return undefined;
+  return { clientNonce: value };
 }
 
 function protocolReject(status: number, reasonCode?: "expired" | "revoked"): Response {

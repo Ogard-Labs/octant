@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +19,7 @@ vi.mock("./remoteGatewayFinalization", async (importOriginal) => {
   };
 });
 import { decodeStableHostId } from "@octant/contracts/remote-access";
+import { buildHostHelloSignaturePayload } from "@octant/domain";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { Journal } from "../persistence/journal";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -783,6 +784,68 @@ describe("RemoteGateway — protocol hello route", () => {
     expect(body.hostId).toBe(hostId);
     expect(body.remoteOrigin).toBe(ORIGIN);
     expect(body.signature).toBeTruthy();
+    // A client built before client nonces sends none and gets the hello it
+    // knows how to verify.
+    expect(body.clientNonce).toBeUndefined();
+    await gateway.stop();
+  });
+
+  it("signs the client nonce a hello request names into the hello it answers", async () => {
+    const { serve, getFetch } = createCapturingServe();
+    const { gateway } = setup({ serve });
+    await gateway.start();
+    const clientNonce = "Zm9vYmFy".repeat(5) + "abc";
+    const response = await getFetch()!(
+      new Request(`${ORIGIN}/api/remote/hello?clientNonce=${clientNonce}`, {
+        headers: { host: "192.168.1.20:9443" },
+      }),
+      lanFacts,
+    );
+    expect(response.status).toBe(200);
+    const hello = await response.json();
+    expect(hello.clientNonce).toBe(clientNonce);
+    const { signature, hostPublicKey, ...facts } = hello;
+    const payload = buildHostHelloSignaturePayload(facts);
+    expect(payload.startsWith("octant.host-hello.v2\n")).toBe(true);
+    expect(
+      verify(
+        "sha256",
+        Buffer.from(payload, "utf8"),
+        {
+          key: createPublicKey({
+            key: Buffer.from(hostPublicKey, "base64url"),
+            format: "der",
+            type: "spki",
+          }),
+          dsaEncoding: "ieee-p1363",
+        },
+        Buffer.from(signature, "base64url"),
+      ),
+    ).toBe(true);
+    await gateway.stop();
+  });
+
+  it("refuses a hello request whose query is anything but one well-formed client nonce", async () => {
+    const { serve, getFetch } = createCapturingServe();
+    const { gateway } = setup({ serve });
+    await gateway.start();
+    const nonce = "a".repeat(43);
+    for (const query of [
+      "clientNonce=short",
+      `clientNonce=${nonce}&clientNonce=${nonce}`,
+      `clientNonce=${nonce}&other=1`,
+      `other=${nonce}`,
+      `clientNonce=${"a".repeat(42)}%3D`,
+      "clientNonce=",
+    ]) {
+      const response = await getFetch()!(
+        new Request(`${ORIGIN}/api/remote/hello?${query}`, {
+          headers: { host: "192.168.1.20:9443" },
+        }),
+        lanFacts,
+      );
+      expect(response.status, query).toBe(400);
+    }
     await gateway.stop();
   });
 });

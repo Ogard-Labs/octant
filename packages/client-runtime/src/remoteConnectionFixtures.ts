@@ -81,6 +81,8 @@ export interface UnsignedTestHostHello {
   readonly securityFloor: number;
   readonly remoteOrigin: string;
   readonly nonce: string;
+  /** The client nonce the hello answers; omitted, the hello is version 1. */
+  readonly clientNonce?: string | undefined;
   readonly expiresAt: string;
 }
 
@@ -156,6 +158,11 @@ export interface FakeRemoteServerConfig {
   readonly advertisedRemoteOrigin?: string;
   readonly incompatibleProtocol?: boolean;
   readonly failRoute?: "hello" | "challenge" | "negotiate" | "session";
+  /**
+   * Answer as a host built before client nonces: a hello request with a
+   * query is an unknown route (404), and a bare one gets a version 1 hello.
+   */
+  readonly predatesClientNonces?: boolean;
   readonly revoked?: boolean;
   readonly credentialFailure?: "expired" | "revoked";
   /** Reject `/api/remote/auth/rotate-key` with this status instead of rotating. */
@@ -215,7 +222,7 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
   let issuedSessionId: string | undefined;
   let productProofVerified = false;
 
-  const hello = () => {
+  const hello = (clientNonce: string | undefined) => {
     const nonce = randomBytes(32).toString("base64url");
     nonces.set(sha256(nonce), now() + 60_000);
     const range = config.incompatibleProtocol ? { min: 9, max: 9 } : { min: 1, max: 1 };
@@ -229,6 +236,7 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
       securityFloor: REMOTE_SECURITY_FLOOR,
       remoteOrigin: config.advertisedRemoteOrigin ?? origin,
       nonce,
+      ...(clientNonce === undefined ? {} : { clientNonce }),
       expiresAt: new Date(now() + 60_000).toISOString(),
     });
     return config.tamperHello === undefined ? signed : config.tamperHello(signed);
@@ -269,7 +277,10 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
 
     if (path === "/api/remote/hello" && method === "GET") {
       if (config.failRoute === "hello") throw new Error("network");
-      return Response.json(hello());
+      if (url.search !== "" && config.predatesClientNonces === true) {
+        return new Response(null, { status: 404 });
+      }
+      return Response.json(hello(url.searchParams.get("clientNonce") ?? undefined));
     }
 
     if (path === "/api/remote/pairing" && method === "POST") {

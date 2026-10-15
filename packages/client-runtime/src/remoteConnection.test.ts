@@ -6,7 +6,7 @@ import {
   sign,
   verify,
 } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import {
   buildRemoteChallengeProofPayload,
   buildRemoteRequestProofPayload,
@@ -114,6 +114,29 @@ function createTestDeviceKeyStore(): {
   return { store, pair };
 }
 
+/** A hello the host genuinely signed, in answer to another request's nonce. */
+async function recordGenuineHello(host: FakeServer): Promise<unknown> {
+  const earlierNonce = randomBytes(32).toString("base64url");
+  const response = await host.fetch(`${ORIGIN}/api/remote/hello?clientNonce=${earlierNonce}`);
+  return response.json();
+}
+
+/**
+ * A responder at the paired origin that answers every hello with `recorded`
+ * and passes every other request through to the real host.
+ */
+function replayingImpostor(recorded: unknown, host: FakeServer): Mock<typeof globalThis.fetch> {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof input === "string" ? input : input.toString());
+    if (url.pathname === "/api/remote/hello") return Response.json(recorded);
+    return host.fetch(input, init);
+  });
+}
+
+function requestedPaths(fetch: Mock<typeof globalThis.fetch>): ReadonlyArray<string> {
+  return fetch.mock.calls.map(([input]) => new URL(String(input)).pathname);
+}
+
 // ── Fake remote server implementing the v1 protocol ─────────────────────────
 
 interface FakeServerConfig {
@@ -132,6 +155,8 @@ interface FakeServerConfig {
   readonly failRoute?: "hello" | "challenge" | "negotiate" | "session";
   /** Revoke the device after approval (challenge/session return unauthorized). */
   readonly revoked?: boolean;
+  /** Answer as a host built before client nonces (404 on a hello query). */
+  readonly predatesClientNonces?: boolean;
 }
 
 interface FakeServer {
@@ -175,7 +200,7 @@ function createFakeServer(config: FakeServerConfig): FakeServer {
   let productProofVerified = false;
   let lastBodyDigest: string | undefined;
 
-  const hello = () => {
+  const hello = (clientNonce: string | undefined) => {
     const nonce = randomBytes(32).toString("base64url");
     nonces.set(sha256(nonce), now() + 60_000);
     const range = config.incompatibleProtocol ? { min: 9, max: 9 } : { min: 1, max: 1 };
@@ -189,6 +214,7 @@ function createFakeServer(config: FakeServerConfig): FakeServer {
       securityFloor: REMOTE_SECURITY_FLOOR,
       remoteOrigin: config.advertisedRemoteOrigin ?? origin,
       nonce,
+      ...(clientNonce === undefined ? {} : { clientNonce }),
       expiresAt: new Date(now() + 60_000).toISOString(),
     });
     return config.tamperHello === undefined ? signed : config.tamperHello(signed);
@@ -208,7 +234,10 @@ function createFakeServer(config: FakeServerConfig): FakeServer {
 
     if (path === "/api/remote/hello" && method === "GET") {
       if (config.failRoute === "hello") throw new Error("network");
-      return Response.json(hello());
+      if (url.search !== "" && config.predatesClientNonces === true) {
+        return new Response(null, { status: 404 });
+      }
+      return Response.json(hello(url.searchParams.get("clientNonce") ?? undefined));
     }
 
     if (path === "/api/remote/pairing" && method === "POST") {
@@ -733,6 +762,107 @@ describe("RemoteConnection host identity / origin fail-closed", () => {
       "https://mac.example.test/api/remote/auth/challenge",
       expect.anything(),
     );
+  });
+
+  it("refuses a genuine, unexpired hello recorded from an earlier request, so a replaying responder never reaches ready", async () => {
+    const host = createFakeServer({});
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: host.fetch,
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+    await connection.connect();
+    const paired = connection.deviceIdentity();
+
+    // A hello the real host signed moments ago for some earlier request. The
+    // impostor serves it at the paired origin and passes every other request
+    // through to the real host, so only the hello is replayed.
+    const recorded = await recordGenuineHello(host);
+    const impostor = replayingImpostor(recorded, host);
+    connection.updateFetch(impostor);
+    connection.disconnect();
+
+    await expect(connection.reconnect()).rejects.toThrow(
+      "This host could not prove its identity, so Octant did not connect.",
+    );
+    expect(connection.state()).toBe("unavailable");
+    expect(connection.session()).toBeUndefined();
+    expect(requestedPaths(impostor)).toEqual(["/api/remote/hello"]);
+    expect(connection.deviceIdentity()).toEqual(paired);
+  });
+
+  it("refuses to pair through a genuine hello recorded from an earlier request", async () => {
+    const host = createFakeServer({});
+    const impostor = replayingImpostor(await recordGenuineHello(host), host);
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: impostor,
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+
+    await expect(connection.connect()).rejects.toThrow(
+      "This host could not prove its identity, so Octant did not connect.",
+    );
+    expect(requestedPaths(impostor)).toEqual(["/api/remote/hello"]);
+    expect(connection.deviceIdentity()).toBeUndefined();
+  });
+
+  it("refuses a genuine hello that answers no client nonce, as a host before client nonces sends", async () => {
+    const host = createFakeServer({});
+    const recorded = await (await host.fetch(`${ORIGIN}/api/remote/hello`)).json();
+    const impostor = replayingImpostor(recorded, host);
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: impostor,
+      deviceKey: store,
+      knownDevice: {
+        hostId: HOST_ID,
+        deviceId: "22222222-2222-4222-8222-222222222222",
+        credentialGeneration: 1,
+        hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+      },
+    });
+
+    await expect(connection.connect()).rejects.toThrow(
+      "This host runs an older Octant that cannot prove its identity. Update Octant on the host, then connect again.",
+    );
+    expect(connection.state()).toBe("incompatible");
+    expect(requestedPaths(impostor)).toEqual(["/api/remote/hello"]);
+  });
+
+  it("asks to update a host built before client nonces and never retries without one, keeping the pairing", async () => {
+    const server = createFakeServer({ predatesClientNonces: true });
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      knownDevice: {
+        hostId: HOST_ID,
+        deviceId: "22222222-2222-4222-8222-222222222222",
+        credentialGeneration: 1,
+        hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+      },
+    });
+
+    await expect(connection.connect()).rejects.toThrow(
+      "This host runs an older Octant that cannot prove its identity. Update Octant on the host, then connect again.",
+    );
+    expect(connection.state()).toBe("incompatible");
+    expect(server.fetch).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(server.fetch).mock.calls[0]?.[0])).toMatch(
+      /\/api\/remote\/hello\?clientNonce=/,
+    );
+    expect(connection.deviceIdentity()).toBeDefined();
   });
 
   it("refuses a hello whose own expiry has passed, keeping the pairing", async () => {
