@@ -15,6 +15,7 @@ import {
   type SqliteFailureKind,
 } from "./journalErrors";
 import type { Journal, JournalCompatibilityIssue } from "./journal";
+import { replayAggregateTypesInOrder } from "./journalHydration";
 import type { SqliteConnection, SqliteStatement } from "./sqlitePort";
 
 export interface Projection {
@@ -27,6 +28,14 @@ export interface Projection {
    * there; resuming left it empty after every restart.
    */
   readonly holdsStateInMemory?: true;
+  /**
+   * The aggregate types whose events this projection applies, when it applies
+   * no others. An in-memory projection that names them is rebuilt at start
+   * from those rows alone, through the (type, sequence) index: replaying every
+   * row of the journal made each one cost a full pass over unrelated history,
+   * about 7 s per projection on a 500,000-event journal.
+   */
+  readonly aggregateTypes?: ReadonlyArray<string>;
   reset(connection: SqliteConnection): void;
   apply(connection: SqliteConnection, event: EventEnvelope): void;
 }
@@ -171,6 +180,17 @@ function catchUpProjectionUnsafe(input: ReplayInput): ProjectionCheckpoint {
   if (input.projection.holdsStateInMemory === true) {
     input.projection.reset(input.connection);
     current = checkpoint(input.projection.name, 0, current.updatedAt);
+    const aggregateTypes = input.projection.aggregateTypes;
+    if (aggregateTypes !== undefined) {
+      try {
+        return replayOwnAggregateTypes(input, statements, aggregateTypes, journalHead);
+      } catch (error) {
+        if (!(error instanceof ReplayEventInvalid)) throw error;
+        // A row that no longer decodes takes the full replay below, which
+        // applies the valid prefix and quarantines the row exactly as before.
+        input.projection.reset(input.connection);
+      }
+    }
   }
 
   while (current.lastSequence < journalHead) {
@@ -197,6 +217,31 @@ function catchUpProjectionUnsafe(input: ReplayInput): ProjectionCheckpoint {
   }
 
   return current;
+}
+
+function replayOwnAggregateTypes(
+  input: ReplayInput,
+  statements: CheckpointStatements,
+  aggregateTypes: ReadonlyArray<string>,
+  journalHead: number,
+): ProjectionCheckpoint {
+  const batchSize = normalizeBatchSize(input.batchSize);
+  let batch: Array<EventEnvelope> = [];
+  for (const event of replayAggregateTypesInOrder(input.journal, aggregateTypes)) {
+    if (event.globalSequence > journalHead) break;
+    batch.push(event);
+    if (batch.length === batchSize) {
+      applyBatch(input, statements, batch);
+      batch = [];
+    }
+  }
+  if (batch.length > 0) applyBatch(input, statements, batch);
+  // Every other row up to the head was never this projection's to apply.
+  const updatedAt = input.clock();
+  input.connection.transaction(() => {
+    statements.upsert.run(input.projection.name, journalHead, updatedAt);
+  })();
+  return checkpoint(input.projection.name, journalHead, updatedAt);
 }
 
 export function rebuildProjection(input: ReplayInput): ProjectionCheckpoint {

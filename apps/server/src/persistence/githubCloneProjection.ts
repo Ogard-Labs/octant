@@ -33,6 +33,7 @@ export class GithubCloneProjection implements Projection {
   // Operations live only in this map, so every host start must replay them
   // all: resuming from the stored checkpoint hid the clones recovery fails.
   readonly holdsStateInMemory = true as const;
+  readonly aggregateTypes: ReadonlyArray<string> = [GITHUB_CLONE_AGGREGATE_TYPE];
   readonly #byRequestId = new Map<string, GithubCloneOperation>();
 
   reset(_connection: SqliteConnection): void {

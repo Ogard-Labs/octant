@@ -2139,6 +2139,22 @@ ALTER TABLE code_runtime_projection
       );
     `,
   },
+  {
+    version: 78,
+    name: "index_event_journal_type_sequence",
+    // Startup rebuilds each in-memory store from its own aggregate type in
+    // journal order. The other indexes that lead with the type are not in
+    // sequence order, so every batch read and sorted all of the type's rows
+    // after the cursor: about 1.3 s per 1,000-row batch on a 500,000-row type,
+    // which made rebuilding a large type quadratic.
+    //
+    // The condition is always true (the column's CHECK) and is there so only a
+    // query that repeats it can use the index. Without it the planner chose
+    // this index for the thread reads too, trading their thread-and-kind
+    // lookups for a walk over every row of the type after the cursor.
+    sql: `CREATE INDEX event_journal_type_sequence ON event_journal (aggregate_type, global_sequence)
+      WHERE aggregate_version > 0;`,
+  },
 ];
 
 interface AppliedMigrationRow {

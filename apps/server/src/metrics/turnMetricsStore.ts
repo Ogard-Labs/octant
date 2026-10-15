@@ -18,6 +18,7 @@ import { addTurnToSessionMetrics, addTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import type { UsageProjectScope } from "../usageProjectScope";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -25,9 +26,8 @@ const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
-const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
 
 export function registerTurnMetricsEvents(registry: EventRegistry): EventRegistry {
   return registry.register(TURN_METRICS_EVENT_NAMES.recorded, 1, TurnMetricsRecord);
@@ -138,28 +138,15 @@ export class TurnMetricsStore {
   }
 
   #hydrate(): void {
-    let afterSequence = 0;
-    for (;;) {
-      const batch = this.#journal.replay({
-        afterSequence: afterSequence as never,
-        limit: JOURNAL_REPLAY_BATCH_SIZE,
-      });
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        if (
-          envelope.aggregateType !== TURN_METRICS_AGGREGATE_TYPE ||
-          envelope.eventName !== TURN_METRICS_EVENT_NAMES.recorded
-        ) {
-          continue;
-        }
-        const record = envelope.payload as TurnMetricsRecord;
-        const thread = this.#threads.get(record.threadId) ?? { records: [], version: 0 };
-        thread.version += 1;
-        thread.records.push(record);
-        this.#threads.set(record.threadId, thread);
-      }
-      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      TURN_METRICS_AGGREGATE_TYPE,
+    ])) {
+      if (envelope.eventName !== TURN_METRICS_EVENT_NAMES.recorded) continue;
+      const record = envelope.payload as TurnMetricsRecord;
+      const thread = this.#threads.get(record.threadId) ?? { records: [], version: 0 };
+      thread.version += 1;
+      thread.records.push(record);
+      this.#threads.set(record.threadId, thread);
     }
   }
 }

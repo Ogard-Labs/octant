@@ -193,13 +193,16 @@ export class Journal {
       ORDER BY global_sequence ASC
       LIMIT ?
     `);
+    // `aggregate_version > 0` is always true; it is the condition of the
+    // (type, sequence) index (migration 78), which only a query that repeats
+    // it may use. That index returns the type's rows already in journal order.
     this.#replayAggregateTypeRows = options.connection.prepare(`
       SELECT
         global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
         event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
         actor_id, ${actorJsonSelect}, occurred_at, payload_json
       FROM event_journal
-      WHERE aggregate_type = ? AND global_sequence > ?
+      WHERE aggregate_type = ? AND global_sequence > ? AND aggregate_version > 0
       ORDER BY global_sequence ASC
       LIMIT ?
     `);
@@ -216,7 +219,7 @@ export class Journal {
         event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
         actor_id, ${actorJsonSelect}, occurred_at, payload_json
       FROM event_journal
-      WHERE aggregate_type = ? AND global_sequence > ?
+      WHERE aggregate_type = ? AND global_sequence > ? AND aggregate_version > 0
         AND (? IS NULL OR event_name = ?)
         AND (? IS NULL OR event_name <> ?)
         AND (? IS NULL OR CASE WHEN json_valid(payload_json)

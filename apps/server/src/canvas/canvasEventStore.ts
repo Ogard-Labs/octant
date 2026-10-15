@@ -31,6 +31,7 @@ import {
 } from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import { ConcurrencyConflict, DuplicateEventIdentity } from "../persistence/journalErrors";
 import {
   CANVAS_OUTSIDE_CONTENT_AGGREGATE_TYPE,
@@ -56,7 +57,7 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 
-type JournalPort = Pick<Journal, "append" | "replay"> &
+type JournalPort = Pick<Journal, "append" | "replay" | "replayAggregateType"> &
   Partial<Pick<Journal, "transaction" | "replayAggregate">>;
 
 export class CanvasEventStoreError extends Error {
@@ -339,20 +340,14 @@ export class CanvasEventStore {
 
   replayActionReceipts(): ReadonlyArray<CanvasActionReceipt> {
     const receipts: CanvasActionReceipt[] = [];
-    let afterSequence = 0;
-    while (true) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        if (envelope.eventName !== CANVAS_ACTION_RECEIPT_RECORDED) continue;
-        try {
-          receipts.push(decodeCanvasActionReceiptRecorded(envelope.payload).receipt);
-        } catch {
-          // Ignore malformed cache entries; lifecycle state remains journaled.
-        }
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      CANVAS_ACTION_AGGREGATE_TYPE,
+    ])) {
+      if (envelope.eventName !== CANVAS_ACTION_RECEIPT_RECORDED) continue;
+      try {
+        receipts.push(decodeCanvasActionReceiptRecorded(envelope.payload).receipt);
+      } catch {
+        // Ignore malformed cache entries; lifecycle state remains journaled.
       }
     }
     return receipts;
@@ -360,31 +355,23 @@ export class CanvasEventStore {
 
   replayRefreshReceipts(): ReadonlyArray<CanvasRefreshReceipt> {
     const receipts: CanvasRefreshReceipt[] = [];
-    let afterSequence = 0;
-    while (true) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        if (envelope.eventName !== CANVAS_REFRESH_RECEIPT_RECORDED) continue;
-        try {
+    // A refresh that made no new version records its own receipt; one that did
+    // carries the receipt on the version.
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      CANVAS_REFRESH_AGGREGATE_TYPE,
+      CANVAS_AGGREGATE_TYPE,
+    ])) {
+      try {
+        if (envelope.eventName === CANVAS_REFRESH_RECEIPT_RECORDED) {
           receipts.push(decodeCanvasRefreshReceiptRecorded(envelope.payload).receipt);
-        } catch {
-          // Ignore malformed cache entries; lifecycle state remains journaled.
-        }
-      }
-      for (const envelope of batch) {
-        if (envelope.eventName !== CANVAS_VERSION_APPENDED) continue;
-        try {
+        } else if (envelope.eventName === CANVAS_VERSION_APPENDED) {
           const payload = decodeCanvasVersionAppended(envelope.payload);
           if (payload.refreshReceipt !== undefined) {
             receipts.push(decodeCanvasRefreshReceipt(payload.refreshReceipt));
           }
-        } catch {
-          // Ignore malformed cache entries; lifecycle state remains journaled.
         }
+      } catch {
+        // Ignore malformed cache entries; lifecycle state remains journaled.
       }
     }
     return receipts;

@@ -1683,10 +1683,21 @@ flowchart LR
   checkpointed by sequence, detect lag, and can be rebuilt individually or
   wholesale (`db:status`, `db:verify`, `db:rebuild`). A projection whose state
   lives only in process memory (AgentRuns, Canvases, image jobs, managed
-  GitHub clones) declares `holdsStateInMemory` and replays from the start of
-  the journal at every host start, because its stored checkpoint describes the
-  previous process rather than this one. Automations are also in memory; the
-  host rebuilds them with a fail-closed hydration after catch-up instead.
+  GitHub clones, artifact replicas) declares `holdsStateInMemory` and replays
+  from the start of the journal at every host start, because its stored
+  checkpoint describes the previous process rather than this one. It names
+  the aggregate types it applies, and that replay reads only those rows.
+  Automations are also in memory; the host rebuilds them with a fail-closed
+  hydration after catch-up instead.
+- **Startup hydration reads a store's own rows.** Every in-memory store and
+  projection rebuilds at start from its own aggregate types, read in journal
+  order through the (type, sequence) index, so no store reads, decodes, or
+  counts another store's rows: a journal dominated by Code turn frames (one
+  row per streamed provider delta) cannot lock out an unrelated store or slow
+  its start. A hydration that passes its scan cap refuses rather than serve a
+  partial rebuild, and the cap counts only the store's own rows. The start-up
+  compatibility check still decodes every row, so a row that no longer
+  decodes stops the start as before.
 - **Migrations.** Ordered, forward-only, checksum-verified, applied in
   transactions before the server reports ready. A changed checksum or an
   unknown newer migration fails closed; a store backup is taken before a

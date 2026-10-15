@@ -135,6 +135,7 @@ export class ReplicaArtifactProjection implements Projection {
   readonly name = "replica-artifacts";
   readonly dependencies: ReadonlyArray<string> = [];
   readonly holdsStateInMemory = true as const;
+  readonly aggregateTypes: ReadonlyArray<string> = [REPLICA_MEMBERSHIP_AGGREGATE_TYPE];
   readonly #queued = new Map<string, ReplicaQueuedEntry>();
   readonly #artifacts = new Map<string, MutableArtifact>();
   readonly #applied = new Map<string, ReplicaAppliedEntry>();

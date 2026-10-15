@@ -1,4 +1,5 @@
 import {
+  CANVAS_AGGREGATE_TYPE,
   decodeCanvasCreated,
   decodeCanvasId,
   decodeCanvasVersion,
@@ -48,6 +49,7 @@ export class CanvasProjection implements Projection {
   // Canvases live only in these maps, so every host start must replay them
   // all: resuming from the stored checkpoint left a restarted host with none.
   readonly holdsStateInMemory = true as const;
+  readonly aggregateTypes: ReadonlyArray<string> = [CANVAS_AGGREGATE_TYPE];
   readonly #byId = new Map<CanvasId, CanvasProjectionEntry>();
   readonly #byProject = new Map<string, Set<CanvasId>>();
   readonly #byThread = new Map<string, Set<CanvasId>>();

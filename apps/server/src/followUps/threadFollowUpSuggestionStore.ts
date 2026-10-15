@@ -25,15 +25,15 @@ import {
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
-const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
 
 export function registerFollowUpSuggestionEvents(registry: EventRegistry): EventRegistry {
   return registry
@@ -185,23 +185,16 @@ export class ThreadFollowUpSuggestionStore {
       string,
       Pick<ThreadFollowUpSuggestions, "mode" | "projectId" | "suggestedBy">
     >();
-    let afterSequence = 0;
-    for (;;) {
-      const batch = this.#journal.replay({
-        afterSequence: afterSequence as never,
-        limit: JOURNAL_REPLAY_BATCH_SIZE,
-      });
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        const threadId = String(envelope.aggregateId);
-        if (envelope.aggregateType === THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE) {
-          this.#apply(threadId, envelope.eventName, envelope.payload);
-        } else if (envelope.aggregateType === NATIVE_HARNESS_SESSION_AGGREGATE_TYPE) {
-          this.#applyHarnessFrame(harnessOrigins, threadId, envelope.eventName, envelope.payload);
-        }
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE,
+      NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
+    ])) {
+      const threadId = String(envelope.aggregateId);
+      if (envelope.aggregateType === THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE) {
+        this.#apply(threadId, envelope.eventName, envelope.payload);
+      } else if (envelope.aggregateType === NATIVE_HARNESS_SESSION_AGGREGATE_TYPE) {
+        this.#applyHarnessFrame(harnessOrigins, threadId, envelope.eventName, envelope.payload);
       }
-      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
   }
 
