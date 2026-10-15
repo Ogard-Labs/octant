@@ -447,7 +447,10 @@ import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
 import { RunningTab } from "./home/RunningTab";
 import { stopRunningRow } from "./home/stopRunningRow";
 import { createRunningServicesCard } from "./home/RunningServicesCard";
-import { useRemoteServerLiveOpener } from "./home/remoteServerLiveOpener";
+import {
+  disconnectedRunningServicesClient,
+  useRemoteServerLiveOpener,
+} from "./home/remoteServerLiveOpener";
 import type { RemoteOpenMode, RemoteOpenOutcome } from "./home/runningServices";
 import { buildReviewEntries, type ReviewEntry } from "./review/reviewModel";
 import { createReviewSource } from "./review/reviewSource";
@@ -1892,22 +1895,41 @@ function LaunchedShell(
       slot.origin === undefined ||
       slot.state.kind !== "ready"
     ) {
-      return undefined;
+      // The filter still names that computer: its card says it cannot read
+      // it rather than showing this computer's servers under its name.
+      return {
+        status: "disconnected" as const,
+        hostName: slot?.displayName ?? environmentNames.get(hostId) ?? "That computer",
+      };
     }
-    return { hostId, hostName: slot.displayName, origin: slot.origin, bridge: slot.bridge };
+    return {
+      status: "ready" as const,
+      hostId,
+      hostName: slot.displayName,
+      origin: slot.origin,
+      bridge: slot.bridge,
+    };
     // The transport slot changes in place; the revision says when to look again.
-  }, [remoteServerLiveOpener, createHostViewScope, hostFederationTransports, federationRevision]);
+  }, [
+    remoteServerLiveOpener,
+    createHostViewScope,
+    hostFederationTransports,
+    federationRevision,
+    environmentNames,
+  ]);
   const remoteRunningServicesClient = useMemo(
     () =>
       runningServicesRemoteHost === undefined
         ? undefined
-        : createLocalServerClient({
-            // The remote session owns the destination; the base URL only shapes
-            // the path, and no window capability leaves this computer.
-            baseUrl: "http://127.0.0.1",
-            fetch: createRemoteProductFetch({ bridge: runningServicesRemoteHost.bridge }),
-            windowCapability: "",
-          }),
+        : runningServicesRemoteHost.status === "disconnected"
+          ? disconnectedRunningServicesClient(runningServicesRemoteHost.hostName)
+          : createLocalServerClient({
+              // The remote session owns the destination; the base URL only shapes
+              // the path, and no window capability leaves this computer.
+              baseUrl: "http://127.0.0.1",
+              fetch: createRemoteProductFetch({ bridge: runningServicesRemoteHost.bridge }),
+              windowCapability: "",
+            }),
     [runningServicesRemoteHost],
   );
   const openRunningServiceLive = useMemo(() => {
@@ -1915,7 +1937,7 @@ function LaunchedShell(
     const opener = remoteServerLiveOpener;
     const registry = federation?.registry;
     const deviceKeyStore = federation?.deviceKeyStore;
-    if (host === undefined || opener === undefined) return undefined;
+    if (host === undefined || host.status !== "ready" || opener === undefined) return undefined;
     if (registry === undefined || deviceKeyStore === undefined) return undefined;
     return async (service: RunningService, mode: RemoteOpenMode): Promise<RemoteOpenOutcome> => {
       const credential = (await registry.get(host.hostId))?.credential;

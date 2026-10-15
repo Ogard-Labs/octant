@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { HomeDashboard } from "./HomeDashboard";
 import { createRunningServicesCard, type RunningServicesCardSource } from "./RunningServicesCard";
 import { RUNNING_SERVICES_ROW_LIMIT } from "./runningServices";
+import { disconnectedRunningServicesClient } from "./remoteServerLiveOpener";
 
 const requestId = "00000000-0000-4000-8000-000000000904";
 const projectId = "00000000-0000-4000-8000-000000000902";
@@ -272,6 +273,21 @@ describe("the Running services card", () => {
       await screen.findByText("vite");
       await userEvent.setup().click(screen.getByRole("button", { name: "Open vite on port 5171" }));
       expect(await screen.findByText(notice)).toBeInTheDocument();
+    });
+
+    it("says a selected computer that is not connected cannot be checked, and lists nothing", async () => {
+      renderCard(
+        createRunningServicesCard(
+          source(disconnectedRunningServicesClient("Studio"), {
+            host: "Studio",
+            canOpen: () => false,
+          }),
+        ),
+      );
+      expect(
+        await screen.findByText("Studio isn't connected, so Octant can't check."),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^Stop / })).toBeNull();
     });
 
     it("keeps the picture of the page where this window cannot open it live", async () => {

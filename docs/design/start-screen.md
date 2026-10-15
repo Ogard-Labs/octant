@@ -260,7 +260,9 @@ Octant-owned, listening server in a thread **Open** and **Open in browser**,
 which show the page live on this computer (see
 [Architecture: security and authority](../architecture.md#security-and-authority),
 Forwarder and signer on the device); any other row there says in one line
-why it opens only on that computer, and a refusal shows on the row. Stop is the
+why it opens only on that computer, and a refusal shows on the row. While that
+computer is not connected, the card says it cannot check it rather than
+listing this computer's servers under its name. Stop is the
 Environment's authorized stop unchanged: a server Octant owns stops at once, one
 it does not own asks for the same confirmation naming process, folder, and port,
 and a Stop the host will not offer (a server in a Plan thread's own worktree, a

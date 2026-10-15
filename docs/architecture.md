@@ -6139,7 +6139,8 @@ mechanisms are:
   exception: a desktop window whose Environments filter is narrowed to one
   connected paired computer reads that computer's Running services over its
   paired session, as that device, and opens its servers only live (below),
-  never as one of its own Browser tabs.
+  never as one of its own Browser tabs; while that computer is not connected
+  the card reads nothing and says so, never this computer's rows.
 - **Proxy sessions and server grants.** A paired device asks for a grant to
   open one dev server from its own computer, under a proxy session that is
   separate from its product session. The rules in force:

@@ -350,6 +350,29 @@ describe("the transport to a paired host's listener", () => {
     ]);
   });
 
+  it("hands back a 205 Reset Content answer without a body", async () => {
+    const server: Server = createHttpServer((_request, response) => {
+      response.writeHead(205, [["x-octant-server-proxy", "relayed"]]);
+      response.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const port = (server.address() as AddressInfo).port;
+    const response = await sendThroughListener(
+      { listenerOrigin: LISTENER, trust: { current: { kind: "platform" } } },
+      {
+        method: "POST",
+        pathQuery: `/api/server-proxy/${GRANT_ID}/form`,
+        headers: [],
+        body: new TextEncoder().encode("a=1"),
+        signal: new AbortController().signal,
+      },
+      async () => ({ status: "connected", socket: connectTcp(port, "127.0.0.1") }),
+    );
+    expect(response.status).toBe(205);
+    expect(response.body).toBeNull();
+  });
+
   it("sends nothing when the listener's trust refuses the connection", async () => {
     await expect(
       sendThroughListener(

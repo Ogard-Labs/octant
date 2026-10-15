@@ -402,7 +402,9 @@ export async function sendThroughListener(
           if (name !== undefined && value !== undefined) answered.append(name, value);
         }
         const status = incoming.statusCode ?? 502;
-        const bodiless = request.method === "HEAD" || status === 204 || status === 304;
+        // Null-body statuses: a Response refuses a body for any of them.
+        const bodiless =
+          request.method === "HEAD" || status === 204 || status === 205 || status === 304;
         if (bodiless) incoming.resume();
         const chunks = incoming[Symbol.asyncIterator]();
         const body = bodiless
@@ -421,7 +423,15 @@ export async function sendThroughListener(
                 incoming.destroy();
               },
             });
-        resolve(new Response(body, { status, headers: answered }));
+        // Constructing the answer runs in Node's response callback, where a
+        // throw would escape as an uncaught main-process error rather than
+        // reach the forwarder; refuse the request instead.
+        try {
+          resolve(new Response(body, { status, headers: answered }));
+        } catch (error) {
+          incoming.destroy();
+          reject(error);
+        }
       },
     );
     outgoing.on("error", reject);

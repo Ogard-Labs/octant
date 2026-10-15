@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RunningService } from "@octant/contracts";
+import { LocalServerClientFailure, type LocalServerClient } from "@octant/client-runtime";
 import type { RemoteSessionFacts } from "@octant/client-runtime";
 import type { ListenerOriginTrust } from "@octant/client-runtime/remote-listener-trust";
 import {
@@ -146,4 +147,17 @@ export function useRemoteServerLiveOpener(
     };
   }, [openPage, subscribe]);
   return opener;
+}
+
+/**
+ * The Running services reader for a paired computer the window is narrowed to
+ * but cannot reach yet. Every read fails with that computer's name, so the
+ * card says it could not check rather than listing this computer's servers
+ * under the other's name, where Stop would act on the wrong computer.
+ */
+export function disconnectedRunningServicesClient(hostName: string): LocalServerClient {
+  const refuse = async (): Promise<never> => {
+    throw new LocalServerClientFailure(`${hostName} isn't connected, so Octant can't check.`, 0);
+  };
+  return { execute: refuse, executeRunningServices: refuse };
 }
