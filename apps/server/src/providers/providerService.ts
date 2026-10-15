@@ -2307,6 +2307,11 @@ function credentialEndpoint(instance: ProviderInstance): string | undefined {
     case "anthropic-compatible":
     case "azure-foundry":
       return instance.configuration.baseUrl;
+    case "bfl-image":
+    case "ideogram-image":
+      // Absent means the provider's own endpoint, so setting or clearing a
+      // proxy moves the key as surely as changing one.
+      return instance.configuration.baseUrl ?? "provider-default";
     default:
       return undefined;
   }

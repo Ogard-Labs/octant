@@ -2435,6 +2435,18 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   or given an empty prompt, records unreachable providers and unexpected
   errors as sanitized failures, and returns only bytes the host's media-type
   check accepted.
+  The Black Forest Labs and Ideogram drivers ship in-tree but import only
+  `@octant/contracts` and the image seam, as a third-party image plugin
+  would; a test fails on any other import. Black Forest Labs declares
+  `*.bfl.ai`, because its polling URLs name regional subdomains, and Ideogram
+  declares `api.ideogram.ai`. Their profiles take an optional
+  base URL (HTTPS, or HTTP on loopback), absent meaning the provider's own
+  endpoint; setting, moving, or clearing it deletes the stored key first, as
+  for any endpoint. The signed-URL exception stays bound to the provider's
+  own result: the image is fetched exactly at the URL the provider's
+  authenticated response named, without the credential, and a configured
+  base URL neither rewrites that URL to the base URL's host nor approves
+  any other URL on that host.
   The **Image generator** surface (profile menu, host-wide `image-library`
   scope; see
   [decisions/0081-image-generation-is-its-own-surface.md](decisions/0081-image-generation-is-its-own-surface.md);
@@ -5022,7 +5034,7 @@ feature is already an independently packaged plugin:
 | Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Only presentation and optional adapters are extraction candidates; core capability, lifecycle, and security remain app-managed |
 | Marketplace and plugin registry                                       | Stay in the host because they admit and activate other components                                                              |
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned           |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | The provider-sdk image seam and image-driver admission exist; adapters move behind them, image jobs stay host-owned            |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | BFL and Ideogram extracted behind the provider-sdk image seam; OpenAI and Gemini still in-tree; image jobs stay host-owned     |
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
