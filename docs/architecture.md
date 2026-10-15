@@ -3163,7 +3163,16 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   carrying the previous turn's counted copies when the ledger records a
   compaction after that turn's last usage report in journal order (not by the
   events' clocks, which can tie): a completed one, or a failed one that may
-  have changed the session.
+  have changed the session. That check comes first: a runtime whose last report
+  of a turn is its own breakdown (Claude Code) carries no `sentContext`, and the
+  journaled compaction still makes the next turn `uncounted` / `compacted`
+  rather than `history-unknown`. A runtime's automatic compaction inside a turn
+  lands before that turn's closing usage report, and the runner marks that
+  report `compacted` (a runtime-owned breakdown gets the field added) when the
+  turn had Octant-sent copies to uncount or the runtime reported its own
+  categories, so the next turn carries it. When neither the session nor the turn holds any such copy,
+  the breakdown stays `counted` with no sent parts, because nothing is left to
+  uncount.
 - A request with no terminal event when the host starts is closed as
   `context.compaction-failed@1` with `interrupted`; for a runtime executor the
   session may have changed, and the next usage report shows what it holds.
