@@ -568,7 +568,7 @@ export function GitHubIssueBrowser(props: GitHubIssueBrowserProps) {
                               })
                             }
                             type="button"
-                            variant="ghost"
+                            variant="bare"
                           >
                             <IssueStateIcon state={row.state} />
                             <span className="github-issue-browser__row-copy">

@@ -27,7 +27,7 @@ export function SyncedArtifactCard(props: SyncedArtifactCardProps) {
         className="artifact-card__button"
         onClick={() => props.onSelect(entry.canvasId)}
         type="button"
-        variant="ghost"
+        variant="bare"
       >
         <span className="artifact-card__preview" aria-hidden="true">
           {entry.preview === undefined ? (
