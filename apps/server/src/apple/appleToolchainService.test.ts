@@ -2221,6 +2221,24 @@ describe("AppleToolchainService Rotate", () => {
     expect(service.snapshot(context).orientations).toEqual([]);
   });
 
+  it("leaves out the orientation of a Simulator that is no longer discovered", async () => {
+    const { service, execute } = rotateService({ kind: "delivered", orientation: "landscape" });
+    await service.discover(discoveryRequest, context);
+    await service.execute(rotateRequest(), context);
+    expect(service.snapshot(context).orientations).toHaveLength(1);
+
+    // The Simulator was deleted: the next discovery lists none.
+    const listing = execute.getMockImplementation()!;
+    execute.mockImplementation(async (input) =>
+      input.argv.join(" ") === "xcrun simctl list devices available --json"
+        ? processResult(JSON.stringify({ devices: {} }))
+        : listing(input),
+    );
+    await service.discover(discoveryRequest, context);
+    expect(service.snapshot(context).simulators).toEqual([]);
+    expect(service.snapshot(context).orientations).toEqual([]);
+  });
+
   it("reports a rotation the helper refused as failed and says why", async () => {
     const { service } = rotateService({
       kind: "refused",
