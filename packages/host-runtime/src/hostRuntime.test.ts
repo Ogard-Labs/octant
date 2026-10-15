@@ -1366,7 +1366,7 @@ describe("start after an aborted host", () => {
     } finally {
       zombie.release();
     }
-  });
+  }, 20_000);
 
   it("still refuses when the recorded owner process is alive", async () => {
     const paths = await plantAbortedOwner(
@@ -1450,7 +1450,10 @@ async function spawnZombie(): Promise<{ readonly pid: number; readonly release: 
     });
     parent.once("error", reject);
   });
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  // A loaded runner can take seconds to schedule the exited child, so wait on the
+  // observable state against a wall-clock deadline rather than a fixed poll count.
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
     const state = await new Promise<string>((resolve) => {
       const ps = spawn("/bin/ps", ["-o", "stat=", "-p", String(pid)], {
         stdio: ["ignore", "pipe", "ignore"],

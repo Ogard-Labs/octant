@@ -7934,12 +7934,14 @@ describe("Project access inside a Code turn's tool calls", () => {
         await vi.waitFor(() => expect(endpoint.bodies).toHaveLength(4));
         expect(endpoint.answers().map(terminalOutcome)).toEqual(["none", "none", "none"]);
         expect(readFileSync(join(checkoutRoot, "after.txt"), "utf8")).toBe("written");
-        await vi.waitFor(() => expect(existsSync(join(checkoutRoot, "terminal.txt"))).toBe(true));
+        await vi.waitFor(() => expect(existsSync(join(checkoutRoot, "terminal.txt"))).toBe(true), {
+          timeout: 10_000,
+        });
       } finally {
         await fixture.runtime.close();
         fixture.close();
       }
-    });
+    }, 20_000);
 
     it("keeps a Plan turn read-only on its checkout after the window is rebound", async () => {
       const { checkoutRoot } = roots();
