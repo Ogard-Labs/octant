@@ -132,18 +132,19 @@ fieldset.profile-editor__field > legend {
   inline-size: 1.6rem;
   block-size: 1.6rem;
   padding: 0;
-  border-radius: var(--oct-radius-pill);
+}
+
+.profile-editor__swatch {
+  inline-size: 100%;
+  block-size: 100%;
   border: 2px solid transparent;
-  cursor: pointer;
-  background: var(--octant-avatar-bg);
+  box-sizing: border-box;
 }
 
 /*
  * Selection is carried by a ring *and* the checked radio state in the markup,
  * so the chosen accent is not communicated by colour alone.
  */
-.profile-editor__accent[aria-checked="true"] {
+.profile-editor__accent[aria-checked="true"] .profile-editor__swatch {
   border-color: CanvasText;
-  outline: 2px solid transparent;
-  outline-offset: 2px;
 }

@@ -84,6 +84,8 @@
     "./remote-listener-trust": "./src/remoteListenerTrust.ts",
     "./app-pairing-code": "./src/appPairingCode.ts",
     "./remote-session-bridge": "./src/remoteSessionBridge.ts",
+    "./remote-server-proxy-client": "./src/remoteServerProxyClient.ts",
+    "./remote-server-forwarder": "./src/remoteServerForwarder.ts",
     "./use-connection-status": "./src/useConnectionStatus.ts",
     "./theme-client": "./src/themeClient.ts",
     "./usage-client": "./src/usageClient.ts",

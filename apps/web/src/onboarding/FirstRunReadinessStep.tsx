@@ -74,7 +74,7 @@ export function FirstRunReadinessStep(props: FirstRunReadinessStepProps) {
                       className="first-run__fact-action"
                       onClick={() => props.onSetup(FACT_TARGET[fact.id])}
                       type="button"
-                      variant="ghost"
+                      variant="link"
                     >
                       {fact.label}
                     </OctantButton>

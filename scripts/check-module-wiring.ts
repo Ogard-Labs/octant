@@ -620,20 +620,7 @@ export function findUnregisteredRouteModules(
  * states a dated reason and the caller it is waiting on. Empty means every
  * served endpoint has a caller (or is a routing prefix).
  */
-export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
-  [
-    "/api/remote/auth/server-proxy-session",
-    "Host side of opening a dev server from a paired device; docs/plans/open-a-dev-server-from-another-computer.md builds the host first and its desktop forwarder last, so nothing calls it yet. Remove once the desktop forwarder does.",
-  ],
-  [
-    "/api/server-proxy",
-    "Host side of opening a dev server from a paired device; docs/plans/open-a-dev-server-from-another-computer.md builds the host first and its desktop forwarder last, so nothing calls it yet. Remove once the desktop forwarder does.",
-  ],
-  [
-    "/api/server-proxy/grants",
-    "Host side of opening a dev server from a paired device; docs/plans/open-a-dev-server-from-another-computer.md builds the host first and its desktop forwarder last, so nothing calls it yet. Remove once the desktop forwarder does.",
-  ],
-]);
+export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map();
 
 const API_PATH_PATTERN = /"(\/api\/[a-z0-9/_-]+)"/g;
 const PREFIX_GUARD_PATTERN = /startsWith\(\s*"(\/api\/[a-z0-9/_-]+)"/g;

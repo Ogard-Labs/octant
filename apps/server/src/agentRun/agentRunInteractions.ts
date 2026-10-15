@@ -3,6 +3,7 @@ import type {
   AgentRunAuthority,
   AgentRunId,
   NativeHarnessApproval,
+  NativeHarnessCommandHost,
   ProviderRuntimeEvent,
   ProviderInstanceId,
   NativeHarnessSlotCandidate,
@@ -11,14 +12,18 @@ import {
   clampAgentRunAuthority,
   effectiveAgentRunExecutionTarget,
 } from "@octant/domain/agent-run-policy";
-import type { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
+import type {
+  NativeHarnessApprovalStore,
+  NativeHarnessCommandApprovalOutcome,
+} from "../harness/nativeHarnessApprovals";
+import type { NativeHarnessChildInteractions } from "../harness/nativeHarnessComposition";
 import type { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
-import type { NativeHarnessToolPorts } from "../harness/nativeHarnessTools";
 import { clampAgentRunSessionAuthority } from "./agentRunSessionRuntime";
 
 export interface AgentRunInteractionOptions {
   readonly getById: (id: AgentRunId) => AgentRun | undefined;
-  readonly approvals: Pick<NativeHarnessApprovalStore, "ask">;
+  readonly approvals: Pick<NativeHarnessApprovalStore, "ask"> &
+    Partial<Pick<NativeHarnessApprovalStore, "askCommand">>;
   readonly questions: Pick<NativeHarnessQuestionStore, "ask">;
   readonly providerName?: (id: ProviderInstanceId) => string | undefined;
   readonly parentLead: (run: AgentRun) => NativeHarnessSlotCandidate | undefined;
@@ -70,26 +75,44 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
     readonly summary: string;
     readonly approvalClass: string;
     readonly signal?: AbortSignal;
-  }) => {
-    if (!current(input.run, input.signal)) return "cancelled" as const;
+  }) => (await approveListing(input)).outcome;
+  /**
+   * Asks on the parent thread. With `commandHosts`, the ask is single-use and
+   * lists them, and an approval carries the hosts the person ticked; a child
+   * whose authority lapsed while it waited gets neither.
+   */
+  const approveListing = async (input: {
+    readonly run: AgentRun;
+    readonly toolName: NativeHarnessApproval["toolName"];
+    readonly summary: string;
+    readonly approvalClass: string;
+    readonly commandHosts?: ReadonlyArray<NativeHarnessCommandHost>;
+    readonly signal?: AbortSignal;
+  }): Promise<NativeHarnessCommandApprovalOutcome> => {
+    if (!current(input.run, input.signal)) return { outcome: "cancelled" };
     // A provider's opaque prompt cannot widen Plan or the child's admitted
     // authority. Native tool prompts have already passed the tool policy.
     if (
       input.toolName === "provider-action" &&
       clampAgentRunSessionAuthority(input.run).executionPolicy === "plan"
     )
-      return "denied" as const;
+      return { outcome: "denied" };
     const parent = scope(input.run);
-    if (parent.lead === undefined) return "cancelled" as const;
-    const outcome = await options.approvals.ask({
+    if (parent.lead === undefined) return { outcome: "cancelled" };
+    const ask = {
       ...parent,
       lead: parent.lead,
       toolName: input.toolName,
       summary: input.summary,
       approvalClass: input.approvalClass,
       signal: input.signal,
-    });
-    return current(input.run, input.signal) ? outcome : ("cancelled" as const);
+    };
+    const askCommand = options.approvals.askCommand;
+    const answered =
+      input.commandHosts === undefined || askCommand === undefined
+        ? { outcome: await options.approvals.ask(ask) }
+        : await askCommand.call(options.approvals, { ...ask, commandHosts: input.commandHosts });
+    return current(input.run, input.signal) ? answered : { outcome: "cancelled" };
   };
   const ask = async (input: {
     readonly run: AgentRun;
@@ -150,8 +173,9 @@ export function createAgentRunInteractions(options: AgentRunInteractionOptions) 
       });
       return outcome.status === "answered" ? outcome.answer : undefined;
     },
-    toolsFor: (run: AgentRun): Pick<NativeHarnessToolPorts, "approvals" | "askUser"> => ({
+    toolsFor: (run: AgentRun): NativeHarnessChildInteractions => ({
       approvals: (input) => approve({ ...input, run }),
+      approveCommand: (input) => approveListing({ ...input, run }),
       askUser: async (input) => {
         const outcome = await ask({ ...input, run });
         return outcome;
