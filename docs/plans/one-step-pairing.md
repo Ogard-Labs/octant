@@ -1,7 +1,7 @@
 # One-step pairing with a self-made listener certificate
 
-**Status: approved by the maintainer on 2026-10-14; slices 1, 2, and 3 are
-built, the rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
+**Status: approved by the maintainer on 2026-10-14; slices 1, 2, 3, and 6 are built (6's live
+check is open), the rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
 holds only the rules that are true today, and each slice below moves its rules
 there when it lands; the host certificate's key, storage, renewal, pin format,
 and status fields, the pairing code's format, QR code, and reading rules, and
@@ -267,7 +267,7 @@ and the plan shrinks accordingly.
    tests on both platforms and the device pass from the
    [TestFlight runbook](../mobile-testflight.md) against a self-made host,
    including a refused mismatch.
-6. _One-line start._ `--pair`. Tests: Tailscale is chosen over LAN,
+6. _One-line start._ **Built**; its rules are in Architecture. `--pair`. Tests: Tailscale is chosen over LAN,
    several candidates refuse and list them, a public address is never
    chosen, and approval needs a typed `y`. Live: pair a second machine over
    Tailscale with only the command and the host approval.

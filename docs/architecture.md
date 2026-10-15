@@ -5947,9 +5947,28 @@ mechanisms are:
       a test refuses any that does. No `octant` command connects to another
       host yet, so only tests use it.
 - **Adding a computer in one step.** Partly built: the host certificate,
-  pairing code, and client trust rule above. Reading the code and pinning on
-  the desktop and phone apps, and the rest, are planned in
-  [the plan](plans/one-step-pairing.md).
+  pairing code, client trust rule above, and the one-line start. Reading the
+  code and pinning on the desktop and phone apps, and key rotation, are
+  planned in [the plan](plans/one-step-pairing.md).
+  - **One-line start.** `octant server install --artifact <path> --pair` and
+    `octant server start --pair` install and start the service as without
+    the flag, then make only the loopback administration calls
+    `octant listener` and `octant pair` make, so they add no authority.
+    `--hostname`, `--port`, `--cert`, and `--key` are accepted only with
+    `--pair`. The address is an up interface's non-loopback, non-link-local
+    address the classifier calls Tailscale, else the one private LAN address
+    (an interface's IPv4 address names it over its IPv6 one); none, or more
+    than one of that kind, is refused with what was found, a public address
+    is never chosen, and `--hostname` must itself classify as Tailscale or
+    private LAN. The listener is enabled on port 8443 unless `--port` says
+    otherwise, with the host's own certificate unless `--cert` and `--key`
+    name one, in which case the command prints the browser link instead of a
+    pairing code. It then prints the code and QR code, polls the pending
+    claims until the ticket's five minutes end, shows the device label, key
+    fingerprint, and comparison code, and approves only on a typed `y`
+    (`y` or `yes`); any other answer denies the request, and an input that
+    ends without an answer leaves it pending for `octant pair approve`. It
+    changes no firewall rule and runs no Tailscale command.
 - **Provider keys on a host without the desktop app.** _Designed, not yet
   built._ The desktop saves an endpoint's API key or bearer token over
   native IPC from its own renderer, so a browser client — local or paired —
