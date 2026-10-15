@@ -17,6 +17,15 @@ const DEFAULT_APPROVAL_TTL_MS = 5 * 60_000;
  */
 export const MAX_PENDING_APPROVALS = 32;
 
+/**
+ * Who is answering: a person at a local window, or a paired device, each by
+ * the service scope its authenticated principal resolved to.
+ */
+export interface ExtensionToolApprovalAnswerer {
+  readonly kind: "local-window" | "remote-device";
+  readonly scopeId: WindowId;
+}
+
 interface PendingApproval {
   readonly view: ExtensionToolApproval;
   readonly windowId: WindowId;
@@ -49,6 +58,21 @@ export class ExtensionToolApprovalService {
        */
       readonly windowCanReachThread?: (
         windowId: WindowId,
+        threadId: string,
+        projectId: string | undefined,
+      ) => boolean;
+      /**
+       * Whether a requesting scope is a paired device that is still paired.
+       * Its turn's prompt may also be answered by a local window that may
+       * drive the thread, since the person may be at either.
+       */
+      readonly isPairedDeviceScope?: (windowId: WindowId) => boolean;
+      /**
+       * Whether the thread still stands under the Project the prompt
+       * recorded: the thread and its Project are active and the thread is
+       * still bound there. A paired device answers only while this holds.
+       */
+      readonly threadAuthorityIsCurrent?: (
         threadId: string,
         projectId: string | undefined,
       ) => boolean;
@@ -127,27 +151,34 @@ export class ExtensionToolApprovalService {
     });
   }
 
-  list(windowId: WindowId): ReadonlyArray<ExtensionToolApproval> {
+  list(answerer: ExtensionToolApprovalAnswerer): ReadonlyArray<ExtensionToolApproval> {
     this.#expire();
     return [...this.#pending.values()]
-      .filter((pending) => this.#answerableBy(pending, windowId))
+      .filter((pending) => this.#answerableBy(pending, answerer))
       .map((pending) => pending.view);
   }
 
-  decide(windowId: WindowId, decision: ExtensionToolApprovalDecision): boolean {
+  decide(
+    answerer: ExtensionToolApprovalAnswerer,
+    decision: ExtensionToolApprovalDecision,
+  ): boolean {
     this.#expire();
     const pending = this.#pending.get(decision.approvalId);
-    if (pending === undefined || !this.#answerableBy(pending, windowId)) return false;
+    if (pending === undefined || !this.#answerableBy(pending, answerer)) return false;
     if (decision.remember === true) {
-      // A remembered approval grows only from a person's answer at a window,
-      // to a prompt that offered it: one a host-owned turn raised arrives
+      // A remembered approval grows only from a person's answer at the local
+      // window whose own turn raised the prompt, and only to a prompt that
+      // offered it: one a host-owned or a paired device's turn raised arrives
       // with no `remember`, whoever answers. The host's own scope is nobody,
-      // so it may settle its prompt but never remember one. A refused or
-      // failed `remember` leaves the call waiting, to be approved once.
+      // so it may settle its prompt but never remember one, and a paired
+      // device approves once only. A refused or failed `remember` leaves the
+      // call waiting, to be approved once.
       if (
         decision.decision !== "approved" ||
         pending.remember === undefined ||
-        this.options.isHostScope?.(windowId) === true ||
+        answerer.kind !== "local-window" ||
+        String(pending.windowId) !== String(answerer.scopeId) ||
+        this.options.isHostScope?.(answerer.scopeId) === true ||
         !pending.remember()
       ) {
         return false;
@@ -158,23 +189,34 @@ export class ExtensionToolApprovalService {
   }
 
   /**
-   * A window answers its own prompts. A host-owned turn's prompt has no
-   * window of its own, so any window that may drive that thread answers it;
-   * the answer settles only this prompt and lends the window nothing else of
-   * the host scope.
+   * A local window answers its own prompts. A host-owned turn's prompt has no
+   * window of its own, and a paired device's turn may be answered from the
+   * machine as well as from the device, so any local window that may drive
+   * that thread answers either; the answer settles only this prompt and lends
+   * the window nothing else of the other scope.
+   *
+   * A paired device answers only the prompts its own turns raised, and only
+   * while their thread still stands in the recorded Project. It never answers
+   * a local window's, another device's, or the host's prompt.
    */
-  #answerableBy(pending: PendingApproval, windowId: WindowId): boolean {
-    if (pending.windowId === windowId) return true;
-    const { isHostScope, windowCanReachThread } = this.options;
-    if (
-      isHostScope === undefined ||
-      windowCanReachThread === undefined ||
-      !isHostScope(pending.windowId) ||
-      isHostScope(windowId)
-    ) {
+  #answerableBy(pending: PendingApproval, answerer: ExtensionToolApprovalAnswerer): boolean {
+    const { isHostScope, isPairedDeviceScope, threadAuthorityIsCurrent, windowCanReachThread } =
+      this.options;
+    if (answerer.kind === "remote-device") {
+      return (
+        String(pending.windowId) === String(answerer.scopeId) &&
+        threadAuthorityIsCurrent !== undefined &&
+        threadAuthorityIsCurrent(pending.view.threadId, pending.view.projectId)
+      );
+    }
+    if (String(pending.windowId) === String(answerer.scopeId)) return true;
+    if (windowCanReachThread === undefined || isHostScope?.(answerer.scopeId) === true) {
       return false;
     }
-    return windowCanReachThread(windowId, pending.view.threadId, pending.view.projectId);
+    const raisedByHost = isHostScope?.(pending.windowId) === true;
+    const raisedByPairedDevice = isPairedDeviceScope?.(pending.windowId) === true;
+    if (!raisedByHost && !raisedByPairedDevice) return false;
+    return windowCanReachThread(answerer.scopeId, pending.view.threadId, pending.view.projectId);
   }
 
   revokeWindow(windowId: WindowId): void {

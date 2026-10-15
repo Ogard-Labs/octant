@@ -1317,6 +1317,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           className="code-thread-workspace__conversation transcript-scroll"
           estimateSize={96}
           gap={20}
+          itemAt={messageHappenedAt}
           itemKey={(message) => message.id}
           items={messages}
           key={String(props.threadId)}
@@ -2355,4 +2356,8 @@ function observedTaskChangedFiles(
     insertions: state.insertions,
     deletions: state.deletions,
   };
+}
+
+function messageHappenedAt(message: CodeConversationMessage): string | undefined {
+  return message.at;
 }

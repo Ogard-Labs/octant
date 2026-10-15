@@ -4,6 +4,14 @@ import {
   MAX_IMAGE_VARIANTS,
   type OpenAiCompatibleProviderInstance,
 } from "@octant/contracts";
+import {
+  imageFailure,
+  imageInterrupted,
+  readImageJson,
+  type ImageAdapterRequest,
+  type ImageAdapterResult,
+  type ImageGenerationAdapter,
+} from "@octant/provider-sdk/image-generation";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import {
   classifyCompatibleHttpFailure,
@@ -17,12 +25,6 @@ import {
   type OpenAiCompatibleEndpoint,
 } from "../providers/openAiCompatibleEndpoint";
 import { sniffGeneratedImageMediaType } from "./generatedImageStore";
-import type {
-  ImageAdapterRequest,
-  ImageAdapterResult,
-  ImageGenerationAdapter,
-} from "./imageAdapter";
-import { fail, interrupted, readImageJson } from "./imageHttp";
 import {
   decodeBase64Image,
   decodeOpenAiImageResponse,
@@ -85,18 +87,21 @@ async function generateCompatibleImage(
   request: ImageAdapterRequest,
 ): Promise<ImageAdapterResult> {
   if (request.signal?.aborted) {
-    return { status: "failed", providerFailure: interrupted() };
+    return { status: "failed", providerFailure: imageInterrupted() };
   }
   if (request.prompt.trim().length === 0) {
     return {
       status: "failed",
-      providerFailure: fail("invalid-configuration", "The image prompt must not be empty."),
+      providerFailure: imageFailure("invalid-configuration", "The image prompt must not be empty."),
     };
   }
   if (request.prompt.length > MAX_IMAGE_PROMPT_CHARACTERS) {
     return {
       status: "failed",
-      providerFailure: fail("invalid-configuration", "The image prompt exceeded the length limit."),
+      providerFailure: imageFailure(
+        "invalid-configuration",
+        "The image prompt exceeded the length limit.",
+      ),
     };
   }
   const variantCount = request.variantCount ?? 1;
@@ -107,7 +112,7 @@ async function generateCompatibleImage(
   ) {
     return {
       status: "failed",
-      providerFailure: fail(
+      providerFailure: imageFailure(
         "invalid-configuration",
         "The requested variant count is not supported.",
       ),
@@ -162,7 +167,7 @@ async function generateCompatibleImage(
   if (decoded.kind === "url-rejected") {
     return {
       status: "failed",
-      providerFailure: fail(
+      providerFailure: imageFailure(
         "protocol",
         "The provider returned an image URL instead of inline image bytes.",
       ),
@@ -171,7 +176,7 @@ async function generateCompatibleImage(
   if (decoded.kind === "invalid") {
     return {
       status: "failed",
-      providerFailure: fail("protocol", "The provider returned an invalid image response."),
+      providerFailure: imageFailure("protocol", "The provider returned an invalid image response."),
     };
   }
   if (decoded.kind === "refused") {
@@ -184,13 +189,13 @@ async function generateCompatibleImage(
     if (bytes === undefined) {
       return {
         status: "failed",
-        providerFailure: fail("protocol", "The provider returned malformed image bytes."),
+        providerFailure: imageFailure("protocol", "The provider returned malformed image bytes."),
       };
     }
     if (bytes.byteLength > MAX_GENERATED_IMAGE_BYTES) {
       return {
         status: "failed",
-        providerFailure: fail(
+        providerFailure: imageFailure(
           "protocol",
           "The provider response exceeded the configured size limit.",
         ),
@@ -200,7 +205,7 @@ async function generateCompatibleImage(
     if (mediaType === undefined) {
       return {
         status: "failed",
-        providerFailure: fail("protocol", "The provider returned malformed image bytes."),
+        providerFailure: imageFailure("protocol", "The provider returned malformed image bytes."),
       };
     }
     images.push({ bytes, mediaType });
@@ -208,7 +213,7 @@ async function generateCompatibleImage(
   if (images.length === 0) {
     return {
       status: "failed",
-      providerFailure: fail("protocol", "The provider returned an invalid image response."),
+      providerFailure: imageFailure("protocol", "The provider returned an invalid image response."),
     };
   }
   return {

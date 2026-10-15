@@ -9,12 +9,18 @@ import {
   type NativeHarnessSlotCandidate,
   type OctantMode,
   type ProjectId,
+  type ProviderExecutionPolicy,
   type ProviderInstanceId,
   type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
 import { hasKnownContextWindow } from "@octant/domain/context-policy";
 import { nativeHarnessResultTaintsThread } from "@octant/domain/untrusted-content-policy";
+import {
+  clampChildThreadEgressPolicy,
+  materializeHarnessToolNetwork,
+  resolveDefaultThreadEgressPolicy,
+} from "../process/threadEgressPolicy";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ContextHarnessService } from "../context/contextHarnessService";
 import type {
@@ -55,6 +61,24 @@ export interface NativeHarnessCompositionOptions {
    */
   readonly offlineShell?: NativeHarnessShellPort;
   /**
+   * Code only: the sandboxed shell on `proxied` network, whose commands reach
+   * only the hosts the scope's egress rules name. With it, each command runs
+   * on the network its thread's live posture resolves: approval-gated and
+   * auto-accept-edits on `proxied`, Full access on `shell`, anything else on
+   * `offlineShell`. Without it every networked command runs on `shell`, as it
+   * did before the rules existed.
+   */
+  readonly proxiedShell?: (scope: HarnessEgressScope) => NativeHarnessShellPort;
+  /**
+   * A Code thread's access posture now, as the window running it holds it and
+   * clamped to its running turn's, or nothing for a thread that is not one.
+   * Without a window it is the stored posture clamped to the running turn's.
+   */
+  readonly readCodeExecutionPolicy?: (
+    threadId: string,
+    windowId?: string,
+  ) => ProviderExecutionPolicy | undefined;
+  /**
    * The web search a turn may use, resolved each time a turn's tools are
    * composed: its backing endpoint is a live setting, not a startup fact.
    */
@@ -85,6 +109,13 @@ export interface NativeHarnessCompositionOptions {
   ) => ExternalContentIngestionResult;
   readonly uuid: () => string;
   readonly clock: () => string;
+}
+
+/** Whose egress rules a proxied command runs under: a child runs under its parent's. */
+export interface HarnessEgressScope {
+  readonly threadId: string;
+  readonly projectId: string;
+  readonly parentThreadId?: string;
 }
 
 export interface NativeHarnessComposition {
@@ -245,6 +276,43 @@ export function createNativeHarnessComposition(
       ? {}
       : { steering: () => options.activity!.deliverSteering(scope.parentThreadId) }),
   });
+  const unavailableShell: NativeHarnessShellPort = {
+    run: async () => ({ status: "unavailable", output: "", truncated: false }),
+  };
+  /**
+   * The shell a command runs on, chosen when it runs from the egress the
+   * posture resolves then, so a posture changed mid-turn applies to the next
+   * command. A posture that cannot be read runs offline; `proxied` never
+   * falls back to open network.
+   */
+  const postureShell = (
+    proxied: NativeHarnessShellPort,
+    resolveEgress: () => ReturnType<typeof resolveDefaultThreadEgressPolicy>,
+  ): NativeHarnessShellPort => ({
+    run: (input) => {
+      const network = materializeHarnessToolNetwork(resolveEgress());
+      const shell =
+        network === "proxied"
+          ? proxied
+          : network === "allow"
+            ? options.shell
+            : options.offlineShell;
+      return (shell ?? unavailableShell).run(input);
+    },
+  });
+  const codeEgress = (threadId: string, windowId?: string) => {
+    const executionPolicy = options.readCodeExecutionPolicy?.(threadId, windowId);
+    return executionPolicy === undefined
+      ? "none"
+      : resolveDefaultThreadEgressPolicy({ mode: "code", executionPolicy });
+  };
+  const codeShell = (
+    scope: HarnessEgressScope,
+    windowId: string,
+  ): NativeHarnessShellPort | undefined =>
+    options.proxiedShell === undefined
+      ? options.shell
+      : postureShell(options.proxiedShell(scope), () => codeEgress(scope.threadId, windowId));
   const delegateFor = (scope: {
     readonly parentThreadId: string;
     readonly windowId: string;
@@ -318,6 +386,7 @@ export function createNativeHarnessComposition(
     forCode: ({ thread, checkoutRoot, windowId }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
+      const shell = codeShell({ threadId, projectId: String(thread.projectId) }, windowId);
       return compose({
         threadId,
         mode: "code",
@@ -337,7 +406,7 @@ export function createNativeHarnessComposition(
             lead: leadOf(thread),
           }),
           filesystem: new NativeHarnessFileSystem({ root: checkoutRoot }),
-          ...(options.shell === undefined ? {} : { shell: options.shell }),
+          ...(shell === undefined ? {} : { shell }),
           ...webPorts(),
         },
       });
@@ -371,8 +440,32 @@ export function createNativeHarnessComposition(
         }),
       });
       // A child without network authority must not reach it through a command
-      // either, so its shell is the one whose sandbox closes the network.
-      const shell = authority.network ? options.shell : options.offlineShell;
+      // either, so its shell is the one whose sandbox closes the network. A
+      // child with it is never wider than its parent's posture now, and on
+      // `proxied` it runs under its parent's rules.
+      const parentThreadId = String(run.parentThreadId);
+      const shell = !authority.network
+        ? options.offlineShell
+        : options.proxiedShell === undefined
+          ? options.shell
+          : projectId === undefined
+            ? unavailableShell
+            : postureShell(
+                options.proxiedShell({
+                  threadId: runId,
+                  projectId: String(projectId),
+                  parentThreadId,
+                }),
+                () =>
+                  clampChildThreadEgressPolicy({
+                    parent: codeEgress(parentThreadId),
+                    childNetworkAuthority: true,
+                    requested: resolveDefaultThreadEgressPolicy({
+                      mode: "code",
+                      executionPolicy: authority.executionPolicy,
+                    }),
+                  }),
+              );
       const tools = createNativeHarnessTools({
         threadId: runId,
         mode,

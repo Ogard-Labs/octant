@@ -23,6 +23,11 @@ export function createExtensionToolCallAuthorizer(options: {
    * turn's prompt is approved once and never remembered.
    */
   readonly isHostScope: (windowId: WindowId) => boolean;
+  /**
+   * Whether the scope a turn runs under is a paired device's. Such a turn's
+   * prompt is approved once and never remembered, whoever answers it.
+   */
+  readonly isPairedDeviceScope: (windowId: WindowId) => boolean;
   /** Whether the thread has taken in outside content, from the journal's taint. */
   readonly threadTainted: (threadId: string) => boolean;
   /** The sources that marked the thread, which its prompt names. */
@@ -51,6 +56,7 @@ export function createExtensionToolCallAuthorizer(options: {
       decision: decideExtensionToolGrant({
         inProject: subject !== undefined,
         hostOwnedTurn: call.windowId !== undefined && options.isHostScope(call.windowId),
+        pairedDeviceTurn: call.windowId !== undefined && options.isPairedDeviceScope(call.windowId),
         planTurn: call.thread.planTurn === true,
         threadTainted: options.threadTainted(call.thread.id),
         reach: call.reach,

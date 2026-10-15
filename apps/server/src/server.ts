@@ -29,6 +29,8 @@ import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  AggregateId,
+  ToolEgressLaunchId,
   effectiveAgentRunConcurrency,
   type ChatThreadId,
   type DiscoveryCandidate,
@@ -382,7 +384,7 @@ import {
 } from "./persistence/persistenceService";
 import { readAgentRunAdmittedContext } from "./persistence/agentRunContentStore";
 import { purgeThreadArtifacts, removeMirrorFiles } from "./persistence/threadArtifactPurge";
-import { readHostIdentity } from "./persistence/remoteAccessProjection";
+import { readDeviceRegistration, readHostIdentity } from "./persistence/remoteAccessProjection";
 import { createProjectBindingRouteHandler } from "./projectBindingRoutes";
 import { createProjectRouteHandler } from "./projectRoutes";
 import { createAgentProfileRouteHandler } from "./agentProfileRoutes";
@@ -531,6 +533,7 @@ import type { CompatibleFetch } from "./providers/openAiCompatibleEndpoint";
 import { makeClaudeAgentSdkPort, type ClaudeAgentSdkPort } from "./providers/claudeAgentSdkPort";
 import type { ClaudeResumeIdentityPort } from "./providers/claudeDriver";
 import { makeClaudeProcessLive, type ClaudeProcessPort } from "./providers/claudeProcess";
+import { ClaudeResumeIdentityJournal } from "./providers/claudeResumeIdentityJournal";
 import { ClaudeResumeIdentityStore } from "./providers/claudeResumeIdentityStore";
 import { makeCodexProcessLive } from "./providers/codexProcess";
 import type { CodexProcessPort } from "./providers/codexProcess";
@@ -713,6 +716,10 @@ import { AgentPluginMcpSessionManager } from "./extensions/agentPluginMcpSession
 import { LocalPluginFolderRegistry } from "./extensions/localPluginFolderRegistry";
 import { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
 import { ExtensionToolApprovalService } from "./extensions/extensionToolApprovalService";
+import {
+  chatThreadStandsInProject,
+  isDeviceRegistrationCurrent,
+} from "./extensions/pairedDeviceApprovalAuthority";
 import { createExtensionToolCallAuthorizer } from "./extensions/extensionToolCallAuthorizer";
 import { ExtensionToolGrantStore } from "./extensions/extensionToolGrantStore";
 import {
@@ -754,9 +761,14 @@ import {
 import { createNativeHarnessAuthority } from "./harness/nativeHarnessAuthority";
 import {
   createNativeHarnessComposition,
+  type HarnessEgressScope,
   type NativeHarnessComposition,
 } from "./harness/nativeHarnessComposition";
 import { createNativeHarnessShell } from "./harness/nativeHarnessShell";
+import {
+  materializeHarnessToolNetwork,
+  resolveDefaultThreadEgressPolicy,
+} from "./process/threadEgressPolicy";
 import { createNativeHarnessDelegatePort } from "./harness/nativeHarnessDelegatePort";
 import {
   NativeHarnessEndpointRegistry,
@@ -1885,9 +1897,38 @@ export function startOctantServer(
       now: Date.now,
       clampNow: processAuthorityNow,
     });
+    // A paired device's service scope is its device id. Only a device still
+    // paired counts: a revoked or expired one's prompts are answered by
+    // nobody else and run out.
+    const isPairedDeviceScope = (scopeId: WindowId): boolean =>
+      isDeviceRegistrationCurrent(
+        readDeviceRegistration(persistence.connection, String(scopeId)),
+        Date.now(),
+      );
     const extensionToolApprovalService = new ExtensionToolApprovalService({
       uuid: randomUUID,
       now: Date.now,
+      isPairedDeviceScope,
+      // The thread must still be active and in the Project the prompt
+      // recorded, which is what a paired device's turn was admitted under. A
+      // prompt with no Project is a Chat thread's, which must still have none.
+      threadAuthorityIsCurrent: (threadId, projectId) => {
+        const chatThread = () => {
+          try {
+            return persistence.readChatThread(decodeChatThreadId(threadId));
+          } catch {
+            return undefined;
+          }
+        };
+        if (projectId === undefined) return chatThreadStandsInProject(chatThread(), undefined);
+        const project = persistence.readProject(decodeProjectId(projectId));
+        if (project === undefined || project.lifecycle !== "active") return false;
+        if (project.type !== "work" && project.type !== "code") {
+          return chatThreadStandsInProject(chatThread(), projectId);
+        }
+        const authority = browserAuthority.resolve(decodeBrowserThreadId(threadId), project.type);
+        return authority !== undefined && String(authority.projectId) === String(project.id);
+      },
       // A usage-limit resume replays its stopped Work turn's extension
       // selections as the host, so that turn's tool prompts go to the windows
       // bound to the thread's Project, as a routine's browser prompts do.
@@ -2825,14 +2866,29 @@ export function startOctantServer(
     // Harness tool egress rules, proposals, and launch records. Recovery runs
     // here, before any route admits a turn: a launch the last run never
     // summarized is marked incomplete, and every launch whose bytes taint its
-    // thread marks it now. No launch runs on the proxy yet; confinement routes
-    // commands there in a later change.
+    // thread marks it now.
     const toolEgressRules = new ToolEgressRules({
       journal: persistence.journal,
       readCodeThread: (threadId) => {
         try {
           const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-          return thread === undefined ? undefined : { projectId: String(thread.projectId) };
+          if (thread === undefined) return undefined;
+          const instance = persistence.readProviderInstance(thread.providerInstanceId);
+          return {
+            projectId: String(thread.projectId),
+            // Mirrors the harness composition: a harness thread's commands on
+            // macOS and Linux run on the network its posture resolves now.
+            commandsProxied:
+              (process.platform === "darwin" || process.platform === "linux") &&
+              instance !== undefined &&
+              isNativeHarnessDriverKind(instance.driverKind) &&
+              materializeHarnessToolNetwork(
+                resolveDefaultThreadEgressPolicy({
+                  mode: "code",
+                  executionPolicy: thread.executionPolicy,
+                }),
+              ) === "proxied",
+          };
         } catch {
           return undefined;
         }
@@ -4096,6 +4152,7 @@ export function startOctantServer(
           grants: extensionToolGrantStore,
           approvals: extensionToolApprovalService,
           isHostScope: isRoutineHostScope,
+          isPairedDeviceScope,
           threadTainted: (threadId) =>
             readThreadExternalContentTaint(persistence.connection, threadId)
               .externalContentIngested,
@@ -4333,7 +4390,14 @@ export function startOctantServer(
     const claudeSdk =
       options.claudeSdk ?? makeClaudeAgentSdkPort({ spawnClaudeCodeProcess: claudeProcess.spawn });
     const claudeResumeIdentityStore =
-      options.claudeResumeIdentityStore ?? new ClaudeResumeIdentityStore();
+      options.claudeResumeIdentityStore ??
+      new ClaudeResumeIdentityStore({
+        journal: new ClaudeResumeIdentityJournal({
+          persistence,
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        }),
+      });
     const ollamaHistoryStore =
       options.ollamaHistoryStore ??
       new JournalOllamaHistoryStore({
@@ -6345,6 +6409,43 @@ export function startOctantServer(
       networkEgress: "none",
       harnessShellScriptDirectory: harnessScriptDirectory,
     });
+    // Approval-gated and auto-accept-edits Code commands run on `proxied`
+    // network: each command gets its own egress proxy listener, on loopback
+    // on macOS and as a Unix socket in a private directory on Linux, and
+    // reaches only the hosts the thread's rules name. Other platforms have no
+    // owned process groups, so no command runs there at all.
+    const harnessEgressSocketDirectory = join(providerDataDirectory, "harness", "egress");
+    const harnessEgressEndpoint =
+      process.platform === "darwin"
+        ? ({ kind: "loopback" } as const)
+        : process.platform === "linux"
+          ? ({ kind: "unix-socket", parentDirectory: harnessEgressSocketDirectory } as const)
+          : undefined;
+    if (harnessEgressEndpoint?.kind === "unix-socket") {
+      mkdirSync(harnessEgressSocketDirectory, { recursive: true, mode: 0o700 });
+    }
+    const decodeEgressAggregateId = Schema.decodeUnknownSync(AggregateId);
+    const decodeEgressLaunchId = Schema.decodeUnknownSync(ToolEgressLaunchId);
+    const harnessProxiedShell =
+      harnessEgressEndpoint === undefined
+        ? undefined
+        : (scope: HarnessEgressScope) =>
+            createNativeHarnessShell({
+              process: harnessProcessPort,
+              scriptDirectory: harnessScriptDirectory,
+              egress: {
+                scope: {
+                  threadId: decodeEgressAggregateId(scope.threadId),
+                  projectId: decodeEgressAggregateId(scope.projectId),
+                  ...(scope.parentThreadId === undefined
+                    ? {}
+                    : { parentThreadId: decodeEgressAggregateId(scope.parentThreadId) }),
+                },
+                startLaunch: (launch) =>
+                  toolEgressRules.startLaunch({ launch, endpoint: harnessEgressEndpoint }),
+                launchId: () => decodeEgressLaunchId(randomUUID()),
+              },
+            });
     const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -6643,6 +6744,24 @@ export function startOctantServer(
         process: harnessOfflineProcessPort,
         scriptDirectory: harnessScriptDirectory,
       }),
+      ...(harnessProxiedShell === undefined ? {} : { proxiedShell: harnessProxiedShell }),
+      // The posture a command's network follows is the one its turn may use:
+      // the window's session grant, clamped to the running turn's posture, so
+      // a thread widened mid-turn keeps that turn's commands on `proxied`.
+      readCodeExecutionPolicy: (threadId, windowId) => {
+        try {
+          const stored = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          if (stored === undefined) return undefined;
+          const session =
+            windowId === undefined
+              ? stored
+              : codeSessionAuthority.effectiveThread(decodeWindowId(windowId), stored);
+          return (codeOperationRuntime?.threadWithActiveTurnPosture?.(session) ?? session)
+            .executionPolicy;
+        } catch {
+          return undefined;
+        }
+      },
       resolveWebSearch: () =>
         searxngHarnessWebSearch({
           readBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,
@@ -10920,8 +11039,32 @@ export function startOctantServer(
           }),
         );
       },
+      relayUpgrade: (input) => {
+        const context = resolvePrincipalRouteContext({
+          request: input.request,
+          principal: input.principal,
+          abortSignal: input.signal,
+        });
+        return codeProjectAccess.run(context, () =>
+          remoteServerGrants.relayUpgrade({
+            principal: {
+              deviceId: String(input.principal.deviceId),
+              credentialGeneration: input.principal.credentialGeneration,
+              sessionIdDigest: input.sessionIdDigest,
+              origin: input.principal.origin,
+            },
+            scopeId: context.scopeId,
+            grantId: input.grantId,
+            pathQuery: input.pathQuery,
+            headers: input.headers,
+            stillAuthorized: input.stillAuthorized,
+            signal: input.signal,
+          }),
+        );
+      },
       closeSession: (sessionIdDigest, reason) =>
         remoteServerGrants.closeSession(sessionIdDigest, reason),
+      holdsOpenSockets: (sessionIdDigest) => remoteServerGrants.holdsOpenSockets(sessionIdDigest),
     };
     let remoteListener: PrivateListener | undefined;
     let remoteListenerError: PrivateListenerFailureCode | undefined;

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  approvalOutsideContentLines,
   harnessRetryStatusText,
   nativeHarnessSessionHeld,
   nativeHarnessStatusLabel,
@@ -19,11 +18,11 @@ import {
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
 import type {
-  ApprovalOutsideContent,
   NativeHarnessFollowUpPreview,
   NativeHarnessSessionView,
 } from "@octant/contracts";
 import { GlassChip, useTheme } from "../../design-system";
+import { OutsideContentNote } from "./OutsideContentNote";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 
 export interface NativeHarnessSessionPanelProps {
@@ -39,34 +38,6 @@ export interface NativeHarnessSessionPanelProps {
  * desktop; the host records the activation and the prompt is shown for the
  * person to carry into the thread they create.
  */
-function readTime(at: string | undefined): string | undefined {
-  if (at === undefined) return undefined;
-  const parsed = new Date(at);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toLocaleString();
-}
-
-/** Why a marked thread asks for this one call and what marked it, ahead of the choices. */
-function OutsideContentNote(props: { readonly outsideContent: ApprovalOutsideContent }) {
-  const { colors } = useTheme();
-  const { reason, rows, more } = approvalOutsideContentLines(props.outsideContent, readTime);
-  return (
-    <View testID="mobile-native-harness-approval-outside-content">
-      <Text style={[mobileTypography.caption, { color: colors.textPrimary }]}>{reason}</Text>
-      {rows.map((row) => (
-        <Text
-          key={row.sourceLabel}
-          style={[mobileTypography.caption, { color: colors.textSecondary }]}
-        >
-          {row.name} · {row.reads}
-        </Text>
-      ))}
-      {more === undefined ? null : (
-        <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>{more}</Text>
-      )}
-    </View>
-  );
-}
-
 export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps) {
   const { colors } = useTheme();
   const [view, setView] = useState<NativeHarnessSessionView | null>();
