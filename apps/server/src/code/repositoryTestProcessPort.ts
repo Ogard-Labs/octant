@@ -21,7 +21,8 @@ import {
   seatbeltAllowRegexReadWriteRule,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
-import type { OsNetworkEgress } from "../process/threadEgressPolicy";
+import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
+import type { EgressProxyEndpoint, OsNetworkEgress } from "../process/threadEgressPolicy";
 
 interface ProcessStream {
   on(event: "data", listener: (chunk: unknown) => void): unknown;
@@ -116,6 +117,15 @@ export interface HarnessShellScriptInput {
   readonly cwd: string;
   readonly environment: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
+  /**
+   * Runs this command on `proxied` network: the OS opens only this launch's
+   * egress proxy and the launch carries the proxy variables. A port whose own
+   * network is `none` refuses it, so an offline port never gains a route out.
+   */
+  readonly egressProxy?: {
+    readonly endpoint: EgressProxyEndpoint;
+    readonly token: string;
+  };
 }
 
 export interface RepositoryTestProcessInput {
@@ -305,6 +315,8 @@ export class RepositoryTestProcessPort {
     const scriptDirectory = this.#harnessShellScriptDirectory;
     if (scriptDirectory === undefined || !supportsOwnedProcessGroups(this.#platform))
       return unavailable(false);
+    if (input.egressProxy !== undefined && this.#networkEgress === "none")
+      return unavailable(false);
     if (signal?.aborted) return cancelledBeforeSpawn();
     let launchInput: RepositoryTestProcessInput;
     try {
@@ -315,8 +327,10 @@ export class RepositoryTestProcessPort {
         ...this.#additionalWritePaths,
       ]);
       launchInput = {
-        ...input,
         argv: [HARNESS_SHELL, script],
+        cwd: input.cwd,
+        environment: input.environment,
+        timeoutMs: input.timeoutMs,
         additionalReadRoots: [dirname(script)],
       };
       validateLaunchInput(launchInput, this.#maxOutputBytes);
@@ -324,10 +338,19 @@ export class RepositoryTestProcessPort {
       return unavailable(false);
     }
     if (signal?.aborted) return cancelledBeforeSpawn();
+    const proxy = input.egressProxy;
     return this.#launch(
       launchInput,
       { executable: HARNESS_SHELL, args: launchInput.argv.slice(1) },
       signal,
+      proxy === undefined
+        ? undefined
+        : {
+            networkEgress: { kind: "proxied", endpoint: proxy.endpoint },
+            // Added after validation: the lowercase forms are names a caller
+            // may not set, and only these values may fill them.
+            environment: proxiedLaunchEnvironment(proxy.endpoint, proxy.token),
+          },
     );
   }
 
@@ -335,6 +358,10 @@ export class RepositoryTestProcessPort {
     input: RepositoryTestProcessInput,
     validated: { readonly executable: string; readonly args: readonly string[] },
     signal: AbortSignal | undefined,
+    proxied?: {
+      readonly networkEgress: OsNetworkEgress;
+      readonly environment: Readonly<Record<string, string>>;
+    },
   ): Promise<RepositoryTestProcessResult> {
     let launch: { readonly command: string; readonly args: readonly string[] };
     try {
@@ -383,7 +410,7 @@ export class RepositoryTestProcessPort {
         args: validated.args,
         boundRoot: input.cwd,
         temporaryDirectory: this.#temporaryDirectory,
-        networkEgress: this.#networkEgress,
+        networkEgress: proxied?.networkEgress ?? this.#networkEgress,
         allowFileReadStar: true,
         allowSimulatorControl: this.#allowSimulatorControl,
         readRoots: [
@@ -412,7 +439,10 @@ export class RepositoryTestProcessPort {
     try {
       child = this.#spawn(launch.command, launch.args, {
         cwd: input.cwd,
-        env: sanitizedEnvironment(input.environment, this.#temporaryDirectory),
+        env: sanitizedEnvironment(
+          { ...input.environment, ...proxied?.environment },
+          this.#temporaryDirectory,
+        ),
         shell: false,
         detached: true,
         windowsHide: true,

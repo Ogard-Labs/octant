@@ -3840,11 +3840,12 @@ native harness in `apps/server/src/harness`:
   `edit`, `write`, and `goal-check` results do not, so local work keeps its
   ordinary approvals; the catalog's `resultTaintsThread` marks each tool and
   `nativeHarnessResultTaintsThread` decides, failing closed for a name it does
-  not know. A command under OS-level `allow` egress keeps today's posture and
+  not know. A command under OS-level `allow` egress (Full access, or a host
+  composed without the proxied shell) keeps today's posture and
   its output does not taint: the host cannot see what such a command received,
   so this is a stated exception to the thread-taint rule, recorded in the
   [threat model](security/security-architecture-threat-model.md), and standing
-  approvals stay active after it. Under the approved, unbuilt `proxied` level
+  approvals stay active after it. Under the `proxied` level
   a launch taints when it received bytes from an outside host, as the
   [egress rules](#harness-tool-egress-rules) describe. Once tainted, `bash`, `edit`,
   `write`, `goal-check`, and `web-fetch` need a person's confirmation for every
@@ -4089,22 +4090,24 @@ composer. The web shows open offers as cards above the chips.
 
 ### Harness tool egress rules
 
-**Status: design approved by the maintainer on 2026-10-13. Phases 1 to 3
-are in: the rule model and decision (`decideToolEgress` and
+**Status: design approved by the maintainer on 2026-10-13. All four
+delivery phases are in: the rule model and decision (`decideToolEgress` and
 `decideToolEgressGrant` in `packages/domain/src/toolEgressPolicy.ts`), the
 event and wire schemas (`packages/contracts/src/toolEgress.ts`), the host proxy
 (`apps/server/src/harness/nativeHarnessEgressProxy.ts`, which reads request
-heads and ClientHellos in `nativeHarnessEgressWire.ts`), and the grants,
+heads and ClientHellos in `nativeHarnessEgressWire.ts`), the grants,
 learn-mode proposals, rules lists, journal records, and recovery
 (`nativeHarnessEgressRules.ts`, served by `nativeHarnessEgressRoutes.ts`, shown
-in a Code thread's Agents tab as Network access). No launch starts the proxy
-yet, so nothing that runs has changed.** Today a harness tool process gets the thread's
-OS-level `none` or `allow` (see Egress and hostile content above). This is the
-approved-but-unfinished design, and the phases below track its delivery. Its
-approval replaces the "no local egress proxy in this release" decision in the
+in a Code thread's Agents tab as Network access), and the confinement wiring:
+the `proxied` level in the Seatbelt builder (`process/seatbeltProfile.ts`) and
+the bubblewrap capsule with its forwarder (`process/linuxConfinement.ts`,
+`process/proxiedNetworkEgress.ts`), chosen per command by the harness
+composition (`nativeHarnessComposition.ts`) and launched by
+`nativeHarnessShell.ts`.** What is not yet verified or wired is listed under
+**Phase 4 settled** below. The design's approval replaces the "no local egress
+proxy in this release" decision in the
 [threat model](security/security-architecture-threat-model.md#approved-decisions-henrik-2026-08-12)
-for native-harness tool processes only; until a phase lands, that decision
-still describes what runs.
+for native-harness tool processes only.
 
 **Outcome.** A command the harness runs for a thread reaches exactly the
 destination hosts and ports a person allowed for that thread, until the
@@ -4439,9 +4442,48 @@ where it was or narrows it:
   them decision batches), startup went from 2.7 s to 0.25 s.
 - _Where the lists show._ A Code thread's Agents tab shows Network access once
   its commands run through these rules, or once the thread holds a rule or a
-  proposal. Until phase 4 routes commands to the proxy, the card says that
-  commands on the thread do not go through these rules yet, so nobody mistakes
-  a rule for a restriction that runs.
+  proposal. When its commands do not run through them under its current
+  access (Full access, Plan), the card says so, so nobody mistakes a rule for
+  a restriction that runs.
+
+**Phase 4 settled.** Each keeps authority where it was or narrows it:
+
+- _The switch._ The harness composition chooses a command's network when the
+  command runs, from the posture the thread holds then: approval-gated and
+  auto-accept-edits run on `proxied`, Full access on `allow`, and Plan or a
+  posture that cannot be read on `none`. A child with network authority is
+  clamped to its parent's posture at that moment and runs under its parent's
+  rules; a child without it stays `none`. The server composes the proxied
+  shell on macOS and Linux; a host composed without it (the switch off) keeps
+  every networked command on `allow`, as before the rules existed, and the
+  rules card says commands do not go through them. `proxied` never falls back
+  to `allow`: a launch whose listener cannot bind or whose start cannot be
+  journaled never runs its command, and a command whose summary or taint
+  cannot be recorded returns `unavailable` without its output.
+- _Which commands._ `bash` and `goal-check`, the two harness tools that run a
+  command. Each run is one launch named by its authorized call. The Code
+  terminal, Git, and provider runtimes are unchanged.
+- _Proxy variables._ The launch adds the proxy variables after the
+  environment check, which refuses lowercase names from any caller, so only
+  these values fill them. An offline port refuses a proxied launch outright,
+  so the `none` shell can never gain a route out.
+- _The Linux forwarder._ The host's own JavaScript runtime runs it (as Node
+  under Electron) from the launch's `0700` socket directory, bound read-only
+  together with the runtime's directory, so no command can rewrite it. It
+  listens on `127.0.0.1:3128` in the private namespace and exits 125 without
+  running the command when it cannot listen. A proxied capsule refuses a
+  process-deny filter, because the forwarder starts the command.
+- _What is unverified._ The Linux native probes have not run: no CI job has
+  `bwrap`, and the hostile suite's native cases run only on macOS or on a
+  Linux host with `/usr/bin/bwrap`. The forwarder's relay and exit behaviour
+  run on every host as plain Node. The bubblewrap arguments are checked as
+  strings.
+- _What is not wired._ The tainted thread's single-use confirmation does not
+  yet list the thread's and Project's hosts, so no `call` rule can be granted
+  and a tainted thread's commands reach no host until a person clears the
+  thread's outside-content mark. A tainted proposal shows on the card and
+  cannot be granted there. The reviewer that may answer a per-call
+  `network-access` prompt is not built. Both fail closed.
 
 **Failure modes.** Each fails closed:
 
@@ -5292,8 +5334,10 @@ mechanisms are:
   network `allow` for the runtime process (`materializeOsNetworkEgress`): the
   runtime, Plan included, can reach any host. The endpoint restriction the name
   promises holds only for Octant-brokered tools (browser origin allowlists,
-  research backends). The persisted value keeps its name for journal
-  compatibility.
+  research backends) and for native-harness commands, which run on `proxied`
+  under the [harness tool egress rules](#harness-tool-egress-rules)
+  (`materializeHarnessToolNetwork`). The persisted value keeps its name for
+  journal compatibility.
   A provider runtime launch is wrapped when the process carries exactly one
   thread's authority. The state below, which `providerProcessConfinement.test.ts`
   pins against this table, is the accepted one: provider runtimes keep their

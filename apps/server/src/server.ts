@@ -29,6 +29,8 @@ import { homedir, hostname } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  AggregateId,
+  ToolEgressLaunchId,
   effectiveAgentRunConcurrency,
   type ChatThreadId,
   type DiscoveryCandidate,
@@ -759,9 +761,14 @@ import {
 import { createNativeHarnessAuthority } from "./harness/nativeHarnessAuthority";
 import {
   createNativeHarnessComposition,
+  type HarnessEgressScope,
   type NativeHarnessComposition,
 } from "./harness/nativeHarnessComposition";
 import { createNativeHarnessShell } from "./harness/nativeHarnessShell";
+import {
+  materializeHarnessToolNetwork,
+  resolveDefaultThreadEgressPolicy,
+} from "./process/threadEgressPolicy";
 import { createNativeHarnessDelegatePort } from "./harness/nativeHarnessDelegatePort";
 import {
   NativeHarnessEndpointRegistry,
@@ -2859,14 +2866,29 @@ export function startOctantServer(
     // Harness tool egress rules, proposals, and launch records. Recovery runs
     // here, before any route admits a turn: a launch the last run never
     // summarized is marked incomplete, and every launch whose bytes taint its
-    // thread marks it now. No launch runs on the proxy yet; confinement routes
-    // commands there in a later change.
+    // thread marks it now.
     const toolEgressRules = new ToolEgressRules({
       journal: persistence.journal,
       readCodeThread: (threadId) => {
         try {
           const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
-          return thread === undefined ? undefined : { projectId: String(thread.projectId) };
+          if (thread === undefined) return undefined;
+          const instance = persistence.readProviderInstance(thread.providerInstanceId);
+          return {
+            projectId: String(thread.projectId),
+            // Mirrors the harness composition: a harness thread's commands on
+            // macOS and Linux run on the network its posture resolves now.
+            commandsProxied:
+              (process.platform === "darwin" || process.platform === "linux") &&
+              instance !== undefined &&
+              isNativeHarnessDriverKind(instance.driverKind) &&
+              materializeHarnessToolNetwork(
+                resolveDefaultThreadEgressPolicy({
+                  mode: "code",
+                  executionPolicy: thread.executionPolicy,
+                }),
+              ) === "proxied",
+          };
         } catch {
           return undefined;
         }
@@ -6387,6 +6409,43 @@ export function startOctantServer(
       networkEgress: "none",
       harnessShellScriptDirectory: harnessScriptDirectory,
     });
+    // Approval-gated and auto-accept-edits Code commands run on `proxied`
+    // network: each command gets its own egress proxy listener, on loopback
+    // on macOS and as a Unix socket in a private directory on Linux, and
+    // reaches only the hosts the thread's rules name. Other platforms have no
+    // owned process groups, so no command runs there at all.
+    const harnessEgressSocketDirectory = join(providerDataDirectory, "harness", "egress");
+    const harnessEgressEndpoint =
+      process.platform === "darwin"
+        ? ({ kind: "loopback" } as const)
+        : process.platform === "linux"
+          ? ({ kind: "unix-socket", parentDirectory: harnessEgressSocketDirectory } as const)
+          : undefined;
+    if (harnessEgressEndpoint?.kind === "unix-socket") {
+      mkdirSync(harnessEgressSocketDirectory, { recursive: true, mode: 0o700 });
+    }
+    const decodeEgressAggregateId = Schema.decodeUnknownSync(AggregateId);
+    const decodeEgressLaunchId = Schema.decodeUnknownSync(ToolEgressLaunchId);
+    const harnessProxiedShell =
+      harnessEgressEndpoint === undefined
+        ? undefined
+        : (scope: HarnessEgressScope) =>
+            createNativeHarnessShell({
+              process: harnessProcessPort,
+              scriptDirectory: harnessScriptDirectory,
+              egress: {
+                scope: {
+                  threadId: decodeEgressAggregateId(scope.threadId),
+                  projectId: decodeEgressAggregateId(scope.projectId),
+                  ...(scope.parentThreadId === undefined
+                    ? {}
+                    : { parentThreadId: decodeEgressAggregateId(scope.parentThreadId) }),
+                },
+                startLaunch: (launch) =>
+                  toolEgressRules.startLaunch({ launch, endpoint: harnessEgressEndpoint }),
+                launchId: () => decodeEgressLaunchId(randomUUID()),
+              },
+            });
     const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -6685,6 +6744,24 @@ export function startOctantServer(
         process: harnessOfflineProcessPort,
         scriptDirectory: harnessScriptDirectory,
       }),
+      ...(harnessProxiedShell === undefined ? {} : { proxiedShell: harnessProxiedShell }),
+      // The posture a command's network follows is the one its turn may use:
+      // the window's session grant, clamped to the running turn's posture, so
+      // a thread widened mid-turn keeps that turn's commands on `proxied`.
+      readCodeExecutionPolicy: (threadId, windowId) => {
+        try {
+          const stored = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          if (stored === undefined) return undefined;
+          const session =
+            windowId === undefined
+              ? stored
+              : codeSessionAuthority.effectiveThread(decodeWindowId(windowId), stored);
+          return (codeOperationRuntime?.threadWithActiveTurnPosture?.(session) ?? session)
+            .executionPolicy;
+        } catch {
+          return undefined;
+        }
+      },
       resolveWebSearch: () =>
         searxngHarnessWebSearch({
           readBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,

@@ -3,10 +3,12 @@ import type { ProviderExecutionPolicy } from "@octant/contracts";
 /**
  * Per-thread network egress policy for tool/provider Seatbelt launches.
  *
- * Thread-level policies are three-valued. Seatbelt OS enforcement in V1 is only
- * two-level (`none` / `allow`). The finer `provider-endpoints-only` host
- * allowlist is enforced by Octant-owned brokered tools (browser origin
- * allowlists, research backends), not by a local egress proxy.
+ * Thread-level policies are three-valued. Provider runtimes materialize them
+ * at two OS levels (`none` / `allow`): their inference and tool traffic share
+ * one process, so a proxy could not tell them apart. Harness tool commands
+ * get a third level, `proxied`, where the OS opens only a per-launch egress
+ * proxy that checks every connection against the thread's host rules
+ * (docs/architecture.md § Harness tool egress rules).
  *
  * Defaults:
  * - Work / Plan / Chat → `none`
@@ -21,8 +23,24 @@ import type { ProviderExecutionPolicy } from "@octant/contracts";
 
 export type ThreadEgressPolicy = "none" | "provider-endpoints-only" | "unrestricted";
 
-/** OS-materialized Seatbelt network permission. */
-export type OsNetworkEgress = "none" | "allow";
+/**
+ * OS-materialized network permission for a confined launch. `proxied` opens
+ * nothing but the launch's own egress proxy: on macOS its loopback port, on
+ * Linux a Unix socket an in-capsule forwarder relays to.
+ */
+export type OsNetworkEgress = "none" | "allow" | ProxiedNetworkEgress;
+
+export interface ProxiedNetworkEgress {
+  readonly kind: "proxied";
+  readonly endpoint: EgressProxyEndpoint;
+}
+
+export type EgressProxyEndpoint =
+  | { readonly kind: "loopback"; readonly port: number }
+  | { readonly kind: "unix-socket"; readonly path: string };
+
+/** How a harness tool command reaches the network. */
+export type HarnessToolNetwork = "none" | "proxied" | "allow";
 
 export type ThreadEgressMode = "chat" | "work" | "code";
 export type ThreadExecutionPolicy = ProviderExecutionPolicy;
@@ -64,13 +82,30 @@ export function resolveDefaultThreadEgressPolicy(
 }
 
 /**
- * Map thread egress to the two-level OS Seatbelt permission.
+ * Map a provider runtime's egress to the two-level OS permission.
  *
- * `provider-endpoints-only` becomes OS `allow` because Seatbelt cannot express
- * host allowlists; brokers enforce the host-level restriction.
+ * `provider-endpoints-only` becomes OS `allow` because the runtime's own
+ * inference and its tools share a process; brokers enforce the host-level
+ * restriction where one exists.
  */
-export function materializeOsNetworkEgress(policy: ThreadEgressPolicy): OsNetworkEgress {
+export function materializeOsNetworkEgress(policy: ThreadEgressPolicy): "none" | "allow" {
   return policy === "none" ? "none" : "allow";
+}
+
+/**
+ * Map thread egress for a harness tool command. `provider-endpoints-only`
+ * runs on `proxied`, so the command reaches only the hosts a rule names;
+ * `unrestricted` keeps open network because the person accepted it.
+ */
+export function materializeHarnessToolNetwork(policy: ThreadEgressPolicy): HarnessToolNetwork {
+  switch (policy) {
+    case "none":
+      return "none";
+    case "provider-endpoints-only":
+      return "proxied";
+    case "unrestricted":
+      return "allow";
+  }
 }
 
 /**

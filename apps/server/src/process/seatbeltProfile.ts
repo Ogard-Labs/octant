@@ -8,9 +8,9 @@
  * `sandbox-exec` profile; on Linux it is a rootless Bubblewrap namespace.
  * Missing the platform runtime fails closed; there is no unconfined fallback.
  *
- * Network egress is materialized as OS `none` | `allow` only. The finer
- * `provider-endpoints-only` host allowlist is enforced by Octant-owned
- * brokered tools, not by a local egress proxy in V1.
+ * Network egress is materialized as OS `none`, `allow`, or `proxied`. Seatbelt
+ * cannot name hosts, so `proxied` opens only the launch's own loopback proxy
+ * port and the host's egress proxy holds the per-host rules.
  *
  * Native macOS sandbox-exec probes remain packaged/native validation evidence;
  * Linux CI covers profile string generation and Bubblewrap launch construction.
@@ -499,6 +499,31 @@ export function privateHomeDenyReadRules(
   return rules;
 }
 
+/**
+ * `proxied` replaces `(allow network*)` with one outbound rule to the launch's
+ * proxy port. Seatbelt's remote filter takes only `*` or `localhost` as the
+ * host, which is why the host allowlist cannot live here. No DNS service, no
+ * other loopback port, no inbound rule, and no UDP: a client that ignores the
+ * proxy variables, or asks the resolver for a name, reaches nothing.
+ */
+function seatbeltNetworkRules(networkEgress: OsNetworkEgress): ReadonlyArray<string> {
+  if (networkEgress === "none") return [];
+  if (networkEgress === "allow") return ["(allow network*)"];
+  const endpoint = networkEgress.endpoint;
+  if (
+    endpoint.kind !== "loopback" ||
+    !Number.isSafeInteger(endpoint.port) ||
+    endpoint.port < 1 ||
+    endpoint.port > 65_535
+  ) {
+    throw new ProcessConfinementError(
+      "invalid-configuration",
+      "A proxied Seatbelt launch needs its proxy's loopback port.",
+    );
+  }
+  return [`(allow network-outbound (remote ip "localhost:${String(endpoint.port)}"))`];
+}
+
 export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): string {
   assertAbsolute(input.boundRoot, "bound root");
   assertAbsolute(input.temporaryDirectory, "temporary directory");
@@ -571,7 +596,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // descendants this process started and nothing else.
     "(allow signal (target children))",
     "(allow sysctl-read)",
-    ...(input.networkEgress === "allow" ? ["(allow network*)"] : []),
+    ...seatbeltNetworkRules(input.networkEgress),
     // TLS clients that verify through Security.framework — Rust's
     // rustls-platform-verifier, which Devin's CLI uses — need the trust daemon
     // and the system root certificates. Deny-default otherwise leaves them
@@ -579,7 +604,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     // ACP, then every backend call dies with `OSStatus -26276` and the probe
     // reports a remote failure. Only public trust material and the trustd XPC
     // services open; /Library/Keychains stays denied.
-    ...(input.networkEgress === "allow"
+    ...(input.networkEgress !== "none"
       ? [
           '(allow mach-lookup (global-name "com.apple.trustd"))',
           '(allow mach-lookup (global-name "com.apple.trustd.agent"))',
