@@ -510,16 +510,7 @@
   align-items: center;
   gap: 4px;
   padding: 2px 6px;
-  color: var(--octant-text-secondary);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-pill);
-  cursor: pointer;
   font-size: var(--oct-text-xs);
-}
-
-.context-health-warning:hover,
-.context-health-warning:focus-visible {
-  color: var(--octant-text-primary);
 }
 
 .context-inspector {

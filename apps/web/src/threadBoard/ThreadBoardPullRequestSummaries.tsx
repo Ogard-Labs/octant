@@ -99,6 +99,7 @@ export function ThreadBoardPullRequestSummaries(props: ThreadBoardPullRequestSum
               className="board-card-pr"
               onClick={() => props.onSelect?.(summary.identity)}
               type="button"
+              variant="bare"
             >
               <GitPullRequest aria-hidden="true" className="icon" size={12} strokeWidth={1.8} />
               <span className="board-card-pr-title">{summary.title}</span>
