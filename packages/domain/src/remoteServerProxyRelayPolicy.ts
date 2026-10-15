@@ -103,6 +103,35 @@ export function relayRequestHeaders(
   return relayed;
 }
 
+/** Handshake fields that belong to one connection's handshake, which the host makes its own. */
+const HANDSHAKE_FIELDS: ReadonlySet<string> = new Set([
+  "sec-websocket-key",
+  "sec-websocket-version",
+  "sec-websocket-extensions",
+  "sec-websocket-accept",
+]);
+
+/**
+ * The headers the host sends a dev server to open a WebSocket: the same
+ * headers as any relayed request, with the handshake made the host's own. The
+ * page's subprotocol list passes; no extension is offered, because the host
+ * relays whole messages and compresses none.
+ */
+export function relayWebSocketRequestHeaders(
+  input: Omit<RemoteServerRelayRequestHeadersInput, "bodyBytes"> & { readonly key: string },
+): ReadonlyArray<RemoteServerRelayHeader> {
+  const relayed = relayRequestHeaders({ ...input, bodyBytes: undefined }).filter(
+    ([name]) => name !== "connection" && !HANDSHAKE_FIELDS.has(name),
+  );
+  return [
+    ...relayed,
+    ["connection", "Upgrade"],
+    ["upgrade", "websocket"],
+    ["sec-websocket-version", "13"],
+    ["sec-websocket-key", input.key],
+  ];
+}
+
 /**
  * Response headers that act on the origin that receives them rather than on
  * the page: `Clear-Site-Data` would clear storage, and `Alt-Svc` would point
