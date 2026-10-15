@@ -231,7 +231,12 @@ describe("Claude Agent SDK port", () => {
             spawnClaudeCodeProcess: expect.any(Function),
           });
           expect(harness.spawnConfinements).toEqual([
-            { projectRoot: openInput.projectRoot, executionPolicy: openInput.executionPolicy },
+            // The sandbox grants a shell only to a launch that offers Bash.
+            {
+              projectRoot: openInput.projectRoot,
+              executionPolicy: openInput.executionPolicy,
+              runsCommands: false,
+            },
           ]);
           expect(harness.invocation?.options).not.toHaveProperty("continue");
           expect(harness.invocation?.options).not.toHaveProperty("allowedTools");

@@ -925,6 +925,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               spawnClaudeCodeProcess: options.spawnClaudeCodeProcess({
                 projectRoot: input.projectRoot,
                 executionPolicy: input.executionPolicy,
+                runsCommands: input.tools.includes("Bash"),
               }),
               canUseTool,
               hooks: { PreToolUse: [{ hooks: [preToolUse] }] },

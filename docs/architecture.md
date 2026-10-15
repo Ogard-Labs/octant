@@ -5322,7 +5322,10 @@ mechanisms are:
   a file inside the account directory, which the launch already holds, and
   Seatbelt rules do not apply there.
   A Code Plan turn on macOS may run read-only commands through the Bash
-  tool (`claudePlanRunsCommands`, `planCommandRules`). The launch may fork,
+  tool (`claudePlanRunsCommands`, `planCommandRules`). Only a launch that
+  offers the Bash tool gets the grants below; a Chat or Work Plan launch
+  and the readiness probes keep no fork and no exec but their own. The
+  launch may fork,
   and may exec exactly these programs, by literal and resolved path:
   `/bin/zsh` (pinned as the tool's shell through `CLAUDE_CODE_SHELL`;
   without bash or zsh the tool refuses to start), `cat`, `ls`, `realpath`,

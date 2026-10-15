@@ -603,29 +603,58 @@ describe("Claude runtime confinement", () => {
 
     expect(confinement.prepared).toHaveLength(2);
     const [subscription, apiKey] = confinement.prepared;
-    const keychainRules = [
-      seatbeltExecRule("/usr/bin/security"),
-      '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
-      '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
-      seatbeltAllowLiteralReadRule(claudeLoginKeychainPath()),
-    ];
     if (process.platform === "darwin") {
       // Measured on macOS 27.0.1 with Claude Code 2.1.296: the runtime is
       // signed out with any one of these missing, and needs nothing more.
-      expect(subscription?.extraRules?.slice(0, keychainRules.length)).toEqual(keychainRules);
-      // Both launches fork for the shell a Plan turn runs its commands in.
+      expect(subscription?.extraRules).toEqual([
+        seatbeltExecRule("/usr/bin/security"),
+        '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+        '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+        seatbeltAllowLiteralReadRule(claudeLoginKeychainPath()),
+      ]);
       expect(subscription?.allowProcessFork).toBe(true);
-      expect(apiKey?.allowProcessFork).toBe(true);
     } else {
       expect(subscription?.extraRules).toBeUndefined();
       expect(subscription?.allowProcessFork).toBe(false);
-      expect(apiKey?.allowProcessFork).toBe(false);
     }
-    // Exec is never open; the programs that may run are named one by one.
+    // No shell and no open exec in either case: neither launch offers Bash.
     expect(subscription?.allowProcessExec).toBe(false);
-    expect(apiKey?.allowProcessExec).toBe(false);
     // An API-key launch reads nothing from the store.
-    for (const rule of keychainRules) expect(apiKey?.extraRules ?? []).not.toContain(rule);
+    expect(apiKey?.extraRules).toBeUndefined();
+    expect(apiKey?.allowProcessFork).toBe(false);
+    expect(apiKey?.allowProcessExec).toBe(false);
+  });
+
+  it("grants the shell and its programs only to a Plan launch that offers the Bash tool", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+    for (const runsCommands of [false, true]) {
+      const child = makePort(target, { confinement: confinement.port }).spawn({
+        projectRoot: target.root,
+        executionPolicy: "plan",
+        runsCommands,
+      })({
+        command: target.binaryPath,
+        args: ["sdk-test"],
+        cwd: target.root,
+        env: { ...target.environment, ANTHROPIC_API_KEY: "sk-test-not-a-real-key" },
+        signal: new AbortController().signal,
+      });
+      child.kill("SIGTERM");
+    }
+    const [withoutShell, withShell] = confinement.prepared;
+    // Chat, Work and the readiness probes run Plan with no shell, so their
+    // process keeps no fork and no program but itself.
+    expect(withoutShell?.allowProcessFork).toBe(false);
+    expect(withoutShell?.extraRules).toBeUndefined();
+    if (process.platform === "darwin") {
+      expect(withShell?.allowProcessFork).toBe(true);
+      expect(withShell?.extraRules).toContain(seatbeltExecRule("/bin/zsh"));
+    } else {
+      expect(withShell?.allowProcessFork).toBe(false);
+      expect(withShell?.extraRules).toBeUndefined();
+    }
+    expect(withShell?.allowProcessExec).toBe(false);
   });
 
   it("checks a confined launch's sign-in inside that launch's confinement", async () => {
@@ -928,11 +957,11 @@ describe("Claude runtime confinement", () => {
   });
 
   it.skipIf(process.platform !== "darwin").each([
-    { launch: "an API-key", apiKey: "sk-test-not-a-real-key" },
-    { launch: "a subscription", apiKey: undefined },
+    { launch: "an API-key", apiKey: "sk-test-not-a-real-key", forks: false },
+    { launch: "a subscription", apiKey: undefined, forks: true },
   ])(
-    "lets the operating system refuse $launch Plan turn's write and a program not on its list",
-    async ({ apiKey }) => {
+    "lets the operating system refuse $launch Plan turn's write and its process execution",
+    async ({ apiKey, forks }) => {
       const target = fixture();
       const readable = join(target.root, "readable.txt");
       const escapeTarget = join(target.root, "plan-must-not-exist.txt");
@@ -1022,11 +1051,19 @@ describe("Claude runtime confinement", () => {
       expect(output).toContain(`state:${otherProject}/memory/MEMORY.md=refused`);
       expect(output).toContain("state:projects/probe.jsonl=refused");
       expect(existsSync(join(stateRoot, ownProject, "memory", "MEMORY.md"))).toBe(false);
-      // The probe asks last for `/bin/date`, which is not a program a Plan
-      // turn may run: the shell forks, and the kernel refuses the exec.
-      expect(output).toContain("exec=refused");
+      // The probe asks for a child process last, and no launch without the
+      // Bash tool may run one.
       expect(output).not.toContain("exec=allowed");
-      expect(child.exitCode).toBe(0);
+      if (forks) {
+        // A Keychain sign-in needs fork, so the shell forks, and the kernel
+        // then refuses the exec of anything but the runtime and `security`.
+        expect(output).toContain("exec=refused");
+        expect(child.exitCode).toBe(0);
+      } else {
+        // Without fork the shell dies at the fork itself and reports nothing.
+        expect(output).not.toContain("exec=refused");
+        expect(child.exitCode).toBe(128);
+      }
     },
   );
 
@@ -1107,6 +1144,7 @@ describe("Claude runtime confinement", () => {
       const child = makeClaudeProcessLive({ shutdownTimeoutMs: 5_000 }).spawn({
         projectRoot: checkout,
         executionPolicy: "plan",
+        runsCommands: true,
       })({
         command: probe,
         args: ["--session-id", sessionId],

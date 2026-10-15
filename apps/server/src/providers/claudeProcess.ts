@@ -57,6 +57,13 @@ export type SpawnClaudeCodeProcess = NonNullable<ClaudeAgentSdkOptions["spawnCla
 export interface ClaudeRuntimeConfinement {
   readonly projectRoot: string;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /**
+   * Whether this launch offers the Bash tool. A Plan launch gets the shell and
+   * read-only programs only then: Chat, Work and the readiness probes run the
+   * same posture without a shell, and hiding the tool from the model would not
+   * take the fork and exec grants away from the process.
+   */
+  readonly runsCommands?: boolean;
 }
 
 /**
@@ -1016,7 +1023,7 @@ function confineClaudeLaunch(
           seatbeltAllowLiteralReadRule(claudeLoginKeychainPath()),
         ]
       : [];
-    const runsCommands = claudePlanRunsCommands();
+    const runsCommands = confinement.runsCommands === true && claudePlanRunsCommands();
     const runtimePrograms = [
       ...new Set(
         [spawnOptions.env.PATH, process.env.PATH].flatMap((searchPath) =>
