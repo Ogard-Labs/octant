@@ -373,13 +373,13 @@ describe("mobileInboxClient", () => {
 
   it("shows a chat thread whose answer carries fields this build does not know", async () => {
     const answer = chatViewAnswer(
-      { toolSteps: [{ id: "step-1", name: "search", state: "succeeded" }] },
+      { futureActivity: [{ id: "step-1", name: "search", state: "succeeded" }] },
       { pagination: { before: null } },
     );
     const view = await loadMobileChatThread(transportAnswering(answer), chatThread.id);
     expect(view.thread.id).toBe(chatThread.id);
     expect(view.turns[0]?.attempts[0]?.outcome).toBe("completed");
-    expect(view.turns[0]?.attempts[0]).not.toHaveProperty("toolSteps");
+    expect(view.turns[0]?.attempts[0]).not.toHaveProperty("futureActivity");
     expect(view).not.toHaveProperty("pagination");
   });
 

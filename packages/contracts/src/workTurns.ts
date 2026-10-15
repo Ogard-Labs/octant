@@ -18,6 +18,7 @@ import { ThreadWorkingDirectory } from "./workingDirectory";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadTaskProgressList } from "./threadTasks";
+import { ThreadToolStepList } from "./threadToolSteps";
 import { ThreadWindowBoundsFields } from "./threadWindow";
 import { WorkThreadId } from "./workThreads";
 
@@ -206,6 +207,13 @@ export const WorkTurnState = Schema.Struct({
   wroteFiles: Schema.optional(WorkTurnWrittenFiles),
   /** The provider's own task list for this turn, restated whole as it moves. */
   tasks: Schema.optional(ThreadTaskProgressList),
+  /**
+   * The tool calls this turn made, in arrival order: name, state, and a
+   * bounded progress or result message. No tool input or output is kept.
+   */
+  toolSteps: Schema.optional(ThreadToolStepList),
+  /** Whether the turn called more tools than `toolSteps` keeps. */
+  toolStepsTruncated: Schema.optional(Schema.Boolean),
   childObservations: Schema.optional(ProviderChildObservationState),
   /**
    * Set only on a turn the host started to deliver a finished subagent run's
@@ -366,6 +374,14 @@ export const WorkTurnStreamFrame = Schema.Union(
     tasks: ThreadTaskProgressList,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("turn-tools"),
+    sequence: Schema.Int.pipe(Schema.positive()),
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+    toolSteps: ThreadToolStepList,
+    toolStepsTruncated: Schema.Boolean,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("turn-settled"),
     sequence: Schema.Int.pipe(Schema.positive()),
     threadId: WorkThreadId,
@@ -441,6 +457,8 @@ export const WorkTurnUpdated = Schema.Struct({
   wroteFiles: Schema.optional(WorkTurnWrittenFiles),
   failure: Schema.optional(WorkTurnFailure),
   tasks: Schema.optional(ThreadTaskProgressList),
+  toolSteps: Schema.optional(ThreadToolStepList),
+  toolStepsTruncated: Schema.optional(Schema.Boolean),
   childObservations: Schema.optional(ProviderChildObservationState),
   updatedAt: UtcTimestamp,
 }).annotations(strict);

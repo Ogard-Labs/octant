@@ -1870,6 +1870,59 @@ describe("WorkTurnService", () => {
     expect(transcript.liveCursor).toBe(2);
   });
 
+  it("keeps the tool calls of a cancelled turn that wrote no file", async () => {
+    const gate = deferred<void>();
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          input.onDelta?.("Partial reply");
+          input.onToolSteps?.({
+            truncated: false,
+            steps: [{ toolCallId: "call-1", toolName: "Read", state: "started" }],
+          });
+          await gate.promise;
+          return { kind: "cancelled" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.service.cancelFirstTurn(ids.window, {
+      kind: "cancel-work-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+    });
+    gate.resolve();
+    await fixture.waitForIdle();
+    const turn = (await fixture.service.transcript(ids.window, ids.thread)).turns[0];
+    expect(turn?.status).toBe("cancelled");
+    expect(turn?.toolSteps).toEqual([{ toolCallId: "call-1", toolName: "Read", state: "started" }]);
+  });
+
+  it("shows a window that opens mid-turn the tool calls already made", async () => {
+    const gate = deferred<void>();
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          input.onDelta?.("Partial");
+          input.onToolSteps?.({
+            truncated: false,
+            steps: [{ toolCallId: "call-1", toolName: "Read", state: "running" }],
+          });
+          await gate.promise;
+          return { kind: "completed", response: "Done" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const midTurn = (await fixture.service.transcript(ids.window, ids.thread)).turns[0];
+    expect(midTurn?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Read", state: "running" },
+    ]);
+    gate.resolve();
+    await fixture.waitForIdle();
+  });
+
   it("does not publish a provider delta after a turn settled", async () => {
     let publishLateDelta: ((response: string) => void) | undefined;
     const fixture = serviceFixture({
@@ -2403,6 +2456,50 @@ describe("WorkTurnService", () => {
     expect(settledTurn?.tasks).toEqual([
       { taskId: "task-1", state: "completed", summary: "Watch CI" },
       { taskId: "task-2", state: "pending", summary: "Commit the evidence" },
+    ]);
+    controller.abort();
+  });
+
+  it("publishes the turn's tool calls live and journals them with the settled turn", async () => {
+    const gate = deferred<void>();
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          input.onDelta?.("Partial");
+          input.onToolSteps?.({
+            truncated: false,
+            steps: [{ toolCallId: "call-1", toolName: "Read", state: "started" }],
+          });
+          await gate.promise;
+          input.onToolSteps?.({
+            truncated: false,
+            steps: [
+              { toolCallId: "call-1", toolName: "Read", state: "completed", summary: "notes.md" },
+            ],
+          });
+          return { kind: "completed", response: "Partial reply" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const controller = new AbortController();
+    const stream = fixture.service.subscribe(ids.window, ids.thread, 0, controller.signal);
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "response-delta", sequence: 1 },
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "turn-tools", sequence: 2, requestId: ids.request },
+    });
+    gate.resolve();
+    for (;;) {
+      const next = await stream.next();
+      if ((next.value as { readonly kind: string }).kind === "turn-settled") break;
+    }
+    // A reconnecting client re-reads the transcript and sees the same steps.
+    const settledTurn = (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1);
+    expect(settledTurn?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Read", state: "completed", summary: "notes.md" },
     ]);
     controller.abort();
   });

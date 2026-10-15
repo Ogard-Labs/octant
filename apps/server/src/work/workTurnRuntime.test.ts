@@ -560,6 +560,101 @@ describe("WorkTurnRuntime", () => {
     ]);
   });
 
+  it("hands the turn's tool steps to the service whenever a call starts, moves, or ends", async () => {
+    const updates: unknown[] = [];
+    const events: ProviderRuntimeEvent[] = [
+      {
+        instanceId: ids.provider,
+        sequence: 1,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+        kind: "tool-start",
+        sessionId: ids.session as never,
+        toolCallId: "call-1",
+        toolName: "Read",
+      },
+      {
+        instanceId: ids.provider,
+        sequence: 2,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:01.000Z"),
+        kind: "tool-success",
+        sessionId: ids.session as never,
+        toolCallId: "call-1",
+        summary: "Read the brief",
+      },
+      {
+        instanceId: ids.provider,
+        sequence: 3,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:02.000Z"),
+        kind: "text-delta",
+        sessionId: ids.session as never,
+        text: "Read it.",
+      },
+      {
+        instanceId: ids.provider,
+        sequence: 4,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:03.000Z"),
+        kind: "completed",
+        sessionId: ids.session as never,
+      },
+    ];
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          subscribe: Effect.succeed(Stream.fromIterable(events)),
+          start: () => Effect.void,
+          send: () => Effect.void,
+          resume: () => Effect.void,
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        } as never),
+    };
+    const command = decodeStartWorkThreadTurnCommand({
+      kind: "start-work-thread-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+      prompt: "Summarize the brief",
+      authority: decodeWorkTurnAuthority({
+        hostId: "local",
+        projectId: ids.project,
+        bindingRevisionId: ids.binding,
+        workingDirectory: ".",
+        confinementPosture: "project-root-confined",
+        providerInstanceId: ids.provider,
+        modelId: "gpt-5",
+      }),
+    });
+
+    const outcome = await new WorkTurnRuntime().run({
+      command,
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      signal: new AbortController().signal,
+      onToolSteps: (steps) => updates.push(steps),
+    });
+
+    expect(outcome).toEqual({ kind: "completed", response: "Read it." });
+    expect(updates).toEqual([
+      { truncated: false, steps: [{ toolCallId: "call-1", toolName: "Read", state: "started" }] },
+      {
+        truncated: false,
+        steps: [
+          { toolCallId: "call-1", toolName: "Read", state: "completed", summary: "Read the brief" },
+        ],
+      },
+    ]);
+  });
+
   it.each([false, true])(
     "persists the resumed identity before sending and refuses input when persistence fails (%s)",
     async (persistenceFails) => {

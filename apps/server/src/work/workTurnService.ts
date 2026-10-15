@@ -86,6 +86,7 @@ import {
   FILE_MENTION_UNREADABLE_CONTEXT,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   workProjectKeepsStatusFile,
+  type ThreadToolSteps,
 } from "@octant/domain";
 import {
   planWorkTurnContext,
@@ -441,6 +442,7 @@ export class WorkTurnService {
   readonly #inflight = new Map<string, Promise<void>>();
   readonly #liveResponses = new Map<string, string>();
   readonly #liveTasks = new Map<string, ThreadTaskProgressList>();
+  readonly #liveToolSteps = new Map<string, ThreadToolSteps>();
 
   constructor(dependencies: WorkTurnServiceDependencies) {
     this.#contextHarness = dependencies.contextHarness;
@@ -991,6 +993,7 @@ export class WorkTurnService {
       this.#inflight.delete(String(command.requestId));
       this.#liveResponses.delete(String(command.requestId));
       this.#liveTasks.delete(String(command.requestId));
+      this.#liveToolSteps.delete(String(command.requestId));
     });
     this.#inflight.set(String(command.requestId), launch);
     return decodeWorkTurnLookupResult({ kind: "accepted", turn: this.#withLive(accepted) });
@@ -1175,12 +1178,23 @@ export class WorkTurnService {
   }
 
   #withLive(turn: WorkTurnState): WorkTurnState {
+    if (turn.status === "completed" || turn.status === "cancelled") return turn;
+    // The live steps live only in this process until the turn settles; a window
+    // that opens or reconnects mid-turn would otherwise miss the frame that
+    // carried them, which no later frame replays.
+    const liveSteps = this.#liveToolSteps.get(String(turn.requestId));
+    const withSteps =
+      liveSteps === undefined || liveSteps.steps.length === 0
+        ? turn
+        : decodeWorkTurnState({
+            ...turn,
+            toolSteps: liveSteps.steps,
+            ...(liveSteps.truncated ? { toolStepsTruncated: true } : {}),
+          });
     const live = this.#liveResponses.get(String(turn.requestId));
-    if (live === undefined || turn.status === "completed" || turn.status === "cancelled") {
-      return turn;
-    }
+    if (live === undefined) return withSteps;
     return decodeWorkTurnState({
-      ...turn,
+      ...withSteps,
       status: turn.status === "accepted" ? "running" : turn.status,
       response: live,
       transcript: [
@@ -1508,6 +1522,15 @@ export class WorkTurnService {
           this.#liveTasks.set(String(input.command.requestId), tasks);
           this.#liveUpdates.appendTasks(input.command.threadId, input.command.requestId, tasks);
         },
+        onToolSteps: (toolSteps) => {
+          if (input.signal.aborted) return;
+          this.#liveToolSteps.set(String(input.command.requestId), toolSteps);
+          this.#liveUpdates.appendToolSteps(
+            input.command.threadId,
+            input.command.requestId,
+            toolSteps,
+          );
+        },
       });
       runOutcome = outcome;
       const wroteFiles = observation?.finish();
@@ -1516,14 +1539,18 @@ export class WorkTurnService {
       if (latest.status === "cancelled") {
         // Cancelling settles the turn, but files the provider wrote before it
         // stopped are still on disk. Returning without recording them told the
-        // person the folder was untouched when it was not.
-        if (wroteFiles !== undefined) {
+        // person the folder was untouched when it was not. The tool calls it
+        // made are recorded the same way, whether or not a file changed.
+        const cancelledToolSteps = this.#liveToolSteps.get(String(input.command.requestId));
+        if (wroteFiles !== undefined || cancelledToolSteps !== undefined) {
           const settledTasks = this.#liveTasks.get(String(input.command.requestId));
+          const settledToolSteps = cancelledToolSteps;
           this.#persistUpdate(latest, {
             status: "cancelled",
             ...(latest.response === undefined ? {} : { response: latest.response }),
-            wroteFiles,
+            ...(wroteFiles === undefined ? {} : { wroteFiles }),
             ...(settledTasks === undefined ? {} : { tasks: settledTasks }),
+            ...(settledToolSteps === undefined ? {} : { toolSteps: settledToolSteps }),
           });
           const settledCancel = this.#projection.lookup(input.command.requestId);
           if (settledCancel !== undefined) {
@@ -1552,6 +1579,7 @@ export class WorkTurnService {
         outcome,
         wroteFiles,
         this.#liveTasks.get(String(input.command.requestId)),
+        this.#liveToolSteps.get(String(input.command.requestId)),
       );
       if (outcome.kind === "completed" && wroteFiles !== undefined) {
         await this.#backfillStatus(
@@ -1927,9 +1955,14 @@ export class WorkTurnService {
     // The provider's task list survived only in process-local state while the
     // turn ran; settling is the last chance to journal it for replay.
     tasks?: ThreadTaskProgressList,
+    // Held in process for the same reason as the task list.
+    toolSteps?: ThreadToolSteps,
   ): void {
     const written = wroteFiles === undefined ? {} : { wroteFiles };
-    const recordedTasks = tasks === undefined ? {} : { tasks };
+    const recordedTasks = {
+      ...(tasks === undefined ? {} : { tasks }),
+      ...(toolSteps === undefined ? {} : { toolSteps }),
+    };
     if (outcome.kind === "completed") {
       this.#persistUpdate(turn, {
         status: "completed",
@@ -1965,6 +1998,7 @@ export class WorkTurnService {
       readonly wroteFiles?: WorkTurnWrittenFiles;
       readonly failure?: WorkTurnState["failure"];
       readonly tasks?: ThreadTaskProgressList;
+      readonly toolSteps?: ThreadToolSteps;
       readonly childObservations?: WorkTurnState["childObservations"];
     },
   ): void {
@@ -1972,6 +2006,11 @@ export class WorkTurnService {
     const updatedAt = decodeTimestamp(this.#clock());
     const response = update.response ?? latest.response;
     const tasks = update.tasks ?? latest.tasks;
+    const toolSteps =
+      update.toolSteps ??
+      (latest.toolSteps === undefined
+        ? undefined
+        : { steps: latest.toolSteps, truncated: latest.toolStepsTruncated === true });
     const transcript = [
       { role: "user" as const, text: latest.prompt },
       ...(response === undefined && update.status === "running"
@@ -1998,6 +2037,12 @@ export class WorkTurnService {
         ...(update.wroteFiles === undefined ? {} : { wroteFiles: update.wroteFiles }),
         ...(update.failure === undefined ? {} : { failure: update.failure }),
         ...(tasks === undefined ? {} : { tasks }),
+        ...(toolSteps === undefined
+          ? {}
+          : {
+              toolSteps: toolSteps.steps,
+              ...(toolSteps.truncated ? { toolStepsTruncated: true } : {}),
+            }),
         ...(update.childObservations === undefined
           ? {}
           : { childObservations: update.childObservations }),

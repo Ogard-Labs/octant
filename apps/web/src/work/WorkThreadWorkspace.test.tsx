@@ -872,6 +872,70 @@ describe("WorkThreadWorkspace", () => {
     expect(screen.getByText("1 of 2 tasks completed")).toBeVisible();
   });
 
+  it("folds a settled Work turn's tool calls behind one summary", async () => {
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({
+        threadId,
+        turns: [
+          {
+            requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            threadId,
+            turnId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            projectId: "20000000-0000-4000-8000-000000000101",
+            authority: {
+              hostId: "local",
+              projectId: "20000000-0000-4000-8000-000000000101",
+              bindingRevisionId: "30000000-0000-4000-8000-000000000101",
+              workingDirectory: ".",
+              confinementPosture: "project-root-confined",
+              providerInstanceId: providerId,
+              modelId,
+            },
+            status: "completed",
+            prompt: "Draft the brief",
+            transcript: [
+              { role: "user", text: "Draft the brief" },
+              { role: "assistant", text: "Done." },
+            ],
+            toolSteps: [
+              { toolCallId: "call-1", toolName: "Read", state: "completed", summary: "brief.md" },
+              { toolCallId: "call-2", toolName: "Search", state: "started" },
+            ],
+            capabilities: {
+              workspace: "project-backed",
+              confinement: "project-root-confined",
+              shell: "denied",
+              git: "denied",
+              worktree: "denied",
+              pullRequest: "denied",
+              code: "denied",
+            },
+            version: 2,
+            acceptedAt: "2026-09-04T20:00:00.000Z",
+            updatedAt: "2026-09-04T20:01:00.000Z",
+          },
+        ],
+      })),
+    };
+
+    render(
+      <WorkThreadWorkspace
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "2 tool calls" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Search, unfinished" })).toBeInTheDocument();
+    expect(screen.getByText("Done.")).toBeVisible();
+  });
+
   it("renders the durable transcript and pending request projection", async () => {
     const user = userEvent.setup();
     const threadClient = {

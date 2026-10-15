@@ -205,7 +205,10 @@ class ConformanceClient implements AcpClientPort {
         id: "mode",
         name: "Mode",
         currentValue: "default",
-        options: [{ value: "default", name: "Default" }],
+        // Offer the mode the conformance turns select, as a real agent does.
+        options: [...new Set(["default", profile.sessionMode("code", "approval-gated")])].map(
+          (value) => ({ value, name: value }),
+        ),
       },
     ];
   }

@@ -301,6 +301,50 @@ describe("ChatTranscript", () => {
     expect(screen.getByText("1 of 2 tasks completed")).toBeVisible();
   });
 
+  it("folds a settled attempt's tool calls behind one summary and expands to the Code row recipe", async () => {
+    const current = viewFixture();
+    const completed = current.turns[0]!.attempts[1]!;
+    render(
+      <ChatTranscript
+        view={viewFixture({
+          turns: [
+            {
+              ...current.turns[0]!,
+              attempts: [
+                current.turns[0]!.attempts[0]!,
+                {
+                  ...completed,
+                  toolSteps: [
+                    {
+                      toolCallId: "call-1",
+                      toolName: "Web search",
+                      state: "completed",
+                      summary: "3 results",
+                    },
+                    { toolCallId: "call-2", toolName: "Fetch page", state: "failed" },
+                    { toolCallId: "call-3", toolName: "Read", state: "running" },
+                  ],
+                },
+              ],
+            },
+          ],
+        })}
+      />,
+    );
+
+    const fold = screen.getByRole("button", { name: "3 tool calls" });
+    expect(screen.getByRole("button", { name: "Read, unfinished" })).toBeInTheDocument();
+    expect(screen.getByText("Web search")).not.toBeVisible();
+    await userEvent.click(fold);
+    expect(screen.getByRole("button", { name: "Web search, done" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Fetch page, failed" })).toBeInTheDocument();
+  });
+
+  it("shows no tool group for an attempt that called no tool", () => {
+    render(<ChatTranscript view={viewFixture()} />);
+    expect(screen.queryByText(/tool call/)).not.toBeInTheDocument();
+  });
+
   it("shows no task list for an attempt whose provider reported none", () => {
     render(<ChatTranscript view={viewFixture()} />);
     expect(screen.queryByRole("region", { name: "Agent tasks" })).not.toBeInTheDocument();
