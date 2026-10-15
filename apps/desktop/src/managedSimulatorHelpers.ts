@@ -39,6 +39,9 @@ const DEVICE_HUB_INPUT_NOTIFICATION = "com.apple.coredevice.dtuhidd.active";
 
 /** The native helper's pace for a swipe that names none. */
 const DEFAULT_SWIPE_MS = 250;
+/** A stream start waits no longer than this for the screen's orientation. */
+const ORIENTATION_READ_MS = 5_000;
+
 /** serve-sim's tag for a single-finger touch on its input socket. */
 const TOUCH_MESSAGE = 3;
 /** The edge flags serve-sim passes to the Simulator's HID layer. */
@@ -652,6 +655,12 @@ export function createManagedSimulatorHelpers(
       session.viewers.add(viewer);
       if (session.latest !== undefined) viewer.onFrame(session.latest);
       void ensureFrames(session);
+      // The streamed frames stay portrait-sized whichever way the Simulator
+      // sits, so the screen's real size is read once as a stream starts (not
+      // per frame), alongside the wait for the first picture.
+      const sitsWide = sitsWideOf(simulatorId, AbortSignal.timeout(ORIENTATION_READ_MS)).catch(
+        () => undefined,
+      );
       const frame = await waitForFrame(session, firstFrameMs);
       if (frame === undefined || session.closed || !session.viewers.has(viewer)) {
         const streamFailed = frame === undefined && !session.closed;
@@ -661,9 +670,11 @@ export function createManagedSimulatorHelpers(
         if (streamFailed) retire(session);
         return native.watch(simulatorId, watchOptions, viewer, timeoutMs);
       }
+      const wide = await sitsWide;
       return {
         status: "watching",
         stop: () => stopView(session, viewer),
+        ...(wide === undefined ? {} : { orientation: wide ? "landscape" : "portrait" }),
       };
     },
 

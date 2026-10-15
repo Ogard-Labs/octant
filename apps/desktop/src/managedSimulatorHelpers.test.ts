@@ -155,6 +155,29 @@ describe("managed simulator streams", () => {
     }
   });
 
+  it("reads which way the Simulator sits once as a stream starts, never per frame", async () => {
+    const sitsWide = vi.fn(async () => true);
+    const helpers = createManagedSimulatorHelpers(nativeHelpers(), tools(), {
+      fetch: fetchStream,
+      inputConnection: connected,
+      sitsWide,
+    });
+    try {
+      const frames: Uint8Array[] = [];
+      const watch = await helpers.watch(
+        udid,
+        { maxHeight: 100, quality: 0.5, framesPerSecond: 1 },
+        { onFrame: (frame) => frames.push(frame), onEnd: () => undefined },
+        1_000,
+      );
+      expect(watch).toMatchObject({ status: "watching", orientation: "landscape" });
+      expect(sitsWide).toHaveBeenCalledTimes(1);
+      if (watch.status === "watching") watch.stop();
+    } finally {
+      helpers.dispose();
+    }
+  });
+
   it("taps through serve-sim and does not also tap through the native helper", async () => {
     const native = nativeHelpers();
     const managed = tools();

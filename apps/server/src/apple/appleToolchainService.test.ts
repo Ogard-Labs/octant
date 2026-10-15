@@ -29,6 +29,7 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
   ): Promise<any>;
   cancel(request: ToolActionCancellation, context: ExecutionContext): Promise<boolean>;
   snapshot(context: ExecutionContext): any;
+  noteOrientation(simulatorId: never, orientation: "portrait" | "landscape"): void;
   requestPaneOpen(
     context: ExecutionContext,
     simulatorId: AppleSimulatorRecord["simulatorId"],
@@ -2219,6 +2220,24 @@ describe("AppleToolchainService Rotate", () => {
       context,
     );
     expect(service.snapshot(context).orientations).toEqual([]);
+  });
+
+  it("reports a Simulator already turned when its live view began, without a rotate", async () => {
+    const { service } = rotateService();
+    await service.discover(discoveryRequest, context);
+
+    service.noteOrientation(ids.simulator as never, "portrait");
+    expect(service.snapshot(context).orientations).toEqual([]);
+
+    service.noteOrientation(ids.simulator as never, "landscape");
+    expect(service.snapshot(context).orientations).toEqual([
+      { simulatorId: ids.simulator, orientation: "landscape" },
+    ]);
+
+    service.noteOrientation(ids.simulator as never, "portrait");
+    expect(service.snapshot(context).orientations).toEqual([
+      { simulatorId: ids.simulator, orientation: "portrait" },
+    ]);
   });
 
   it("reports a rotation the helper refused as failed and says why", async () => {

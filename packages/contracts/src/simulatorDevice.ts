@@ -101,6 +101,9 @@ export type SimulatorDeviceWatch = typeof SimulatorDeviceWatch.Type;
 /** Response header naming the device's screen in pixels, as `1206x2622`. */
 export const SIMULATOR_SCREEN_HEADER = "x-octant-simulator-screen";
 
+/** Response header naming which way the Simulator sat when the watch began: `portrait` or `landscape`. */
+export const SIMULATOR_ORIENTATION_HEADER = "x-octant-simulator-orientation";
+
 export const decodeSimulatorDeviceInput = Schema.decodeUnknownSync(SimulatorDeviceInput);
 export const decodeSimulatorDeviceWatch = Schema.decodeUnknownSync(SimulatorDeviceWatch);
 export const decodeSimulatorDeviceInputResult = Schema.decodeUnknownSync(

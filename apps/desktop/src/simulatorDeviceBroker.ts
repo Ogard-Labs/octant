@@ -4,6 +4,7 @@ import { ParseResult } from "effect";
 import {
   decodeSimulatorDeviceInput,
   decodeSimulatorDeviceWatch,
+  SIMULATOR_ORIENTATION_HEADER,
   SIMULATOR_SCREEN_HEADER,
   type SimulatorDeviceInput,
   type SimulatorDeviceInputResult,
@@ -332,6 +333,9 @@ export function createSimulatorScreenStream(
       "content-type": "application/octet-stream",
       "cache-control": "no-store",
       [SIMULATOR_SCREEN_HEADER]: `${looked.screen.width}x${looked.screen.height}`,
+      ...(started.orientation === undefined
+        ? {}
+        : { [SIMULATOR_ORIENTATION_HEADER]: started.orientation }),
     });
     outgoing.flushHeaders();
     stopWatching = started.stop;

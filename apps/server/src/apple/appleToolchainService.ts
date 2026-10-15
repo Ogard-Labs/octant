@@ -591,6 +591,21 @@ export class AppleToolchainService {
     return { kind: "found", bytes };
   }
 
+  /**
+   * Records which way a Simulator sat when its live view began, as the desktop
+   * read it. A rotate says the same afterwards; this covers a Simulator that
+   * was already turned, or turned outside Octant.
+   */
+  noteOrientation(
+    simulatorId: AppleSimulatorRecord["simulatorId"],
+    orientation: "portrait" | "landscape",
+  ): void {
+    const known = this.#orientations.get(String(simulatorId))?.orientation;
+    if (known === orientation || (known === undefined && orientation === "portrait")) return;
+    this.#orientations.set(String(simulatorId), { simulatorId, orientation });
+    this.#sequence += 1;
+  }
+
   snapshot(context: AppleExecutionContext): AppleRuntimeSnapshot {
     const paneOpenRequest = this.#paneOpenRequests.get(String(context.threadId));
     return decodeAppleRuntimeSnapshot({

@@ -448,6 +448,26 @@ describe("the Simulator screen stream", () => {
     abort.abort();
   });
 
+  it("names which way the Simulator sat when the watch began", async () => {
+    const { watching } = watchable();
+    const turned: SimulatorDeviceHelpers = {
+      ...watching,
+      watch: async (...args) => {
+        const started = await watching.watch(...args);
+        return started.status === "watching" ? { ...started, orientation: "landscape" } : started;
+      },
+    };
+    const url = await serve(turned);
+    const abort = new AbortController();
+    const response = await fetch(url, {
+      method: "POST",
+      body: JSON.stringify({ watch }),
+      signal: abort.signal,
+    });
+    expect(response.headers.get("x-octant-simulator-orientation")).toBe("landscape");
+    abort.abort();
+  });
+
   it("catches a slow viewer up to the newest screen once it can take more", async () => {
     const { watching, frame } = watchable();
     const written: number[][] = [];

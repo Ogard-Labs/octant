@@ -233,10 +233,13 @@ portrait-sized, the pane draws each frame a quarter turn clockwise (`landscape`
 is `landscape_left`), so the picture, its bezel and the side keys sit the way
 the device does, and a pointer or touch on it is turned back a quarter
 counter-clockwise into the frame's pixel space before it is sent. Frames that
-arrive already wide are drawn as they are. The host learns the orientation
-only when it rotates: a Simulator turned from outside Octant, or already in
-landscape when the pane opens, is drawn as the frames arrive until the next
-Rotate. The Android emulator streams rotated frames and needs none of this.
+arrive already wide are drawn as they are. The host learns the orientation when
+it rotates and once when a Simulator's stream starts: the desktop reads the real
+screen (the same screenshot-size read Rotate uses, never one per frame), names
+it in the watch response, and the host records it like a rotate does, so a
+Simulator already in landscape when the pane opens, or turned from outside
+Octant, is drawn upright. A turn made outside Octant while a stream is running
+shows after the next stream start or Rotate. The Android emulator streams rotated frames and needs none of this.
 
 Rotate is an effect, not input. Only a person (`local-user` or
 `remote-device` in `requestedBy`) may ask for it; an agent or the host is
