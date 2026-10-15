@@ -2399,6 +2399,21 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   inline image bytes, and the journal holds attachment references and a
   prompt hash, never image bytes or prompt text. See
   [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).
+  Image providers reach the job service through the provider-sdk image seam
+  (`@octant/provider-sdk/image-generation`): a driver builds one profile's
+  adapter from the profile and capability-scoped ports, never from host
+  internals. The ports are one provider call the host authenticates with a
+  key leased from the profile's key pool (the adapter names only the header,
+  and a refused key cools down as for any other call), the bounded
+  approved-URL fetch, and the host's generated-image media-type check; size,
+  time, and redirect bounds are the host's. Bundled image drivers pass the
+  same plugin-host activation ladder as provider drivers but stay out of the
+  chat-driver catalog, and a profile whose image driver plugin is disabled
+  fails its jobs as unsupported before any provider call. The seam's
+  conformance harness proves a driver stops before calling out when cancelled
+  or given an empty prompt, records unreachable providers and unexpected
+  errors as sanitized failures, and returns only bytes the host's media-type
+  check accepted.
   The **Image generator** surface (profile menu, host-wide `image-library`
   scope; see
   [decisions/0081-image-generation-is-its-own-surface.md](decisions/0081-image-generation-is-its-own-surface.md);
@@ -4895,7 +4910,7 @@ feature is already an independently packaged plugin:
 | Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Only presentation and optional adapters are extraction candidates; core capability, lifecycle, and security remain app-managed |
 | Marketplace and plugin registry                                       | Stay in the host because they admit and activate other components                                                              |
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned           |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | In-tree adapters the image job service picks directly; move behind the provider seam, image jobs stay host-owned               |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | The provider-sdk image seam and image-driver admission exist; adapters move behind them, image jobs stay host-owned            |
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a

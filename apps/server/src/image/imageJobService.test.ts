@@ -10,8 +10,13 @@ import {
   decodeProviderInstanceId,
   decodeProviderModelId,
   type ImageGenerationCustomSource,
+  type ProviderDriverKind,
   type ProviderInstance,
 } from "@octant/contracts";
+import type {
+  ImageGenerationAdapter,
+  ImageGenerationDriver,
+} from "@octant/provider-sdk/image-generation";
 import { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
@@ -20,7 +25,6 @@ import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import { readUsageDashboard } from "../usageDashboardService";
 import { GeneratedImageStore } from "./generatedImageStore";
-import type { ImageGenerationAdapter } from "./imageAdapter";
 import type { ImageHttpFetch } from "./imageHttp";
 import { ImageJobService, ImageJobServiceError } from "./imageJobService";
 
@@ -137,6 +141,8 @@ function openHarness(
     readonly bflInstance?: ProviderInstance;
     readonly ideogramInstance?: ProviderInstance;
     readonly fetch?: ImageHttpFetch;
+    readonly imageDrivers?: ReadonlyArray<ImageGenerationDriver>;
+    readonly admittedImageDriverKinds?: ReadonlySet<ProviderDriverKind>;
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-image-job-"));
@@ -208,6 +214,10 @@ function openHarness(
     ...(adapter === undefined ? {} : { createAdapter: () => adapter }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
+    ...(options.imageDrivers === undefined ? {} : { imageDrivers: options.imageDrivers }),
+    ...(options.admittedImageDriverKinds === undefined
+      ? {}
+      : { admittedImageDriverKinds: options.admittedImageDriverKinds }),
   });
   return { directory, connection, journal: innerJournal, runtime, attachments, service };
 }
@@ -889,6 +899,73 @@ describe("custom image sources", () => {
     const completed = await service.whenTerminal(queued.id);
     expect(completed.status).toBe("completed");
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("image providers behind the image seam", () => {
+  it("builds a registered image driver's adapter with ports that carry the profile's credential", async () => {
+    const fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("x-seam-key")).toBe("sk-test");
+      return new Response(png, { status: 200 });
+    });
+    const seen: Array<string> = [];
+    const driver: ImageGenerationDriver = {
+      driverKind: "bfl-image",
+      create: ({ instance, ports }) => ({
+        generate: async () => {
+          seen.push(String(instance.id));
+          const response = await ports.request({
+            url: "https://images.example.test/v1/generate",
+            method: "POST",
+            auth: { header: "x-seam-key" },
+            body: "{}",
+          });
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          const mediaType = ports.sniffMediaType(bytes);
+          if (mediaType === undefined) {
+            return { status: "failed", providerFailure: { category: "protocol", message: "bad" } };
+          }
+          return { status: "completed", images: [{ bytes, mediaType }] };
+        },
+      }),
+    };
+    const { service } = openHarness(undefined, {
+      bflInstance: bflInstance(),
+      fetch,
+      imageDrivers: [driver],
+    });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: bflId,
+      modelId: bflModelId,
+      prompt: "a red cube",
+    });
+    const completed = await service.whenTerminal(queued.id);
+    expect(completed.status).toBe("completed");
+    expect(seen).toEqual([String(bflId)]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails a job as unsupported without calling the provider when its image driver plugin is disabled", async () => {
+    const fetch = vi.fn(async () => new Response(png, { status: 200 }));
+    const { service } = openHarness(undefined, {
+      bflInstance: bflInstance(),
+      fetch,
+      admittedImageDriverKinds: new Set<ProviderDriverKind>(["ideogram-image"]),
+    });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: bflId,
+      modelId: bflModelId,
+      prompt: "a red cube",
+    });
+    const failed = await service.whenTerminal(queued.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.failure?.category).toBe("unsupported");
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 
