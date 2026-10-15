@@ -91,6 +91,10 @@ export type RemoteServerGrant = typeof RemoteServerGrant.Type;
  *   held the port without answering or because the host never finished asking.
  * - `open-denied`: the local Open decision for the thread's posture refuses it,
  *   and a paired device never gets more than a local window would.
+ * - `grant-limit`: every other rule allows the grant, but the device already
+ *   holds {@link REMOTE_SERVER_GRANTS_PER_DEVICE} open grants or the host holds
+ *   {@link REMOTE_SERVER_GRANTS_PER_HOST}. Asked last, so it never hides a
+ *   refusal that says why the server itself cannot open.
  */
 export const RemoteServerGrantRefusal = Schema.Union(
   Schema.Struct({
@@ -101,6 +105,7 @@ export const RemoteServerGrantRefusal = Schema.Union(
       "not-octant-owned",
       "not-in-thread",
       "open-denied",
+      "grant-limit",
     ),
     message: Schema.NonEmptyTrimmedString,
   }).annotations(strict),
@@ -116,6 +121,11 @@ export const RemoteServerGrantRefusal = Schema.Union(
 );
 export type RemoteServerGrantRefusal = typeof RemoteServerGrantRefusal.Type;
 export type RemoteServerGrantRefusalReason = RemoteServerGrantRefusal["reason"];
+
+/** How many grants one paired device may hold open at once. */
+export const REMOTE_SERVER_GRANTS_PER_DEVICE = 8;
+/** How many grants the host holds open at once, across every paired device. */
+export const REMOTE_SERVER_GRANTS_PER_HOST = 32;
 
 export const RemoteServerGrantResult = Schema.Union(
   Schema.Struct({
@@ -162,6 +172,7 @@ export type RemoteServerGrantOpenedPayload = typeof RemoteServerGrantOpenedPaylo
 export const RemoteServerGrantCloseReason = Schema.Literal(
   "device-revoked",
   "device-credential-rotated",
+  "device-credential-expired",
   "device-signed-out",
   "proxy-session-ended",
   "listener-disabled",

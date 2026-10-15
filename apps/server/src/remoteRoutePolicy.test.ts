@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createRemoteRouteHandler,
   createRemoteRoutePolicy,
+  listDefaultRemoteAuthenticatedRoutes,
   type RemoteRouteDefinition,
   type RemoteRouteResponse,
 } from "./remoteRoutePolicy";
@@ -673,6 +674,70 @@ describe("remote route policy", () => {
         ],
       }),
     ).toThrow("local-only");
+  });
+
+  it("dispatches the grant route only to the proxy surface, never as a product route", async () => {
+    const serverProxy = vi.fn(async () => Response.json({ proxy: true }));
+    const { route, authenticatedProduct } = handler({ serverProxy });
+    const response = await route(
+      request("/api/server-proxy/grants", {
+        method: "POST",
+        headers: { "content-type": "application/json", "content-length": "2" },
+        body: "{}",
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(serverProxy).toHaveBeenCalledOnce();
+    expect(authenticatedProduct).not.toHaveBeenCalled();
+    expect((await route(request("/api/server-proxy/anything", { method: "POST" }))).status).toBe(
+      404,
+    );
+    expect(
+      listDefaultRemoteAuthenticatedRoutes().some((candidate) =>
+        candidate.match.path.startsWith("/api/server-proxy"),
+      ),
+    ).toBe(false);
+  });
+
+  it("counts proxy requests apart from every other surface's", () => {
+    const routes = policy({ maxConcurrentRequests: 1, maxConcurrentServerProxyRequests: 1 });
+    const product = routes.acquire("authenticated-product");
+    expect(product).toBeDefined();
+    expect(routes.acquire("authenticated-product")).toBeUndefined();
+    const proxy = routes.acquire("server-proxy");
+    expect(proxy).toBeDefined();
+    expect(routes.acquire("server-proxy")).toBeUndefined();
+    product?.();
+    expect(routes.acquire("pre-auth")).toBeDefined();
+  });
+
+  it("refuses a product route under the proxy prefix and a proxy route outside it", () => {
+    expect(() =>
+      createRemoteRoutePolicy({
+        origin,
+        authenticatedRoutes: [
+          {
+            id: "product-proxy",
+            match: { kind: "prefix", path: "/api/server-proxy/" },
+            surface: "authenticated-product",
+            methods: ["POST"],
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      createRemoteRoutePolicy({
+        origin,
+        serverProxyRoutes: [
+          {
+            id: "proxy-chat",
+            match: { kind: "prefix", path: "/api/chat/" },
+            surface: "server-proxy",
+            methods: ["POST"],
+          },
+        ],
+      }),
+    ).toThrow();
   });
 
   it("rejects unsafe route registrations instead of allowing a local route by configuration", () => {

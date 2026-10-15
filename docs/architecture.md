@@ -5757,8 +5757,49 @@ mechanisms are:
   paired device may stop only a server Octant owns; the actor comes
   from the request's authenticated principal. A window reads the host it is
   connected to; All Hosts federation does not carry these rows.
-  Planned, not built: opening such a server live on a paired computer, in
-  [the plan](plans/open-a-dev-server-from-another-computer.md).
+  Opening such a server live on a paired computer is being built in
+  [the plan](plans/open-a-dev-server-from-another-computer.md); today the
+  host can grant it, and nothing forwards a request yet.
+- **Proxy sessions and server grants.** A paired device asks for a grant to
+  open one dev server from its own computer, under a proxy session that is
+  separate from its product session. The rules in force:
+  - **Proxy session.** Minted at `/api/remote/auth/server-proxy-session` from
+    the ordinary device challenge, signed over a proxy transcript that differs
+    from the product one only in its label, so neither signature becomes the
+    other kind of session. It lives in the host's memory only, travels in its
+    own `HttpOnly` cookie scoped to `/api/server-proxy/`, and reaches only the
+    routes under that prefix, which are their own route-policy surface: never
+    product routes, never forwarded or classified as product actions. A
+    product session never reaches a proxy route. Each request carries the same
+    signed envelope product routes use, re-reads the device, and spends a
+    nonce from the session's own store (16,384 in the retention window). The
+    proxy surface has its own concurrency: 64 on the listener and in the route
+    policy, 32 per device in the session store, answered 503 with a one-second
+    `Retry-After`, apart from the product budget. A device holds at most four
+    proxy sessions (a fifth ends its oldest) and the host 64. A host restart
+    ends every proxy session.
+  - **Grant.** `POST /api/server-proxy/grants` names the listing its listener id
+    came from. The host gathers every fact itself: the principal, whether the
+    device can open the thread (an archived thread counts as unreadable), the
+    listener re-observed and re-classified by that id, its ownership and health,
+    the thread whose own worktree it runs in, and that thread's posture, and
+    decides with the grant policy in its fixed order. A device holds at most 8
+    open grants and the host 32, refused `grant-limit` after every other rule.
+    The same session opening the same server again gets the same grant. A
+    listing the host could not finish answers 503, never a refusal. A local
+    window reaching the route on the loopback listener is answered
+    `local-principal` and nothing about the server is read.
+  - **Record and revocation.** Each opening (actor: the device) and closing
+    (actor: the host) is journaled as `remote-server.grant-opened@1` and
+    `remote-server.grant-closed@1` with the grant, device, thread, and port,
+    never the endpoint, and an open-grant projection is rebuilt from them. A
+    starting host closes every grant still open as `proxy-session-ended`. A
+    grant closes when its proxy session ends or expires, when its device is
+    revoked, rotated, expired, or signs out (before that credential change
+    returns), when the listener is disabled, when its thread is archived or
+    purged, and when Octant stops its server. A thread purge erases the grant's
+    records with the thread's. Nothing erases a device's records, so a revoked
+    device's grant history stays with its revoke.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and

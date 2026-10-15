@@ -1112,3 +1112,118 @@ describe("LocalServerService running services", () => {
     );
   });
 });
+
+describe("LocalServerService grant targets", () => {
+  const ownedVite: ObservedLocalListener = { ...viteListener, ownedByOctant: true };
+  const fromThread = (listener: ObservedLocalListener) => ({
+    surface: "local-servers" as const,
+    threadId,
+    projectId,
+    listenerId: deriveListenerId(threadId, listener),
+  });
+
+  function grantService(input: {
+    readonly observed: ReadonlyArray<ObservedLocalListener>;
+    readonly scope?: LocalServerScopeBinding | undefined;
+    readonly onStopped?: (stopped: { readonly pid: number; readonly port: number }) => void;
+  }) {
+    return new LocalServerService({
+      listeners: { observe: async () => ({ status: "observed", listeners: input.observed }) },
+      scopes: { resolve: async () => ("scope" in input ? input.scope : scope()) },
+      hostScopes: { resolve: async () => hostBinding() },
+      health: { probe: async () => listening },
+      stopPort: { stop: async () => "stopped" },
+      clock: () => "2026-08-14T08:00:00.000Z",
+      ...(input.onStopped === undefined ? {} : { onStopped: input.onStopped }),
+    });
+  }
+
+  it("scopes a server in the thread's own worktree to that thread, with the endpoint it answered on", async () => {
+    const service = grantService({
+      observed: [ownedVite],
+      scope: scope({ checkoutIsOwnWorktree: true }),
+    });
+    expect(
+      await service.observeGrantTarget(windowId, fromThread(ownedVite), { actor: "remote-client" }),
+    ).toEqual({
+      status: "listed",
+      ownership: "octant-owned",
+      health: "listening",
+      threadId,
+      endpoint: { url: "http://127.0.0.1:5173/", port: 5173, pid: 4213, processName: "node" },
+    });
+  });
+
+  it("scopes no thread when the checkout is the Project folder or the server is outside it", async () => {
+    const inProjectFolder = await grantService({ observed: [ownedVite] }).observeGrantTarget(
+      windowId,
+      fromThread(ownedVite),
+      { actor: "remote-client" },
+    );
+    expect(inProjectFolder).toMatchObject({ status: "listed" });
+    expect(inProjectFolder).not.toHaveProperty("threadId");
+
+    const elsewhere: ObservedLocalListener = {
+      ...leftoverListener,
+      lineage: [],
+      ownedByOctant: true,
+    };
+    const outside = await grantService({
+      observed: [elsewhere],
+      scope: scope({ checkoutIsOwnWorktree: true }),
+    }).observeGrantTarget(windowId, fromThread(elsewhere), { actor: "remote-client" });
+    expect(outside).toMatchObject({ status: "listed" });
+    expect(outside).not.toHaveProperty("threadId");
+  });
+
+  it("answers not-listed for an unknown id and for a thread with no scope", async () => {
+    const service = grantService({ observed: [ownedVite] });
+    expect(
+      await service.observeGrantTarget(windowId, fromThread(postgresListener), {
+        actor: "remote-client",
+      }),
+    ).toEqual({ status: "not-listed" });
+    expect(
+      await grantService({ observed: [ownedVite], scope: undefined }).observeGrantTarget(
+        windowId,
+        fromThread(ownedVite),
+        { actor: "remote-client" },
+      ),
+    ).toEqual({ status: "not-listed" });
+  });
+
+  it("takes the thread from the Running services row the listener id names", async () => {
+    const service = grantService({ observed: [worktreeListener, orphanListener] });
+    const running = (listener: ObservedLocalListener) => ({
+      surface: "running-services" as const,
+      listenerId: deriveListenerId("octant.running-services", listener),
+    });
+    expect(
+      await service.observeGrantTarget(windowId, running(worktreeListener), {
+        actor: "remote-client",
+      }),
+    ).toMatchObject({ status: "listed", ownership: "octant-owned", threadId: worktreeThreadId });
+    const orphan = await service.observeGrantTarget(windowId, running(orphanListener), {
+      actor: "remote-client",
+    });
+    expect(orphan).toMatchObject({ status: "listed", ownership: "leftover" });
+    expect(orphan).not.toHaveProperty("threadId");
+  });
+
+  it("says which server it stopped, after the signal lands", async () => {
+    const stopped: Array<{ readonly pid: number; readonly port: number }> = [];
+    const service = grantService({
+      observed: [ownedVite],
+      onStopped: (server) => stopped.push(server),
+    });
+    const result = await execute(
+      service,
+      command({
+        kind: "stop-local-server",
+        listenerId: deriveListenerId(threadId, viteListener),
+      } as Partial<LocalServerCommand>),
+    );
+    expect(result.kind).toBe("local-server-stopped");
+    expect(stopped).toEqual([{ pid: 4213, port: 5173 }]);
+  });
+});

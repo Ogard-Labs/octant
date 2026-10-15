@@ -1,7 +1,7 @@
 # Open a dev server from another computer
 
-**Status: approved by the maintainer on 2026-10-14; slice 1 built, nothing
-reachable.** Nothing here is in force. [Architecture](../architecture.md) holds
+**Status: approved by the maintainer on 2026-10-14; slices 1 and 2 built,
+nothing forwarded.** Nothing here is in force. [Architecture](../architecture.md) holds
 only the rules that are true today; each slice below moves its rules there when
 it lands. Today a paired device that opens a server from Local servers or
 Running services gets a Browser tab on the host and sees the host browser's
@@ -364,6 +364,40 @@ dark; slice 5 makes the feature reachable.
    refuses past the grant cap. The product session cannot reach the proxy
    route and the proxy session cannot reach product routes. Journal replay
    rebuilds the open-grant view.
+
+   **Built.** The proxy session store is `apps/server/src/remote/remoteServerProxySessions.ts`,
+   the grant service `apps/server/src/remote/remoteServerGrantService.ts`, and
+   the route lives in the private listener's authentication beside product
+   sessions. The rules now in force are in the
+   [architecture](../architecture.md) under proxy sessions and server grants.
+   Rules this slice resolved, which later slices must keep:
+   - The proxy session lives in the host's memory, not the product session
+     store, so a product route cannot find it and a host restart ends it and
+     every grant with it; a starting host journals those grants closed as
+     `proxy-session-ended`.
+   - The proxy transcript is the product one under its own label, so a device
+     key signature asks for exactly one kind of session.
+   - The grant cap refusal is `grant-limit`, asked last. Opening the same
+     server again under the same session returns the same grant rather than
+     spending the cap, since there is no route to release a grant: grants end
+     only by the losses listed under revocation.
+   - A device keeps at most four proxy sessions; a fifth ends its oldest, so a
+     client that lost its cookie is not locked out until idle expiry.
+   - An archived thread is refused as `thread-unreadable`, because archiving
+     closes a grant. A purged thread closes its grants as `thread-unreadable`,
+     and the purge then erases their records.
+   - A credential expiry closes grants as `device-credential-expired`, a close
+     reason this slice added. Signing out any of a device's product sessions
+     ends all its proxy sessions, as `device-signed-out`.
+   - A Local servers row belongs to the thread only when the thread's checkout
+     is a managed worktree whose root is not the Project folder.
+   - The grant and proxy-session endpoints have no caller until slice 5's
+     forwarder, so the wiring check lists them as uncalled, each with the
+     reason.
+
+   Not yet closed by this slice, left to slice 3's per-request checks: a server
+   that exits or changes hands without Octant stopping it, read access lost
+   other than by archive, and Code turned off.
 
 3. **HTTP proxy route on the private listener.** Per-request proof against
    the proxy session, endpoint identity re-check, header handling, budgets,

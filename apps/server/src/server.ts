@@ -620,6 +620,8 @@ import { createFileMentionRouteHandler } from "./fileMentionRoutes";
 import { pinFileMentionRoot } from "./fileMentionIo";
 import { FileMentionService, fileMentionContextBlocks } from "./fileMentionService";
 import { createLocalServerRouteHandler } from "./localServerRoutes";
+import { createRemoteServerGrantLocalRouteHandler } from "./remoteServerGrantLocalRoutes";
+import { RemoteServerGrantService } from "./remote/remoteServerGrantService";
 import { createLiveLocalListenerPort } from "./localServers/localListenerPort";
 import {
   createLiveLocalServerHealthProbe,
@@ -911,7 +913,9 @@ import {
   createRemoteGateway,
   type RemoteGateway,
   type RemoteGatewayServices,
+  type RemoteServerGrantGatewayPort,
 } from "./remote/remoteGateway";
+import { resolvePrincipalRouteContext } from "./principalRouteContext";
 import { createLocalDeviceAdministrationRouteHandler } from "./remote/localDeviceAdministrationRoutes";
 import {
   createHostControlRouteHandler,
@@ -6116,53 +6120,108 @@ export function startOctantServer(
     // process, so it is bound to the same authoritative thread, checkout, and
     // root resolution the Code workspace already uses. The live observer verifies
     // terminal roots and their descendants; unknown processes remain leftovers.
-    const localServerRoutes = createLocalServerRouteHandler({
-      service: new LocalServerService({
-        listeners: createLiveLocalListenerPort({
-          ownedProcessRoots: async () =>
-            (await terminalProcessPort?.ownedProcessRoots()) ?? new Set<number>(),
-        }),
-        health: createLiveLocalServerHealthProbe(),
-        stopPort: createLiveLocalServerStopPort(),
-        scopes: createCodeThreadLocalServerScopeResolver({
-          projects: projectService,
-          source: {
-            readThread: (threadId) => persistence.readCodeThread(threadId),
-            readCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
-            resolveCheckoutRoot: async (windowId, thread, checkout) =>
-              (await roots.resolve(windowId, thread, checkout, codeWorkingDirectoryProbePath))
-                ?.rootPath,
-            ownedPids: () => new Set<number>(),
-          },
-        }),
-        hostScopes: createRunningServiceScopeResolver({
-          projects: projectService,
-          source: {
-            readThreads: persistence.readCodeThreads,
-            readCheckout: persistence.readCodeCheckout,
-            // Only the ownership receipt the host wrote for this thread's own
-            // worktree vouches for the folder; the same fields the Code file
-            // root authority demands, without its Git observation, because this
-            // only names where a listener came from and authorizes nothing.
-            managedWorktreeRoot: async (thread, checkout, repositoryRoot) => {
-              const receipt = await managedWorktreeReceipts.load(checkout.ownershipReceiptId);
-              return receipt !== undefined &&
-                receipt.state === "ready" &&
-                receipt.receiptId === checkout.ownershipReceiptId &&
-                receipt.threadId === thread.id &&
-                receipt.checkoutId === checkout.id &&
-                receipt.repositoryId === thread.repositoryId &&
-                receipt.repositoryId === checkout.repositoryId &&
-                receipt.canonicalRepositoryPath === repositoryRoot
-                ? receipt.canonicalWorktreePath
-                : undefined;
-            },
-            ownedPids: () => new Set<number>(),
-          },
-        }),
+    const localServerService = new LocalServerService({
+      listeners: createLiveLocalListenerPort({
+        ownedProcessRoots: async () =>
+          (await terminalProcessPort?.ownedProcessRoots()) ?? new Set<number>(),
       }),
+      health: createLiveLocalServerHealthProbe(),
+      stopPort: createLiveLocalServerStopPort(),
+      scopes: createCodeThreadLocalServerScopeResolver({
+        projects: projectService,
+        source: {
+          readThread: (threadId) => persistence.readCodeThread(threadId),
+          readCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+          resolveCheckoutRoot: async (windowId, thread, checkout) =>
+            (await roots.resolve(windowId, thread, checkout, codeWorkingDirectoryProbePath))
+              ?.rootPath,
+          ownedPids: () => new Set<number>(),
+        },
+      }),
+      hostScopes: createRunningServiceScopeResolver({
+        projects: projectService,
+        source: {
+          readThreads: persistence.readCodeThreads,
+          readCheckout: persistence.readCodeCheckout,
+          // Only the ownership receipt the host wrote for this thread's own
+          // worktree vouches for the folder; the same fields the Code file
+          // root authority demands, without its Git observation, because this
+          // only names where a listener came from and authorizes nothing.
+          managedWorktreeRoot: async (thread, checkout, repositoryRoot) => {
+            const receipt = await managedWorktreeReceipts.load(checkout.ownershipReceiptId);
+            return receipt !== undefined &&
+              receipt.state === "ready" &&
+              receipt.receiptId === checkout.ownershipReceiptId &&
+              receipt.threadId === thread.id &&
+              receipt.checkoutId === checkout.id &&
+              receipt.repositoryId === thread.repositoryId &&
+              receipt.repositoryId === checkout.repositoryId &&
+              receipt.canonicalRepositoryPath === repositoryRoot
+              ? receipt.canonicalWorktreePath
+              : undefined;
+          },
+          ownedPids: () => new Set<number>(),
+        },
+      }),
+      // A server Octant stopped ends every grant to it at once; a grant
+      // never forwards to whatever takes the port next.
+      onStopped: (stopped) => remoteServerGrants.closeServer(stopped),
+    });
+    const localServerRoutes = createLocalServerRouteHandler({
+      service: localServerService,
       persistence,
       projects: projectService,
+      windowAuthorityStore,
+    });
+    // Grants to open an Octant-owned dev server from a paired device. They live
+    // in this host's memory, bound to a proxy session; the journal records each
+    // opening and closing, and a starting host closes what a past run left open.
+    const remoteServerGrants = new RemoteServerGrantService({
+      observeTarget: (scopeId, source, signal) =>
+        localServerService.observeGrantTarget(scopeId, source, {
+          actor: "remote-client",
+          ...(signal === undefined ? {} : { signal }),
+        }),
+      canOpenThread: async (scopeId, threadId) =>
+        (await routeCodeService.read(scopeId, threadId)) !== undefined,
+      readThread: persistence.readCodeThread,
+      readOpenGrants: persistence.readOpenRemoteServerGrants,
+      journal: persistence.journal,
+      hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    try {
+      remoteServerGrants.reconcile();
+    } catch {
+      console.error("[remote-server-grants] Grants a past run left open could not be closed.");
+    }
+    const unsubscribeRemoteServerGrants = persistence.journal.subscribeCommitted((append) => {
+      for (const event of append.events) {
+        if (event.eventName === "code.thread-updated@1" && event.aggregateType === "code-thread") {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(event.aggregateId));
+          if (thread?.lifecycle !== "active") {
+            remoteServerGrants.closeThread(event.aggregateId, "thread-archived");
+          }
+        } else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
+          const purged = event.payload as { readonly mode?: unknown; readonly threadId?: unknown };
+          // Closed before the purge erases the thread's records, which takes
+          // these closings with it.
+          if (purged.mode === "code" && typeof purged.threadId === "string") {
+            remoteServerGrants.closeThread(purged.threadId, "thread-unreadable");
+          }
+        }
+      }
+    });
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        unsubscribeRemoteServerGrants();
+        // Proxy sessions do not outlive this process, so neither does a grant.
+        remoteServerGrants.closeAll("proxy-session-ended");
+      }),
+    );
+    const remoteServerGrantLocalRoutes = createRemoteServerGrantLocalRouteHandler({
+      grants: remoteServerGrants,
       windowAuthorityStore,
     });
     const codeOperationApprovalRoutes = createCodeOperationApprovalRouteHandler({
@@ -10713,6 +10772,7 @@ export function startOctantServer(
       (await zenRoutes(request)) ??
       (await navigatorAssistantRoutes(request)) ??
       (await localServerRoutes(request)) ??
+      (await remoteServerGrantLocalRoutes(request)) ??
       (await threadMentionRoutes(request)) ??
       (await fileMentionRoutes(request)) ??
       (await spendCeilingRoutes(request)) ??
@@ -10768,6 +10828,33 @@ export function startOctantServer(
       dispatch: (request, context) =>
         codeProjectAccess.run(context, () => dispatchMeasuredProductRoutes(request)),
     });
+    // The proxy route's grant requests run under the paired device's own scope,
+    // the same remote read rule product requests are judged by.
+    const remoteServerGrantGatewayPort: RemoteServerGrantGatewayPort = {
+      open: (input) => {
+        const context = resolvePrincipalRouteContext({
+          request: input.request,
+          principal: input.principal,
+          abortSignal: input.signal,
+        });
+        return codeProjectAccess.run(context, () =>
+          remoteServerGrants.open({
+            principal: {
+              kind: "remote-device",
+              deviceId: String(input.principal.deviceId),
+              credentialGeneration: input.principal.credentialGeneration,
+              sessionIdDigest: input.sessionIdDigest,
+            },
+            scopeId: context.scopeId,
+            request: input.grantRequest,
+            stillAuthorized: input.stillAuthorized,
+            signal: input.signal,
+          }),
+        );
+      },
+      closeSession: (sessionIdDigest, reason) =>
+        remoteServerGrants.closeSession(sessionIdDigest, reason),
+    };
     let remoteListener: PrivateListener | undefined;
     let remoteListenerError: PrivateListenerFailureCode | undefined;
     // Retained so shutdown can settle warming before the runtime registry
@@ -10819,6 +10906,7 @@ export function startOctantServer(
           );
         },
         pushTokenStore: pushNotificationTokenStore,
+        remoteServerGrants: remoteServerGrantGatewayPort,
       };
     };
     const privateListenerController = createPrivateListenerLifecycleController({
@@ -10827,6 +10915,7 @@ export function startOctantServer(
         const gateway = createRemoteGateway({
           ...services,
           productDispatch: services.productDispatch ?? authenticatedProductDispatch,
+          remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
           serve: options.remoteServe ?? serve,
           config,
         });

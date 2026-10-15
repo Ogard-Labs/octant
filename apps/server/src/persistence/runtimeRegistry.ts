@@ -128,6 +128,10 @@ import {
   ProjectTerminalEnded,
   ProjectTerminalStarted,
   ProductFeedbackDiscarded,
+  REMOTE_SERVER_GRANT_CLOSED,
+  REMOTE_SERVER_GRANT_OPENED,
+  RemoteServerGrantClosedPayload,
+  RemoteServerGrantOpenedPayload,
   TERMINAL_BROWSER_GRANT_EVENT_NAMES,
   TerminalBrowserGrantIssued,
   TerminalBrowserGrantRevoked,
@@ -206,6 +210,7 @@ import {
   ProductFeedbackProjection,
 } from "./productFeedbackProjection";
 import { ProjectTerminalProjection } from "./projectTerminalProjection";
+import { RemoteServerGrantProjection } from "./remoteServerGrantProjection";
 import { ThreadRetentionProjection } from "./threadRetentionProjection";
 import { SpendCeilingProjection } from "./spendCeilingProjection";
 import { UsageResumeProjection } from "./usageResumeProjection";
@@ -434,6 +439,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(PROJECT_TERMINAL_EVENT_NAMES.ended, 1, ProjectTerminalEnded)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.issued, 1, TerminalBrowserGrantIssued)
     .register(TERMINAL_BROWSER_GRANT_EVENT_NAMES.revoked, 1, TerminalBrowserGrantRevoked)
+    .register(REMOTE_SERVER_GRANT_OPENED, 1, RemoteServerGrantOpenedPayload)
+    .register(REMOTE_SERVER_GRANT_CLOSED, 1, RemoteServerGrantClosedPayload)
     .register(THREAD_CHECKPOINT_MARKED, 1, ThreadCheckpointMarked)
     .register(THREAD_CHECKPOINT_FORGOTTEN, 1, ThreadCheckpointForgotten)
     .register(THREAD_CHECKPOINT_RESTORED, 1, ThreadCheckpointRestored)
@@ -517,6 +524,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ThreadCheckpointProjection())
       .register(new ProductFeedbackProjection())
       .register(new ProjectTerminalProjection())
+      .register(new RemoteServerGrantProjection())
       .register(new ThreadRetentionProjection())
       .register(new ExternalContentTaintProjection())
       .register(new UsageResumeProjection())

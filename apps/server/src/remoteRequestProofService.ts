@@ -13,6 +13,7 @@ import {
   REMOTE_REQUEST_NONCE_RETENTION_MS,
   buildRemoteChallengeProofPayload,
   buildRemoteRequestProofPayload,
+  buildRemoteServerProxySessionProofPayload,
   canonicalizeRemotePathQuery,
   evaluateRemoteRequestFreshness,
   sessionExpiry,
@@ -85,6 +86,38 @@ export interface RemoteSessionFacts {
   readonly capabilityDigest: string;
   readonly idleExpiresAt: string;
   readonly absoluteExpiresAt: string;
+}
+
+/**
+ * What a challenge proves when a device turns it into a proxy session: the same
+ * standing a product session records, with nothing stored. The proxy session
+ * lives in the host's memory, so the product session store never holds a row a
+ * product route could find.
+ */
+export interface RemoteServerProxySessionFacts {
+  readonly hostId: string;
+  readonly deviceId: string;
+  readonly credentialGeneration: number;
+  readonly origin: string;
+  readonly protocolVersion: number;
+  readonly authenticationVersion: number;
+  readonly capabilityDigest: string;
+  readonly issuedAt: string;
+  readonly idleExpiresAt: string;
+  readonly absoluteExpiresAt: string;
+}
+
+type ChallengeTranscript = typeof buildRemoteChallengeProofPayload;
+
+interface AcceptedChallenge {
+  readonly row: ChallengeRow;
+  readonly challenge: RemoteAuthChallengeV1;
+  readonly negotiation: {
+    readonly origin: string;
+    readonly protocolVersion: number;
+    readonly authenticationVersion: number;
+    readonly capabilityDigest: string;
+  };
 }
 
 export interface RemoteRequestProofServiceOptions {
@@ -189,84 +222,10 @@ export class RemoteRequestProofService {
   issueSession(
     input: RemoteAuthChallengeV1 & { readonly signature: string },
   ): RemoteSessionIssuedV1 {
-    let challenge: RemoteAuthChallengeV1;
-    try {
-      challenge = decodeRemoteAuthChallengeV1({
-        challengeId: input.challengeId,
-        hostId: input.hostId,
-        deviceId: input.deviceId,
-        credentialGeneration: input.credentialGeneration,
-        nonce: input.nonce,
-        issuedAt: input.issuedAt,
-        expiresAt: input.expiresAt,
-      });
-    } catch {
-      throw new RemoteRequestProofError("invalid");
-    }
-    const now = this.#now();
-    const row = this.#connection
-      .prepare("SELECT * FROM remote_auth_challenge_store WHERE challenge_id_digest = ?")
-      .get(digest(challenge.challengeId)) as ChallengeRow | undefined;
-    if (
-      row === undefined ||
-      row.consumed !== 0 ||
-      now >= row.expires_at ||
-      row.host_id !== challenge.hostId ||
-      row.device_id !== challenge.deviceId ||
-      row.credential_generation !== challenge.credentialGeneration ||
-      row.nonce_digest !== digest(challenge.nonce) ||
-      row.issued_at !== Date.parse(challenge.issuedAt) ||
-      row.expires_at !== Date.parse(challenge.expiresAt)
-    ) {
-      throw new RemoteRequestProofError("expired");
-    }
-    const negotiation = this.#resolveNegotiation?.({
-      challengeId: challenge.challengeId,
-      hostId: challenge.hostId,
-      deviceId: challenge.deviceId,
-      credentialGeneration: challenge.credentialGeneration,
-    });
-    if (negotiation === undefined) throw new RemoteRequestProofError("invalid");
-    const device = readDeviceRegistration(this.#connection, challenge.deviceId);
-    if (
-      device === undefined ||
-      device.hostId !== challenge.hostId ||
-      device.credentialGeneration !== challenge.credentialGeneration ||
-      device.origin !== negotiation.origin ||
-      negotiation.protocolVersion < device.protocolFloor
-    ) {
-      throw new RemoteRequestProofError(
-        "invalid",
-        device?.state === "expired"
-          ? "expired"
-          : device?.state === "revoked"
-            ? "revoked"
-            : undefined,
-      );
-    }
-    if (device.state !== "active") {
-      throw new RemoteRequestProofError(
-        "invalid",
-        device.state === "expired" ? "expired" : "revoked",
-      );
-    }
-    if (
-      !this.#verifySignature({
-        publicKey: device.devicePublicKey,
-        payload: buildRemoteChallengeProofPayload({
-          challenge,
-          sessionFacts: {
-            ...negotiation,
-            ...sessionExpiry(Date.parse(challenge.issuedAt)),
-          },
-        }),
-        signature: input.signature,
-      })
-    ) {
-      this.#consumeChallenge(row.challenge_id_digest);
-      throw new RemoteRequestProofError("invalid");
-    }
-
+    const { row, challenge, negotiation } = this.#acceptChallenge(
+      input,
+      buildRemoteChallengeProofPayload,
+    );
     const sessionId = this.#uniqueToken("session_id_digest");
     const csrfToken = toBase64Url(this.#randomBytes(32));
     const expiry = sessionExpiry(Date.parse(challenge.issuedAt));
@@ -340,6 +299,189 @@ export class RemoteRequestProofService {
       throw new RemoteRequestProofError("unavailable");
     }
     return issued;
+  }
+
+  /**
+   * Consume a challenge the device signed for a proxy session. The checks are
+   * the product session's, against the proxy transcript, and the challenge is
+   * spent in the same transaction that re-reads the device, so one challenge
+   * yields one session of one kind.
+   */
+  issueServerProxySessionFacts(
+    input: RemoteAuthChallengeV1 & { readonly signature: string },
+  ): RemoteServerProxySessionFacts {
+    const { row, challenge, negotiation } = this.#acceptChallenge(
+      input,
+      buildRemoteServerProxySessionProofPayload,
+    );
+    try {
+      this.#connection.transaction(() => {
+        const consumed = this.#connection
+          .prepare(
+            "UPDATE remote_auth_challenge_store SET consumed = 1 WHERE challenge_id_digest = ? AND consumed = 0",
+          )
+          .run(row.challenge_id_digest).changes;
+        if (consumed !== 1) throw new RemoteRequestProofError("replayed");
+        if (!this.isDeviceCurrent({ ...challenge, origin: negotiation.origin })) {
+          throw new RemoteRequestProofError("invalid");
+        }
+      })();
+    } catch (error) {
+      if (error instanceof RemoteRequestProofError) throw error;
+      throw new RemoteRequestProofError("unavailable");
+    }
+    return {
+      hostId: challenge.hostId,
+      deviceId: challenge.deviceId,
+      credentialGeneration: challenge.credentialGeneration,
+      ...negotiation,
+      ...sessionExpiry(Date.parse(challenge.issuedAt)),
+    };
+  }
+
+  /**
+   * Whether the device still stands where a session was minted: registered on
+   * this host, active, at the same credential generation, for the same origin.
+   * A proxy session asks on every request, so a revoke or rotation that commits
+   * between two requests refuses the second.
+   */
+  isDeviceCurrent(input: {
+    readonly hostId: string;
+    readonly deviceId: string;
+    readonly credentialGeneration: number;
+    readonly origin: string;
+  }): boolean {
+    const device = readDeviceRegistration(this.#connection, input.deviceId);
+    return (
+      device !== undefined &&
+      device.hostId === input.hostId &&
+      device.state === "active" &&
+      device.credentialGeneration === input.credentialGeneration &&
+      device.origin === input.origin
+    );
+  }
+
+  /**
+   * Verify a request proof against the current device key, for a session this
+   * store does not hold. The caller owns the session, its freshness, and its
+   * nonces; this answers only whether the device that stands now signed it.
+   */
+  verifyDeviceRequestSignature(input: {
+    readonly hostId: string;
+    readonly deviceId: string;
+    readonly credentialGeneration: number;
+    readonly origin: string;
+    readonly sessionId: string;
+    readonly proof: Parameters<typeof buildRemoteRequestProofPayload>[0]["proof"] & {
+      readonly signature: string;
+    };
+  }): boolean {
+    const device = readDeviceRegistration(this.#connection, input.deviceId);
+    if (
+      device === undefined ||
+      device.hostId !== input.hostId ||
+      device.state !== "active" ||
+      device.credentialGeneration !== input.credentialGeneration ||
+      device.origin !== input.origin
+    ) {
+      return false;
+    }
+    return this.#verifySignature({
+      publicKey: device.devicePublicKey,
+      payload: buildRemoteRequestProofPayload({ sessionId: input.sessionId, proof: input.proof }),
+      signature: input.proof.signature,
+    });
+  }
+
+  /**
+   * Every check a signed challenge must pass before it may become a session of
+   * either kind, ending with the signature over that kind's transcript. A bad
+   * signature spends the challenge; a good one leaves spending it to the
+   * caller's transaction.
+   */
+  #acceptChallenge(
+    input: RemoteAuthChallengeV1 & { readonly signature: string },
+    transcript: ChallengeTranscript,
+  ): AcceptedChallenge {
+    let challenge: RemoteAuthChallengeV1;
+    try {
+      challenge = decodeRemoteAuthChallengeV1({
+        challengeId: input.challengeId,
+        hostId: input.hostId,
+        deviceId: input.deviceId,
+        credentialGeneration: input.credentialGeneration,
+        nonce: input.nonce,
+        issuedAt: input.issuedAt,
+        expiresAt: input.expiresAt,
+      });
+    } catch {
+      throw new RemoteRequestProofError("invalid");
+    }
+    const now = this.#now();
+    const row = this.#connection
+      .prepare("SELECT * FROM remote_auth_challenge_store WHERE challenge_id_digest = ?")
+      .get(digest(challenge.challengeId)) as ChallengeRow | undefined;
+    if (
+      row === undefined ||
+      row.consumed !== 0 ||
+      now >= row.expires_at ||
+      row.host_id !== challenge.hostId ||
+      row.device_id !== challenge.deviceId ||
+      row.credential_generation !== challenge.credentialGeneration ||
+      row.nonce_digest !== digest(challenge.nonce) ||
+      row.issued_at !== Date.parse(challenge.issuedAt) ||
+      row.expires_at !== Date.parse(challenge.expiresAt)
+    ) {
+      throw new RemoteRequestProofError("expired");
+    }
+    const negotiation = this.#resolveNegotiation?.({
+      challengeId: challenge.challengeId,
+      hostId: challenge.hostId,
+      deviceId: challenge.deviceId,
+      credentialGeneration: challenge.credentialGeneration,
+    });
+    if (negotiation === undefined) throw new RemoteRequestProofError("invalid");
+    const device = readDeviceRegistration(this.#connection, challenge.deviceId);
+    if (
+      device === undefined ||
+      device.hostId !== challenge.hostId ||
+      device.credentialGeneration !== challenge.credentialGeneration ||
+      device.origin !== negotiation.origin ||
+      negotiation.protocolVersion < device.protocolFloor
+    ) {
+      throw new RemoteRequestProofError(
+        "invalid",
+        device?.state === "expired"
+          ? "expired"
+          : device?.state === "revoked"
+            ? "revoked"
+            : undefined,
+      );
+    }
+    if (device.state !== "active") {
+      throw new RemoteRequestProofError(
+        "invalid",
+        device.state === "expired" ? "expired" : "revoked",
+      );
+    }
+    if (
+      !this.#verifySignature({
+        publicKey: device.devicePublicKey,
+        payload: transcript({
+          challenge,
+          sessionFacts: {
+            ...negotiation,
+            ...sessionExpiry(Date.parse(challenge.issuedAt)),
+          },
+        }),
+        signature: input.signature,
+      })
+    ) {
+      this.#consumeChallenge(row.challenge_id_digest);
+      throw new RemoteRequestProofError("invalid");
+    }
+
+    return { row, challenge, negotiation };
   }
 
   describeSession(sessionId: string): RemoteSessionFacts | undefined {
