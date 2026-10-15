@@ -92,6 +92,7 @@ export * from "./mobileCodeCreateClient";
 export * from "./mobilePushTokenClient";
 export * from "./mobileProviderClient";
 export * from "./mobileWorkClient";
+export * from "./mobileExtensionToolApprovalClient";
 export * from "./zenClient";
 export * from "./workspacePresetClient";
 export * from "./providerUsageHistoryClient";

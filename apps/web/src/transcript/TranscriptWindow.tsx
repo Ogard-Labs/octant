@@ -14,6 +14,11 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
+import {
+  CompactionDivider,
+  placeCompactions,
+  useCompactionReceipts,
+} from "../context/CompactionDivider";
 import { TranscriptOutputLimitNote } from "./outputLimitNote";
 
 /**
@@ -36,6 +41,11 @@ export interface TranscriptWindowProps<T> {
    * transcript's own row rendering stays as it is.
    */
   readonly afterItem?: (item: T, index: number) => ReactNode;
+  /**
+   * When a row happened. A transcript that passes it shows a divider where the
+   * thread's session was compacted, from the host's journaled receipts.
+   */
+  readonly itemAt?: (item: T) => string | undefined;
   /** Identifies the thread so leaving and returning restores this scroll offset. */
   readonly restoreKey: string;
   readonly estimateSize?: number;
@@ -118,6 +128,15 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const follows = align === "end" && props.followOutput !== false;
   const ListTag = props.listTag ?? "div";
   const ItemTag = props.itemTag ?? "div";
+  const compactionReceipts = useCompactionReceipts();
+  const { itemAt } = props;
+  const compactionPlacement = useMemo(
+    () =>
+      itemAt === undefined || compactionReceipts.length === 0
+        ? undefined
+        : placeCompactions(props.items, compactionReceipts, itemAt),
+    [compactionReceipts, itemAt, props.items],
+  );
   const scrollElementRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLElement | null>(null);
   const leadRef = useRef<HTMLDivElement>(null);
@@ -587,6 +606,9 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
               width: "100%",
             }}
           >
+            {(compactionPlacement?.before.get(virtualItem.index) ?? []).map((receipt) => (
+              <CompactionDivider key={String(receipt.compactionId)} receipt={receipt} />
+            ))}
             {props.renderItem(item, virtualItem.index)}
             {props.afterItem?.(item, virtualItem.index)}
           </ItemTag>
@@ -614,6 +636,13 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       </div>
       {list}
       <div data-transcript-trail="" ref={trailRef}>
+        {compactionPlacement === undefined || compactionPlacement.trailing.length === 0 ? null : (
+          <div className={props.listClassName}>
+            {compactionPlacement.trailing.map((receipt) => (
+              <CompactionDivider key={String(receipt.compactionId)} receipt={receipt} />
+            ))}
+          </div>
+        )}
         {props.trail}
         <TranscriptOutputLimitNote restoreKey={props.restoreKey} />
       </div>

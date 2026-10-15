@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { decodeToolActionAuthority } from "@octant/contracts";
+import { decodeApprovalOutsideContent, decodeToolActionAuthority } from "@octant/contracts";
 import {
   decodeComputerUseOwner,
   decodeComputerControlResult,
@@ -22,9 +22,18 @@ const authority = decodeToolActionAuthority({
   extension: { kind: "core" },
 });
 
+const marking = decodeApprovalOutsideContent({
+  sources: [
+    { sourceLabel: "web-fetch", ingestionCount: 1, lastIngestedAt: "2026-10-15T09:00:00.000Z" },
+  ],
+  sourceCount: 1,
+});
+
 function fixture(overrides?: {
   readonly enabled?: boolean;
   readonly toolConstraints?: ReadonlyArray<string>;
+  /** Whether the host can name the sources that marked the thread. */
+  readonly namesSources?: boolean;
 }) {
   let current = true;
   let tainted = false;
@@ -59,6 +68,7 @@ function fixture(overrides?: {
     ownerIsCurrent: () => current,
     toolConstraints: () => toolConstraints,
     externalContentIngested: () => tainted,
+    outsideContent: () => (tainted && overrides?.namesSources !== false ? marking : undefined),
     threadTitle: () => "Fixture task",
     record: async () => {},
   });
@@ -179,6 +189,47 @@ describe("Computer use through a provider tool", () => {
       expect(pending?.scope).toBeUndefined();
       expect(pending?.summary).toContain("this one action");
       expect(pending?.summary).not.toContain("5 minutes");
+      expect(pending?.outsideContent).toEqual(marking);
+      await f.tools.close?.();
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("names no outside content on a clean thread's approval", async () => {
+    const f = fixture();
+    try {
+      void f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval?.outsideContent).toBe(
+        undefined,
+      );
+      await f.tools.close?.();
+    } finally {
+      await f.service.close();
+    }
+  });
+
+  it("still says a thread is marked when the host cannot name what marked it", async () => {
+    const f = fixture({ namesSources: false });
+    try {
+      f.taint();
+      void f.tools.execute({
+        name: "octant_computer",
+        inputJson: '{"operation":"windows","appId":"com.example.Fixture"}',
+      });
+      await vi.waitFor(() =>
+        expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval).toBeDefined(),
+      );
+      expect(f.service.runtime.list(owner.windowId)[0]?.pendingApproval?.outsideContent).toEqual({
+        sources: [],
+        sourceCount: 0,
+      });
       await f.tools.close?.();
     } finally {
       await f.service.close();

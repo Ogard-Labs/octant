@@ -143,6 +143,43 @@ on its next start. Pairing commands need the listener on, and say so when it
 is off. Approve only when the comparison code matches the one the device shows.
 The desktop app's Settings → Remote access shows the same listener state.
 
+## Add a computer in one step
+
+A second, always-on computer needs one command on that computer and one
+approval, with no certificate work. Run it in a shell on the computer you are
+adding:
+
+```sh
+octant server install --artifact <path> --pair   # from an unpacked headless build
+octant server start --pair                       # from a checkout
+```
+
+The command installs and starts the service as usual, then:
+
+1. Looks for this computer's address: an address on a Tailscale interface,
+   else the one private LAN address. With none, or with more than one of that
+   kind, it stops and names what it found; pass `--hostname <address>` to
+   choose. It never picks a public address.
+2. Turns the listener on at port 8443 (`--port` changes it) with a
+   certificate the host makes itself. `--cert` and `--key` use your own
+   certificate instead, and then the command prints the browser link.
+3. Prints a pairing code and its QR code in the terminal. The code is
+   single-use and expires in five minutes.
+4. Waits for a device to use it, shows the device label, key fingerprint, and
+   comparison code, and asks `Approve? [y/N]`. Only a typed `y` approves.
+   `octant pair approve <ticket-id>` is the same decision from another shell.
+
+The command changes no firewall rule and runs no Tailscale command: allow the
+port on the `tailscale0` interface yourself if the machine has a firewall.
+A LAN address that changes later changes the origin, and the device pairs
+again, which is why Tailscale is tried first.
+
+The pairing code carries a fingerprint of the host's own key, which Octant's
+own clients pin. A browser cannot check a certificate the host made itself, so
+there is no browser link for it; if a browser opens the address anyway and
+shows a certificate warning, stop there. Pair the Octant desktop app with
+the code as described next; the phone app cannot use the code yet.
+
 ## Pairing the desktop app with another computer
 
 When the other computer's listener serves a certificate it made itself

@@ -9,6 +9,7 @@ import { Eye, EyeOff, MonitorUp, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { IconButton } from "../shell/IconButton";
+import { ApprovalOutsideContentNote } from "../composer/ApprovalOutsideContentNote";
 import { OctantButton } from "../ui/base/OctantButton";
 import { computerUseApproveLabel } from "../computerUse/computerUseApprovalCopy";
 
@@ -444,6 +445,11 @@ function ComputerUseActivityPreview(props: {
           <h3>Allow computer access?</h3>
         </div>
         <p>{props.session.pendingApproval.summary}</p>
+        {props.session.pendingApproval.outsideContent === undefined ? null : (
+          <ApprovalOutsideContentNote
+            outsideContent={props.session.pendingApproval.outsideContent}
+          />
+        )}
         <div className="thread-activity-pip__permission-actions">
           <OctantButton
             disabled={props.busy}

@@ -15,7 +15,11 @@ const origin = "https://192.168.1.20:9443";
 const issuedAtMs = Date.parse("2026-10-15T09:00:00.000Z");
 
 function harness(
-  options: { readonly noncesPerSession?: number; readonly sessionsPerHost?: number } = {},
+  options: {
+    readonly noncesPerSession?: number;
+    readonly sessionsPerHost?: number;
+    readonly holdsOpenSockets?: () => boolean;
+  } = {},
 ) {
   let now = issuedAtMs;
   let standing: "current" | "revoked" | "credential-expired" | "credential-rotated" = "current";
@@ -37,6 +41,9 @@ function harness(
   const sessions = new RemoteServerProxySessions({
     proofs,
     onSessionEnded: (session) => ended.push(session),
+    ...(options.holdsOpenSockets === undefined
+      ? {}
+      : { holdsOpenSockets: options.holdsOpenSockets }),
     now: () => now,
     uuid: randomUUID,
     limits: {
@@ -181,6 +188,28 @@ describe("RemoteServerProxySessions", () => {
     sessions.sweepExpired();
     expect(sessions.describe(sessionId)).toBeUndefined();
     expect(ended).toEqual([expect.objectContaining({ deviceId, reason: "proxy-session-ended" })]);
+  });
+
+  it("keeps a session with an open WebSocket from idling out, until its absolute expiry", () => {
+    let socketsOpen = true;
+    const { issue, sessions, ended, advance } = harness({ holdsOpenSockets: () => socketsOpen });
+    const { sessionId } = issue();
+    for (let minute = 0; minute < 60; minute += 1) {
+      advance(60_000);
+      sessions.sweepExpired();
+    }
+    expect(sessions.describe(sessionId)).toBeDefined();
+    advance(12 * 60 * 60 * 1_000);
+    sessions.sweepExpired();
+    expect(sessions.describe(sessionId)).toBeUndefined();
+    expect(ended).toEqual([expect.objectContaining({ reason: "proxy-session-ended" })]);
+
+    // Once its sockets close, a session idles out as before.
+    const second = issue();
+    socketsOpen = false;
+    advance(15 * 60 * 1_000);
+    sessions.sweepExpired();
+    expect(sessions.describe(second.sessionId)).toBeUndefined();
   });
 
   it("ends a device's oldest session when it mints a fifth", () => {

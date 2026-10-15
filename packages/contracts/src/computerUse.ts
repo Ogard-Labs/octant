@@ -1,3 +1,4 @@
+import { ApprovalOutsideContent } from "./contentProvenance";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { CorrelationId, EventActor, UtcTimestamp } from "./events";
@@ -180,6 +181,8 @@ export const ComputerUsePendingApproval = Schema.Struct({
   expiresAt: UtcTimestamp,
   summary: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   scope: Schema.optional(Schema.Literal("application-session")),
+  /** Present when the thread has taken in outside content; see `ApprovalOutsideContent`. */
+  outsideContent: Schema.optional(ApprovalOutsideContent),
 }).annotations({ ...strict, ...personDecides });
 export type ComputerUsePendingApproval = typeof ComputerUsePendingApproval.Type;
 

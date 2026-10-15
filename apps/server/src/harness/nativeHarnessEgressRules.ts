@@ -182,8 +182,13 @@ export interface ToolEgressRulesOptions {
     Journal,
     "append" | "replayAggregateType" | "aggregateVersions" | "transaction"
   >;
-  /** The Code thread rules may be granted on, or nothing for any other thread. */
-  readonly readCodeThread: (threadId: string) => { readonly projectId: string } | undefined;
+  /**
+   * The Code thread rules may be granted on, or nothing for any other thread,
+   * and whether its harness commands run on `proxied` network now.
+   */
+  readonly readCodeThread: (
+    threadId: string,
+  ) => { readonly projectId: string; readonly commandsProxied?: boolean } | undefined;
   /** Whether the thread has taken in outside content. A read that throws counts as tainted. */
   readonly readThreadTaint: (threadId: string) => boolean;
   /**
@@ -709,8 +714,7 @@ export class ToolEgressRules {
     return {
       threadId: decodeAggregateId(threadId),
       projectId: decodeAggregateId(thread.projectId),
-      // Commands do not run through the proxy until confinement routes them there.
-      enforced: false,
+      enforced: thread.commandsProxied === true,
       learnMode: !this.#learnModeOff.has(threadId),
       threadTainted: tainted,
       projectGrant: tainted

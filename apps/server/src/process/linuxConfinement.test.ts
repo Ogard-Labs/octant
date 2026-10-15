@@ -20,6 +20,7 @@ import {
   buildBubblewrapLaunch,
   DEFAULT_BWRAP_PATH,
 } from "./linuxConfinement";
+import { LINUX_EGRESS_FORWARDER_PORT, LINUX_EGRESS_FORWARDER_SOURCE } from "./proxiedNetworkEgress";
 import { ProcessConfinementError } from "./seatbeltProfile";
 
 const directories: string[] = [];
@@ -429,6 +430,66 @@ describe("Linux Bubblewrap confinement", () => {
       expect(result.status).not.toBe(0);
     },
   );
+
+  it("keeps a proxied launch in its private network and starts it behind the forwarder", () => {
+    const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();
+    const sockets = join(root, "egress-launch");
+    mkdirSync(sockets, { mode: 0o700 });
+    const socket = join(sockets, "proxy.sock");
+    const runtimeDirectory = join(root, "runtime");
+    mkdirSync(runtimeDirectory);
+    const runtime = join(runtimeDirectory, "node");
+
+    const launch = buildBubblewrapLaunch(
+      {
+        executable: "/bin/sh",
+        args: ["/scripts/command.sh"],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: { kind: "proxied", endpoint: { kind: "unix-socket", path: socket } },
+      },
+      { bwrapPath, forwarderRuntime: runtime },
+    );
+
+    expect(launch.args).toContain("--unshare-all");
+    expect(launch.args).not.toContain("--share-net");
+    expect(boundPairs(launch.args, "--ro-bind")).not.toContainEqual([
+      "/run/systemd/resolve",
+      "/run/systemd/resolve",
+    ]);
+    expect(boundPairs(launch.args, "--ro-bind")).toContainEqual([sockets, sockets]);
+    expect(boundPairs(launch.args, "--bind")).not.toContainEqual([sockets, sockets]);
+    const forwarder = join(sockets, "forwarder.cjs");
+    expect(launch.args.slice(launch.args.indexOf("--") + 1)).toEqual([
+      runtime,
+      forwarder,
+      socket,
+      String(LINUX_EGRESS_FORWARDER_PORT),
+      "/bin/sh",
+      "/scripts/command.sh",
+    ]);
+    expect(readFileSync(forwarder, "utf8")).toBe(LINUX_EGRESS_FORWARDER_SOURCE);
+  });
+
+  it("refuses a proxied launch without its socket, or one that may not start a process", () => {
+    const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();
+    const socket = join(root, "proxy.sock");
+    for (const input of [
+      { networkEgress: { kind: "proxied", endpoint: { kind: "loopback", port: 3128 } } },
+      { networkEgress: { kind: "proxied", endpoint: { kind: "unix-socket", path: "proxy.sock" } } },
+      {
+        networkEgress: { kind: "proxied", endpoint: { kind: "unix-socket", path: socket } },
+        allowProcessFork: false,
+      },
+    ] as const) {
+      expect(() =>
+        buildBubblewrapLaunch(
+          { executable: "/bin/true", args: [], boundRoot, temporaryDirectory, ...input },
+          { bwrapPath },
+        ),
+      ).toThrow(ProcessConfinementError);
+    }
+  });
 
   it("starts an interactive shell on Linux without any Seatbelt rules", () => {
     const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();
