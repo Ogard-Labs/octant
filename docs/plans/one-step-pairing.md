@@ -1,12 +1,13 @@
 # One-step pairing with a self-made listener certificate
 
-**Status: approved by the maintainer on 2026-10-14; slices 1 and 2 are built,
-the rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
+**Status: approved by the maintainer on 2026-10-14; slices 1, 2, and 3 are
+built, the rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
 holds only the rules that are true today, and each slice below moves its rules
 there when it lands; the host certificate's key, storage, renewal, pin format,
-and status fields, and the pairing code's format, QR code, and reading rules,
-are already there. Today the host can serve a certificate it makes itself and
-show a pairing code that pins it, but no client reads the code or pins the
+and status fields, the pairing code's format, QR code, and reading rules, and
+the client trust rule are already there. Today the host can serve a
+certificate it makes itself and show a pairing code that pins it, and the
+client runtime holds the pin rule, but no app reads the code or pins the
 key, so a client reaches only a listener that
 serves a certificate the person brings, and a second, always-on computer first
 needs a Tailscale certificate or the person's own certificate authority. This plan lets
@@ -59,27 +60,13 @@ anything.
   screen or terminal by the Octant app or pasted by the person. The
   host-side approval with the comparison code stays the check that the claim
   is the person's.
-- **How each client pins.** A client takes a pin only from a pairing code,
-  or from the rotation route below, and records it with the device
-  registration for that exact origin (device-key metadata and the host
-  registry). On every connection to that origin, the first hello included,
-  it checks the served key against the recorded pins before it sends a
-  request, and on a mismatch it closes the connection without sending or
-  reading anything. For a pinned origin the pin check replaces platform
-  chain validation and never falls back to it, so a certificate a public
-  authority issued for the same name does not pass. An origin with no pin
-  uses platform trust only, so it never accepts a self-made certificate.
-  The only exception is a rotation window the host announced over a proven
-  session (below). Validation is replaced for a pinned origin, never turned
-  off.
-  - **Resolve before the first request.** The code reader judges a name by
-    its spelling, so any `*.ts.net` name passes it, including a public
-    Tailscale Funnel name. Before its first request to a code's origin, a
-    client resolves the name and refuses unless the address it will connect
-    to classifies as private LAN or Tailscale (`100.64.0.0/10` or
-    `fd7a:115c:a1e0::/48`), and it checks the connected peer address the same
-    way. The reader keeps accepting names, because a self-made certificate
-    may name a DNS name.
+- **How each client pins.** The rule every client applies, from what a
+  pairing record keeps to the certificate, address, and staged-trust
+  checks, is the client trust rule in Architecture. Each app below
+  implements it in its own TLS layer, on every connection to a pinned
+  origin, the first hello included. The reader keeps accepting names,
+  because a self-made certificate may name a DNS name; the address check
+  is what refuses a public one.
   - **Phone.** Before the phone reuses `readPairingCode`, its tests run on
     the phone's JavaScript engine, whose built-in `URL` is not fully
     standard; the reader's origin check leans on `URL.origin`.
@@ -102,9 +89,7 @@ anything.
     its certificate is otherwise trusted.
   - **CLI.** No `octant` command connects to another host as a paired device
     today; the CLI talks only to its own host over loopback. A future one
-    pins through the TLS server-identity callback under the same rule, and
-    a test refuses any code path that turns off chain validation without
-    the pin check.
+    uses the client runtime's Node implementation of the rule.
   - **A plain browser cannot pin.** It decides trust before any Octant page
     loads, and a page served over a connection it could not authenticate
     may come from anyone, so no script on that page can check the pin.
@@ -163,13 +148,12 @@ anything.
   from a stolen key: for a suspected compromise the person replaces the key
   and revokes every device, and each device pairs again. Rotating the host
   identity key still revokes every device, unchanged.
+  The client half, accepting and promoting a staged trust, is built;
+  recording one from the route is not.
 - **Failure copy.** Each refusal is a typed failure with one line of copy:
-  - pin mismatch on any client: "This isn't the computer you paired with:
-    its security key has changed. Octant stopped before sending anything.
-    If its key was replaced on purpose, pair again from that computer.";
-  - platform trust fails for an origin with no pin: "Octant couldn't verify
-    this computer's certificate. Pair with the full pairing code or QR code from
-    that computer.";
+  - a pin mismatch, a certificate platform validation refuses for an
+    origin with no pin, and an address outside the private network: as in
+    Architecture's client trust rule;
   - unknown pin prefix: "This pairing code needs a newer version of
     Octant.";
   - a browser link asked for on a self-made listener: "A browser can't check
@@ -267,11 +251,10 @@ and the plan shrinks accordingly.
 2. _Pairing code._ **Built**; its rules are in Architecture. Building and
    reading the code, Settings and `octant pair` output, the QR code, and no
    browser link or bare ticket for a self-made listener.
-3. _Client pin rule._ The pin and trust mode in device-key metadata and the
-   host registry, and a pinned transport port in the client runtime.
-   Tests: a client refuses a host whose key does not match the pin before
-   it sends a request; a pinned origin never falls back to platform trust,
-   and an unpinned one never accepts a self-made certificate.
+3. _Client pin rule._ **Built**; its rules are in Architecture. The trust
+   in device-key metadata and the host registry, the shared rule, and its
+   Node implementation. Recording a staged trust waits for the rotation
+   route in slice 7.
 4. _Desktop._ The main-process pin store and certificate verification
    hook. Tests: against a local self-made listener, the right key passes
    and any other is refused; a public name cannot be pinned; a trusted

@@ -8,6 +8,7 @@ import {
 } from "./remotePairingClient";
 import { bindFetchPort } from "./bindFetchPort";
 import { createPairingDeviceKeyAdapter } from "./pairingDeviceKeyAdapter";
+import type { ListenerOriginTrust } from "./remoteListenerTrust";
 import {
   createRemoteConnection,
   RemoteConnectionError,
@@ -123,6 +124,7 @@ export function createRemoteSessionBridge(
         readonly origin: string;
         readonly hostId: StableHostId;
         readonly deviceId: string;
+        readonly listenerTrust: ListenerOriginTrust;
       }
     | undefined;
   let hostFacts:
@@ -271,6 +273,7 @@ export function createRemoteSessionBridge(
         origin: approval.origin,
         hostId: approval.hostId,
         deviceId: approval.deviceId,
+        listenerTrust: approval.listenerTrust,
       };
       emit({
         kind: "connecting",
@@ -327,6 +330,7 @@ export function createRemoteSessionBridge(
           origin: metadata.origin,
           hostId: metadata.hostId,
           deviceId: metadata.deviceId,
+          listenerTrust: metadata.listenerTrust,
         };
         emit({
           kind: "connecting",
@@ -342,6 +346,7 @@ export function createRemoteSessionBridge(
               credentialGeneration: metadata.credentialGeneration,
               deviceKeyId: metadata.keyId,
               origin: metadata.origin,
+              listenerTrust: metadata.listenerTrust,
             },
             metadata,
           );
@@ -415,6 +420,8 @@ export function createRemoteSessionBridge(
             deviceId: registration.deviceId,
             credentialGeneration,
             hostKeyFingerprint: facts.hostKeyFingerprint,
+            // A new device key is not a new listener: the origin keeps its trust.
+            listenerTrust: registration.listenerTrust,
           });
           activeDeviceKeyId = stagedKeyId;
           // Only now is the superseded record redundant. Removing it earlier

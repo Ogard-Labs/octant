@@ -20,6 +20,7 @@ import {
   ORIGIN,
   TICKET_ID,
 } from "./remoteConnectionFixtures";
+import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const hostId = decodeStableHostId(HOST_ID);
 
@@ -153,6 +154,7 @@ async function readyBridge(): Promise<ReturnType<typeof createRemoteSessionBridg
     credentialGeneration: 1,
     deviceKeyId,
     origin: ORIGIN,
+    listenerTrust: PLATFORM_LISTENER_TRUST,
   });
   await waitUntil(() => bridge.getState().kind === "ready");
   return bridge;

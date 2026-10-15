@@ -7,6 +7,7 @@ import {
   RemotePairingFailure,
 } from "./remotePairingClient";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
+import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const hostId = "11111111-1111-4111-8111-111111111111";
 const ticketId = "00000000-0000-4000-8000-000000000001";
@@ -87,6 +88,7 @@ describe("RemotePairingClient", () => {
       deviceId: "00000000-0000-4000-8000-000000000002",
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
 
     await expect(store.findByOrigin(serverBaseUrl)).resolves.toEqual({
@@ -96,6 +98,7 @@ describe("RemotePairingClient", () => {
       deviceId: "00000000-0000-4000-8000-000000000002",
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     expect(JSON.stringify(await store.findByOrigin(serverBaseUrl))).not.toContain("privateKey");
   });
@@ -123,11 +126,13 @@ describe("RemotePairingClient", () => {
       deviceId: "00000000-0000-4000-8000-000000000003",
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await store.updateMetadata(secondId, {
       deviceId: "00000000-0000-4000-8000-000000000004",
       credentialGeneration: 2,
       hostKeyFingerprint: "b".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await store.removeOtherApprovedForOrigin(serverBaseUrl, secondId);
 
@@ -170,11 +175,13 @@ describe("RemotePairingClient", () => {
       deviceId: "00000000-0000-4000-8000-000000000003",
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await store.updateMetadata(freshId, {
       deviceId: "00000000-0000-4000-8000-000000000005",
       credentialGeneration: 1,
       hostKeyFingerprint: "c".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     // The pending claim has no approved metadata yet; a concurrent approval in
     // another tab must not destroy its still-unapproved key record.
@@ -208,11 +215,13 @@ describe("RemotePairingClient", () => {
       deviceId: "00000000-0000-4000-8000-000000000003",
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await store.updateMetadata(freshId, {
       deviceId: "00000000-0000-4000-8000-000000000005",
       credentialGeneration: 1,
       hostKeyFingerprint: "c".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
 
     await expect(store.findByOrigin(serverBaseUrl)).resolves.toMatchObject({
@@ -304,6 +313,52 @@ describe("RemotePairingClient", () => {
     });
   });
 
+  it("records the pairing code's pin with the approved device for that origin", async () => {
+    const store = createInMemoryDeviceKeyStore();
+    const pin = `sha256-${"A".repeat(43)}`;
+    const client = createRemotePairingClient({
+      baseUrl: serverBaseUrl,
+      fetch: createMockFetch([hostHelloFetch, pairingClaimFetch, pairingStatusApprovedFetch]),
+      webBuildVersion: "0.1.0",
+      deviceKeyStore: store,
+      listenerTrust: { kind: "pinned", pin },
+    });
+
+    const claim = await client.claimPairing({
+      ticket: { ticketId, ticketProof },
+      deviceLabel: "Ada's phone",
+      hostHello: await client.requestHostHello(),
+    });
+    const status = await client.pollPairingStatus({ ticket: { ticketId, ticketProof }, claim });
+
+    const listenerTrust = { current: { kind: "pinned", pin } };
+    expect(status).toMatchObject({ kind: "approved", approval: { listenerTrust } });
+    await expect(store.findByOrigin(serverBaseUrl)).resolves.toMatchObject({ listenerTrust });
+  });
+
+  it("treats a registration whose stored trust is unreadable as no registration", async () => {
+    const store = createInMemoryDeviceKeyStore();
+    const keyPair = (await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign", "verify"],
+    )) as CryptoKeyPair;
+    const keyId = await store.set(keyPair, {
+      origin: serverBaseUrl,
+      hostId: decodeStableHostId(hostId),
+    });
+
+    await store.updateMetadata(keyId, {
+      deviceId: "00000000-0000-4000-8000-000000000002",
+      credentialGeneration: 1,
+      hostKeyFingerprint: "a".repeat(64),
+      // As storage could hand back a record damaged outside this code.
+      listenerTrust: { current: { kind: "pinned" } } as never,
+    });
+
+    await expect(store.findByOrigin(serverBaseUrl)).resolves.toBeUndefined();
+  });
+
   it("fails closed when the approved key disappears before origin replacement", async () => {
     const store = createInMemoryDeviceKeyStore();
     const previousKeyPair = (await crypto.subtle.generateKey(
@@ -320,6 +375,7 @@ describe("RemotePairingClient", () => {
       deviceId: "00000000-0000-4000-8000-000000000003",
       credentialGeneration: 1,
       hostKeyFingerprint: "a".repeat(64),
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const fetch = createMockFetch([hostHelloFetch, pairingClaimFetch, pairingStatusApprovedFetch]);
     const client = createRemotePairingClient({

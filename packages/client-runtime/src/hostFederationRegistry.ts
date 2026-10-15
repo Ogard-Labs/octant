@@ -1,5 +1,6 @@
 import { LOCAL_HOST_ID, decodeHostId, type HostId } from "@octant/contracts/host";
 import { localHostDisplayName } from "./localHostDisplayName";
+import { decodeListenerOriginTrust, type ListenerOriginTrust } from "./remoteListenerTrust";
 
 /**
  * Client-local multi-host registry for Post-preview B.
@@ -21,6 +22,12 @@ export interface ClientHostCredentialHandle {
   readonly credentialGeneration: number;
   readonly hostKeyFingerprint: string;
   readonly deviceId?: string;
+  /**
+   * How the host's listener certificate is trusted, as recorded at pairing.
+   * Absent for a host paired before listener pins existed, which relied on
+   * platform trust.
+   */
+  readonly listenerTrust?: ListenerOriginTrust;
 }
 
 export interface ClientHostRegistration {
@@ -149,7 +156,7 @@ function parseStored(raw: string): ClientHostRegistration[] {
         ...(record.credential !== undefined &&
         record.credential !== null &&
         typeof record.credential === "object"
-          ? { credential: record.credential as ClientHostCredentialHandle }
+          ? { credential: parseCredentialHandle(record.credential) }
           : {}),
       };
     }
@@ -175,10 +182,21 @@ function parseStored(raw: string): ClientHostRegistration[] {
       record.credential !== undefined &&
       record.credential !== null &&
       typeof record.credential === "object"
-        ? { credential: record.credential as ClientHostCredentialHandle }
+        ? { credential: parseCredentialHandle(record.credential) }
         : {}),
     };
   });
+}
+
+function parseCredentialHandle(value: object): ClientHostCredentialHandle {
+  const handle = value as ClientHostCredentialHandle & { readonly listenerTrust?: unknown };
+  if (handle.listenerTrust === undefined) return handle;
+  // An unreadable trust is never read as a weaker one.
+  const listenerTrust = decodeListenerOriginTrust(handle.listenerTrust);
+  if (listenerTrust === undefined) {
+    throw new Error("Host registry entry has an unreadable listener trust.");
+  }
+  return { ...handle, listenerTrust };
 }
 
 /**
