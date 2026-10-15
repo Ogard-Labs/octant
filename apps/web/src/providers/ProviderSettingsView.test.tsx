@@ -1754,6 +1754,24 @@ describe("ProviderSettingsView", () => {
     ).toBeVisible();
   });
 
+  it("shows a BFL profile's key as no longer stored after its base URL moves without a new key", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: bflImageProvider() });
+    renderProviderListExpanded(props);
+    const card = screen.getByRole("article", { name: "FLUX" });
+    expect(await within(card).findByText("Stored in Keychain")).toBeVisible();
+    await user.type(
+      within(card).getByLabelText("Base URL for FLUX"),
+      "https://proxy.example.test/bfl",
+    );
+    await user.click(
+      within(card).getByRole("button", { name: "Save Black Forest Labs image settings for FLUX" }),
+    );
+
+    expect(await within(card).findByText("Not configured")).toBeVisible();
+    expect(within(card).queryByText("Stored in Keychain")).not.toBeInTheDocument();
+  });
+
   it("shows unavailable credential status for an image profile on a remote client", () => {
     renderProviderListExpanded(
       fixture({ instance: openAiImageProvider(), credentialManagementAvailable: false }),

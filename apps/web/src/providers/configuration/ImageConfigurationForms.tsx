@@ -668,16 +668,23 @@ export function BflImageConfigurationForm(props: BflImageConfigurationFormProps)
         event.preventDefault();
         const configuration = bflImageConfigurationFrom(new FormData(event.currentTarget));
         const enteredCredential = transientCredential(credentialInput.current);
-        const generation =
-          enteredCredential.value.length > 0 ? props.credential.beginMutation() : undefined;
+        const keyEntered = enteredCredential.value.length > 0;
+        // The host deletes the stored key when the address moves, so a save
+        // without a new key ends with no key stored.
+        const moved = !sameImageAddress(
+          configuration.baseUrl ?? "",
+          props.instance.configuration.baseUrl ?? "",
+        );
+        const successStatus = keyEntered ? "stored" : "missing";
+        const generation = keyEntered || moved ? props.credential.beginMutation() : undefined;
         void props.onChange(props.instance.id, configuration, enteredCredential).then(
           (updated) => {
             if (generation !== undefined)
-              props.credential.finishMutation(generation, updated, "stored");
+              props.credential.finishMutation(generation, updated, successStatus);
           },
           () => {
             if (generation !== undefined)
-              props.credential.finishMutation(generation, false, "stored");
+              props.credential.finishMutation(generation, false, successStatus);
           },
         );
       }}
@@ -739,16 +746,23 @@ export function IdeogramImageConfigurationForm(props: IdeogramImageConfiguration
         event.preventDefault();
         const configuration = ideogramImageConfigurationFrom(new FormData(event.currentTarget));
         const enteredCredential = transientCredential(credentialInput.current);
-        const generation =
-          enteredCredential.value.length > 0 ? props.credential.beginMutation() : undefined;
+        const keyEntered = enteredCredential.value.length > 0;
+        // The host deletes the stored key when the address moves, so a save
+        // without a new key ends with no key stored.
+        const moved = !sameImageAddress(
+          configuration.baseUrl ?? "",
+          props.instance.configuration.baseUrl ?? "",
+        );
+        const successStatus = keyEntered ? "stored" : "missing";
+        const generation = keyEntered || moved ? props.credential.beginMutation() : undefined;
         void props.onChange(props.instance.id, configuration, enteredCredential).then(
           (updated) => {
             if (generation !== undefined)
-              props.credential.finishMutation(generation, updated, "stored");
+              props.credential.finishMutation(generation, updated, successStatus);
           },
           () => {
             if (generation !== undefined)
-              props.credential.finishMutation(generation, false, "stored");
+              props.credential.finishMutation(generation, false, successStatus);
           },
         );
       }}
