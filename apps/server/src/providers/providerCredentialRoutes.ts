@@ -14,19 +14,24 @@
 // OS user.
 //
 // The key is never logged, journaled, or returned. The routes answer only
-// `stored`, `missing`, `removed`, or a typed refusal.
+// `stored`, `missing`, `removed`, or a typed refusal. Each change to the store
+// is journaled as a request before the store is touched and as an outcome
+// after (never the key); a host that stops in between settles the request at
+// its next start (see providerKeyJournal).
 
 import { createHash, timingSafeEqual } from "node:crypto";
-import type { ProviderInstance } from "@octant/contracts";
+import type { ProviderInstance, ProviderInstanceId, WindowId } from "@octant/contracts";
 import { listApiKeys } from "@octant/host-runtime";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import type { ProviderCredentialStore } from "./credentialBrokerClient";
+import type { ProviderKeyChangeRecorder, ProviderKeyJournal } from "./providerKeyJournal";
 
 const ROUTES = {
   status: "/api/desktop/provider-credentials/status",
   set: "/api/desktop/provider-credentials/set",
   remove: "/api/desktop/provider-credentials/remove",
+  removeProvider: "/api/desktop/provider-credentials/remove-provider",
 } as const;
 
 type Route = (typeof ROUTES)[keyof typeof ROUTES];
@@ -46,6 +51,9 @@ export type ProviderCredentialRefusal =
   | "already-stored"
   | "several-keys"
   | "changed"
+  | "provider-refused"
+  | "provider-removed-key-kept"
+  | "journal-unavailable"
   | "credential-store-unavailable";
 
 const REFUSAL_STATUS: Readonly<Record<ProviderCredentialRefusal, number>> = {
@@ -58,6 +66,9 @@ const REFUSAL_STATUS: Readonly<Record<ProviderCredentialRefusal, number>> = {
   "already-stored": 409,
   "several-keys": 409,
   changed: 409,
+  "provider-refused": 409,
+  "provider-removed-key-kept": 503,
+  "journal-unavailable": 503,
   "credential-store-unavailable": 503,
 };
 
@@ -79,6 +90,17 @@ export interface ProviderCredentialRouteOptions {
         readonly readStored: (providerInstanceId: string) => Promise<string>;
       }
     | undefined;
+  readonly journal: ProviderKeyJournal;
+  /**
+   * Removes the provider through the same service Settings uses, so its own
+   * refusals (an active session, the implicit owner of an account) apply.
+   */
+  readonly removeProvider: (
+    windowId: WindowId,
+    instance: ProviderInstance,
+  ) => Promise<
+    { readonly kind: "removed" } | { readonly kind: "refused"; readonly message: string }
+  >;
   readonly now?: () => number;
 }
 
@@ -111,8 +133,9 @@ export function createProviderCredentialRouteHandler(
     ) {
       return refuse("unauthorized");
     }
+    let windowId: WindowId;
     try {
-      options.windowAuthorityStore.authenticate(
+      windowId = options.windowAuthorityStore.authenticate(
         request.headers.get("x-octant-window-capability") ?? "",
         now(),
       );
@@ -151,9 +174,63 @@ export function createProviderCredentialRouteHandler(
         );
       }
       const { id } = target;
+      const begin = (
+        action: "set" | "remove" | "remove-with-provider",
+      ): ProviderKeyChangeRecorder | undefined => {
+        try {
+          return options.journal.request({
+            instanceId: id as ProviderInstanceId,
+            action,
+            instanceVersion: target.kind === "existing" ? target.instance.version : 0,
+            windowId,
+          });
+        } catch {
+          return undefined;
+        }
+      };
       try {
+        if (route === ROUTES.removeProvider) {
+          if (target.kind !== "existing") return refuse("not-found");
+          // Provider first, then key: a failure between the two leaves a key
+          // for no instance, which the request settles at the next start and
+          // `key remove <id>` clears now, and never an instance without its key.
+          const recorder = begin("remove-with-provider");
+          if (recorder === undefined) return refuse("journal-unavailable");
+          const removal = await options.removeProvider(windowId, target.instance);
+          // A refusal after the removal was journaled (a later cleanup step
+          // failed) still removed the provider, so the projection decides.
+          const stillConfigured = options
+            .readProviderInstances()
+            .some((instance) => String(instance.id) === id);
+          if (removal.kind === "refused" && stillConfigured) {
+            recorder.fail("abandoned");
+            return Response.json(
+              { category: "provider-refused", message: removal.message },
+              { status: REFUSAL_STATUS["provider-refused"] },
+            );
+          }
+          try {
+            await credentials.store.delete(id);
+          } catch {
+            return Response.json(
+              {
+                category: "provider-removed-key-kept",
+                message: REFUSAL_MESSAGE["provider-removed-key-kept"],
+                instanceId: id,
+              },
+              { status: REFUSAL_STATUS["provider-removed-key-kept"] },
+            );
+          }
+          recorder.complete("removed");
+          return answer("removed", target);
+        }
         if (route === ROUTES.remove) {
+          const recorder = begin("remove");
+          if (recorder === undefined) return refuse("journal-unavailable");
+          // A store error does not say whether the delete committed, so the
+          // request stays unsettled and the next start clears the key again.
           await credentials.store.delete(id);
+          recorder.complete("removed");
           return answer("removed", target);
         }
         if (target.kind === "existing" && !usesStoredKey(target.instance)) {
@@ -171,6 +248,11 @@ export function createProviderCredentialRouteHandler(
             return refuse("several-keys");
           }
         }
+        const recorder = begin("set");
+        if (recorder === undefined) return refuse("journal-unavailable");
+        // A store error (a lost or malformed answer) does not say whether the
+        // write committed, so the request stays unsettled and the next start
+        // checks the key against its instance.
         await credentials.store.set(id, decoded.credential);
         // Settings can remove or reconfigure the instance while the key is
         // being written. A removal would leave a key for no instance, and a new
@@ -182,8 +264,10 @@ export function createProviderCredentialRouteHandler(
           .find((instance) => String(instance.id) === id);
         if (current === undefined || current.version !== target.instance.version) {
           await credentials.store.delete(id);
+          recorder.complete("cleared-after-change");
           return refuse(current === undefined ? "not-found" : "changed");
         }
+        recorder.complete("stored");
         return answer("stored", target);
       } catch {
         return refuse("credential-store-unavailable");
@@ -193,7 +277,7 @@ export function createProviderCredentialRouteHandler(
 }
 
 type DecodedRequest =
-  | { readonly kind: "status" | "remove"; readonly instance: string }
+  | { readonly kind: "status" | "remove" | "remove-provider"; readonly instance: string }
   | {
       readonly kind: "set";
       readonly instance: string;
@@ -216,7 +300,15 @@ function decodeRequest(route: Route, value: unknown): DecodedRequest | undefined
   }
   if (route !== ROUTES.set) {
     if (keys.length !== 1) return undefined;
-    return { kind: route === ROUTES.status ? "status" : "remove", instance };
+    return {
+      kind:
+        route === ROUTES.status
+          ? "status"
+          : route === ROUTES.removeProvider
+            ? "remove-provider"
+            : "remove",
+      instance,
+    };
   }
   if (keys.join(",") !== "credential,instance,replace") return undefined;
   const { credential, replace } = record;
@@ -295,6 +387,10 @@ const REFUSAL_MESSAGE: Readonly<Record<ProviderCredentialRefusal, string>> = {
   "already-stored": "That provider already has a stored key.",
   "several-keys": "That provider holds several keys.",
   changed: "That provider changed while the key was being saved, so the key was not kept.",
+  "provider-refused": "The provider could not be removed.",
+  "provider-removed-key-kept":
+    "The provider was removed, but its stored key could not be cleared yet.",
+  "journal-unavailable": "The change could not be recorded, so nothing was changed.",
   "credential-store-unavailable": "The host credential store is unavailable.",
 };
 

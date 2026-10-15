@@ -6318,15 +6318,40 @@ mechanisms are:
     written, the key is cleared and the `set` refuses as `not-found` or
     `changed`, so a concurrent change can neither leave an orphaned secret
     nor send a key entered for one endpoint to another.
-  - **Not built yet.** An `octant provider remove <instance>` that removes an
-    instance and then clears its key, and journaling each store, replace, and
-    remove as `requested` then `completed`/`failed` provider credential
-    events around the write (Secret Service and the journal cannot be updated
-    atomically) with startup reconciliation of a `requested` event that has
-    no outcome. Such an event would hold the instance id, the action, the
-    outcome category, the local window id, and the time, and never the key,
-    its length, prefix, or hash, because a hash of a short key can be guessed
-    offline.
+  - **Remove a provider with its key.** `octant provider remove <instance>`
+    removes the instance through the same provider service Settings uses, so
+    that service's own refusals (an active session, the implicit owner of an
+    account) apply and are reported as `provider-refused`; then it clears the
+    key. The provider goes first, so no instance is left without its key; if
+    clearing the key then fails the command says so and names
+    `octant provider key remove <id>`, and the host clears it at its next start
+    (below). It takes the same references and gives the same refusals as
+    `key remove` (`not-found`, `ambiguous`, `credential-store-unavailable`,
+    `unauthorized`), refuses before touching anything when the credential
+    store is unavailable, and does not accept a removed instance's id.
+  - **Journal and reconciliation.** Each store, replace, and remove is
+    journaled as a `provider-key.recorded@1` request before the store is
+    touched and as a `completed` outcome after (`failed` only when a removal with its provider never reached the provider) (Secret Service and
+    the journal cannot be updated atomically), on an aggregate per instance
+    ([`providerKeyJournal.ts`](../apps/server/src/providers/providerKeyJournal.ts),
+    [`providerKeyJournal.ts` contract](../packages/contracts/src/providerKeyJournal.ts)).
+    A record holds the instance id, the action (`set`, `remove`,
+    `remove-with-provider`), the instance version, the local window id, and the
+    outcome, and never the key, its length, prefix, or hash, because a hash of a
+    short key can be guessed offline; the schema rejects any other field. A
+    request that cannot be journaled refuses the change (`journal-unavailable`)
+    before the store is touched; an outcome that cannot be journaled is
+    best-effort, and a store error leaves its request unsettled because it
+    does not say whether the write committed. At host start, before the routes take a change, every request
+    without an outcome is settled: a `set` whose instance is gone or was
+    reconfigured since the request has its key cleared, an unchanged instance
+    keeps whatever the store holds; a `remove` clears the key; a
+    `remove-with-provider` clears it once the instance is gone, and keeps it
+    (recorded as abandoned) when the instance is still configured, because the
+    provider was never removed. Settling is idempotent and only ever clears, and
+    an unreachable store leaves the request for the next start. The authority
+    boundary above is unchanged: the new route sits behind the same bridge
+    secret, window capability, no-`Origin`, and loopback checks.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider

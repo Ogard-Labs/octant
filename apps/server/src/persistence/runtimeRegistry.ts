@@ -168,6 +168,7 @@ import {
   AgentMessageAcknowledged,
 } from "@octant/contracts";
 import { HostOAuthJournalRecord } from "@octant/contracts/host-oauth";
+import { ProviderKeyJournalRecord } from "@octant/contracts/provider-key-journal";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
   DeviceKeyRotatedV1,
@@ -331,6 +332,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("provider.defaults-updated@1", 1, ProviderDefaultsUpdated)
     .register("provider.catalog-updated@1", 1, ProviderCatalogUpdated)
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
+    .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
     .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
     .register("context.manifest-created@1", 1, ContextManifestCreated)

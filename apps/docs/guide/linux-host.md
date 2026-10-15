@@ -96,6 +96,16 @@ other processes and your shell history can read those.
 - `octant provider key remove <provider>` clears the key and leaves the
   provider configured. It also takes the id of a provider you already removed,
   to clear a key it left behind.
+- `octant provider remove <provider>` removes the provider and then its
+  stored key, so no key is left behind. It refuses for the same reasons
+  `key remove` does, and when the provider itself cannot be removed (for
+  example it has an active session) the provider and its key stay. If the key
+  cannot be cleared after the provider is gone, the command says so and names
+  `octant provider key remove <id>`; the server also clears it the next time it
+  starts.
+
+Each key change is recorded in the host's journal without the key, so a stop
+in the middle of a change is settled at the next start.
 
 The key goes to the running server over its loopback administration session,
 which only processes running as your user can open, and the server stores it

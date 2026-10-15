@@ -8,6 +8,7 @@ const PROVIDER_KEY_ROUTES = {
   set: "/api/desktop/provider-credentials/set",
   status: "/api/desktop/provider-credentials/status",
   remove: "/api/desktop/provider-credentials/remove",
+  "remove-provider": "/api/desktop/provider-credentials/remove-provider",
 } as const;
 
 export type ProviderKeyCliCommand =
@@ -17,17 +18,26 @@ export type ProviderKeyCliCommand =
       readonly fromStdin: boolean;
       readonly replace: boolean;
     }
-  | { readonly action: "status" | "remove"; readonly instance: string };
+  | { readonly action: "status" | "remove" | "remove-provider"; readonly instance: string };
 
 /**
- * `octant provider key set|status|remove <instance>`. The key itself is never
- * an argument or a flag value: argv is visible to other processes and lands in
- * shell history.
+ * `octant provider key set|status|remove <instance>` and `octant provider remove
+ * <instance>`. The key itself is never an argument or a flag value: argv is
+ * visible to other processes and lands in shell history.
  */
 export function resolveProviderKeyCliCommand(
   positional: readonly string[],
   flags: Readonly<Record<string, string | boolean>>,
 ): ProviderKeyCliCommand | undefined {
+  if (positional[0] === "remove") {
+    const [, provider, ...others] = positional;
+    return provider === undefined ||
+      provider.trim() === "" ||
+      others.length !== 0 ||
+      Object.keys(flags).length !== 0
+      ? undefined
+      : { action: "remove-provider", instance: provider };
+  }
   const [noun, action, instance, ...rest] = positional;
   if (noun !== "key" || instance === undefined || instance.trim() === "" || rest.length !== 0) {
     return undefined;
@@ -93,7 +103,7 @@ export async function runProviderKeyCliCommand(
       input.stderr.write("Octant returned an unusable answer.\n");
       return 1;
     }
-    input.stdout.write(`${describeAnswer(answer)}\n`);
+    input.stdout.write(`${describeAnswer(answer, command)}\n`);
     return 0;
   }
   input.stderr.write(`${describeRefusal(response, command, input.platform)}\n`);
@@ -148,13 +158,14 @@ function answerOf(body: unknown): Answer | undefined {
   return { outcome, instanceId, displayName };
 }
 
-function describeAnswer(answer: Answer): string {
+function describeAnswer(answer: Answer, command: ProviderKeyCliCommand): string {
   const name =
     answer.displayName === null
       ? answer.instanceId
       : `${answer.displayName} (${answer.instanceId})`;
   if (answer.outcome === "stored") return `${name} has a stored key.`;
   if (answer.outcome === "missing") return `${name} has no stored key.`;
+  if (command.action === "remove-provider") return `${name} was removed with its stored key.`;
   return `${name} has no stored key now.`;
 }
 
@@ -168,10 +179,20 @@ function describeRefusal(
       ? (response.body as Record<string, unknown>)
       : {};
   switch (body.category) {
-    case "credential-store-unavailable":
+    case "credential-store-unavailable": {
+      const outcome = command.action === "remove-provider" ? "removed" : "saved";
       return platform === "linux"
-        ? "Nothing was saved: the Octant server has no credential store. Saving a key needs a running Secret Service (org.freedesktop.secrets on your user session bus) and /usr/bin/secret-tool. Start and unlock the keyring, then run `octant server restart` and try again."
-        : "Nothing was saved: this host has no credential store the Octant server can reach. Save the key in the Octant desktop app.";
+        ? `Nothing was ${outcome}: the Octant server has no credential store. Changing a key needs a running Secret Service (org.freedesktop.secrets on your user session bus) and /usr/bin/secret-tool. Start and unlock the keyring, then run \`octant server restart\` and try again.`
+        : `Nothing was ${outcome}: this host has no credential store the Octant server can reach. Use the Octant desktop app.`;
+    }
+    case "journal-unavailable":
+      return "Nothing was changed: Octant could not record the change in its journal. Try again.";
+    case "provider-refused":
+      return `"${command.instance}" was not removed: ${typeof body.message === "string" ? body.message : "Octant refused."}`;
+    case "provider-removed-key-kept": {
+      const id = typeof body.instanceId === "string" ? body.instanceId : command.instance;
+      return `"${command.instance}" was removed, but its stored key could not be cleared. Octant retries when it next starts; to clear it now, run \`octant provider key remove ${id}\`.`;
+    }
     case "ambiguous": {
       const candidates = Array.isArray(body.candidates) ? body.candidates : [];
       const lines = candidates.flatMap((candidate: unknown) => {
