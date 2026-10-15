@@ -1,16 +1,15 @@
 # One-step pairing with a self-made listener certificate
 
-**Status: approved by the maintainer on 2026-10-14; slices 1, 2, and 3 are
-built, the rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
+**Status: approved by the maintainer on 2026-10-14; slices 1 to 4 and 6 are
+built (6's live check is open), and of slice 5 only the phone's pasted-code
+reading; the rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
 holds only the rules that are true today, and each slice below moves its rules
-there when it lands; the host certificate's key, storage, renewal, pin format,
-and status fields, the pairing code's format, QR code, and reading rules, and
-the client trust rule are already there. Today the host can serve a
-certificate it makes itself and show a pairing code that pins it, and the
-client runtime holds the pin rule, but no app reads the code or pins the
-key, so a client reaches only a listener that
-serves a certificate the person brings, and a second, always-on computer first
-needs a Tailscale certificate or the person's own certificate authority. This plan lets
+there when it lands; the host certificate, the pairing code, the client trust
+rule, pairing from a code, and the desktop's pins are already there. Today the
+desktop app pairs with a computer that serves its own certificate from that
+computer's pairing code alone, but the phone refuses such a code because it
+has no transport that can check a pin. `octant server install --pair` sets
+up the listener and shows the code on the new computer. This plan lets
 the host make its own certificate and has the pairing code carry a fingerprint
 of its key, which Octant's own clients pin, so adding a computer takes one
 command there and one approval. It does not authorize merging or releasing
@@ -30,10 +29,11 @@ anything.
   listener serves.
 - **Why the pin is required, not optional.** Today the certificate is the
   only thing that authenticates the host on first contact. The host hello
-  names the host identity key's fingerprint and carries a signature, but a
-  client holds no public key to check that signature against: it records the
-  fingerprint as the host states it at pairing and compares it on later
-  connections. A self-made certificate without a pin would leave first
+  carries the host identity public key, its fingerprint, and a signature, and
+  every client checks the key against the fingerprint and the signature
+  against the key (see the host identity rule in Architecture). That proves
+  the hello came from the key's holder, not that the holder is the host the
+  person meant, since a first contact has nothing to compare the key with. A self-made certificate without a pin would leave first
   contact unauthenticated, so the self-made path exists only together with
   a pin.
 - **Settings.** Settings makes the PEM fields optional behind "Use my own
@@ -67,9 +67,10 @@ anything.
   origin, the first hello included. The reader keeps accepting names,
   because a self-made certificate may name a DNS name; the address check
   is what refuses a public one.
-  - **Phone.** Before the phone reuses `readPairingCode`, its tests run on
-    the phone's JavaScript engine, whose built-in `URL` is not fully
-    standard; the reader's origin check leans on `URL.origin`.
+  - **Phone.** The phone reads a pasted code with the shared reader, which
+    now judges the origin's shape by pattern because the phone's `URL` only
+    matches patterns. Its tests have not yet run on the phone's JavaScript
+    engine itself; they run under Node with a pattern-only `URL` stand-in.
   - **Phone transport.** Requests to a pinned origin go through a small in-tree native
     module that checks the pins in the platform's TLS trust callback on iOS
     and Android; the app's ordinary fetch is not used for those origins. It
@@ -78,15 +79,7 @@ anything.
     from the app's own QR scanner, which needs camera permission, or from
     a paste; typing the origin and ticket by hand stays for hosts with a
     pasted certificate.
-  - **Desktop to host.** The desktop app reaches another host through
-    Electron's network stack. The main process keeps the pins owner-only
-    under the app's data and checks them in the session's certificate
-    verification hook. The renderer can ask main to record a pin only while
-    completing a pairing code, and main records pins only for names and
-    addresses the listener address classifier calls private LAN or
-    Tailscale, never a public name, so a compromised renderer cannot pin a
-    public site. A pinned name whose key does not match is refused even when
-    its certificate is otherwise trusted.
+  - **Desktop to host.** Built; its rules are in Architecture.
   - **CLI.** No `octant` command connects to another host as a paired device
     today; the CLI talks only to its own host over loopback. A future one
     uses the client runtime's Node implementation of the rule.
@@ -257,16 +250,14 @@ and the plan shrinks accordingly.
    in device-key metadata and the host registry, the shared rule, and its
    Node implementation. Recording a staged trust waits for the rotation
    route in slice 7.
-4. _Desktop._ The main-process pin store and certificate verification
-   hook. Tests: against a local self-made listener, the right key passes
-   and any other is refused; a public name cannot be pinned; a trusted
-   certificate with the wrong key is refused for a pinned name; a
-   packaged-app smoke.
-5. _Phone._ The native module, in-app scanner, and pasted code. Tests: module
+4. _Desktop._ **Built**; its rules are in Architecture. Not yet done: the
+   packaged-app smoke and a live pairing of a second machine.
+5. _Phone._ The native module, in-app scanner, and pasted code. The pasted
+   code is read and refused until the native module exists. Tests: module
    tests on both platforms and the device pass from the
    [TestFlight runbook](../mobile-testflight.md) against a self-made host,
    including a refused mismatch.
-6. _One-line start._ `--pair`. Tests: Tailscale is chosen over LAN,
+6. _One-line start._ **Built**; its rules are in Architecture. `--pair`. Tests: Tailscale is chosen over LAN,
    several candidates refuse and list them, a public address is never
    chosen, and approval needs a typed `y`. Live: pair a second machine over
    Tailscale with only the command and the host approval.

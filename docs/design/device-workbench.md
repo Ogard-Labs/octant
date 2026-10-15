@@ -199,17 +199,23 @@ snapshot lists `capabilities.rotate`; a host that predates the flag omits it
 and the item is left out, never shown disabled. Both the Simulator and
 emulator hosts report it.
 
-The request names the orientation to set, `portrait` or `landscape`
+The Android request names the orientation to set, `portrait` or `landscape`
 (`DeviceOrientation`), not a turn, so a repeated request is idempotent. The
-pane names the one the device is not showing: it reads the streamed picture,
-and with no picture it asks for `landscape`. There is no upside-down or
-reverse-landscape choice.
+pane names the one the emulator is not showing: it reads the streamed picture,
+and with no picture it asks for `landscape`. The Apple request names none
+(`orientation` is optional): the Simulator keeps streaming portrait-sized
+frames after it turns, so the picture cannot say which way it sits, and the
+desktop reads the Simulator's real screen (a screenshot's size, captured into the host-private capture directory and deleted at once) and turns it
+the other way, so every Rotate alternates however the pane was opened. A request that does name one still sets it. There is no
+upside-down or reverse-landscape choice.
 
 On the Simulator, `simctl` has no rotate command and Octant does not script
 Simulator.app, so the host hands the request to the desktop's device broker
 like input, and the desktop runs `serve-sim rotate` against the managed
 stream, starting it when needed (`landscape` is `landscape_left`). Without the
-desktop app or the managed `serve-sim` tool the action is `unavailable`. On
+desktop app the action is `unavailable`; without the managed `serve-sim` tool
+(dev builds do not vendor it) the desktop refuses with `rotate-unavailable`
+and the pane says the device tool is not installed. On
 the emulator the host turns auto-rotate off and sets the rotation through adb
 (`settings put system accelerometer_rotation 0`, then `user_rotation` to `0`
 for portrait or `1` for landscape), so the sensor cannot undo it.
@@ -218,7 +224,7 @@ Rotate is an effect, not input. Only a person (`local-user` or
 `remote-device` in `requestedBy`) may ask for it; an agent or the host is
 refused. Plan refuses it; Full access sends it unasked; on an approval-gated
 thread each Rotate raises its own confirmation, and Allow input never covers
-it. Evidence and its log record `rotate to <orientation> completed` and
+it. Evidence and its log record `rotate to <orientation> completed` (`rotate completed` when the host chose) and
 nothing from the device. The agent tools do not offer Rotate.
 
 ## Record screen
@@ -237,7 +243,7 @@ the action, and the host holds it until a stop, the time limit
 the host closing. On the Simulator the recorder is `xcrun simctl io <udid>
 recordVideo --codec=h264 --force <file>`, writing into the same host-private
 `0700` capture directory a screenshot uses, with that directory granted to
-this launch alone. On the emulator it is `adb shell screenrecord` with a time
+this launch alone. Stopping sends the recorder SIGINT and waits for it to exit, because `simctl` writes the file only then (SIGTERM leaves it empty and the device refusing any new recorder); only after a bounded wait does it escalate to SIGTERM and SIGKILL, and a recorder that cannot be confirmed gone reports `failed`. On the emulator it is `adb shell screenrecord` with a time
 limit and a 1.5 Mbit/s bit rate, so a full-length recording stays under the
 artifact store's 16 MiB bound; stopping sends it SIGINT (`pkill -2`) so the
 device finishes the file, then reads it with `exec-out cat` and deletes the

@@ -1,7 +1,8 @@
 # Open a dev server from another computer
 
-**Status: approved by the maintainer on 2026-10-14; slices 1 to 3 built: the
-host relays HTTP, and no client calls it yet.** Nothing here is in force. [Architecture](../architecture.md) holds
+**Status: approved by the maintainer on 2026-10-14; slices 1 to 4 built: the
+host relays HTTP and WebSockets, and no client calls it yet; the renderer half of slice 5 and
+the user guide are built behind the missing forwarder.** Nothing here is in force. [Architecture](../architecture.md) holds
 only the rules that are true today; each slice below moves its rules there when
 it lands. Today a paired device that opens a server from Local servers or
 Running services gets a Browser tab on the host and sees the host browser's
@@ -466,6 +467,32 @@ dark; slice 5 makes the feature reachable.
    revoked or the grant closes; the subprotocol passes through; the message
    cap and per-grant socket cap hold.
 
+   **Built.** The socket relay is `relayUpgrade` in the grant service, the
+   dev-server handshake `openDevServerWebSocket` in the relay, its header
+   rules `relayWebSocketRequestHeaders` in the relay policy, and the message
+   framing and the hand-off from the route to the listener's transport
+   `apps/server/src/webSocketRelay.ts`. The rules now in force are in the
+   [architecture](../architecture.md) under WebSockets. Rules this slice
+   resolved, which slice 5 must keep:
+   - The host connects to the dev server before it answers the page, so the
+     page's connection switches only once the dev server accepted, with the
+     subprotocol it chose. A dev server that declines answers the page
+     `upgrade-refused`, not its own HTTP answer.
+   - The host offers the dev server no extension and relays whole messages.
+     Compression stays between the page and the forwarder.
+   - The route's answer carries the accepted upgrade to the transport, since
+     the fetch boundary carries only a `Response`. Node and Bun both switch
+     only on that, so no other route can switch a connection by accident.
+   - An open socket keeps its proxy session from idling out, because a page
+     left open with live reload sends no proxied request and would otherwise
+     lose its grant after 15 minutes. The absolute expiry still ends it.
+   - A socket over its cap answers 503 with the proxy's one-second
+     `Retry-After`, the plan's over-limit answer. A switched socket gives up
+     its proxy-budget slot, since the socket caps bound it instead.
+   - A write the other end does not read is held to twice the message cap,
+     then the socket closes with 1008, rather than pausing the reader: Bun's
+     server sockets offer no pause.
+
 5. **Client forwarder, signer, and Open.** The desktop main-process
    forwarder, name derivation, the claim cookie, response rewriting, failure
    pages, the renderer signing channel, Open and Open in browser on Local
@@ -480,6 +507,17 @@ dark; slice 5 makes the feature reachable.
    it holds; `Location` and `Set-Cookie` rewriting; web component tests for
    the row states and failure lines; rendered QA of both cards on a client
    window reading another computer, at the dock's narrow and wide widths.
+
+   **Built so far (renderer half).** The Running services card takes an
+   optional live opener from its window. With one, an Octant-owned, listening
+   server in a thread offers **Open** and **Open in browser** and states the
+   page's limits in one line; a server Octant does not own, or one in no
+   thread, says it opens only on its computer, in the table's words; a refusal
+   from the opener shows on the row. No window supplies an opener yet, so no
+   row changes today. The Local servers row is not changed: its listing carries
+   no ownership, so it waits for the forwarder to ask the host. The forwarder,
+   the renderer signing channel, name derivation, and the claim cookie are not
+   built.
 
 6. **User guide.** A page in `apps/docs` on opening a server from another
    computer: what it needs (the desktop app on the computer in front of you,

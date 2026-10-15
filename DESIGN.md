@@ -542,6 +542,11 @@ never repaint it; pick a recipe variant instead) ratchet against
 re-record the lower count with `--write-baseline` so the baseline never
 overstates.
 
+The remaining control repaints are burned down by restoring each control to its
+recipe, in small batches. Each batch is its own pull request with before and
+after screenshots, and the maintainer approves the paint change before it
+merges, because removing a repaint changes what the control looks like.
+
 The `control-repaint` rule reads the classes feature code hands to an Octant
 primitive. A control marked `unstyled` is feature-owned paint by design and is
 skipped; `unstyled={false}` is not, and stays under the rule. The checker also
@@ -570,7 +575,9 @@ disabled and checked states, and nested actions. Native menus dismiss after
 a selection, including checkbox/radio changes; reopening reads the current state. Ordinary editable text and text selections
 receive the platform editing/copy menu. The Code editor and both diff sides
 use native editing/find actions that run through the existing editor commands. Browser clients retain the accessible
-Base UI menus. Searchable pickers and popovers with embedded controls remain
+Base UI menus. Native menus rely on macOS accessibility and get no automated
+check, because the OS draws them and a test cannot reach them; only the
+browser menus are covered by automated keyboard and role checks. Searchable pickers and popovers with embedded controls remain
 renderer surfaces.
 
 ### Turn header

@@ -1,4 +1,5 @@
 import type {
+  ApprovalOutsideContent,
   ComputerUseActionRequest,
   ComputerUsePolicy,
   ComputerUseSessionView,
@@ -156,6 +157,10 @@ export function createComputerUseRuntime(_options: {
     | "application-session"
     | ((request: ComputerUseActionRequest) => "application-session" | undefined);
   readonly approvalSummary?: (request: ComputerUseActionRequest) => string;
+  /** The sources that marked the thread, which a one-time approval names. */
+  readonly approvalOutsideContent?: (
+    request: ComputerUseActionRequest,
+  ) => ApprovalOutsideContent | undefined;
 }): ComputerUseRuntime {
   const options = _options;
   // The fallback summary below promises five minutes; the default offer must
@@ -485,6 +490,7 @@ export function createComputerUseRuntime(_options: {
             ? `Allow control of ${session.observation.targetApp} for this task for 5 minutes.`
             : `${input.request.kind} in ${session.observation.targetApp}`),
         ...(approvalScope === undefined ? {} : { scope: approvalScope }),
+        ...outsideContentOf(options.approvalOutsideContent?.(input.request)),
       };
       await append(session, "approval-requested", "One-time approval is required.");
       return view(session);
@@ -705,4 +711,10 @@ function isProcessDeath(error: unknown): boolean {
     "category" in error &&
     error.category === "process-died"
   );
+}
+
+function outsideContentOf(outsideContent: ApprovalOutsideContent | undefined): {
+  readonly outsideContent?: ApprovalOutsideContent;
+} {
+  return outsideContent === undefined ? {} : { outsideContent };
 }

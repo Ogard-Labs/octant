@@ -679,6 +679,13 @@ export interface CodeOperationRuntime {
    */
   turnAwaitsPerson?(threadId: string): boolean;
   /**
+   * The thread as its running turn may use it: a turn keeps the posture it
+   * started under, so a later wider grant does not reach its tool calls.
+   */
+  threadWithActiveTurnPosture?(
+    thread: import("@octant/contracts").CodeThread,
+  ): import("@octant/contracts").CodeThread;
+  /**
    * Whether a turn on the thread is being prepared, runs, or waits on the
    * person. A compaction is refused meanwhile.
    */
@@ -1409,6 +1416,7 @@ export function createCodeOperationRuntime(
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
     admitsTurn: (windowId, thread) => service.admitsTurn(windowId, thread),
     turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
+    threadWithActiveTurnPosture: (thread) => turns.threadWithActiveTurnPosture(thread),
     turnInProgress: (threadId) => startingTurns.has(threadId) || turns.holdsTurn(threadId),
     compactionSessions: {
       exists: (threadId) => compactableSession(decodeCodeThreadId(threadId)) !== undefined,

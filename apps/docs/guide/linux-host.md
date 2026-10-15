@@ -121,6 +121,15 @@ an environment variable.
 
 ## Pair a laptop over Tailscale
 
+The shortest path is one command on the Linux machine,
+`octant server install --artifact <directory> --pair` (or
+`octant server start --pair` from a checkout), which turns the listener on at
+the machine's Tailscale address with a certificate Octant makes, prints a
+pairing code, and asks you to approve the device. See
+[Add a computer in one step](../advanced/remote-access#add-a-computer-in-one-step)
+for what it does and its limits. The steps below are the browser path, which
+needs a Tailscale certificate.
+
 A paired browser reaches the host only through Octant's own HTTPS listener,
 bound to the machine's tailnet name. Tailscale is the route, not the identity:
 you still pair and approve each device.

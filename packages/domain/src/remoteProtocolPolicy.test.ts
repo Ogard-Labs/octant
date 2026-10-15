@@ -78,6 +78,56 @@ describe("buildHostHelloSignaturePayload", () => {
   });
 });
 
+describe("buildHostHelloSignaturePayload with a client nonce", () => {
+  const answered = { ...hello, clientNonce: "client_nonce_abcdefghijk" };
+
+  it("signs a hello that answers a client nonce as version 2", () => {
+    const payload = buildHostHelloSignaturePayload(answered);
+    expect(payload.startsWith("octant.host-hello.v2\n")).toBe(true);
+    expect(payload).not.toBe(buildHostHelloSignaturePayload(hello));
+  });
+
+  it("binds the client nonce and every other host-hello fact", () => {
+    const baseline = buildHostHelloSignaturePayload(answered);
+    const mutations: ReadonlyArray<Partial<typeof answered>> = [
+      { hostId: "11111111-1111-4111-8111-111111111112" },
+      { displayName: "Other Mac" },
+      { hostKeyFingerprint: "b".repeat(64) },
+      { serverBuildVersion: "0.1.1" },
+      { supportedProtocolRange: { min: 1, max: 2 } },
+      { authenticationProtocolVersions: [1, 2] },
+      { securityFloor: 2 },
+      { remoteOrigin: "https://other.example.test" },
+      { nonce: "nonce_abcdefghij" },
+      { clientNonce: "client_nonce_abcdefghil" },
+      { expiresAt: "2026-07-28T20:02:00.000Z" },
+    ];
+    for (const mutation of mutations) {
+      expect(buildHostHelloSignaturePayload({ ...answered, ...mutation })).not.toBe(baseline);
+    }
+  });
+
+  it("keeps two hellos apart that version 1 joins to the same text", () => {
+    // A newline in the display name shifts the following fields in version 1.
+    const first = {
+      ...hello,
+      displayName: `Mac\n${"a".repeat(64)}`,
+      hostKeyFingerprint: "b".repeat(64),
+      serverBuildVersion: "0.1.0",
+    };
+    const second = {
+      ...hello,
+      displayName: "Mac",
+      hostKeyFingerprint: "a".repeat(64),
+      serverBuildVersion: `${"b".repeat(64)}\n0.1.0`,
+    };
+    expect(buildHostHelloSignaturePayload(first)).toBe(buildHostHelloSignaturePayload(second));
+    expect(
+      buildHostHelloSignaturePayload({ ...first, clientNonce: answered.clientNonce }),
+    ).not.toBe(buildHostHelloSignaturePayload({ ...second, clientNonce: answered.clientNonce }));
+  });
+});
+
 describe("buildNegotiatedProtocolPayload", () => {
   it("is deterministic, domain-separated, and binds every negotiated fact", () => {
     const baseline = buildNegotiatedProtocolPayload(negotiated);

@@ -686,6 +686,14 @@ function AppleWorkbenchSurface(props: {
           inputDisconnected(evidence)
         ) {
           setActionFailure({ kind: "refused", intent, reason: "input-disconnected" });
+        } else if (
+          evidence.outcome !== "succeeded" &&
+          intent.kind === "rotate" &&
+          evidence.diagnostics.some((diagnostic) =>
+            diagnostic.message.includes(": rotate-unavailable: "),
+          )
+        ) {
+          setActionFailure({ kind: "refused", intent, reason: "rotate-unavailable" });
         } else if (evidence.outcome !== "succeeded") {
           setActionFailure({ kind: "outcome", intent, outcome: evidence.outcome });
         }
@@ -901,7 +909,7 @@ function appleActionRequest(input: {
         kind: "rotate",
         simulatorId: intent.simulatorId,
         requestedBy: localUserActor(),
-        orientation: intent.orientation,
+        ...(intent.orientation === undefined ? {} : { orientation: intent.orientation }),
         timeoutMs: 30_000,
       };
   }

@@ -69,6 +69,7 @@ import {
   NAVIGATOR_ASSISTANT_EVENT_NAMES,
   NavigatorAssistantThreadBound,
   OllamaHistoryRecorded,
+  ClaudeResumeIdentityRecorded,
   ProjectBindingRelinked,
   ProjectCreated,
   ProjectLifecycleChanged,
@@ -333,6 +334,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("host-oauth.recorded@1", 1, HostOAuthJournalRecord)
     .register("provider-key.recorded@1", 1, ProviderKeyJournalRecord)
     .register("ollama.history-recorded@1", 1, OllamaHistoryRecorded)
+    .register("claude.resume-identity-recorded@1", 1, ClaudeResumeIdentityRecorded)
     .register("context.manifest-created@1", 1, ContextManifestCreated)
     .register("context.overrides-updated@1", 1, ContextOverridesUpdated)
     .register("context.plan-created@1", 1, ContextPlanCreated)

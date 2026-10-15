@@ -272,7 +272,7 @@ export function NativeHarnessEgressCard(props: NativeHarnessEgressCardProps) {
       </div>
       {view.enforced ? null : (
         <p className="native-harness-card__detail">
-          Commands on this thread do not go through these rules yet.
+          Commands on this thread do not go through these rules under its current access.
         </p>
       )}
       {view.proposals.length === 0 ? null : (

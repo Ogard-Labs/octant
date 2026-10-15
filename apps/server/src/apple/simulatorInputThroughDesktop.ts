@@ -48,10 +48,14 @@ export function simulatorDeviceInput(
   if (request.kind === "repair-input") {
     return { kind: "input", input: { kind: "repair-input", ...destination } };
   }
-  if (request.kind === "rotate" && request.orientation !== undefined) {
+  if (request.kind === "rotate") {
     return {
       kind: "input",
-      input: { kind: "rotate", ...destination, orientation: request.orientation },
+      input: {
+        kind: "rotate",
+        ...destination,
+        ...(request.orientation === undefined ? {} : { orientation: request.orientation }),
+      },
     };
   }
   if (request.kind === "key-press" && request.key !== undefined) {

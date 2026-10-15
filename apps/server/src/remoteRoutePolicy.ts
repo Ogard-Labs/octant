@@ -49,7 +49,6 @@ const LOCAL_ONLY_PREFIXES = [
   "/api/folders",
   "/api/extensions/lifecycle",
   "/api/extensions/skills",
-  "/api/extensions/tool-approvals",
   "/api/extensions/tool-grants",
   "/api/providers/discovery",
   "/api/host-control",
@@ -107,7 +106,8 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     match: { kind: "exact", path: "/api/remote/hello" },
     surface: "pre-auth",
     methods: ["GET", "HEAD"],
-    allowQuery: false,
+    // Only the client's hello nonce; the gateway refuses any other query.
+    allowQuery: true,
     allowedRequestHeaders: [],
     maxResponseBytes: 4_096,
   },
@@ -308,6 +308,18 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 16 * 1_024,
     maxResponseBytes: 96 * 1_024,
+  },
+  {
+    // A paired device lists and answers the MCP tool prompts its own turns
+    // raised, approve once or deny. Remembered approvals stay on the
+    // local-only tool-grants route, and the approval service refuses a paired
+    // device's answer that asks to be remembered.
+    kind: "exact" as const,
+    path: "/api/extensions/tool-approvals",
+    methods: ["POST"] as const,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"] as const,
+    maxBodyBytes: 4_096,
   },
   {
     kind: "exact" as const,

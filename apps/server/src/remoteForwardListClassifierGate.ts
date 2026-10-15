@@ -17,6 +17,7 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/host-control/export", method: "GET" },
   { path: "/api/host-control/lifecycle", method: "POST" },
   { path: "/api/extensions/lifecycle", method: "POST" },
+  { path: "/api/extensions/tool-grants", method: "POST" },
   { path: "/api/desktop/window-authorities", method: "GET" },
   { path: "/api/desktop/provider-credentials/set", method: "POST" },
   { path: "/api/replica-store/commands", method: "POST" },
@@ -62,6 +63,7 @@ const PRODUCT_PROBES = [
   { path: "/api/extensions/preview", method: "POST" },
   { path: "/api/extensions/snapshot", method: "POST" },
   { path: "/api/extensions/state", method: "POST" },
+  { path: "/api/extensions/tool-approvals", method: "POST" },
   { path: "/api/validation/evidence", method: "POST" },
   { path: "/api/context/inspect", method: "POST" },
   {
