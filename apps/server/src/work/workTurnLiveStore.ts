@@ -7,6 +7,7 @@ import {
   type WorkTurnState,
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
+import type { ThreadToolSteps } from "@octant/domain";
 
 interface ThreadFrames {
   nextSequence: number;
@@ -129,6 +130,27 @@ export class WorkTurnLiveStore {
         threadId,
         requestId,
         tasks,
+      }),
+    );
+  }
+
+  /** Publishes the turn's tool calls whole, so a late subscriber reads current state. */
+  appendToolSteps(
+    threadId: WorkThreadId,
+    requestId: WorkTurnRequestId,
+    toolSteps: ThreadToolSteps,
+  ): void {
+    if (this.#closed || toolSteps.steps.length === 0) return;
+    const state = this.#state(threadId);
+    this.#publish(
+      threadId,
+      decodeWorkTurnStreamFrame({
+        kind: "turn-tools",
+        sequence: state.nextSequence,
+        threadId,
+        requestId,
+        toolSteps: toolSteps.steps,
+        toolStepsTruncated: toolSteps.truncated,
       }),
     );
   }

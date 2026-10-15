@@ -2929,6 +2929,107 @@ describe("ChatTurnRunner", () => {
     ]);
   });
 
+  it("journals one tool step per call id and updates it in place", async () => {
+    const updates: ChatAttempt[] = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "On it." } as never);
+          yield* Queue.offer(queue, {
+            kind: "tool-start",
+            sessionId,
+            toolCallId: "call-1",
+            toolName: "Web search",
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "tool-start",
+            sessionId,
+            toolCallId: "call-2",
+            toolName: "Fetch page",
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "tool-progress",
+            sessionId,
+            toolCallId: "call-1",
+            message: "Searching",
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "tool-success",
+            sessionId,
+            toolCallId: "call-1",
+            summary: "3 results",
+          } as never);
+          yield* Queue.offer(queue, {
+            kind: "tool-failure",
+            sessionId,
+            toolCallId: "call-2",
+            message: "Timed out",
+          } as never);
+          yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { acquire: () => Effect.succeed(connection) } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchEnabled: true,
+          researchRoute: researchRoute({ backend: "searxng" }),
+          attachments: [],
+          persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000060"),
+              digest: "a".repeat(64),
+              byteLength: 4,
+            }),
+        }),
+      ),
+    );
+
+    expect(updates.at(-1)?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Web search", state: "completed", summary: "3 results" },
+      { toolCallId: "call-2", toolName: "Fetch page", state: "failed", summary: "Timed out" },
+    ]);
+    expect(updates.at(-1)?.toolStepsTruncated).toBeUndefined();
+  });
+
   it("passes finalized attachment bytes to send", async () => {
     const sent: Array<{ readonly attachments: ReadonlyArray<{ readonly bytes: Uint8Array }> }> = [];
     const bytes = new TextEncoder().encode("attachment-bytes");

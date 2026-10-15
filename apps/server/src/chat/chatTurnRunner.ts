@@ -29,7 +29,13 @@ import {
   type TurnUsage,
   upsertThreadTaskProgress,
 } from "@octant/contracts";
-import { accumulateTurnUsage, observeTurnMetrics, startTurnMetrics } from "@octant/domain";
+import {
+  accumulateTurnUsage,
+  observeTurnMetrics,
+  recordThreadToolStep,
+  startTurnMetrics,
+  type ThreadToolSteps,
+} from "@octant/domain";
 import { answerChatTurnQuestion, transitionChatAttempt } from "@octant/domain/chat-policy";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Cause, Deferred, Effect, Fiber, Option, Schema, Scope, Stream } from "effect";
@@ -1370,6 +1376,34 @@ export class ChatTurnRunner {
                   });
                   if (nextTasks === currentAttempt.tasks) return;
                   currentAttempt = { ...currentAttempt, tasks: nextTasks, updatedAt: updatedAt() };
+                  yield* input.persistAttempt(currentAttempt);
+                  return;
+                }
+                if (
+                  event.kind === "tool-start" ||
+                  event.kind === "tool-progress" ||
+                  event.kind === "tool-success" ||
+                  event.kind === "tool-failure"
+                ) {
+                  // One step per provider tool call id, restated whole on the
+                  // attempt like the task list, so a replayed attempt-updated
+                  // is the full state. A name, a state, and a bounded message;
+                  // never the tool's input or output.
+                  const before: ThreadToolSteps | undefined =
+                    currentAttempt.toolSteps === undefined
+                      ? undefined
+                      : {
+                          steps: currentAttempt.toolSteps,
+                          truncated: currentAttempt.toolStepsTruncated === true,
+                        };
+                  const after = recordThreadToolStep(before, event);
+                  if (after === undefined || after === before) return;
+                  currentAttempt = {
+                    ...currentAttempt,
+                    toolSteps: after.steps,
+                    ...(after.truncated ? { toolStepsTruncated: true } : {}),
+                    updatedAt: updatedAt(),
+                  };
                   yield* input.persistAttempt(currentAttempt);
                   return;
                 }

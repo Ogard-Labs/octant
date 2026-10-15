@@ -1654,6 +1654,25 @@ operation events, Chat from `ChatAttempt.tasks` carried on
 projection of journaled state, never a renderer-owned plan; per-step detail
 stays in the transcript's activity rows.
 
+## Tool calls in Chat and Work
+
+Every mode shows a turn's tool calls as the same compact group in the
+transcript (see [DESIGN.md](../DESIGN.md) Transcript). Code replays them from
+its journaled `tool-activity` events. Chat and Work record exactly the same
+step per tool call and nothing more: the provider's tool call id, the tool
+name, a state (`started`, `running`, `completed`, `failed`), and an optional
+progress or result message of at most 2048 bytes, redacted before it is kept. No tool
+input and no tool output is captured. A turn keeps at most 64 steps in arrival
+order and sets a truncated flag when it called more. Chat carries them as
+`ChatAttempt.toolSteps` on `chat.attempt-updated@1`; Work carries them as
+`WorkTurnState.toolSteps` journaled with the settled `work.turn-updated@1`,
+with a live `turn-tools` stream frame while the turn runs. They live on the
+attempt or turn record, so they are thread content and purging the thread
+removes them with it. Both fields are optional, so a turn saved before they existed
+still decodes, and the group draws nothing for a turn that called no tool. This
+changes rendering and recording only; Chat's and Work's authority, and Work's
+withheld shell, are unchanged.
+
 ## Workspace shell
 
 [Workspace behavior](design/workspace.md) owns navigation, Projects, panes,

@@ -2407,6 +2407,50 @@ describe("WorkTurnService", () => {
     controller.abort();
   });
 
+  it("publishes the turn's tool calls live and journals them with the settled turn", async () => {
+    const gate = deferred<void>();
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          input.onDelta?.("Partial");
+          input.onToolSteps?.({
+            truncated: false,
+            steps: [{ toolCallId: "call-1", toolName: "Read", state: "started" }],
+          });
+          await gate.promise;
+          input.onToolSteps?.({
+            truncated: false,
+            steps: [
+              { toolCallId: "call-1", toolName: "Read", state: "completed", summary: "notes.md" },
+            ],
+          });
+          return { kind: "completed", response: "Partial reply" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    const controller = new AbortController();
+    const stream = fixture.service.subscribe(ids.window, ids.thread, 0, controller.signal);
+
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "response-delta", sequence: 1 },
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { kind: "turn-tools", sequence: 2, requestId: ids.request },
+    });
+    gate.resolve();
+    for (;;) {
+      const next = await stream.next();
+      if ((next.value as { readonly kind: string }).kind === "turn-settled") break;
+    }
+    // A reconnecting client re-reads the transcript and sees the same steps.
+    const settledTurn = (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1);
+    expect(settledTurn?.toolSteps).toEqual([
+      { toolCallId: "call-1", toolName: "Read", state: "completed", summary: "notes.md" },
+    ]);
+    controller.abort();
+  });
+
   it.each([true, false])(
     "keeps native Work follow-ups without replay when the provider repeats its cursor: %s",
     async (repeatsCursor) => {
