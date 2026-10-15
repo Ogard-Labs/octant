@@ -63,6 +63,17 @@ describe("a turn's tool steps", () => {
     expect(many?.truncated).toBe(true);
   });
 
+  it("cuts an oversized tool call id and name to what the contract holds instead of failing", () => {
+    const steps = fold([
+      event({ kind: "tool-start", toolCallId: "i".repeat(400), toolName: "n".repeat(400) }),
+      event({ kind: "tool-success", toolCallId: "i".repeat(400), summary: "ok" }),
+    ]);
+    expect(steps?.steps).toHaveLength(1);
+    expect(steps?.steps[0]?.toolCallId).toHaveLength(255);
+    expect(steps?.steps[0]?.toolName).toHaveLength(255);
+    expect(steps?.steps[0]?.state).toBe("completed");
+  });
+
   it("ignores events that are not tool calls", () => {
     expect(fold([event({ kind: "text-delta", text: "hi" })])).toBeUndefined();
   });

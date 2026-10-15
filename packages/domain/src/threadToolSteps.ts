@@ -30,6 +30,19 @@ function boundedSummary(text: string): string | undefined {
   return head === "" ? undefined : `${head}${TRUNCATED_SUFFIX}`;
 }
 
+const MAX_IDENTIFIER_BYTES = 255;
+
+/** A provider's tool call id or name cut to what the contract holds; it never fails the turn. */
+function boundedIdentifier(text: string): string {
+  const trimmed = text.trim();
+  const bytes = encoder.encode(trimmed);
+  if (bytes.byteLength <= MAX_IDENTIFIER_BYTES) return trimmed;
+  return decoder
+    .decode(bytes.slice(0, MAX_IDENTIFIER_BYTES))
+    .replace(/\uFFFD+$/, "")
+    .trimEnd();
+}
+
 /**
  * Folds one normalized runtime event into a turn's tool steps, keyed by the
  * provider's own tool call id so a repeated event updates a step instead of
@@ -50,7 +63,8 @@ export function recordThreadToolStep(
     return current;
   }
   const steps = current?.steps ?? [];
-  const index = steps.findIndex((step) => step.toolCallId === event.toolCallId);
+  const toolCallId = boundedIdentifier(event.toolCallId);
+  const index = steps.findIndex((step) => step.toolCallId === toolCallId);
   const previous = index === -1 ? undefined : steps[index];
   if (previous === undefined && steps.length >= MAX_THREAD_TOOL_STEPS_PER_TURN) {
     return current?.truncated === true ? current : { steps, truncated: true };
@@ -60,13 +74,13 @@ export function recordThreadToolStep(
   switch (event.kind) {
     case "tool-start":
       if (previous !== undefined) return current;
-      next = { toolCallId: event.toolCallId, toolName: event.toolName, state: "started" };
+      next = { toolCallId, toolName: boundedIdentifier(event.toolName), state: "started" };
       break;
     case "tool-progress": {
       if (ended) return current;
       const summary = boundedSummary(event.message) ?? previous?.summary;
       next = {
-        toolCallId: event.toolCallId,
+        toolCallId,
         toolName: previous?.toolName ?? "Tool",
         state: "running",
         ...(summary === undefined ? {} : { summary }),
@@ -78,7 +92,7 @@ export function recordThreadToolStep(
       const summary = boundedSummary(event.kind === "tool-success" ? event.summary : event.message);
       const kept = summary ?? previous?.summary;
       next = {
-        toolCallId: event.toolCallId,
+        toolCallId,
         toolName: previous?.toolName ?? "Tool",
         state: event.kind === "tool-success" ? "completed" : "failed",
         ...(kept === undefined ? {} : { summary: kept }),

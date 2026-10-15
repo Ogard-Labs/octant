@@ -1178,12 +1178,23 @@ export class WorkTurnService {
   }
 
   #withLive(turn: WorkTurnState): WorkTurnState {
+    if (turn.status === "completed" || turn.status === "cancelled") return turn;
+    // The live steps live only in this process until the turn settles; a window
+    // that opens or reconnects mid-turn would otherwise miss the frame that
+    // carried them, which no later frame replays.
+    const liveSteps = this.#liveToolSteps.get(String(turn.requestId));
+    const withSteps =
+      liveSteps === undefined || liveSteps.steps.length === 0
+        ? turn
+        : decodeWorkTurnState({
+            ...turn,
+            toolSteps: liveSteps.steps,
+            ...(liveSteps.truncated ? { toolStepsTruncated: true } : {}),
+          });
     const live = this.#liveResponses.get(String(turn.requestId));
-    if (live === undefined || turn.status === "completed" || turn.status === "cancelled") {
-      return turn;
-    }
+    if (live === undefined) return withSteps;
     return decodeWorkTurnState({
-      ...turn,
+      ...withSteps,
       status: turn.status === "accepted" ? "running" : turn.status,
       response: live,
       transcript: [
@@ -1528,14 +1539,16 @@ export class WorkTurnService {
       if (latest.status === "cancelled") {
         // Cancelling settles the turn, but files the provider wrote before it
         // stopped are still on disk. Returning without recording them told the
-        // person the folder was untouched when it was not.
-        if (wroteFiles !== undefined) {
+        // person the folder was untouched when it was not. The tool calls it
+        // made are recorded the same way, whether or not a file changed.
+        const cancelledToolSteps = this.#liveToolSteps.get(String(input.command.requestId));
+        if (wroteFiles !== undefined || cancelledToolSteps !== undefined) {
           const settledTasks = this.#liveTasks.get(String(input.command.requestId));
-          const settledToolSteps = this.#liveToolSteps.get(String(input.command.requestId));
+          const settledToolSteps = cancelledToolSteps;
           this.#persistUpdate(latest, {
             status: "cancelled",
             ...(latest.response === undefined ? {} : { response: latest.response }),
-            wroteFiles,
+            ...(wroteFiles === undefined ? {} : { wroteFiles }),
             ...(settledTasks === undefined ? {} : { tasks: settledTasks }),
             ...(settledToolSteps === undefined ? {} : { toolSteps: settledToolSteps }),
           });
