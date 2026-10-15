@@ -1,4 +1,5 @@
 import {
+  IMAGE_JOB_AGGREGATE_TYPE,
   IMAGE_JOB_QUEUED,
   IMAGE_JOB_STATUS_CHANGED,
   decodeImageJob,
@@ -28,6 +29,7 @@ export class ImageJobProjection implements Projection {
   // Jobs live only in this map, so every host start must replay them all:
   // resuming from the stored checkpoint hid the running jobs a restart fails.
   readonly holdsStateInMemory = true as const;
+  readonly aggregateTypes: ReadonlyArray<string> = [IMAGE_JOB_AGGREGATE_TYPE];
   readonly #byId = new Map<string, ImageJob>();
 
   reset(_connection: SqliteConnection): void {
