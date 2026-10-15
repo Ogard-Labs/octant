@@ -18,6 +18,7 @@ let createAppleToolchainClient: (options: Record<string, unknown>) => {
     | {
         readonly status: "watching";
         readonly screen: { readonly width: number; readonly height: number };
+        readonly orientation?: "portrait" | "landscape";
         readonly frames: AsyncIterable<Uint8Array>;
       }
     | { readonly status: "failed"; readonly kind: string; readonly message: string }
