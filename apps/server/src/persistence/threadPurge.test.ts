@@ -276,6 +276,56 @@ describe("thread purge sweep", () => {
     },
   );
 
+  it("erases the Claude resume identity of a purged thread's session and keeps another thread's", async () => {
+    const harness = openHarness();
+    seedControlThread(harness);
+    seedCodeProjection(harness, threads.code.id);
+    const identityFor = (sessionId: string) => ({
+      providerInstanceId: "c3630000-0000-4000-8000-0000000000a1",
+      octantSessionId: sessionId,
+      sdkSessionId: `sdk-${sessionId}`,
+      identity: { projectRoot: "/tmp/resume-fixture" },
+    });
+    const purgedSession = "c3630000-0000-4000-8000-0000000000d1";
+    const keptSession = "c3630000-0000-4000-8000-0000000000d2";
+    insertEvent(
+      harness.connection,
+      "code-thread",
+      threads.code.id,
+      { kind: "provider-session-ready", sessionId: purgedSession },
+      "code.provider-session-ready@1",
+      2,
+    );
+    for (const sessionId of [purgedSession, keptSession]) {
+      insertEvent(
+        harness.connection,
+        "claude-resume-identity",
+        sessionId,
+        identityFor(sessionId),
+        "claude.resume-identity-recorded@1",
+      );
+    }
+
+    await harness.service.purge(
+      {
+        scope: {
+          kind: "thread",
+          mode: "code",
+          threadId: decodeThreadRetentionThreadId(threads.code.id),
+        },
+        confirm: true,
+      },
+      "local-window",
+    );
+
+    const remaining = harness.connection
+      .prepare(
+        "SELECT aggregate_id FROM event_journal WHERE aggregate_type = 'claude-resume-identity'",
+      )
+      .all();
+    expect(remaining).toEqual([{ aggregate_id: keptSession }]);
+  });
+
   it("never erases another mode's thread that shares the purged thread's id", async () => {
     const harness = openHarness();
     const sharedId = threads.code.id;

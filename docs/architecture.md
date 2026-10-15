@@ -3378,7 +3378,15 @@ session without a recoverable cursor still fails closed; no transcript replay or
 replacement conversation repairs the missing identity. A follow-up on another model of
 the same provider instance resumes the same native session only when the driver
 reports the `modelSwitch` capability; the resume carries the thread's current
-model and the turn records it on the session. Codex restates the model and its
+model and the turn records it on the session. Claude resumes only a session
+whose identity (provider instance, Octant session, SDK session, Project root,
+authentication) this host recorded; the identity is journaled
+(`claude-resume-identity`), so a host restart keeps an existing thread
+resumable and compactable. A removed identity or a removed provider stays
+refused as `stale-resume` after a restart. A reconfigured provider keeps its
+identities, as it did within one host lifetime; the resume checks (instance,
+authentication, Project root, account directory history) still decide. A
+thread purge erases the identity of the session the thread recorded. Codex restates the model and its
 reasoning effort on each turn, and Claude resumes the SDK session under the new
 model. Another model on any other driver still fails closed. In Code, a
 change of provider instance starts a new session with a provider-switch
