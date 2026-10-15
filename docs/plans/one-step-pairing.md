@@ -1,7 +1,7 @@
 # One-step pairing with a self-made listener certificate
 
-**Status: approved by the maintainer on 2026-10-14; slices 1, 2, and 3 are
-built, the rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
+**Status: approved by the maintainer on 2026-10-14; slices 1, 2, 3, and 6 are built (6's live
+check is open), the rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
 holds only the rules that are true today, and each slice below moves its rules
 there when it lands; the host certificate's key, storage, renewal, pin format,
 and status fields, the pairing code's format, QR code, and reading rules, and
