@@ -6019,13 +6019,13 @@ mechanisms are:
     lowercase hex of the same hash, shown for comparison, and no client reads
     it as a pin. Only the loopback administration status
     carries the pin; `octant listener status` prints it.
-  - **No app pins yet.** A self-made listener is served, and the client
-    runtime holds the trust rule below, but neither the desktop app nor the
-    phone app reads a pairing code or connects through a pinned transport
-    yet, and a client that relies on platform trust refuses the certificate,
-    so only a pasted certificate can be reached by a client today. Settings
-    still asks for a certificate and key, and `octant listener`'s usage line
-    still names them.
+  - **Which apps pin.** The desktop app pairs with another computer from its
+    app pairing code and pins it (below). The phone app reads a pasted code
+    but has no transport that can check a pin yet, so it refuses the code
+    before sending anything; a phone reaches only a listener serving a pasted
+    certificate. The phone's QR scanner is not built either. Settings still
+    asks for a certificate and key, and `octant listener`'s usage line still
+    names them.
   - **No browser link.** A browser decides whether to trust the listener
     before any Octant page loads and cannot check a certificate the host made
     itself, so Settings offers no browser pairing link for a self-made
@@ -6058,7 +6058,10 @@ mechanisms are:
     algorithm other than `sha256` is refused as needing a newer Octant,
     never skipped. A missing, extra, or repeated field, a malformed id,
     proof, or pin, a non-canonical base64url spelling, or an origin that is
-    not exactly an HTTPS origin is refused as damaged. An origin the listener
+    not exactly an HTTPS origin is refused as damaged. The origin's shape is
+    matched by pattern before `URL` reads it, and its host is taken from
+    that match, because the phone's JavaScript engine ships a `URL` that
+    only matches patterns: its `origin` keeps credentials and a second port. An origin the listener
     address classifier does not call private LAN or Tailscale is refused as
     not private: for an address literal that means `10/8`, `172.16/12`,
     `192.168/16`, `100.64/10`, `fc00::/7`, and `fe80::/10`, judged on the
@@ -6127,12 +6130,40 @@ mechanisms are:
       failure value, not a refusal, and nothing was sent. Only its tests can replace name
       resolution, dialling, or trust roots. No other client runtime or CLI
       source turns platform validation off or accepts every server name, and
-      a test refuses any that does. No `octant` command connects to another
-      host yet, so only tests use it.
+      a test refuses any that does. Its `fetch` sends each request over its
+      own judged connection, refuses a URL on any other origin, never follows
+      a redirect, and throws the refusal before any request byte. The desktop
+      app's main process uses it; no `octant` command connects to another
+      host yet.
+    - **Pairing from a code.** The client runtime holds the one flow every
+      app follows: read the code, ask the platform for a transport held to
+      the code's pin (a client without one refuses with "This version of the
+      app can't check that computer's own certificate yet…" and sends
+      nothing), request a hello with a fresh client nonce over it and verify
+      it, then claim the ticket through that hello. The approved device
+      records the pinned trust with its key.
+    - **Desktop.** The renderer hands main the pasted text and nothing else.
+      Main runs the flow above over the Node transport, then records the
+      origin's pin in an owner-only file under the app's data
+      (`paired-computer-pins.json`, written whole and renamed into place) and
+      opens the other computer's own pairing page with the code's ticket in a
+      window. Main pins only an origin the listener address classifier calls
+      private LAN or Tailscale, and a pin file it cannot read holds no pins.
+      That window gets no preload, stays on that origin, opens no other
+      window, grants no permission, and uses a session partition only paired
+      computers use, whose certificate verification hook accepts a name only
+      when the served key matches a pin recorded for it and refuses every
+      other name, a certificate a public authority issued included. Chromium
+      reports only the name to that hook, so a name is held to every pin
+      recorded for it, whatever the port. Opening a paired computer again
+      first resolves and judges its address and checks its key over the Node
+      transport; Chromium then resolves the name itself, so the pin, not the
+      address, is what that window relies on. Settings → Remote access lists
+      paired computers with an Open action.
 - **Adding a computer in one step.** Partly built: the host certificate,
-  pairing code, client trust rule above, and the one-line start. Reading the
-  code and pinning on the desktop and phone apps, and key rotation, are
-  planned in [the plan](plans/one-step-pairing.md).
+  pairing code, client trust rule, and desktop pinning above, and the
+  one-line start. The phone's pinned transport and scanner, and key rotation,
+  are planned in [the plan](plans/one-step-pairing.md).
   - **One-line start.** `octant server install --artifact <path> --pair` and
     `octant server start --pair` install and start the service as without
     the flag, then make only the loopback administration calls

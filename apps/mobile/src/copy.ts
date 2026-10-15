@@ -59,6 +59,8 @@ export const MOBILE_COPY = {
   hostKeyNotDeleted:
     "A host was removed, but its device key could not be deleted from this phone's secure storage.",
   hostsHint: "Enter the host HTTPS origin and pairing ticket from the desktop host.",
+  pairCodeHint:
+    "Paste the pairing code a computer shows for its own certificate, or leave it empty and enter the origin and ticket below.",
   pairHostTitle: "Pair a host",
   pairHostBody: "Connect your laptop to create and follow Chat, Work, and Code threads.",
   pairHostCta: "Pair host",

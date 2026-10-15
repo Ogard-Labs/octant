@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildPairingCode,
   PAIRING_CODE_PREFIX,
@@ -25,6 +25,10 @@ function codeOf(value: PairingCodeContents): string {
 function rawCode(json: string, prefix = PAIRING_CODE_PREFIX): string {
   return `${prefix}${Buffer.from(json, "utf8").toString("base64url")}`;
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("the app pairing code", () => {
   it("reads back exactly what the host put in it", () => {
@@ -164,6 +168,49 @@ describe("the app pairing code", () => {
       expect(buildPairingCode({ ...contents, origin })).toEqual({
         status: "refused",
         reason: "damaged",
+      });
+    }
+  });
+
+  it("refuses a tampered address the same way under a URL that only matches patterns", () => {
+    // The phone's engine ships a `URL` like this one: its `origin` is
+    // everything up to the first slash, and its `hostname` stops at a colon.
+    class PatternOnlyUrl {
+      readonly #text: string;
+      constructor(text: string) {
+        this.#text = text;
+      }
+      get protocol(): string {
+        return /^([a-zA-Z][a-zA-Z\d+\-.]*):/.exec(this.#text)?.[1]?.concat(":") ?? "";
+      }
+      get origin(): string {
+        return /^(https?:\/\/[^/]+)/.exec(this.#text)?.[1] ?? "";
+      }
+      get hostname(): string {
+        return /^https?:\/\/(?:[^@]+@)?([^:/?#]+)/.exec(this.#text)?.[1] ?? "";
+      }
+    }
+    vi.stubGlobal("URL", PatternOnlyUrl);
+
+    for (const origin of [
+      "https://user@100.101.102.103:8443",
+      "https://evil.example@100.101.102.103",
+      "https://100.101.102.103:8443:9443",
+      "https://100.101.102.103:99999",
+      "https://100.101.102.103:08443",
+      "https://100.101.102.103:443",
+      "https://Mac.tailnet.ts.net",
+      "https://100.101.102.103:8443?x=1",
+    ]) {
+      expect(readPairingCode(rawCode(JSON.stringify({ ...contents, origin })))).toEqual({
+        status: "refused",
+        reason: "damaged",
+      });
+    }
+    for (const origin of [contents.origin, "https://[fd7a:115c:a1e0::1]:8443"]) {
+      expect(readPairingCode(rawCode(JSON.stringify({ ...contents, origin })))).toEqual({
+        status: "read",
+        contents: { ...contents, origin },
       });
     }
   });
