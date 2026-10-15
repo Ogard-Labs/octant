@@ -9,6 +9,8 @@ import { buildHostHelloSignaturePayload, buildPairingCode } from "@octant/domain
 import {
   CERTIFICATE_ACCEPTED,
   CERTIFICATE_REFUSED,
+  clearRemotePageStorage,
+  forgetPairedComputer,
   installPairedComputerIpcHandlers,
   openPairedComputer,
   PAIRED_COMPUTER_CHANNELS,
@@ -79,6 +81,14 @@ afterAll(() => {
 
 function freshPins(): PairedComputerPins {
   return new PairedComputerPins(join(mkdtempSync(join(directory, "pins-")), "pins.json"));
+}
+
+function storagePort() {
+  return {
+    clearStorageData: vi.fn(async () => {}),
+    clearCache: vi.fn(async () => {}),
+    clearAuthCache: vi.fn(async () => {}),
+  };
 }
 
 /** A host that verifies itself with a hello signed by its identity key, answering the client's nonce. */
@@ -170,7 +180,7 @@ describe("pairing with another computer from its code", () => {
     const outcome = await pairFromPairingCode({
       code: pairingCode(pinOf(listenerCert)),
       pins,
-      windows: { open },
+      windows: { open, closeAll: vi.fn() },
       webBuildVersion: "0.1.0",
       fetchFor,
     });
@@ -196,7 +206,7 @@ describe("pairing with another computer from its code", () => {
     const outcome = await pairFromPairingCode({
       code: pairingCode(pinOf(listenerCert)),
       pins,
-      windows: { open },
+      windows: { open, closeAll: vi.fn() },
       webBuildVersion: "0.1.0",
       fetchFor: () => async () => {
         throw new ListenerTrustRefused("pin-mismatch");
@@ -222,7 +232,7 @@ describe("pairing with another computer from its code", () => {
       const outcome = await pairFromPairingCode({
         code: text,
         pins,
-        windows: { open },
+        windows: { open, closeAll: vi.fn() },
         webBuildVersion: "0.1.0",
         fetchFor,
       });
@@ -241,12 +251,16 @@ describe("pairing with another computer from its code", () => {
       openPairedComputer({
         origin: ORIGIN,
         pins,
-        windows: { open },
+        windows: { open, closeAll: vi.fn() },
         connect: async () => ({ status: "refused", reason: "pin-mismatch" }),
       }),
     ).resolves.toMatchObject({ status: "refused" });
     await expect(
-      openPairedComputer({ origin: "https://100.101.102.104:8443", pins, windows: { open } }),
+      openPairedComputer({
+        origin: "https://100.101.102.104:8443",
+        pins,
+        windows: { open, closeAll: vi.fn() },
+      }),
     ).resolves.toEqual({ status: "refused", message: "Octant isn't paired with that computer." });
     expect(open).not.toHaveBeenCalled();
   });
@@ -259,7 +273,8 @@ describe("pairing with another computer from its code", () => {
         throw new Error("not an Octant window");
       },
       pins: freshPins,
-      windows: { open: vi.fn() },
+      windows: { open: vi.fn(), closeAll: vi.fn() },
+      storage: storagePort(),
       webBuildVersion: "0.1.0",
     });
 
@@ -267,10 +282,107 @@ describe("pairing with another computer from its code", () => {
       IPC_CHANNELS.pairedComputerPair,
       IPC_CHANNELS.pairedComputerList,
       IPC_CHANNELS.pairedComputerOpen,
+      IPC_CHANNELS.pairedComputerForget,
     ]);
     expect(Object.values(PAIRED_COMPUTER_CHANNELS)).toEqual([...handlers.keys()]);
     await expect(
       Promise.resolve().then(() => handlers.get(PAIRED_COMPUTER_CHANNELS.list)?.({})),
     ).rejects.toThrow("Octant rejected an unauthorized paired-computer request.");
+  });
+});
+
+describe("forgetting a paired computer", () => {
+  it("closes its windows, drops its pin so its key is trusted by nothing, and clears its page storage", async () => {
+    const path = join(mkdtempSync(join(directory, "pins-")), "pins.json");
+    const pins = new PairedComputerPins(path);
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
+    const other = "https://100.101.102.104:8443";
+    pins.record({ origin: other, displayName: "Laptop", pin: pinOf(otherCert) });
+    const storage = storagePort();
+    const closeAll = vi.fn();
+
+    const outcome = await forgetPairedComputer({
+      origin: ORIGIN,
+      pins,
+      windows: { open: vi.fn(), closeAll },
+      storage,
+    });
+
+    expect(outcome).toEqual({ status: "forgotten" });
+    expect(closeAll).toHaveBeenCalledWith(ORIGIN);
+    expect(pins.judgeCertificate("100.101.102.103", listenerCert, NOW)).toBe(CERTIFICATE_REFUSED);
+    expect(new PairedComputerPins(path).list()).toEqual([{ origin: other, displayName: "Laptop" }]);
+    expect(storage.clearStorageData).toHaveBeenCalledWith({ origin: ORIGIN });
+    expect(storage.clearCache).toHaveBeenCalledOnce();
+    expect(storage.clearAuthCache).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a computer it isn't paired with and touches nothing", async () => {
+    const pins = freshPins();
+    const storage = storagePort();
+    const closeAll = vi.fn();
+
+    for (const origin of [ORIGIN, 42]) {
+      await expect(
+        forgetPairedComputer({ origin, pins, windows: { open: vi.fn(), closeAll }, storage }),
+      ).resolves.toEqual({ status: "refused", message: "Octant isn't paired with that computer." });
+    }
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(storage.clearStorageData).not.toHaveBeenCalled();
+  });
+
+  it("still forgets the pin and says so when the page storage cannot be cleared", async () => {
+    const pins = freshPins();
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
+    const storage = {
+      ...storagePort(),
+      clearStorageData: vi.fn().mockRejectedValue(new Error("x")),
+    };
+
+    const outcome = await forgetPairedComputer({
+      origin: ORIGIN,
+      pins,
+      windows: { open: vi.fn(), closeAll: vi.fn() },
+      storage,
+    });
+
+    expect(outcome.status).toBe("refused");
+    expect(pins.list()).toEqual([]);
+  });
+
+  it("attempts every clearing step even when an earlier one fails", async () => {
+    const storage = {
+      ...storagePort(),
+      clearStorageData: vi.fn().mockRejectedValue(new Error("x")),
+    };
+
+    await expect(clearRemotePageStorage(storage, ORIGIN)).rejects.toThrow("x");
+    expect(storage.clearCache).toHaveBeenCalledOnce();
+    expect(storage.clearAuthCache).toHaveBeenCalledOnce();
+  });
+
+  it("opens no window for an Open still connecting when the computer is forgotten", async () => {
+    const pins = freshPins();
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
+    const open = vi.fn();
+
+    const outcome = await openPairedComputer({
+      origin: ORIGIN,
+      pins,
+      windows: { open, closeAll: vi.fn() },
+      connect: async () => {
+        pins.forget(ORIGIN);
+        return { status: "connected", socket: { destroy: vi.fn() } } as never;
+      },
+    });
+
+    expect(outcome.status).toBe("refused");
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("clears one origin's page storage through the helper any unpair path can call", async () => {
+    const storage = storagePort();
+    await clearRemotePageStorage(storage, ORIGIN);
+    expect(storage.clearStorageData).toHaveBeenCalledWith({ origin: ORIGIN });
   });
 });
