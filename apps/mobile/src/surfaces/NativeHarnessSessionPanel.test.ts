@@ -56,6 +56,15 @@ function sessionView(approval: {
   readonly status: "pending";
   readonly askedAt: string;
   readonly singleUse?: boolean;
+  readonly outsideContent?: {
+    readonly sourceCount: number;
+    readonly sources: ReadonlyArray<{
+      readonly sourceLabel: string;
+      readonly ingestionCount: number;
+      readonly firstIngestedAt: string;
+      readonly lastIngestedAt: string;
+    }>;
+  };
   readonly source?: {
     readonly runId: string;
     readonly providerInstanceId: string;
@@ -174,5 +183,59 @@ describe("phone harness approvals", () => {
 
     expect(approvalChoices(container)).toEqual(["Allow", "Deny"]);
     expect(container.textContent).toContain("Needs your say-so (shell-commands).");
+  });
+
+  it("shows why a marked thread asks and what marked it before the choices", async () => {
+    const container = await renderPanel(
+      sessionView({
+        id: "00000000-0000-4000-8000-000000000082",
+        toolName: "bash",
+        summary: "bash: bun run test",
+        approvalClass: "shell-commands",
+        singleUse: true,
+        status: "pending",
+        askedAt: "2026-09-05T12:06:00.000Z",
+        outsideContent: {
+          sourceCount: 3,
+          sources: [
+            {
+              sourceLabel: "web-fetch",
+              ingestionCount: 2,
+              firstIngestedAt: "2026-09-05T11:00:00.000Z",
+              lastIngestedAt: "2026-09-05T11:30:00.000Z",
+            },
+          ],
+        },
+      }),
+    );
+
+    const note = container.querySelector(
+      '[data-testid="mobile-native-harness-approval-outside-content"]',
+    );
+    expect(note?.textContent).toContain("This thread took in outside content");
+    expect(note?.textContent).toContain("Web pages · Read 2 times");
+    expect(note?.textContent).toContain("and 2 more sources");
+    const choice = [...container.querySelectorAll('[role="button"]')].find(
+      (node) => node.textContent?.trim() === "Allow",
+    );
+    expect(
+      note !== null &&
+        choice !== undefined &&
+        (note.compareDocumentPosition(choice) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    ).toBe(true);
+  });
+
+  it("shows no outside content note on a clean thread", async () => {
+    const container = await renderPanel(
+      sessionView({
+        id: "00000000-0000-4000-8000-000000000083",
+        toolName: "bash",
+        summary: "bash: bun run test",
+        approvalClass: "shell-commands",
+        status: "pending",
+        askedAt: "2026-09-05T12:06:00.000Z",
+      }),
+    );
+    expect(container.textContent).not.toContain("outside content");
   });
 });

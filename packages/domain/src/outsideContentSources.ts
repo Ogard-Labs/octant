@@ -1,3 +1,5 @@
+import type { ApprovalOutsideContent, ThreadExternalContentSource } from "@octant/contracts";
+
 /** What a source shows as when the host records a label nobody has named yet. */
 export const UNNAMED_OUTSIDE_SOURCE = "Other outside content";
 
@@ -82,4 +84,65 @@ export function describeSource(label: string): string {
   if (label.startsWith(SYNCED_PREFIX))
     return `An artifact synced from ${label.slice(SYNCED_PREFIX.length)}`;
   return UNNAMED_OUTSIDE_SOURCE;
+}
+
+/**
+ * How many times a source was read and when, in words. `formatTime` turns a
+ * recorded time into the client's own wording; a time it cannot read is left
+ * out rather than shown raw.
+ */
+export function describeOutsideContentReads(
+  source: ThreadExternalContentSource,
+  formatTime: (at: string | undefined) => string | undefined,
+): string {
+  const reads = source.ingestionCount === 1 ? "Read once" : `Read ${source.ingestionCount} times`;
+  const first = formatTime(source.firstIngestedAt);
+  const last = formatTime(source.lastIngestedAt);
+  if (first === undefined && last === undefined) return reads;
+  if (source.ingestionCount === 1 || first === last) return `${reads}, ${last ?? first}`;
+  return [
+    reads,
+    first === undefined ? undefined : `first ${first}`,
+    last === undefined ? undefined : `last ${last}`,
+  ]
+    .filter((part) => part !== undefined)
+    .join(", ");
+}
+
+export const APPROVAL_OUTSIDE_CONTENT_REASON =
+  "This thread took in outside content, so this call is approved once. Check that it is something you asked for.";
+
+/**
+ * The words every approval prompt shows ahead of its answer controls when the
+ * thread is marked: why it asks, each source that marked the thread, and how
+ * many more the list leaves out. One definition so the web, phone and
+ * terminal prompts cannot say different things.
+ */
+export function approvalOutsideContentLines(
+  outsideContent: ApprovalOutsideContent,
+  formatTime: (at: string | undefined) => string | undefined,
+): {
+  readonly reason: string;
+  readonly rows: ReadonlyArray<{
+    readonly sourceLabel: string;
+    readonly name: string;
+    readonly reads: string;
+  }>;
+  readonly more: string | undefined;
+} {
+  const unnamed = outsideContent.sourceCount - outsideContent.sources.length;
+  return {
+    reason: APPROVAL_OUTSIDE_CONTENT_REASON,
+    rows: outsideContent.sources.map((source) => ({
+      sourceLabel: source.sourceLabel,
+      name: describeSource(source.sourceLabel),
+      reads: describeOutsideContentReads(source, formatTime),
+    })),
+    more:
+      unnamed <= 0
+        ? undefined
+        : unnamed === 1
+          ? "and 1 more source"
+          : `and ${unnamed} more sources`,
+  };
 }

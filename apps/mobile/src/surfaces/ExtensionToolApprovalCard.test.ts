@@ -31,7 +31,7 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function hostWithOnePrompt() {
+function hostWithOnePrompt(outsideContent?: unknown) {
   const answers: Array<unknown> = [];
   let answered = false;
   const transport: MobileRemoteTransport = {
@@ -60,6 +60,7 @@ function hostWithOnePrompt() {
                 inputJson: '{"q":"plan"}',
                 requestedAt: "2026-10-15T06:00:00.000Z",
                 rememberable: false,
+                ...(outsideContent === undefined ? {} : { outsideContent }),
               },
             ],
       );
@@ -111,5 +112,73 @@ describe("MCP tool prompt on the phone", () => {
 
     expect(answers).toEqual([{ kind: "decide", approvalId, decision: "approved" }]);
     expect(container.querySelector('[data-testid="mobile-extension-tool-approval"]')).toBeNull();
+  });
+
+  it("shows why a marked thread asks and what marked it before Approve once", async () => {
+    const { transport } = hostWithOnePrompt({
+      sourceCount: 2,
+      sources: [
+        {
+          sourceLabel: "web-fetch",
+          ingestionCount: 2,
+          firstIngestedAt: "2026-10-15T05:00:00.000Z",
+          lastIngestedAt: "2026-10-15T05:30:00.000Z",
+        },
+      ],
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => {
+      root.render(
+        createElement(ThemeProvider, {
+          preference: "light",
+          surfaceStyle: "flat",
+          children: createElement(ExtensionToolApprovalCard, {
+            transport,
+            threadId,
+            refreshIntervalMs: 60_000,
+          }),
+        }),
+      );
+    });
+
+    const note = container.querySelector(
+      '[data-testid="mobile-native-harness-approval-outside-content"]',
+    );
+    expect(note?.textContent).toContain("This thread took in outside content");
+    expect(note?.textContent).toContain("Web pages · Read 2 times");
+    expect(note?.textContent).toContain("and 1 more source");
+    const approve = [...container.querySelectorAll('[role="button"]')].find(
+      (node) => node.textContent?.trim() === "Approve once",
+    );
+    expect(
+      note !== null &&
+        approve !== undefined &&
+        (note.compareDocumentPosition(approve) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    ).toBe(true);
+  });
+
+  it("shows no outside content note on a clean thread", async () => {
+    const { transport } = hostWithOnePrompt();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => {
+      root.render(
+        createElement(ThemeProvider, {
+          preference: "light",
+          surfaceStyle: "flat",
+          children: createElement(ExtensionToolApprovalCard, {
+            transport,
+            threadId,
+            refreshIntervalMs: 60_000,
+          }),
+        }),
+      );
+    });
+    expect(container.textContent).not.toContain("outside content");
   });
 });

@@ -19,6 +19,7 @@ import {
 } from "@octant/client-runtime";
 import type { NativeHarnessFollowUpPreview, NativeHarnessSessionView } from "@octant/contracts";
 import { GlassChip, useTheme } from "../../design-system";
+import { OutsideContentNote } from "./OutsideContentNote";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 
 export interface NativeHarnessSessionPanelProps {
@@ -190,6 +191,9 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
               ? `Needs your say-so (${pendingApproval.approvalClass}).`
               : "Allow this request for this child."}
           </Text>
+          {pendingApproval.outsideContent === undefined ? null : (
+            <OutsideContentNote outsideContent={pendingApproval.outsideContent} />
+          )}
           <View style={styles.chips}>
             <GlassChip active={false} label="Allow" onPress={() => decide("approve")} />
             {/* A child request is never remembered, and neither is a call after
