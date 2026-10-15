@@ -6704,9 +6704,19 @@ export function startOctantServer(
             proxiedShell: harnessProxiedShell,
             commandHosts: (threadId: string) => toolEgressRules.commandConfirmationHosts(threadId),
           }),
-      readCodeExecutionPolicy: (threadId) => {
+      // The posture a command's network follows is the one its turn may use:
+      // the window's session grant, clamped to the running turn's posture, so
+      // a thread widened mid-turn keeps that turn's commands on `proxied`.
+      readCodeExecutionPolicy: (threadId, windowId) => {
         try {
-          return persistence.readCodeThread(decodeCodeThreadId(threadId))?.executionPolicy;
+          const stored = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          if (stored === undefined) return undefined;
+          const session =
+            windowId === undefined
+              ? stored
+              : codeSessionAuthority.effectiveThread(decodeWindowId(windowId), stored);
+          return (codeOperationRuntime?.threadWithActiveTurnPosture?.(session) ?? session)
+            .executionPolicy;
         } catch {
           return undefined;
         }
