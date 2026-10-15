@@ -180,7 +180,8 @@ function isPrivateListenerAddress(address: string | undefined): boolean {
   // its spelling. An IPv4-mapped IPv6 form or a zone is refused, not unwrapped.
   if (address === undefined) return false;
   const literal =
-    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(address) || /^[0-9A-Fa-f:]*:[0-9A-Fa-f:]*$/.test(address);
+    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(address) ||
+    (address.includes(":") && /^[0-9A-Fa-f:]+$/.test(address));
   if (!literal) return false;
   const reach = classifyRemoteListenerAddress(address);
   return reach === "lan-private" || reach === "tailscale";
