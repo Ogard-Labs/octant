@@ -5176,12 +5176,12 @@ mechanisms are:
   because Bubblewrap would create it in the person's own Project (see
   [Extensions and skills](#extensions-and-skills)).
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                                                                  |
-  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                                                                |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only `sessions/` and this checkout's transcript folder, never `memory/` |
-  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                                                               |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                                                  |
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                                                        |
+  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                                                      |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder |
+  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                                                     |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                                        |
 
   Codex is unwrapped because its app-server is leased once per provider
   instance: `providerRuntimeRegistry` keys runtimes by `instanceId`, so one
@@ -5208,21 +5208,27 @@ mechanisms are:
   itself.
   A confined Claude Plan launch reads the assigned leaf of that account's
   state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
-  writes only `sessions/` and its own checkout's transcript folder
-  `projects/<checkout>/` in it, plus the launch temporary directory.
+  writes only `sessions/` and its own session in `projects/`: the
+  transcript `projects/<checkout>/<session>.jsonl` and the session's folder
+  `projects/<checkout>/<session>/` (subagent transcripts, saved tool
+  results), plus the launch temporary directory. `<session>` is the UUID
+  Octant opens the session under (`--session-id`) or resumes
+  (`--resume`); a launch whose arguments name neither gets no transcript.
   `<checkout>` is the runtime's own name for the canonical working
   directory: every character outside `[a-zA-Z0-9]` becomes `-`, and a name
   over 200 characters is cut there and gains a hash of the full path (read
-  from Claude Code 2.1.300). Within that folder `memory/` is refused. Every
-  other checkout's folder, with its transcripts and its `memory/`, is
-  read-only, because a later session reads `memory/` as instructions; on
-  Linux the checkout's own `memory/` is overlaid read-only and empty, so a
-  Plan launch there does not see it. Octant creates `sessions/` and the
-  transcript folder before the launch. The transcript folder is granted
-  rather than the one transcript file, because the runtime also keeps a
-  session's subagent transcripts and saved tool results in
-  `projects/<checkout>/<session>/`; resume reads the transcript from the
-  same folder. Measured on macOS 27 with Claude Code 2.1.299, one Plan turn
+  from Claude Code 2.1.300). That name is not unique (`/tmp/team-project`
+  and `/tmp/team/project` share one), so the grant is the session and not
+  the folder: other sessions' transcripts, in this folder or another, and
+  every `memory/` folder, which a later session reads as instructions, stay
+  read-only. Octant creates `sessions/` and the session's folder before the
+  launch, but not the transcript, because the runtime refuses a new
+  session id whose transcript already exists. Seatbelt grants the
+  transcript path before it exists. Bubblewrap binds only what exists, so
+  on Linux a new session's transcript is refused and a resumed one's is
+  written. Measured unconfined with Claude Code 2.1.300 and a refused API
+  key (no model call), a new session wrote only its transcript in that
+  folder, and a resume appended to the same file in place. Measured on macOS 27 with Claude Code 2.1.299, one Plan turn
   wrote session records in `sessions/`, its transcript as
   `projects/<checkout>/<session>.jsonl`, and
   `.claude.json` (with a lock, a temporary file and a copy in `backups/`)
@@ -5233,7 +5239,7 @@ mechanisms are:
   `.claude.json` lock and temporary file and its `.last-cleanup` were
   denied, its transcript landed in `projects/`, and the sandbox refused
   nothing else that the first turn had been allowed. No real turn has run
-  yet under the narrower transcript-folder grant. That keeps a Plan
+  yet under the narrower session grant. That keeps a Plan
   launch from writing what a later session outside this sandbox would
   load: `settings.json` and its hooks, `.claude.json` and its per-project
   MCP servers, `skills/`, `plugins/`, `agents/`, `commands/`, and any
