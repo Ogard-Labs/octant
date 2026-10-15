@@ -192,10 +192,16 @@ one call. **Always allow in this Project** also makes Octant run that one tool
 in that one Project without asking; other tools of the same plugin, and the
 same tool in other Projects, still ask. It appears only where Octant can
 remember the answer: not in a thread with no Project, not in Plan, not for a
-network tool in a thread that has already read outside content, and not from a
-paired device. A plugin update, or a change to how the server describes the
-tool, makes Octant ask again, and removing the plugin forgets every answer
-about it.
+network tool in a thread that has already read outside content, not for a
+turn sent from a paired device, and not from a paired device. A plugin update,
+or a change to how the server describes the tool, makes Octant ask again, and
+removing the plugin forgets every answer about it.
+
+A turn you send from a paired device, such as the phone, shows the card on that
+device with **Approve once** and **Deny**. A window on the host that has the
+thread's Project open shows the same card and may answer it instead. Whoever
+answers first settles the call; if nobody answers within five minutes, the
+call is denied.
 
 To see or take back what you allowed, open **Settings → Data & privacy →
 Remembered tool approvals**. It lists each tool under its Project with a

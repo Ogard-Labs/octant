@@ -1,4 +1,5 @@
 import type { ComputerUseSessionView } from "@octant/contracts/computer-use";
+import { ApprovalOutsideContentNote } from "../composer/ApprovalOutsideContentNote";
 import { OctantButton } from "../ui/base/OctantButton";
 import { computerUseApprovalPrompt, computerUseApproveLabel } from "./computerUseApprovalCopy";
 
@@ -31,6 +32,11 @@ export function ComputerUseLifecyclePane(props: ComputerUseLifecyclePaneProps) {
         <div aria-label="Computer-use approval" role="group">
           <p>{computerUseApprovalPrompt(props.view.pendingApproval)}</p>
           <strong>{props.view.pendingApproval.summary}</strong>
+          {props.view.pendingApproval.outsideContent === undefined ? null : (
+            <ApprovalOutsideContentNote
+              outsideContent={props.view.pendingApproval.outsideContent}
+            />
+          )}
           <p>This approval is bound to this host, Project, thread, provider, action, and client.</p>
           <div>
             <OctantButton disabled={props.busy} onClick={props.onApprove} type="button">

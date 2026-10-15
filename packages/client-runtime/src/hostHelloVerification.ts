@@ -1,4 +1,7 @@
-import type { HostHelloV1 } from "@octant/contracts/remote-access";
+import {
+  HOST_HELLO_CLIENT_NONCE_PARAMETER,
+  type HostHelloV1,
+} from "@octant/contracts/remote-access";
 import { buildHostHelloSignaturePayload } from "@octant/domain";
 
 /** The host identity a paired client recorded when it paired. */
@@ -12,12 +15,13 @@ export type HostHelloVerification =
   | {
       readonly status: "refused";
       /**
-       * `host-outdated`: the hello carries no public key, so this host was
-       * built before clients checked it. Updating the host fixes it; the
-       * pairing stays.
-       * `unproven`: the hello's key does not match its fingerprint or its
-       * signature does not verify, so whoever answered does not hold the key
-       * it names.
+       * `host-outdated`: the hello carries no public key or does not answer
+       * a client nonce, so this host was built before clients checked it.
+       * Updating the host fixes it; the pairing stays.
+       * `unproven`: the hello's key does not match its fingerprint, its
+       * signature does not verify, or it answers another request's client
+       * nonce, so whoever answered has not shown it holds the key it names
+       * now.
        * `host-changed`: a proven hello from a different host id or identity
        * key than the one recorded at pairing.
        * `expired`: the hello's own expiry has passed (beyond the allowed
@@ -27,7 +31,7 @@ export type HostHelloVerification =
       readonly message: string;
     };
 
-const OUTDATED_MESSAGE =
+export const HOST_OUTDATED_MESSAGE =
   "This host runs an older Octant that cannot prove its identity. Update Octant on the host, then connect again.";
 const UNPROVEN_MESSAGE = "This host could not prove its identity, so Octant did not connect.";
 const CHANGED_MESSAGE = "Host identity or key fingerprint changed at the same endpoint.";
@@ -42,30 +46,61 @@ const EXPIRED_MESSAGE =
 export const HOST_HELLO_CLOCK_SKEW_MS = 2 * 60 * 1_000;
 
 /**
+ * A fresh nonce for one hello request: 32 random bytes, unpadded base64url.
+ * The host signs it into the hello, so a hello recorded from an earlier
+ * request cannot answer this one.
+ */
+export function createHelloClientNonce(): string {
+  return toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+/** The hello route at `origin`, naming the request's client nonce. */
+export function hostHelloUrl(origin: string, clientNonce: string): string {
+  const url = new URL("/api/remote/hello", origin);
+  url.searchParams.set(HOST_HELLO_CLIENT_NONCE_PARAMETER, clientNonce);
+  return url.toString();
+}
+
+/**
+ * A host built before client nonces refuses a hello request with a query as
+ * an unknown route (404). Every Octant host serves the hello route, so that
+ * answer means the host is too old, never that the route is missing.
+ */
+export const HOST_HELLO_OUTDATED_STATUS = 404;
+
+/**
  * Checks a host hello before a client acts on it. The hello must carry the
  * host identity public key, that key must hash (SHA-256 of its DER
- * SubjectPublicKeyInfo) to the fingerprint the hello states, and the hello's
- * signature must verify against it. With a pin, the proven host id and
- * fingerprint must also equal the ones recorded at pairing, and the hello
- * must not have expired.
+ * SubjectPublicKeyInfo) to the fingerprint the hello states, the hello must
+ * echo the client nonce this client sent with the request, and the hello's
+ * signature (version 2, which covers that nonce) must verify against the
+ * key. The hello must not have expired, and with a pin the proven host id
+ * and fingerprint must also equal the ones recorded at pairing.
  *
  * Before this check, clients compared only the fingerprint a host stated
  * about itself, so anything that answered at the paired origin could state
- * the paired fingerprint and pass.
+ * the paired fingerprint and pass. Checking the signature alone still let it
+ * replay a genuine hello it had recorded, because the hello's own nonce is
+ * the host's; the client nonce makes each hello answer one request.
  */
 export async function verifyHostHello(
   hello: HostHelloV1,
-  context: { readonly pinned?: PinnedHostIdentity | undefined; readonly now: number },
+  context: {
+    readonly pinned?: PinnedHostIdentity | undefined;
+    readonly now: number;
+    readonly clientNonce: string;
+  },
 ): Promise<HostHelloVerification> {
   const pinned = context.pinned;
-  if (hello.hostPublicKey === undefined) {
-    return { status: "refused", reason: "host-outdated", message: OUTDATED_MESSAGE };
+  if (hello.hostPublicKey === undefined || hello.clientNonce === undefined) {
+    return { status: "refused", reason: "host-outdated", message: HOST_OUTDATED_MESSAGE };
   }
   const expiresAt = Date.parse(hello.expiresAt);
   if (!Number.isFinite(expiresAt) || expiresAt + HOST_HELLO_CLOCK_SKEW_MS <= context.now) {
     return { status: "refused", reason: "expired", message: EXPIRED_MESSAGE };
   }
   const unproven = { status: "refused", reason: "unproven", message: UNPROVEN_MESSAGE } as const;
+  if (hello.clientNonce !== context.clientNonce) return unproven;
   const spki = fromBase64Url(hello.hostPublicKey);
   const signature = fromBase64Url(hello.signature);
   if (spki === undefined || signature === undefined) return unproven;
@@ -115,4 +150,10 @@ function fromBase64Url(value: string): Uint8Array<ArrayBuffer> | undefined {
 
 function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function toBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }

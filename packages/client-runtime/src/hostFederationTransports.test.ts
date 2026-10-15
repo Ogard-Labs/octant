@@ -472,14 +472,24 @@ describe("HostFederationTransports (Post-preview B2)", () => {
     expect(bridges.get(HOST_A)?.disconnect).toHaveBeenCalled();
   });
 
-  it("refuses a paired host whose hello does not verify, keeping the pairing", async () => {
+  it.each([
+    ["whose hello does not verify", "forged"],
+    ["that replays a genuine hello recorded from an earlier request", "replayed"],
+  ] as const)("refuses a paired host %s, keeping the pairing", async (_label, answer) => {
     // The desktop window reaches other hosts through these transports and the
     // production session bridge, so this drives the real verification path.
     const forger = createTestHostKey();
+    let recorded: Record<string, unknown> | undefined;
     const server = createFakeRemoteServer({
       hostId: HOST_A,
-      tamperHello: (hello) => ({ ...hello, signature: forger.sign("forged") }),
+      tamperHello: (hello) =>
+        answer === "forged" ? { ...hello, signature: forger.sign("forged") } : (recorded ?? hello),
     });
+    if (answer === "replayed") {
+      recorded = await (
+        await server.fetch(`${ORIGIN}/api/remote/hello?clientNonce=${"r".repeat(43)}`)
+      ).json();
+    }
     const deviceKeyStore = createInMemoryDeviceKeyStore();
     const keyPair = (await crypto.subtle.generateKey(
       { name: "ECDSA", namedCurve: "P-256" },

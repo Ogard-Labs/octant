@@ -2,6 +2,12 @@ import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { parseListenerRequestHost, requestUrlStaysOnHost } from "./listenerRequestHost";
 import { deriveTransportFactsFromPeer } from "./remoteRequestFacts";
 import type { RequestTransportFacts, Serve } from "./server";
+import {
+  WEBSOCKET_RELAY_MAX_MESSAGE_BYTES,
+  takeWebSocketUpgrade,
+  type WebSocketPeerEvents,
+  type WebSocketUpgradeAcceptance,
+} from "./webSocketRelay";
 
 interface BunRequestAddress {
   readonly address: string;
@@ -9,15 +15,24 @@ interface BunRequestAddress {
   readonly port: number;
 }
 
+interface RelayedSocketData {
+  readonly acceptance: WebSocketUpgradeAcceptance;
+  events?: WebSocketPeerEvents;
+}
+
 type BunServer = {
   readonly requestIP: (request: Request) => BunRequestAddress | null;
+  readonly upgrade: (
+    request: Request,
+    options: { readonly data: RelayedSocketData; readonly headers?: HeadersInit },
+  ) => boolean;
   readonly url: URL;
   readonly stop: (closeActiveConnections?: boolean) => void;
 };
 
 export const bunServe: Serve = (options) => {
   const listenerTrust = options.listenerTrust ?? "loopback";
-  const server = Bun.serve({
+  const server = Bun.serve<RelayedSocketData>({
     hostname: options.hostname,
     port: options.port,
     maxRequestBodySize: options.maxRequestBodySize ?? MAX_CHAT_ATTACHMENT_BYTES,
@@ -54,11 +69,57 @@ export const bunServe: Serve = (options) => {
         ...(peer === null ? {} : { family: peer.family }),
         listenerTrust,
       });
-      return options.fetch(request, facts);
+      return answerOrUpgrade(request, runtime, options.fetch(request, facts));
+    },
+    // Only an upgrade a route accepted reaches these; every other request
+    // that asks to upgrade gets the route's ordinary answer.
+    websocket: {
+      maxPayloadLength: WEBSOCKET_RELAY_MAX_MESSAGE_BYTES,
+      perMessageDeflate: false,
+      open: (socket) => {
+        socket.data.events = socket.data.acceptance.open({
+          send: (message) => {
+            if (message.text) socket.sendText(new TextDecoder().decode(message.data));
+            else socket.sendBinary(message.data);
+          },
+          close: (code, reason) => socket.close(code, reason),
+        });
+      },
+      message: (socket, message) => {
+        socket.data.events?.message(
+          typeof message === "string"
+            ? { text: true, data: new TextEncoder().encode(message) }
+            : { text: false, data: new Uint8Array(message) },
+        );
+      },
+      close: (socket, code, reason) => socket.data.events?.closed(code, reason),
     },
   });
   return server as unknown as ReturnType<Serve>;
 };
+
+/**
+ * Switch the connection when the route's answer carries an accepted upgrade;
+ * otherwise send the answer as it is.
+ */
+async function answerOrUpgrade(
+  request: Request,
+  runtime: BunServer,
+  answer: Response | Promise<Response>,
+): Promise<Response | undefined> {
+  const response = await answer;
+  const acceptance = takeWebSocketUpgrade(response);
+  if (acceptance === undefined) return response;
+  const upgraded = runtime.upgrade(request, {
+    data: { acceptance },
+    ...(acceptance.protocol === undefined
+      ? {}
+      : { headers: { "sec-websocket-protocol": acceptance.protocol } }),
+  });
+  if (upgraded) return undefined;
+  acceptance.cancel();
+  return new Response("Bad WebSocket handshake", { status: 400 });
+}
 
 function invalidHostResponse(): Response {
   return new Response("Invalid Host header", {

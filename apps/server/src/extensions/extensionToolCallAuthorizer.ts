@@ -2,7 +2,7 @@ import {
   decideExtensionToolGrant,
   type ExtensionToolGrantDecision,
 } from "@octant/domain/extension-tool-grant-policy";
-import type { WindowId } from "@octant/contracts";
+import type { ApprovalOutsideContent, WindowId } from "@octant/contracts";
 import type { ExtensionToolGrantSubject } from "../persistence/extensionToolGrantProjection";
 import type { ExtensionToolCall } from "./agentPluginMcpSessionManager";
 import type { ExtensionToolApprovalService } from "./extensionToolApprovalService";
@@ -23,8 +23,15 @@ export function createExtensionToolCallAuthorizer(options: {
    * turn's prompt is approved once and never remembered.
    */
   readonly isHostScope: (windowId: WindowId) => boolean;
+  /**
+   * Whether the scope a turn runs under is a paired device's. Such a turn's
+   * prompt is approved once and never remembered, whoever answers it.
+   */
+  readonly isPairedDeviceScope: (windowId: WindowId) => boolean;
   /** Whether the thread has taken in outside content, from the journal's taint. */
   readonly threadTainted: (threadId: string) => boolean;
+  /** The sources that marked the thread, which its prompt names. */
+  readonly outsideContent?: (threadId: string) => ApprovalOutsideContent | undefined;
 }): (call: ExtensionToolCall) => Promise<boolean> {
   const judge = (
     call: ExtensionToolCall,
@@ -49,6 +56,7 @@ export function createExtensionToolCallAuthorizer(options: {
       decision: decideExtensionToolGrant({
         inProject: subject !== undefined,
         hostOwnedTurn: call.windowId !== undefined && options.isHostScope(call.windowId),
+        pairedDeviceTurn: call.windowId !== undefined && options.isPairedDeviceScope(call.windowId),
         planTurn: call.thread.planTurn === true,
         threadTainted: options.threadTainted(call.thread.id),
         reach: call.reach,
@@ -81,6 +89,7 @@ export function createExtensionToolCallAuthorizer(options: {
     if (decision.kind === "covered") return true;
     // A turn nobody is sitting at may use a grant but cannot raise a prompt.
     if (call.windowId === undefined) return false;
+    const outsideContent = options.outsideContent?.(call.thread.id);
     return options.approvals.request({
       windowId: call.windowId,
       threadId: call.thread.id,
@@ -92,6 +101,7 @@ export function createExtensionToolCallAuthorizer(options: {
       providerToolName: call.providerToolName,
       mcpToolName: call.mcpToolName,
       inputJson: call.inputJson,
+      ...(outsideContent === undefined ? {} : { outsideContent }),
       ...(decision.rememberable ? { remember: () => remember(call) } : {}),
       ...(call.signal === undefined ? {} : { signal: call.signal }),
     });

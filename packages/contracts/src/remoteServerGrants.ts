@@ -213,8 +213,8 @@ export const REMOTE_SERVER_PROXY_RELAYED = "relayed" as const;
  *   answer the same, so a refusal never says which.
  * - `server-unreachable`: the host could not connect to the dev server on its
  *   loopback address in time, or the dev server failed before answering.
- * - `upgrade-refused`: the request asked to upgrade the connection, which this
- *   route does not carry.
+ * - `upgrade-refused`: the request asked to upgrade the connection to anything
+ *   but a WebSocket, or the dev server declined the WebSocket.
  */
 export const RemoteServerProxyRefusal = Schema.Struct({
   kind: Schema.Literal("remote-server-proxy-refused"),

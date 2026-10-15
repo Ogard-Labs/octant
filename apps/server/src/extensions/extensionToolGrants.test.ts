@@ -11,7 +11,10 @@ import { AGENT_PLUGINS_MCP_SCHEMA } from "@octant/plugin-host/agent-plugins";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  readApprovalOutsideContent,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { readAggregateVersion } from "../persistence/chatProjection";
 import {
   EXTENSION_AGGREGATE_TYPE,
@@ -43,6 +46,9 @@ const threadTwo = "73000000-0000-4000-8000-000000000002";
 const threadThree = "73000000-0000-4000-8000-000000000003";
 const threadFour = "73000000-0000-4000-8000-000000000004";
 const windowId = decodeWindowId("74000000-0000-4000-8000-000000000001");
+const pairedDevice = decodeWindowId("74000000-0000-4000-8000-0000000000d1");
+const isPairedDeviceScope = (scope: WindowId) => String(scope) === String(pairedDevice);
+const atWindow = { kind: "local-window", scopeId: windowId } as const;
 
 const directories: Array<string> = [];
 const closers: Array<() => Promise<void>> = [];
@@ -106,6 +112,8 @@ function openHost(
     uuid: randomUUID,
     now: () => Date.parse(now),
     isHostScope: isRoutineHostScope,
+    isPairedDeviceScope,
+    threadAuthorityIsCurrent: () => true,
     windowCanReachThread: () => true,
   });
   const server = {
@@ -188,8 +196,10 @@ function openHost(
       grants,
       approvals,
       isHostScope: isRoutineHostScope,
+      isPairedDeviceScope,
       threadTainted: (threadId) =>
         readThreadExternalContentTaint(connection, threadId).externalContentIngested,
+      outsideContent: (threadId) => readApprovalOutsideContent(connection, threadId),
     }),
     recordExternalContentIngestion: (input) => taint.record(input),
   });
@@ -235,15 +245,15 @@ function openHost(
 
   /** The one prompt a person at the window sees, once the call has raised it. */
   async function prompt() {
-    await vi.waitFor(() => expect(approvals.list(windowId)).toHaveLength(1));
-    const [pending] = approvals.list(windowId);
+    await vi.waitFor(() => expect(approvals.list(atWindow)).toHaveLength(1));
+    const [pending] = approvals.list(atWindow);
     if (pending === undefined) throw new Error("No extension tool approval is pending.");
     return pending;
   }
 
   async function answer(remember: boolean) {
     const pending = await prompt();
-    return approvals.decide(windowId, {
+    return approvals.decide(atWindow, {
       approvalId: pending.approvalId,
       decision: "approved",
       ...(remember ? { remember: true } : {}),
@@ -253,7 +263,7 @@ function openHost(
   /** Runs a call that must not ask anyone, and reports what it returned. */
   async function unprompted(input: Parameters<typeof call>[0]) {
     const result = await call(input);
-    expect(approvals.list(windowId)).toEqual([]);
+    expect(approvals.list(atWindow)).toEqual([]);
     return result;
   }
 
@@ -390,6 +400,8 @@ function lifecycle(host: ReturnType<typeof openHost>) {
 /** Approves `search` in Project A from thread one and remembers the answer. */
 async function rememberSearch(host: ReturnType<typeof openHost>) {
   const first = host.call({ threadId: threadOne, projectId: projectA });
+  // A clean thread's prompt names no outside content.
+  expect((await host.prompt()).outsideContent).toBeUndefined();
   expect(await host.prompt()).toMatchObject({
     extensionId,
     packageId,
@@ -501,8 +513,19 @@ describe("an MCP tool a person always allows in a Project", () => {
     const tainted = host.call({ threadId: threadOne, projectId: projectA });
     expect(await host.prompt()).toMatchObject({ mcpToolName: "search", rememberable: false });
     const pending = await host.prompt();
+    // The prompt names the source that marked the thread and when it was read.
+    expect(pending.outsideContent).toEqual({
+      sources: [
+        expect.objectContaining({
+          sourceLabel: "mcp-tool",
+          ingestionCount: 1,
+          lastIngestedAt: now,
+        }),
+      ],
+      sourceCount: 1,
+    });
     expect(
-      host.approvals.decide(windowId, {
+      host.approvals.decide(atWindow, {
         approvalId: pending.approvalId,
         decision: "approved",
         remember: true,
@@ -578,7 +601,7 @@ describe("an MCP tool a person always allows in a Project", () => {
     expect(pending.projectId).toBeUndefined();
 
     expect(await host.answer(true)).toBe(false);
-    expect(host.approvals.list(windowId)).toHaveLength(1);
+    expect(host.approvals.list(atWindow)).toHaveLength(1);
     expect(host.grants.list()).toEqual([]);
 
     expect(await host.answer(false)).toBe(true);
@@ -611,19 +634,59 @@ describe("an MCP tool a person always allows in a Project", () => {
     // the thread can turn this answer into a grant; the call keeps waiting.
     for (const answering of [ROUTINE_HOST_SCOPE_ID, windowId]) {
       expect(
-        host.approvals.decide(answering, {
-          approvalId: pending.approvalId,
-          decision: "approved",
-          remember: true,
-        }),
+        host.approvals.decide(
+          { kind: "local-window", scopeId: answering },
+          {
+            approvalId: pending.approvalId,
+            decision: "approved",
+            remember: true,
+          },
+        ),
       ).toBe(false);
-      expect(host.approvals.list(windowId)).toHaveLength(1);
+      expect(host.approvals.list(atWindow)).toHaveLength(1);
       expect(host.grants.list()).toEqual([]);
     }
 
     expect(await host.answer(false)).toBe(true);
     await expect(routine).resolves.not.toMatchObject({ isError: true });
     expect(host.grants.list()).toEqual([]);
+  });
+
+  it("approves a paired device's turn's prompt once from the device or a local window, and never remembers it", async () => {
+    const host = openHost(temporaryDirectory());
+    const atDevice = { kind: "remote-device", scopeId: pairedDevice } as const;
+    const fromDevice = host.call({ threadId: threadOne, projectId: projectA, from: pairedDevice });
+    await vi.waitFor(() => expect(host.approvals.list(atDevice)).toHaveLength(1));
+    const [pending] = host.approvals.list(atDevice);
+    if (pending === undefined) throw new Error("No extension tool approval is pending.");
+    expect(pending).toMatchObject({ projectId: projectA, rememberable: false });
+
+    for (const answerer of [atDevice, atWindow]) {
+      expect(
+        host.approvals.decide(answerer, {
+          approvalId: pending.approvalId,
+          decision: "approved",
+          remember: true,
+        }),
+      ).toBe(false);
+    }
+    expect(host.grants.list()).toEqual([]);
+    expect(host.approvals.list(atWindow)).toHaveLength(1);
+
+    expect(
+      host.approvals.decide(atDevice, { approvalId: pending.approvalId, decision: "approved" }),
+    ).toBe(true);
+    await expect(fromDevice).resolves.not.toMatchObject({ isError: true });
+    expect(host.grants.list()).toEqual([]);
+
+    const answeredAtWindow = host.call({
+      threadId: threadOne,
+      projectId: projectA,
+      from: pairedDevice,
+    });
+    expect(await host.answer(false)).toBe(true);
+    await expect(answeredAtWindow).resolves.not.toMatchObject({ isError: true });
+    expect(host.server.calls).toEqual(["search", "search"]);
   });
 
   it("lets a host-run turn use a grant a person recorded from their own turn", async () => {
@@ -887,6 +950,7 @@ describe("the grant a call is checked against", () => {
       grants: host.grants,
       approvals: host.approvals,
       isHostScope: isRoutineHostScope,
+      isPairedDeviceScope,
       threadTainted: () => true,
     });
     const tool = {
@@ -905,6 +969,6 @@ describe("the grant a call is checked against", () => {
 
     await expect(authorize({ ...tool, reach: "confined-stdio" })).resolves.toBe(true);
     await expect(authorize({ ...tool, reach: "network" })).resolves.toBe(false);
-    expect(host.approvals.list(windowId)).toEqual([]);
+    expect(host.approvals.list(atWindow)).toEqual([]);
   });
 });
