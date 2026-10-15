@@ -855,6 +855,7 @@ import {
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import {
   decodeCanvasDefinition,
+  decodeCanvasId,
   decodeProjectId,
   type ProjectId,
   type UtcTimestamp,
@@ -6920,13 +6921,6 @@ export function startOctantServer(
                 targetThreadIds: threadMentionIds ?? [],
                 ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
               }),
-              canvasAgentToolPort === undefined
-                ? undefined
-                : createCanvasAgentTools({
-                    windowId,
-                    thread,
-                    port: canvasAgentToolPort,
-                  }),
               createImageAgentTools({
                 threadKind: "chat-thread",
                 scopeId: decodeImageGenerationScopeId(String(thread.id)),
@@ -6953,6 +6947,17 @@ export function startOctantServer(
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
           }),
+          // Outside the taint wrapper: a Canvas marks its reader only when a
+          // read or preview returns content from a Canvas that carries a mark,
+          // the rule Work and Code follow, so describe and a clean read leave
+          // the thread unmarked.
+          canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId,
+                thread,
+                port: canvasAgentToolPort,
+              }),
           // Host-internal: its results are Octant's own answers, not external
           // content, and `delegate` itself refuses while the thread is tainted.
           agentsManagedToolsFor({
@@ -9134,6 +9139,19 @@ export function startOctantServer(
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       writerMarked: threadOutsideContentMarks.isMarked,
     });
+    // Versions taken from another computer before they recorded their own
+    // author still name the thread they landed in, which a Clear exempts.
+    try {
+      canvasEventStore.carryAdoptedVersionWriters({
+        versionIdsOf: (canvasId) =>
+          persistence.canvasProjection
+            .getById(decodeCanvasId(canvasId))
+            ?.versions.map((version) => String(version.versionId)),
+        occurredAt: new Date().toISOString() as UtcTimestamp,
+      });
+    } catch {
+      // The next start tries again; a read refuses when the mark is unreadable.
+    }
     // One server-owned Canvas authority, shared by every Canvas mutation
     // including sharing, so a share can never be admitted under weaker checks
     // than a revise or a refresh.

@@ -1504,6 +1504,56 @@ describe("createCanvasAgentTools", () => {
   });
 });
 
+describe("a Chat thread's Canvas reads", () => {
+  const canvasId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const get = () => ({
+    kind: "ready" as const,
+    version: { sequence: 2, definition: { title: "Hand-off", blocks: [diagram] } },
+  });
+
+  it("does not look for a mark when describing", async () => {
+    const markReader = vi.fn(() => ({ status: "marked" as const }));
+    const { set } = tools({ markReader });
+
+    await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe" }),
+    });
+
+    expect(markReader).not.toHaveBeenCalled();
+  });
+
+  it("hands on a clean Canvas without marking the thread", async () => {
+    const markReader = vi.fn(() => ({ status: "nothing-to-mark" as const }));
+    const { set } = tools({
+      canvas: { create: vi.fn(), revise: vi.fn(), threadReferenceCards: vi.fn(), get },
+      markReader,
+    });
+
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read", canvasId }),
+    });
+
+    expect(markReader).toHaveBeenCalledWith({ readerId: threadId, canvasId });
+    expect(outcome.result).toMatchObject({ canvasId, blocks: [diagram] });
+  });
+
+  it("withholds a marked Canvas when the thread cannot be marked", async () => {
+    const { set } = tools({
+      canvas: { create: vi.fn(), revise: vi.fn(), threadReferenceCards: vi.fn(), get },
+      markReader: vi.fn(() => ({ status: "refused" as const })),
+    });
+
+    const outcome = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read", canvasId }),
+    });
+
+    expect(outcome.isError).toBe(true);
+  });
+});
+
 describe("a managed child's Canvas tool", () => {
   const runId = "12121212-1212-4121-8121-121212121212";
   const parentThreadId = threadId;
