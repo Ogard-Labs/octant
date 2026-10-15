@@ -232,6 +232,15 @@ import {
   registerCanvasPrototypeScheme,
   type CanvasPrototypeSurface,
 } from "./canvasPrototypeSurface";
+import {
+  createRemoteServerPages,
+  pageAccessHeader,
+  pageNavigation,
+  readRecordedForwarderPort,
+  recordForwarderPort,
+  validateRemoteServerPageOpenRequest,
+  type RemoteServerPages,
+} from "./remoteServerPages";
 
 const IPC_CHANNELS = {
   nativeMenu: "octant:menu:popup",
@@ -312,6 +321,9 @@ const IPC_CHANNELS = {
   remoteHostIdentityStatus: "octant:remote-host-identity:status",
   remoteHostIdentityRotate: "octant:remote-host-identity:rotate",
   remoteHostIdentityRecover: "octant:remote-host-identity:recover",
+  remoteServerPageOpen: "octant:remote-server-page:open",
+  remoteServerPageSign: "octant:remote-server-page:sign",
+  remoteServerPageSigned: "octant:remote-server-page:signed",
 } as const;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -3369,6 +3381,26 @@ function installIpcHandlers(): void {
       writeFile: options.writeFile,
     });
   });
+  ipcMain.handle(IPC_CHANNELS.remoteServerPageOpen, async (event, value: unknown) => {
+    ownedTopLevelWindowContext(event);
+    const request = validateRemoteServerPageOpenRequest(value);
+    const signer = event.sender;
+    if (!remoteServerPageSigners.has(signer.id)) {
+      remoteServerPageSigners.set(signer.id, signer);
+      const signerId = signer.id;
+      signer.once("destroyed", () => {
+        remoteServerPageSigners.delete(signerId);
+        remoteServerPages().windowClosed(signerId);
+      });
+    }
+    return await remoteServerPages().open(signer.id, request);
+  });
+  ipcMain.handle(IPC_CHANNELS.remoteServerPageSigned, (event, value: unknown) => {
+    ownedTopLevelWindowContext(event);
+    if (typeof value !== "object" || value === null) return;
+    const answer = value as { readonly requestId?: unknown; readonly signing?: unknown };
+    remoteServerPages().answer(event.sender.id, answer.requestId, answer.signing);
+  });
   ipcMain.handle(IPC_CHANNELS.browserSurfaceOpenExternal, async (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
     await shell.openExternal(validateExternalBrowserUrl(value));
@@ -3714,6 +3746,86 @@ function decodeCodeOperationApprovalPresentation(value: unknown): {
 
 function ownedWindow(event: IpcMainInvokeEvent): BrowserWindow {
   return ownedWindowContext(event).window;
+}
+
+// The windows that opened a page of another computer, which sign its requests.
+const remoteServerPageSigners = new Map<number, Electron.WebContents>();
+// Octant's browser windows for opened pages, by page name, and the origin each
+// name is served at now (the forwarder's port is part of it).
+const remoteServerPageWindows = new Map<string, BrowserWindow>();
+const remoteServerPageOrigins = new Map<string, string>();
+let remoteServerPagesInstance: RemoteServerPages | undefined;
+
+function remoteServerPages(): RemoteServerPages {
+  remoteServerPagesInstance ??= createRemoteServerPages({
+    readRecordedPort: () => readRecordedForwarderPort(app.getPath("userData")),
+    recordPort: (port) => recordForwarderPort(app.getPath("userData"), port),
+    askWindowToSign: (windowId, requestId, request) => {
+      const signer = remoteServerPageSigners.get(windowId);
+      if (signer === undefined || signer.isDestroyed()) return false;
+      signer.send(IPC_CHANNELS.remoteServerPageSign, { requestId, request });
+      return true;
+    },
+    showInOctantBrowser: showRemoteServerPage,
+    openExternal: (url) => shell.openExternal(url),
+  });
+  return remoteServerPagesInstance;
+}
+
+/**
+ * Octant's browser for an opened page: a window of its own in a persistent
+ * partition per page name, which only the person drives. It adds the page's
+ * secret to requests for the page's exact origin, keeps navigation on that
+ * origin, sends other links to the default browser, and grants no permission.
+ */
+function showRemoteServerPage(page: { readonly name: string; readonly pageOrigin: string }): void {
+  remoteServerPageOrigins.set(page.name, page.pageOrigin);
+  const existing = remoteServerPageWindows.get(page.name);
+  if (existing !== undefined && !existing.isDestroyed()) {
+    void existing.loadURL(`${page.pageOrigin}/`);
+    existing.show();
+    existing.focus();
+    return;
+  }
+  const partition = `persist:octant-remote-page-${page.name}`;
+  const pageSession = session.fromPartition(partition);
+  const currentOrigin = () => remoteServerPageOrigins.get(page.name) ?? page.pageOrigin;
+  pageSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  pageSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const header = pageAccessHeader(details.url, currentOrigin(), (origin) =>
+      remoteServerPages().accessFor(origin),
+    );
+    callback({
+      requestHeaders:
+        header === undefined
+          ? details.requestHeaders
+          : { ...details.requestHeaders, [header.name]: header.value },
+    });
+  });
+  const window = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    title: page.name,
+    webPreferences: {
+      partition,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (pageNavigation(url, currentOrigin()) === "external") void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  window.webContents.on("will-navigate", (event, url) => {
+    const decision = pageNavigation(url, currentOrigin());
+    if (decision === "stay") return;
+    event.preventDefault();
+    if (decision === "external") void shell.openExternal(url);
+  });
+  window.on("closed", () => remoteServerPageWindows.delete(page.name));
+  remoteServerPageWindows.set(page.name, window);
+  void window.loadURL(`${page.pageOrigin}/`);
 }
 
 function ownedWindowContext(

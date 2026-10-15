@@ -9,10 +9,6 @@ computer (the host), you can open the page on the computer in front of you (the
 client). Octant carries the page's requests to the host over the host's private
 HTTPS listener, so nothing needs an SSH tunnel and no new port is exposed.
 
-This page describes the designed behavior. Opening a page live needs the
-desktop app's local forwarder, which is not shipped yet. Until it is, a row on a
-window reading another computer keeps showing the host's picture of the page.
-
 ## What it needs
 
 - **The Octant desktop app on the client.** A paired browser and the phone
@@ -27,10 +23,13 @@ window reading another computer keeps showing the host's picture of the page.
 
 ## Open a server
 
-On the Running services card, a server that qualifies has **Open** and **Open
-in browser**.
+In the Octant desktop app, choose the other computer in the Environments filter
+so the start screen shows only that computer. Its Running services card then
+lists the servers running there, and a server that qualifies has **Open** and
+**Open in browser**.
 
-- **Open** shows the page in Octant's browser, in a view only you control.
+- **Open** shows the page in a window of Octant's own browser that only you
+  control; links to other sites open in your default browser.
 - **Open in browser** shows it in your default browser.
 
 The page gets its own name on your computer, `<port>-<label>.octant.localhost`,
@@ -44,12 +43,16 @@ Octant. The same server keeps the same name across reopens and restarts.
   or data reaches your own loopback, not the host's. The same applies to a
   sign-in callback registered on `localhost` and to a second server of the same
   thread that the page reaches by port.
-- **Live reload may not connect.** The host's proxy does not yet carry
-  WebSocket connections, so a dev server's hot-reload socket is refused and the
-  page needs a manual reload until that lands. A dev server that polls instead
-  keeps working.
-- **Octant must be open.** Each request is signed by an open Octant window.
-  With none open, the page says an Octant window must be open.
+- **Live reload does not connect yet.** Octant does not carry WebSocket
+  connections to the other computer yet, so a dev server's hot-reload socket
+  is refused and the page needs a manual reload. A dev server that polls
+  instead keeps working.
+- **Octant must stay open.** Each request is signed by the Octant window you
+  opened the page from. If you close that window, the page says an Octant
+  window must be open; open the server again from Running services.
+- **Octant's local port.** Pages are served on a port from 47610 to 47619.
+  If the port Octant used before is taken, it moves to the next one and says
+  that pages opened before start with empty storage.
 - **Open in browser has one residual risk.** Browsers send a name's cookies to
   every port on that name. A process on your computer that gets your browser to
   request the name on its own port can replay the page's access cookie. What it

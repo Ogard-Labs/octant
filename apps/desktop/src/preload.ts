@@ -88,6 +88,9 @@ export const IPC_CHANNELS = {
   remoteHostIdentityStatus: "octant:remote-host-identity:status",
   remoteHostIdentityRotate: "octant:remote-host-identity:rotate",
   remoteHostIdentityRecover: "octant:remote-host-identity:recover",
+  remoteServerPageOpen: "octant:remote-server-page:open",
+  remoteServerPageSign: "octant:remote-server-page:sign",
+  remoteServerPageSigned: "octant:remote-server-page:signed",
 } as const;
 
 type ResolvedSidebarMaterial = "opaque" | "translucent";
@@ -314,6 +317,29 @@ export interface RemoteHostIdentityRotationResult {
 }
 type MaterialListener = (event: unknown, material: unknown) => void;
 type DeepLinkListener = (event: unknown, target: unknown) => void;
+
+export type RemoteServerPageBridgeOutcome =
+  | { readonly kind: "opened"; readonly notice?: string }
+  | { readonly kind: "refused"; readonly message: string };
+
+function decodeRemoteServerPageOutcome(value: unknown): RemoteServerPageBridgeOutcome {
+  if (typeof value === "object" && value !== null) {
+    const record = value as {
+      readonly kind?: unknown;
+      readonly notice?: unknown;
+      readonly message?: unknown;
+    };
+    if (record.kind === "opened") {
+      return typeof record.notice === "string"
+        ? { kind: "opened", notice: record.notice }
+        : { kind: "opened" };
+    }
+    if (record.kind === "refused" && typeof record.message === "string") {
+      return { kind: "refused", message: record.message };
+    }
+  }
+  return { kind: "refused", message: "Octant could not open this server." };
+}
 type AgentStartListener = (event: unknown) => void;
 type SettingsOpenListener = (event: unknown) => void;
 type BoundProjectType = "work" | "code";
@@ -516,6 +542,20 @@ export interface OctantHostBridge {
   readonly subscribeCanvasFrameFocusEscape: (listener: () => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
+  /**
+   * Shows a server of another paired computer, which that computer granted,
+   * in Octant's browser or the default browser. The main process checks the
+   * request; the answer is opened, or refused with words for the row.
+   */
+  readonly openRemoteServerPage: (request: unknown) => Promise<RemoteServerPageBridgeOutcome>;
+  /**
+   * Makes this window the signer for the pages it opens: the forwarder asks
+   * it to sign each of their requests, and it answers with Octant's headers
+   * or a refusal.
+   */
+  readonly subscribeRemoteServerPageSigning: (
+    signer: (request: unknown) => Promise<unknown>,
+  ) => () => void;
   readonly getPrivateListenerStatus: () => Promise<PrivateListenerPublicStatus>;
   readonly enablePrivateListener: (
     request: PrivateListenerEnableBridgeRequest,
@@ -1032,6 +1072,33 @@ export function createHostBridge(
       const receive: AgentStartListener = () => listener();
       ipc.on(IPC_CHANNELS.startNewAgent, receive);
       return () => ipc.removeListener(IPC_CHANNELS.startNewAgent, receive);
+    },
+    openRemoteServerPage: async (request: unknown): Promise<RemoteServerPageBridgeOutcome> => {
+      try {
+        return decodeRemoteServerPageOutcome(
+          await ipc.invoke(IPC_CHANNELS.remoteServerPageOpen, request),
+        );
+      } catch {
+        return { kind: "refused", message: "Octant could not open this server." };
+      }
+    },
+    subscribeRemoteServerPageSigning: (signer: (request: unknown) => Promise<unknown>) => {
+      const receive: DeepLinkListener = (_event, message) => {
+        if (typeof message !== "object" || message === null) return;
+        const { requestId, request } = message as {
+          readonly requestId?: unknown;
+          readonly request?: unknown;
+        };
+        if (typeof requestId !== "string") return;
+        void signer(request)
+          .catch(() => ({ status: "refused" }))
+          .then((signing) =>
+            ipc.invoke(IPC_CHANNELS.remoteServerPageSigned, { requestId, signing }),
+          )
+          .catch(() => undefined);
+      };
+      ipc.on(IPC_CHANNELS.remoteServerPageSign, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
     },
     getPrivateListenerStatus: async () =>
       decodePrivateListenerStatus(await ipc.invoke(IPC_CHANNELS.privateListenerStatus)),

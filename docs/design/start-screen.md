@@ -253,7 +253,14 @@ started it. Each row
 has **Open** and **Stop**. Open places the page the host prepared: as a Browser
 tab of the thread whose own worktree the server runs in, otherwise in this
 computer's own browser, and only there, so a window reading another computer
-never opens that computer's loopback address on its own. Stop is the
+never opens that computer's loopback address on its own. In the desktop app,
+a window whose Environments filter is narrowed to one connected paired
+computer lists that computer's services instead, names it, and offers an
+Octant-owned, listening server in a thread **Open** and **Open in browser**,
+which show the page live on this computer (see
+[Architecture: security and authority](../architecture.md#security-and-authority),
+Forwarder and signer on the device); any other row there says in one line
+why it opens only on that computer, and a refusal shows on the row. Stop is the
 Environment's authorized stop unchanged: a server Octant owns stops at once, one
 it does not own asks for the same confirmation naming process, folder, and port,
 and a Stop the host will not offer (a server in a Plan thread's own worktree, a

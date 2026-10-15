@@ -31,6 +31,9 @@ function createBridge(): {
     deviceIdentity: () => undefined,
     updateFetch: () => undefined,
     authenticatedFetch: async () => new Response(),
+    issueServerProxySession: async () => {
+      throw new Error("No proxy session in this test.");
+    },
   };
   const reconnect = vi.fn();
   const bridge = {

@@ -5,5 +5,8 @@
     "types": ["bun", "node"]
   },
   "include": ["src"],
-  "exclude": ["src/remote/remoteExitEvidenceADriver.ts"]
+  "exclude": [
+    "src/remote/remoteExitEvidenceADriver.ts",
+    "src/remote/remoteServerForwarder.twoHost.test.ts"
+  ]
 }

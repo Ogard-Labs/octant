@@ -263,6 +263,17 @@ describe("the Running services card", () => {
       await waitFor(() => expect(screen.queryByText(/stopped or changed/)).toBeNull());
     });
 
+    it("says once that pages opened earlier start with empty storage when the opener moved", async () => {
+      const { client } = fakeClient(() => listed([service(1, threaded)]));
+      const notice =
+        "Octant moved its local port, so pages opened before start with empty storage.";
+      const openLive = vi.fn(async () => ({ kind: "opened" as const, notice }));
+      renderCard(createRunningServicesCard(source(client, { host: "Studio", openLive })));
+      await screen.findByText("vite");
+      await userEvent.setup().click(screen.getByRole("button", { name: "Open vite on port 5171" }));
+      expect(await screen.findByText(notice)).toBeInTheDocument();
+    });
+
     it("keeps the picture of the page where this window cannot open it live", async () => {
       const { client } = fakeClient(() => listed([service(1, threaded)]));
       renderCard(

@@ -113,10 +113,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
-  [
-    "packages/client-runtime/src/remoteListenerTlsNode.ts",
-    "The Node implementation of the listener trust rule; its real-TLS tests are the evidence that a pinned origin refuses before any request byte, and docs/plans/one-step-pairing.md ships it ahead of any `octant` command that connects to another host. Remove once such a command imports it.",
-  ],
 ]);
 
 /** Route modules exempt from Rule A, with the reason they are not registered. */
@@ -620,20 +616,7 @@ export function findUnregisteredRouteModules(
  * states a dated reason and the caller it is waiting on. Empty means every
  * served endpoint has a caller (or is a routing prefix).
  */
-export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
-  [
-    "/api/remote/auth/server-proxy-session",
-    "Host side of opening a dev server from a paired device; docs/plans/open-a-dev-server-from-another-computer.md builds the host first and its desktop forwarder last, so nothing calls it yet. Remove once the desktop forwarder does.",
-  ],
-  [
-    "/api/server-proxy",
-    "Host side of opening a dev server from a paired device; docs/plans/open-a-dev-server-from-another-computer.md builds the host first and its desktop forwarder last, so nothing calls it yet. Remove once the desktop forwarder does.",
-  ],
-  [
-    "/api/server-proxy/grants",
-    "Host side of opening a dev server from a paired device; docs/plans/open-a-dev-server-from-another-computer.md builds the host first and its desktop forwarder last, so nothing calls it yet. Remove once the desktop forwarder does.",
-  ],
-]);
+export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map();
 
 const API_PATH_PATTERN = /"(\/api\/[a-z0-9/_-]+)"/g;
 const PREFIX_GUARD_PATTERN = /startsWith\(\s*"(\/api\/[a-z0-9/_-]+)"/g;

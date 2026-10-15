@@ -52,7 +52,8 @@ export type RemoteOpenMode = "octant-browser" | "default-browser";
 
 /** What the live opener answers; a refusal carries words fit for the row. */
 export type RemoteOpenOutcome =
-  | { readonly kind: "opened" }
+  /** `notice`: something the person should know about pages opened earlier, said once. */
+  | { readonly kind: "opened"; readonly notice?: string }
   | { readonly kind: "refused"; readonly message: string };
 
 /** One line, because the page runs on this computer and its dev server does not. */

@@ -18,6 +18,7 @@ export * from "./codeProjectWorkspacePolicy";
 export * from "./localServerPolicy";
 export * from "./remoteServerGrantPolicy";
 export * from "./remoteServerProxyRelayPolicy";
+export * from "./remoteServerPagePolicy";
 export * from "./pushNotificationPolicy";
 export * from "./automationNotificationPolicy";
 export * from "./mobileHardeningPolicy";
