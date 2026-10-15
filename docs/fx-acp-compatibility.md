@@ -62,6 +62,9 @@ with the files readable.
 `session/new` reports `mode` as a select of `ask` and `code`, where `code`
 carries `permissionMode: "auto"`. Octant therefore never maps an approval-gated
 turn onto `code`, and refuses Chat and Plan before a session process starts.
+Because fx accepts a mode id it does not offer, Octant also refuses to start a
+session whose `mode` option does not list the mode the turn needs, before it
+selects one.
 
 ## Matrix
 
