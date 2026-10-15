@@ -79,7 +79,7 @@ export function RoutineCalendar(props: {
                     className="routine-calendar__entry"
                     onClick={() => props.onSelect(entry.automationId)}
                     type="button"
-                    variant="ghost"
+                    variant="bare"
                   >
                     <span className="routine-calendar__entry-time">{entry.label}</span>
                     <span className="routine-calendar__entry-name">{entry.displayName}</span>

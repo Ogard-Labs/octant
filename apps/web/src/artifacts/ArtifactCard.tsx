@@ -43,7 +43,7 @@ export function ArtifactCard(props: ArtifactCardProps) {
         className="artifact-card__button"
         onClick={() => props.onOpen(entry)}
         type="button"
-        variant="ghost"
+        variant="bare"
       >
         <span className="artifact-card__preview" aria-hidden="true">
           {entry.preview === undefined ? (
