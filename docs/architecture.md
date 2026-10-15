@@ -2406,7 +2406,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   key leased from the profile's key pool (the adapter names only the header,
   and a refused key cools down as for any other call), the bounded
   approved-URL fetch, and the host's generated-image media-type check; size,
-  time, and redirect bounds are the host's. Bundled image drivers pass the
+  time, and redirect bounds are the host's, with the response bound sized for
+  base64 images. The credential goes only over HTTPS to the hosts the driver
+  declares in code, or to the origin of a base URL the person configured; the
+  host refuses any other URL before it reads the key. Bundled image drivers pass the
   same plugin-host activation ladder as provider drivers but stay out of the
   chat-driver catalog, and a profile whose image driver plugin is disabled
   fails its jobs as unsupported before any provider call. The seam's

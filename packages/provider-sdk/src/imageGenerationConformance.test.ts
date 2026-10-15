@@ -4,6 +4,7 @@ import {
   classifyImageHttpFailure,
   imageFailure,
   imageInterrupted,
+  isImageEndpointAllowed,
   isProviderFailure,
   readImageJson,
   sanitizeImageFailure,
@@ -28,6 +29,7 @@ const instance = decodeProviderInstance({
 /** A synchronous URL-result provider written only against the seam. */
 const honestDriver: ImageGenerationDriver = {
   driverKind: "bfl-image",
+  providerHosts: ["images.example.test"],
   create: ({ ports }) => ({
     generate: async (request): Promise<ImageAdapterResult> => {
       try {
@@ -87,12 +89,14 @@ describe("image generation conformance", () => {
       unexpectedErrorContained: true,
       completedWithHostMediaTypes: true,
       hostMediaRefusalHonored: true,
+      calledOnlyDeclaredEndpoints: true,
     });
   });
 
   it("refuses a driver that calls the provider for a cancelled request", async () => {
     const eager: ImageGenerationDriver = {
       driverKind: "bfl-image",
+      providerHosts: ["images.example.test"],
       create: (context) => ({
         generate: async (request) => {
           await context.ports.request({
@@ -112,6 +116,7 @@ describe("image generation conformance", () => {
   it("refuses a driver whose generate rejects", async () => {
     const throwing: ImageGenerationDriver = {
       driverKind: "bfl-image",
+      providerHosts: ["images.example.test"],
       create: () => ({
         generate: async () => {
           throw new Error("boom");
@@ -126,6 +131,7 @@ describe("image generation conformance", () => {
   it("refuses a driver that labels bytes itself instead of asking the host", async () => {
     const selfLabelling: ImageGenerationDriver = {
       driverKind: "bfl-image",
+      providerHosts: ["images.example.test"],
       create: (context) => {
         const honest = honestDriver.create({
           ...context,
@@ -137,6 +143,35 @@ describe("image generation conformance", () => {
     await expect(
       runImageGenerationConformance({ ...fixture, driver: selfLabelling }),
     ).rejects.toThrow("bytes the host's media-type check refused");
+  });
+});
+
+describe("image provider endpoints", () => {
+  it("refuses a driver whose calls leave the hosts it declares", async () => {
+    const wandering: ImageGenerationDriver = {
+      ...honestDriver,
+      providerHosts: ["other.example.test"],
+    };
+    await expect(runImageGenerationConformance({ ...fixture, driver: wandering })).rejects.toThrow(
+      "outside the driver's declared provider hosts",
+    );
+  });
+
+  it("allows only HTTPS to a declared host, its subdomains when starred, or the configured base URL's origin", () => {
+    const endpoint = { providerHosts: ["api.example.test", "*.delivery.example.test"] };
+    expect(isImageEndpointAllowed("https://api.example.test/v1/x", endpoint)).toBe(true);
+    expect(isImageEndpointAllowed("https://eu.delivery.example.test/r", endpoint)).toBe(true);
+    expect(isImageEndpointAllowed("http://api.example.test/v1/x", endpoint)).toBe(false);
+    expect(isImageEndpointAllowed("https://api.example.test:8443/v1/x", endpoint)).toBe(false);
+    expect(isImageEndpointAllowed("https://api.example.test.evil.test/x", endpoint)).toBe(false);
+    expect(isImageEndpointAllowed("https://user:pw@api.example.test/x", endpoint)).toBe(false);
+    expect(isImageEndpointAllowed("http://127.0.0.1:9000/v1/x", endpoint)).toBe(false);
+    expect(
+      isImageEndpointAllowed("http://127.0.0.1:9000/v1/x", {
+        ...endpoint,
+        baseUrl: "http://127.0.0.1:9000/",
+      }),
+    ).toBe(true);
   });
 });
 

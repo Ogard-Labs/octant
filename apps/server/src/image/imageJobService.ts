@@ -44,10 +44,11 @@ import {
   type ProviderModelId,
   type UtcTimestamp,
 } from "@octant/contracts";
-import type {
-  ImageAdapterRequest,
-  ImageGenerationAdapter,
-  ImageGenerationDriver,
+import {
+  configuredImageBaseUrl,
+  type ImageAdapterRequest,
+  type ImageGenerationAdapter,
+  type ImageGenerationDriver,
 } from "@octant/provider-sdk/image-generation";
 import {
   assertCustomImageSourceEligible,
@@ -425,11 +426,16 @@ export class ImageJobService {
       (candidate) => candidate.driverKind === instance.driverKind,
     );
     if (driver !== undefined) {
+      const baseUrl = configuredImageBaseUrl(instance);
       return driver.create({
         instance,
         ports: makeImageGenerationPorts({
           instanceId: String(instance.id),
           credentialResolver: this.#credentialResolver,
+          endpoint: {
+            providerHosts: driver.providerHosts,
+            ...(baseUrl === undefined ? {} : { baseUrl }),
+          },
           ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
         }),
       });
