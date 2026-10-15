@@ -10065,7 +10065,8 @@ export function startOctantServer(
     // projection empty instead of trusting a partial stream. The host still
     // starts; the Automation list reports the degraded state and the
     // scheduler never starts, so nothing fires against history it never read.
-    const automationHistoryAvailable =
+    // A live rehydration that fails later revokes the same state.
+    let automationHistoryAvailable =
       hydrateAutomationProjection({
         store: automationEventStore,
         projection: persistence.automationProjection,
@@ -10296,6 +10297,10 @@ export function startOctantServer(
       projection: persistence.automationProjection,
       dispatch: automationDispatch,
       now: () => new Date().toISOString() as UtcTimestamp,
+      onHistoryUnavailable: () => {
+        automationHistoryAvailable = false;
+        void automationScheduler.stop();
+      },
     });
     if (automationHistoryAvailable) automationScheduler.start();
     // The host's own timer for completed threads, fed by every mode's service
