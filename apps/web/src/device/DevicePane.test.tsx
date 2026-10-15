@@ -331,6 +331,17 @@ describe("DevicePane", () => {
     expect(onAction).toHaveBeenLastCalledWith({ kind: "rotate", orientation: "portrait" });
   });
 
+  it("leaves the orientation to a host that knows which way the device sits", async () => {
+    const user = userEvent.setup();
+    // A Simulator keeps streaming portrait-sized frames after it turns, so the
+    // picture's size must not decide.
+    const { onAction } = pane({ canRotate: true, hostTurnsRotation: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Rotate" }));
+    expect(onAction).toHaveBeenLastCalledWith({ kind: "rotate" });
+  });
+
   it("leaves Rotate out of More on a host that has not reported it", async () => {
     const user = userEvent.setup();
     pane({ canRotate: false });
@@ -431,6 +442,15 @@ describe("DevicePane", () => {
     expect(unknown.message).toBe("iPhone 17 refused that action.");
     unknown.fix?.run();
     expect(retry).toHaveBeenCalledWith(intent);
+  });
+
+  it("says Rotate needs the device tool when a build does not have it installed", () => {
+    const problem = deviceProblemFor(
+      { kind: "refused", intent: { kind: "rotate" }, reason: "rotate-unavailable" },
+      { platform: "ios", deviceName: "iPhone 17e", retry: vi.fn() },
+    );
+    expect(problem.message).toContain("device tool isn't installed");
+    expect(problem.fix).toBeUndefined();
   });
 
   it("keeps a dismissed error hidden until that failure clears and a new one comes", () => {
