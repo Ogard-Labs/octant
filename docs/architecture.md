@@ -4709,12 +4709,14 @@ prompt, schema, tool, route, model, or capability.
     may drive (bound to the Project the prompt recorded).
   - A paired device answers only the prompts its own turns raised, approve
     once or deny, and only while the thread is still active and bound in
-    that Project. It never sees or answers a local window's, another
+    that Project (a Chat thread: still active and in the same Chat Project,
+    or still in none). It never sees or answers a local window's, another
     device's, or the host's prompt. `/api/extensions/tool-approvals` is
     forwarded to paired devices as `extension.tool-call.answer-once`; the
     approval service, not the route policy, applies these rules.
-  - A prompt raised by a device that is no longer paired goes to nobody
-    else and runs out.
+  - A prompt raised by a device that is no longer paired (revoked, or past
+    its registration's deadline even before the expiry is reconciled) goes
+    to nobody else and runs out.
 
   At most 32 of those approvals
   wait at once across the whole host; the cap is shared by every thread and

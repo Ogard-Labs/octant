@@ -713,6 +713,10 @@ import { AgentPluginMcpSessionManager } from "./extensions/agentPluginMcpSession
 import { LocalPluginFolderRegistry } from "./extensions/localPluginFolderRegistry";
 import { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
 import { ExtensionToolApprovalService } from "./extensions/extensionToolApprovalService";
+import {
+  chatThreadStandsInProject,
+  isDeviceRegistrationCurrent,
+} from "./extensions/pairedDeviceApprovalAuthority";
 import { createExtensionToolCallAuthorizer } from "./extensions/extensionToolCallAuthorizer";
 import { ExtensionToolGrantStore } from "./extensions/extensionToolGrantStore";
 import {
@@ -1886,19 +1890,31 @@ export function startOctantServer(
     // paired counts: a revoked or expired one's prompts are answered by
     // nobody else and run out.
     const isPairedDeviceScope = (scopeId: WindowId): boolean =>
-      readDeviceRegistration(persistence.connection, String(scopeId))?.state === "active";
+      isDeviceRegistrationCurrent(
+        readDeviceRegistration(persistence.connection, String(scopeId)),
+        Date.now(),
+      );
     const extensionToolApprovalService = new ExtensionToolApprovalService({
       uuid: randomUUID,
       now: Date.now,
       isPairedDeviceScope,
-      // A thread with no Project has no binding to have left. Otherwise the
-      // thread must still be active and bound in the Project the prompt
-      // recorded, which is what a paired device's turn was admitted under.
+      // The thread must still be active and in the Project the prompt
+      // recorded, which is what a paired device's turn was admitted under. A
+      // prompt with no Project is a Chat thread's, which must still have none.
       threadAuthorityIsCurrent: (threadId, projectId) => {
-        if (projectId === undefined) return true;
+        const chatThread = () => {
+          try {
+            return persistence.readChatThread(decodeChatThreadId(threadId));
+          } catch {
+            return undefined;
+          }
+        };
+        if (projectId === undefined) return chatThreadStandsInProject(chatThread(), undefined);
         const project = persistence.readProject(decodeProjectId(projectId));
         if (project === undefined || project.lifecycle !== "active") return false;
-        if (project.type !== "work" && project.type !== "code") return true;
+        if (project.type !== "work" && project.type !== "code") {
+          return chatThreadStandsInProject(chatThread(), projectId);
+        }
         const authority = browserAuthority.resolve(decodeBrowserThreadId(threadId), project.type);
         return authority !== undefined && String(authority.projectId) === String(project.id);
       },
