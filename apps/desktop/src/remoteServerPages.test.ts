@@ -1,6 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer as createHttpServer, request as httpRequest, type Server } from "node:http";
-import { connect as connectTcp, createServer as createTcpServer, type AddressInfo } from "node:net";
+import {
+  connect as connectTcp,
+  createServer as createTcpServer,
+  type AddressInfo,
+  type Socket,
+} from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,6 +18,7 @@ import {
   readRecordedForwarderPort,
   recordForwarderPort,
   sendThroughListener,
+  upgradeThroughListener,
   validateRemoteServerPageOpenRequest,
   type RemoteServerPages,
   type RemoteServerPagesPorts,
@@ -281,7 +287,15 @@ describe("Octant's browser for an opened page", () => {
       name: "x-octant-page-access",
       value: "s3cret",
     });
+    // The page's live-reload socket to its own name and port.
+    const socketUrl = `${pageOrigin.replace("http:", "ws:")}/hmr`;
+    expect(pageAccessHeader(socketUrl, pageOrigin, accessFor)).toEqual({
+      name: "x-octant-page-access",
+      value: "s3cret",
+    });
     for (const other of [
+      "ws://5173-abcdefghijklmnop.octant.localhost:47611/hmr",
+      "wss://5173-abcdefghijklmnop.octant.localhost:47610/hmr",
       "http://5173-abcdefghijklmnop.octant.localhost:47611/",
       "http://3000-zzzzzzzzzzzzzzzz.octant.localhost:47610/",
       "https://cdn.example.com/lib.js",
@@ -371,6 +385,79 @@ describe("the transport to a paired host's listener", () => {
     );
     expect(response.status).toBe(205);
     expect(response.body).toBeNull();
+  });
+
+  it("hands back the switched connection when the host accepts a WebSocket upgrade, and the answer when it refuses", async () => {
+    const seen: Array<{ url: string; host: string | undefined; upgrade: string | undefined }> = [];
+    const server: Server = createHttpServer((_request, response) => {
+      response.writeHead(410, [["content-type", "application/json"]]);
+      response.end('{"kind":"remote-server-proxy-refused"}');
+    });
+    const switchedSockets: Socket[] = [];
+    server.on("upgrade", (request, socket: Socket) => {
+      switchedSockets.push(socket);
+      seen.push({
+        url: request.url ?? "",
+        host: request.headers.host,
+        upgrade: request.headers.upgrade,
+      });
+      if (request.url?.endsWith("/closed") === true) {
+        socket.end("HTTP/1.1 410 Gone\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}");
+        return;
+      }
+      socket.write(
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: accept\r\n\r\nfirst",
+      );
+      socket.on("data", (chunk: Buffer) => socket.write(chunk));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    cleanups.push(
+      () =>
+        new Promise<void>((resolve) => {
+          // A switched connection is no longer the server's to close.
+          for (const socket of switchedSockets) socket.destroy();
+          server.closeAllConnections();
+          server.close(() => resolve());
+        }),
+    );
+    const port = (server.address() as AddressInfo).port;
+    const headers = [
+      ["connection", "Upgrade"],
+      ["upgrade", "websocket"],
+      ["sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ=="],
+      ["sec-websocket-version", "13"],
+    ] as const;
+    const switched = await upgradeThroughListener(
+      { listenerOrigin: LISTENER, trust: { current: { kind: "platform" } } },
+      { pathQuery: `/api/server-proxy/${GRANT_ID}/hmr`, headers },
+      async () => ({ status: "connected", socket: connectTcp(port, "127.0.0.1") }),
+    );
+    if (switched.status !== "switched") throw new Error("The host did not switch.");
+    cleanups.push(() => void switched.socket.destroy());
+    expect(new Map(switched.headers).get("Sec-WebSocket-Accept")).toBe("accept");
+    expect(new TextDecoder().decode(switched.head)).toBe("first");
+    switched.socket.write("frame");
+    const echoed = await new Promise<string>((resolve) =>
+      switched.socket.once("data", (chunk: Buffer) => resolve(chunk.toString())),
+    );
+    expect(echoed).toBe("frame");
+
+    const refused = await upgradeThroughListener(
+      { listenerOrigin: LISTENER, trust: { current: { kind: "platform" } } },
+      { pathQuery: `/api/server-proxy/${GRANT_ID}/closed`, headers },
+      async () => ({ status: "connected", socket: connectTcp(port, "127.0.0.1") }),
+    );
+    if (refused.status !== "answered") throw new Error("The host did not answer.");
+    expect(refused.response.status).toBe(410);
+    expect(await refused.response.text()).toBe("{}");
+    expect(seen).toEqual([
+      { url: `/api/server-proxy/${GRANT_ID}/hmr`, host: "192.168.1.20:9443", upgrade: "websocket" },
+      {
+        url: `/api/server-proxy/${GRANT_ID}/closed`,
+        host: "192.168.1.20:9443",
+        upgrade: "websocket",
+      },
+    ]);
   });
 
   it("sends nothing when the listener's trust refuses the connection", async () => {

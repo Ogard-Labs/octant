@@ -44,10 +44,12 @@ Octant gets the same local port it used before.
   or data reaches your own loopback, not the host's. The same applies to a
   sign-in callback registered on `localhost` and to a second server of the same
   thread that the page reaches by port.
-- **Live reload does not connect yet.** The other computer carries the dev
-  server's WebSocket connections, but Octant on this computer does not pass
-  them on yet, so a dev server's hot-reload socket is refused and the page
-  needs a manual reload. A dev server that polls instead keeps working.
+- **Live reload works, on the page's own address.** A dev server's hot-reload
+  socket that connects to the page's own host and port passes through Octant
+  to the other computer, so edits there reload the page here. A hot-reload
+  client set to connect to `localhost` or a fixed port reaches your own
+  loopback instead, like any other `localhost` link. Messages are capped at
+  16 MB, and the socket closes when the server's access ends.
 - **A taken local port changes the page's origin.** Octant keeps one local port
   for these pages, from 47610 to 47619. If another program holds it, Octant
   moves to the next free port in that range, says so once, and pages opened
