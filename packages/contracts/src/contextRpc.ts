@@ -5,6 +5,7 @@ import {
   ContextCompactionAvailability,
   ContextCompactionExecutor,
   ContextCompactionId,
+  ContextCompactionReceipt,
   ContextCompactionRecord,
   ContextCompactionRefusalReason,
   ContextManifest,
@@ -129,6 +130,9 @@ export const ContextCompactionState = Schema.Struct({
   subject: ContextSubjectRef,
   compaction: ContextCompactionAvailability,
   latestCompaction: Schema.optional(ContextCompactionRecord),
+  // Every completed compaction, oldest first, so a window can mark each point
+  // the session was compacted. Absent when the thread has had none.
+  completedCompactions: Schema.optional(Schema.Array(ContextCompactionReceipt)),
   // Named only while the server offers compaction, so the confirm can say
   // where the conversation goes before the person agrees.
   executor: Schema.optional(ContextCompactionExecutor),
@@ -140,7 +144,12 @@ export const ContextCompactionState = Schema.Struct({
         (state.executor !== undefined) === (state.compaction.status === "available") &&
         (state.latestCompaction?.status !== "completed" ||
           (state.latestCompaction.receipt.subject.aggregateType === state.subject.aggregateType &&
-            state.latestCompaction.receipt.subject.aggregateId === state.subject.aggregateId)),
+            state.latestCompaction.receipt.subject.aggregateId === state.subject.aggregateId)) &&
+        (state.completedCompactions ?? []).every(
+          (receipt) =>
+            receipt.subject.aggregateType === state.subject.aggregateType &&
+            receipt.subject.aggregateId === state.subject.aggregateId,
+        ),
     ),
   );
 export type ContextCompactionState = typeof ContextCompactionState.Type;
