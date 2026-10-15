@@ -323,14 +323,28 @@ export function ThreadActivityPictureInPicture(props: ThreadActivityPictureInPic
       <div className="thread-activity-pip__collapsed-controls">
         {currentComputerSession.pendingApproval === undefined ? null : (
           <>
-            <OctantButton
-              disabled={busy}
-              onClick={() => void decideComputerUse("approved")}
-              size="sm"
-              type="button"
-            >
-              {computerUseApproveLabel(currentComputerSession.pendingApproval)}
-            </OctantButton>
+            {/* A strip has no room for the sources that marked the thread, so
+                Approve there would be answered unseen. It opens the full
+                prompt, which lists them above the controls. */}
+            {currentComputerSession.pendingApproval.outsideContent === undefined ? (
+              <OctantButton
+                disabled={busy}
+                onClick={() => void decideComputerUse("approved")}
+                size="sm"
+                type="button"
+              >
+                {computerUseApproveLabel(currentComputerSession.pendingApproval)}
+              </OctantButton>
+            ) : (
+              <OctantButton
+                disabled={busy}
+                onClick={() => setCollapsed(false)}
+                size="sm"
+                type="button"
+              >
+                Review before approving
+              </OctantButton>
+            )}
             <OctantButton
               disabled={busy}
               onClick={() => void decideComputerUse("denied")}

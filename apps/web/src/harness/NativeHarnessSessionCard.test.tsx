@@ -333,4 +333,52 @@ describe("NativeHarnessSessionCard", () => {
     const prompt = await screen.findByRole("region", { name: "Approval requested" });
     expect(prompt).not.toHaveTextContent("outside content");
   });
+
+  it("lists the hosts a marked thread's command may reach and sends only the ones left ticked", async () => {
+    const approval = {
+      id: "00000000-0000-4000-8000-000000000065",
+      toolName: "bash",
+      summary: "bash: npm install",
+      approvalClass: "shell-commands",
+      singleUse: true,
+      commandHosts: [
+        { host: "registry.npmjs.org", port: 443, from: "thread-rule", preselected: true },
+        { host: "mirror.example.com", port: 8080, from: "project-rule", preselected: true },
+        { host: "cdn.example.com", port: 443, from: "proposal", preselected: false },
+      ],
+      status: "pending",
+      askedAt: "2026-09-05T12:06:00.000Z",
+    };
+    const client = {
+      session: vi.fn(async () => ({ ...view(), approvals: [approval] })),
+      command: vi.fn(),
+      answerQuestion: vi.fn(),
+      decideApproval: vi.fn(async () => ({
+        kind: "approval-decided",
+        approval: { ...approval, status: "approved", settledAt: "2026-09-05T12:06:05.000Z" },
+      })),
+    };
+    render(<NativeHarnessSessionCard client={client as never} threadId={threadId} />);
+    const list = await screen.findByRole("list", { name: "Hosts this command may reach" });
+    const boxes = within(list).getAllByRole("checkbox");
+    expect(boxes.map((box) => (box as HTMLInputElement).checked)).toEqual([true, true, false]);
+    expect(within(list).getByText("mirror.example.com:8080")).toBeVisible();
+    expect(within(list).getByText("Refused earlier")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Allow for this session" })).toBeNull();
+
+    await userEvent.click(boxes[1]!);
+    await userEvent.click(boxes[2]!);
+    await userEvent.click(screen.getByRole("button", { name: "Allow" }));
+
+    await waitFor(() =>
+      expect(client.decideApproval).toHaveBeenCalledWith(threadId, {
+        approvalId: approval.id,
+        decision: "approve",
+        commandHosts: [
+          { host: "registry.npmjs.org", port: 443 },
+          { host: "cdn.example.com", port: 443 },
+        ],
+      }),
+    );
+  });
 });

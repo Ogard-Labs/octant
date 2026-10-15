@@ -3,7 +3,11 @@ import { join } from "node:path";
 import type { AggregateId, ToolEgressLaunch, ToolEgressLaunchId } from "@octant/contracts";
 import type { HarnessShellScriptInput } from "../code/repositoryTestProcessPort";
 import type { RepositoryTestProcessResult } from "../code/repositoryTestRunner";
-import type { ToolEgressLaunchEnd, ToolEgressLaunchStart } from "./nativeHarnessEgressRules";
+import type {
+  ToolEgressCallConfirmation,
+  ToolEgressLaunchEnd,
+  ToolEgressLaunchStart,
+} from "./nativeHarnessEgressRules";
 import type { NativeHarnessShellPort, NativeHarnessShellRun } from "./nativeHarnessTools";
 
 export interface SandboxedProcessPort {
@@ -35,8 +39,14 @@ export interface NativeHarnessShellEgress {
     readonly projectId: AggregateId;
     readonly parentThreadId?: AggregateId;
   };
-  /** Binds the launch's listener and records that it started. */
-  readonly startLaunch: (launch: ToolEgressLaunch) => Promise<ToolEgressLaunchStart>;
+  /**
+   * Binds the launch's listener and records that it started, then grants the
+   * hosts a person confirmed for this command as `call` rules for it alone.
+   */
+  readonly startLaunch: (
+    launch: ToolEgressLaunch,
+    confirmed: ToolEgressCallConfirmation | undefined,
+  ) => Promise<ToolEgressLaunchStart>;
   readonly launchId: () => ToolEgressLaunchId;
 }
 
@@ -53,11 +63,14 @@ export function createNativeHarnessShell(
   return {
     run: async (input): Promise<NativeHarnessShellRun> => {
       if (egress === undefined) return runScript(options, input, undefined);
-      const started = await egress.startLaunch({
-        launchId: egress.launchId(),
-        ...egress.scope,
-        ...(input.callId === undefined ? {} : { toolCallId: input.callId }),
-      });
+      const started = await egress.startLaunch(
+        {
+          launchId: egress.launchId(),
+          ...egress.scope,
+          ...(input.callId === undefined ? {} : { toolCallId: input.callId }),
+        },
+        input.confirmedHosts,
+      );
       if (started.status === "refused") {
         return { status: "unavailable", output: "", truncated: false };
       }

@@ -69,9 +69,11 @@ open connections included.
 
 What a command receives through the proxy counts as outside content. After a
 package install or a clone, the thread asks before every command, and the
-hosts you allowed stop applying to it. Octant cannot yet allow a host for one
-confirmed command, so on such a thread commands reach no host until you clear
-the thread's outside-content mark.
+hosts you allowed stop applying to it on their own. Instead, each command's
+approval lists the hosts the thread and its Project allow, already ticked, and
+hosts a command was refused earlier, unticked. The command reaches only the
+hosts you leave ticked when you choose **Allow**, and only while it runs: the
+next command asks again and starts from the list, not from your last answer.
 
 ## Verifying a model's tools
 

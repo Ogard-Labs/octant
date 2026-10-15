@@ -5,6 +5,7 @@ import {
   EventActor,
   EventId,
   MAX_LIVE_TOOL_EGRESS_RULES,
+  MAX_NATIVE_HARNESS_COMMAND_HOSTS,
   MAX_OPEN_TOOL_EGRESS_PROPOSALS,
   MAX_TOOL_EGRESS_PROPOSALS_PER_LAUNCH,
   MAX_TOOL_EGRESS_SUMMARY_ENTRIES,
@@ -31,6 +32,7 @@ import {
   ToolEgressRuleId,
   UtcTimestamp,
   type EventEnvelope,
+  type NativeHarnessCommandHost,
   type ToolEgressDecisionEntry,
   type ToolEgressLaunch,
   type ToolEgressProjectRuleLifetime,
@@ -157,9 +159,23 @@ export type ToolEgressAnswerOutcome =
         | "unavailable";
     };
 
+/**
+ * The hosts a person confirmed for one command on a marked thread, and who
+ * confirmed them. They become `call` rules for that command's launch alone.
+ */
+export interface ToolEgressCallConfirmation {
+  /** The harness approval the person answered; the grant names it. */
+  readonly approvalId: string;
+  readonly principal: ToolEgressPerson;
+  readonly hosts: ReadonlyArray<{ readonly host: string; readonly port: number }>;
+}
+
 export type ToolEgressLaunchStart =
   | { readonly status: "listening"; readonly launch: ToolEgressLiveLaunch }
-  | { readonly status: "refused"; readonly reason: "listener-unavailable" | "audit-unavailable" };
+  | {
+      readonly status: "refused";
+      readonly reason: "listener-unavailable" | "audit-unavailable" | "call-rules-refused";
+    };
 
 export type ToolEgressLaunchEnd =
   | { readonly status: "summarized"; readonly summary: ThreadEgressLaunchSummarizedPayload }
@@ -377,7 +393,10 @@ export class ToolEgressRules {
     input: Pick<
       ToolEgressProxyOptions,
       "launch" | "endpoint" | "resolveAll" | "connect" | "limits"
-    >,
+    > & {
+      /** Hosts a person confirmed for this command; granted to this launch alone. */
+      readonly confirmed?: ToolEgressCallConfirmation | undefined;
+    },
   ): Promise<ToolEgressLaunchStart> {
     const launch = input.launch;
     const proposals: LiveLaunchState["proposals"] = new Map();
@@ -411,10 +430,92 @@ export class ToolEgressRules {
     if (started.status === "refused") return started;
     const state: LiveLaunchState = { proxy: started.proxy, launch, proposals };
     this.#live.set(String(launch.launchId), state);
+    const hosts = input.confirmed?.hosts ?? [];
+    if (input.confirmed !== undefined && hosts.length > 0) {
+      // The launch id exists only now, so this is the first moment a rule can
+      // name it. The command has not started, so nothing has connected yet;
+      // a grant that cannot land ends the launch before the command runs.
+      let granted: ToolEgressAnswerOutcome;
+      try {
+        granted = this.answer({
+          threadId: String(launch.parentThreadId ?? launch.threadId),
+          principal: input.confirmed.principal,
+          approvalId: input.confirmed.approvalId,
+          grants: hosts.map((host) => ({
+            host: host.host,
+            port: host.port,
+            scope: { kind: "call", launchId: String(launch.launchId) },
+          })),
+        });
+      } catch {
+        granted = { kind: "refused", reason: "unavailable" };
+      }
+      if (granted.kind !== "answered") {
+        await this.#finish(state);
+        return { status: "refused", reason: "call-rules-refused" };
+      }
+    }
     return {
       status: "listening",
       launch: { proxy: started.proxy, finish: () => this.#finish(state) },
     };
+  }
+
+  /**
+   * What a marked thread's command confirmation lists: the hosts its thread
+   * and Project rules name, preselected, then its open proposals, unticked.
+   * Taint suspends those rules, so none of these reaches the command unless
+   * the person confirms it for that command. An aggregate whose revocations
+   * cannot be read offers nothing, as it allows nothing.
+   */
+  commandConfirmationHosts(threadId: string): ReadonlyArray<NativeHarnessCommandHost> {
+    const thread = this.#options.readCodeThread(threadId);
+    if (thread === undefined) return [];
+    this.#sweepExpiredRules();
+    const now = this.#timestamp();
+    if (now === undefined) return [];
+    const listed = new Map<string, NativeHarnessCommandHost>();
+    const add = (entry: NativeHarnessCommandHost) => {
+      const key = hostKey(entry.host, entry.port);
+      if (!listed.has(key)) listed.set(key, entry);
+    };
+    const standing = (
+      aggregateType: string,
+      id: string,
+      rules: Map<string, StoredRule> | undefined,
+      from: "thread-rule" | "project-rule",
+    ) => {
+      if (this.#unreadableAggregates.has(aggregateKey(aggregateType, id))) return;
+      for (const rule of rules?.values() ?? []) {
+        if (rule.scope.kind === "call" || !toolEgressRuleLive(rule.expiresAt, now)) continue;
+        add({ host: rule.host, port: rule.port, from, preselected: true });
+      }
+    };
+    standing(
+      TOOL_EGRESS_THREAD_AGGREGATE,
+      threadId,
+      this.#threadRules.get(threadId),
+      "thread-rule",
+    );
+    standing(
+      TOOL_EGRESS_PROJECT_AGGREGATE,
+      thread.projectId,
+      this.#projectRules.get(thread.projectId),
+      "project-rule",
+    );
+    // A proposal is granted on the thread's aggregate, which grants nothing
+    // while its revocations cannot be read, so it is not offered either.
+    const proposals = this.#unreadableAggregates.has(
+      aggregateKey(TOOL_EGRESS_THREAD_AGGREGATE, threadId),
+    )
+      ? []
+      : (this.#proposals.get(threadId)?.values() ?? []);
+    for (const { payload } of proposals) {
+      const host = Option.getOrUndefined(decodeRuleHostOption(payload.host));
+      if (host === undefined) continue;
+      add({ host, port: payload.port, from: "proposal", preselected: false });
+    }
+    return [...listed.values()].slice(0, MAX_NATIVE_HARNESS_COMMAND_HOSTS);
   }
 
   async #finish(state: LiveLaunchState): Promise<ToolEgressLaunchEnd> {
@@ -449,6 +550,8 @@ export class ToolEgressRules {
     readonly principal: ToolEgressAnsweringPrincipal;
     readonly grants: ReadonlyArray<ToolEgressGrantRequest>;
     readonly declineProposalIds?: ReadonlyArray<string>;
+    /** The approval answered, when it has an id of its own; otherwise one is minted. */
+    readonly approvalId?: string;
   }): ToolEgressAnswerOutcome {
     const thread = this.#options.readCodeThread(input.threadId);
     if (thread === undefined) return { kind: "refused", reason: "not-a-code-thread" };
@@ -456,7 +559,7 @@ export class ToolEgressRules {
     const now = this.#timestamp();
     if (now === undefined) return { kind: "refused", reason: "unavailable" };
     const tainted = this.#tainted(input.threadId);
-    const approvalId = decodeApprovalId(this.#options.uuid());
+    const approvalId = decodeApprovalId(input.approvalId ?? this.#options.uuid());
     const principal = input.principal;
     const threadEvents: AppendEvent[] = [];
     const projectEvents: AppendEvent[] = [];

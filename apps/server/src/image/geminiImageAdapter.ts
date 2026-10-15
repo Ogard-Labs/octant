@@ -2,7 +2,6 @@ import {
   MAX_GENERATED_IMAGE_BYTES,
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_VARIANTS,
-  type ProviderInstanceId,
 } from "@octant/contracts";
 import {
   classifyImageHttpFailure,
@@ -14,29 +13,15 @@ import {
   type ImageAdapterRequest,
   type ImageAdapterResult,
   type ImageGenerationAdapter,
+  type ImageGenerationDriver,
+  type ImageGenerationPorts,
 } from "@octant/provider-sdk/image-generation";
-import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
-import { sniffGeneratedImageMediaType } from "./generatedImageStore";
-import {
-  GEMINI_IMAGE_API_BASE_URL,
-  performImageHttpRequest,
-  type ImageHttpFetch,
-  type ImageHttpLimits,
-} from "./imageHttp";
-
-const DEFAULT_LIMITS: ImageHttpLimits = {
-  connectionTimeoutMs: 120_000,
-  requestBodyBytes: MAX_GENERATED_IMAGE_BYTES * 2,
-  responseBodyBytes: MAX_GENERATED_IMAGE_BYTES * MAX_IMAGE_VARIANTS + 262_144,
-};
+export const GEMINI_IMAGE_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 
 const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 export interface GeminiImageAdapterOptions {
-  readonly instanceId: ProviderInstanceId;
-  readonly credentialResolver: ProviderCredentialResolver;
-  readonly fetch?: ImageHttpFetch;
-  readonly limits?: Partial<ImageHttpLimits>;
+  readonly ports: ImageGenerationPorts;
 }
 
 /**
@@ -45,22 +30,13 @@ export interface GeminiImageAdapterOptions {
  * never journaled.
  */
 export function makeGeminiImageAdapter(options: GeminiImageAdapterOptions): ImageGenerationAdapter {
-  const fetch = options.fetch ?? globalThis.fetch;
-  const limits: ImageHttpLimits = { ...DEFAULT_LIMITS, ...options.limits };
   return {
     generate: async (request) => {
       try {
-        return await generateGeminiImage({
-          adapterInstanceId: options.instanceId,
-          credentialResolver: options.credentialResolver,
-          fetch,
-          limits,
-          request,
-        });
+        return await generateGeminiImage({ ports: options.ports, request });
       } catch (error) {
-        if (isProviderFailure(error)) {
-          if (error.category === "interrupted") return { status: "failed", providerFailure: error };
-          return { status: "failed", providerFailure: sanitizeImageFailure(error) };
+        if (isProviderFailure(error) && error.category === "interrupted") {
+          return { status: "failed", providerFailure: error };
         }
         return { status: "failed", providerFailure: sanitizeImageFailure(error) };
       }
@@ -68,11 +44,14 @@ export function makeGeminiImageAdapter(options: GeminiImageAdapterOptions): Imag
   };
 }
 
+export const geminiImageDriver: ImageGenerationDriver = {
+  driverKind: "gemini-native-image",
+  providerHosts: ["generativelanguage.googleapis.com"],
+  create: ({ ports }) => makeGeminiImageAdapter({ ports }),
+};
+
 async function generateGeminiImage(input: {
-  readonly adapterInstanceId: ProviderInstanceId;
-  readonly credentialResolver: ProviderCredentialResolver;
-  readonly fetch: ImageHttpFetch;
-  readonly limits: ImageHttpLimits;
+  readonly ports: ImageGenerationPorts;
   readonly request: ImageAdapterRequest;
 }): Promise<ImageAdapterResult> {
   if (input.request.signal?.aborted) {
@@ -138,15 +117,11 @@ async function generateGeminiImage(input: {
     generationConfig,
   };
 
-  const response = await performImageHttpRequest({
+  const response = await input.ports.request({
     url: `${GEMINI_IMAGE_API_BASE_URL}/models/${encodeURIComponent(modelId)}:generateContent`,
     method: "POST",
     auth: { header: "x-goog-api-key" },
-    instanceId: String(input.adapterInstanceId),
-    credentialResolver: input.credentialResolver,
     body: JSON.stringify(body),
-    fetch: input.fetch,
-    limits: input.limits,
     ...(input.request.signal === undefined ? {} : { signal: input.request.signal }),
   });
 
@@ -207,7 +182,7 @@ async function generateGeminiImage(input: {
         ),
       };
     }
-    const mediaType = sniffGeneratedImageMediaType(bytes);
+    const mediaType = input.ports.sniffMediaType(bytes);
     if (mediaType === undefined) {
       return {
         status: "failed",

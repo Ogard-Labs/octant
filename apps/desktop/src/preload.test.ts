@@ -190,6 +190,7 @@ describe("desktop preload bridge", () => {
       "disablePrivateListener",
       "downloadAppUpdate",
       "enablePrivateListener",
+      "forgetPairedComputer",
       "getComputerUseStatus",
       "getHostCapabilities",
       "getManagedToolsStatus",

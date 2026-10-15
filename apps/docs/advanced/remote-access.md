@@ -206,7 +206,10 @@ paired with: its security key has changed." and sends nothing; if the key was
 replaced on purpose, pair again with a new code. A changed, damaged, or
 non-private code is refused before Octant contacts anything. Paired computers
 are listed under **Other computers** with an **Open** action, which checks the
-key again before the window loads.
+key again before the window loads, and a **Forget** action. Forget asks first,
+then closes that computer's windows, removes its saved key, and clears the
+sign-in and data its page stored in Octant. The other computer keeps listing
+this device until you revoke it there; to pair again, make a new code.
 
 The phone app accepts a pasted pairing code but cannot check a computer's own
 certificate yet, so it refuses the code before sending anything. To pair a

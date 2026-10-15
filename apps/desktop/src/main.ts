@@ -1466,8 +1466,14 @@ function pairedComputerSession(): Electron.Session {
   return pairedSession;
 }
 
-/** Open paired-computer windows, held until each closes so none is collected mid-pairing. */
-const pairedComputerWindows = new Set<BrowserWindow>();
+/** Open paired-computer windows and the origin each is held to, kept until each closes so none is collected mid-pairing. */
+const pairedComputerWindows = new Map<BrowserWindow, string>();
+
+function closePairedComputerWindows(origin: string): void {
+  for (const [window, held] of [...pairedComputerWindows]) {
+    if (held === origin && !window.isDestroyed()) window.destroy();
+  }
+}
 
 /**
  * A window on another computer's own Octant page. It gets no preload and no
@@ -1500,7 +1506,7 @@ function openPairedComputerWindow(input: { readonly origin: string; readonly url
     if (!staysOnOrigin(event.url)) event.preventDefault();
   });
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  pairedComputerWindows.add(window);
+  pairedComputerWindows.set(window, input.origin);
   window.once("closed", () => pairedComputerWindows.delete(window));
   void window.loadURL(input.url);
 }
@@ -3075,7 +3081,8 @@ function installIpcHandlers(): void {
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
     pins: pairedComputerPins,
-    windows: { open: openPairedComputerWindow },
+    windows: { open: openPairedComputerWindow, closeAll: closePairedComputerWindows },
+    storage: pairedComputerSession(),
     webBuildVersion: app.getVersion(),
   });
   installNativeMenuIpcHandlers({

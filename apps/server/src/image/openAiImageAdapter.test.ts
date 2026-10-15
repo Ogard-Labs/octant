@@ -1,9 +1,17 @@
-import { decodeProviderInstanceId, type ProviderModelId } from "@octant/contracts";
+import {
+  decodeProviderInstance,
+  decodeProviderInstanceId,
+  type ProviderModelId,
+} from "@octant/contracts";
+import { runImageGenerationConformance } from "@octant/provider-sdk/image-generation-conformance";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
-import type { ImageHttpFetch } from "./imageHttp";
-import { OPENAI_IMAGE_API_BASE_URL } from "./imageHttp";
-import { makeOpenAiImageAdapter } from "./openAiImageAdapter";
+import { makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
+import {
+  OPENAI_IMAGE_API_BASE_URL,
+  makeOpenAiImageAdapter,
+  openAiImageDriver,
+} from "./openAiImageAdapter";
 
 const SECRET = "sk-fixture-super-secret";
 const instanceId = decodeProviderInstanceId("a2000000-0000-4000-8000-000000000001");
@@ -28,10 +36,13 @@ function adapter(
   limits?: { connectionTimeoutMs?: number; requestBodyBytes?: number },
 ) {
   return makeOpenAiImageAdapter({
-    instanceId,
-    credentialResolver: resolver(),
-    fetch,
-    ...(limits === undefined ? {} : { limits }),
+    ports: makeImageGenerationPorts({
+      instanceId: String(instanceId),
+      credentialResolver: resolver(),
+      endpoint: { providerHosts: openAiImageDriver.providerHosts },
+      fetch,
+      ...(limits === undefined ? {} : { limits }),
+    }),
   });
 }
 
@@ -194,5 +205,33 @@ describe("OpenAI image adapter", () => {
       expect(result.providerFailure.category).toBe("unauthenticated");
       expect(JSON.stringify(result)).not.toContain(SECRET);
     }
+  });
+});
+
+describe("OpenAI image driver behind the image seam", () => {
+  it("keeps the image seam's conformance promises", async () => {
+    await expect(
+      runImageGenerationConformance({
+        driver: openAiImageDriver,
+        instance: decodeProviderInstance({
+          id: instanceId,
+          displayName: "OpenAI",
+          enabled: true,
+          environmentPolicy: "inherit-host",
+          version: 1,
+          createdAt: "2026-10-15T00:00:00.000Z",
+          updatedAt: "2026-10-15T00:00:00.000Z",
+          driverKind: "openai-image",
+          configuration: {
+            kind: "openai-image-http",
+            modelAllowlist: [modelId],
+            defaultModel: modelId,
+          },
+        }),
+        request: { instanceId, modelId, prompt: "a red cube" },
+        respond: () => Response.json({ data: [{ b64_json: pngB64 }] }),
+        expectedImageCount: 1,
+      }),
+    ).resolves.toMatchObject({ completedWithHostMediaTypes: true });
   });
 });

@@ -28,6 +28,7 @@ import {
   ThreadGoalEvidenceRef,
 } from "./goal";
 import { OctantMode } from "./modes";
+import { MAX_TOOL_EGRESS_HOST_LENGTH, ToolEgressPort, ToolEgressRuleHost } from "./toolEgressHost";
 import {
   NativeHarnessJob,
   NativeHarnessRouteDecision,
@@ -995,6 +996,35 @@ export const NativeHarnessApprovalStatus = Schema.Literal(
 export type NativeHarnessApprovalStatus = typeof NativeHarnessApprovalStatus.Type;
 
 /**
+ * At most this many hosts a command's confirmation lists: a thread's and its
+ * Project's live rules (64 each) and the thread's open proposals (64).
+ */
+export const MAX_NATIVE_HARNESS_COMMAND_HOSTS = 192;
+
+/**
+ * A host a marked thread's command may reach if the person ticks it. Thread
+ * and Project rules come preselected; a proposal comes unticked. None of them
+ * applies to the command until the person confirms it.
+ */
+export const NativeHarnessCommandHost = Schema.Struct({
+  host: ToolEgressRuleHost,
+  port: ToolEgressPort,
+  from: Schema.Literal("thread-rule", "project-rule", "proposal"),
+  preselected: Schema.Boolean,
+}).annotations(strict);
+export type NativeHarnessCommandHost = typeof NativeHarnessCommandHost.Type;
+
+/**
+ * A host the person confirmed. It is read as written and canonicalized by the
+ * host, which grants it only when the approval listed it.
+ */
+export const NativeHarnessCommandHostChoice = Schema.Struct({
+  host: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_TOOL_EGRESS_HOST_LENGTH + 2)),
+  port: ToolEgressPort,
+}).annotations(strict);
+export type NativeHarnessCommandHostChoice = typeof NativeHarnessCommandHostChoice.Type;
+
+/**
  * A tool call the policy would only allow with a person's say-so, asked
  * inline where the turn is watched. Approving "always" remembers the class
  * for the rest of this thread's session, never beyond it.
@@ -1019,6 +1049,14 @@ export const NativeHarnessApproval = Schema.Struct({
    * only with `singleUse`; an approval journaled before it existed has none.
    */
   outsideContent: Schema.optional(ApprovalOutsideContent),
+  /**
+   * On a marked thread's command that runs through the egress rules: the
+   * hosts the person may let this one command reach. What they confirm is
+   * granted for that command alone and ends with it.
+   */
+  commandHosts: Schema.optional(
+    Schema.Array(NativeHarnessCommandHost).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_COMMAND_HOSTS)),
+  ),
   askedAt: UtcTimestamp,
   settledAt: Schema.optional(UtcTimestamp),
 })
@@ -1027,7 +1065,10 @@ export const NativeHarnessApproval = Schema.Struct({
     Schema.filter(
       (approval) =>
         (approval.status === "pending") === (approval.settledAt === undefined) &&
-        (approval.outsideContent === undefined || approval.singleUse === true),
+        (approval.outsideContent === undefined || approval.singleUse === true) &&
+        // Only a single-use confirmation can name hosts: a remembered approval
+        // would otherwise carry them to calls nobody saw.
+        (approval.commandHosts === undefined || approval.singleUse === true),
     ),
   )
   .annotations(personDecides);
@@ -1036,7 +1077,15 @@ export type NativeHarnessApproval = typeof NativeHarnessApproval.Type;
 export const DecideNativeHarnessApproval = Schema.Struct({
   approvalId: NativeHarnessApprovalId,
   decision: Schema.Literal("approve", "approve-always", "deny"),
-}).annotations(strict);
+  /** The listed hosts the person lets this one command reach; none when absent. */
+  commandHosts: Schema.optional(
+    Schema.Array(NativeHarnessCommandHostChoice).pipe(
+      Schema.maxItems(MAX_NATIVE_HARNESS_COMMAND_HOSTS),
+    ),
+  ),
+})
+  .annotations(strict)
+  .pipe(Schema.filter((input) => input.commandHosts === undefined || input.decision === "approve"));
 export type DecideNativeHarnessApproval = typeof DecideNativeHarnessApproval.Type;
 
 export const NativeHarnessApprovalDecisionResult = Schema.Union(
@@ -1047,7 +1096,12 @@ export const NativeHarnessApprovalDecisionResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("approval-refused"),
     approvalId: NativeHarnessApprovalId,
-    reason: Schema.Literal("approval-not-found", "already-settled", "not-authorized"),
+    reason: Schema.Literal(
+      "approval-not-found",
+      "already-settled",
+      "not-authorized",
+      "host-not-offered",
+    ),
     message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   }).annotations(strict),
 );
