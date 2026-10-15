@@ -131,8 +131,20 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const follows = align === "end" && props.followOutput !== false;
   const ListTag = props.listTag ?? "div";
   const ItemTag = props.itemTag ?? "div";
-  const compactionReceipts = useCompactionReceipts(props.compactionSubject, props.items.length);
   const { itemAt } = props;
+  // A turn already listed keeps its place while it moves on (a later attempt, a
+  // status change), so the count alone would miss a compaction journaled in it.
+  const rowsRevision = useMemo(() => {
+    let latest = "";
+    if (itemAt !== undefined) {
+      for (const item of props.items) {
+        const at = itemAt(item);
+        if (at !== undefined && at > latest) latest = at;
+      }
+    }
+    return `${props.items.length}:${latest}`;
+  }, [itemAt, props.items]);
+  const compactionReceipts = useCompactionReceipts(props.compactionSubject, rowsRevision);
   const compactionPlacement = useMemo(
     () =>
       itemAt === undefined || compactionReceipts.length === 0

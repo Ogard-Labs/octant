@@ -12,13 +12,13 @@ import { compactionResultLine } from "./sessionCompactionPresentation";
  * The compactions the host journaled for one thread, oldest first. Each pane
  * asks the host about its own thread, so a pane that is not the active one
  * still shows its dividers and no pane ever shows another thread's. It asks
- * again when the transcript's rows change, which is when a turn may have
- * compacted the session, and when the active thread's own compaction state
+ * again when the transcript's rows change (a new row, or a row that moved on
+ * to a later time), which is when a turn may have compacted the session, and when the active thread's own compaction state
  * moves.
  */
 export function useCompactionReceipts(
   subject: ContextSubjectRef | undefined,
-  rowCount: number,
+  rowsRevision: string,
 ): ReadonlyArray<ContextCompactionReceipt> {
   const compaction = useComposerContextMeterScope().compaction;
   const client = compaction?.client;
@@ -40,7 +40,7 @@ export function useCompactionReceipts(
       })
       .catch(() => undefined);
     return () => abort.abort();
-  }, [activeCount, aggregateId, aggregateType, client, key, rowCount]);
+  }, [activeCount, aggregateId, aggregateType, client, key, rowsRevision]);
   // An answer for a thread this transcript no longer shows is never drawn.
   return read !== undefined && read.key === key ? read.receipts : NONE;
 }

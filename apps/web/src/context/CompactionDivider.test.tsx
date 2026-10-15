@@ -215,6 +215,46 @@ describe("compaction divider in a transcript", () => {
     expect(background.queryAllByRole("separator")).toEqual([]);
   });
 
+  it("shows a compaction journaled in a turn that was already listed", async () => {
+    const byThread = new Map<string, ReturnType<typeof receipt>[]>();
+    const client = clientFor(byThread);
+    const view = (items: ReadonlyArray<Row>) => (
+      <ComposerContextMeterProvider
+        compaction={{
+          controller: {
+            starting: false,
+            stateUnknown: false,
+            compact: vi.fn(async () => undefined),
+          },
+          client,
+          names: { provider: () => "Codex", model: () => undefined },
+        }}
+        status="not-planned"
+      >
+        <TranscriptWindow
+          compactionSubject={otherSubject}
+          itemAt={rowAt}
+          itemKey={(row) => row.id}
+          items={items}
+          listLabel="Background"
+          renderItem={(row) => <p>{`Row ${row.id}`}</p>}
+          restoreKey="background"
+        />
+      </ComposerContextMeterProvider>
+    );
+    const view1 = render(view(rows));
+    await waitFor(() => expect(client.readCompaction).toHaveBeenCalledTimes(1));
+    expect(screen.queryAllByRole("separator")).toEqual([]);
+
+    // The turn keeps its place and its count; only its time moves on.
+    byThread.set(String(otherSubject.aggregateId), [otherReceipt]);
+    view1.rerender(
+      view(rows.map((row) => (row.id === "c" ? { ...row, at: "2026-07-18T12:45:00.000Z" } : row))),
+    );
+
+    expect(await screen.findAllByRole("separator")).toHaveLength(1);
+  });
+
   it("shows no divider for a thread that was never compacted", async () => {
     const client = clientFor(new Map());
     renderPanes(client);
