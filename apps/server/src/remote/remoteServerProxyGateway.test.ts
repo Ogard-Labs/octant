@@ -916,6 +916,8 @@ interface DevServer {
   }>;
   /** Sockets the dev server accepted, so a case can see the host close one. */
   readonly sockets: Socket[];
+  /** Upgrade requests the dev server received, and answered like a hot-reload socket. */
+  readonly upgrades: string[];
 }
 
 type DevHandler = (request: IncomingMessage, response: ServerResponse) => void;
@@ -940,13 +942,23 @@ async function devServer(
       handle(request, response);
     });
   };
+  const upgrades: string[] = [];
   const server = tls === undefined ? createHttpServer(listener) : createHttpsServer(tls, listener);
+  server.on("upgrade", (request: IncomingMessage, socket: Socket) => {
+    upgrades.push(request.url ?? "");
+    const accept = createHash("sha1")
+      .update(`${String(request.headers["sec-websocket-key"])}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+    );
+  });
   server.on(tls === undefined ? "connection" : "secureConnection", (socket: Socket) =>
     sockets.push(socket),
   );
   devServers.push(server);
   await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", () => resolve()));
-  return { port: (server.address() as AddressInfo).port, requests, sockets };
+  return { port: (server.address() as AddressInfo).port, requests, sockets, upgrades };
 }
 
 function listedAt(index: number, server: { readonly port: number }, scheme = "http") {
@@ -1375,7 +1387,7 @@ describe("relay from a paired device to its granted dev server", () => {
     expect(harness.grants.openCount()).toBe(1);
   });
 
-  it("refuses a connection upgrade without connecting", async () => {
+  it("does not carry a hot-reload WebSocket: a dev server that would accept the upgrade never sees it", async () => {
     const harness = await setup();
     const server = await devServer((_request, response) => response.end("dev"));
     harness.targets.set(listenerKey(1), listedAt(1, server));
@@ -1383,11 +1395,22 @@ describe("relay from a paired device to its granted dev server", () => {
     const grantId = await grantTo(harness, proxy, 1);
     const upgrade = await call(
       harness,
-      relayRequest(proxy, grantId, { headers: { upgrade: "websocket", connection: "Upgrade" } }),
+      relayRequest(proxy, grantId, {
+        path: "/hmr",
+        headers: {
+          upgrade: "websocket",
+          connection: "Upgrade",
+          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+          "sec-websocket-version": "13",
+          "sec-websocket-protocol": "vite-hmr",
+        },
+      }),
     );
     expect(upgrade.status).toBe(501);
     expect(refusalReason(upgrade)).toBe("upgrade-refused");
     expect(server.requests).toHaveLength(0);
+    expect(server.upgrades).toEqual([]);
+    expect(harness.grants.openCount()).toBe(1);
   });
 
   it("reads at most 4 KiB of a proxy request without a live session, and few at once per source", async () => {
