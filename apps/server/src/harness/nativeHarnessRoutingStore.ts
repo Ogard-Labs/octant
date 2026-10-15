@@ -18,6 +18,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
@@ -29,9 +30,8 @@ const decodeEventId = Schema.decodeUnknownSync(EventId);
 export const NATIVE_HARNESS_ROUTING_HOST_AGGREGATE_ID = decodeAggregateId(
   "00000000-0000-4000-8000-0000000000b1",
 );
-const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
 
-type JournalPort = Pick<Journal, "append" | "replayAggregate" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replayAggregate" | "replayAggregateType">;
 
 export interface NativeHarnessRoutingStoreOptions {
   readonly journal: JournalPort;
@@ -189,33 +189,22 @@ export class NativeHarnessRoutingStore {
     // The host aggregate has a fixed id; Project overrides are found by
     // walking the aggregate type across the journal, which is the one read
     // that cannot know its aggregate ids in advance.
-    let afterSequence = 0;
-    for (;;) {
-      const batch = this.#journal.replay({
-        afterSequence: afterSequence as never,
-        limit: JOURNAL_REPLAY_BATCH_SIZE,
-      } as never);
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        if (envelope.aggregateType !== NATIVE_HARNESS_ROUTING_AGGREGATE_TYPE) continue;
-        if (envelope.eventName === NATIVE_HARNESS_ROUTING_EVENT_NAMES.settingsUpdated) {
-          this.#host = decodeNativeHarnessRoutingSettings(envelope.payload);
-        } else if (envelope.eventName === NATIVE_HARNESS_ROUTING_EVENT_NAMES.projectOverrideSet) {
-          const override = decodeNativeHarnessProjectRoutingOverride(envelope.payload);
-          this.#projects.set(String(override.projectId), override);
-        } else if (
-          envelope.eventName === NATIVE_HARNESS_ROUTING_EVENT_NAMES.projectOverrideCleared
-        ) {
-          const cleared = envelope.payload as {
-            readonly projectId: string;
-            readonly version: number;
-          };
-          this.#projects.delete(String(cleared.projectId));
-          this.#clearedVersions.set(String(cleared.projectId), cleared.version);
-        }
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      NATIVE_HARNESS_ROUTING_AGGREGATE_TYPE,
+    ])) {
+      if (envelope.eventName === NATIVE_HARNESS_ROUTING_EVENT_NAMES.settingsUpdated) {
+        this.#host = decodeNativeHarnessRoutingSettings(envelope.payload);
+      } else if (envelope.eventName === NATIVE_HARNESS_ROUTING_EVENT_NAMES.projectOverrideSet) {
+        const override = decodeNativeHarnessProjectRoutingOverride(envelope.payload);
+        this.#projects.set(String(override.projectId), override);
+      } else if (envelope.eventName === NATIVE_HARNESS_ROUTING_EVENT_NAMES.projectOverrideCleared) {
+        const cleared = envelope.payload as {
+          readonly projectId: string;
+          readonly version: number;
+        };
+        this.#projects.delete(String(cleared.projectId));
+        this.#clearedVersions.set(String(cleared.projectId), cleared.version);
       }
-      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
   }
 }

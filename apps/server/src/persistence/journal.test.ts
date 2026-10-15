@@ -814,6 +814,34 @@ describe("Journal", () => {
     connection.close();
   });
 
+  it("reads an aggregate type in journal order through its own index, without sorting the type", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    const typeReplays = prepare.mock.calls
+      .map(([sql]) => sql)
+      .filter(
+        (sql) =>
+          sql.includes("WHERE aggregate_type = ? AND global_sequence > ?") &&
+          !sql.includes("'$.threadId'"),
+      );
+    prepare.mockRestore();
+
+    // The plain read and the narrowed one; startup rebuilds every store through them.
+    expect(typeReplays).toHaveLength(2);
+    for (const sql of typeReplays) {
+      const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
+      const plan = JSON.stringify(
+        connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters),
+      );
+      expect(plan).toMatch(
+        /event_journal_type_sequence \(aggregate_type=\? AND global_sequence>\?\)/,
+      );
+      expect(plan).not.toMatch(/TEMP B-TREE/);
+    }
+    connection.close();
+  });
+
   it("finds a thread's rows through the thread index instead of reading every row of the type", () => {
     const connection = openMigratedConnection();
     const prepare = vi.spyOn(connection, "prepare");

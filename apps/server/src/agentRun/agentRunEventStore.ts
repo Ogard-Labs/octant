@@ -33,6 +33,7 @@ import {
   writeAgentRunResultEvidence,
 } from "../persistence/agentRunContentStore";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 
 export const AGENT_RUN_AGGREGATE_TYPE = "agent-run";
@@ -51,7 +52,7 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replay" | "replayAggregateType">;
 
 export class AgentRunEventStoreError extends Error {
   override readonly name = "AgentRunEventStoreError";
@@ -598,24 +599,9 @@ export class AgentRunEventStore {
       throw new AgentRunEventStoreError("invalid", "AgentRun replay is invalid.");
     }
     const events: EventEnvelope[] = [];
-    let afterSequence = 0;
-    let scannedEvents = 0;
-    while (events.length < limit) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        scannedEvents += 1;
-        if (scannedEvents > MAX_JOURNAL_SCAN_EVENTS) {
-          return { status: "snapshot-required", reason: "scan-limit" };
-        }
-        afterSequence = envelope.globalSequence;
-        if (envelope.aggregateType !== AGENT_RUN_AGGREGATE_TYPE) continue;
-        events.push(envelope);
-        if (events.length >= limit) break;
-      }
-      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [AGENT_RUN_AGGREGATE_TYPE])) {
+      events.push(envelope);
+      if (events.length >= limit) break;
     }
     const lastEvent = events.at(-1);
     return {

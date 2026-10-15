@@ -18,15 +18,15 @@ import {
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
-const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
 
 export function registerSideTaskEvents(registry: EventRegistry): EventRegistry {
   return registry
@@ -167,29 +167,20 @@ export class SideTaskStore {
   }
 
   #hydrate(): void {
-    let afterSequence = 0;
-    for (;;) {
-      const batch = this.#journal.replay({
-        afterSequence: afterSequence as never,
-        limit: JOURNAL_REPLAY_BATCH_SIZE,
-      });
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        if (envelope.aggregateType !== THREAD_SIDE_TASKS_AGGREGATE_TYPE) continue;
-        const threadId = String(envelope.aggregateId);
-        const record = this.#records.get(threadId) ?? { tasks: [], version: 0 };
-        this.#records.set(threadId, record);
-        record.version += 1;
-        if (envelope.eventName === THREAD_SIDE_TASK_EVENT_NAMES.offered) {
-          this.#applyOffer(record, envelope.payload as SideTaskOffer);
-        } else if (envelope.eventName === THREAD_SIDE_TASK_EVENT_NAMES.started) {
-          this.#applySettlement(record, "started", envelope.payload as SideTaskStarted);
-        } else if (envelope.eventName === THREAD_SIDE_TASK_EVENT_NAMES.dismissed) {
-          this.#applySettlement(record, "dismissed", envelope.payload as SideTaskDismissed);
-        }
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      THREAD_SIDE_TASKS_AGGREGATE_TYPE,
+    ])) {
+      const threadId = String(envelope.aggregateId);
+      const record = this.#records.get(threadId) ?? { tasks: [], version: 0 };
+      this.#records.set(threadId, record);
+      record.version += 1;
+      if (envelope.eventName === THREAD_SIDE_TASK_EVENT_NAMES.offered) {
+        this.#applyOffer(record, envelope.payload as SideTaskOffer);
+      } else if (envelope.eventName === THREAD_SIDE_TASK_EVENT_NAMES.started) {
+        this.#applySettlement(record, "started", envelope.payload as SideTaskStarted);
+      } else if (envelope.eventName === THREAD_SIDE_TASK_EVENT_NAMES.dismissed) {
+        this.#applySettlement(record, "dismissed", envelope.payload as SideTaskDismissed);
       }
-      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
   }
 }

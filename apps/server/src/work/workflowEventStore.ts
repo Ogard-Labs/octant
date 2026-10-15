@@ -5,7 +5,6 @@ import {
   CorrelationId,
   EventActor,
   EventId,
-  ReplayCursor,
   decodeWorkflowFrame,
   decodeWorkflowId,
   type WorkflowFrame,
@@ -13,10 +12,10 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
 
 export const WORK_WORKFLOW_RECORDED = "work.workflow-recorded@1";
-const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
 const MAX_JOURNAL_SCAN_EVENTS = 100_000;
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
@@ -25,9 +24,8 @@ const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
-const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
 
 export class WorkflowEventStoreError extends Error {
   override readonly name = "WorkflowEventStoreError";
@@ -163,49 +161,37 @@ export class WorkflowEventStore {
    */
   replayAll(): WorkflowReplayAll {
     const byWorkflow = new Map<WorkflowId, Array<WorkflowFrame>>();
-    let afterSequence = 0;
     let scannedEvents = 0;
 
-    for (;;) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
-      if (batch.length === 0) break;
-
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        if (envelope.aggregateType !== "work-workflow") continue;
-        scannedEvents += 1;
-        if (scannedEvents > MAX_JOURNAL_SCAN_EVENTS) {
-          return { status: "snapshot-required", reason: "scan-limit" };
-        }
-        if (envelope.eventName !== WORK_WORKFLOW_RECORDED || envelope.eventVersion !== 1) {
-          return { status: "snapshot-required", reason: "invalid-frame" };
-        }
-
-        let frame: WorkflowFrame;
-        try {
-          frame = decodeWorkflowFrame(envelope.payload);
-        } catch {
-          return { status: "snapshot-required", reason: "invalid-frame" };
-        }
-        if (
-          String(frame.workflow.workflowId) !== String(envelope.aggregateId) ||
-          frame.workflow.version !== envelope.aggregateVersion
-        ) {
-          return { status: "snapshot-required", reason: "identity-mismatch" };
-        }
-
-        const workflowId = frame.workflow.workflowId;
-        let list = byWorkflow.get(workflowId);
-        if (list === undefined) {
-          list = [];
-          byWorkflow.set(workflowId, list);
-        }
-        list.push(frame);
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, ["work-workflow"])) {
+      scannedEvents += 1;
+      if (scannedEvents > MAX_JOURNAL_SCAN_EVENTS) {
+        return { status: "snapshot-required", reason: "scan-limit" };
+      }
+      if (envelope.eventName !== WORK_WORKFLOW_RECORDED || envelope.eventVersion !== 1) {
+        return { status: "snapshot-required", reason: "invalid-frame" };
       }
 
-      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
+      let frame: WorkflowFrame;
+      try {
+        frame = decodeWorkflowFrame(envelope.payload);
+      } catch {
+        return { status: "snapshot-required", reason: "invalid-frame" };
+      }
+      if (
+        String(frame.workflow.workflowId) !== String(envelope.aggregateId) ||
+        frame.workflow.version !== envelope.aggregateVersion
+      ) {
+        return { status: "snapshot-required", reason: "identity-mismatch" };
+      }
+
+      const workflowId = frame.workflow.workflowId;
+      let list = byWorkflow.get(workflowId);
+      if (list === undefined) {
+        list = [];
+        byWorkflow.set(workflowId, list);
+      }
+      list.push(frame);
     }
 
     const all: Array<WorkflowFrame> = [];

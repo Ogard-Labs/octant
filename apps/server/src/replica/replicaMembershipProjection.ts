@@ -375,6 +375,7 @@ export class ReplicaMembershipProjection implements Projection {
   readonly name = "replica-membership";
   readonly dependencies: ReadonlyArray<string> = [];
   readonly holdsStateInMemory = true as const;
+  readonly aggregateTypes: ReadonlyArray<string> = [REPLICA_MEMBERSHIP_AGGREGATE_TYPE];
   #local: ReplicaLocalIdentity | undefined;
   #founder: { readonly instanceId: ReplicaInstanceId; readonly publicKey: string } | undefined;
   readonly #records = new Map<string, ReplicaHeldFile>();

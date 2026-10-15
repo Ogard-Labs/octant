@@ -18,7 +18,6 @@ import {
   AutomationNotificationRefRecorded,
   CorrelationId,
   EventActor,
-  ReplayCursor,
   EventId,
   deriveAutomationOccurrenceKey,
   type AutomationBlockReason,
@@ -41,6 +40,7 @@ import {
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import { ConcurrencyConflict, DuplicateEventIdentity } from "../persistence/journalErrors";
 
 export const AUTOMATION_DEFINITION_AGGREGATE_TYPE = "automation-definition";
@@ -62,7 +62,6 @@ export const AUTOMATION_FIRST_TURN_DISPATCH_CANCELLED =
 export const AUTOMATION_FIRST_TURN_ACCEPTED = "automation-first-turn-accepted@1";
 export const AUTOMATION_NOTIFICATION_REF_RECORDED = "automation-notification-ref-recorded@1";
 
-const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
 const MAX_JOURNAL_SCAN_EVENTS = 100_000;
 
 const decodeActor = Schema.decodeUnknownSync(EventActor);
@@ -70,7 +69,6 @@ const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
-const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 const decodeDefinitionCreated = Schema.decodeUnknownSync(AutomationDefinitionCreated);
 const decodeDefinitionUpdated = Schema.decodeUnknownSync(AutomationDefinitionUpdated);
 const decodeDefinitionLifecycleChanged = Schema.decodeUnknownSync(
@@ -111,7 +109,7 @@ export function registerAutomationEvents(registry: EventRegistry): EventRegistry
     .register(AUTOMATION_NOTIFICATION_REF_RECORDED, 1, AutomationNotificationRefRecorded);
 }
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
 
 export class AutomationEventStoreError extends Error {
   override readonly name = "AutomationEventStoreError";
@@ -759,26 +757,18 @@ export class AutomationEventStore {
    */
   replayAll(): AutomationReplay {
     const events: Array<EventEnvelope> = [];
-    let afterSequence = 0;
     let scannedEvents = 0;
 
-    for (;;) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        if (!AUTOMATION_AGGREGATE_TYPES.has(envelope.aggregateType)) continue;
-        scannedEvents += 1;
-        if (scannedEvents > MAX_JOURNAL_SCAN_EVENTS) {
-          return { status: "snapshot-required", reason: "scan-limit" };
-        }
-        const inspection = inspectAutomationFrame(envelope);
-        if (inspection !== "ok") return { status: "snapshot-required", reason: inspection };
-        events.push(envelope);
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      ...AUTOMATION_AGGREGATE_TYPES,
+    ])) {
+      scannedEvents += 1;
+      if (scannedEvents > MAX_JOURNAL_SCAN_EVENTS) {
+        return { status: "snapshot-required", reason: "scan-limit" };
       }
-      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
+      const inspection = inspectAutomationFrame(envelope);
+      if (inspection !== "ok") return { status: "snapshot-required", reason: inspection };
+      events.push(envelope);
     }
     return { status: "ok", events };
   }

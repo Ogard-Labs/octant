@@ -35,6 +35,7 @@ import { effectiveAgentRunExecutionTarget, isAgentRunActiveStatus } from "@octan
 import type { Projection } from "../persistence/projection";
 import type { SqliteConnection } from "../persistence/sqlitePort";
 import {
+  AGENT_RUN_AGGREGATE_TYPE,
   AGENT_RUN_REQUESTED,
   AGENT_RUN_RESULT_ACKNOWLEDGED,
   AGENT_RUN_RESULT_DELIVERY_SETTLED,
@@ -161,6 +162,7 @@ export class AgentRunProjection implements Projection {
   // Runs live only in these maps, so every host start must replay them all:
   // resuming from the stored checkpoint showed a restarted host no children.
   readonly holdsStateInMemory = true as const;
+  readonly aggregateTypes: ReadonlyArray<string> = [AGENT_RUN_AGGREGATE_TYPE];
   readonly #resultHistory = new Map<AgentRunId, ReadonlyArray<AgentRun>>();
   readonly #truncatedResults = new Set<AgentRunId>();
   readonly #byId = new Map<AgentRunId, AgentRun>();

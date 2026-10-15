@@ -7,7 +7,6 @@ import {
   CorrelationId,
   EventActor,
   EventId,
-  ReplayCursor,
   decodeCanvasCommentEvent,
   decodeCanvasCommentsOutcome,
   decodeCanvasId,
@@ -44,19 +43,17 @@ import {
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import { ConcurrencyConflict, DuplicateEventIdentity } from "../persistence/journalErrors";
 import type { CanvasProjection } from "./canvasProjection";
 import type { CanvasAuthorizationContext, CanvasProjectRecord } from "./canvasService";
 
 export const CANVAS_COMMENT_AGGREGATE_TYPE = "canvas-comments";
 
-const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
-
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
-const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 
 /** Register the Canvas comment journal frames so they can be appended and replayed. */
 export function registerCanvasCommentEvents(registry: EventRegistry): EventRegistry {
@@ -67,7 +64,7 @@ export function registerCanvasCommentEvents(registry: EventRegistry): EventRegis
     .register(CANVAS_COMMENT_DELETED, 1, CanvasCommentDeleted);
 }
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
 
 export interface CanvasCommentServiceOptions {
   readonly journal: JournalPort;
@@ -309,24 +306,16 @@ export class CanvasCommentService {
 
   #replay(): void {
     this.#replayed = true;
-    let afterSequence = 0;
-    while (true) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      CANVAS_COMMENT_AGGREGATE_TYPE,
+    ])) {
+      const event = eventFromEnvelope(envelope);
+      if (event === undefined) continue;
+      const key = String(event.event.canvasId);
+      this.#state.set(
+        key,
+        applyCanvasCommentEvent(this.#state.get(key) ?? EMPTY_CANVAS_COMMENT_STATE, event),
       );
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        if (envelope.aggregateType !== CANVAS_COMMENT_AGGREGATE_TYPE) continue;
-        const event = eventFromEnvelope(envelope);
-        if (event === undefined) continue;
-        const key = String(event.event.canvasId);
-        this.#state.set(
-          key,
-          applyCanvasCommentEvent(this.#state.get(key) ?? EMPTY_CANVAS_COMMENT_STATE, event),
-        );
-      }
-      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
   }
 }
