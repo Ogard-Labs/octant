@@ -56,7 +56,7 @@ export function AppleDevicePane(props: AppleWorkbenchPaneProps) {
                 onRun({
                   kind: "rotate",
                   simulatorId: live.simulatorId,
-                  orientation: action.orientation,
+                  ...(action.orientation === undefined ? {} : { orientation: action.orientation }),
                 });
               }
               return;
@@ -130,6 +130,7 @@ export function AppleDevicePane(props: AppleWorkbenchPaneProps) {
       busy={props.busy === true}
       canOpenUrl={props.runtime?.capabilities?.openUrl === true}
       canRotate={props.runtime?.capabilities?.rotate === true}
+      hostTurnsRotation
       canVolume={props.runtime?.capabilities?.volume === true}
       canRecordScreen={props.runtime?.capabilities?.recordScreen === true}
       recording={

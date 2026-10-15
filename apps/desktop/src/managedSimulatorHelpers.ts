@@ -1,4 +1,7 @@
 import { spawn as spawnProcess, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { mkdir, open, rm } from "node:fs/promises";
+import { join } from "node:path";
 import {
   readManagedDeviceEndpoint,
   takeJpegFrames,
@@ -114,6 +117,10 @@ export interface ManagedSimulatorHelpersOptions {
   /** Puts text on the Simulator's pasteboard; resolves whether it did. */
   readonly copyToPasteboard?: (udid: string, text: string, signal: AbortSignal) => Promise<boolean>;
   /** Asks the guest whether Device Hub has taken its touch and buttons. */
+  /** The host-private directory a screen capture may land in; without it Rotate cannot read the orientation. */
+  readonly captureDirectory?: string;
+  /** Whether the Simulator shows wider than tall now; nothing when it cannot be read. */
+  readonly sitsWide?: (udid: string, signal: AbortSignal) => Promise<boolean | undefined>;
   readonly inputConnection?: (
     udid: string,
     signal: AbortSignal,
@@ -175,6 +182,7 @@ export function createManagedSimulatorHelpers(
   const firstFrameMs = options.firstFrameMs ?? FIRST_FRAME_MS;
   const copyToPasteboard = options.copyToPasteboard ?? simctlPasteboardCopy;
   const inputConnection = options.inputConnection ?? simctlInputConnection;
+  const sitsWideOf = options.sitsWide ?? simctlSitsWideIn(options.captureDirectory);
   const openTouchChannel = options.openTouchChannel ?? openServeSimTouchChannel;
   const sessions = new Map<string, Promise<StreamSession | undefined>>();
   const live = new Set<ChildProcess>();
@@ -486,20 +494,44 @@ export function createManagedSimulatorHelpers(
   /**
    * serve-sim rotates a Simulator by sending the orientation over its running
    * stream, so the stream has to be up first. Simulator.app is never scripted.
+   * Asked for no orientation, it turns the Simulator away from the way it
+   * shows now, which the pane cannot tell from the streamed picture.
    */
   async function rotate(
     udid: string,
-    orientation: "portrait" | "landscape",
+    orientation: "portrait" | "landscape" | undefined,
     timeoutMs: number,
     cancelled: AbortSignal | undefined,
   ): Promise<DeviceHelperReply> {
     const startedAt = Date.now();
     const session = await sessionFor(udid);
     if (session === undefined || session.closed) {
+      // Dev builds do not vendor serve-sim, and a person can only fix that one.
+      if ((await tools.launchSpec("serve-sim", ["--help"])) === undefined) {
+        return {
+          status: "refused",
+          code: "rotate-unavailable",
+          message: "Rotate needs the managed serve-sim tool, and it is not installed.",
+        };
+      }
       return { status: "unavailable", message: "Rotate needs the managed serve-sim stream." };
     }
+    let target = orientation;
+    if (target === undefined) {
+      const sitsWide = await sitsWideOf(
+        udid,
+        AbortSignal.any([
+          AbortSignal.timeout(Math.max(1, timeoutMs - (Date.now() - startedAt))),
+          ...(cancelled === undefined ? [] : [cancelled]),
+        ]),
+      );
+      if (sitsWide === undefined) {
+        return { status: "unavailable", message: "The Simulator's orientation could not be read." };
+      }
+      target = sitsWide ? "portrait" : "landscape";
+    }
     const outcome = await runControl(
-      ["rotate", orientation === "landscape" ? "landscape_left" : "portrait", "-d", udid],
+      ["rotate", target === "landscape" ? "landscape_left" : "portrait", "-d", udid],
       Math.max(1, timeoutMs - (Date.now() - startedAt)),
       cancelled,
     );
@@ -513,11 +545,6 @@ export function createManagedSimulatorHelpers(
     if (outcome !== "ok") {
       return { status: "unavailable", message: "The Simulator did not rotate." };
     }
-    const { width, height } = session.screen;
-    const long = Math.max(width, height);
-    const short = Math.min(width, height);
-    session.screen =
-      orientation === "landscape" ? { width: long, height: short } : { width: short, height: long };
     return { status: "delivered" };
   }
 
@@ -837,6 +864,60 @@ async function readConfig(
   if (width === 0 && height === 0) return "pending";
   if (width <= 0 || height <= 0 || width > 20_000 || height > 20_000) return "error";
   return { width, height };
+}
+
+/**
+ * Whether the Simulator's screen is wider than tall right now, read from a
+ * screenshot's size. serve-sim's own orientation is only what it last sent, and
+ * is portrait again whenever its stream restarts; the streamed picture stays
+ * portrait-sized after a turn. The screenshot is what the device shows.
+ *
+ * The capture lands in the host-private capture directory, which the
+ * confinement profile denies to every launch, and is deleted as soon as its
+ * header is read. `simctl` replaces a pipe at the path with a file, so a pipe
+ * cannot keep the pixels off disk.
+ */
+function simctlSitsWideIn(
+  captureDirectory: string | undefined,
+): (udid: string, signal: AbortSignal) => Promise<boolean | undefined> {
+  return async (udid, signal) => {
+    if (captureDirectory === undefined) return undefined;
+    await mkdir(captureDirectory, { recursive: true, mode: 0o700 });
+    const file = join(captureDirectory, `orientation-${randomUUID()}.png`);
+    try {
+      const captured = await new Promise<boolean>((resolve) => {
+        let child: ChildProcess;
+        try {
+          child = spawnProcess("xcrun", ["simctl", "io", udid, "screenshot", "--type=png", file], {
+            stdio: "ignore",
+            signal,
+          });
+        } catch {
+          resolve(false);
+          return;
+        }
+        child.once("error", () => resolve(false));
+        child.once("close", (code) => resolve(code === 0));
+      });
+      if (!captured) return undefined;
+      const handle = await open(file, "r");
+      try {
+        const header = Buffer.alloc(24);
+        const { bytesRead } = await handle.read(header, 0, header.length, 0);
+        // A PNG's IHDR chunk starts at byte 8; width and height follow its name.
+        if (bytesRead < header.length || header.toString("latin1", 12, 16) !== "IHDR") {
+          return undefined;
+        }
+        return header.readUInt32BE(16) > header.readUInt32BE(20);
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      return undefined;
+    } finally {
+      await rm(file, { force: true });
+    }
+  };
 }
 
 /** `xcrun simctl pbcopy` reads the text from stdin, so it never reaches argv. */

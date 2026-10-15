@@ -1045,7 +1045,9 @@ export class AppleToolchainService {
           severity: "note" as const,
           message:
             outcome === "succeeded"
-              ? `rotate to ${request.orientation ?? "unknown"} completed`
+              ? request.orientation === undefined
+                ? "rotate completed"
+                : `rotate to ${request.orientation} completed`
               : `rotate ${outcome}: ${text(terminal.stderr).trim()}`.trimEnd(),
         };
         cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";

@@ -197,7 +197,7 @@ export const AppleSimulatorRequest = Schema.Struct({
   key: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
   /** The address `open-url` opens. Shown whole in its confirmation; evidence keeps the origin. */
   url: Schema.optional(DeviceOpenUrl),
-  /** The orientation `rotate` sets. */
+  /** The orientation `rotate` sets. Apple omits it: the host turns the Simulator the other way. */
   orientation: Schema.optional(DeviceOrientation),
   timeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(10 * 60 * 1000)),
   approval: ToolActionApproval,
@@ -244,7 +244,7 @@ export const AppleSimulatorRequest = Schema.Struct({
         return request.requestedBy !== undefined && request.url !== undefined;
       }
       if (request.kind === "rotate") {
-        return request.requestedBy !== undefined && request.orientation !== undefined;
+        return request.requestedBy !== undefined;
       }
       if (request.kind === "start-recording" || request.kind === "stop-recording") {
         return request.requestedBy !== undefined;
