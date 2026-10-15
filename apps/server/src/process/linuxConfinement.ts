@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, normalize, parse, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, normalize, parse, resolve, sep } from "node:path";
 import {
   confinedExecutableExecPaths,
   ProcessConfinementError,
@@ -18,6 +18,7 @@ import {
   type ProcessConfinementPrepareInput,
 } from "./seatbeltProfile";
 import { buildLinuxProcessDenySeccompFilter } from "./linuxProcessDenySeccomp";
+import { LINUX_EGRESS_FORWARDER_PORT, LINUX_EGRESS_FORWARDER_SOURCE } from "./proxiedNetworkEgress";
 
 export const DEFAULT_BWRAP_PATH = "/usr/bin/bwrap";
 const HOST_SH_PATH = "/bin/sh";
@@ -25,6 +26,11 @@ const HOST_SH_PATH = "/bin/sh";
 export interface BuildLinuxConfinementLaunchInput {
   readonly bwrapPath?: string;
   readonly processArch?: NodeJS.Architecture;
+  /**
+   * The JavaScript runtime that runs a `proxied` launch's forwarder inside the
+   * capsule. Defaults to the host's own runtime.
+   */
+  readonly forwarderRuntime?: string;
 }
 
 export interface LinuxAllowDefaultDenyLaunchInput {
@@ -143,6 +149,24 @@ export function buildBubblewrapLaunch(
     );
   }
 
+  // `proxied` keeps the private network namespace `--unshare-all` gives,
+  // whose only interface is loopback, and reaches the host proxy through the
+  // forwarder below; the capsule has no resolver to ask.
+  const proxied = typeof input.networkEgress === "object" ? input.networkEgress : undefined;
+  if (proxied !== undefined) {
+    if (proxied.endpoint.kind !== "unix-socket" || !isAbsolute(proxied.endpoint.path)) {
+      throw new ProcessConfinementError(
+        "invalid-configuration",
+        "A proxied Linux launch needs its proxy's Unix socket.",
+      );
+    }
+    if (input.allowProcessFork === false || input.allowProcessExec === false) {
+      throw new ProcessConfinementError(
+        "incompatible",
+        "A proxied Linux launch starts its command from the forwarder, so it needs fork and exec.",
+      );
+    }
+  }
   const args: string[] = ["--unshare-all"];
   if (input.networkEgress === "allow") {
     args.push("--share-net");
@@ -240,6 +264,26 @@ export function buildBubblewrapLaunch(
   }
   for (const path of input.additionalWriteRoots ?? []) {
     tryBindWritable(path);
+  }
+  // The launch's own socket directory, read-only: connecting to a socket
+  // needs no write to the mount, and the forwarder beside it cannot be
+  // rewritten from inside. Only this launch's directory is bound, so no
+  // other launch's socket is reachable.
+  let forwarder: { readonly runtime: string; readonly script: string } | undefined;
+  if (proxied !== undefined && proxied.endpoint.kind === "unix-socket") {
+    const socketDirectory = dirname(proxied.endpoint.path);
+    const script = join(socketDirectory, "forwarder.cjs");
+    writeFileSync(script, LINUX_EGRESS_FORWARDER_SOURCE, { mode: 0o600 });
+    const runtime = options.forwarderRuntime ?? process.execPath;
+    if (!isAbsolute(runtime)) {
+      throw new ProcessConfinementError(
+        "invalid-configuration",
+        "The Linux egress forwarder runtime must be absolute.",
+      );
+    }
+    addMount("ro-bind", socketDirectory, socketDirectory);
+    tryBindReadOnly(dirname(runtime));
+    forwarder = { runtime, script };
   }
   // Bubblewrap applies seccomp before execve of the command, so a filter that
   // blocked execve would prevent the launch itself. Overlay host executable
@@ -343,7 +387,22 @@ export function buildBubblewrapLaunch(
 
   args.push("--remount-ro", "/");
   args.push("--chdir", input.boundRoot);
-  args.push("--", input.executable);
+  if (forwarder !== undefined && proxied?.endpoint.kind === "unix-socket") {
+    // A packaged host's runtime is Electron, which runs a script only as Node.
+    if (process.versions.electron !== undefined) {
+      args.push("--setenv", "ELECTRON_RUN_AS_NODE", "1");
+    }
+    args.push(
+      "--",
+      forwarder.runtime,
+      forwarder.script,
+      proxied.endpoint.path,
+      String(LINUX_EGRESS_FORWARDER_PORT),
+      input.executable,
+    );
+  } else {
+    args.push("--", input.executable);
+  }
   args.push(...input.args);
 
   if (denyProcessFork || denyProcessExec) {

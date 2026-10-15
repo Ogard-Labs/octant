@@ -86,8 +86,11 @@ export type DeviceAction =
   | { readonly kind: "stop-recording" }
   /** An address the host checks again and confirms whole before the device opens it. */
   | { readonly kind: "open-url"; readonly url: string }
-  /** The orientation the device is not showing now; the host sets it. */
-  | { readonly kind: "rotate"; readonly orientation: "portrait" | "landscape" };
+  /**
+   * The orientation the device is not showing now. Without one the host turns
+   * the device away from the way it sits, which only it knows.
+   */
+  | { readonly kind: "rotate"; readonly orientation?: "portrait" | "landscape" };
 
 /**
  * What a person typed into Open URL, as the address the device would receive,
@@ -175,7 +178,7 @@ const REFUSALS: Readonly<
     string,
     {
       readonly sentence: (name: string) => string;
-      readonly fix: "try-again" | "allow-input" | "repair-input";
+      readonly fix: "try-again" | "allow-input" | "repair-input" | "none";
     }
   >
 > = {
@@ -188,6 +191,12 @@ const REFUSALS: Readonly<
   "input-disconnected": {
     sentence: (name) => `Input on ${name} is disconnected. Repair input restarts its home screen.`,
     fix: "repair-input",
+  },
+  // Dev builds do not vendor the managed device tool; installing it is Settings' job.
+  "rotate-unavailable": {
+    sentence: (name) =>
+      `${name} can't rotate: the device tool isn't installed. Update managed tools in Settings.`,
+    fix: "none",
   },
 };
 
@@ -291,11 +300,13 @@ export function deviceProblemFor<Intent extends { readonly kind: string }>(
       const fix =
         known.fix === "allow-input"
           ? allow
-          : known.fix === "repair-input"
-            ? repair === undefined
-              ? {}
-              : { fix: { label: "Repair input", run: () => repair(intent) } }
-            : tryAgain(intent);
+          : known.fix === "none"
+            ? {}
+            : known.fix === "repair-input"
+              ? repair === undefined
+                ? {}
+                : { fix: { label: "Repair input", run: () => repair(intent) } }
+              : tryAgain(intent);
       return { message: known.sentence(name), ...fix };
     }
     case "input-not-allowed":

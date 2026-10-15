@@ -21,6 +21,7 @@ import {
   type ContextCompactionExecutor,
   type ContextCompactionFailureReason,
   type ContextCompactionId,
+  type ContextCompactionReceipt,
   type ContextCompactionRecord,
   type ContextCompactionUsage,
   type ContextEntry,
@@ -775,6 +776,14 @@ export class ContextHarnessService {
   summaryContent(summaryId: ContextSummaryId): string | undefined {
     this.#assertReady();
     return readContextSummaryContent(this.#persistence.connection, summaryId);
+  }
+
+  /** The subject's completed compactions, oldest first. */
+  completedCompactions(subject: ContextSubjectRef): ReadonlyArray<ContextCompactionReceipt> {
+    this.#assertReady();
+    return readContextCompactions(this.#persistence.connection, subject).flatMap((record) =>
+      record.status === "completed" ? [record.receipt] : [],
+    );
   }
 
   /** The subject's most recent compaction, if it has had one. */

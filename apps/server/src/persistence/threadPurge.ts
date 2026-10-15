@@ -385,7 +385,46 @@ function collectOwnedAggregates(
       add(match.aggregateType, match.aggregateId);
     }
   }
+  for (const identity of claudeResumeIdentityAggregates(connection, keys)) {
+    add(identity.aggregateType, identity.aggregateId);
+  }
   return [...keys.values()];
+}
+
+/**
+ * A Claude resume identity is keyed by the Octant session, not by a thread, so
+ * no ownership path names the thread. The thread's own events name the session
+ * they ran in, which is the only link; an identity whose session a purged
+ * thread recorded goes with it.
+ */
+function claudeResumeIdentityAggregates(
+  connection: SqliteConnection,
+  keys: ReadonlyMap<string, AggregateKey>,
+): ReadonlyArray<AggregateKey> {
+  const identities = connection
+    .prepare(
+      `SELECT DISTINCT aggregate_id FROM event_journal WHERE aggregate_type = 'claude-resume-identity'`,
+    )
+    .all() as ReadonlyArray<{ readonly aggregate_id: string }>;
+  const mentions = connection.prepare(
+    `SELECT aggregate_type, aggregate_id FROM event_journal WHERE instr(payload_json, ?) > 0`,
+  );
+  const owned: AggregateKey[] = [];
+  for (const { aggregate_id: sessionId } of identities) {
+    const named = mentions.all(sessionId) as ReadonlyArray<{
+      readonly aggregate_type: string;
+      readonly aggregate_id: string;
+    }>;
+    if (
+      named.some(
+        (row) =>
+          row.aggregate_type !== "claude-resume-identity" &&
+          keys.has(`${row.aggregate_type}:${row.aggregate_id}`),
+      )
+    )
+      owned.push({ aggregateType: "claude-resume-identity", aggregateId: sessionId });
+  }
+  return owned;
 }
 
 function followLinkedAggregates(

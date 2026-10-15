@@ -214,10 +214,16 @@ export function classifyProductAction(request: Request): string | undefined {
     return method === "GET" || method === "HEAD" ? "settings.read-non-secret" : undefined;
   }
   if (path.startsWith("/api/extensions/")) {
+    // A paired device answers the MCP tool prompts its own turns raised. The
+    // approval service limits it to those prompts and refuses a remembered
+    // answer, so the action is approve once or deny.
+    if (method === "POST" && path === "/api/extensions/tool-approvals") {
+      return "extension.tool-call.answer-once";
+    }
     // The Extension API is POST-only — it answers 405 to any other method — so
     // a GET/HEAD-only classification denied every extension request the remote
-    // route policy forwards. That forward list is already the read subset:
-    // lifecycle, skills, tool approvals, and tool grants are local-only, and
+    // route policy forwards. That forward list is otherwise the read subset:
+    // lifecycle, skills, and tool grants are local-only, and
     // local folder import is never forwarded and stays local-window at the
     // route. Each of these five carries exactly one read command, or no body
     // at all for the snapshot. Admission is still only forwarding: the route

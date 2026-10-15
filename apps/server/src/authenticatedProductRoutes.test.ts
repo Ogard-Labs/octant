@@ -413,7 +413,6 @@ describe("authenticated product route dispatch", () => {
       "/api/context/commands",
       "/api/extensions/lifecycle",
       "/api/extensions/skills",
-      "/api/extensions/tool-approvals",
       "/api/extensions/tool-grants",
       "/api/extensions/import-local",
       "/api/thread-external-content",
@@ -422,6 +421,11 @@ describe("authenticated product route dispatch", () => {
         classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
       ).toBeUndefined();
     }
+    expect(
+      classifyProductAction(
+        new Request("https://octant.example/api/extensions/tool-approvals", { method: "POST" }),
+      ),
+    ).toBe("extension.tool-call.answer-once");
     expect(
       classifyProductAction(new Request("https://octant.example/api/projects/project-id/memory")),
     ).toBe("project.overview.read");
@@ -454,7 +458,6 @@ describe("authenticated product route dispatch", () => {
       "/api/context/commands",
       "/api/extensions/lifecycle",
       "/api/extensions/skills",
-      "/api/extensions/tool-approvals",
       "/api/extensions/tool-grants",
       "/api/extensions/import-local",
       "/api/thread-external-content",
@@ -463,6 +466,16 @@ describe("authenticated product route dispatch", () => {
       expect(response?.status).toBe(403);
     }
     expect(dispatch).toHaveBeenCalledTimes(7);
+  });
+
+  it("dispatches a paired device's MCP tool prompt list and answer to the route, which judges each prompt", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    const response = await product(handoff("/api/extensions/tool-approvals", "POST"));
+
+    expect(response?.status).toBe(200);
+    expect(dispatch).toHaveBeenCalledOnce();
   });
 
   it("dispatches an explicitly confirmed GitHub lifecycle command for a paired user", async () => {

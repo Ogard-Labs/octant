@@ -11,6 +11,7 @@ import type { ExtensionLifecycleService } from "./extensions/extensionLifecycleS
 import type { ResolvedExtensionPackage } from "./extensions/packageInspector";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
+import { ExtensionToolApprovalService } from "./extensions/extensionToolApprovalService";
 
 const now = Date.parse("2026-07-28T12:00:00.000Z");
 const capability = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop0";
@@ -18,6 +19,30 @@ const windowId = "44000000-0000-4000-8000-000000000001";
 const extensionId = "44000000-0000-4000-8000-000000000002";
 const packageId = "44000000-0000-4000-8000-000000000003";
 const digest = `sha256:${"a".repeat(64)}`;
+const pairedDeviceId = "55000000-0000-4000-8000-000000000001";
+
+/** A request the remote gateway already authenticated as a paired device. */
+function pairedDeviceRequest(path: string, body: unknown): Request {
+  const remoteRequest = new Request(`http://127.0.0.1${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  bindPrincipalRouteContext(remoteRequest, {
+    principal: {
+      kind: "remote-device",
+      hostId: "local",
+      deviceId: pairedDeviceId,
+      credentialGeneration: 1,
+      origin: "https://remote.example",
+      protocolVersion: 1,
+      capabilityDigest: "a".repeat(64),
+      sessionId: "55000000-0000-4000-8000-000000000002",
+    } as never,
+    scopeId: pairedDeviceId as never,
+  });
+  return remoteRequest;
+}
 
 function setup(service?: ExtensionRouteService, maxRequestBodySize = 4_096) {
   const windowAuthorityStore = new WindowAuthorityStore();
@@ -134,11 +159,14 @@ describe("bounded authenticated extension routes", () => {
       }),
     );
     expect(decided?.status).toBe(200);
-    expect(list).toHaveBeenCalledWith(windowId);
-    expect(decide).toHaveBeenCalledWith(windowId, {
-      approvalId: "44000000-0000-4000-8000-000000000010",
-      decision: "approved",
-    });
+    expect(list).toHaveBeenCalledWith({ kind: "local-window", scopeId: windowId });
+    expect(decide).toHaveBeenCalledWith(
+      { kind: "local-window", scopeId: windowId },
+      {
+        approvalId: "44000000-0000-4000-8000-000000000010",
+        decision: "approved",
+      },
+    );
   });
 
   it("lets a local window answer a tool approval with always allow", async () => {
@@ -162,11 +190,14 @@ describe("bounded authenticated extension routes", () => {
     const refused = await handler(request("/api/extensions/tool-approvals", answer));
     expect(refused?.status).toBe(409);
     expect(await refused?.json()).toEqual({ accepted: false });
-    expect(decide).toHaveBeenCalledWith(windowId, {
-      approvalId: answer.approvalId,
-      decision: "approved",
-      remember: true,
-    });
+    expect(decide).toHaveBeenCalledWith(
+      { kind: "local-window", scopeId: windowId },
+      {
+        approvalId: answer.approvalId,
+        decision: "approved",
+        remember: true,
+      },
+    );
 
     const denied = await handler(
       request("/api/extensions/tool-approvals", { ...answer, decision: "denied" }),
@@ -232,54 +263,125 @@ describe("bounded authenticated extension routes", () => {
     expect(list).toHaveBeenCalledOnce();
   });
 
-  it("refuses a paired device both remembered-approval routes", async () => {
+  it("refuses a paired device the remembered-approval route", async () => {
     const list = vi.fn(() => []);
     const revoke = vi.fn(() => "revoked" as const);
-    const decide = vi.fn(() => true);
     const handler = createExtensionRouteHandler({
       service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
       windowAuthorityStore: new WindowAuthorityStore(),
-      toolApprovals: { list: () => [], decide },
       toolGrants: { list, revoke },
       now: () => now,
     });
-    for (const [path, body] of [
-      ["/api/extensions/tool-grants", { kind: "list" }],
-      ["/api/extensions/tool-grants", { kind: "revoke", grantId: `sha256:${"b".repeat(64)}` }],
-      [
-        "/api/extensions/tool-approvals",
-        {
-          kind: "decide",
-          approvalId: "44000000-0000-4000-8000-000000000010",
-          decision: "approved",
-          remember: true,
-        },
-      ],
-    ] as const) {
-      const remoteRequest = new Request(`http://127.0.0.1${path}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      bindPrincipalRouteContext(remoteRequest, {
-        principal: {
-          kind: "remote-device",
-          hostId: "local",
-          deviceId: "55000000-0000-4000-8000-000000000001",
-          credentialGeneration: 1,
-          origin: "https://remote.example",
-          protocolVersion: 1,
-          capabilityDigest: "a".repeat(64),
-          sessionId: "55000000-0000-4000-8000-000000000002",
-        } as never,
-        scopeId: "55000000-0000-4000-8000-000000000001" as never,
-      });
-      const response = await handler(remoteRequest);
+    for (const body of [
+      { kind: "list" },
+      { kind: "revoke", grantId: `sha256:${"b".repeat(64)}` },
+    ]) {
+      const response = await handler(pairedDeviceRequest("/api/extensions/tool-grants", body));
       expect(response?.status).toBe(401);
     }
     expect(list).not.toHaveBeenCalled();
     expect(revoke).not.toHaveBeenCalled();
-    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it("lets a paired device list and approve its own turn's MCP prompt once, and refuses remembering it", async () => {
+    const approvals = new ExtensionToolApprovalService({
+      uuid: () => "44000000-0000-4000-8000-000000000010",
+      now: () => now,
+      isPairedDeviceScope: (scope) => String(scope) === pairedDeviceId,
+      threadAuthorityIsCurrent: () => true,
+    });
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: new WindowAuthorityStore(),
+      toolApprovals: approvals,
+      now: () => now,
+    });
+    const remember = vi.fn(() => true);
+    const call = approvals.request({
+      windowId: pairedDeviceId as never,
+      threadId: "44000000-0000-4000-8000-000000000011",
+      projectId: "44000000-0000-4000-8000-000000000012",
+      extensionId,
+      packageId,
+      componentId: "server",
+      serverName: "server",
+      providerToolName: "plugin__server__read",
+      mcpToolName: "read",
+      inputJson: "{}",
+      remember,
+    });
+
+    const listed = await handler(
+      pairedDeviceRequest("/api/extensions/tool-approvals", { kind: "list" }),
+    );
+    expect(listed?.status).toBe(200);
+    expect(await listed?.json()).toEqual([
+      expect.objectContaining({ approvalId: "44000000-0000-4000-8000-000000000010" }),
+    ]);
+    const answer = {
+      kind: "decide",
+      approvalId: "44000000-0000-4000-8000-000000000010",
+      decision: "approved",
+    };
+    const remembered = await handler(
+      pairedDeviceRequest("/api/extensions/tool-approvals", { ...answer, remember: true }),
+    );
+    expect(remembered?.status).toBe(409);
+    expect(remember).not.toHaveBeenCalled();
+    // Nobody signed in: no window capability and no paired principal.
+    const anonymous = await handler(
+      new Request("http://127.0.0.1/api/extensions/tool-approvals", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(answer),
+      }),
+    );
+    expect(anonymous?.status).toBe(401);
+    const approved = await handler(pairedDeviceRequest("/api/extensions/tool-approvals", answer));
+    expect(approved?.status).toBe(200);
+    await expect(call).resolves.toBe(true);
+  });
+
+  it("refuses a paired device another scope's MCP prompt", async () => {
+    const approvals = new ExtensionToolApprovalService({
+      uuid: () => "44000000-0000-4000-8000-000000000010",
+      now: () => now,
+      isPairedDeviceScope: () => true,
+      threadAuthorityIsCurrent: () => true,
+      windowCanReachThread: () => true,
+    });
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: new WindowAuthorityStore(),
+      toolApprovals: approvals,
+      now: () => now,
+    });
+    const call = approvals.request({
+      windowId: windowId as never,
+      threadId: "44000000-0000-4000-8000-000000000011",
+      projectId: "44000000-0000-4000-8000-000000000012",
+      extensionId,
+      packageId,
+      componentId: "server",
+      serverName: "server",
+      providerToolName: "plugin__server__read",
+      mcpToolName: "read",
+      inputJson: "{}",
+    });
+    const listed = await handler(
+      pairedDeviceRequest("/api/extensions/tool-approvals", { kind: "list" }),
+    );
+    expect(await listed?.json()).toEqual([]);
+    const answered = await handler(
+      pairedDeviceRequest("/api/extensions/tool-approvals", {
+        kind: "decide",
+        approvalId: "44000000-0000-4000-8000-000000000010",
+        decision: "approved",
+      }),
+    );
+    expect(answered?.status).toBe(409);
+    approvals.revokeWindow(windowId as never);
+    await expect(call).resolves.toBe(false);
   });
 
   it("imports a desktop-selected folder through a one-time window-bound receipt", async () => {

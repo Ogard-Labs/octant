@@ -3325,6 +3325,7 @@ function LaunchedShell(
   const composerCompaction = useMemo<ComposerCompaction>(
     () => ({
       controller: sessionCompaction,
+      ...(contextClient === undefined ? {} : { client: contextClient }),
       names: {
         provider: (providerInstanceId) =>
           providerController.instances.find(
@@ -3336,7 +3337,12 @@ function LaunchedShell(
             ?.models.find((listed) => String(listed.id) === String(modelId))?.displayName,
       },
     }),
-    [providerController.instances, providerController.observedByInstance, sessionCompaction],
+    [
+      contextClient,
+      providerController.instances,
+      providerController.observedByInstance,
+      sessionCompaction,
+    ],
   );
   const workCreateThreadAvailable = workProviderChoice !== undefined;
   const enabledProjectTypes = new Set(

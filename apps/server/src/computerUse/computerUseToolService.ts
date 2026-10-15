@@ -11,6 +11,7 @@ import {
   decodeToolActionRequest,
   decodeEventActor,
   sameToolActionAuthority,
+  type ApprovalOutsideContent,
   type ComputerUseActionKind,
   type ToolActionAuthority,
 } from "@octant/contracts";
@@ -44,6 +45,8 @@ export function createComputerUseToolService(options: {
   readonly ownerIsCurrent: (owner: ComputerUseOwner) => boolean;
   readonly toolConstraints: (owner: ComputerUseOwner) => ReadonlyArray<string>;
   readonly externalContentIngested: (owner: ComputerUseOwner) => boolean;
+  /** The sources that marked the owner's thread, read when an approval is asked. */
+  readonly outsideContent?: (owner: ComputerUseOwner) => ApprovalOutsideContent | undefined;
   readonly threadTitle: (owner: ComputerUseOwner) => string;
   readonly record: (event: ComputerUseEvidenceEvent) => void | Promise<void>;
 }) {
@@ -143,6 +146,14 @@ export function createComputerUseToolService(options: {
         return `Allow this one action in ${action.appId} for "${options.threadTitle(action.owner).slice(0, 100)}".`;
       }
       return `Allow control of ${action?.appId ?? "this application"} for "${action === undefined ? "this task" : options.threadTitle(action.owner).slice(0, 100)}" for 5 minutes.`;
+    },
+    // A marked thread's one-time approval says what marked it. A mark the
+    // host reads as present but whose sources it cannot name still says so,
+    // with an empty list, rather than reading like an ordinary prompt.
+    approvalOutsideContent: (request) => {
+      const action = pending.get(String(request.actionId));
+      if (action === undefined || !options.externalContentIngested(action.owner)) return undefined;
+      return options.outsideContent?.(action.owner) ?? { sources: [], sourceCount: 0 };
     },
     uuid: randomUUID,
     clock: () => new Date().toISOString(),

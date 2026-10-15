@@ -63,7 +63,8 @@ export const SimulatorDeviceInput = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("rotate"),
     ...destination,
-    orientation: DeviceOrientation,
+    /** Absent: turn the Simulator away from the way it sits now. */
+    orientation: Schema.optional(DeviceOrientation),
   }).annotations(strict),
 );
 export type SimulatorDeviceInput = typeof SimulatorDeviceInput.Type;

@@ -21,7 +21,8 @@ import {
   seatbeltAllowRegexReadWriteRule,
   type ProcessConfinementPort,
 } from "../process/seatbeltProfile";
-import type { OsNetworkEgress } from "../process/threadEgressPolicy";
+import { proxiedLaunchEnvironment } from "../process/proxiedNetworkEgress";
+import type { EgressProxyEndpoint, OsNetworkEgress } from "../process/threadEgressPolicy";
 
 interface ProcessStream {
   on(event: "data", listener: (chunk: unknown) => void): unknown;
@@ -65,6 +66,8 @@ interface RepositoryTestProcessPortOptions {
   ) => SpawnedProcess;
   readonly killProcessGroup?: (groupId: number, signal: NodeJS.Signals) => void;
   readonly gracefulTimeoutMs?: number;
+  /** How long an interrupt-first launch gets to finish its output after SIGINT. */
+  readonly interruptTimeoutMs?: number;
   readonly maxOutputBytes?: number;
   readonly receiptDirectory?: string;
   readonly processIdentity?: (pid: number) => Promise<string | undefined>;
@@ -114,6 +117,15 @@ export interface HarnessShellScriptInput {
   readonly cwd: string;
   readonly environment: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
+  /**
+   * Runs this command on `proxied` network: the OS opens only this launch's
+   * egress proxy and the launch carries the proxy variables. A port whose own
+   * network is `none` refuses it, so an offline port never gains a route out.
+   */
+  readonly egressProxy?: {
+    readonly endpoint: EgressProxyEndpoint;
+    readonly token: string;
+  };
 }
 
 export interface RepositoryTestProcessInput {
@@ -174,6 +186,13 @@ export interface RepositoryTestProcessInput {
    */
   readonly allowSignal?: boolean;
   /**
+   * End this launch with SIGINT first when it is cancelled or times out, and
+   * wait for it to exit before escalating to SIGTERM then SIGKILL. A recorder
+   * writes its file only on SIGINT; SIGTERM leaves it empty and the device
+   * refusing any new recorder.
+   */
+  readonly interruptFirst?: boolean;
+  /**
    * Directories this launch may read and write on top of the port-wide set,
    * for host state only one kind of launch should reach. The Apple screenshot
    * is the caller: its raw capture lands in a host-private directory no other
@@ -217,6 +236,7 @@ export class RepositoryTestProcessPort {
   readonly #spawn: NonNullable<RepositoryTestProcessPortOptions["spawn"]>;
   readonly #killProcessGroup: NonNullable<RepositoryTestProcessPortOptions["killProcessGroup"]>;
   readonly #gracefulTimeoutMs: number;
+  readonly #interruptTimeoutMs: number;
   readonly #maxOutputBytes: number;
   readonly #receiptDirectory: string | undefined;
   readonly #processIdentity: ((pid: number) => Promise<string | undefined>) | undefined;
@@ -238,6 +258,7 @@ export class RepositoryTestProcessPort {
     this.#killProcessGroup =
       options.killProcessGroup ?? ((groupId, signal) => process.kill(groupId, signal));
     this.#gracefulTimeoutMs = options.gracefulTimeoutMs ?? 1_000;
+    this.#interruptTimeoutMs = options.interruptTimeoutMs ?? 10_000;
     this.#maxOutputBytes = options.maxOutputBytes ?? MAX_REPOSITORY_TEST_OUTPUT_BYTES;
     this.#receiptDirectory = options.receiptDirectory;
     this.#processIdentity = options.processIdentity;
@@ -294,6 +315,8 @@ export class RepositoryTestProcessPort {
     const scriptDirectory = this.#harnessShellScriptDirectory;
     if (scriptDirectory === undefined || !supportsOwnedProcessGroups(this.#platform))
       return unavailable(false);
+    if (input.egressProxy !== undefined && this.#networkEgress === "none")
+      return unavailable(false);
     if (signal?.aborted) return cancelledBeforeSpawn();
     let launchInput: RepositoryTestProcessInput;
     try {
@@ -304,8 +327,10 @@ export class RepositoryTestProcessPort {
         ...this.#additionalWritePaths,
       ]);
       launchInput = {
-        ...input,
         argv: [HARNESS_SHELL, script],
+        cwd: input.cwd,
+        environment: input.environment,
+        timeoutMs: input.timeoutMs,
         additionalReadRoots: [dirname(script)],
       };
       validateLaunchInput(launchInput, this.#maxOutputBytes);
@@ -313,10 +338,19 @@ export class RepositoryTestProcessPort {
       return unavailable(false);
     }
     if (signal?.aborted) return cancelledBeforeSpawn();
+    const proxy = input.egressProxy;
     return this.#launch(
       launchInput,
       { executable: HARNESS_SHELL, args: launchInput.argv.slice(1) },
       signal,
+      proxy === undefined
+        ? undefined
+        : {
+            networkEgress: { kind: "proxied", endpoint: proxy.endpoint },
+            // Added after validation: the lowercase forms are names a caller
+            // may not set, and only these values may fill them.
+            environment: proxiedLaunchEnvironment(proxy.endpoint, proxy.token),
+          },
     );
   }
 
@@ -324,6 +358,10 @@ export class RepositoryTestProcessPort {
     input: RepositoryTestProcessInput,
     validated: { readonly executable: string; readonly args: readonly string[] },
     signal: AbortSignal | undefined,
+    proxied?: {
+      readonly networkEgress: OsNetworkEgress;
+      readonly environment: Readonly<Record<string, string>>;
+    },
   ): Promise<RepositoryTestProcessResult> {
     let launch: { readonly command: string; readonly args: readonly string[] };
     try {
@@ -372,7 +410,7 @@ export class RepositoryTestProcessPort {
         args: validated.args,
         boundRoot: input.cwd,
         temporaryDirectory: this.#temporaryDirectory,
-        networkEgress: this.#networkEgress,
+        networkEgress: proxied?.networkEgress ?? this.#networkEgress,
         allowFileReadStar: true,
         allowSimulatorControl: this.#allowSimulatorControl,
         readRoots: [
@@ -401,7 +439,10 @@ export class RepositoryTestProcessPort {
     try {
       child = this.#spawn(launch.command, launch.args, {
         cwd: input.cwd,
-        env: sanitizedEnvironment(input.environment, this.#temporaryDirectory),
+        env: sanitizedEnvironment(
+          { ...input.environment, ...proxied?.environment },
+          this.#temporaryDirectory,
+        ),
         shell: false,
         detached: true,
         windowsHide: true,
@@ -469,14 +510,18 @@ export class RepositoryTestProcessPort {
         : unavailable(!groupReleased, output);
     }
     if (settledProcess?.kind === "timed-out" || settledProcess?.kind === "cancelled") {
-      const cleanup = await this.#terminate(child, closed);
+      const cleanup = await this.#terminate(child, closed, input.interruptFirst === true);
       void receiptAttempt
         .then(async (value) => {
           if (await this.#waitForProcessGroupExit(child.pid ?? -1)) {
             await value.remove();
             return;
           }
-          const receiptCleanup = await this.#terminate(child, closed);
+          const receiptCleanup = await this.#terminate(
+            child,
+            closed,
+            input.interruptFirst === true,
+          );
           if (!receiptCleanup.uncertain) await value.remove();
         })
         .catch(() => undefined);
@@ -488,7 +533,7 @@ export class RepositoryTestProcessPort {
       };
     }
     if (receiptOutcome.kind === "receipt-error") {
-      const cleanup = await this.#terminate(child, closed);
+      const cleanup = await this.#terminate(child, closed, input.interruptFirst === true);
       return unavailable(cleanup.uncertain, output);
     }
     if (receiptOutcome.kind !== "receipt") return unavailable(true, output);
@@ -504,7 +549,7 @@ export class RepositoryTestProcessPort {
       return exited(first.code, output, !groupReleased);
     }
 
-    const cleanup = await this.#terminate(child, closed);
+    const cleanup = await this.#terminate(child, closed, input.interruptFirst === true);
     if (!cleanup.uncertain) await receipt.remove();
     return {
       termination: first.kind === "cancelled" ? "cancelled" : "timed-out",
@@ -565,10 +610,23 @@ export class RepositoryTestProcessPort {
   async #terminate(
     child: SpawnedProcess,
     closed: Promise<ProcessClose>,
+    interruptFirst = false,
   ): Promise<{ readonly code: number | null; readonly uncertain: boolean }> {
     if (!Number.isSafeInteger(child.pid) || (child.pid ?? 0) <= 0)
       return { code: null, uncertain: true };
-    const groupId = -Math.abs(child.pid!);
+    const pid = child.pid ?? -1;
+    const groupId = -Math.abs(pid);
+    if (interruptFirst) {
+      try {
+        this.#killProcessGroup(groupId, "SIGINT");
+        const interrupted = await closeWithin(closed, this.#interruptTimeoutMs);
+        if (interrupted?.kind === "closed" && (await this.#waitForProcessGroupExit(pid))) {
+          return { code: interrupted.code, uncertain: false };
+        }
+      } catch {
+        return { code: null, uncertain: true };
+      }
+    }
     try {
       this.#killProcessGroup(groupId, "SIGTERM");
     } catch {

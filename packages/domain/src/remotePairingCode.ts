@@ -22,6 +22,10 @@ const BASE64URL_32_BYTES = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 const TICKET_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const PIN_ALGORITHM = /^([a-z0-9]+)-/;
 const FIELDS = ["origin", "ticketId", "ticketProof", "pin"] as const;
+// `https://`, then a lowercase name or address, or a bracketed IPv6 address,
+// then an optional port without a leading zero; nothing else.
+const ORIGIN_SHAPE =
+  /^https:\/\/(\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::([1-9][0-9]{0,4}))?$/;
 
 export interface PairingCodeContents {
   /** The listener's exact HTTPS origin on a private LAN or Tailscale address. */
@@ -141,6 +145,16 @@ function refuseContents(contents: PairingCodeContents): PairingCodeRefusal | und
 }
 
 function refuseOrigin(origin: string): PairingCodeRefusal | undefined {
+  // The shape is judged by pattern first, and the host comes from that match,
+  // not from `URL`: the phone's JavaScript engine ships a `URL` that only
+  // matches patterns, whose `origin` keeps credentials and a second port and
+  // whose `hostname` cuts a bracketed IPv6 address short.
+  const shape = ORIGIN_SHAPE.exec(origin);
+  const host = shape?.[1];
+  const port = shape?.[2];
+  if (host === undefined || (port !== undefined && (Number(port) > 65_535 || port === "443"))) {
+    return "damaged";
+  }
   let parsed: URL;
   try {
     parsed = new URL(origin);
@@ -148,10 +162,10 @@ function refuseOrigin(origin: string): PairingCodeRefusal | undefined {
     return "damaged";
   }
   // `URL.origin` drops a path, query, fragment, credentials, a trailing slash,
-  // and the default port, so equality means the text is exactly an origin.
+  // and the default port, and canonicalizes the host, so equality means the
+  // text is exactly an origin in the form the host spells it.
   if (parsed.protocol !== "https:" || parsed.origin !== origin) return "damaged";
-  const hostname = parsed.hostname.replace(/^\[(.*)\]$/, "$1");
-  const reach = classifyRemoteListenerAddress(hostname);
+  const reach = classifyRemoteListenerAddress(host.replace(/^\[(.*)\]$/, "$1"));
   return reach === "lan-private" || reach === "tailscale" ? undefined : "not-private";
 }
 

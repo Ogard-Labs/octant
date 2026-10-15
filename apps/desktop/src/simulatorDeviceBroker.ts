@@ -111,7 +111,10 @@ export function createSimulatorInputDelivery(
       const rotated = result(
         await helpers.send(
           command.udid,
-          { op: "rotate", orientation: command.orientation },
+          {
+            op: "rotate",
+            ...(command.orientation === undefined ? {} : { orientation: command.orientation }),
+          },
           budgetMs,
           cancelled,
         ),

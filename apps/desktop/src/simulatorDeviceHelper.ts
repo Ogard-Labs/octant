@@ -41,8 +41,12 @@ export type DeviceHelperRequest =
    * and closes running apps, so it runs only when a person asks for it.
    */
   | { readonly op: "repair-input" }
-  /** Sets the Simulator's orientation through the managed serve-sim stream. */
-  | { readonly op: "rotate"; readonly orientation: "portrait" | "landscape" };
+  /**
+   * Sets the Simulator's orientation through the managed serve-sim stream.
+   * Without an orientation the helper turns it away from the one serve-sim
+   * reports, which the streamed picture's size cannot tell (it stays portrait).
+   */
+  | { readonly op: "rotate"; readonly orientation?: "portrait" | "landscape" };
 
 export type DeviceHelperReply =
   | {

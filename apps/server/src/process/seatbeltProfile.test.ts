@@ -460,6 +460,44 @@ describe("shared Seatbelt profile builder", () => {
     expect(allowed).toContain("(allow network*)");
   });
 
+  it("opens only the launch's proxy port on proxied network, and refuses a proxy it cannot name", () => {
+    const root = temporaryRoot();
+    const boundRoot = join(root, "project");
+    const temporaryDirectory = join(root, "tmp");
+    mkdirSync(boundRoot);
+    mkdirSync(temporaryDirectory);
+    const input = {
+      boundRoot,
+      temporaryDirectory,
+      privateHomeAllowPaths: [boundRoot, temporaryDirectory],
+      homeDirectory: root,
+      usersDirectory: root,
+    };
+
+    const proxied = buildDenyDefaultSeatbeltProfile({
+      ...input,
+      networkEgress: { kind: "proxied", endpoint: { kind: "loopback", port: 50_123 } },
+    });
+
+    const network = proxied.split("\n").filter((line) => line.includes("network"));
+    expect(network).toEqual(['(allow network-outbound (remote ip "localhost:50123"))']);
+    // TLS still runs in the client, so the trust daemon stays reachable.
+    expect(proxied).toContain('(allow mach-lookup (global-name "com.apple.trustd"))');
+    expect(proxied).not.toContain("mDNSResponder");
+    for (const endpoint of [
+      { kind: "unix-socket", path: join(root, "proxy.sock") },
+      { kind: "loopback", port: 0 },
+      { kind: "loopback", port: 65_536 },
+    ] as const) {
+      expect(() =>
+        buildDenyDefaultSeatbeltProfile({
+          ...input,
+          networkEgress: { kind: "proxied", endpoint },
+        }),
+      ).toThrow(ProcessConfinementError);
+    }
+  });
+
   it("denies sensitive system reads even for toolchain profiles with network egress", () => {
     const profile = buildDenyDefaultSeatbeltProfile({
       boundRoot: "/private/tmp/octant-project",

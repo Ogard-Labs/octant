@@ -15,6 +15,7 @@
  * pointer at durable evidence.
  */
 
+import { ApprovalOutsideContent } from "./contentProvenance";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { AgentRunDependencies, AgentRunId, MAX_AGENT_RUN_DEPENDENCIES } from "./agentRun";
@@ -1013,13 +1014,20 @@ export const NativeHarnessApproval = Schema.Struct({
    * this one call, so surfaces offer no "for this session" choice.
    */
   singleUse: Schema.optional(Schema.Boolean),
+  /**
+   * The sources that marked the thread, read by the host when it asked. Set
+   * only with `singleUse`; an approval journaled before it existed has none.
+   */
+  outsideContent: Schema.optional(ApprovalOutsideContent),
   askedAt: UtcTimestamp,
   settledAt: Schema.optional(UtcTimestamp),
 })
   .annotations(strict)
   .pipe(
     Schema.filter(
-      (approval) => (approval.status === "pending") === (approval.settledAt === undefined),
+      (approval) =>
+        (approval.status === "pending") === (approval.settledAt === undefined) &&
+        (approval.outsideContent === undefined || approval.singleUse === true),
     ),
   )
   .annotations(personDecides);

@@ -40,6 +40,33 @@ const waiting = decodeComputerUseSessionView({
 });
 
 describe("ComputerUseLifecyclePane", () => {
+  it("says a marked thread's action is approved once and names what marked it", () => {
+    const pendingApproval = waiting.pendingApproval;
+    if (pendingApproval === undefined) throw new Error("Expected a pending approval.");
+    const marked = decodeComputerUseSessionView({
+      ...waiting,
+      pendingApproval: {
+        ...pendingApproval,
+        outsideContent: {
+          sources: [{ sourceLabel: "octant_browser", ingestionCount: 3 }],
+          sourceCount: 1,
+        },
+      },
+    });
+    render(
+      <ComputerUseLifecyclePane
+        onApprove={vi.fn()}
+        onDeny={vi.fn()}
+        onStop={vi.fn()}
+        view={marked}
+      />,
+    );
+    const approval = screen.getByRole("group", { name: "Computer-use approval" });
+    expect(approval).toHaveTextContent("This thread took in outside content");
+    expect(approval).toHaveTextContent("Pages seen in the browser");
+    expect(approval).toHaveTextContent("Read 3 times");
+  });
+
   it("shows the exact pending action with approve, deny, and immediate stop", () => {
     const approve = vi.fn();
     const deny = vi.fn();

@@ -88,8 +88,10 @@ or the validation-evidence dump — those stay on the Apple workbench command.
   **Allow input** does not cover it. Evidence records only the address's
   origin (`https://example.com`), never its path or query.
 - **Rotate.** **More** offers **Rotate** when the host supports it. It turns
-  the Simulator to the orientation it is not showing, portrait or landscape.
-  It needs the Octant desktop app and its managed streaming tool, asks first
+  the Simulator away from the orientation it shows now, so each press
+  alternates between portrait and landscape. It needs the Octant desktop app
+  and its managed streaming tool (a development build does not include it and
+  says so), asks first
   on an approval-gated thread, and **Allow input** does not cover it.
 - **Record screen.** Records the Simulator's screen for up to 60 seconds, or
   until **Stop recording**, a shut down, or the host closing. On an

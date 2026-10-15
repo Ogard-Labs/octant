@@ -150,7 +150,11 @@ import {
 } from "../settings/MarketplaceFetchSettings";
 import { OpenInApplicationSettings } from "../settings/OpenInApplicationSettings";
 import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
-import { remoteAccessAdministrationOf, type OctantHostBridge } from "./hostBridge";
+import {
+  pairedComputersOf,
+  remoteAccessAdministrationOf,
+  type OctantHostBridge,
+} from "./hostBridge";
 import { openExternalUrl } from "./openExternalUrl";
 import "../styles/settings.css";
 import "../styles/settings-specialty.css";
@@ -1099,7 +1103,10 @@ function ActiveSectionContent({
     case "remote-access": {
       const administration = remoteAccessAdministrationOf(props.hostBridge);
       return administration !== undefined ? (
-        <RemoteAccessSettingsSection bridge={administration} />
+        <RemoteAccessSettingsSection
+          bridge={administration}
+          pairedComputers={pairedComputersOf(props.hostBridge)}
+        />
       ) : (
         <section aria-label="Remote access" id="settings-remote-access">
           <p>

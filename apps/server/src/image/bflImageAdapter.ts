@@ -5,23 +5,23 @@ import {
   type ProviderFailure,
   type ProviderInstanceId,
 } from "@octant/contracts";
-import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
-import { sniffGeneratedImageMediaType } from "./generatedImageStore";
-import type {
-  ImageAdapterRequest,
-  ImageAdapterResult,
-  ImageGenerationAdapter,
-} from "./imageAdapter";
 import {
-  BFL_IMAGE_API_BASE_URL,
-  fail,
-  fetchApprovedImageUrl,
-  interrupted,
+  imageFailure,
+  imageInterrupted,
   isProviderFailure,
   parseRetryAfter,
-  performImageHttpRequest,
   readImageJson,
   sanitizeImageFailure,
+  type ImageAdapterRequest,
+  type ImageAdapterResult,
+  type ImageGenerationAdapter,
+} from "@octant/provider-sdk/image-generation";
+import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
+import { sniffGeneratedImageMediaType } from "./generatedImageStore";
+import {
+  BFL_IMAGE_API_BASE_URL,
+  fetchApprovedImageUrl,
+  performImageHttpRequest,
   type ImageHttpFetch,
   type ImageHttpLimits,
 } from "./imageHttp";
@@ -96,25 +96,28 @@ async function generateBflImage(input: {
 }): Promise<ImageAdapterResult> {
   const signal = input.request.signal;
   if (signal?.aborted) {
-    return { status: "failed", providerFailure: interrupted() };
+    return { status: "failed", providerFailure: imageInterrupted() };
   }
   if (input.request.prompt.trim().length === 0) {
     return {
       status: "failed",
-      providerFailure: fail("invalid-configuration", "The image prompt must not be empty."),
+      providerFailure: imageFailure("invalid-configuration", "The image prompt must not be empty."),
     };
   }
   if (input.request.prompt.length > MAX_IMAGE_PROMPT_CHARACTERS) {
     return {
       status: "failed",
-      providerFailure: fail("invalid-configuration", "The image prompt exceeded the length limit."),
+      providerFailure: imageFailure(
+        "invalid-configuration",
+        "The image prompt exceeded the length limit.",
+      ),
     };
   }
   const modelId = String(input.request.modelId);
   if (!MODEL_ID_PATTERN.test(modelId)) {
     return {
       status: "failed",
-      providerFailure: fail("invalid-configuration", "The selected model id is not valid."),
+      providerFailure: imageFailure("invalid-configuration", "The selected model id is not valid."),
     };
   }
   const variantCount = input.request.variantCount ?? 1;
@@ -125,7 +128,7 @@ async function generateBflImage(input: {
   ) {
     return {
       status: "failed",
-      providerFailure: fail(
+      providerFailure: imageFailure(
         "invalid-configuration",
         "The requested variant count is not supported.",
       ),
@@ -134,7 +137,7 @@ async function generateBflImage(input: {
   if (variantCount > 1) {
     return {
       status: "failed",
-      providerFailure: fail(
+      providerFailure: imageFailure(
         "invalid-configuration",
         "This provider generates one image per request.",
       ),
@@ -143,7 +146,7 @@ async function generateBflImage(input: {
   if ((input.request.references ?? []).length > 0) {
     return {
       status: "failed",
-      providerFailure: fail(
+      providerFailure: imageFailure(
         "invalid-configuration",
         "This provider does not support reference images.",
       ),
@@ -171,14 +174,17 @@ async function generateBflImage(input: {
   if (submitted === undefined) {
     return {
       status: "failed",
-      providerFailure: fail("protocol", "The provider returned an invalid submit response."),
+      providerFailure: imageFailure(
+        "protocol",
+        "The provider returned an invalid submit response.",
+      ),
     };
   }
 
   let sampleUrl: string | undefined;
   for (let attempt = 0; attempt < input.maxPollAttempts; attempt += 1) {
     if (attempt > 0) await delay(input.pollIntervalMs, signal);
-    if (signal?.aborted) throw interrupted();
+    if (signal?.aborted) throw imageInterrupted();
 
     const pollResponse = await performImageHttpRequest({
       url: submitted.pollingUrl,
@@ -208,18 +214,21 @@ async function generateBflImage(input: {
     if (decoded.kind === "failed") {
       return {
         status: "failed",
-        providerFailure: fail("provider-failed", "The provider reported a generation failure."),
+        providerFailure: imageFailure(
+          "provider-failed",
+          "The provider reported a generation failure.",
+        ),
       };
     }
     return {
       status: "failed",
-      providerFailure: fail("protocol", "The provider returned an invalid poll response."),
+      providerFailure: imageFailure("protocol", "The provider returned an invalid poll response."),
     };
   }
   if (sampleUrl === undefined) {
     return {
       status: "failed",
-      providerFailure: fail("unavailable", "The provider request timed out."),
+      providerFailure: imageFailure("unavailable", "The provider request timed out."),
     };
   }
 
@@ -237,7 +246,7 @@ async function generateBflImage(input: {
   if (mediaType === undefined) {
     return {
       status: "failed",
-      providerFailure: fail("protocol", "The provider returned malformed image bytes."),
+      providerFailure: imageFailure("protocol", "The provider returned malformed image bytes."),
     };
   }
   return { status: "completed", images: [{ bytes: fetched.bytes, mediaType }] };
@@ -246,13 +255,13 @@ async function generateBflImage(input: {
 function classifyBflHttpFailure(response: Response, now = Date.now()): ProviderFailure {
   switch (response.status) {
     case 400:
-      return fail("invalid-configuration", "The provider rejected this request.");
+      return imageFailure("invalid-configuration", "The provider rejected this request.");
     case 402:
-      return fail("unauthorized", "The provider account has insufficient credits.");
+      return imageFailure("unauthorized", "The provider account has insufficient credits.");
     case 403:
-      return fail("unauthorized", "The provider denied this request.");
+      return imageFailure("unauthorized", "The provider denied this request.");
     case 422:
-      return fail("invalid-configuration", "The provider rejected this request.");
+      return imageFailure("invalid-configuration", "The provider rejected this request.");
     case 429: {
       const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"), now);
       return {
@@ -262,11 +271,14 @@ function classifyBflHttpFailure(response: Response, now = Date.now()): ProviderF
       };
     }
     case 500:
-      return fail("provider-failed", "The provider request failed.");
+      return imageFailure("provider-failed", "The provider request failed.");
     case 503:
-      return fail("unavailable", "The provider is temporarily unavailable.");
+      return imageFailure("unavailable", "The provider is temporarily unavailable.");
     default:
-      return fail("provider-failed", `The provider request failed with HTTP ${response.status}.`);
+      return imageFailure(
+        "provider-failed",
+        `The provider request failed with HTTP ${response.status}.`,
+      );
   }
 }
 
@@ -324,12 +336,12 @@ function bflModerationMessage(value: Record<string, unknown>, status: string): s
 
 function delay(ms: number, signal: AbortSignal | undefined): Promise<void> {
   if (ms <= 0) return Promise.resolve();
-  if (signal?.aborted) return Promise.reject(interrupted());
+  if (signal?.aborted) return Promise.reject(imageInterrupted());
   return new Promise((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout>;
     const onAbort = () => {
       clearTimeout(timer);
-      reject(interrupted());
+      reject(imageInterrupted());
     };
     timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);

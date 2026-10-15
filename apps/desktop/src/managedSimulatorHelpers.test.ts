@@ -309,7 +309,52 @@ describe("managed simulator streams", () => {
     }
   });
 
-  it("says Rotate is unavailable without the managed serve-sim stream", async () => {
+  it("turns the Simulator away from the way it shows when no orientation is named", async () => {
+    let wide = false;
+    const managed = tools();
+    const helpers = createManagedSimulatorHelpers(nativeHelpers(), managed, {
+      fetch: fetchStream,
+      inputConnection: connected,
+      sitsWide: async () => wide,
+    });
+    try {
+      await helpers.send(udid, { op: "rotate" }, 2_000);
+      wide = true;
+      await helpers.send(udid, { op: "rotate" }, 2_000);
+      wide = false;
+      await helpers.send(udid, { op: "rotate" }, 2_000);
+      expect(managed.commands.filter((command) => command[0] === "rotate")).toEqual([
+        ["rotate", "landscape_left", "-d", udid],
+        ["rotate", "portrait", "-d", udid],
+        ["rotate", "landscape_left", "-d", udid],
+      ]);
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("gives the orientation read the caller's cancellation", async () => {
+    let seen: AbortSignal | undefined;
+    const helpers = createManagedSimulatorHelpers(nativeHelpers(), tools(), {
+      fetch: fetchStream,
+      inputConnection: connected,
+      sitsWide: async (_udid, signal) => {
+        seen = signal;
+        return false;
+      },
+    });
+    try {
+      const cancel = new AbortController();
+      await helpers.send(udid, { op: "rotate" }, 2_000, cancel.signal);
+      expect(seen?.aborted).toBe(false);
+      cancel.abort();
+      expect(seen?.aborted).toBe(true);
+    } finally {
+      helpers.dispose();
+    }
+  });
+
+  it("refuses Rotate and names the missing tool when serve-sim is not installed", async () => {
     const native = nativeHelpers();
     const helpers = createManagedSimulatorHelpers(
       native,
@@ -319,7 +364,9 @@ describe("managed simulator streams", () => {
     try {
       await expect(
         helpers.send(udid, { op: "rotate", orientation: "landscape" }, 1_000),
-      ).resolves.toEqual(expect.objectContaining({ status: "unavailable" }));
+      ).resolves.toEqual(
+        expect.objectContaining({ status: "refused", code: "rotate-unavailable" }),
+      );
       expect(native.send).not.toHaveBeenCalled();
     } finally {
       helpers.dispose();

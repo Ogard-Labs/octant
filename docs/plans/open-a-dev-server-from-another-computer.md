@@ -1,12 +1,11 @@
 # Open a dev server from another computer
 
-**Status: approved by the maintainer on 2026-10-14; slices 1 to 3 built: the
-host relays HTTP; slice 5 built for the Running services card in the desktop
-app, without WebSockets, and its rules are in the
-[architecture](../architecture.md); the user guide is written.** Slice 4 and
-the parts of slice 5 listed under it as not built are still plans. A
-paired browser and the phone keep the host's picture of the page. This plan does not authorize
-merging or releasing anything.
+**Status: approved by the maintainer on 2026-10-14; slices 1 to 4 built: the
+host relays HTTP and WebSockets; slice 5 built for the Running services card
+in the desktop app, without passing WebSockets on, and its rules are in the
+[architecture](../architecture.md); the user guide is written.** The parts of
+slice 5 listed under it as not built are still plans. A paired browser and the
+phone keep the host's picture of the page. merging or releasing anything.
 
 ## Design
 
@@ -466,6 +465,32 @@ dark; slice 5 makes the feature reachable.
    revoked or the grant closes; the subprotocol passes through; the message
    cap and per-grant socket cap hold.
 
+   **Built.** The socket relay is `relayUpgrade` in the grant service, the
+   dev-server handshake `openDevServerWebSocket` in the relay, its header
+   rules `relayWebSocketRequestHeaders` in the relay policy, and the message
+   framing and the hand-off from the route to the listener's transport
+   `apps/server/src/webSocketRelay.ts`. The rules now in force are in the
+   [architecture](../architecture.md) under WebSockets. Rules this slice
+   resolved, which slice 5 must keep:
+   - The host connects to the dev server before it answers the page, so the
+     page's connection switches only once the dev server accepted, with the
+     subprotocol it chose. A dev server that declines answers the page
+     `upgrade-refused`, not its own HTTP answer.
+   - The host offers the dev server no extension and relays whole messages.
+     Compression stays between the page and the forwarder.
+   - The route's answer carries the accepted upgrade to the transport, since
+     the fetch boundary carries only a `Response`. Node and Bun both switch
+     only on that, so no other route can switch a connection by accident.
+   - An open socket keeps its proxy session from idling out, because a page
+     left open with live reload sends no proxied request and would otherwise
+     lose its grant after 15 minutes. The absolute expiry still ends it.
+   - A socket over its cap answers 503 with the proxy's one-second
+     `Retry-After`, the plan's over-limit answer. A switched socket gives up
+     its proxy-budget slot, since the socket caps bound it instead.
+   - A write the other end does not read is held to twice the message cap,
+     then the socket closes with 1008, rather than pausing the reader: Bun's
+     server sockets offer no pause.
+
 5. **Client forwarder, signer, and Open.** The desktop main-process
    forwarder, name derivation, the claim cookie, response rewriting, failure
    pages, the renderer signing channel, Open and Open in browser on Local
@@ -549,8 +574,8 @@ dark; slice 5 makes the feature reachable.
      cookies on `http://*.localhost` is part of the live check.
 
    **Not built in this slice:** a Local servers row's Open (its listing carries
-   no ownership), the live-updates indicator, WebSocket forwarding (the
-   forwarder answers an upgrade 501 until slice 4), clearing a page's
+   no ownership), the live-updates indicator, passing WebSockets on (the
+   forwarder answers an upgrade 501, though slice 4 carries them on the host), clearing a page's
    partition when its host is removed or the device unpaired (decision 8),
    and signing when the opening window has closed. The stopped-or-changed
    copy names Running services, since Local servers does not offer Open yet;
@@ -562,11 +587,6 @@ dark; slice 5 makes the feature reachable.
    | No secret or a used claim token        | Open this page again from Octant on this computer.                       |
    | `same-site` or `cross-site` request    | Octant refused a request another site sent to this page.                 |
    | Proxy session ended, grant not in hand | This page's access to {host} ended. Open it again from Running services. |
-
-   **WebSocket.** Slice 4 is not built: the relay refuses an upgrade with
-   `upgrade-refused` and never connects (a gateway test with a dev server that
-   would accept the upgrade proves it never receives one). Until it lands the
-   user guide and the row state that live reload may not connect.
 
 6. **User guide.** A page in `apps/docs` on opening a server from another
    computer: what it needs (the desktop app on the computer in front of you,
