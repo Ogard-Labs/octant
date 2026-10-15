@@ -130,6 +130,7 @@ describe("managed simulator streams", () => {
     const helpers = createManagedSimulatorHelpers(native, managed, {
       fetch: fetchStream,
       inputConnection: connected,
+      sitsWide: async () => undefined,
     });
     try {
       await expect(helpers.send(udid, { op: "hello" }, 2_000)).resolves.toEqual({
@@ -562,6 +563,7 @@ describe("managed simulator streams", () => {
     const helpers = createManagedSimulatorHelpers(native, managed, {
       fetch: fetchNoFrame,
       inputConnection: connected,
+      sitsWide: async () => undefined,
       firstFrameMs: 200,
     });
     try {

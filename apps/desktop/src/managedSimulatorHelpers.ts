@@ -40,7 +40,7 @@ const DEVICE_HUB_INPUT_NOTIFICATION = "com.apple.coredevice.dtuhidd.active";
 /** The native helper's pace for a swipe that names none. */
 const DEFAULT_SWIPE_MS = 250;
 /** A stream start waits no longer than this for the screen's orientation. */
-const ORIENTATION_READ_MS = 5_000;
+const ORIENTATION_READ_MS = 2_000;
 
 /** serve-sim's tag for a single-finger touch on its input socket. */
 const TOUCH_MESSAGE = 3;

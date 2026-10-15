@@ -58,8 +58,14 @@ export function useAppleSimulatorLiveScreen(options: {
 }): AppleSimulatorLiveScreen {
   const { attempt = 0, client, enabled, request } = options;
   const decode = options.decode ?? decodeJpeg;
+  // The host's runtime snapshot says which way a Simulator was turned by a
+  // rotate; a view that began on one already turned says so itself, and the
+  // snapshot is not polled to learn it.
+  const [started, setStarted] = useState<"portrait" | "landscape">();
+  const startedRef = useRef<"portrait" | "landscape" | undefined>(undefined);
   const orientationRef = useRef(options.orientation);
   orientationRef.current = options.orientation;
+  const orientationNow = () => orientationRef.current ?? startedRef.current;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const latestRef = useRef<{ readonly key: string; readonly frame: DecodedFrame } | undefined>(
     undefined,
@@ -86,7 +92,7 @@ export function useAppleSimulatorLiveScreen(options: {
     canvasRef.current = canvas;
     const latest = latestRef.current;
     if (canvas !== null && latest !== undefined && latest.key === requestKeyRef.current) {
-      paint(canvas, latest.frame, orientationRef.current);
+      paint(canvas, latest.frame, orientationNow());
     }
   }, []);
 
@@ -99,9 +105,9 @@ export function useAppleSimulatorLiveScreen(options: {
       latest !== undefined &&
       latest.key === requestKeyRef.current
     ) {
-      paint(canvasRef.current, latest.frame, options.orientation);
+      paint(canvasRef.current, latest.frame, options.orientation ?? started);
     }
-  }, [options.orientation]);
+  }, [options.orientation, started]);
 
   useEffect(() => {
     if (!enabled || request === undefined || requestKey === undefined) {
@@ -138,6 +144,8 @@ export function useAppleSimulatorLiveScreen(options: {
           }
           stopped = watch.message;
         } else {
+          startedRef.current = watch.orientation;
+          setStarted(watch.orientation);
           const noPicture = setTimeout(() => {
             stopped = "The live Simulator view showed no picture.";
             endView();
@@ -173,8 +181,7 @@ export function useAppleSimulatorLiveScreen(options: {
               }
               latestRef.current?.frame.close();
               latestRef.current = { key, frame };
-              if (canvasRef.current !== null)
-                paint(canvasRef.current, frame, orientationRef.current);
+              if (canvasRef.current !== null) paint(canvasRef.current, frame, orientationNow());
               const facing = screenFacing(shown ?? watch.screen, frame);
               if (!painted || facing !== shown) {
                 painted = true;
@@ -210,6 +217,8 @@ export function useAppleSimulatorLiveScreen(options: {
       controller.abort();
       latestRef.current?.frame.close();
       latestRef.current = undefined;
+      startedRef.current = undefined;
+      setStarted(undefined);
     };
     // `requestKey` stands in for `request`: callers rebuild the object each render.
   }, [attempt, client, decode, enabled, requestKey]);
@@ -219,7 +228,11 @@ export function useAppleSimulatorLiveScreen(options: {
       ? known.state
       : { status: enabled && request !== undefined ? "connecting" : "off" };
   return state.status === "live"
-    ? { ...state, attach, turned: pictureIsTurned(options.orientation, state.screen) }
+    ? {
+        ...state,
+        attach,
+        turned: pictureIsTurned(options.orientation ?? started, state.screen),
+      }
     : state;
 }
 

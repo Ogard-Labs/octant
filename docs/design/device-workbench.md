@@ -236,7 +236,9 @@ counter-clockwise into the frame's pixel space before it is sent. Frames that
 arrive already wide are drawn as they are. The host learns the orientation when
 it rotates and once when a Simulator's stream starts: the desktop reads the real
 screen (the same screenshot-size read Rotate uses, never one per frame), names
-it in the watch response, and the host records it like a rotate does, so a
+it in the watch response, the host records it like a rotate does, and the
+stream's own response carries it to the pane (the snapshot is not polled while
+no action runs), so a
 Simulator already in landscape when the pane opens, or turned from outside
 Octant, is drawn upright. A turn made outside Octant while a stream is running
 shows after the next stream start or Rotate. The Android emulator streams rotated frames and needs none of this.
