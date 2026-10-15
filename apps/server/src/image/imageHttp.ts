@@ -20,9 +20,6 @@ import type {
 import { acquireProviderCredential, reportKeyRejection } from "../providers/providerApiKeyPool";
 import { sniffGeneratedImageMediaType } from "./generatedImageStore";
 
-export const OPENAI_IMAGE_API_BASE_URL = "https://api.openai.com/v1";
-export const GEMINI_IMAGE_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-
 export type ImageHttpFetch = (
   input: string | URL | Request,
   init?: RequestInit,

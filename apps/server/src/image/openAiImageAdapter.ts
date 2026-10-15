@@ -1,10 +1,9 @@
 import {
-  MAX_GENERATED_IMAGE_BYTES,
   MAX_IMAGE_PROMPT_CHARACTERS,
   MAX_IMAGE_VARIANTS,
+  MAX_GENERATED_IMAGE_BYTES,
   type OpenAiImageQuality,
   type OpenAiImageSize,
-  type ProviderInstanceId,
 } from "@octant/contracts";
 import {
   classifyImageHttpFailure,
@@ -16,35 +15,13 @@ import {
   type ImageAdapterRequest,
   type ImageAdapterResult,
   type ImageGenerationAdapter,
+  type ImageGenerationDriver,
+  type ImageGenerationPorts,
 } from "@octant/provider-sdk/image-generation";
-import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
-import { sniffGeneratedImageMediaType } from "./generatedImageStore";
-import {
-  OPENAI_IMAGE_API_BASE_URL,
-  performImageHttpRequest,
-  type ImageHttpFetch,
-  type ImageHttpLimits,
-} from "./imageHttp";
-import {
-  decodeBase64Image,
-  decodeOpenAiImageResponse,
-  safetyMessageFromUnknown,
-} from "./openAiImageResponseCodec";
-
-const DEFAULT_LIMITS: ImageHttpLimits = {
-  connectionTimeoutMs: 120_000,
-  requestBodyBytes: MAX_GENERATED_IMAGE_BYTES * 2,
-  // Base64 expands decoded bytes by 4/3: bound the encoded JSON response by
-  // that expansion, not by the decoded image ceiling, or a valid maximal
-  // response gets rejected before decodeOpenAiImageResponse ever sees it.
-  responseBodyBytes: 4 * Math.ceil(MAX_GENERATED_IMAGE_BYTES / 3) * MAX_IMAGE_VARIANTS + 262_144,
-};
+export const OPENAI_IMAGE_API_BASE_URL = "https://api.openai.com/v1";
 
 export interface OpenAiImageAdapterOptions {
-  readonly instanceId: ProviderInstanceId;
-  readonly credentialResolver: ProviderCredentialResolver;
-  readonly fetch?: ImageHttpFetch;
-  readonly limits?: Partial<ImageHttpLimits>;
+  readonly ports: ImageGenerationPorts;
 }
 
 /**
@@ -53,37 +30,28 @@ export interface OpenAiImageAdapterOptions {
  * is a protocol failure, never an artifact.
  */
 export function makeOpenAiImageAdapter(options: OpenAiImageAdapterOptions): ImageGenerationAdapter {
-  const fetch = options.fetch ?? globalThis.fetch;
-  const limits: ImageHttpLimits = { ...DEFAULT_LIMITS, ...options.limits };
   return {
     generate: async (request) => {
       try {
-        return await generateOpenAiImage({
-          adapterInstanceId: options.instanceId,
-          credentialResolver: options.credentialResolver,
-          fetch,
-          limits,
-          request,
-        });
+        return await generateOpenAiImage({ ports: options.ports, request });
       } catch (error) {
-        if (isProviderFailure(error)) {
-          if (error.category === "interrupted") return { status: "failed", providerFailure: error };
-          return { status: "failed", providerFailure: sanitizeImageFailure(error) };
+        if (isProviderFailure(error) && error.category === "interrupted") {
+          return { status: "failed", providerFailure: error };
         }
-        return {
-          status: "failed",
-          providerFailure: sanitizeImageFailure(error),
-        };
+        return { status: "failed", providerFailure: sanitizeImageFailure(error) };
       }
     },
   };
 }
 
+export const openAiImageDriver: ImageGenerationDriver = {
+  driverKind: "openai-image",
+  providerHosts: ["api.openai.com"],
+  create: ({ ports }) => makeOpenAiImageAdapter({ ports }),
+};
+
 async function generateOpenAiImage(input: {
-  readonly adapterInstanceId: ProviderInstanceId;
-  readonly credentialResolver: ProviderCredentialResolver;
-  readonly fetch: ImageHttpFetch;
-  readonly limits: ImageHttpLimits;
+  readonly ports: ImageGenerationPorts;
   readonly request: ImageAdapterRequest;
 }): Promise<ImageAdapterResult> {
   if (input.request.signal?.aborted) {
@@ -133,15 +101,11 @@ async function generateOpenAiImage(input: {
       n: variantCount,
     };
     assignOpenAiOptions(body, input.request.quality, input.request.size);
-    response = await performImageHttpRequest({
+    response = await input.ports.request({
       url,
       method: "POST",
       auth: { header: "authorization", scheme: "Bearer" },
-      instanceId: String(input.adapterInstanceId),
-      credentialResolver: input.credentialResolver,
       body: JSON.stringify(body),
-      fetch: input.fetch,
-      limits: input.limits,
       ...(input.request.signal === undefined ? {} : { signal: input.request.signal }),
     });
   } else {
@@ -158,15 +122,11 @@ async function generateOpenAiImage(input: {
         `reference-${index}${extensionFor(reference.mediaType)}`,
       );
     }
-    response = await performImageHttpRequest({
+    response = await input.ports.request({
       url,
       method: "POST",
       auth: { header: "authorization", scheme: "Bearer" },
-      instanceId: String(input.adapterInstanceId),
-      credentialResolver: input.credentialResolver,
       form,
-      fetch: input.fetch,
-      limits: input.limits,
       ...(input.request.signal === undefined ? {} : { signal: input.request.signal }),
     });
   }
@@ -219,7 +179,7 @@ async function generateOpenAiImage(input: {
         ),
       };
     }
-    const mediaType = sniffGeneratedImageMediaType(bytes);
+    const mediaType = input.ports.sniffMediaType(bytes);
     if (mediaType === undefined) {
       return {
         status: "failed",
@@ -270,4 +230,83 @@ async function readOpenAiSafetyRefusal(response: Response): Promise<string | und
   } catch {
     return undefined;
   }
+}
+
+// OpenAI-shaped image responses, shared with the OpenAI-compatible adapter.
+export type OpenAiImageDecoded =
+  | {
+      readonly kind: "ok";
+      readonly images: ReadonlyArray<string>;
+      readonly usage?: { inputTokens?: number; outputTokens?: number; size?: string };
+    }
+  | { readonly kind: "refused"; readonly message: string }
+  | { readonly kind: "url-rejected" }
+  | { readonly kind: "invalid" };
+
+export function decodeOpenAiImageResponse(value: unknown): OpenAiImageDecoded {
+  if (!isRecord(value)) return { kind: "invalid" };
+  const safety = safetyMessageFromUnknown(value);
+  if (safety !== undefined) return { kind: "refused", message: safety };
+  if (!Array.isArray(value.data)) return { kind: "invalid" };
+  const images: Array<string> = [];
+  for (const item of value.data) {
+    if (!isRecord(item)) return { kind: "invalid" };
+    if (typeof item.url === "string") return { kind: "url-rejected" };
+    if (typeof item.b64_json !== "string" || item.b64_json.length === 0) return { kind: "invalid" };
+    images.push(item.b64_json);
+  }
+  const usage = decodeOpenAiUsage(value.usage);
+  return {
+    kind: "ok",
+    images,
+    ...(usage === undefined ? {} : { usage }),
+  };
+}
+
+function decodeOpenAiUsage(
+  value: unknown,
+): { inputTokens?: number; outputTokens?: number } | undefined {
+  if (!isRecord(value)) return undefined;
+  const inputTokens = asNonNegativeInt(value.input_tokens);
+  const outputTokens = asNonNegativeInt(value.output_tokens);
+  if (inputTokens === undefined && outputTokens === undefined) return undefined;
+  return {
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+  };
+}
+
+export function safetyMessageFromUnknown(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const error = isRecord(value.error) ? value.error : value;
+  const code = typeof error.code === "string" ? error.code : "";
+  const type = typeof error.type === "string" ? error.type : "";
+  const message = typeof error.message === "string" ? error.message : "";
+  if (
+    code === "moderation_blocked" ||
+    code === "content_policy_violation" ||
+    type === "image_generation_user_error" ||
+    /safety|content policy|moderation/i.test(message)
+  ) {
+    return message.length > 0 ? message.slice(0, 2_000) : "The provider refused this request.";
+  }
+  return undefined;
+}
+
+export function decodeBase64Image(value: string): Uint8Array | undefined {
+  try {
+    const bytes = Uint8Array.from(Buffer.from(value, "base64"));
+    if (bytes.byteLength === 0) return undefined;
+    return bytes;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function asNonNegativeInt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
