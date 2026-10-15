@@ -1,8 +1,10 @@
 import type {
   ApprovalOutsideContent,
+  NativeHarnessApproval,
   NativeHarnessSessionView,
   ThreadGoal,
 } from "@octant/contracts";
+import { readCommandHostNumbers } from "./agentHost";
 import type { AgentThreadSnapshot } from "./agentThread";
 import { BUILT_IN_THEME_PRESET_IDS, resolveThemePresetTokens } from "@octant/theme";
 import {
@@ -295,4 +297,45 @@ export function approvalPanelOutsideContent(outsideContent: ApprovalOutsideConte
   return [APPROVAL_OUTSIDE_CONTENT_REASON, [...named, ...more].join(" · ")]
     .filter((line) => line !== "")
     .join("\n");
+}
+
+/** What a line typed while an approval waits does. */
+export type TuiApprovalAnswer =
+  | {
+      readonly kind: "decide";
+      readonly decision: "approve" | "approve-always" | "deny";
+    }
+  /** Hosts of a marked thread's command, ticked anew. */
+  | { readonly kind: "tick"; readonly ticked: ReadonlySet<number> }
+  | { readonly kind: "unknown" };
+
+/**
+ * Reads a line typed at the approval panel. `y`, `a` (only when offered), and
+ * `n` decide. When the command lists hosts, numbers toggle those hosts and
+ * `none` clears every tick, so the person sees what `y` will send before
+ * sending it.
+ */
+export function readTuiApprovalAnswer(
+  text: string,
+  approval: Pick<NativeHarnessApproval, "commandHosts">,
+  ticked: ReadonlySet<number>,
+  mayRemember: boolean,
+): TuiApprovalAnswer {
+  const lowered = text.trim().toLowerCase();
+  if (lowered === "y" || lowered === "yes") return { kind: "decide", decision: "approve" };
+  if ((lowered === "a" || lowered === "always") && mayRemember) {
+    return { kind: "decide", decision: "approve-always" };
+  }
+  if (lowered === "n" || lowered === "no") return { kind: "decide", decision: "deny" };
+  const hosts = approval.commandHosts ?? [];
+  if (hosts.length === 0) return { kind: "unknown" };
+  const named = readCommandHostNumbers(lowered, hosts.length);
+  if (named === undefined) return { kind: "unknown" };
+  if (named.size === 0) return { kind: "tick", ticked: new Set() };
+  const next = new Set(ticked);
+  for (const index of named) {
+    if (next.has(index)) next.delete(index);
+    else next.add(index);
+  }
+  return { kind: "tick", ticked: next };
 }

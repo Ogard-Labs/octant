@@ -1,8 +1,10 @@
 import { decodeUtcTimestamp } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
+import { approvalDecisionBody, chosenCommandHosts, preselectedCommandHosts } from "./agentHost";
 import {
   approvalPanelOutsideContent,
   paletteFor,
+  readTuiApprovalAnswer,
   retryFooterText,
   statusLineFrom,
   tasksFrom,
@@ -246,5 +248,55 @@ describe("approval panel outside content", () => {
     expect(lines[1]).toContain("Web pages (2x)");
     expect(lines[1]).toContain("Pages seen in the browser (2x)");
     expect(lines[1]).toContain("and 3 more");
+  });
+});
+
+describe("the approval panel's host list", () => {
+  const approval = {
+    id: "00000000-0000-4000-8000-000000000081",
+    commandHosts: [
+      { host: "registry.example.com", port: 443, from: "thread-rule", preselected: true },
+      { host: "cdn.example.com", port: 443, from: "proposal", preselected: false },
+    ],
+  } as never;
+
+  /** Types each line in turn and returns what y would then send. */
+  const typeLines = (...lines: ReadonlyArray<string>) => {
+    let ticked = preselectedCommandHosts(approval);
+    for (const line of lines) {
+      const answer = readTuiApprovalAnswer(line, approval, ticked, false);
+      if (answer.kind === "tick") ticked = answer.ticked;
+      else if (answer.kind === "decide") {
+        return approvalDecisionBody(
+          approval,
+          answer.decision,
+          chosenCommandHosts(approval, ticked),
+        );
+      }
+    }
+    return undefined;
+  };
+
+  it("sends the hosts the host preselected when the person allows straight away", () => {
+    expect(typeLines("y")).toMatchObject({
+      decision: "approve",
+      commandHosts: [{ host: "registry.example.com", port: 443 }],
+    });
+  });
+
+  it("toggles hosts by number and sends exactly the ticked ones", () => {
+    expect(typeLines("1", "2", "y")).toMatchObject({
+      commandHosts: [{ host: "cdn.example.com", port: 443 }],
+    });
+    expect(typeLines("none", "y")).toMatchObject({ decision: "approve", commandHosts: [] });
+  });
+
+  it("ignores a number the list does not have and sends no host with a denial", () => {
+    expect(readTuiApprovalAnswer("3", approval, new Set([0]), false)).toEqual({ kind: "unknown" });
+    expect(readTuiApprovalAnswer("a", approval, new Set([0]), false)).toEqual({ kind: "unknown" });
+    expect(typeLines("2", "n")).toEqual({
+      approvalId: (approval as { id: string }).id,
+      decision: "deny",
+    });
   });
 });

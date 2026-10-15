@@ -74,6 +74,14 @@ approval lists the hosts the thread and its Project allow, already ticked, and
 hosts a command was refused earlier, unticked. The command reaches only the
 hosts you leave ticked when you choose **Allow**, and only while it runs: the
 next command asks again and starts from the list, not from your last answer.
+A helper agent's command on such a thread asks the same way, with the same
+list; a helper never reaches a host its parent thread does not allow.
+
+In `octant agent`, the approval prints the list with `[x]` beside each ticked
+host. Line mode takes `y` for the ticked hosts, `y 1,3` for exactly those, and
+`y none` for none; a number the list does not have refuses the command. In the
+terminal UI, type a host's number and press Enter to tick or untick it, then
+`y` to allow with the hosts ticked.
 
 ## Verifying a model's tools
 

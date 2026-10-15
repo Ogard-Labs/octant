@@ -35,7 +35,10 @@ import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
-import type { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
+import type {
+  NativeHarnessApprovalStore,
+  NativeHarnessCommandApprovalOutcome,
+} from "./nativeHarnessApprovals";
 import type { ToolEgressCallConfirmation } from "./nativeHarnessEgressRules";
 import type { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
@@ -109,9 +112,7 @@ export interface NativeHarnessCompositionOptions {
    * proxied command reaches no host.
    */
   readonly commandHosts?: (threadId: string) => ReadonlyArray<NativeHarnessCommandHost>;
-  readonly childInteractions?: (
-    run: AgentRun,
-  ) => Pick<NativeHarnessToolPorts, "approvals" | "askUser">;
+  readonly childInteractions?: (run: AgentRun) => NativeHarnessChildInteractions;
   readonly isChildAuthorityCurrent: (run: AgentRun) => boolean;
   readonly recordExternalContentIngestion: (
     input: RecordExternalContentIngestionInput,
@@ -119,6 +120,23 @@ export interface NativeHarnessCompositionOptions {
   readonly uuid: () => string;
   readonly clock: () => string;
 }
+
+/**
+ * How a child asks its parent's person. `approveCommand` asks for a command
+ * that runs through the parent's egress rules while they are suspended, and
+ * lists the hosts it may reach; the outcome carries the hosts the person
+ * ticked.
+ */
+export type NativeHarnessChildInteractions = Pick<
+  NativeHarnessToolPorts,
+  "approvals" | "askUser"
+> & {
+  readonly approveCommand?: (
+    input: Parameters<NonNullable<NativeHarnessToolPorts["approvals"]>>[0] & {
+      readonly commandHosts: ReadonlyArray<NativeHarnessCommandHost>;
+    },
+  ) => Promise<NativeHarnessCommandApprovalOutcome>;
+};
 
 /** Whose egress rules a proxied command runs under: a child runs under its parent's. */
 export interface HarnessEgressScope {
@@ -497,6 +515,17 @@ export function createNativeHarnessComposition(
       // child with it is never wider than its parent's posture now, and on
       // `proxied` it runs under its parent's rules.
       const parentThreadId = String(run.parentThreadId);
+      const childEgress = () =>
+        clampChildThreadEgressPolicy({
+          parent: codeEgress(parentThreadId),
+          childNetworkAuthority: true,
+          requested: resolveDefaultThreadEgressPolicy({
+            mode: "code",
+            executionPolicy: authority.executionPolicy,
+          }),
+        });
+      const commandsProxied =
+        authority.network && options.proxiedShell !== undefined && projectId !== undefined;
       const shell = !authority.network
         ? options.offlineShell
         : options.proxiedShell === undefined
@@ -509,23 +538,49 @@ export function createNativeHarnessComposition(
                   projectId: String(projectId),
                   parentThreadId,
                 }),
-                () =>
-                  clampChildThreadEgressPolicy({
-                    parent: codeEgress(parentThreadId),
-                    childNetworkAuthority: true,
-                    requested: resolveDefaultThreadEgressPolicy({
-                      mode: "code",
-                      executionPolicy: authority.executionPolicy,
-                    }),
-                  }),
+                childEgress,
               );
+      const { approveCommand, ...interactions } = options.childInteractions?.(run) ?? {};
+      const askApproval = interactions.approvals;
+      const approvals: NativeHarnessToolPorts["approvals"] =
+        askApproval === undefined
+          ? undefined
+          : async (input) => {
+              // A command that will run through its parent's rules while they
+              // are suspended (the parent or the child is marked) lists the
+              // parent's hosts, so the person picks them for this one command.
+              // The list is the parent's; the child adds nothing to it.
+              if (
+                approveCommand === undefined ||
+                options.commandHosts === undefined ||
+                !commandsProxied ||
+                mode !== "code" ||
+                (input.toolName !== "bash" && input.toolName !== "goal-check") ||
+                !(input.freshConfirmation || options.readThreadTaint(parentThreadId)) ||
+                materializeHarnessToolNetwork(childEgress()) !== "proxied"
+              ) {
+                return askApproval(input);
+              }
+              const answered = await approveCommand({
+                ...input,
+                commandHosts: options.commandHosts(parentThreadId),
+              });
+              if (answered.outcome === "approved" && answered.confirmed !== undefined) {
+                confirmedCommandHosts.set(input.callId, answered.confirmed);
+              }
+              return answered.outcome;
+            };
       const tools = createNativeHarnessTools({
         threadId: runId,
         mode,
         authority: service,
         resolveAuthority: () => granted,
         ports: {
-          ...options.childInteractions?.(run),
+          ...interactions,
+          ...(approvals === undefined ? {} : { approvals }),
+          callEnded: (callId) => {
+            confirmedCommandHosts.delete(callId);
+          },
           ...(authority.filesystem && mode !== "chat"
             ? { filesystem: new NativeHarnessFileSystem({ root: projectRoot }) }
             : {}),

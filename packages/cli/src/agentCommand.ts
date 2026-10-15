@@ -9,11 +9,16 @@ import {
   decodeHostAnswer,
 } from "@octant/contracts";
 import {
+  approvalDecisionBody,
   approvalMayBeRemembered,
   approvalOutsideContentText,
+  chosenCommandHosts,
+  commandHostLines,
   listAgentThreads,
   openAgentSideChat,
+  preselectedCommandHosts,
   readAgentGoal,
+  readCommandHostNumbers,
   reviseAgentGoal,
 } from "./agentHost";
 import {
@@ -533,6 +538,10 @@ async function takeFollowUp(
  * A gated tool call is allowed or refused from the terminal: y, a (always this
  * session, only when the host would remember it), or n. Any other answer, `a`
  * included when it is not offered, refuses the call.
+ *
+ * A marked thread's command lists the hosts it may reach, ticked as the host
+ * preselected them. `y` sends the ticked ones, `y 1,3` exactly those, and
+ * `y none` none; a list naming a number it does not have refuses the call.
  */
 export async function decidePendingApproval(
   input: Pick<RunAgentCliCommandInput, "session" | "stdout"> & {
@@ -543,25 +552,51 @@ export async function decidePendingApproval(
   lines: Pick<LineSource, "next">,
 ): Promise<void> {
   const mayRemember = approvalMayBeRemembered(approval);
+  const hosts = approval.commandHosts;
+  const outside = approvalOutsideContentText(approval)
+    .map((line) => `  ${line}\n`)
+    .join("");
   if (input.command.json) {
     input.stdout.write(`${JSON.stringify({ kind: "approval", approval })}\n`);
-  } else {
-    const outside = approvalOutsideContentText(approval);
+  } else if (hosts !== undefined && hosts.length > 0) {
+    const listed = commandHostLines(approval, preselectedCommandHosts(approval))
+      .map((line) => `    ${line}\n`)
+      .join("");
     input.stdout.write(
-      `\n! ${approval.toolName} wants to ${approval.summary} (${approval.approvalClass})\n${outside.map((line) => `  ${line}\n`).join("")}  allow? [y]es / ${mayRemember ? "[a]lways this session / " : ""}[n]o > `,
+      `\n! ${approval.toolName} wants to ${approval.summary} (${approval.approvalClass})\n${outside}  it may reach only the hosts you allow, for this command alone:\n${listed}  allow? [y]es with the ticked hosts / y 1,3 for those / y none / [n]o > `,
+    );
+  } else {
+    input.stdout.write(
+      `\n! ${approval.toolName} wants to ${approval.summary} (${approval.approvalClass})\n${outside}  allow? [y]es / ${mayRemember ? "[a]lways this session / " : ""}[n]o > `,
     );
   }
   const line = (await lines.next())?.trim().toLowerCase() ?? "";
+  const [word = "", ...rest] = line.split(/\s+/);
+  const named = rest.join(" ");
+  const approves = word === "y" || word === "yes" || word === "approve";
+  // Hosts are named only after an approval of a command that lists them.
+  const ticked =
+    named.length === 0
+      ? preselectedCommandHosts(approval)
+      : hosts === undefined
+        ? undefined
+        : readCommandHostNumbers(named, hosts.length);
   const decision =
-    line === "y" || line === "yes" || line === "approve"
+    approves && ticked !== undefined
       ? "approve"
-      : mayRemember && (line === "a" || line === "always" || line === "approve-always")
+      : rest.length === 0 &&
+          mayRemember &&
+          (word === "a" || word === "always" || word === "approve-always")
         ? "approve-always"
         : "deny";
   await input.session.send({
     path: `/api/native-harness/sessions/${encodeURIComponent(threadId)}/approvals`,
     method: "POST",
-    body: { approvalId: String(approval.id), decision },
+    body: approvalDecisionBody(
+      approval,
+      decision,
+      ticked === undefined ? [] : chosenCommandHosts(approval, ticked),
+    ),
   });
 }
 

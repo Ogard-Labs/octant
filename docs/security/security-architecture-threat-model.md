@@ -508,8 +508,9 @@ guidance instead.
   [`docs/architecture.md`, Harness tool egress rules](../architecture.md#harness-tool-egress-rules);
   its approval supersedes decision 4 below for those processes only. On a tainted thread a
   command's single-use confirmation lists the thread's and Project's hosts, and what the person
-  ticks becomes `call` rules for that one launch. The Linux native probes have not run, and a
-  child's command confirmation lists no hosts yet; both are listed in that section.
+  ticks becomes `call` rules for that one launch; a child's command asks on its parent's thread
+  with the parent's hosts and is granted nothing beyond them. The Linux native probes have not
+  run; that and what is not wired are listed in that section.
 - **Equal-or-narrower child sandboxes.** A child agent's sandbox profile derives from its clamped
   authority, never from its parent's raw profile: a child without `network` gets a no-egress
   profile even if the parent had egress; a child's write scope is its own isolated worktree, never
