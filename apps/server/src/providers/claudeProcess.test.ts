@@ -38,6 +38,9 @@ import {
 
 const fakeCliPath = fileURLToPath(new URL("./fixtures/fakeClaudeCli.ts", import.meta.url));
 const planProbePath = fileURLToPath(new URL("./fixtures/confinedPlanProbe.sh", import.meta.url));
+const planCommandsPath = fileURLToPath(
+  new URL("./fixtures/confinedPlanCommands.sh", import.meta.url),
+);
 const directories: string[] = [];
 
 /**
@@ -600,26 +603,29 @@ describe("Claude runtime confinement", () => {
 
     expect(confinement.prepared).toHaveLength(2);
     const [subscription, apiKey] = confinement.prepared;
+    const keychainRules = [
+      seatbeltExecRule("/usr/bin/security"),
+      '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
+      '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
+      seatbeltAllowLiteralReadRule(claudeLoginKeychainPath()),
+    ];
     if (process.platform === "darwin") {
       // Measured on macOS 27.0.1 with Claude Code 2.1.296: the runtime is
       // signed out with any one of these missing, and needs nothing more.
-      expect(subscription?.extraRules).toEqual([
-        seatbeltExecRule("/usr/bin/security"),
-        '(allow mach-lookup (global-name "com.apple.SecurityServer"))',
-        '(allow mach-lookup (global-name "com.apple.securityd.xpc"))',
-        seatbeltAllowLiteralReadRule(claudeLoginKeychainPath()),
-      ]);
+      expect(subscription?.extraRules?.slice(0, keychainRules.length)).toEqual(keychainRules);
+      // Both launches fork for the shell a Plan turn runs its commands in.
       expect(subscription?.allowProcessFork).toBe(true);
+      expect(apiKey?.allowProcessFork).toBe(true);
     } else {
       expect(subscription?.extraRules).toBeUndefined();
       expect(subscription?.allowProcessFork).toBe(false);
+      expect(apiKey?.allowProcessFork).toBe(false);
     }
-    // No shell and no open exec in either case.
+    // Exec is never open; the programs that may run are named one by one.
     expect(subscription?.allowProcessExec).toBe(false);
-    // An API-key launch reads nothing from the store.
-    expect(apiKey?.extraRules).toBeUndefined();
-    expect(apiKey?.allowProcessFork).toBe(false);
     expect(apiKey?.allowProcessExec).toBe(false);
+    // An API-key launch reads nothing from the store.
+    for (const rule of keychainRules) expect(apiKey?.extraRules ?? []).not.toContain(rule);
   });
 
   it("checks a confined launch's sign-in inside that launch's confinement", async () => {
@@ -922,11 +928,11 @@ describe("Claude runtime confinement", () => {
   });
 
   it.skipIf(process.platform !== "darwin").each([
-    { launch: "an API-key", apiKey: "sk-test-not-a-real-key", forks: false },
-    { launch: "a subscription", apiKey: undefined, forks: true },
+    { launch: "an API-key", apiKey: "sk-test-not-a-real-key" },
+    { launch: "a subscription", apiKey: undefined },
   ])(
-    "lets the operating system refuse $launch Plan turn's write and its process execution",
-    async ({ apiKey, forks }) => {
+    "lets the operating system refuse $launch Plan turn's write and a program not on its list",
+    async ({ apiKey }) => {
       const target = fixture();
       const readable = join(target.root, "readable.txt");
       const escapeTarget = join(target.root, "plan-must-not-exist.txt");
@@ -1016,18 +1022,134 @@ describe("Claude runtime confinement", () => {
       expect(output).toContain(`state:${otherProject}/memory/MEMORY.md=refused`);
       expect(output).toContain("state:projects/probe.jsonl=refused");
       expect(existsSync(join(stateRoot, ownProject, "memory", "MEMORY.md"))).toBe(false);
-      // The probe asks for a child process last, and no launch may run one.
+      // The probe asks last for `/bin/date`, which is not a program a Plan
+      // turn may run: the shell forks, and the kernel refuses the exec.
+      expect(output).toContain("exec=refused");
       expect(output).not.toContain("exec=allowed");
-      if (forks) {
-        // A Keychain sign-in needs fork, so the shell forks, and the kernel
-        // then refuses the exec of anything but the runtime and `security`.
-        expect(output).toContain("exec=refused");
-        expect(child.exitCode).toBe(0);
-      } else {
-        // Without fork the shell dies at the fork itself and reports nothing.
-        expect(output).not.toContain("exec=refused");
-        expect(child.exitCode).toBe(128);
+      expect(child.exitCode).toBe(0);
+    },
+  );
+
+  it.skipIf(process.platform !== "darwin")(
+    "lets a Plan turn's shell read the checkout with Git and the listed tools, and refuses every write and reach beyond its grant",
+    async () => {
+      const target = fixture();
+      const checkout = realpathSync(target.root);
+      const git = (...args: string[]) =>
+        execFileSync(
+          "git",
+          ["-c", "user.name=Plan", "-c", "user.email=plan@example.invalid", ...args],
+          {
+            cwd: checkout,
+            stdio: "pipe",
+          },
+        );
+      writeFileSync(join(checkout, "notes.txt"), "first line\n");
+      git("init", "-q");
+      git("add", "notes.txt");
+      git("commit", "-qm", "Add the first note");
+      writeFileSync(join(checkout, "notes.txt"), "first line\nneedle line\n");
+      git("commit", "-qam", "Add the needle");
+      const stateRoot = realpathSync(target.environment.CLAUDE_CONFIG_DIR ?? "");
+      // A repository's own configuration names a command Git runs on every
+      // status and diff. Through `/bin/sh` it would plant a file in the account.
+      const planted = join(stateRoot, "fsmonitor-ran");
+      git("config", "core.fsmonitor", `sh -c 'echo ran > ${planted}' #`);
+      const probe = join(checkout, "confinedPlanCommands.sh");
+      copyFileSync(planCommandsPath, probe);
+      chmodSync(probe, 0o755);
+      const sessionId = randomUUID();
+      const ownProject = `projects/${checkout.replace(/[^a-zA-Z0-9]/g, "-")}`;
+      mkdirSync(join(stateRoot, "skills", "planted"), { recursive: true });
+      mkdirSync(join(stateRoot, "plugins"), { recursive: true });
+      mkdirSync(join(stateRoot, ownProject, "memory"), { recursive: true });
+      writeFileSync(join(stateRoot, ownProject, "another-session.jsonl"), "{}\n");
+      mkdirSync(join(stateRoot, "projects", "-Users-someone-another-checkout"), {
+        recursive: true,
+      });
+      // `git log --output=<path>` writes wherever it is pointed; each target
+      // is reported by its name under the account folder or the checkout.
+      const writeTargets = [
+        `${stateRoot}/settings.json`,
+        `${stateRoot}/.claude.json`,
+        `${stateRoot}/skills/planted/SKILL.md`,
+        `${stateRoot}/plugins/installed_plugins.json`,
+        `${stateRoot}/${ownProject}/memory/MEMORY.md`,
+        `${stateRoot}/projects/-Users-someone-another-checkout/session.jsonl`,
+        `${checkout}/planted.txt`,
+        `${checkout}/.git/hooks/pre-commit`,
+        `${stateRoot}/${ownProject}/${sessionId}.jsonl`,
+      ];
+      const commands = [
+        "exec 2>&1",
+        "print -r -- log=$(git log --oneline -1)",
+        "print -r -- diff=$(git diff HEAD~1 --stat | head -1)",
+        "print -r -- ls=$(ls | sort | tr '\\n' ' ')",
+        "print -r -- cat=$(cat notes.txt | tail -1)",
+        "print -r -- grep=$(grep -c needle notes.txt)",
+        "if whence -p rg >/dev/null; then print -r -- rg=$(rg -c needle notes.txt); fi",
+        ...writeTargets.map(
+          (path) =>
+            `if git log --output=${path} -1 >/dev/null 2>&1; then print -r -- "output:${path}=allowed"; else print -r -- "output:${path}=refused"; fi`,
+        ),
+        'print -r -- written > "$TMPDIR/scratch.txt" && print -r -- scratch=$(cat "$TMPDIR/scratch.txt")',
+        // Another session's transcript, from any checkout, is the runtime's to read.
+        `if cat ${stateRoot}/${ownProject}/another-session.jsonl >/dev/null 2>&1; then print -r -- account-read=allowed; else print -r -- account-read=refused; fi`,
+        // The environment pins the repository's fsmonitor off; with that set
+        // aside, the profile still refuses the `/bin/sh` Git would start it in.
+        "git status --short >/dev/null 2>&1; GIT_CONFIG_COUNT=0 git status --short >/dev/null 2>&1",
+        // No host for the shell or what it starts, even where the runtime has one.
+        "git ls-remote git://127.0.0.1:9/probe 2>&1 | grep -q 'Operation not permitted' && print -r -- network=refused",
+        // Not the runtime's own program, not `/bin/sh`, and not `security`.
+        'for program in /bin/bash /bin/sh /usr/bin/security /bin/date; do if $program -c true >/dev/null 2>&1; then print -r -- "run:$program=allowed"; else print -r -- "run:$program=refused"; fi; done',
+      ].join("\n");
+
+      const child = makeClaudeProcessLive({ shutdownTimeoutMs: 5_000 }).spawn({
+        projectRoot: checkout,
+        executionPolicy: "plan",
+      })({
+        command: probe,
+        args: ["--session-id", sessionId],
+        cwd: checkout,
+        env: {
+          ...target.environment,
+          ANTHROPIC_API_KEY: "sk-test-not-a-real-key",
+          OCTANT_PROBE_COMMANDS: commands,
+        },
+        signal: new AbortController().signal,
+      });
+      let output = "";
+      child.stdout.on("data", (chunk: Buffer | string) => {
+        output += chunk.toString();
+      });
+      await waitForExit(child);
+
+      // Reads in the checkout work: Git's history and diff, and the listed tools.
+      expect(output).toMatch(/^log=[0-9a-f]+ Add the needle$/m);
+      expect(output).toMatch(/^diff= ?notes\.txt \| 1 \+$/m);
+      expect(output).toMatch(/^ls=.*\bnotes\.txt\b/m);
+      expect(output).toContain("cat=needle line");
+      expect(output).toContain("grep=1");
+      if (output.includes("rg=")) expect(output).toContain("rg=1");
+      // A write through Git is refused everywhere, this session's transcript
+      // included: that grant is the runtime's, not a command's.
+      for (const path of writeTargets) {
+        expect(output).toContain(`output:${path}=refused`);
+        expect(existsSync(path)).toBe(false);
       }
+      // The launch's own temporary directory, where the Bash tool keeps its
+      // output, is the one place a command writes.
+      expect(output).toContain("scratch=written");
+      expect(output).toContain("account-read=refused");
+      // The repository's configured command never ran.
+      expect(existsSync(planted)).toBe(false);
+      expect(output).toContain("network=refused");
+      // `/bin/bash` stands in for the runtime here, so this is also the shell
+      // being refused a second runtime.
+      for (const program of ["/bin/bash", "/bin/sh", "/usr/bin/security", "/bin/date"]) {
+        expect(output).toContain(`run:${program}=refused`);
+      }
+      expect(child.exitCode).toBe(0);
     },
   );
 });
