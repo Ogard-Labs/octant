@@ -543,9 +543,13 @@ describe("HostFederationLifecycle (Post-preview B6)", () => {
       },
     });
 
-    await lifecycle.removeLocal(HOST_B);
-    await lifecycle.revoke(HOST_A, { revokeSelf: async () => ({ localCredentialRemoved: true }) });
+    const removed = await lifecycle.removeLocal(HOST_B);
+    const revoked = await lifecycle.revoke(HOST_A, {
+      revokeSelf: async () => ({ localCredentialRemoved: true }),
+    });
 
+    expect(removed.warning).toBe("page storage busy");
+    expect(revoked.warning).toBe("page storage busy");
     expect(cleared).toEqual([HOST_B, HOST_A]);
     expect(await registry.get(HOST_A)).toBeUndefined();
     expect(await registry.get(HOST_B)).toBeUndefined();

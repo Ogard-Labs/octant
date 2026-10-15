@@ -199,11 +199,17 @@ export async function forgetPairedComputer(input: {
   }
   input.windows.closeAll(origin);
   input.pins.forget(origin);
-  try {
-    await clearRemotePageStorage(input.storage, origin);
-    const pages = await input.serverPages?.forgetListener(origin);
-    if (pages?.status === "incomplete") throw new Error("Server page storage was not cleared.");
-  } catch {
+  // Both clear whatever the other does: the pin is gone, so a step skipped
+  // here would never be retried.
+  const [session, pages] = await Promise.allSettled([
+    clearRemotePageStorage(input.storage, origin),
+    input.serverPages?.forgetListener(origin),
+  ]);
+  if (
+    session.status === "rejected" ||
+    pages.status === "rejected" ||
+    pages.value?.status === "incomplete"
+  ) {
     return {
       status: "refused",
       message:

@@ -571,7 +571,8 @@ dark; slice 5 makes the feature reachable.
      for those names is cleared whole (not one origin, since the forwarder's
      port may have moved) through `clearRemotePageStorage`, and the names are
      dropped. A name whose clearing failed stays recorded and is retried by the
-     next forget; a paired computer's forget says so in its refusal copy. A host
+     next forget for that host or listener; removing a host says so in its
+     result's warning, and a paired computer's forget in its refusal copy. A host
      the other computer revoked on its own is not cleared until the person
      removes it here. Open in browser pages live in the default browser's
      storage, which Octant does not clear.

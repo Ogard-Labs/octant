@@ -419,7 +419,9 @@ export interface OctantHostBridge
    * Closes the windows of a removed host's pages, clears their storage, and
    * forgets their names. Absent outside the desktop app.
    */
-  readonly forgetRemoteServerPages?: (hostId: string) => Promise<void>;
+  readonly forgetRemoteServerPages?: (
+    hostId: string,
+  ) => Promise<{ readonly status: "forgotten" | "incomplete"; readonly message?: string }>;
   /** Makes this window the signer for the pages it opened. Absent outside the desktop app. */
   readonly subscribeRemoteServerPageSigning?: (
     signer: (request: unknown) => Promise<unknown>,

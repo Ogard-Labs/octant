@@ -97,6 +97,7 @@ export interface HostFederationRemoveResult {
   readonly ok: boolean;
   readonly hostId: HostId;
   readonly localCredentialRemoved: boolean;
+  readonly warning?: string;
 }
 
 export interface HostFederationLifecycleOptions {
@@ -112,7 +113,9 @@ export interface HostFederationLifecycleOptions {
   /**
    * Runs after a remote host's local record is gone, so whatever else this
    * device keeps for that host (such as pages of its servers opened in the
-   * desktop) goes with it. A failure here never undoes the removal.
+   * desktop) goes with it. A failure never undoes the removal: its message
+   * comes back as the result's warning, since the host can no longer be
+   * removed again to retry.
    */
   readonly onHostCleared?: (hostId: string) => Promise<void>;
 }
@@ -396,6 +399,7 @@ export function createHostFederationLifecycle(
     hostId: HostId,
   ): Promise<{
     readonly localCredentialRemoved: boolean;
+    readonly warning?: string;
   }> => {
     if (hostId === LOCAL_HOST_ID) {
       throw new Error("Cannot remove the local host from the federation lifecycle.");
@@ -413,12 +417,14 @@ export function createHostFederationLifecycle(
     options.cache?.remove(hostId);
     registrations.delete(hostId);
     rebuildFromTransports();
+    let warning: string | undefined;
     try {
       await options.onHostCleared?.(hostId);
-    } catch {
-      // The host is already forgotten; the owner of the extra data reports its own failure.
+    } catch (error) {
+      warning =
+        error instanceof Error ? error.message : "Octant couldn't clear everything this host left.";
     }
-    return { localCredentialRemoved };
+    return { localCredentialRemoved, ...(warning === undefined ? {} : { warning }) };
   };
 
   return {
@@ -533,6 +539,7 @@ export function createHostFederationLifecycle(
       }
 
       const cleared = await clearHostLocally(id);
+      warning ??= cleared.warning;
       return {
         ok: true,
         hostId: id,
@@ -548,6 +555,7 @@ export function createHostFederationLifecycle(
         ok: true,
         hostId: id,
         localCredentialRemoved: cleared.localCredentialRemoved,
+        ...(cleared.warning === undefined ? {} : { warning: cleared.warning }),
       };
     },
 

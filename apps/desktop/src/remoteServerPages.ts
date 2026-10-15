@@ -251,7 +251,13 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
           failed += 1;
         }
       }
-      if (doomed.length > 0) await ports.writePageRecords([...held.values()]);
+      if (doomed.length > 0) {
+        try {
+          await ports.writePageRecords([...held.values()]);
+        } catch {
+          failed += 1;
+        }
+      }
       return failed === 0
         ? { status: "forgotten" }
         : {
@@ -330,13 +336,21 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
         // later forget could not find.
         await exclusive(async () => {
           const held = await loadRecords();
-          if (held.has(page.name)) return;
-          held.set(page.name, {
-            name: page.name,
-            hostId: request.hostId,
-            listenerOrigin: request.listenerOrigin,
-          });
-          await ports.writePageRecords([...held.values()]);
+          const previous = held.get(page.name);
+          if (
+            previous?.hostId === request.hostId &&
+            previous.listenerOrigin === request.listenerOrigin
+          ) {
+            return;
+          }
+          // A host paired again at another address keeps its page names, so
+          // the record follows the listener it is served from now.
+          const next = [
+            ...[...held.values()].filter((record) => record.name !== page.name),
+            { name: page.name, hostId: request.hostId, listenerOrigin: request.listenerOrigin },
+          ];
+          await ports.writePageRecords(next);
+          held.set(page.name, next[next.length - 1] as RemoteServerPageRecord);
         });
         ports.showInOctantBrowser({ name: page.name, pageOrigin: page.pageOrigin });
       } else {

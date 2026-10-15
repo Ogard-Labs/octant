@@ -60,7 +60,13 @@ export function useHostFederationLifecycle(
           deviceKeyStore,
           cache,
           onHostCleared: async (hostId) => {
-            await forgetPages.current?.(hostId);
+            const outcome = await forgetPages.current?.(hostId);
+            if (outcome?.status === "incomplete") {
+              throw new Error(
+                outcome.message ??
+                  "Removed, but Octant couldn't clear everything its pages stored on this computer.",
+              );
+            }
           },
         }),
         transports,

@@ -335,6 +335,23 @@ describe("forgetting a paired computer", () => {
     expect(pins.list()).toEqual([]);
   });
 
+  it("still forgets the server pages when the session storage cannot be cleared", async () => {
+    const pins = freshPins();
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
+    const forgetListener = vi.fn().mockResolvedValue({ status: "forgotten" });
+
+    const outcome = await forgetPairedComputer({
+      origin: ORIGIN,
+      pins,
+      windows: { open: vi.fn(), closeAll: vi.fn() },
+      storage: { ...storagePort(), clearCache: vi.fn().mockRejectedValue(new Error("x")) },
+      serverPages: { forgetListener },
+    });
+
+    expect(forgetListener).toHaveBeenCalledWith(ORIGIN);
+    expect(outcome.status).toBe("refused");
+  });
+
   it("refuses a computer it isn't paired with and touches nothing", async () => {
     const pins = freshPins();
     const storage = storagePort();

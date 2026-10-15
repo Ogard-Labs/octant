@@ -308,6 +308,34 @@ describe("forgetting a host's pages", () => {
     expect(h.pageRecords.map((record) => record.name)).not.toContain(mine);
   });
 
+  it("follows a host paired again at another address, so forgetting the new address clears the page", async () => {
+    const h = await harness();
+    await h.pages.open(7, validateRemoteServerPageOpenRequest(OPEN));
+    await h.pages.open(
+      7,
+      validateRemoteServerPageOpenRequest({ ...OPEN, listenerOrigin: OTHER_LISTENER }),
+    );
+
+    expect(h.pageRecords.map((record) => record.listenerOrigin)).toEqual([OTHER_LISTENER]);
+    expect(await h.pages.forgetListener(OTHER_LISTENER)).toEqual({ status: "forgotten" });
+    expect(h.pageRecords).toEqual([]);
+  });
+
+  it("retries recording a page after a write failed instead of trusting the failed entry", async () => {
+    let failWrites = true;
+    const h = await harness({
+      writePageRecords: async (next) => {
+        if (failWrites) throw new Error("disk busy");
+        h.pageRecords.splice(0, h.pageRecords.length, ...next);
+      },
+    });
+    await expect(h.pages.open(7, validateRemoteServerPageOpenRequest(OPEN))).rejects.toThrow();
+    failWrites = false;
+    await h.pages.open(7, validateRemoteServerPageOpenRequest(OPEN));
+
+    expect(h.pageRecords.map((record) => record.hostId)).toEqual([HOST_ID]);
+  });
+
   it("does nothing for a host with no pages", async () => {
     const h = await harness();
     expect(await h.pages.forgetHost(HOST_ID)).toEqual({ status: "forgotten" });

@@ -576,7 +576,9 @@ export interface OctantHostBridge {
    * request; the answer is opened, or refused with words for the row.
    */
   readonly openRemoteServerPage: (request: unknown) => Promise<RemoteServerPageBridgeOutcome>;
-  readonly forgetRemoteServerPages: (hostId: string) => Promise<void>;
+  readonly forgetRemoteServerPages: (
+    hostId: string,
+  ) => Promise<{ readonly status: "forgotten" | "incomplete"; readonly message?: string }>;
   /**
    * Makes this window the signer for the pages it opens: the forwarder asks
    * it to sign each of their requests, and it answers with Octant's headers
@@ -1111,8 +1113,19 @@ export function createHostBridge(
         return { kind: "refused", message: "Octant could not open this server." };
       }
     },
-    forgetRemoteServerPages: async (hostId: string): Promise<void> => {
-      await ipc.invoke(IPC_CHANNELS.remoteServerPageForgetHost, hostId);
+    forgetRemoteServerPages: async (hostId: string) => {
+      const outcome = (await ipc
+        .invoke(IPC_CHANNELS.remoteServerPageForgetHost, hostId)
+        .catch(() => null)) as {
+        readonly status?: unknown;
+        readonly message?: unknown;
+      } | null;
+      return outcome?.status === "forgotten"
+        ? { status: "forgotten" as const }
+        : {
+            status: "incomplete" as const,
+            ...(typeof outcome?.message === "string" ? { message: outcome.message } : {}),
+          };
     },
     subscribeRemoteServerPageSigning: (signer: (request: unknown) => Promise<unknown>) => {
       const receive: DeepLinkListener = (_event, message) => {
