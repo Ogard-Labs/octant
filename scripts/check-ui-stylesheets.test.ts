@@ -353,6 +353,29 @@ describe("UI stylesheet check", () => {
     ]);
   });
 
+  it("does not credit a later element's class to a primitive whose braced prop holds a greater-than", () => {
+    const primitives = collectPrimitiveClasses({
+      "apps/web/src/palette/CommandPalette.tsx": [
+        "<OctantInput",
+        "  aria-expanded={results.length > 0}",
+        "/>",
+        '<p className="command-palette__scope" role="note">Scope</p>',
+      ].join("\n"),
+      "apps/web/src/shell/ThreadSearchOverlay.tsx": [
+        "<OctantInput",
+        "  onChange={(event) => setQuery(event.target.value)}",
+        "  disabled={hits.length >= 10 || count > limit}",
+        "  value={items as Array<string>}",
+        '  className="thread-search__field"',
+        "/>",
+        '<p className="thread-search__listing" role="note">Listing</p>',
+      ].join("\n"),
+    });
+    // The first input has no class of its own: the paragraph after it must not
+    // be read as part of its tag.
+    expect([...primitives.keys()]).toEqual(["thread-search__field"]);
+  });
+
   it("collects a class past an arrow function, from every literal, and when unstyled is off", () => {
     const primitives = collectPrimitiveClasses({
       "apps/web/src/code/A.tsx":

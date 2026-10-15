@@ -3,6 +3,8 @@ import {
   MAX_NATIVE_HARNESS_FOLLOW_UPS,
   NATIVE_HARNESS_TOOL_NAMES,
   decodeActivateNativeHarnessFollowUp,
+  decodeDecideNativeHarnessApproval,
+  decodeNativeHarnessApproval,
   decodeNativeHarnessAdvisorIntervention,
   decodeNativeHarnessCarriedNote,
   decodeNativeHarnessContextReduction,
@@ -255,6 +257,57 @@ describe("native harness turns and sessions", () => {
   });
 });
 
+describe("native harness command confirmations", () => {
+  const pending = {
+    id: "00000000-0000-4000-8000-000000000030",
+    toolName: "bash",
+    summary: "bash: npm install",
+    approvalClass: "shell-exec",
+    status: "pending",
+    askedAt: at,
+  };
+  const listed = { host: "registry.npmjs.org", port: 443, from: "thread-rule", preselected: true };
+
+  it("lists hosts only on a single-use confirmation, and only in rule form", () => {
+    expect(
+      decodeNativeHarnessApproval({ ...pending, singleUse: true, commandHosts: [listed] })
+        .commandHosts,
+    ).toEqual([listed]);
+    expect(() => decodeNativeHarnessApproval({ ...pending, commandHosts: [listed] })).toThrow();
+    for (const host of ["127.0.0.1", "localhost", "Registry.NPMJS.org", "*.com"]) {
+      expect(() =>
+        decodeNativeHarnessApproval({
+          ...pending,
+          singleUse: true,
+          commandHosts: [{ ...listed, host }],
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("takes confirmed hosts only with a one-time approval", () => {
+    const approvalId = pending.id;
+    const commandHosts = [{ host: "registry.npmjs.org", port: 443 }];
+    expect(
+      decodeDecideNativeHarnessApproval({ approvalId, decision: "approve", commandHosts })
+        .commandHosts,
+    ).toEqual(commandHosts);
+    expect(() =>
+      decodeDecideNativeHarnessApproval({ approvalId, decision: "approve-always", commandHosts }),
+    ).toThrow();
+    expect(() =>
+      decodeDecideNativeHarnessApproval({ approvalId, decision: "deny", commandHosts }),
+    ).toThrow();
+    expect(() =>
+      decodeDecideNativeHarnessApproval({
+        approvalId,
+        decision: "approve",
+        commandHosts: [{ host: "registry.npmjs.org", port: 0 }],
+      }),
+    ).toThrow();
+  });
+});
+
 describe("native harness advisor", () => {
   const fields = {
     id: "00000000-0000-4000-8000-000000000030",
@@ -401,5 +454,36 @@ describe("a compacted harness transcript", () => {
     ["covers no turn", { ...compacted, turns: 0 }],
   ])("refuses a compaction that %s", (_, value) => {
     expect(() => decodeNativeHarnessTranscriptCompacted(value)).toThrow();
+  });
+});
+
+describe("a harness approval on a marked thread", () => {
+  const pending = {
+    id: "00000000-0000-4000-8000-000000000020",
+    toolName: "bash",
+    summary: "bash: git push",
+    approvalClass: "shell-commands",
+    status: "pending",
+    askedAt: at,
+  };
+  const outsideContent = {
+    sources: [{ sourceLabel: "web-fetch", ingestionCount: 1, lastIngestedAt: at }],
+    sourceCount: 1,
+  };
+
+  it("names the sources that marked the thread on a single-use approval", () => {
+    expect(
+      decodeNativeHarnessApproval({ ...pending, singleUse: true, outsideContent }).outsideContent,
+    ).toEqual(outsideContent);
+  });
+
+  it("refuses sources on an approval that may still be remembered", () => {
+    expect(() => decodeNativeHarnessApproval({ ...pending, outsideContent })).toThrow();
+  });
+
+  it("still reads an approval journaled before sources were recorded", () => {
+    expect(decodeNativeHarnessApproval({ ...pending, singleUse: true }).outsideContent).toBe(
+      undefined,
+    );
   });
 });

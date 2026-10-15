@@ -63,13 +63,18 @@ export const SimulatorDeviceInput = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("rotate"),
     ...destination,
-    orientation: DeviceOrientation,
+    /** Absent: turn the Simulator away from the way it sits now. */
+    orientation: Schema.optional(DeviceOrientation),
   }).annotations(strict),
 );
 export type SimulatorDeviceInput = typeof SimulatorDeviceInput.Type;
 
 export const SimulatorDeviceInputResult = Schema.Union(
-  Schema.Struct({ kind: Schema.Literal("delivered") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("delivered"),
+    /** After a rotate: which way the Simulator now sits, as the helper read it. */
+    orientation: Schema.optional(DeviceOrientation),
+  }).annotations(strict),
   Schema.Struct({
     /** `refused`: the helper answered no. `unavailable`: no helper answered. */
     kind: Schema.Literal("refused", "unavailable"),
@@ -95,6 +100,9 @@ export type SimulatorDeviceWatch = typeof SimulatorDeviceWatch.Type;
 
 /** Response header naming the device's screen in pixels, as `1206x2622`. */
 export const SIMULATOR_SCREEN_HEADER = "x-octant-simulator-screen";
+
+/** Response header naming which way the Simulator sat when the watch began: `portrait` or `landscape`. */
+export const SIMULATOR_ORIENTATION_HEADER = "x-octant-simulator-orientation";
 
 export const decodeSimulatorDeviceInput = Schema.decodeUnknownSync(SimulatorDeviceInput);
 export const decodeSimulatorDeviceWatch = Schema.decodeUnknownSync(SimulatorDeviceWatch);

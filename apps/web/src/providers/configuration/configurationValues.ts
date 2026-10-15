@@ -112,6 +112,7 @@ export function bflImageConfigurationFrom(data: FormData): BflImageProviderConfi
     kind: "bfl-image-http",
     modelAllowlist: modelAllowlist as unknown as BflImageProviderConfiguration["modelAllowlist"],
     defaultModel: defaultModel as BflImageProviderConfiguration["defaultModel"],
+    ...optionalBaseUrl(data),
   };
 }
 
@@ -124,5 +125,12 @@ export function ideogramImageConfigurationFrom(data: FormData): IdeogramImagePro
     modelAllowlist:
       modelAllowlist as unknown as IdeogramImageProviderConfiguration["modelAllowlist"],
     defaultModel: defaultModel as IdeogramImageProviderConfiguration["defaultModel"],
+    ...optionalBaseUrl(data),
   };
+}
+
+/** Blank leaves the profile on its provider's own endpoint. */
+function optionalBaseUrl(data: FormData): { readonly baseUrl?: string } {
+  const baseUrl = String(data.get("baseUrl") ?? "").trim();
+  return baseUrl.length === 0 ? {} : { baseUrl };
 }

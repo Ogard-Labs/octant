@@ -461,6 +461,71 @@ describe("Claude execution policy", () => {
       allowDangerouslySkipPermissions: false,
       tools: ["Read", "Glob", "Grep"],
     });
+    // A Code Plan turn runs read-only commands only where its Seatbelt profile
+    // can name the programs; Chat and Work have no shell in any posture.
+    expect(claudeExecutionOptions("plan", false, "code", "darwin").tools).toEqual([
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash",
+    ]);
+    for (const [mode, platform] of [
+      ["code", "linux"],
+      ["chat", "darwin"],
+      ["work", "darwin"],
+    ] as const) {
+      expect(claudeExecutionOptions("plan", false, mode, platform).tools).toEqual([
+        "Read",
+        "Glob",
+        "Grep",
+      ]);
+    }
+  });
+
+  it("runs a Code Plan turn's shell command without asking, since its sandbox keeps it read-only", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
+    );
+    const open = f.opens[0]!;
+    const signal = new AbortController().signal;
+    const approvals: unknown[] = [];
+    const watched = Effect.runFork(
+      Stream.runForEach(
+        Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+          Stream.filter((event) => event.kind === "approval-request"),
+        ),
+        (event) => Effect.sync(() => approvals.push(event)),
+      ),
+    );
+    const command = (toolUseId: string, input: Record<string, unknown>) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Bash",
+        input,
+        toolUseId,
+        signal,
+      });
+    if (process.platform === "darwin") {
+      expect(open.tools).toContain("Bash");
+      // Plan has no approvals: a prompt here could only fail the turn.
+      await expect(command("log", { command: "git log --oneline -5" })).resolves.toEqual({
+        behavior: "allow",
+      });
+      await expect(
+        command("outside", { command: "ls", cwd: "/tmp/outside-project" }),
+      ).resolves.toMatchObject({ behavior: "deny" });
+    } else {
+      expect(open.tools).not.toContain("Bash");
+      await expect(command("log", { command: "git log --oneline -5" })).resolves.toMatchObject({
+        behavior: "deny",
+      });
+    }
+    expect(approvals).toEqual([]);
+    await Effect.runPromise(Fiber.interrupt(watched));
+    await acquired.close();
   });
 
   it("configures the strict exact-root sandbox only for approval-gated sessions", async () => {

@@ -54,3 +54,18 @@
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
+
+/* Inside an approval row: a full-width line under the request sentence, so
+   the reason and its sources read before the answer controls. */
+.approval-outside-content {
+  display: grid;
+  flex: 1 1 100%;
+  gap: var(--oct-space-2);
+  min-width: 0;
+}
+
+.approval-outside-content__reason {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-detail);
+}

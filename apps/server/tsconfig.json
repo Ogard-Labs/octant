@@ -5,5 +5,12 @@
     "types": ["bun", "node"]
   },
   "include": ["src"],
-  "exclude": ["src/remote/remoteExitEvidenceADriver.ts"]
+  // Both import the client runtime's sources, whose `fetch` ports do not
+  // satisfy Bun's `fetch` type (it adds `preconnect`). The client runtime
+  // typechecks those sources under its own program; the driver has its own
+  // program below, and the pairing-code smoke runs under vitest.
+  "exclude": [
+    "src/remote/remoteExitEvidenceADriver.ts",
+    "src/remote/remotePairingCode.smoke.test.ts"
+  ]
 }

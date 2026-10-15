@@ -29,6 +29,7 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
   ): Promise<any>;
   cancel(request: ToolActionCancellation, context: ExecutionContext): Promise<boolean>;
   snapshot(context: ExecutionContext): any;
+  noteOrientation(simulatorId: never, orientation: "portrait" | "landscape"): void;
   requestPaneOpen(
     context: ExecutionContext,
     simulatorId: AppleSimulatorRecord["simulatorId"],
@@ -1985,7 +1986,11 @@ describe("AppleToolchainService screen recording", () => {
   const stopId = "30000000-0000-4000-8000-0000000000a2" as never;
 
   async function recordingService(
-    options: { readonly endsAtOnce?: boolean; readonly shutdownExitCode?: number } = {},
+    options: {
+      readonly endsAtOnce?: boolean;
+      readonly shutdownExitCode?: number;
+      readonly recorderSurvives?: boolean;
+    } = {},
   ) {
     const discovery = discoveryExecutor();
     const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-recording-test-"));
@@ -2007,7 +2012,11 @@ describe("AppleToolchainService screen recording", () => {
           recordedPath!,
           Uint8Array.from([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 1, 2, 3, 4, 5, 6, 7, 8]),
         );
-        return processResult("", { termination: "cancelled", exitCode: null });
+        return processResult("", {
+          termination: "cancelled",
+          exitCode: null,
+          cleanupUncertain: options.recorderSurvives === true,
+        });
       },
     );
     const service = new AppleToolchainService({
@@ -2062,6 +2071,22 @@ describe("AppleToolchainService screen recording", () => {
     });
     expect(artifacts.get(`apple-recording-${stopId}`)?.byteLength).toBe(16);
     expect(service.snapshot(gated).recordings).toEqual([]);
+  });
+
+  it("stops the recorder by interrupting it, and refuses a recording whose recorder did not stop", async () => {
+    const { service, execute, artifacts } = await recordingService({ recorderSurvives: true });
+    await service.discover(discoveryRequest, context);
+    await service.execute(recording("start-recording", startId), context);
+    const command = execute.mock.calls.find(([input]) => input.argv.includes("recordVideo"))?.[0];
+    expect((command as { interruptFirst?: boolean } | undefined)?.interruptFirst).toBe(true);
+
+    const stopped = await service.execute(
+      recording("stop-recording", "30000000-0000-4000-8000-0000000000a5" as never),
+      context,
+    );
+
+    expect(stopped.outcome).toBe("failed");
+    expect([...artifacts.keys()].some((key) => key.startsWith("apple-recording-"))).toBe(false);
   });
 
   it("launches one recorder when two starts arrive together", async () => {
@@ -2162,15 +2187,16 @@ describe("AppleToolchainService Rotate", () => {
 
   function rotateService(reply: SimulatorDeviceInputResult = { kind: "delivered" }) {
     const deliver = vi.fn(async (_input: SimulatorDeviceInput, _signal?: AbortSignal) => reply);
+    const execute = discoveryExecutor();
     const service = new AppleToolchainService({
-      execute: discoveryExecutor(),
+      execute,
       injectSimulatorInput: simulatorInputThroughDesktop({ deliver }),
       writeArtifact: async () => undefined,
       realpath: async (path: string) => path,
       now: () => "2026-10-14T20:00:00.000Z",
       newId: () => "30000000-0000-4000-8000-000000000012",
     });
-    return { service, deliver };
+    return { service, deliver, execute };
   }
 
   function rotateRequest(overrides: Partial<AppleSimulatorRequest> = {}) {
@@ -2200,6 +2226,60 @@ describe("AppleToolchainService Rotate", () => {
         orientation: "landscape",
       }),
     ]);
+  });
+
+  it("reports which way a rotated Simulator sits until it is shut down", async () => {
+    const { service, execute } = rotateService({ kind: "delivered", orientation: "landscape" });
+    await service.discover(discoveryRequest, context);
+    expect(service.snapshot(context).orientations).toEqual([]);
+
+    await service.execute(rotateRequest(), context);
+    expect(service.snapshot(context).orientations).toEqual([
+      { simulatorId: ids.simulator, orientation: "landscape" },
+    ]);
+
+    execute.mockResolvedValue(processResult("ok\n"));
+    await service.execute(
+      simulatorRequest({ kind: "shutdown", approval: buildRequest().approval }),
+      context,
+    );
+    expect(service.snapshot(context).orientations).toEqual([]);
+  });
+
+  it("reports a Simulator already turned when its live view began, without a rotate", async () => {
+    const { service } = rotateService();
+    await service.discover(discoveryRequest, context);
+
+    service.noteOrientation(ids.simulator as never, "portrait");
+    expect(service.snapshot(context).orientations).toEqual([]);
+
+    service.noteOrientation(ids.simulator as never, "landscape");
+    expect(service.snapshot(context).orientations).toEqual([
+      { simulatorId: ids.simulator, orientation: "landscape" },
+    ]);
+
+    service.noteOrientation(ids.simulator as never, "portrait");
+    expect(service.snapshot(context).orientations).toEqual([
+      { simulatorId: ids.simulator, orientation: "portrait" },
+    ]);
+  });
+
+  it("leaves out the orientation of a Simulator that is no longer discovered", async () => {
+    const { service, execute } = rotateService({ kind: "delivered", orientation: "landscape" });
+    await service.discover(discoveryRequest, context);
+    await service.execute(rotateRequest(), context);
+    expect(service.snapshot(context).orientations).toHaveLength(1);
+
+    // The Simulator was deleted: the next discovery lists none.
+    const listing = execute.getMockImplementation()!;
+    execute.mockImplementation(async (input) =>
+      input.argv.join(" ") === "xcrun simctl list devices available --json"
+        ? processResult(JSON.stringify({ devices: {} }))
+        : listing(input),
+    );
+    await service.discover(discoveryRequest, context);
+    expect(service.snapshot(context).simulators).toEqual([]);
+    expect(service.snapshot(context).orientations).toEqual([]);
   });
 
   it("reports a rotation the helper refused as failed and says why", async () => {

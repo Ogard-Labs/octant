@@ -68,6 +68,38 @@ const BUNDLED_PROVIDER_DRIVERS = [
   readonly uuidNibble: string;
 }>;
 
+/**
+ * Image providers reach the image job service through the provider-sdk image
+ * seam. They share the provider-driver component kind and activation ladder,
+ * but stay out of the chat-driver catalog: they cannot start a turn.
+ */
+const BUNDLED_IMAGE_DRIVERS = [
+  {
+    driverKind: "openai-image",
+    displayName: "OpenAI Images",
+    digestNibble: "15",
+    uuidNibble: "16",
+  },
+  {
+    driverKind: "gemini-native-image",
+    displayName: "Gemini Images",
+    digestNibble: "16",
+    uuidNibble: "17",
+  },
+  {
+    driverKind: "bfl-image",
+    displayName: "Black Forest Labs",
+    digestNibble: "17",
+    uuidNibble: "18",
+  },
+  { driverKind: "ideogram-image", displayName: "Ideogram", digestNibble: "18", uuidNibble: "19" },
+] as const satisfies ReadonlyArray<{
+  readonly driverKind: ProviderDriverKind;
+  readonly displayName: string;
+  readonly digestNibble: string;
+  readonly uuidNibble: string;
+}>;
+
 const PROVIDER_DRIVER_COMPONENT_ID = "provider-driver";
 
 export interface BundledProviderDriverPlugin {
@@ -82,7 +114,9 @@ const digest = (seed: string) => {
   return decodeExtensionContentDigest(`sha256:${normalized}`);
 };
 
-function bundledProviderDriverManifest(spec: (typeof BUNDLED_PROVIDER_DRIVERS)[number]) {
+function bundledProviderDriverManifest(
+  spec: (typeof BUNDLED_PROVIDER_DRIVERS)[number] | (typeof BUNDLED_IMAGE_DRIVERS)[number],
+) {
   return decodeExtensionPackageManifest({
     manifestVersion: 1,
     extensionId: `10000000-0000-4000-8000-0000000002${spec.uuidNibble}`,
@@ -115,6 +149,12 @@ function bundledProviderDriverManifest(spec: (typeof BUNDLED_PROVIDER_DRIVERS)[n
 
 export const BUNDLED_PROVIDER_DRIVER_PLUGINS: ReadonlyArray<BundledProviderDriverPlugin> =
   BUNDLED_PROVIDER_DRIVERS.map((spec) => ({
+    driverKind: spec.driverKind,
+    manifest: bundledProviderDriverManifest(spec),
+  }));
+
+export const BUNDLED_IMAGE_DRIVER_PLUGINS: ReadonlyArray<BundledProviderDriverPlugin> =
+  BUNDLED_IMAGE_DRIVERS.map((spec) => ({
     driverKind: spec.driverKind,
     manifest: bundledProviderDriverManifest(spec),
   }));
@@ -196,6 +236,17 @@ export function admittedBundledProviderDriverKinds(
 ): ReadonlySet<ProviderDriverKind> {
   return new Set(
     BUNDLED_PROVIDER_DRIVER_PLUGINS.filter((plugin) =>
+      isBundledProviderDriverEffective(plugin, patches[plugin.driverKind] ?? {}),
+    ).map((plugin) => plugin.driverKind),
+  );
+}
+
+/** The bundled image providers the activation ladder admits. */
+export function admittedBundledImageDriverKinds(
+  patches: Readonly<Partial<Record<ProviderDriverKind, BundledProviderDriverActivationPatch>>> = {},
+): ReadonlySet<ProviderDriverKind> {
+  return new Set(
+    BUNDLED_IMAGE_DRIVER_PLUGINS.filter((plugin) =>
       isBundledProviderDriverEffective(plugin, patches[plugin.driverKind] ?? {}),
     ).map((plugin) => plugin.driverKind),
   );

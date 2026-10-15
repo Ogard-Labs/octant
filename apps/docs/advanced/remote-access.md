@@ -68,7 +68,10 @@ recovery phrase, or localStorage fallback.
 ## Security properties
 
 - **HTTPS only**, with a browser-trusted certificate (a Tailscale certificate
-  or an admin-provided LAN certificate). Certificate validation is never
+  or an admin-provided LAN certificate), or a certificate the host makes for
+  itself, which only the Octant desktop app can check (see
+  [Pairing the desktop app with another computer](#pairing-the-desktop-app-with-another-computer)).
+  Certificate validation is never
   disabled and no trust root is silently installed; there is no plaintext
   fallback. The browser holds the same line before it sends anything: a launch
   address that is plain HTTP to any host other than loopback is refused with an
@@ -140,6 +143,102 @@ on its next start. Pairing commands need the listener on, and say so when it
 is off. Approve only when the comparison code matches the one the device shows.
 The desktop app's Settings → Remote access shows the same listener state.
 
+## Add a computer in one step
+
+A second, always-on computer needs one command on that computer and one
+approval, with no certificate work. Run it in a shell on the computer you are
+adding:
+
+```sh
+octant server install --artifact <path> --pair   # from an unpacked headless build
+octant server start --pair                       # from a checkout
+```
+
+The command installs and starts the service as usual, then:
+
+1. Looks for this computer's address: an address on a Tailscale interface,
+   else the one private LAN address. With none, or with more than one of that
+   kind, it stops and names what it found; pass `--hostname <address>` to
+   choose. It never picks a public address.
+2. Turns the listener on at port 8443 (`--port` changes it) with a
+   certificate the host makes itself. `--cert` and `--key` use your own
+   certificate instead, and then the command prints the browser link.
+3. Prints a pairing code and its QR code in the terminal. The code is
+   single-use and expires in five minutes.
+4. Waits for a device to use it, shows the device label, key fingerprint, and
+   comparison code, and asks `Approve? [y/N]`. Only a typed `y` approves.
+   `octant pair approve <ticket-id>` is the same decision from another shell.
+
+The command changes no firewall rule and runs no Tailscale command: allow the
+port on the `tailscale0` interface yourself if the machine has a firewall.
+A LAN address that changes later changes the origin, and the device pairs
+again, which is why Tailscale is tried first.
+
+The pairing code carries a fingerprint of the host's own key, which Octant's
+own clients pin. A browser cannot check a certificate the host made itself, so
+there is no browser link for it; if a browser opens the address anyway and
+shows a certificate warning, stop there. Pair the Octant desktop app or the
+phone app with the code as described next.
+
+## Pairing the desktop app with another computer
+
+When the other computer's listener serves a certificate it made itself
+(enabled without a certificate and key), it shows an **app pairing code**
+instead of a pairing link: a line starting `octant-pair-1.`, with a QR code of
+the same text, in its Settings → Remote access or from `octant pair`. The code
+carries that computer's address, a single-use five-minute ticket, and a
+fingerprint (pin) of its certificate key. A browser cannot check that
+certificate, so there is no browser link for it.
+
+1. On the other computer, create a pairing code.
+2. In the Octant desktop app on this computer, open **Settings → Remote
+   access → Other computers**, paste the whole code, and choose **Pair**.
+3. Octant checks the code, checks that the address is on your private network
+   or Tailscale, connects, and compares the computer's certificate key with
+   the pin before it sends anything. It then checks the computer's signed
+   hello and opens that computer's pairing page in a window.
+4. Confirm there, then approve on the other computer when its comparison code
+   matches the one the window shows.
+
+The window for a paired computer trusts only the key the code pinned. If that
+computer's key changes, Octant refuses with "This isn't the computer you
+paired with: its security key has changed." and sends nothing; if the key was
+replaced on purpose, pair again with a new code. A changed, damaged, or
+non-private code is refused before Octant contacts anything. Paired computers
+are listed under **Other computers** with an **Open** action, which checks the
+key again before the window loads, and a **Forget** action. Forget asks first,
+then closes that computer's windows, removes its saved key, and clears the
+sign-in and data its page stored in Octant. The other computer keeps listing
+this device until you revoke it there; to pair again, make a new code.
+
+## Pairing the phone app with a computer
+
+The phone app pairs from the same app pairing code.
+
+1. On the computer, create a pairing code in Settings → Remote access or with
+   `octant pair` (or `octant server install --pair`).
+2. In the Octant phone app, open the pairing screen and choose **Scan QR
+   code**, then point the camera at the QR code. The first time, the app asks
+   for the camera; it uses it only to scan this code. You can paste the code
+   into **Pairing code** and choose **Start pairing** instead. When the
+   computer is on your local network rather than Tailscale, iPhone also asks
+   once whether Octant may connect to devices on your local network; allow
+   it, and start pairing again if the first try could not reach the computer.
+3. Octant checks the code, checks that the address is on your private network
+   or Tailscale, and compares the computer's certificate key with the pin
+   during the connection, before it sends anything. It then checks the
+   computer's signed hello and shows a comparison code.
+4. Approve on the computer when its comparison code matches the one the phone
+   shows, then choose **Check approval** on the phone.
+
+The phone app reads a pairing code only from its own scanner or a paste. The
+phone's camera app shows the code as text and opens nothing, so no other app
+receives the ticket. Every later connection to that computer is held to the
+same key: if it changes, the phone refuses with "This isn't the computer you
+paired with: its security key has changed." and sends nothing. Pair again
+with a new code if the key was replaced on purpose. Typing the origin and
+ticket by hand stays for a listener with a Tailscale certificate or your own.
+
 ## Device management
 
 The host can rename or revoke devices, revoke all devices, and rotate host
@@ -150,14 +249,16 @@ own metadata and can sign out or self-revoke.
 
 Disconnected host data is explicitly stale and read-only; there are no
 offline authority queues and no durable offline browser cache. On reconnect,
-the client checks the host's signed hello against the host key fingerprint it
-recorded at pairing, re-negotiates, re-authenticates, fetches an authoritative
+the client asks for a hello signed over a one-time value it chose, checks it
+against the host key fingerprint it recorded at pairing, re-negotiates, re-authenticates, fetches an authoritative
 snapshot, and resumes streams from the last applied cursor. Gaps stop the
 stream and require a fresh snapshot — never skip ahead. A host restart renews
 and replays; a host ID or key change requires re-pairing. A host that cannot
 prove it holds the paired key is refused ("This host could not prove its
-identity") and the pairing is kept; a host too old to send its key is refused
-with a request to update it. Revocation or expiry cancels streams and blocks
+identity") and the pairing is kept, and so is a copy of an earlier hello
+replayed by something at the host's address. A host too old to sign the
+client's value is refused with a request to update it, so update the host
+with or before the devices that reach it. Revocation or expiry cancels streams and blocks
 background reconnect until the user starts a new pairing flow. Remote
 authentication failures remain generic to avoid revealing device lifecycle
 state over the network.

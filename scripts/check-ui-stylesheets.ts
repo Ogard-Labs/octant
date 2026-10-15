@@ -153,7 +153,10 @@ export function collectPrimitiveClasses(
  * one — so braces, brackets, quotes, and nested elements are counted instead.
  */
 function readAttributes(source: string, start: number): string {
-  let depth = 0;
+  // The open delimiters, innermost last. Only a `>` that closes an open `<`
+  // ends a nested element; any other `>` is an operator inside a braced prop
+  // (`hits.length > 0`), and one at the bottom ends the tag itself.
+  const open: string[] = [];
   let quote: string | undefined;
   for (let index = start; index < source.length; index += 1) {
     const char = source[index];
@@ -172,11 +175,11 @@ function readAttributes(source: string, start: number): string {
     if (char === "<" && source[index + 1] !== ">" && !/[A-Za-z_$/]/.test(source[index + 1] ?? "")) {
       continue;
     }
-    if (char === "{" || char === "(" || char === "[" || char === "<") depth += 1;
-    else if (char === "}" || char === ")" || char === "]") depth -= 1;
+    if (char === "{" || char === "(" || char === "[" || char === "<") open.push(char);
+    else if (char === "}" || char === ")" || char === "]") open.pop();
     else if (char === ">") {
-      if (depth === 0) return source.slice(start, index);
-      depth -= 1;
+      if (open.length === 0) return source.slice(start, index);
+      if (open[open.length - 1] === "<") open.pop();
     }
   }
   return source.slice(start);

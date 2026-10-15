@@ -113,6 +113,7 @@ describe("managed child interactions", () => {
               summary: "bun run test",
               approvalClass: "shell-commands",
               freshConfirmation: false,
+              callId: "call-1",
               signal,
             });
       expect(await approve()).toBe(harness === "provider" ? false : "cancelled");
@@ -140,6 +141,7 @@ describe("managed child interactions", () => {
         summary: "bun run test",
         approvalClass: "shell-commands",
         freshConfirmation: false,
+        callId: "call-1",
         signal,
       }),
     ).toBe("approved");

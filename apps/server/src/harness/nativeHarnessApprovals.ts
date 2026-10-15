@@ -1,14 +1,19 @@
 import {
   decodeNativeHarnessApproval,
+  type ApprovalOutsideContent,
   decodeNativeHarnessApprovalId,
   decodeUtcTimestamp,
   type NativeHarnessApproval,
   type NativeHarnessApprovalId,
+  type NativeHarnessCommandHost,
+  type NativeHarnessCommandHostChoice,
   type NativeHarnessSlotCandidate,
   type NativeHarnessInteractionSource,
   type OctantMode,
   type ProjectId,
 } from "@octant/contracts";
+import { canonicalToolEgressRuleHost } from "@octant/domain/tool-egress-policy";
+import type { ToolEgressCallConfirmation, ToolEgressPerson } from "./nativeHarnessEgressRules";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
 const DEFAULT_APPROVAL_TIMEOUT_MS = 10 * 60_000;
@@ -31,15 +36,50 @@ export type NativeHarnessApprovalOutcome =
 /** How an asked, journaled approval settles; a refused ask is never journaled. */
 type SettledApprovalOutcome = Exclude<NativeHarnessApprovalOutcome, "too-many-waiting">;
 
+/** A command's approval, with the hosts the person confirmed when it listed any. */
+export interface NativeHarnessCommandApprovalOutcome {
+  readonly outcome: NativeHarnessApprovalOutcome;
+  readonly confirmed?: ToolEgressCallConfirmation;
+}
+
+/** Who decided, and the listed hosts they let this one command reach. */
+export interface NativeHarnessApprovalAnswer {
+  readonly principal: ToolEgressPerson;
+  readonly commandHosts?: ReadonlyArray<NativeHarnessCommandHostChoice> | undefined;
+}
+
 interface Waiter {
   readonly threadId: string;
   readonly approvalClass: string;
   readonly allowRemember: boolean;
+  /** Hosts the approval listed, keyed `host port`; absent when it listed none. */
+  readonly commandHosts: ReadonlySet<string> | undefined;
   readonly expiresAt: number;
-  readonly resolve: (outcome: SettledApprovalOutcome, remembered?: boolean) => void;
+  readonly resolve: (
+    outcome: SettledApprovalOutcome,
+    remembered?: boolean,
+    confirmed?: ToolEgressCallConfirmation,
+  ) => void;
   readonly timer: ReturnType<typeof setTimeout>;
   readonly onAbort: () => void;
   readonly signal: AbortSignal | undefined;
+}
+
+export interface NativeHarnessApprovalAsk {
+  readonly threadId: string;
+  readonly mode: OctantMode;
+  readonly projectId?: ProjectId | undefined;
+  readonly lead: NativeHarnessSlotCandidate;
+  readonly toolName: NativeHarnessApproval["toolName"];
+  readonly source?: NativeHarnessInteractionSource;
+  readonly summary: string;
+  readonly approvalClass: string;
+  readonly singleUse?: boolean;
+  readonly signal?: AbortSignal | undefined;
+}
+
+function commandHostKey(host: string, port: number): string {
+  return `${host} ${String(port)}`;
 }
 
 export interface NativeHarnessApprovalStoreOptions {
@@ -47,6 +87,11 @@ export interface NativeHarnessApprovalStoreOptions {
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly timeoutMs?: number;
+  /**
+   * The sources that marked a thread, read when its own single-use approval
+   * is asked so the prompt can say why it asks and what the thread read.
+   */
+  readonly outsideContent?: (threadId: string) => ApprovalOutsideContent | undefined;
   readonly onAsked?: (input: {
     readonly threadId: string;
     readonly mode: OctantMode;
@@ -73,33 +118,44 @@ export class NativeHarnessApprovalStore {
     this.#options = options;
   }
 
-  ask(input: {
-    readonly threadId: string;
-    readonly mode: OctantMode;
-    readonly projectId?: ProjectId | undefined;
-    readonly lead: NativeHarnessSlotCandidate;
-    readonly toolName: NativeHarnessApproval["toolName"];
-    readonly source?: NativeHarnessInteractionSource;
-    readonly summary: string;
-    readonly approvalClass: string;
-    readonly singleUse?: boolean;
-    readonly signal?: AbortSignal | undefined;
-  }): Promise<NativeHarnessApprovalOutcome> {
+  async ask(input: NativeHarnessApprovalAsk): Promise<NativeHarnessApprovalOutcome> {
+    return (await this.#ask(input)).outcome;
+  }
+
+  /**
+   * Asks for a marked thread's command and lists the hosts it may reach. The
+   * outcome carries the hosts the person ticked, for that command's launch
+   * only; nothing here is remembered once the promise settles.
+   */
+  askCommand(
+    input: NativeHarnessApprovalAsk & {
+      readonly commandHosts: ReadonlyArray<NativeHarnessCommandHost>;
+    },
+  ): Promise<NativeHarnessCommandApprovalOutcome> {
+    return this.#ask({ ...input, singleUse: true });
+  }
+
+  #ask(
+    input: NativeHarnessApprovalAsk & {
+      readonly commandHosts?: ReadonlyArray<NativeHarnessCommandHost>;
+    },
+  ): Promise<NativeHarnessCommandApprovalOutcome> {
     const singleUse = input.singleUse === true;
-    if (input.signal?.aborted) return Promise.resolve("cancelled");
-    if (input.source !== undefined && input.summary.length > 8_192)
-      return Promise.resolve("denied");
+    const settled = (outcome: NativeHarnessApprovalOutcome) => Promise.resolve({ outcome });
+    if (input.signal?.aborted) return settled("cancelled");
+    if (input.source !== undefined && input.summary.length > 8_192) return settled("denied");
     if (
       input.source === undefined &&
       !singleUse &&
       this.#remembered.get(input.threadId)?.has(input.approvalClass) === true
     ) {
-      return Promise.resolve("approved");
+      return settled("approved");
     }
     this.#expire();
     if (this.#waiters.size >= MAX_WAITING_NATIVE_HARNESS_APPROVALS) {
-      return Promise.resolve("too-many-waiting");
+      return settled("too-many-waiting");
     }
+    const commandHosts = singleUse ? input.commandHosts : undefined;
     this.#options.sessions.ensure({
       threadId: input.threadId,
       mode: input.mode,
@@ -120,6 +176,8 @@ export class NativeHarnessApprovalStore {
         : {}),
       approvalClass: input.approvalClass,
       ...(singleUse ? { singleUse: true } : {}),
+      ...this.#outsideContentFor(input.threadId, singleUse && input.source === undefined),
+      ...(commandHosts === undefined ? {} : { commandHosts }),
       status: "pending",
       askedAt,
     });
@@ -130,7 +188,11 @@ export class NativeHarnessApprovalStore {
       // A surface that cannot show the approval does not stop it being asked.
     }
     return new Promise((resolve) => {
-      const settle = (outcome: SettledApprovalOutcome, remembered?: boolean) => {
+      const settle = (
+        outcome: SettledApprovalOutcome,
+        remembered?: boolean,
+        confirmed?: ToolEgressCallConfirmation,
+      ) => {
         const waiter = this.#waiters.get(String(approvalId));
         if (waiter === undefined) return;
         this.#waiters.delete(String(approvalId));
@@ -140,12 +202,18 @@ export class NativeHarnessApprovalStore {
           status: outcome,
           ...(remembered === true ? { remembered: true } : {}),
         });
-        resolve(outcome);
+        resolve(
+          outcome === "approved" && confirmed !== undefined ? { outcome, confirmed } : { outcome },
+        );
       };
       const waiter: Waiter = {
         threadId: input.threadId,
         approvalClass: input.approvalClass,
         allowRemember: input.source === undefined && !singleUse,
+        commandHosts:
+          commandHosts === undefined
+            ? undefined
+            : new Set(commandHosts.map((entry) => commandHostKey(entry.host, entry.port))),
         expiresAt: Date.parse(askedAt) + timeoutMs,
         resolve: settle,
         timer: setTimeout(() => settle("expired"), timeoutMs),
@@ -161,6 +229,15 @@ export class NativeHarnessApprovalStore {
     });
   }
 
+  #outsideContentFor(
+    threadId: string,
+    named: boolean,
+  ): { readonly outsideContent?: ApprovalOutsideContent } {
+    if (!named) return {};
+    const outsideContent = this.#options.outsideContent?.(threadId);
+    return outsideContent === undefined ? {} : { outsideContent };
+  }
+
   /**
    * The approvals a tool call is blocked on right now. A request that expired,
    * was cancelled, or was lost to a restart has no waiter and is not here, so
@@ -174,13 +251,38 @@ export class NativeHarnessApprovalStore {
     }));
   }
 
+  /**
+   * Settles a waiting approval. On one that listed hosts, `answer` names who
+   * decided and the hosts they ticked; each must be one the approval listed,
+   * or nothing is decided. Approving with no hosts lets the command reach
+   * none.
+   */
   decide(
     threadId: string,
     approvalId: string,
     decision: "approve" | "approve-always" | "deny",
-  ): "decided" | "approval-not-found" | "already-settled" {
+    answer?: NativeHarnessApprovalAnswer,
+  ): "decided" | "approval-not-found" | "already-settled" | "host-not-offered" {
     this.#expire();
     const waiter = this.#waiters.get(approvalId);
+    let confirmed: ToolEgressCallConfirmation | undefined;
+    if (waiter !== undefined && waiter.threadId === threadId) {
+      const chosen = answer?.commandHosts ?? [];
+      if (chosen.length > 0 && (waiter.commandHosts === undefined || decision !== "approve")) {
+        return "host-not-offered";
+      }
+      if (waiter.commandHosts !== undefined && decision === "approve" && answer !== undefined) {
+        const hosts = new Map<string, { readonly host: string; readonly port: number }>();
+        for (const choice of chosen) {
+          const host = canonicalToolEgressRuleHost(choice.host);
+          if (host === undefined || !waiter.commandHosts.has(commandHostKey(host, choice.port))) {
+            return "host-not-offered";
+          }
+          hosts.set(commandHostKey(host, choice.port), { host, port: choice.port });
+        }
+        confirmed = { approvalId, principal: answer.principal, hosts: [...hosts.values()] };
+      }
+    }
     if (waiter === undefined || waiter.threadId !== threadId) {
       return this.#options.sessions.settleApproval(
         threadId,
@@ -198,7 +300,7 @@ export class NativeHarnessApprovalStore {
       classes.add(waiter.approvalClass);
       this.#remembered.set(threadId, classes);
     }
-    waiter.resolve(decision === "deny" ? "denied" : "approved", remember);
+    waiter.resolve(decision === "deny" ? "denied" : "approved", remember, confirmed);
     return "decided";
   }
 

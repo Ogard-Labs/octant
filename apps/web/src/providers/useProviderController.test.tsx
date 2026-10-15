@@ -839,7 +839,7 @@ describe("useProviderController", () => {
 
     expect(api.execute).not.toHaveBeenCalled();
     expect(result.current.message).toBe(
-      "Provider credential management is unavailable on this host.",
+      "This window cannot save provider keys. On the host, run `octant provider key set <provider>`, or use the desktop app.",
     );
   });
 
@@ -2797,7 +2797,7 @@ describe("useProviderController", () => {
 
     expect(api.execute).not.toHaveBeenCalled();
     expect(calls).toEqual(["field.clear"]);
-    expect(result.current.message).toMatch(/credential management.*unavailable.*host/i);
+    expect(result.current.message).toMatch(/cannot save provider keys.*octant provider key set/i);
     expect(result.current.message).not.toMatch(/enter.*API key/i);
   });
 
