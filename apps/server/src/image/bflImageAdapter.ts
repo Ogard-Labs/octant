@@ -69,6 +69,8 @@ export function makeBflImageAdapter(options: BflImageAdapterOptions): ImageGener
 
 export const bflImageDriver: ImageGenerationDriver = {
   driverKind: "bfl-image",
+  // Polling and result URLs come from regional subdomains of the API host.
+  providerHosts: ["*.bfl.ai"],
   create: ({ instance, ports }) => {
     const baseUrl =
       instance.configuration.kind === "bfl-image-http" ? instance.configuration.baseUrl : undefined;

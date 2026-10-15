@@ -35,6 +35,10 @@ function adapter(fetch: ImageHttpFetch, baseUrl?: string) {
     ports: makeImageGenerationPorts({
       instanceId: String(instanceId),
       credentialResolver: resolver(),
+      endpoint: {
+        providerHosts: ideogramImageDriver.providerHosts,
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+      },
       fetch,
     }),
     ...(baseUrl === undefined ? {} : { baseUrl }),
@@ -301,6 +305,10 @@ describe("Ideogram image driver behind the image seam", () => {
       ports: makeImageGenerationPorts({
         instanceId: String(instanceId),
         credentialResolver: resolver(),
+        endpoint: {
+          providerHosts: ideogramImageDriver.providerHosts,
+          baseUrl: "https://proxy.example.test/ideogram/",
+        },
         fetch,
       }),
     });

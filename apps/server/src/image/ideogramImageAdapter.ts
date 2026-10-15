@@ -58,6 +58,7 @@ export function makeIdeogramImageAdapter(
 
 export const ideogramImageDriver: ImageGenerationDriver = {
   driverKind: "ideogram-image",
+  providerHosts: ["api.ideogram.ai"],
   create: ({ instance, ports }) => {
     const baseUrl =
       instance.configuration.kind === "ideogram-image-http"

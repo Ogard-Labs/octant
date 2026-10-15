@@ -2419,7 +2419,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   check accepted.
   The Black Forest Labs and Ideogram drivers ship in-tree but import only
   `@octant/contracts` and the image seam, as a third-party image plugin
-  would; a test fails on any other import. Their profiles take an optional
+  would; a test fails on any other import. Black Forest Labs declares
+  `*.bfl.ai`, because its polling URLs name regional subdomains, and Ideogram
+  declares `api.ideogram.ai`. Their profiles take an optional
   base URL (HTTPS, or HTTP on loopback), absent meaning the provider's own
   endpoint; setting, moving, or clearing it deletes the stored key first, as
   for any endpoint. The signed-URL exception stays bound to the provider's

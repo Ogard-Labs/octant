@@ -42,6 +42,10 @@ function adapter(
     ports: makeImageGenerationPorts({
       instanceId: String(instanceId),
       credentialResolver: resolver(),
+      endpoint: {
+        providerHosts: bflImageDriver.providerHosts,
+        ...(overrides.baseUrl === undefined ? {} : { baseUrl: overrides.baseUrl }),
+      },
       fetch,
       ...(overrides.limits === undefined ? {} : { limits: overrides.limits }),
     }),
@@ -337,6 +341,10 @@ describe("BFL image driver behind the image seam", () => {
       ports: makeImageGenerationPorts({
         instanceId: String(instanceId),
         credentialResolver: resolver(),
+        endpoint: {
+          providerHosts: bflImageDriver.providerHosts,
+          baseUrl: "https://proxy.example.test/bfl/",
+        },
         fetch,
       }),
     });
