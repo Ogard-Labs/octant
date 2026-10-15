@@ -382,7 +382,7 @@ import {
 } from "./persistence/persistenceService";
 import { readAgentRunAdmittedContext } from "./persistence/agentRunContentStore";
 import { purgeThreadArtifacts, removeMirrorFiles } from "./persistence/threadArtifactPurge";
-import { readHostIdentity } from "./persistence/remoteAccessProjection";
+import { readDeviceRegistration, readHostIdentity } from "./persistence/remoteAccessProjection";
 import { createProjectBindingRouteHandler } from "./projectBindingRoutes";
 import { createProjectRouteHandler } from "./projectRoutes";
 import { createAgentProfileRouteHandler } from "./agentProfileRoutes";
@@ -1882,9 +1882,26 @@ export function startOctantServer(
       now: Date.now,
       clampNow: processAuthorityNow,
     });
+    // A paired device's service scope is its device id. Only a device still
+    // paired counts: a revoked or expired one's prompts are answered by
+    // nobody else and run out.
+    const isPairedDeviceScope = (scopeId: WindowId): boolean =>
+      readDeviceRegistration(persistence.connection, String(scopeId))?.state === "active";
     const extensionToolApprovalService = new ExtensionToolApprovalService({
       uuid: randomUUID,
       now: Date.now,
+      isPairedDeviceScope,
+      // A thread with no Project has no binding to have left. Otherwise the
+      // thread must still be active and bound in the Project the prompt
+      // recorded, which is what a paired device's turn was admitted under.
+      threadAuthorityIsCurrent: (threadId, projectId) => {
+        if (projectId === undefined) return true;
+        const project = persistence.readProject(decodeProjectId(projectId));
+        if (project === undefined || project.lifecycle !== "active") return false;
+        if (project.type !== "work" && project.type !== "code") return true;
+        const authority = browserAuthority.resolve(decodeBrowserThreadId(threadId), project.type);
+        return authority !== undefined && String(authority.projectId) === String(project.id);
+      },
       // A usage-limit resume replays its stopped Work turn's extension
       // selections as the host, so that turn's tool prompts go to the windows
       // bound to the thread's Project, as a routine's browser prompts do.
@@ -4091,6 +4108,7 @@ export function startOctantServer(
           grants: extensionToolGrantStore,
           approvals: extensionToolApprovalService,
           isHostScope: isRoutineHostScope,
+          isPairedDeviceScope,
           threadTainted: (threadId) =>
             readThreadExternalContentTaint(persistence.connection, threadId)
               .externalContentIngested,
