@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import {
   buildPairingCode,
+  classifyRemoteListenerAddress,
   PAIRING_CODE_REFUSAL_COPY,
   refusePairingCodeListener,
   remoteListenerOrigin,
@@ -10,6 +11,7 @@ import {
   type LocalControlResponse,
   type OpenedLocalControlSession,
 } from "./localControl";
+import { choosePairAddress, type NetworkInterfaceMap } from "./pairAddress";
 import { renderTerminalQr } from "./terminalQr";
 
 type PairingSourceClass = "loopback" | "lan-private" | "tailscale";
@@ -146,6 +148,193 @@ export async function runRemoteAccessCliCommand(
   return await runDeviceCommand(input, command);
 }
 
+export const DEFAULT_PAIR_LISTENER_PORT = 8443;
+
+export interface ServerPairingOptions {
+  /** Absent: the address found on this computer's network interfaces. */
+  readonly hostname?: string;
+  readonly port: number;
+  /** Absent: the host serves the certificate it makes itself. */
+  readonly pasted?: { readonly certificatePath: string; readonly privateKeyPath: string };
+}
+
+/**
+ * Splits the flags `server install` and `server start` take for `--pair` from
+ * the rest. Without `--pair` the flags come back untouched, so the pairing
+ * flags stay a usage error on a command that does not pair.
+ */
+export function resolveServerPairingFlags(flags: Readonly<Record<string, string | boolean>>):
+  | {
+      readonly rest: Readonly<Record<string, string | boolean>>;
+      readonly pairing?: ServerPairingOptions;
+    }
+  | undefined {
+  if (flags.pair !== true) return flags.pair === undefined ? { rest: flags } : undefined;
+  const { pair: _pair, hostname, port, cert, key, ...rest } = flags;
+  if (hostname !== undefined && typeof hostname !== "string") return undefined;
+  if (port !== undefined && (typeof port !== "string" || !/^\d{1,5}$/.test(port))) {
+    return undefined;
+  }
+  const portNumber = port === undefined ? DEFAULT_PAIR_LISTENER_PORT : Number(port);
+  if (portNumber < 1 || portNumber > 65_535) return undefined;
+  if (cert === undefined && key === undefined) {
+    return {
+      rest,
+      pairing: { ...(hostname === undefined ? {} : { hostname }), port: portNumber },
+    };
+  }
+  if (typeof cert !== "string" || typeof key !== "string") return undefined;
+  return {
+    rest,
+    pairing: {
+      ...(hostname === undefined ? {} : { hostname }),
+      port: portNumber,
+      pasted: { certificatePath: cert, privateKeyPath: key },
+    },
+  };
+}
+
+export interface RunServerPairingInput extends Omit<RunRemoteAccessCliCommandInput, "command"> {
+  readonly options: ServerPairingOptions;
+  readonly networkInterfaces: () => NetworkInterfaceMap;
+  /** Asks the person one question; `undefined` when no answer can be read. */
+  readonly ask: (question: string) => Promise<string | undefined>;
+  readonly now?: () => number;
+  readonly sleep?: (milliseconds: number) => Promise<void>;
+}
+
+/**
+ * The one-line start's host half, once the service is running: enable the
+ * listener on the address found here, mint a pairing code, wait for a device
+ * to claim it, and approve only on a typed `y`. Every step is the same
+ * loopback administration call Settings and `octant listener` / `octant pair`
+ * make; nothing here widens what the host allows.
+ */
+export async function runServerPairing(input: RunServerPairingInput): Promise<number> {
+  const { options } = input;
+  let hostname = options.hostname;
+  if (hostname === undefined) {
+    const choice = choosePairAddress(input.networkInterfaces());
+    if (choice.status === "refused") {
+      input.stderr.write(`${choice.message}\n`);
+      return 1;
+    }
+    hostname = choice.address;
+  }
+  const reach = classifyRemoteListenerAddress(hostname);
+  if (reach !== "tailscale" && reach !== "lan-private") {
+    input.stderr.write(
+      `${hostname} is not a Tailscale or private network address, so Octant will not listen on it.\n`,
+    );
+    return 1;
+  }
+  const enabled = await runRemoteAccessCliCommand({
+    ...input,
+    command: {
+      action: "listener-enable",
+      hostname,
+      port: options.port,
+      ...(options.pasted === undefined ? {} : { pasted: options.pasted }),
+    },
+  });
+  if (enabled !== 0) return enabled;
+
+  const status = await input.session.send({
+    path: "/api/desktop/private-listener/status",
+    method: "GET",
+  });
+  const listener = status.status === 200 ? listenerStatusOf(status.body) : undefined;
+  if (listener === undefined || listener.state !== "ready") {
+    input.stderr.write(
+      `${listener?.errorCode === undefined ? "The remote listener did not come up." : `The remote listener did not come up (${listener.errorCode}).`}\n`,
+    );
+    return 1;
+  }
+  const asPair = { ...input, command: { action: "pair" } } as const;
+  const ticket =
+    listener.certificateSource === "self-made"
+      ? await printPairingCode(asPair, asPair.command, listener, { approveHint: false })
+      : await printBrowserPairing(asPair, listener);
+  if (ticket === undefined) return 1;
+
+  const now = input.now ?? Date.now;
+  const sleep =
+    input.sleep ??
+    ((milliseconds: number) => new Promise<void>((r) => setTimeout(r, milliseconds)));
+  input.stdout.write("Waiting for a device to use the pairing code...\n");
+  let request: PendingPairingOutput | undefined;
+  while (request === undefined && now() < ticket.expiresAt) {
+    const listed = await input.session.send({
+      path: "/api/desktop/remote/pairing-requests",
+      method: "GET",
+    });
+    if (listed.status === 200) {
+      request = pendingRequestsOf(listed.body).find((entry) => entry.ticketId === ticket.ticketId);
+    }
+    if (request === undefined) await sleep(1_000);
+  }
+  if (request === undefined) {
+    input.stderr.write(
+      "No device used the pairing code within five minutes. Run the command again for a new one.\n",
+    );
+    return 1;
+  }
+  input.stdout.write(
+    [
+      `Device ${request.deviceLabel}`,
+      `Key fingerprint ${request.deviceKeyFingerprint}`,
+      `Comparison code ${request.comparisonCode}`,
+      "Approve only if the comparison code matches the one shown on the device.",
+      "",
+    ].join("\n"),
+  );
+  const answer = await input.ask("Approve? [y/N] ");
+  if (answer === undefined) {
+    input.stderr.write(
+      `No answer was read. The request stays pending; decide with \`octant pair approve ${ticket.ticketId}\` or \`octant pair deny ${ticket.ticketId}\`.\n`,
+    );
+    return 1;
+  }
+  const approved = /^y(es)?$/i.test(answer.trim());
+  return await runRemoteAccessCliCommand({
+    ...input,
+    command: {
+      action: approved ? "approve-pairing" : "deny-pairing",
+      ticketId: ticket.ticketId,
+    },
+  });
+}
+
+/** A pasted certificate keeps the browser link: a browser can check that one. */
+async function printBrowserPairing(
+  input: RunRemoteAccessCliCommandInput,
+  listener: ListenerStatusOutput,
+): Promise<PairingTicketOutput | undefined> {
+  if (listener.origin === null || listener.exposureClass === null) {
+    input.stderr.write("Octant returned an unusable remote listener status.\n");
+    return undefined;
+  }
+  const response = await input.session.send({
+    path: "/api/desktop/remote/pairing-tickets",
+    method: "POST",
+    body: { sourceClass: listener.exposureClass },
+  });
+  if (response.status !== 201) {
+    input.stderr.write(`${failureMessage(response, "Octant refused to mint a pairing token.")}\n`);
+    return undefined;
+  }
+  const ticket = pairingTicketOf(response.body);
+  if (ticket === undefined) {
+    input.stderr.write("Octant returned an unusable pairing token.\n");
+    return undefined;
+  }
+  input.stdout.write(
+    `Open ${listener.origin}/#ticketId=${ticket.ticketId}&ticketProof=${ticket.ticketProof}\n`,
+  );
+  input.stdout.write(`Expires ${new Date(ticket.expiresAt).toISOString()}\n`);
+  return ticket;
+}
+
 async function runDeviceCommand(
   input: RunRemoteAccessCliCommandInput,
   command: Extract<
@@ -171,7 +360,8 @@ async function runDeviceCommand(
       return 1;
     }
     if (listener.state === "ready" && listener.certificateSource === "self-made") {
-      return await printPairingCode(input, command, listener);
+      const ticket = await printPairingCode(input, command, listener, { approveHint: true });
+      return ticket === undefined ? 1 : 0;
     }
     const sourceClass = command.sourceClass ?? "loopback";
     const response = await session.send({
@@ -246,7 +436,8 @@ async function printPairingCode(
   input: RunRemoteAccessCliCommandInput,
   command: Extract<RemoteAccessCliCommand, { readonly action: "pair" }>,
   listener: ListenerStatusOutput,
-): Promise<number> {
+  options: { readonly approveHint: boolean },
+): Promise<PairingTicketOutput | undefined> {
   const { origin, tlsPin, exposureClass } = listener;
   if (
     origin === null ||
@@ -254,7 +445,7 @@ async function printPairingCode(
     (exposureClass !== "lan-private" && exposureClass !== "tailscale")
   ) {
     input.stderr.write("Octant returned an unusable remote listener status.\n");
-    return 1;
+    return undefined;
   }
   // The device claims the ticket over the listener itself, so a ticket for any
   // other network could never be claimed.
@@ -262,14 +453,14 @@ async function printPairingCode(
     input.stderr.write(
       `A pairing code is claimed over the listener's own network (${exposureClass}). Leave out --source.\n`,
     );
-    return 1;
+    return undefined;
   }
   // A listener no code can name is refused before a ticket exists, so a
   // refusal never leaves a live, unprinted ticket on the host.
   const refusal = refusePairingCodeListener({ origin, pin: tlsPin });
   if (refusal !== undefined) {
     input.stderr.write(`${PAIRING_CODE_REFUSAL_COPY[refusal]}\n`);
-    return 1;
+    return undefined;
   }
   const response = await input.session.send({
     path: "/api/desktop/remote/pairing-tickets",
@@ -278,12 +469,12 @@ async function printPairingCode(
   });
   if (response.status !== 201) {
     input.stderr.write(`${failureMessage(response, "Octant refused to mint a pairing code.")}\n`);
-    return 1;
+    return undefined;
   }
   const ticket = pairingTicketOf(response.body);
   if (ticket === undefined) {
     input.stderr.write("Octant returned an unusable pairing token.\n");
-    return 1;
+    return undefined;
   }
   const built = buildPairingCode({
     origin,
@@ -293,7 +484,7 @@ async function printPairingCode(
   });
   if (built.status === "refused") {
     input.stderr.write(`${PAIRING_CODE_REFUSAL_COPY[built.reason]}\n`);
-    return 1;
+    return undefined;
   }
   input.stdout.write(renderTerminalQr(built.code, { color: input.stdout.isTTY === true }));
   input.stdout.write(`Pairing code ${built.code}\n`);
@@ -301,13 +492,17 @@ async function printPairingCode(
   input.stdout.write(`Expires ${new Date(ticket.expiresAt).toISOString()}\n`);
   input.stdout.write(
     [
-      "The code is single-use. Approve the device's request on this host with `octant pair approve <ticket-id>`.",
+      ...(options.approveHint
+        ? [
+            "The code is single-use. Approve the device's request on this host with `octant pair approve <ticket-id>`.",
+          ]
+        : []),
       "A browser can't check this computer's own certificate, so there is no browser link.",
       "Octant's phone and desktop apps can't read pairing codes yet.",
       "",
     ].join("\n"),
   );
-  return 0;
+  return ticket;
 }
 
 async function runListenerCommand(

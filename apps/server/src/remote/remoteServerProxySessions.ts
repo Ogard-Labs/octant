@@ -95,6 +95,12 @@ export interface RemoteServerProxySessionsOptions {
   readonly proofs: RemoteServerProxyProofPort;
   /** Told once per session that ends, before the call that ended it returns. */
   readonly onSessionEnded: (ended: RemoteServerProxySessionEnded) => void;
+  /**
+   * Whether a session has a relayed WebSocket open. Its messages carry no
+   * proof, so an open socket counts as use and keeps the session from idling
+   * out; the absolute expiry still ends it.
+   */
+  readonly holdsOpenSockets?: (sessionIdDigest: string) => boolean;
   readonly now?: () => number;
   readonly uuid?: () => string;
   readonly randomBytes?: (size: number) => Uint8Array;
@@ -130,6 +136,7 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 export class RemoteServerProxySessions {
   readonly #proofs: RemoteServerProxyProofPort;
   readonly #onSessionEnded: (ended: RemoteServerProxySessionEnded) => void;
+  readonly #holdsOpenSockets: (sessionIdDigest: string) => boolean;
   readonly #now: () => number;
   readonly #uuid: () => string;
   readonly #randomBytes: (size: number) => Uint8Array;
@@ -142,6 +149,7 @@ export class RemoteServerProxySessions {
   constructor(options: RemoteServerProxySessionsOptions) {
     this.#proofs = options.proofs;
     this.#onSessionEnded = options.onSessionEnded;
+    this.#holdsOpenSockets = options.holdsOpenSockets ?? (() => false);
     this.#now = options.now ?? (() => Date.now());
     this.#uuid = options.uuid ?? randomUUID;
     this.#randomBytes = options.randomBytes ?? randomBytes;
@@ -190,6 +198,7 @@ export class RemoteServerProxySessions {
     const session = this.#sessions.get(digest(sessionId));
     if (session === undefined) return undefined;
     const now = this.#now();
+    this.#keepAliveWhileSocketsOpen(session, now);
     if (now >= session.idleExpiresAtMs || now >= session.absoluteExpiresAtMs) {
       this.#end(session, "proxy-session-ended");
       return undefined;
@@ -346,6 +355,7 @@ export class RemoteServerProxySessions {
   sweepExpired(): void {
     const now = this.#now();
     for (const session of this.#sessions.values()) {
+      this.#keepAliveWhileSocketsOpen(session, now);
       if (now >= session.idleExpiresAtMs || now >= session.absoluteExpiresAtMs) {
         this.#end(session, "proxy-session-ended");
       } else {
@@ -356,6 +366,13 @@ export class RemoteServerProxySessions {
 
   size(): number {
     return this.#sessions.size;
+  }
+
+  #keepAliveWhileSocketsOpen(session: LiveSession, now: number): void {
+    if (now >= session.absoluteExpiresAtMs || !this.#holdsOpenSockets(session.sessionIdDigest)) {
+      return;
+    }
+    session.idleExpiresAtMs = Math.min(now + SESSION_IDLE_TTL_MS, session.absoluteExpiresAtMs);
   }
 
   /** Whether the session's device still stands; ends the session, with why, when not. */

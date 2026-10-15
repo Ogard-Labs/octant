@@ -43,9 +43,9 @@ import { defaultResolveAll, isPrivateAddress } from "./nativeHarnessWebFetch";
  * what that pure decision cannot know: the token, the resolved addresses, the
  * TLS server name, and its own limits. It decides afresh for every request
  * and before every chunk it relays, so a rule that expires or is revoked
- * closes its tunnels whatever a timer did. Nothing launches a command with it
- * yet; until confinement routes commands here, what they can reach is
- * unchanged.
+ * closes its tunnels whatever a timer did. The harness shell starts one per
+ * command on `proxied` network, and the OS rules of that launch reach nothing
+ * else.
  */
 
 export const TOOL_EGRESS_PROXY_LIMITS = {

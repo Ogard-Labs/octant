@@ -15,6 +15,7 @@ function facts(overrides: Partial<ExtensionToolGrantFacts> = {}): ExtensionToolG
   return {
     inProject: true,
     hostOwnedTurn: false,
+    pairedDeviceTurn: false,
     planTurn: false,
     threadTainted: false,
     reach: "network",
@@ -70,6 +71,17 @@ describe("remembered MCP tool approval", () => {
     expect(decideExtensionToolGrant(facts({ hostOwnedTurn: true, ...changed }))).toEqual({
       kind: "ask",
       reason,
+      rememberable: false,
+    });
+  });
+
+  it("lets a paired device's turn use a grant but never offers to remember its prompt", () => {
+    expect(decideExtensionToolGrant(facts({ pairedDeviceTurn: true }))).toEqual({
+      kind: "covered",
+    });
+    expect(decideExtensionToolGrant(facts({ pairedDeviceTurn: true, grant: undefined }))).toEqual({
+      kind: "ask",
+      reason: "not-granted",
       rememberable: false,
     });
   });

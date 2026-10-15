@@ -953,8 +953,10 @@ choice reads as off.
 Each Code child allocation is keyed by its parent and delegation request. Two
 sibling requests receive distinct managed worktrees; only the same request can
 reuse its verified receipt. The host checks the actual Git worktree inventory
-and records the starting commit. Children start from committed source; the
-parent checkout's uncommitted edits are not copied into a child worktree.
+and records the starting commit. Children start from committed source only; the
+parent checkout's uncommitted edits are not copied into a child worktree, and
+there is no opt-in to seed one from the parent's working tree. A child that
+must see an edit starts after the parent commits it.
 
 Provider-owned child reports are read-only observations through the existing
 `child-agent-activity` SDK event. Chat attempts, Work turn updates, Code operation
@@ -1020,9 +1022,10 @@ is recorded as Interrupted and releases its capacity. The bound counts working
 time only: it pauses while the child waits for a person's approval or answer and
 resumes with the remaining time once every pending request is answered, because
 a child cut off with its approval card still open lost its work to the person's
-pace rather than its own. No separate wall-time bound exists; a waiting child
-keeps its capacity slot until the request is answered, the run is cancelled, or
-the host restarts.
+pace rather than its own. No separate overall wall-time cap exists, by decision: the working
+deadline is the only bound, since a cap that counted a person's wait would
+cut off the work it protects. A waiting child keeps its capacity slot until
+the request is answered, the run is cancelled, or the host restarts.
 
 Managed children retain a private provider-session cursor and a bounded,
 purgeable conversation alongside their journaled lifecycle. A cursor is bound
@@ -1777,6 +1780,20 @@ flowchart LR
   destructive, credential, outside-Project, or privilege-expansion class
   without that flag. A Code Git action a person takes from a window is that
   person's own per-action act, and no agent tool issues one.
+  The prompt that asks says why. A harness approval asked for the thread's
+  own call (`singleUse`), an MCP tool prompt, and a Computer use approval on
+  a marked thread carry `outsideContent`: the sources that marked it, most
+  recently read first, each with its read count and first and last read
+  time, at most eight, and the total number of sources. The host reads them
+  from the ingestion projection when it asks; no client supplies them, and
+  they hold labels and times only, never content or a content reference. The
+  web prompt says the thread took in outside content, so the call is
+  approved once, and lists them in the words the Clear review uses, ahead of
+  the answer controls; the mobile and CLI approval surfaces do not show them
+  yet. A
+  Computer use approval the host gates as marked but whose sources it cannot
+  read carries an empty list, so it still says so. A child run's approval
+  names no sources: it is never remembered in the first place.
 - **Provider runtimes' own web tools.** A runtime's built-in web search or page
   fetch, or a tool the model's provider runs on its own servers, hands its
   result to the model without Octant seeing it. The adapter reports the call
@@ -2350,7 +2367,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   declared capabilities, contributions, a second component, an entry point
   other than `builtin:provider-driver/<kind>`, and any source other than
   `bundled`. Outside drivers need their own design before the schema admits
-  them. The catalog repeats installed and trusted from the activation context
+  them; third-party provider-driver plugins are parked until after the
+  technical preview. The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -2399,6 +2417,24 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   inline image bytes, and the journal holds attachment references and a
   prompt hash, never image bytes or prompt text. See
   [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).
+  Image providers reach the job service through the provider-sdk image seam
+  (`@octant/provider-sdk/image-generation`): a driver builds one profile's
+  adapter from the profile and capability-scoped ports, never from host
+  internals. The ports are one provider call the host authenticates with a
+  key leased from the profile's key pool (the adapter names only the header,
+  and a refused key cools down as for any other call), the bounded
+  approved-URL fetch, and the host's generated-image media-type check; size,
+  time, and redirect bounds are the host's, with the response bound sized for
+  base64 images. The credential goes only over HTTPS to the hosts the driver
+  declares in code, or to the origin of a base URL the person configured; the
+  host refuses any other URL before it reads the key. Bundled image drivers pass the
+  same plugin-host activation ladder as provider drivers but stay out of the
+  chat-driver catalog, and a profile whose image driver plugin is disabled
+  fails its jobs as unsupported before any provider call. The seam's
+  conformance harness proves a driver stops before calling out when cancelled
+  or given an empty prompt, records unreachable providers and unexpected
+  errors as sanitized failures, and returns only bytes the host's media-type
+  check accepted.
   The **Image generator** surface (profile menu, host-wide `image-library`
   scope; see
   [decisions/0081-image-generation-is-its-own-surface.md](decisions/0081-image-generation-is-its-own-surface.md);
@@ -2873,8 +2909,8 @@ result line, and the composer's held send, read from a per-thread compaction
 state every thread kind answers, Code included; and the Chat, Work and Code turn
 runners journal a runtime's own compactions on the same ledger, which, with the
 requested ones, now decide when a Code window breakdown stops counting Octant's
-per-turn context as held. Not built yet: the compaction divider on the thread's
-timeline. No compaction, requested or automatic, has been run against a real
+per-turn context as held; and the compaction divider on the thread's timeline in
+Chat, Work and Code. No compaction, requested or automatic, has been run against a real
 runtime yet. **Compact session** replaces
 what the model sees from the next turn on with a summary of the earlier
 conversation and a recent tail, when the person asks, outside a turn. It never
@@ -2921,16 +2957,16 @@ a replacement provider session seeded with its own summary behind the person's
 back; that is the existing fork handoff, which stays a separate, explicit
 action.
 
-| Thread                                                   | Who compacts             | How                                                                                                                                                                                                                                                               | Refuses with                                                  |
-| -------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Chat or Work on a direct endpoint (host-planned history) | Host                     | `ContextHarnessService` summarizes the planned conversation before the tail through the existing summary generator (`makeContextSummaryGenerator`, a one-shot session on the thread's provider and model), then commits it as `maintainContext` does today.       | `nothing-to-compact`                                          |
-| Code on Octant Harness (journaled transcript)            | Octant Harness           | The harness connection's `compact` summarizes the transcript turns before the tail with the same endpoint and journals a `compacted` transcript event; later requests are built from the summary and the tail.                                                    | `nothing-to-compact`, `no-session`                            |
-| Codex app-server, any mode                               | Codex                    | `thread/compact/start` with the thread id (codex-cli 0.159.3 and 0.162.1 app-server schemas); the run is observed as a turn carrying the `contextCompaction` item.                                                                                                | `runtime-version-unsupported` when the method is not found    |
-| Claude Code, any mode                                    | Claude Code              | The runtime's own `/compact`, sent by the port as a user-role input that carries no tools and is not counted as a turn; observed as `system`/`compact_boundary` (`compact_metadata.trigger: "manual"`, `pre_tokens`) and the `status` message's `compact_result`. | `runtime-version-unsupported` when `compact` is not announced |
-| OpenCode, any mode                                       | OpenCode                 | `/api/session/:sessionID/compact` (served by OpenCode 2.0.26); observed as `session.compaction.ended`, `session.next.compaction.ended` or `session.compacted`.                                                                                                    | `runtime-version-unsupported` on a server without the route   |
-| Pi and Oh My Pi, any mode                                | Pi                       | Pi's RPC `compact` command (`packages/coding-agent/docs/rpc.md`); observed as `compaction_end`, which changed nothing when it carries no `result`.                                                                                                                | `runtime-version-unsupported` when the command is refused     |
-| ACP agents                                               | Nobody                   | The protocol has no compaction request.                                                                                                                                                                                                                           | `runtime-cannot-compact`                                      |
-| Any other adapter                                        | Nobody, unless it claims | An adapter compacts only by reporting the capability and implementing the seam below.                                                                                                                                                                             | `runtime-cannot-compact`                                      |
+| Thread                                                   | Who compacts             | How                                                                                                                                                                                                                                                                                                                                                                                                                                    | Refuses with                                                  |
+| -------------------------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Chat or Work on a direct endpoint (host-planned history) | Host                     | `ContextHarnessService` summarizes the planned conversation before the tail through the existing summary generator (`makeContextSummaryGenerator`, a one-shot session on the thread's provider and model), then commits it as `maintainContext` does today.                                                                                                                                                                            | `nothing-to-compact`                                          |
+| Code on Octant Harness (journaled transcript)            | Octant Harness           | The harness connection's `compact` summarizes the transcript turns before the tail with the same endpoint and journals a `compacted` transcript event; later requests are built from the summary and the tail.                                                                                                                                                                                                                         | `nothing-to-compact`, `no-session`                            |
+| Codex app-server, any mode                               | Codex                    | `thread/compact/start` with the thread id (codex-cli 0.159.3 and 0.162.1 app-server schemas); the run is observed as a turn carrying the `contextCompaction` item.                                                                                                                                                                                                                                                                     | `runtime-version-unsupported` when the method is not found    |
+| Claude Code, any mode                                    | Claude Code              | The runtime's own `/compact`, sent by the port as a user-role input that carries no tools and is not counted as a turn; observed as `system`/`compact_boundary` (`compact_metadata.trigger: "manual"`, `pre_tokens`) and the `status` message's `compact_result`. A resumed session sends its `compacting` status and a `rate_limit_event` before it initializes; the port holds both and delivers them after the initialized message. | `runtime-version-unsupported` when `compact` is not announced |
+| OpenCode, any mode                                       | OpenCode                 | `/api/session/:sessionID/compact` (served by OpenCode 2.0.26); observed as `session.compaction.ended`, `session.next.compaction.ended` or `session.compacted`.                                                                                                                                                                                                                                                                         | `runtime-version-unsupported` on a server without the route   |
+| Pi and Oh My Pi, any mode                                | Pi                       | Pi's RPC `compact` command (`packages/coding-agent/docs/rpc.md`); observed as `compaction_end`, which changed nothing when it carries no `result`.                                                                                                                                                                                                                                                                                     | `runtime-version-unsupported` when the command is refused     |
+| ACP agents                                               | Nobody                   | The protocol has no compaction request.                                                                                                                                                                                                                                                                                                                                                                                                | `runtime-cannot-compact`                                      |
+| Any other adapter                                        | Nobody, unless it claims | An adapter compacts only by reporting the capability and implementing the seam below.                                                                                                                                                                                                                                                                                                                                                  | `runtime-cannot-compact`                                      |
 
 The Codex and Claude rows cite the schema and message shapes they were read
 from. The Codex adapter claims compaction from codex-cli 0.162.1, the release
@@ -3151,7 +3187,18 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   a Code connection offers `compact`: Chat and Work send the host's planned
   history.
 - The thread's timeline shows a compaction divider from the completed event.
-  Everything above it stays visible, searchable and exported.
+  Everything above it stays visible, searchable and exported. The compaction
+  state read carries every completed receipt, oldest first
+  (`completedCompactions`), and the window draws one quiet labelled rule per
+  receipt, in the muted text and rule colours with no accent, in Chat, Work and
+  Code alike. It sits before the first row that ended after the compaction
+  completed, so a requested compaction falls between two turns and a runtime's
+  own sits ahead of the reply it happened in (Work rows carry a time only on
+  the person's messages, so there it falls before the next message of theirs).
+  A compaction older than the loaded history is not drawn until that history
+  loads. Each pane asks the host about its own thread, so a split workspace
+  shows every pane its own dividers, active or not, and no pane draws another
+  thread's; a pane asks again when its rows change.
 - A completed compaction marks a runtime's session `compacted`, so the window
   breakdown goes `uncounted` with that reason under the existing rule. Within
   a turn, the runner that sees `context-compacted` reports the turn's later
@@ -3159,7 +3206,16 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   carrying the previous turn's counted copies when the ledger records a
   compaction after that turn's last usage report in journal order (not by the
   events' clocks, which can tie): a completed one, or a failed one that may
-  have changed the session.
+  have changed the session. That check comes first: a runtime whose last report
+  of a turn is its own breakdown (Claude Code) carries no `sentContext`, and the
+  journaled compaction still makes the next turn `uncounted` / `compacted`
+  rather than `history-unknown`. A runtime's automatic compaction inside a turn
+  lands before that turn's closing usage report, and the runner marks that
+  report `compacted` (a runtime-owned breakdown gets the field added) when the
+  turn had Octant-sent copies to uncount or the runtime reported its own
+  categories, so the next turn carries it. When neither the session nor the turn holds any such copy,
+  the breakdown stays `counted` with no sent parts, because nothing is left to
+  uncount.
 - A request with no terminal event when the host starts is closed as
   `context.compaction-failed@1` with `interrupted`; for a runtime executor the
   session may have changed, and the next usage report shows what it holds.
@@ -3282,7 +3338,7 @@ watched has ended.
   reads in a row (a host that went away, or a window that lost the thread) it
   stops holding send and reads "Compaction state unknown: the host stopped
   answering. It may still be compacting, and refuses a send until it ends."
-- The result line, in the popover and the inspector (and, once built, on the
+- The result line, in the popover and the inspector (and on the
   timeline divider): "Compacted · 41.2K freed · summary by Codex", "Compacted ·
   freed amount shows after the next reply · summary by Codex", "Compacted ·
   freed amount not reported · summary by Codex", "Compacted · nothing freed ·
@@ -3365,7 +3421,15 @@ session without a recoverable cursor still fails closed; no transcript replay or
 replacement conversation repairs the missing identity. A follow-up on another model of
 the same provider instance resumes the same native session only when the driver
 reports the `modelSwitch` capability; the resume carries the thread's current
-model and the turn records it on the session. Codex restates the model and its
+model and the turn records it on the session. Claude resumes only a session
+whose identity (provider instance, Octant session, SDK session, Project root,
+authentication) this host recorded; the identity is journaled
+(`claude-resume-identity`), so a host restart keeps an existing thread
+resumable and compactable. A removed identity or a removed provider stays
+refused as `stale-resume` after a restart. A reconfigured provider keeps its
+identities, as it did within one host lifetime; the resume checks (instance,
+authentication, Project root, account directory history) still decide. A
+thread purge erases the identity of the session the thread recorded. Codex restates the model and its
 reasoning effort on each turn, and Claude resumes the SDK session under the new
 model. Another model on any other driver still fails closed. In Code, a
 change of provider instance starts a new session with a provider-switch
@@ -3778,11 +3842,12 @@ native harness in `apps/server/src/harness`:
   `edit`, `write`, and `goal-check` results do not, so local work keeps its
   ordinary approvals; the catalog's `resultTaintsThread` marks each tool and
   `nativeHarnessResultTaintsThread` decides, failing closed for a name it does
-  not know. A command under OS-level `allow` egress keeps today's posture and
+  not know. A command under OS-level `allow` egress (Full access, or a host
+  composed without the proxied shell) keeps today's posture and
   its output does not taint: the host cannot see what such a command received,
   so this is a stated exception to the thread-taint rule, recorded in the
   [threat model](security/security-architecture-threat-model.md), and standing
-  approvals stay active after it. Under the approved, unbuilt `proxied` level
+  approvals stay active after it. Under the `proxied` level
   a launch taints when it received bytes from an outside host, as the
   [egress rules](#harness-tool-egress-rules) describe. Once tainted, `bash`, `edit`,
   `write`, `goal-check`, and `web-fetch` need a person's confirmation for every
@@ -3791,7 +3856,8 @@ native harness in `apps/server/src/harness`:
   confirmation is single-use: a remembered "always" approval stops covering
   its class the moment the thread is tainted, and an "always" answered then
   covers only that call, so surfaces offer no "for this session" choice
-  (`singleUse` on the approval). A person's clear ends this until the next
+  (`singleUse` on the approval, which then also names the sources that marked
+  the thread; [Persistence](#persistence), Untrusted-content taint). A person's clear ends this until the next
   result that taints ([Persistence](#persistence), Clearing taint).
   `web-search` does not ask under taint: it
   reaches only the search endpoint the person configured, so the tool-call
@@ -4026,22 +4092,24 @@ composer. The web shows open offers as cards above the chips.
 
 ### Harness tool egress rules
 
-**Status: design approved by the maintainer on 2026-10-13. Phases 1 to 3
-are in: the rule model and decision (`decideToolEgress` and
+**Status: design approved by the maintainer on 2026-10-13. All four
+delivery phases are in: the rule model and decision (`decideToolEgress` and
 `decideToolEgressGrant` in `packages/domain/src/toolEgressPolicy.ts`), the
 event and wire schemas (`packages/contracts/src/toolEgress.ts`), the host proxy
 (`apps/server/src/harness/nativeHarnessEgressProxy.ts`, which reads request
-heads and ClientHellos in `nativeHarnessEgressWire.ts`), and the grants,
+heads and ClientHellos in `nativeHarnessEgressWire.ts`), the grants,
 learn-mode proposals, rules lists, journal records, and recovery
 (`nativeHarnessEgressRules.ts`, served by `nativeHarnessEgressRoutes.ts`, shown
-in a Code thread's Agents tab as Network access). No launch starts the proxy
-yet, so nothing that runs has changed.** Today a harness tool process gets the thread's
-OS-level `none` or `allow` (see Egress and hostile content above). This is the
-approved-but-unfinished design, and the phases below track its delivery. Its
-approval replaces the "no local egress proxy in this release" decision in the
+in a Code thread's Agents tab as Network access), and the confinement wiring:
+the `proxied` level in the Seatbelt builder (`process/seatbeltProfile.ts`) and
+the bubblewrap capsule with its forwarder (`process/linuxConfinement.ts`,
+`process/proxiedNetworkEgress.ts`), chosen per command by the harness
+composition (`nativeHarnessComposition.ts`) and launched by
+`nativeHarnessShell.ts`.** What is not yet verified or wired is listed under
+**Phase 4 settled** below. The design's approval replaces the "no local egress
+proxy in this release" decision in the
 [threat model](security/security-architecture-threat-model.md#approved-decisions-henrik-2026-08-12)
-for native-harness tool processes only; until a phase lands, that decision
-still describes what runs.
+for native-harness tool processes only.
 
 **Outcome.** A command the harness runs for a thread reaches exactly the
 destination hosts and ports a person allowed for that thread, until the
@@ -4376,9 +4444,48 @@ where it was or narrows it:
   them decision batches), startup went from 2.7 s to 0.25 s.
 - _Where the lists show._ A Code thread's Agents tab shows Network access once
   its commands run through these rules, or once the thread holds a rule or a
-  proposal. Until phase 4 routes commands to the proxy, the card says that
-  commands on the thread do not go through these rules yet, so nobody mistakes
-  a rule for a restriction that runs.
+  proposal. When its commands do not run through them under its current
+  access (Full access, Plan), the card says so, so nobody mistakes a rule for
+  a restriction that runs.
+
+**Phase 4 settled.** Each keeps authority where it was or narrows it:
+
+- _The switch._ The harness composition chooses a command's network when the
+  command runs, from the posture the thread holds then: approval-gated and
+  auto-accept-edits run on `proxied`, Full access on `allow`, and Plan or a
+  posture that cannot be read on `none`. A child with network authority is
+  clamped to its parent's posture at that moment and runs under its parent's
+  rules; a child without it stays `none`. The server composes the proxied
+  shell on macOS and Linux; a host composed without it (the switch off) keeps
+  every networked command on `allow`, as before the rules existed, and the
+  rules card says commands do not go through them. `proxied` never falls back
+  to `allow`: a launch whose listener cannot bind or whose start cannot be
+  journaled never runs its command, and a command whose summary or taint
+  cannot be recorded returns `unavailable` without its output.
+- _Which commands._ `bash` and `goal-check`, the two harness tools that run a
+  command. Each run is one launch named by its authorized call. The Code
+  terminal, Git, and provider runtimes are unchanged.
+- _Proxy variables._ The launch adds the proxy variables after the
+  environment check, which refuses lowercase names from any caller, so only
+  these values fill them. An offline port refuses a proxied launch outright,
+  so the `none` shell can never gain a route out.
+- _The Linux forwarder._ The host's own JavaScript runtime runs it (as Node
+  under Electron) from the launch's `0700` socket directory, bound read-only
+  together with the runtime's directory, so no command can rewrite it. It
+  listens on `127.0.0.1:3128` in the private namespace and exits 125 without
+  running the command when it cannot listen. A proxied capsule refuses a
+  process-deny filter, because the forwarder starts the command.
+- _What is unverified._ The Linux native probes have not run: no CI job has
+  `bwrap`, and the hostile suite's native cases run only on macOS or on a
+  Linux host with `/usr/bin/bwrap`. The forwarder's relay and exit behaviour
+  run on every host as plain Node. The bubblewrap arguments are checked as
+  strings.
+- _What is not wired._ The tainted thread's single-use confirmation does not
+  yet list the thread's and Project's hosts, so no `call` rule can be granted
+  and a tainted thread's commands reach no host until a person clears the
+  thread's outside-content mark. A tainted proposal shows on the card and
+  cannot be granted there. The reviewer that may answer a per-call
+  `network-access` prompt is not built. Both fail closed.
 
 **Failure modes.** Each fails closed:
 
@@ -4703,7 +4810,22 @@ prompt, schema, tool, route, model, or capability.
   that scope, offers only the selected tools, and refuses the turn when the
   provider or model cannot carry Octant's tools. Every call waits for an
   approval in the turn's window, shown in the open thread, unless a
-  remembered approval covers it (next item). At most 32 of those approvals
+  remembered approval covers it (next item). Who may answer:
+  - A local window answers its own turns' prompts, and any prompt raised by
+    a host-owned turn or by a paired device's turn on a thread that window
+    may drive (bound to the Project the prompt recorded).
+  - A paired device answers only the prompts its own turns raised, approve
+    once or deny, and only while the thread is still active and bound in
+    that Project (a Chat thread: still active and in the same Chat Project,
+    or still in none). It never sees or answers a local window's, another
+    device's, or the host's prompt. `/api/extensions/tool-approvals` is
+    forwarded to paired devices as `extension.tool-call.answer-once`; the
+    approval service, not the route policy, applies these rules.
+  - A prompt raised by a device that is no longer paired (revoked, or past
+    its registration's deadline even before the expiry is reconciled) goes
+    to nobody else and runs out.
+
+  At most 32 of those approvals
   wait at once across the whole host; the cap is shared by every thread and
   window, not counted per thread. A call past that cap is denied immediately
   with the refusal a declined call already uses, and answering or expiry
@@ -4715,6 +4837,7 @@ prompt, schema, tool, route, model, or capability.
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
   carried it.
+
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
   that one Project (`extension.tool-grant-recorded@1` on the Project's
@@ -4729,13 +4852,17 @@ prompt, schema, tool, route, model, or capability.
   update or a changed listing is a new question
   (`decideExtensionToolGrant` in `@octant/domain`). The payloads hold
   identifiers and digests, never a call's arguments or result.
-  - A grant grows only through that answer from a local window. No route,
-    command, manifest field, structured reference, tool call, model output,
-    paired device, or host-owned turn (a routine, a goal loop, a usage-limit
-    resume, a child-run delivery) can create one. A host-owned turn in the
-    Project may use one, but the prompt it raises is approved once and is
-    never remembered, even when a person at a local window answers it:
-    nobody chose to send that turn.
+  - A grant grows only through that answer from the local window whose own
+    turn raised the prompt. No route, command, manifest field, structured
+    reference, tool call, model output, paired device, or host-owned turn (a
+    routine, a goal loop, a usage-limit resume, a child-run delivery) can
+    create one. A host-owned turn in the Project may use one, but the prompt
+    it raises is approved once and is never remembered, even when a person
+    at a local window answers it: nobody chose to send that turn. A paired
+    device's turn is treated the same way: it may use a grant, and its prompt
+    is approved once, whether the device or a local window answers.
+    Remembering is an answer at the machine, and the person who sent that
+    turn is not at it.
   - A thread with no Project and a Plan turn are asked for every call, and
     the answer covers that call alone. An answer that asks to be remembered
     where it cannot be is refused and the call keeps waiting.
@@ -4895,7 +5022,7 @@ feature is already an independently packaged plugin:
 | Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Only presentation and optional adapters are extraction candidates; core capability, lifecycle, and security remain app-managed |
 | Marketplace and plugin registry                                       | Stay in the host because they admit and activate other components                                                              |
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned           |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | In-tree adapters the image job service picks directly; move behind the provider seam, image jobs stay host-owned               |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | The provider-sdk image seam and image-driver admission exist; adapters move behind them, image jobs stay host-owned            |
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -5209,12 +5336,17 @@ mechanisms are:
   network `allow` for the runtime process (`materializeOsNetworkEgress`): the
   runtime, Plan included, can reach any host. The endpoint restriction the name
   promises holds only for Octant-brokered tools (browser origin allowlists,
-  research backends). The persisted value keeps its name for journal
-  compatibility.
+  research backends) and for native-harness commands, which run on `proxied`
+  under the [harness tool egress rules](#harness-tool-egress-rules)
+  (`materializeHarnessToolNetwork`). The persisted value keeps its name for
+  journal compatibility.
   A provider runtime launch is wrapped when the process carries exactly one
-  thread's authority. The goal is that every runtime below Full access is
-  wrapped; the current state, which `providerProcessConfinement.test.ts` pins
-  against this table, is below. Full access never gets the deny-default
+  thread's authority. The state below, which `providerProcessConfinement.test.ts`
+  pins against this table, is the accepted one: provider runtimes keep their
+  own sandboxes (Codex in every posture, Claude outside Plan) and closing that
+  gap is not an open goal. Octant says so rather than promising a boundary it
+  does not draw; a runtime that can be wrapped without losing what it needs is
+  taken as its own change. Full access never gets the deny-default
   profile. The one wrapper it can get is deny-only: an ACP profile with
   extension or host-auth paths to deny (Kimi, for example) launches Full access
   under an allow-default `sandbox-exec` profile or a Bubblewrap host-root bind
@@ -5223,22 +5355,22 @@ mechanisms are:
   because Bubblewrap would create it in the person's own Project (see
   [Extensions and skills](#extensions-and-skills)).
 
-  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                                                        |
-  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                                                      |
-  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder |
-  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                                                     |
-  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                                        |
+  | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                                                                                                                                                                               |
+  | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | ACP, OpenCode, Pi (`acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) | Wrapped                         | Wrapped                                             | `allow`                                          | Octant sandbox: no root write, no exec or fork                                                                                                                                                                                             |
+  | Claude Agent SDK (`claudeProcess.ts`)                                     | Wrapped; Chat children run here | Unwrapped; runtime's own sandbox, project root only | `allow` on Plan; not limited by Octant otherwise | Octant sandbox: project and checkout read-only; write only `sessions/` and this session's own transcript and folder; on macOS exec only zsh and listed read-only tools, which get no network and write only the launch temporary directory |
+  | Codex app-server (`codexProcess.ts`)                                      | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | Codex's own `read-only` sandbox                                                                                                                                                                                                            |
+  | Oh My Pi (`ohMyPiProcess.ts`), readiness probe only                       | Unwrapped                       | Unwrapped                                           | Not limited by Octant                            | No turn runs                                                                                                                                                                                                                               |
 
   Codex is unwrapped because its app-server is leased once per provider
   instance: `providerRuntimeRegistry` keys runtimes by `instanceId`, so one
   process carries every thread on that instance, each choosing its own root
   and `sandbox` at `thread/start`. No profile is exact for all of them, and one
-  wide enough for all of them is not a boundary. That exception closes when
-  the lease is keyed by the thread's root and execution policy, as an OpenCode
-  connection is. Claude is a gap, not an exception: one process per query
-  already carries one thread's authority, and its remaining postures close as
-  its per-query spawn callback prepares a confined launch for them.
+  wide enough for all of them is not a boundary. Keying the lease by the
+  thread's root and execution policy, as an OpenCode connection is, would
+  change that, and nothing requires it. Claude's unwrapped postures rest on
+  the runtime's own sandbox for the same reason: its sign-in and tools need
+  reach that a deny-default profile would have to re-grant.
   `providerProcessConfinement.test.ts` refuses a new module that launches
   without the shared builder unless it is named here. The ACP/OpenCode/Pi row has one
   carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
@@ -5252,7 +5384,9 @@ mechanisms are:
   ([Persistence](#persistence), Provider runtimes' own web tools, lists which
   calls are observable), but the gate that mark applies to Octant's computer-use,
   MCP, and native-harness calls does not cover a tool the runtime executes
-  itself.
+  itself. That boundary is accepted: the mark gates Octant's own tools only,
+  and Claude's and Codex's built-in tools run under the runtime's own sandbox
+  and approvals.
   A confined Claude Plan launch reads the assigned leaf of that account's
   state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
   writes only `sessions/` and its own session in `projects/`: the
@@ -5309,16 +5443,74 @@ mechanisms are:
   `~/Library/Keychains/login.keychain-db`, and the two security-server
   lookups. With any one missing the runtime is signed out, so the launch
   takes all four, as Seatbelt `extraRules` and the fork switch, the same
-  way an OpenCode launch may exec `/usr/bin/false`. No shell, no Keychain
-  write, and no other file in that folder is granted: `/bin/sh` and every
-  other exec stay refused, which keeps hooks and the Bash tool out. The
-  cost: the confined runtime may fork, may run `security`, which returns
-  any keychain item that trusts that tool, and may read the encrypted
-  login keychain file. The driver refuses a file tool that names that
-  folder, so the grant serves the runtime's sign-in read and not the
-  model. A launch on an API key takes none of it. Linux keeps the login in
+  way an OpenCode launch may exec `/usr/bin/false`. No Keychain write and
+  no other file in that folder is granted, and `/bin/sh` stays refused,
+  which keeps hooks out. The cost: the confined runtime may fork, may run
+  `security`, which returns any keychain item that trusts that tool, and
+  may read the encrypted login keychain file. The driver refuses a file
+  tool that names that folder, and the profile refuses both `security` and
+  that file to every process but the runtime (and the file to `security`),
+  so the grant serves the runtime's sign-in read and not the model. A
+  launch on an API key takes none of it.
+  Linux keeps the login in
   a file inside the account directory, which the launch already holds, and
-  Seatbelt rules do not apply there. Before a confined launch starts, the
+  Seatbelt rules do not apply there.
+  A Code Plan turn on macOS may run read-only commands through the Bash
+  tool (`claudePlanRunsCommands`, `planCommandRules`). Only a launch that
+  offers the Bash tool gets the grants below; a Chat or Work Plan launch
+  and the readiness probes keep no fork and no exec but their own. The
+  launch may fork,
+  and may exec exactly these programs, by literal and resolved path:
+  `/bin/zsh` (pinned as the tool's shell through `CLAUDE_CODE_SHELL`;
+  without bash or zsh the tool refuses to start), `cat`, `ls`, `realpath`,
+  `awk`, `basename`, `cut`, `diff`, `dirname`, `file`, `find`, `grep`,
+  `head`, `sed`, `sort`, `stat`, `tail`, `tr`, `uniq`, `wc` and `xargs`
+  from `/bin` and `/usr/bin`, and the first `git` and `rg` on the launch's
+  `PATH`. A program on `PATH` that resolves into the checkout or a folder
+  the launch may write is not listed. `/usr/bin/git` is a developer-tools
+  shim that, measured on macOS 27.0.1 under this profile, failed every call
+  (it reads `/var/select/developer_dir` under the `/private` denial and
+  then starts `xcodebuild`), so the shim is not listed: the real Git of the
+  active developer folder is, and a `git` link to it in the launch's
+  temporary directory goes first on `PATH`. Everything else stays refused,
+  `/bin/sh` and `/bin/bash` included, so a Git command a repository
+  configures with arguments (`core.fsmonitor`, `core.pager`, a textconv, a
+  `!` alias), which Git starts through `/bin/sh -c`, cannot start, and a
+  configured program in the checkout cannot either. The shell also starts
+  with Git's system and global files skipped, the fsmonitor off, the
+  per-user ignore and attributes files at `/dev/null`, no optional index
+  lock, `cat` as pager and no credential prompt; the model can set that
+  environment aside, and the profile still holds. A Seatbelt rule's
+  `process-path` names the program asking (measured on macOS 27.0.1), and
+  the profile uses that to keep the runtime's reach with the runtime:
+  only the runtime's own program has network, so the shell and what it
+  starts reach no host (`git ls-remote git://…` and zsh's `ztcp` are
+  refused); only `sandbox-exec` and the runtime may start the runtime's
+  program, so a shell cannot start a second runtime with that network and
+  an endpoint of its choosing. Writes are the runtime's too: a
+  command writes only the launch's temporary directory, where the Bash
+  tool keeps its output. `git log --output=` into the account's
+  `settings.json`, `.claude.json`, `skills/`, `plugins/`, any `memory/`
+  folder, another session's transcript or another checkout's folder, or
+  into the checkout and its `.git/hooks`, is refused, and so is the same
+  command into this session's own transcript or `sessions/`: those grants
+  serve the runtime, and a command that rewrote the transcript could put
+  words in the person's mouth for a later turn that resumes it with
+  write access. Measured on
+  macOS 27.0.1 with Claude Code 2.1.300, the real runtime under this
+  profile, driven by a local scripted Messages endpoint with a fake
+  key, ran `git log`, `git diff`, `git status`, `rg`, `ls`, `cat`, `grep`
+  and `find` in the checkout, and every refusal above held. A Plan turn
+  has no approvals, so a Plan command runs unasked: the profile, not a
+  person, keeps it read-only. The account's state directories, which hold
+  every session's transcript from every checkout, are the runtime's to read
+  and refused to a command. What a command can still do: read whatever
+  else the launch may read, checkout secrets and files outside the home
+  folder included, into the model's context (which goes only to the
+  provider), and write the launch's temporary
+  directory, which is removed when the runtime exits. On Linux the Plan
+  launch keeps its fork-denying seccomp filter, and Plan offers no Bash
+  tool there. Before a confined launch starts, the
   `claude auth status` check that readiness uses runs inside that launch's
   sandbox: a sign-in the sandbox cannot read refuses the turn with the step
   that fixes it, instead of failing after the turn has started. Octant
@@ -5938,9 +6130,28 @@ mechanisms are:
       a test refuses any that does. No `octant` command connects to another
       host yet, so only tests use it.
 - **Adding a computer in one step.** Partly built: the host certificate,
-  pairing code, and client trust rule above. Reading the code and pinning on
-  the desktop and phone apps, and the rest, are planned in
-  [the plan](plans/one-step-pairing.md).
+  pairing code, client trust rule above, and the one-line start. Reading the
+  code and pinning on the desktop and phone apps, and key rotation, are
+  planned in [the plan](plans/one-step-pairing.md).
+  - **One-line start.** `octant server install --artifact <path> --pair` and
+    `octant server start --pair` install and start the service as without
+    the flag, then make only the loopback administration calls
+    `octant listener` and `octant pair` make, so they add no authority.
+    `--hostname`, `--port`, `--cert`, and `--key` are accepted only with
+    `--pair`. The address is an up interface's non-loopback, non-link-local
+    address the classifier calls Tailscale, else the one private LAN address
+    (an interface's IPv4 address names it over its IPv6 one); none, or more
+    than one of that kind, is refused with what was found, a public address
+    is never chosen, and `--hostname` must itself classify as Tailscale or
+    private LAN. The listener is enabled on port 8443 unless `--port` says
+    otherwise, with the host's own certificate unless `--cert` and `--key`
+    name one, in which case the command prints the browser link instead of a
+    pairing code. It then prints the code and QR code, polls the pending
+    claims until the ticket's five minutes end, shows the device label, key
+    fingerprint, and comparison code, and approves only on a typed `y`
+    (`y` or `yes`); any other answer denies the request, and an input that
+    ends without an answer leaves it pending for `octant pair approve`. It
+    changes no firewall rule and runs no Tailscale command.
 - **Provider keys on a host without the desktop app.** _Designed, not yet
   built._ The desktop saves an endpoint's API key or bearer token over
   native IPC from its own renderer, so a browser client — local or paired —
@@ -5992,7 +6203,9 @@ mechanisms are:
     renderer would inherit the window capability. The
     bridge secret binds the CLI to the host's OS user, and nothing a browser
     can present does. A browser on a host with no desktop app stays
-    read-only for credentials and names the CLI command.
+    read-only for credentials and names the CLI command: the browser client
+    never stores credentials, and a host-local `octant` prompt is the one way
+    to save a key there.
   - **Store absent or locked.** `octant server run` starts a credential
     broker only when Secret Service (`org.freedesktop.secrets` on the user
     bus) and `/usr/bin/secret-tool` are present at start. Without a broker the
@@ -6233,9 +6446,33 @@ mechanisms are:
     request is registered under its grant before connecting, and holds its
     place in the device's proxy budget until its response ends; closing the
     grant closes the upstream socket and cuts the response before the call
-    that closed it returns. An upgrade request is refused `upgrade-refused`,
-    and `OPTIONS` is not relayed. The listener admits bodies up to the relay's
-    8 MiB; every other route keeps its own budget.
+    that closed it returns. `OPTIONS` is not relayed. The listener admits
+    bodies up to the relay's 8 MiB; every other route keeps its own budget.
+  - **WebSockets.** The relay route is the only one that switches a
+    connection: a signed `GET` asking to upgrade to `websocket` takes the same
+    checks as any relayed request, then the host opens a WebSocket to the
+    grant's endpoint with the same header rules, its own handshake key, the
+    page's subprotocol list, and no extension, within the connect bound. Only
+    when the dev server answers 101 with the right accept value, no extension,
+    and no subprotocol or one the page offered does the page's connection
+    switch, answering that subprotocol; a dev server that declines, and any
+    upgrade to another protocol, is refused `upgrade-refused` (501). Every
+    other route on either listener answers an upgrade request as an ordinary
+    one and never switches. After the switch, messages carry no proof of their
+    own: each socket is registered under its grant before the host connects,
+    and closing the grant for any reason above closes the page's end with 1008
+    and the dev server's with 1001 before the call that closed it returns. A
+    grant holds at most four sockets and a device sixteen, answered 503 with a
+    one-second `Retry-After` past either; a socket does not hold a proxy-budget
+    slot once switched. A message is at most 16 MiB in either direction, and a
+    larger one closes the socket with 1009 before the host buffers it; writes
+    one end does not read close the socket with 1008 past twice that. The host
+    answers pings itself and relays whole messages, text or binary, and close
+    codes. An open socket counts as use of its proxy session, so the session
+    does not idle out under it; its absolute expiry still ends the session,
+    the grant, and the socket. The listener's transport (Node or Bun) switches
+    a connection only when the route's answer carries an accepted upgrade, so
+    an answer that does not is written as plain HTTP and the connection closed.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and

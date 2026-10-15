@@ -23,6 +23,8 @@ export interface ExtensionToolGrantFacts {
    * usage-limit resume, or a child run's result delivered to its parent.
    */
   readonly hostOwnedTurn: boolean;
+  /** A paired device sent this turn, from its own scope rather than a local window's. */
+  readonly pairedDeviceTurn: boolean;
   readonly planTurn: boolean;
   /** The thread has taken in outside content: a tool result or external text. */
   readonly threadTainted: boolean;
@@ -73,7 +75,10 @@ export function decideExtensionToolGrant(
   // person asking for this tool. It may use a grant a person already made,
   // but its own prompt approves one call, whoever answers. Host ownership is
   // never why a call asks, so it adds no reason of its own.
-  const rememberable = !facts.hostOwnedTurn;
+  // A paired device's turn is approved once the same way: "always allow in
+  // this Project" is a local window's answer, and the person who sent the
+  // turn is not at one, so nobody who answers it may remember it.
+  const rememberable = !facts.hostOwnedTurn && !facts.pairedDeviceTurn;
   const grant = facts.grant;
   if (grant === undefined) return { kind: "ask", reason: "not-granted", rememberable };
   if (grant.revoked) return { kind: "ask", reason: "revoked", rememberable };

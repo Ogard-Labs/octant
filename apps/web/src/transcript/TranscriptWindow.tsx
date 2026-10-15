@@ -1,3 +1,4 @@
+import type { ContextSubjectRef } from "@octant/contracts/context";
 import {
   defaultRangeExtractor,
   useVirtualizer,
@@ -14,6 +15,11 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
+import {
+  CompactionDivider,
+  placeCompactions,
+  useCompactionReceipts,
+} from "../context/CompactionDivider";
 import { TranscriptOutputLimitNote } from "./outputLimitNote";
 
 /**
@@ -36,6 +42,13 @@ export interface TranscriptWindowProps<T> {
    * transcript's own row rendering stays as it is.
    */
   readonly afterItem?: (item: T, index: number) => ReactNode;
+  /**
+   * When a row happened. A transcript that passes it shows a divider where the
+   * thread's session was compacted, from the host's journaled receipts.
+   */
+  readonly itemAt?: (item: T) => string | undefined;
+  /** The thread whose compactions the dividers show; with `itemAt`, it turns them on. */
+  readonly compactionSubject?: ContextSubjectRef;
   /** Identifies the thread so leaving and returning restores this scroll offset. */
   readonly restoreKey: string;
   readonly estimateSize?: number;
@@ -118,6 +131,27 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const follows = align === "end" && props.followOutput !== false;
   const ListTag = props.listTag ?? "div";
   const ItemTag = props.itemTag ?? "div";
+  const { itemAt } = props;
+  // A turn already listed keeps its place while it moves on (a later attempt, a
+  // status change), so the count alone would miss a compaction journaled in it.
+  const rowsRevision = useMemo(() => {
+    let latest = "";
+    if (itemAt !== undefined) {
+      for (const item of props.items) {
+        const at = itemAt(item);
+        if (at !== undefined && at > latest) latest = at;
+      }
+    }
+    return `${props.items.length}:${latest}`;
+  }, [itemAt, props.items]);
+  const compactionReceipts = useCompactionReceipts(props.compactionSubject, rowsRevision);
+  const compactionPlacement = useMemo(
+    () =>
+      itemAt === undefined || compactionReceipts.length === 0
+        ? undefined
+        : placeCompactions(props.items, compactionReceipts, itemAt),
+    [compactionReceipts, itemAt, props.items],
+  );
   const scrollElementRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLElement | null>(null);
   const leadRef = useRef<HTMLDivElement>(null);
@@ -587,6 +621,9 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
               width: "100%",
             }}
           >
+            {(compactionPlacement?.before.get(virtualItem.index) ?? []).map((receipt) => (
+              <CompactionDivider key={String(receipt.compactionId)} receipt={receipt} />
+            ))}
             {props.renderItem(item, virtualItem.index)}
             {props.afterItem?.(item, virtualItem.index)}
           </ItemTag>
@@ -614,6 +651,13 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
       </div>
       {list}
       <div data-transcript-trail="" ref={trailRef}>
+        {compactionPlacement === undefined || compactionPlacement.trailing.length === 0 ? null : (
+          <div className={props.listClassName}>
+            {compactionPlacement.trailing.map((receipt) => (
+              <CompactionDivider key={String(receipt.compactionId)} receipt={receipt} />
+            ))}
+          </div>
+        )}
         {props.trail}
         <TranscriptOutputLimitNote restoreKey={props.restoreKey} />
       </div>

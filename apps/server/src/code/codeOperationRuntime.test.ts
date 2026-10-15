@@ -7797,6 +7797,17 @@ describe("Project access inside a Code turn's tool calls", () => {
       }),
       read: (path: string) => ({ name: "octant_acp_fs_read_text_file", input: { path } }),
       run: (command: string) => ({ name: "octant_acp_terminal_create", input: { command } }),
+      /** Waits for the terminal the call before it created, so the turn ends only once it exited. */
+      waitForExit: () => ({
+        name: "octant_acp_terminal_wait_for_exit",
+        input: (answers: ReadonlyArray<string | undefined>) => ({
+          terminalId: (
+            JSON.parse(answers.findLast((answer) => answer !== undefined) ?? "{}") as {
+              readonly terminalId?: string;
+            }
+          ).terminalId,
+        }),
+      }),
     };
     const otherProject = decodeProjectId("90000000-0000-4000-8000-0000000000c1");
     const scratch: Array<string> = [];
@@ -7915,6 +7926,7 @@ describe("Project access inside a Code turn's tool calls", () => {
           acp.write(join(checkoutRoot, "before.txt")),
           acp.write(join(checkoutRoot, "after.txt")),
           acp.run("echo ran > terminal.txt"),
+          acp.waitForExit(),
         ],
         (requestNumber) => {
           if (requestNumber === 2) presence.live = false;
@@ -7931,17 +7943,17 @@ describe("Project access inside a Code turn's tool calls", () => {
       fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
       try {
         await startTurn(fixture, access, operationId(1361));
-        await vi.waitFor(() => expect(endpoint.bodies).toHaveLength(4));
-        expect(endpoint.answers().map(terminalOutcome)).toEqual(["none", "none", "none"]);
+        // The last request is the model's closing answer, sent after the
+        // terminal exited, so nothing here races the shell's start-up.
+        await vi.waitFor(() => expect(endpoint.bodies).toHaveLength(5), { timeout: 20_000 });
+        expect(endpoint.answers().map(terminalOutcome)).toEqual(["none", "none", "none", "none"]);
         expect(readFileSync(join(checkoutRoot, "after.txt"), "utf8")).toBe("written");
-        await vi.waitFor(() => expect(existsSync(join(checkoutRoot, "terminal.txt"))).toBe(true), {
-          timeout: 10_000,
-        });
+        expect(existsSync(join(checkoutRoot, "terminal.txt"))).toBe(true);
       } finally {
         await fixture.runtime.close();
         fixture.close();
       }
-    }, 20_000);
+    }, 30_000);
 
     it("keeps a Plan turn read-only on its checkout after the window is rebound", async () => {
       const { checkoutRoot } = roots();
@@ -7997,7 +8009,10 @@ describe("Project access inside a Code turn's tool calls", () => {
  * request chain, as a hosted provider's do.
  */
 async function functionCallingEndpoint(
-  calls: ReadonlyArray<{ readonly name: string; readonly input: unknown }>,
+  calls: ReadonlyArray<{
+    readonly name: string;
+    readonly input: unknown | ((answers: ReadonlyArray<string | undefined>) => unknown);
+  }>,
   onRequest?: (requestNumber: number) => void,
 ) {
   const bodies: Array<string> = [];
@@ -8012,7 +8027,7 @@ async function functionCallingEndpoint(
       : responsesToolCallStream(
           `call_${String(bodies.length)}`,
           call.name,
-          JSON.stringify(call.input),
+          JSON.stringify(typeof call.input === "function" ? call.input(answers()) : call.input),
         );
   });
   const registry = new ProviderRuntimeRegistry();

@@ -62,6 +62,7 @@ export interface AppleLaunchGrants {
   readonly allowPseudoTty?: boolean;
   readonly allowJobCreation?: boolean;
   readonly allowSignal?: boolean;
+  readonly interruptFirst?: boolean;
   readonly additionalReadRoots?: ReadonlyArray<string>;
   /**
    * Directories this launch may read and write on top of the port-wide set.
@@ -176,6 +177,7 @@ export interface AppleToolchainServiceOptions {
       readonly allowPseudoTty?: boolean;
       readonly allowJobCreation?: boolean;
       readonly allowSignal?: boolean;
+      readonly interruptFirst?: boolean;
       readonly additionalWriteRoots?: ReadonlyArray<string>;
       readonly additionalReadRoots?: ReadonlyArray<string>;
       readonly isolatedRoots?: ReadonlyArray<string>;
@@ -1316,7 +1318,7 @@ export class AppleToolchainService {
       context,
       DEVICE_RECORDING_LIMIT_SECONDS * 1_000,
       controller.signal,
-      { additionalWriteRoots: [this.#captureDirectory] },
+      { additionalWriteRoots: [this.#captureDirectory], interruptFirst: true },
     ).catch(() => unavailableInputResult("The recording could not be started."));
     // A recording that ends at once never started: report why, keep nothing.
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1374,7 +1376,13 @@ export class AppleToolchainService {
     this.#recordings.delete(key);
     recording.controller.abort();
     try {
-      await recording.finished;
+      const ended = await recording.finished;
+      // The recorder writes its file when interrupted; one still alive leaves
+      // the device refusing a new recording, so say so rather than read a
+      // half-written file.
+      if (ended.cleanupUncertain) {
+        return { saved: false, reason: "The Simulator recorder did not stop." };
+      }
       const bytes = await readCapture(recording.path, "recording");
       if (bytes === undefined) {
         return { saved: false, reason: "The recording was empty or larger than Octant keeps." };

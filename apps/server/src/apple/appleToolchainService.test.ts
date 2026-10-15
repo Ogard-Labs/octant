@@ -1985,7 +1985,11 @@ describe("AppleToolchainService screen recording", () => {
   const stopId = "30000000-0000-4000-8000-0000000000a2" as never;
 
   async function recordingService(
-    options: { readonly endsAtOnce?: boolean; readonly shutdownExitCode?: number } = {},
+    options: {
+      readonly endsAtOnce?: boolean;
+      readonly shutdownExitCode?: number;
+      readonly recorderSurvives?: boolean;
+    } = {},
   ) {
     const discovery = discoveryExecutor();
     const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-recording-test-"));
@@ -2007,7 +2011,11 @@ describe("AppleToolchainService screen recording", () => {
           recordedPath!,
           Uint8Array.from([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 1, 2, 3, 4, 5, 6, 7, 8]),
         );
-        return processResult("", { termination: "cancelled", exitCode: null });
+        return processResult("", {
+          termination: "cancelled",
+          exitCode: null,
+          cleanupUncertain: options.recorderSurvives === true,
+        });
       },
     );
     const service = new AppleToolchainService({
@@ -2062,6 +2070,22 @@ describe("AppleToolchainService screen recording", () => {
     });
     expect(artifacts.get(`apple-recording-${stopId}`)?.byteLength).toBe(16);
     expect(service.snapshot(gated).recordings).toEqual([]);
+  });
+
+  it("stops the recorder by interrupting it, and refuses a recording whose recorder did not stop", async () => {
+    const { service, execute, artifacts } = await recordingService({ recorderSurvives: true });
+    await service.discover(discoveryRequest, context);
+    await service.execute(recording("start-recording", startId), context);
+    const command = execute.mock.calls.find(([input]) => input.argv.includes("recordVideo"))?.[0];
+    expect((command as { interruptFirst?: boolean } | undefined)?.interruptFirst).toBe(true);
+
+    const stopped = await service.execute(
+      recording("stop-recording", "30000000-0000-4000-8000-0000000000a5" as never),
+      context,
+    );
+
+    expect(stopped.outcome).toBe("failed");
+    expect([...artifacts.keys()].some((key) => key.startsWith("apple-recording-"))).toBe(false);
   });
 
   it("launches one recorder when two starts arrive together", async () => {

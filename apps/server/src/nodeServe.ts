@@ -1,10 +1,17 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { STATUS_CODES, createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
-import type { AddressInfo } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import { parseListenerRequestHost, requestUrlStaysOnHost } from "./listenerRequestHost";
 import { deriveTransportFactsFromPeer } from "./remoteRequestFacts";
 import { MAX_CHAT_ATTACHMENT_BYTES, type OctantServer, type RequestTransportFacts } from "./server";
 import type { PrivateListenerTls } from "./privateListener";
+import {
+  WEBSOCKET_RELAY_MAX_MESSAGE_BYTES,
+  WebSocketEndpoint,
+  isWebSocketKey,
+  takeWebSocketUpgrade,
+  webSocketAcceptFor,
+} from "./webSocketRelay";
 
 export interface NodeServeOptions {
   readonly hostname: string;
@@ -43,6 +50,22 @@ export async function nodeServe(options: NodeServeOptions): Promise<OctantServer
     options.tls === undefined
       ? createServer(requestHandler)
       : createHttpsServer(options.tls, requestHandler);
+  // Upgraded sockets leave the HTTP server's own connection list, so stopping
+  // the server closes them from here.
+  const upgradedSockets = new Set<Socket>();
+  server.on("upgrade", (incoming: IncomingMessage, socket: Socket, head: Buffer) => {
+    upgradedSockets.add(socket);
+    socket.once("close", () => upgradedSockets.delete(socket));
+    void bridgeUpgrade(
+      incoming,
+      socket,
+      head,
+      options.fetch,
+      baseUrl,
+      options.hostname,
+      listenerTrust,
+    ).catch(() => socket.destroy());
+  });
 
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
@@ -78,6 +101,8 @@ export async function nodeServe(options: NodeServeOptions): Promise<OctantServer
       activeReaders.clear();
       const closed = closeServer(server);
       if (closeActiveConnections) server.closeAllConnections();
+      for (const socket of upgradedSockets) socket.destroy();
+      upgradedSockets.clear();
       await closed;
     },
   };
@@ -193,6 +218,137 @@ async function bridgeRequest(
     }
   } finally {
     unregister();
+  }
+}
+
+/**
+ * A request that asks to switch protocols goes through the same fetch handler
+ * as any other. Only an answer carrying an accepted WebSocket upgrade switches
+ * the socket; every other answer is written as plain HTTP and the socket is
+ * closed after it, so a route that does not accept upgrades refuses them by
+ * answering as it always does.
+ */
+async function bridgeUpgrade(
+  incoming: IncomingMessage,
+  socket: Socket,
+  head: Buffer,
+  handler: NodeServeOptions["fetch"],
+  baseUrl: URL | undefined,
+  configuredHostname: string,
+  listenerTrust: "loopback" | "remote",
+): Promise<void> {
+  socket.on("error", () => undefined);
+  if (baseUrl === undefined) throw new Error("Octant Node server is not ready.");
+  let requestUrl: string;
+  try {
+    requestUrl = resolveRequestUrl(incoming, baseUrl, configuredHostname);
+  } catch (error) {
+    if (!(error instanceof InvalidRequestHost)) throw error;
+    await writeRawResponse(socket, new Response("Invalid Host header", { status: 400 }), "GET");
+    return;
+  }
+  const method = incoming.method ?? "GET";
+  if (safeMethodDeclaresBody(incoming)) {
+    await writeRawResponse(socket, new Response("Request body too large", { status: 413 }), method);
+    return;
+  }
+  if (method !== "GET") {
+    await writeRawResponse(socket, new Response("Upgrade needs a GET", { status: 400 }), method);
+    return;
+  }
+  // The handshake has no body, and a client sends nothing more before the
+  // answer, so the socket is not read until the upgrade is decided. A
+  // connection that fails meanwhile aborts the request.
+  socket.pause();
+  const abortController = new AbortController();
+  const onClose = () => abortController.abort();
+  socket.once("close", onClose);
+  let response: Response;
+  try {
+    response = await handler(
+      new Request(requestUrl, {
+        method,
+        headers: requestHeaders(incoming),
+        signal: abortController.signal,
+      }),
+      deriveTransportFactsFromPeer({ peerAddress: socket.remoteAddress, listenerTrust }),
+    );
+  } finally {
+    socket.off("close", onClose);
+  }
+  const acceptance = takeWebSocketUpgrade(response);
+  if (acceptance === undefined) {
+    await writeRawResponse(socket, response, method);
+    return;
+  }
+  const key = incoming.headers["sec-websocket-key"];
+  if (
+    socket.destroyed ||
+    !isWebSocketKey(key) ||
+    incoming.headers["sec-websocket-version"] !== "13"
+  ) {
+    acceptance.cancel();
+    await writeRawResponse(
+      socket,
+      new Response("Bad WebSocket handshake", { status: 400 }),
+      method,
+    );
+    return;
+  }
+  const lines = [
+    "HTTP/1.1 101 Switching Protocols",
+    "Upgrade: websocket",
+    "Connection: Upgrade",
+    `Sec-WebSocket-Accept: ${webSocketAcceptFor(key)}`,
+    ...(acceptance.protocol === undefined
+      ? []
+      : [`Sec-WebSocket-Protocol: ${acceptance.protocol}`]),
+  ];
+  socket.write(`${lines.join("\r\n")}\r\n\r\n`);
+  const client = new WebSocketEndpoint(socket, "server", WEBSOCKET_RELAY_MAX_MESSAGE_BYTES);
+  client.start(acceptance.open(client), head);
+}
+
+/**
+ * Write a fetch answer as HTTP/1.1 on a socket that will not be reused: the
+ * body streams until it ends, and the end of the connection ends it.
+ */
+async function writeRawResponse(socket: Socket, response: Response, method: string): Promise<void> {
+  if (socket.destroyed) {
+    await response.body?.cancel().catch(() => undefined);
+    return;
+  }
+  const lines = [`HTTP/1.1 ${response.status} ${STATUS_CODES[response.status] ?? ""}`];
+  response.headers.forEach((value, name) => {
+    if (name === "content-length" || name === "transfer-encoding" || name === "connection") return;
+    lines.push(`${name}: ${value}`);
+  });
+  lines.push("connection: close");
+  socket.write(`${lines.join("\r\n")}\r\n\r\n`);
+  if (method === "HEAD" || response.body === null) {
+    await response.body?.cancel().catch(() => undefined);
+    socket.end();
+    return;
+  }
+  const reader = response.body.getReader();
+  const onClose = () => void reader.cancel().catch(() => undefined);
+  socket.once("close", onClose);
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done || socket.destroyed) break;
+      if (!socket.write(next.value)) {
+        await new Promise<void>((resolve) => {
+          socket.once("drain", resolve);
+          socket.once("close", resolve);
+        });
+      }
+    }
+  } catch {
+    // The answer failed midway; the connection ends with what was written.
+  } finally {
+    socket.off("close", onClose);
+    socket.end();
   }
 }
 
