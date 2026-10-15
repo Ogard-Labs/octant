@@ -266,7 +266,7 @@ and the plan shrinks accordingly.
    tests on both platforms and the device pass from the
    [TestFlight runbook](../mobile-testflight.md) against a self-made host,
    including a refused mismatch.
-6. _One-line start._ `--pair`. Tests: Tailscale is chosen over LAN,
+6. _One-line start._ **Built**; its rules are in Architecture. `--pair`. Tests: Tailscale is chosen over LAN,
    several candidates refuse and list them, a public address is never
    chosen, and approval needs a typed `y`. Live: pair a second machine over
    Tailscale with only the command and the host approval.
