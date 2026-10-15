@@ -55,7 +55,7 @@ const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
  */
 const MAX_STREAM_SCAN_EVENTS = 100_000;
 /**
- * How many decoded frames, across threads, the store keeps between history
+ * How many decoded frames, across threads, the stores on one journal keep between history
  * reads. The board, the sidebar's pull-request join, and child observations
  * each read whole thread histories every few seconds while a window is open,
  * and decoding a 2,000-turn thread's 28,000 frames again for every read held
@@ -184,17 +184,37 @@ interface RememberedHistory {
   readonly frames: ReadonlyArray<typeof CodeOperationEventFrame.Type>;
 }
 
+/**
+ * The remembered histories of one journal, shared by every store built on it:
+ * the host builds one store for the board and another inside the Code runtime,
+ * and each keeping its own copy would double the frame bound. Least recently
+ * read first.
+ */
+interface RememberedHistories {
+  readonly byThread: Map<string, RememberedHistory>;
+  frames: number;
+}
+const rememberedHistoriesByJournal = new WeakMap<JournalPort, RememberedHistories>();
+
+function rememberedHistoriesFor(journal: JournalPort): RememberedHistories {
+  let remembered = rememberedHistoriesByJournal.get(journal);
+  if (remembered === undefined) {
+    remembered = { byThread: new Map(), frames: 0 };
+    rememberedHistoriesByJournal.set(journal, remembered);
+  }
+  return remembered;
+}
+
 export class CodeOperationEventStore {
   readonly #journal: JournalPort;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #actor: typeof EventActor.Type;
-  /** Least recently read first. */
-  readonly #histories = new Map<string, RememberedHistory>();
-  #rememberedFrames = 0;
+  readonly #histories: RememberedHistories;
 
   constructor(options: CodeOperationEventStoreOptions) {
     this.#journal = options.journal;
+    this.#histories = rememberedHistoriesFor(options.journal);
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     try {
@@ -603,7 +623,7 @@ export class CodeOperationEventStore {
       this.#forget(key);
       return { status: "rebuild-required" };
     }
-    const remembered = this.#histories.get(key);
+    const remembered = this.#histories.byThread.get(key);
     if (
       remembered !== undefined &&
       remembered.lastSequence === head.lastSequence &&
@@ -676,20 +696,21 @@ export class CodeOperationEventStore {
 
   #remember(key: string, history: RememberedHistory): void {
     this.#forget(key);
-    this.#histories.set(key, history);
-    this.#rememberedFrames += history.frames.length;
-    for (const [oldestKey, oldest] of this.#histories) {
-      if (this.#rememberedFrames <= MAX_REMEMBERED_HISTORY_FRAMES || oldestKey === key) break;
-      this.#histories.delete(oldestKey);
-      this.#rememberedFrames -= oldest.frames.length;
+    const histories = this.#histories;
+    histories.byThread.set(key, history);
+    histories.frames += history.frames.length;
+    for (const [oldestKey, oldest] of histories.byThread) {
+      if (histories.frames <= MAX_REMEMBERED_HISTORY_FRAMES || oldestKey === key) break;
+      histories.byThread.delete(oldestKey);
+      histories.frames -= oldest.frames.length;
     }
   }
 
   #forget(key: string): void {
-    const remembered = this.#histories.get(key);
+    const remembered = this.#histories.byThread.get(key);
     if (remembered === undefined) return;
-    this.#histories.delete(key);
-    this.#rememberedFrames -= remembered.frames.length;
+    this.#histories.byThread.delete(key);
+    this.#histories.frames -= remembered.frames.length;
   }
 
   conversation(input: ReadCodeConversationInput): CodeConversationPage {

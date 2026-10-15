@@ -202,6 +202,21 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 
+  it("keeps one remembered history per journal, however many stores read it", () => {
+    const fixture = openJournal();
+    const board = createStore(fixture.journal);
+    const runtime = createStore(fixture.journal);
+    board.append({ threadId, operationId, expectedCursor: 0, event: stateEvent("running") });
+    expect(board.historyForThread(threadId)).toMatchObject({ status: "ok", frames: [{}] });
+    const replay = vi.spyOn(fixture.journal, "replayAggregateTypeForThread");
+
+    // The host's board and its Code runtime each build a store on the same
+    // journal; a second copy of a thread's history would double the bound.
+    expect(runtime.historyForThread(threadId)).toMatchObject({ status: "ok", frames: [{}] });
+    expect(replay).not.toHaveBeenCalled();
+    fixture.connection.close();
+  });
+
   it("stops answering with a thread's history once its rows are purged from the journal", () => {
     const fixture = openJournal();
     const store = createStore(fixture.journal);
