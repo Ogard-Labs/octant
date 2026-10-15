@@ -1454,6 +1454,9 @@ function pairedComputerSession(): Electron.Session {
   return pairedSession;
 }
 
+/** Open paired-computer windows, held until each closes so none is collected mid-pairing. */
+const pairedComputerWindows = new Set<BrowserWindow>();
+
 /**
  * A window on another computer's own Octant page. It gets no preload and no
  * desktop bridge, stays on that one origin, and opens no other window.
@@ -1485,6 +1488,8 @@ function openPairedComputerWindow(input: { readonly origin: string; readonly url
     if (!staysOnOrigin(event.url)) event.preventDefault();
   });
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  pairedComputerWindows.add(window);
+  window.once("closed", () => pairedComputerWindows.delete(window));
   void window.loadURL(input.url);
 }
 
