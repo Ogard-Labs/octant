@@ -90,6 +90,15 @@ export class PairedComputerPins {
     this.#records = next;
   }
 
+  /** Drops an origin's pin. Returns whether there was one. */
+  forget(origin: string): boolean {
+    const next = this.#records.filter((record) => record.origin !== origin);
+    if (next.length === this.#records.length) return false;
+    writePinRecords(this.#path, next);
+    this.#records = next;
+    return true;
+  }
+
   /**
    * Judges a certificate the paired computers' session was served. Chromium
    * names only the host, not the port, so a name is held to every pin
@@ -127,6 +136,66 @@ export class PairedComputerPins {
 export interface PairedComputerWindows {
   /** Opens a window on `url`, held to `origin`, in the paired computers' session. */
   readonly open: (input: { readonly origin: string; readonly url: string }) => void;
+  /** Closes every open window held to `origin`, without waiting on the page. */
+  readonly closeAll: (origin: string) => void;
+}
+
+/** The part of an Electron session that holds what a page left behind. */
+export interface PageStoragePort {
+  readonly clearStorageData: (options: { readonly origin: string }) => Promise<void>;
+  readonly clearCache: () => Promise<void>;
+  readonly clearAuthCache: () => Promise<void>;
+}
+
+/**
+ * Clears everything a remote page left in a session for one origin: cookies,
+ * local and session storage, IndexedDB, service workers, and the HTTP and
+ * authentication caches. Every unpair path (forgetting a paired computer, and
+ * dropping a remote dev server's page) calls this one helper, so none of them
+ * leaves a page's data behind. The caches are session-wide, which is safe
+ * because these sessions open nothing but remote computers.
+ */
+export async function clearRemotePageStorage(
+  storage: PageStoragePort,
+  origin: string,
+): Promise<void> {
+  await storage.clearStorageData({ origin });
+  await storage.clearCache();
+  await storage.clearAuthCache();
+}
+
+export type ForgetOutcome =
+  | { readonly status: "forgotten" }
+  | { readonly status: "refused"; readonly message: string };
+
+/**
+ * Forgets a paired computer. Its windows close first so no page outlives its
+ * trust, then the pin goes, so that computer's key is trusted by nothing, and
+ * last its page storage and session are cleared. This only ends this app's
+ * side: the other computer keeps listing this device until it is revoked there.
+ */
+export async function forgetPairedComputer(input: {
+  readonly origin: unknown;
+  readonly pins: PairedComputerPins;
+  readonly windows: PairedComputerWindows;
+  readonly storage: PageStoragePort;
+}): Promise<ForgetOutcome> {
+  const origin = typeof input.origin === "string" ? input.origin : "";
+  if (input.pins.pinFor(origin) === undefined) {
+    return { status: "refused", message: "Octant isn't paired with that computer." };
+  }
+  input.windows.closeAll(origin);
+  input.pins.forget(origin);
+  try {
+    await clearRemotePageStorage(input.storage, origin);
+  } catch {
+    return {
+      status: "refused",
+      message:
+        "Octant forgot that computer, but couldn't clear everything its page stored. Quit and reopen Octant, then pair again if you want it back.",
+    };
+  }
+  return { status: "forgotten" };
 }
 
 /**
@@ -260,11 +329,12 @@ export const PAIRED_COMPUTER_CHANNELS = {
   pair: "octant:paired-computers:pair",
   list: "octant:paired-computers:list",
   open: "octant:paired-computers:open",
+  forget: "octant:paired-computers:forget",
 } as const;
 
 /**
  * The paired-computer actions a trusted local window may ask for: pair from a
- * pasted code, list paired computers, and open one. Each refusal is a value
+ * pasted code, list paired computers, open one, and forget one. Each refusal is a value
  * with one line of copy.
  */
 export function installPairedComputerIpcHandlers(options: {
@@ -275,6 +345,7 @@ export function installPairedComputerIpcHandlers(options: {
   readonly resolveOwnedWindow: (event: unknown) => void;
   readonly pins: () => PairedComputerPins;
   readonly windows: PairedComputerWindows;
+  readonly storage: PageStoragePort;
   readonly webBuildVersion: string;
 }): void {
   const authorize = (event: unknown): void => {
@@ -300,5 +371,14 @@ export function installPairedComputerIpcHandlers(options: {
   options.handle(PAIRED_COMPUTER_CHANNELS.open, async (event, origin) => {
     authorize(event);
     return await openPairedComputer({ origin, pins: options.pins(), windows: options.windows });
+  });
+  options.handle(PAIRED_COMPUTER_CHANNELS.forget, async (event, origin) => {
+    authorize(event);
+    return await forgetPairedComputer({
+      origin,
+      pins: options.pins(),
+      windows: options.windows,
+      storage: options.storage,
+    });
   });
 }

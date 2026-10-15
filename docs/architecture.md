@@ -6159,7 +6159,12 @@ mechanisms are:
       first resolves and judges its address and checks its key over the Node
       transport; Chromium then resolves the name itself, so the pin, not the
       address, is what that window relies on. Settings → Remote access lists
-      paired computers with an Open action.
+      paired computers with Open and Forget actions. Forget asks first, then
+      main closes that origin's windows, drops its pin (so nothing trusts that
+      key), and clears the origin's page storage and the session's HTTP and
+      authentication caches through one helper, `clearRemotePageStorage`, that
+      every unpair path calls. It ends only this app's side: the other
+      computer keeps listing the device until it is revoked there.
 - **Adding a computer in one step.** Partly built: the host certificate,
   pairing code, client trust rule, and desktop pinning above, and the
   one-line start. The phone's pinned transport and scanner, and key rotation,

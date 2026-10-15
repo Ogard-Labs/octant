@@ -326,6 +326,10 @@ export interface PairedComputer {
   readonly displayName: string;
 }
 
+export type ForgetPairedComputerOutcome =
+  | { readonly status: "forgotten" }
+  | { readonly status: "refused"; readonly message: string };
+
 export type PairedComputerOutcome =
   | { readonly status: "opened"; readonly computer: PairedComputer }
   | { readonly status: "refused"; readonly message: string };
@@ -339,6 +343,7 @@ export interface PairedComputersBridge {
   readonly pairWithPairingCode: (code: string) => Promise<PairedComputerOutcome>;
   readonly listPairedComputers: () => Promise<ReadonlyArray<PairedComputer>>;
   readonly openPairedComputer: (origin: string) => Promise<PairedComputerOutcome>;
+  readonly forgetPairedComputer: (origin: string) => Promise<ForgetPairedComputerOutcome>;
 }
 
 /** The paired-computers bridge when the desktop app exposes every part of it, else nothing. */
@@ -348,7 +353,8 @@ export function pairedComputersOf(
   if (
     bridge?.pairWithPairingCode === undefined ||
     bridge.listPairedComputers === undefined ||
-    bridge.openPairedComputer === undefined
+    bridge.openPairedComputer === undefined ||
+    bridge.forgetPairedComputer === undefined
   ) {
     return undefined;
   }
@@ -356,6 +362,7 @@ export function pairedComputersOf(
     pairWithPairingCode: bridge.pairWithPairingCode,
     listPairedComputers: bridge.listPairedComputers,
     openPairedComputer: bridge.openPairedComputer,
+    forgetPairedComputer: bridge.forgetPairedComputer,
   };
 }
 
