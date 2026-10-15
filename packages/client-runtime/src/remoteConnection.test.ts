@@ -26,10 +26,16 @@ import {
   type DeviceKeyStore,
   type RemoteConnectionState,
 } from "./remoteConnection";
+import {
+  createTestHostKey,
+  HOST_KEY,
+  signTestHostHello,
+  type TestHostKey,
+} from "./remoteConnectionFixtures";
 
 const ORIGIN = "https://mac.example.test";
 const HOST_ID = "11111111-1111-4111-8111-111111111111";
-const HOST_KEY_FINGERPRINT = "a".repeat(64);
+const HOST_KEY_FINGERPRINT = HOST_KEY.fingerprint;
 const DEVICE_LABEL = "Ada's Safari";
 const TICKET_ID = "44444444-4444-4444-8444-444444444444";
 const TICKET_PROOF = "ticket_proof_1234567890";
@@ -113,7 +119,10 @@ function createTestDeviceKeyStore(): {
 interface FakeServerConfig {
   readonly origin?: string;
   readonly hostId?: string;
-  readonly hostKeyFingerprint?: string;
+  /** The host identity key this host signs its hello with. */
+  readonly hostKey?: TestHostKey;
+  /** Rewrites the signed hello, as something between client and host could. */
+  readonly tamperHello?: (hello: Record<string, unknown>) => Record<string, unknown>;
   readonly approve?: boolean;
   /** Override the remoteOrigin advertised in host hello (to simulate mismatch). */
   readonly advertisedRemoteOrigin?: string;
@@ -136,7 +145,7 @@ interface FakeServer {
 function createFakeServer(config: FakeServerConfig): FakeServer {
   const origin = config.origin ?? ORIGIN;
   const hostId = config.hostId ?? HOST_ID;
-  const hostKeyFingerprint = config.hostKeyFingerprint ?? HOST_KEY_FINGERPRINT;
+  const hostKey = config.hostKey ?? HOST_KEY;
   const approve = config.approve ?? true;
   const now = () => Date.now();
   const nonces = new Map<string, number>(); // digest -> expiresAt
@@ -170,11 +179,10 @@ function createFakeServer(config: FakeServerConfig): FakeServer {
     const nonce = randomBytes(32).toString("base64url");
     nonces.set(sha256(nonce), now() + 60_000);
     const range = config.incompatibleProtocol ? { min: 9, max: 9 } : { min: 1, max: 1 };
-    return {
+    const signed = signTestHostHello(hostKey, {
       productId: "octant",
       hostId,
       displayName: "This Mac",
-      hostKeyFingerprint,
       serverBuildVersion: SERVER_BUILD_VERSION,
       supportedProtocolRange: range,
       authenticationProtocolVersions: [REMOTE_AUTHENTICATION_PROTOCOL_VERSION],
@@ -182,8 +190,8 @@ function createFakeServer(config: FakeServerConfig): FakeServer {
       remoteOrigin: config.advertisedRemoteOrigin ?? origin,
       nonce,
       expiresAt: new Date(now() + 60_000).toISOString(),
-      signature: "host_sig",
-    };
+    });
+    return config.tamperHello === undefined ? signed : config.tamperHello(signed);
   };
 
   const consumeNonce = (nonce: string) => {
@@ -578,7 +586,7 @@ describe("RemoteConnection state machine", () => {
 
 describe("RemoteConnection host identity / origin fail-closed", () => {
   it("stops and requires re-pairing when the host key fingerprint changes", async () => {
-    const serverA = createFakeServer({ hostKeyFingerprint: "a".repeat(64) });
+    const serverA = createFakeServer({});
     const { store } = createTestDeviceKeyStore();
     const connection = createRemoteConnection({
       origin: ORIGIN,
@@ -591,7 +599,7 @@ describe("RemoteConnection host identity / origin fail-closed", () => {
     const originalDevice = connection.deviceIdentity()!;
 
     // The same endpoint now presents a different host key (clone/compromise).
-    const serverB = createFakeServer({ hostKeyFingerprint: "b".repeat(64) });
+    const serverB = createFakeServer({ hostKey: createTestHostKey() });
     connection.updateFetch(serverB.fetch);
     connection.disconnect();
 
@@ -601,7 +609,7 @@ describe("RemoteConnection host identity / origin fail-closed", () => {
     expect(connection.deviceIdentity()).toBeUndefined();
     expect(connection.session()).toBeUndefined();
     // The original device identity must not be reusable after a host-key mismatch.
-    expect(originalDevice.hostKeyFingerprint).toBe("a".repeat(64));
+    expect(originalDevice.hostKeyFingerprint).toBe(HOST_KEY_FINGERPRINT);
   });
 
   it("stops when the host id changes at the same endpoint", async () => {
@@ -639,6 +647,173 @@ describe("RemoteConnection host identity / origin fail-closed", () => {
     await expect(connection.connect()).rejects.toBeInstanceOf(RemoteConnectionError);
     expect(connection.state()).toBe("incompatible");
     expect(connection.deviceIdentity()).toBeUndefined();
+  });
+
+  it("refuses to pair with a host whose hello signature does not verify", async () => {
+    const forger = createTestHostKey();
+    const server = createFakeServer({
+      tamperHello: (hello) => ({ ...hello, signature: forger.sign("forged") }),
+    });
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+
+    await expect(connection.connect()).rejects.toThrow(
+      "This host could not prove its identity, so Octant did not connect.",
+    );
+    expect(server.fetch).not.toHaveBeenCalledWith(
+      "https://mac.example.test/api/remote/pairing",
+      expect.anything(),
+    );
+    expect(connection.deviceIdentity()).toBeUndefined();
+  });
+
+  it("refuses a paired host whose hello signature no longer verifies, keeping the pairing", async () => {
+    const server = createFakeServer({});
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+    await connection.connect();
+    const paired = connection.deviceIdentity();
+
+    // Something at the paired origin states the paired id, key, and
+    // fingerprint, but cannot sign as that key.
+    const forger = createTestHostKey();
+    const impostor = createFakeServer({
+      tamperHello: (hello) => ({ ...hello, signature: forger.sign("forged") }),
+    });
+    connection.updateFetch(impostor.fetch);
+    connection.disconnect();
+
+    await expect(connection.reconnect()).rejects.toThrow(
+      "This host could not prove its identity, so Octant did not connect.",
+    );
+    expect(connection.state()).toBe("unavailable");
+    expect(impostor.fetch).not.toHaveBeenCalledWith(
+      "https://mac.example.test/api/remote/auth/challenge",
+      expect.anything(),
+    );
+    expect(connection.deviceIdentity()).toEqual(paired);
+  });
+
+  it("refuses a genuine hello from another host replayed at the paired origin", async () => {
+    const server = createFakeServer({});
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+    await connection.connect();
+
+    // Another host's hello, signed by its own key, claiming the paired host's
+    // id and fingerprint.
+    const other = createFakeServer({
+      hostKey: createTestHostKey(),
+      tamperHello: (hello) => ({ ...hello, hostKeyFingerprint: HOST_KEY_FINGERPRINT }),
+    });
+    connection.updateFetch(other.fetch);
+    connection.disconnect();
+
+    await expect(connection.reconnect()).rejects.toBeInstanceOf(RemoteConnectionError);
+    expect(connection.state()).toBe("unavailable");
+    expect(other.fetch).not.toHaveBeenCalledWith(
+      "https://mac.example.test/api/remote/auth/challenge",
+      expect.anything(),
+    );
+  });
+
+  it("refuses a hello whose own expiry has passed, keeping the pairing", async () => {
+    const server = createFakeServer({});
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      knownDevice: {
+        hostId: HOST_ID,
+        deviceId: "22222222-2222-4222-8222-222222222222",
+        credentialGeneration: 1,
+        hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+      },
+      // The host signs hellos valid for one minute; ten minutes later even
+      // the allowed clock skew has run out, as for a captured hello replayed.
+      now: () => Date.now() + 10 * 60_000,
+    });
+
+    await expect(connection.connect()).rejects.toThrow(
+      "This host's hello had already expired, so Octant did not connect. Check this device's clock, then connect again.",
+    );
+    expect(connection.state()).toBe("unavailable");
+    expect(server.fetch).not.toHaveBeenCalledWith(
+      "https://mac.example.test/api/remote/auth/challenge",
+      expect.anything(),
+    );
+    expect(connection.deviceIdentity()).toBeDefined();
+  });
+
+  it("accepts a hello just past its expiry within the allowed clock skew", async () => {
+    const server = createFakeServer({});
+    const { store } = createTestDeviceKeyStore();
+    const pairing = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+    await pairing.connect();
+    const identity = pairing.deviceIdentity();
+    if (identity === undefined) throw new Error("pairing produced no identity");
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      knownDevice: identity,
+      now: () => Date.now() + 90_000,
+    });
+
+    await connection.connect();
+    expect(connection.state()).toBe("ready");
+  });
+
+  it("asks to update a host that sends no public key in its hello", async () => {
+    const server = createFakeServer({
+      tamperHello: ({ hostPublicKey: _omitted, ...hello }) => hello,
+    });
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      knownDevice: {
+        hostId: HOST_ID,
+        deviceId: "22222222-2222-4222-8222-222222222222",
+        credentialGeneration: 1,
+        hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+      },
+    });
+
+    await expect(connection.connect()).rejects.toThrow(
+      "This host runs an older Octant that cannot prove its identity. Update Octant on the host, then connect again.",
+    );
+    expect(connection.state()).toBe("incompatible");
+    expect(connection.deviceIdentity()).toBeDefined();
   });
 
   it("refuses to reconnect when the device key has been cleared (lost credential)", async () => {

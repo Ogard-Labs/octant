@@ -5698,6 +5698,48 @@ mechanisms are:
   and keys can still follow a link or submit a form within the context's
   approved origins; the host's navigation guards refuse any page outside them,
   so a paired client cannot take the host browser to a new origin.
+  - **Host identity on every connection.** The host hello carries the host
+    identity public key (DER SubjectPublicKeyInfo, base64url), its fingerprint
+    (SHA-256 of those bytes, lowercase hex), an expiry, and a signature over
+    the hello. Every client (phone, desktop window reaching another host, and
+    the paired browser page) checks that the key hashes to the stated
+    fingerprint, that the signature verifies, and that the hello has not
+    expired (allowing two minutes of clock skew) before it sends a pairing
+    claim or a challenge request. At pairing it records the proven
+    fingerprint with the device registration; on every later hello it also
+    requires the proven host id and fingerprint to equal that record.
+    Outcomes:
+    - A hello that states the paired fingerprint without proving the key, or
+      relabels another host's signed hello, is refused with "This host could
+      not prove its identity". An expired hello is refused the same way.
+    - A proven hello from a different host id or key is "host identity
+      changed".
+    - A hello with no key comes from a host built before this check. The
+      client refuses it as incompatible and asks to update the host.
+    - No refusal deletes the device key, and neither does a 401 naming the
+      device revoked or expired: those answers arrive before the client has
+      authenticated the live peer. The key goes only when the person pairs
+      again (the new approval replaces the origin's other registrations),
+      signs out, or removes the host from the desktop's federated hosts.
+
+    What this does not stop: the client authenticates only the hello, never
+    the live peer behind it, and does not check the negotiation record's
+    `hostSignature`. A genuine hello from the paired host can be replayed
+    until it expires, a relay that terminates TLS for the listener's name can
+    pass genuine hellos through, and anything that answers at the address can
+    still refuse service, for example by signing a hello with its own key or
+    answering 401. First contact is trust on first use over TLS.
+
+    Records written before hellos were checked need no migration: the host has
+    always stated the SHA-256 of the key's SubjectPublicKeyInfo, so those
+    fingerprints already pin the key. Clients that decode the host hello
+    strictly (built before host answers ignored unknown fields) refuse a hello
+    carrying the key, so a host with this check ships only after paired
+    clients run a release that ignores unknown hello fields. The listener's
+    `certificateFingerprint` is likewise the SHA-256 of the leaf
+    certificate's SubjectPublicKeyInfo, not of its PEM text. It is shown in
+    Settings and by `octant listener` for the person to compare, and no
+    client pins it.
 - **Listener certificate.** The listener serves a certificate and key the
   person pastes exactly as given, or, when enabled with neither (the
   administration route without PEMs, or `octant listener enable` without
@@ -5750,8 +5792,9 @@ mechanisms are:
   - **Pin and status.** The listener status carries `certificateSource`
     (`self-made` or `pasted`) and, for a self-made certificate, `tlsPin`:
     `sha256-` followed by the unpadded base64url SHA-256 of the certificate's
-    DER SubjectPublicKeyInfo. The existing `certificateFingerprint` hashes the
-    PEM text and is not a pin. Only the loopback administration status
+    DER SubjectPublicKeyInfo. The existing `certificateFingerprint` is the
+    lowercase hex of the same hash, shown for comparison, and no client reads
+    it as a pin. Only the loopback administration status
     carries the pin; `octant listener status` prints it.
   - **No app pins yet.** A self-made listener is served, and the client
     runtime holds the trust rule below, but neither the desktop app nor the

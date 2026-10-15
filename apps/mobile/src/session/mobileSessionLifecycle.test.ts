@@ -68,6 +68,7 @@ describe("live mobile session lifecycle", () => {
       deviceKeyId: "key",
       credentialGeneration: 1,
       origin: registration.origin,
+      hostKeyFingerprint: registration.hostKeyFingerprint,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     };
     let saved = () => {};

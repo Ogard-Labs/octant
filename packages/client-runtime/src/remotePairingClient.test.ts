@@ -6,7 +6,8 @@ import {
   parseTypedPairingCode,
   RemotePairingFailure,
 } from "./remotePairingClient";
-import { decodeStableHostId } from "@octant/contracts/remote-access";
+import { decodeHostHelloV1, decodeStableHostId } from "@octant/contracts/remote-access";
+import { createTestHostKey, HOST_KEY, signTestHostHello } from "./remoteConnectionFixtures";
 import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const hostId = "11111111-1111-4111-8111-111111111111";
@@ -14,11 +15,10 @@ const ticketId = "00000000-0000-4000-8000-000000000001";
 const ticketProof = "proof1234567890abcdefghijklmnopqrstuvwxyz";
 const serverBaseUrl = "https://mac.example.test";
 
-const hostHello = {
-  productId: "octant" as const,
+const hostHello = signTestHostHello(HOST_KEY, {
+  productId: "octant",
   hostId,
   displayName: "This Mac",
-  hostKeyFingerprint: "a".repeat(64),
   serverBuildVersion: "0.1.0",
   supportedProtocolRange: { min: 1, max: 1 },
   authenticationProtocolVersions: [1],
@@ -26,8 +26,7 @@ const hostHello = {
   remoteOrigin: serverBaseUrl,
   nonce: "nonce1234567890",
   expiresAt: new Date(Date.now() + 60_000).toISOString(),
-  signature: "sig_123",
-};
+});
 
 const pairingClaim = {
   kind: "pending" as const,
@@ -306,10 +305,11 @@ describe("RemotePairingClient", () => {
     if (status.kind !== "approved") throw new Error("unexpected status");
     expect(status.approval.deviceId).toBe("00000000-0000-4000-8000-000000000002");
     expect(status.approval.credentialGeneration).toBe(1);
+    expect(status.approval.hostKeyFingerprint).toBe(HOST_KEY.fingerprint);
     await expect(store.findByOrigin(serverBaseUrl)).resolves.toMatchObject({
       deviceId: "00000000-0000-4000-8000-000000000002",
       credentialGeneration: 1,
-      hostKeyFingerprint: "a".repeat(64),
+      hostKeyFingerprint: HOST_KEY.fingerprint,
     });
   });
 
@@ -447,6 +447,32 @@ describe("RemotePairingClient", () => {
     });
 
     await expect(client.requestHostHello()).rejects.toBeInstanceOf(RemotePairingFailure);
+  });
+
+  it("refuses to pair through a hello whose signature does not verify", async () => {
+    const forged = { ...hostHello, signature: createTestHostKey().sign("forged") };
+    const store = createInMemoryDeviceKeyStore();
+    const fetch = createMockFetch([() => Promise.resolve(Response.json(forged))]);
+    const client = createRemotePairingClient({
+      baseUrl: serverBaseUrl,
+      fetch,
+      webBuildVersion: "0.1.0",
+      deviceKeyStore: store,
+    });
+
+    await expect(client.requestHostHello()).rejects.toThrow(
+      "This host could not prove its identity, so Octant did not connect.",
+    );
+    await expect(
+      client.claimPairing({
+        ticket: { ticketId, ticketProof },
+        deviceLabel: "Ada's Safari",
+        hostHello: decodeHostHelloV1(forged),
+      }),
+    ).rejects.toBeInstanceOf(RemotePairingFailure);
+    // Only the hello was fetched: no claim was sent and no device key made.
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await expect(store.findByOrigin(serverBaseUrl)).resolves.toBeUndefined();
   });
 
   it("generates a non-extractable P-256 device key", async () => {

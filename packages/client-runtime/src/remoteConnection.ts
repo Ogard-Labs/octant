@@ -36,6 +36,7 @@ import {
   shouldRotateSession,
 } from "@octant/domain";
 import { bindFetchPort } from "./bindFetchPort";
+import { verifyHostHello, type PinnedHostIdentity } from "./hostHelloVerification";
 
 const SESSION_COOKIE_NAME = "__Secure-octant-remote-session";
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
@@ -260,7 +261,10 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
     return decodeHostAnswer(HostHelloV1)(await response.json());
   };
 
-  const verifyHelloIdentity = (hello: HostHelloV1, known: DeviceIdentity | undefined): void => {
+  const verifyHelloIdentity = async (
+    hello: HostHelloV1,
+    known: DeviceIdentity | undefined,
+  ): Promise<void> => {
     if (hello.remoteOrigin !== config.origin) {
       throw new RemoteConnectionError(
         "incompatible",
@@ -274,14 +278,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
     if (negotiation.kind === "rejected") {
       throw new RemoteConnectionError("incompatible", "Remote protocol versions are incompatible.");
     }
-    if (known !== undefined) {
-      if (hello.hostId !== known.hostId || hello.hostKeyFingerprint !== known.hostKeyFingerprint) {
-        throw new RemoteConnectionError(
-          "host-changed",
-          "Host identity or key fingerprint changed at the same endpoint.",
-        );
-      }
-    }
+    await requireProvenHostHello(hello, known, now());
   };
 
   const requestChallenge = async (known: DeviceIdentity): Promise<RemoteAuthChallengeV1> => {
@@ -377,10 +374,10 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
    */
   const authenticate = async (known: DeviceIdentity): Promise<RemoteSessionFacts> => {
     const hello = await fetchHello();
-    verifyHelloIdentity(hello, known);
+    await verifyHelloIdentity(hello, known);
     const challenge = await requestChallenge(known);
     const helloForNegotiate = await fetchHello();
-    verifyHelloIdentity(helloForNegotiate, known);
+    await verifyHelloIdentity(helloForNegotiate, known);
     const negotiated = await negotiate(known, challenge, helloForNegotiate.nonce);
     setState("authenticating");
     return issueSession(known, challenge, negotiated);
@@ -391,7 +388,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
       throw new RemoteConnectionError("invalid", "No pairing ticket or known device was supplied.");
     }
     const hello = await fetchHello();
-    verifyHelloIdentity(hello, undefined);
+    await verifyHelloIdentity(hello, undefined);
     const deviceKey = await config.deviceKey.loadOrCreate();
     setState("negotiating");
     const claimBody = {
@@ -654,6 +651,30 @@ function sessionNeedsRenewal(session: RemoteSessionFacts, nowMs: number): boolea
   if (Number.isFinite(idleExpiresAt) && idleExpiresAt <= nowMs) return true;
   if (Number.isFinite(absoluteExpiresAt) && absoluteExpiresAt <= nowMs) return true;
   return shouldRotateSession(session.issuedAt, nowMs);
+}
+
+/**
+ * Refuses a host hello that does not prove the host identity key, or (with a
+ * pin) proves a different one than the device recorded at pairing.
+ */
+export async function requireProvenHostHello(
+  hello: HostHelloV1,
+  pinned: PinnedHostIdentity | undefined,
+  now: number,
+): Promise<void> {
+  const verification = await verifyHostHello(hello, { pinned, now });
+  if (verification.status === "verified") return;
+  switch (verification.reason) {
+    case "host-changed":
+      throw new RemoteConnectionError("host-changed", verification.message);
+    case "host-outdated":
+      throw new RemoteConnectionError("incompatible", verification.message);
+    case "unproven":
+    case "expired":
+      // Whatever answered did not prove it is the paired host now. Refuse and
+      // keep the device key so a later connection can reach the real host.
+      throw new RemoteConnectionError("unavailable", verification.message);
+  }
 }
 
 class RemoteProtocolStatusError extends Error {

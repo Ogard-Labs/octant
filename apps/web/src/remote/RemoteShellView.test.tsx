@@ -13,6 +13,7 @@ import {
   createFakeRemoteServer,
   fingerprintFromPem,
   HOST_ID,
+  HOST_KEY_FINGERPRINT,
   ORIGIN,
   TICKET_ID,
 } from "../../../../packages/client-runtime/src/remoteConnectionFixtures";
@@ -304,6 +305,7 @@ async function readyBridge(seen: ProductRequest[] = []) {
     credentialGeneration: 1,
     deviceKeyId,
     origin: ORIGIN,
+    hostKeyFingerprint: HOST_KEY_FINGERPRINT,
     listenerTrust: PLATFORM_LISTENER_TRUST,
   });
   await waitUntil(() => bridge.getState().kind === "ready");

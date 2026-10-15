@@ -5,8 +5,16 @@ import {
   decodeGlobalEntityReference,
   decodeHostId,
 } from "@octant/contracts/host";
+import { decodeStableHostId } from "@octant/contracts/remote-access";
 import type { RemoteSessionBridge, RemoteSessionBridgeState } from "./remoteSessionBridge";
-import type { RemoteDeviceKeyStore } from "./remotePairingClient";
+import { createInMemoryDeviceKeyStore, type RemoteDeviceKeyStore } from "./remotePairingClient";
+import {
+  createFakeRemoteServer,
+  createTestHostKey,
+  fingerprintFromPem,
+  HOST_KEY_FINGERPRINT,
+  ORIGIN,
+} from "./remoteConnectionFixtures";
 import {
   createClientHostRegistry,
   createInMemoryClientHostRegistryStorage,
@@ -20,6 +28,7 @@ import {
   type FederatedHostTransportSlot,
   type HostFederationTransportFactory,
 } from "./hostFederationTransports";
+import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const HOST_A = "11111111-1111-4111-8111-111111111111";
 const HOST_B = "22222222-2222-4222-8222-222222222222";
@@ -461,6 +470,67 @@ describe("HostFederationTransports (Post-preview B2)", () => {
 
     expect(transports.list().map((slot) => slot.hostId)).toEqual([LOCAL_HOST_ID]);
     expect(bridges.get(HOST_A)?.disconnect).toHaveBeenCalled();
+  });
+
+  it("refuses a paired host whose hello does not verify, keeping the pairing", async () => {
+    // The desktop window reaches other hosts through these transports and the
+    // production session bridge, so this drives the real verification path.
+    const forger = createTestHostKey();
+    const server = createFakeRemoteServer({
+      hostId: HOST_A,
+      tamperHello: (hello) => ({ ...hello, signature: forger.sign("forged") }),
+    });
+    const deviceKeyStore = createInMemoryDeviceKeyStore();
+    const keyPair = (await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign", "verify"],
+    )) as CryptoKeyPair;
+    const spki = new Uint8Array(await crypto.subtle.exportKey("spki", keyPair.publicKey));
+    const pem = `-----BEGIN PUBLIC KEY-----\n${btoa(String.fromCharCode(...spki))}\n-----END PUBLIC KEY-----`;
+    const deviceId = "33333333-3333-4333-8333-333333333333";
+    server.registerDevice({ deviceId, publicKeyPem: pem, fingerprint: fingerprintFromPem(pem) });
+    const keyId = await deviceKeyStore.set(keyPair, {
+      origin: ORIGIN,
+      hostId: decodeStableHostId(HOST_A),
+      deviceId,
+    });
+    await deviceKeyStore.updateMetadata(keyId, {
+      deviceId,
+      credentialGeneration: 1,
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
+    });
+    const registry = createClientHostRegistry(createInMemoryClientHostRegistryStorage());
+    await registry.upsertRemote(
+      remoteHost({
+        hostId: decodeHostId(HOST_A),
+        displayName: "Studio",
+        origin: ORIGIN,
+        credential: {
+          keyId,
+          credentialGeneration: 1,
+          hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+          deviceId,
+        },
+      }),
+    );
+    const transports = createHostFederationTransports({
+      registry,
+      deviceKeyStore,
+      fetch: server.fetch,
+    });
+
+    await transports.syncEnabledHosts();
+    await vi.waitFor(() => expect(transports.get(HOST_A)?.state.kind).toBe("unavailable"));
+
+    expect(transports.get(HOST_A)?.state).toMatchObject({
+      kind: "unavailable",
+      reason: "This host could not prove its identity, so Octant did not connect.",
+    });
+    expect(transports.remoteTransportFor(HOST_A)).toBeUndefined();
+    await expect(deviceKeyStore.get(keyId)).resolves.toBeDefined();
+    transports.disconnectAll();
   });
 
   it("globalEntityReference rejects empty entity ids via contracts", () => {

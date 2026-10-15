@@ -5,6 +5,7 @@ import {
 } from "@octant/contracts/remote-access";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
+import { verifyHostHello } from "./hostHelloVerification";
 import {
   decodeListenerOriginTrust,
   PLATFORM_LISTENER_TRUST,
@@ -117,6 +118,8 @@ export interface RemotePairingApproval {
   readonly credentialGeneration: number;
   readonly deviceKeyId: string;
   readonly origin: string;
+  /** The host identity key fingerprint proven by the hello this device paired through. */
+  readonly hostKeyFingerprint: string;
   readonly listenerTrust: ListenerOriginTrust;
 }
 
@@ -220,6 +223,7 @@ export function createRemotePairingClient(
     if (new Date(hello.expiresAt).getTime() <= now()) {
       throw new RemotePairingFailure("unavailable", "Host hello has expired.");
     }
+    await requireSelfProvenHello(hello, now());
     return hello;
   };
 
@@ -234,6 +238,9 @@ export function createRemotePairingClient(
     if (new Date(input.hostHello.expiresAt).getTime() <= now()) {
       throw new RemotePairingFailure("unavailable", "Host hello has expired.");
     }
+    // The fingerprint this hello proves becomes the pin every later
+    // connection is checked against.
+    await requireSelfProvenHello(input.hostHello, now());
     const trimmedLabel = input.deviceLabel.trim();
     if (trimmedLabel.length === 0) {
       throw new RemotePairingFailure("invalid", "Device label is required.");
@@ -406,6 +413,7 @@ export function createRemotePairingClient(
           credentialGeneration: result.credentialGeneration,
           deviceKeyId: input.claim.deviceKeyId,
           origin,
+          hostKeyFingerprint: input.claim.hostKeyFingerprint,
           listenerTrust,
         },
       };
@@ -424,6 +432,17 @@ export function createRemotePairingClient(
   };
 
   return { requestHostHello, claimPairing, pollPairingStatus, removeDeviceKey };
+}
+
+/**
+ * First contact: nothing is pinned yet, so the hello must at least prove the
+ * key it names. A refused hello stops pairing before a device key is made.
+ */
+async function requireSelfProvenHello(hello: HostHelloV1, now: number): Promise<void> {
+  const verification = await verifyHostHello(hello, { now });
+  if (verification.status === "refused") {
+    throw new RemotePairingFailure("invalid", verification.message);
+  }
 }
 
 export function readPairingFragment(href: string): RemotePairingTicket | undefined {

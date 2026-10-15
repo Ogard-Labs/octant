@@ -1,4 +1,4 @@
-import { createPublicKey, verify as cryptoVerify } from "node:crypto";
+import { createHash, createPublicKey, verify as cryptoVerify } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -73,6 +73,22 @@ describe("private listener host identity", () => {
         Buffer.from(signature, "base64url"),
       ),
     ).toBe(true);
+  });
+
+  it("publishes the persisted public key that its fingerprint hashes", () => {
+    const directory = makeDirectory();
+    const identity = resolvePrivateListenerHostIdentity({
+      connection: freshConnection(directory),
+      dataDirectory: directory,
+    });
+
+    const keyPem = readFileSync(join(directory, "remote", "private-listener-host-key.pem"), "utf8");
+    const spki = createPublicKey(keyPem).export({ format: "der", type: "spki" });
+    expect(identity.signing.hostPublicKey).toBe(spki.toString("base64url"));
+    expect(identity.signing.hostKeyFingerprint).toBe(
+      createHash("sha256").update(spki).digest("hex"),
+    );
+    expect(identity.signing.hostPublicKey).not.toContain("PRIVATE");
   });
 
   it("reuses the persisted host id and key across resolutions", () => {

@@ -11,6 +11,7 @@ import { createPairingDeviceKeyAdapter } from "./pairingDeviceKeyAdapter";
 import type { ListenerOriginTrust } from "./remoteListenerTrust";
 import {
   createRemoteConnection,
+  requireProvenHostHello,
   RemoteConnectionError,
   type RemoteConnection,
   type RemoteConnectionState,
@@ -177,6 +178,11 @@ export function createRemoteSessionBridge(
     }
   };
 
+  // A failure never deletes the device key. A hello signed by another key, or
+  // a 401 naming the device revoked or expired, arrives before the client has
+  // authenticated whoever answered, so anything at the host's address could
+  // send it. The key goes only when the person signs out, removes the host, or
+  // pairs again (a new approval replaces the origin's other registrations).
   const failFromError = (
     error: unknown,
     facts?: { hostId: string; displayName: string },
@@ -210,10 +216,7 @@ export function createRemoteSessionBridge(
     return { kind: "unavailable", reason: "Remote host is unavailable.", ...partial };
   };
 
-  const establishConnection = async (
-    approval: RemotePairingApproval,
-    expectedIdentity?: { readonly hostId: string; readonly hostKeyFingerprint: string },
-  ): Promise<void> => {
+  const establishConnection = async (approval: RemotePairingApproval): Promise<void> => {
     const helloResponse = await fetch(new URL("/api/remote/hello", approval.origin).toString(), {
       method: "GET",
     });
@@ -221,16 +224,14 @@ export function createRemoteSessionBridge(
       throw new RemoteConnectionError("unavailable", "Remote host hello failed.");
     }
     const hello = decodeHostAnswer(HostHelloV1)(await helloResponse.json());
-    if (
-      expectedIdentity !== undefined &&
-      (hello.hostId !== expectedIdentity.hostId ||
-        hello.hostKeyFingerprint !== expectedIdentity.hostKeyFingerprint)
-    ) {
-      throw new RemoteConnectionError(
-        "host-changed",
-        "Host identity or key fingerprint changed at the same endpoint.",
-      );
-    }
+    // The display name shown while connecting comes from this hello, so it is
+    // checked against the key recorded at pairing before anything is shown.
+    // The connection below checks every hello it fetches again.
+    await requireProvenHostHello(
+      hello,
+      { hostId: approval.hostId, hostKeyFingerprint: approval.hostKeyFingerprint },
+      Date.now(),
+    );
     const facts = factsFromHello(hello);
     hostFacts = facts;
 
@@ -282,9 +283,6 @@ export function createRemoteSessionBridge(
       });
       void establishConnection(approval).catch((error) => {
         activeConnection = undefined;
-        if (error instanceof RemoteConnectionError && shouldRemoveDeviceKey(error)) {
-          void deviceKeyStore.remove(approval.deviceKeyId).catch(() => undefined);
-        }
         emit(failFromError(error, hostFacts));
       });
     },
@@ -337,25 +335,16 @@ export function createRemoteSessionBridge(
           hostId: metadata.hostId,
           displayName: UNKNOWN_REMOTE_HOST_DISPLAY_NAME,
         });
-        try {
-          await establishConnection(
-            {
-              ticketId: "00000000-0000-4000-8000-000000000000",
-              hostId: metadata.hostId,
-              deviceId: metadata.deviceId,
-              credentialGeneration: metadata.credentialGeneration,
-              deviceKeyId: metadata.keyId,
-              origin: metadata.origin,
-              listenerTrust: metadata.listenerTrust,
-            },
-            metadata,
-          );
-        } catch (error) {
-          if (error instanceof RemoteConnectionError && shouldRemoveDeviceKey(error)) {
-            await deviceKeyStore.remove(metadata.keyId).catch(() => undefined);
-          }
-          throw error;
-        }
+        await establishConnection({
+          ticketId: "00000000-0000-4000-8000-000000000000",
+          hostId: metadata.hostId,
+          deviceId: metadata.deviceId,
+          credentialGeneration: metadata.credentialGeneration,
+          deviceKeyId: metadata.keyId,
+          origin: metadata.origin,
+          hostKeyFingerprint: metadata.hostKeyFingerprint,
+          listenerTrust: metadata.listenerTrust,
+        });
       })().catch((error) => {
         activeConnection = undefined;
         emit(failFromError(error, hostFacts));
@@ -446,12 +435,4 @@ export function createRemoteSessionBridge(
     },
     connection: () => activeConnection,
   };
-}
-
-function shouldRemoveDeviceKey(error: RemoteConnectionError): boolean {
-  if (error.category === "host-changed") return true;
-  // A generic 401 may be a transient/ambiguous session rejection (for example
-  // a browser waking after a challenge expired). Retain the key so resume can
-  // retry; only explicit lifecycle reasons are terminal for this device.
-  return error.category === "unauthorized" && error.reasonCode !== undefined;
 }

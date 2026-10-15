@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
   PrivateListenerControlFailure,
@@ -298,11 +298,32 @@ describe("private listener control service", () => {
     expect(service.getStatus()).toMatchObject({ state: "failed", errorCode: "unavailable" });
   });
 
-  it("computes a stable certificate fingerprint from PEM without returning the PEM", () => {
-    const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
-    const fingerprint = certificateFingerprintFromPem(pem);
-    expect(fingerprint).toMatch(/^[a-f0-9]{64}$/);
-    expect(fingerprint).toBe(createHash("sha256").update(pem.replaceAll(/\s+/g, "")).digest("hex"));
+  it("fingerprints the certificate's public key, matching the host's fingerprint", () => {
+    // A throwaway self-signed P-256 certificate; only public material.
+    const pem =
+      "-----BEGIN CERTIFICATE-----\n" +
+      "MIIBhDCCASugAwIBAgIUApBnaMxwXDjiJEFcUZmT1vEoiMUwCgYIKoZIzj0EAwIw\n" +
+      "HzEdMBsGA1UEAwwUb2N0YW50LWxpc3RlbmVyLXRlc3QwIBcNMjYxMDE0MTU1MTQ4\n" +
+      "WhgPMjEyNjA5MjAxNTUxNDhaMB8xHTAbBgNVBAMMFG9jdGFudC1saXN0ZW5lci10\n" +
+      "ZXN0MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEjloqBB63xDIGRaEK1yipFl6l\n" +
+      "oQCHcfTcNKtC/iJfvwcpghCu4QKWU7EbfC1eRuBlBK5FCAheLeG1dqn6VuWPvKND\n" +
+      "MEEwHQYDVR0OBBYEFE5WdXRaXovmWB1O7JqcOePoJ+aQMA8GA1UdEwEB/wQFMAMB\n" +
+      "Af8wDwYDVR0RBAgwBocEwKgBFDAKBggqhkjOPQQDAgNHADBEAiAVIfW93+rk2+cA\n" +
+      "M3OQW5UyQ3pILnqTGkNUm4UGmbK0wgIgVK1hchGz7t4LkDk/lm/+Lp8VPzDEVe2m\n" +
+      "k5kjFUP/KM0=\n" +
+      "-----END CERTIFICATE-----\n";
+    const spki = new X509Certificate(pem).publicKey.export({ format: "der", type: "spki" });
+    expect(certificateFingerprintFromPem(pem)).toBe(
+      createHash("sha256").update(spki).digest("hex"),
+    );
+    expect(certificateFingerprintFromPem(pem)).toBe(
+      "6439998429a39fc7b86f685ca4aac1beaf22985b03fecbe183e99beadef5d2ce",
+    );
+    expect(() =>
+      certificateFingerprintFromPem(
+        "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n",
+      ),
+    ).toThrow(PrivateListenerControlFailure);
   });
 });
 

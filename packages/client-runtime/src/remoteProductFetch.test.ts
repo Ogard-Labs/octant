@@ -11,6 +11,7 @@ import {
   HOST_ID,
   ORIGIN,
   TICKET_ID,
+  HOST_KEY_FINGERPRINT,
 } from "./remoteConnectionFixtures";
 import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
@@ -56,6 +57,7 @@ async function readyBridge(
     credentialGeneration: 1,
     deviceKeyId,
     origin: ORIGIN,
+    hostKeyFingerprint: HOST_KEY_FINGERPRINT,
     listenerTrust: PLATFORM_LISTENER_TRUST,
   });
   await waitUntil(() => bridge.getState().kind === "ready");

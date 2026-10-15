@@ -5,8 +5,10 @@ import { createRemoteSessionBridge } from "./remoteSessionBridge";
 import { localHostDisplayName } from "./localHostDisplayName";
 import {
   createFakeRemoteServer,
+  createTestHostKey,
   fingerprintFromPem,
   HOST_ID,
+  HOST_KEY_FINGERPRINT,
   ORIGIN,
   TICKET_ID,
 } from "./remoteConnectionFixtures";
@@ -75,6 +77,7 @@ describe("RemoteSessionBridge", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
 
@@ -111,6 +114,7 @@ describe("RemoteSessionBridge", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust,
     });
     await waitUntil(() => bridge.getState().kind === "ready");
@@ -140,6 +144,7 @@ describe("RemoteSessionBridge", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
 
@@ -163,6 +168,7 @@ describe("RemoteSessionBridge", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await waitUntil(() => bridge.getState().kind === "ready");
@@ -186,6 +192,7 @@ describe("RemoteSessionBridge", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await waitUntil(() => bridge.getState().kind === "ready");
@@ -203,7 +210,7 @@ describe("RemoteSessionBridge", () => {
     await pairingStore.updateMetadata(deviceKeyId, {
       deviceId,
       credentialGeneration: 1,
-      hostKeyFingerprint: "a".repeat(64),
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const bridge = createRemoteSessionBridge({
@@ -233,13 +240,13 @@ describe("RemoteSessionBridge", () => {
   });
 
   it("fails closed when a resumed endpoint presents a different host key", async () => {
-    const server = createFakeRemoteServer({ hostKeyFingerprint: "c".repeat(64) });
+    const server = createFakeRemoteServer({ hostKey: createTestHostKey() });
     const pairingStore = createInMemoryDeviceKeyStore();
     const { deviceKeyId, deviceId } = await registerWebCryptoDevice(server, pairingStore);
     await pairingStore.updateMetadata(deviceKeyId, {
       deviceId,
       credentialGeneration: 1,
-      hostKeyFingerprint: "a".repeat(64),
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const bridge = createRemoteSessionBridge({
@@ -251,6 +258,101 @@ describe("RemoteSessionBridge", () => {
 
     await waitUntil(() => bridge.getState().kind === "unauthorized");
     expect(bridge.getState()).toMatchObject({ kind: "unauthorized", reasonCode: "host-changed" });
+    // A validly signed hello from any other key ends nothing by itself: the
+    // key stays until the person forgets the host or pairs again.
+    await expect(pairingStore.get(deviceKeyId)).resolves.toBeDefined();
+  });
+
+  async function resumePairedDevice(config: Parameters<typeof createFakeRemoteServer>[0]) {
+    const server = createFakeRemoteServer(config);
+    const pairingStore = createInMemoryDeviceKeyStore();
+    const { deviceKeyId, deviceId } = await registerWebCryptoDevice(server, pairingStore);
+    await pairingStore.updateMetadata(deviceKeyId, {
+      deviceId,
+      credentialGeneration: 1,
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
+    });
+    const bridge = createRemoteSessionBridge({ fetch: server.fetch, deviceKeyStore: pairingStore });
+    bridge.resume(ORIGIN);
+    return { server, pairingStore, deviceKeyId, bridge };
+  }
+
+  it("refuses a host whose hello signature does not verify and keeps the pairing", async () => {
+    const forger = createTestHostKey();
+    const { server, pairingStore, deviceKeyId, bridge } = await resumePairedDevice({
+      // States the paired key and fingerprint but signs with a key it holds.
+      tamperHello: (hello) => ({ ...hello, signature: forger.sign("forged") }),
+    });
+
+    await waitUntil(() => bridge.getState().kind === "unavailable");
+    expect(bridge.getState()).toMatchObject({
+      kind: "unavailable",
+      reason: "This host could not prove its identity, so Octant did not connect.",
+    });
+    expect(server.fetch).not.toHaveBeenCalledWith(
+      "https://mac.example.test/api/remote/auth/challenge",
+      expect.anything(),
+    );
+    await expect(pairingStore.get(deviceKeyId)).resolves.toBeDefined();
+  });
+
+  it.each([
+    ["as that host sent it", "host-changed", (hello: Record<string, unknown>) => hello],
+    [
+      "relabelled with the paired key",
+      "unproven",
+      (hello: Record<string, unknown>) => ({
+        ...hello,
+        hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+      }),
+    ],
+  ] as const)(
+    "refuses a genuine hello from another host replayed %s",
+    async (_label, outcome, tamperHello) => {
+      const { server, bridge } = await resumePairedDevice({
+        hostKey: createTestHostKey(),
+        tamperHello,
+      });
+
+      await waitUntil(() => {
+        const kind = bridge.getState().kind;
+        return kind === "unauthorized" || kind === "unavailable";
+      });
+      expect(bridge.getState()).toMatchObject(
+        outcome === "host-changed"
+          ? { kind: "unauthorized", reasonCode: "host-changed" }
+          : { kind: "unavailable" },
+      );
+      expect(server.fetch).not.toHaveBeenCalledWith(
+        "https://mac.example.test/api/remote/auth/challenge",
+        expect.anything(),
+      );
+    },
+  );
+
+  it("asks to update a host whose hello carries no public key and keeps the pairing", async () => {
+    const { pairingStore, deviceKeyId, bridge } = await resumePairedDevice({
+      tamperHello: ({ hostPublicKey: _omitted, ...hello }) => hello,
+    });
+
+    await waitUntil(() => bridge.getState().kind === "incompatible");
+    expect(bridge.getState()).toMatchObject({
+      kind: "incompatible",
+      reason:
+        "This host runs an older Octant that cannot prove its identity. Update Octant on the host, then connect again.",
+    });
+    await expect(pairingStore.get(deviceKeyId)).resolves.toBeDefined();
+  });
+
+  it("connects a device paired before hellos carried a key, whose record holds only the fingerprint", async () => {
+    // Records written before hellos were verified hold the fingerprint the
+    // host stated; the host has always computed it as SHA-256 of the key's
+    // DER SubjectPublicKeyInfo, so the stored value pins the proven key as is.
+    const { bridge } = await resumePairedDevice({});
+
+    await waitUntil(() => bridge.getState().kind === "ready");
+    expect(bridge.getState()).toMatchObject({ kind: "ready", hostId: HOST_ID });
   });
 
   it.each([
@@ -264,7 +366,7 @@ describe("RemoteSessionBridge", () => {
     await pairingStore.updateMetadata(deviceKeyId, {
       deviceId: server.deviceId() ?? "22222222-2222-4222-8222-222222222222",
       credentialGeneration: 1,
-      hostKeyFingerprint: "a".repeat(64),
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     if (failure === undefined) {
@@ -279,6 +381,10 @@ describe("RemoteSessionBridge", () => {
 
     await waitUntil(() => bridge.getState().kind === "unauthorized");
     expect(bridge.getState()).toMatchObject({ kind: "unauthorized", reasonCode: reason });
+    if (failure !== undefined) {
+      // A bare 401 naming the reason is unauthenticated, so the key stays.
+      await expect(pairingStore.get(deviceKeyId)).resolves.toBeDefined();
+    }
   });
 
   it("retains the paired key after an ambiguous unauthorized resume failure", async () => {
@@ -288,7 +394,7 @@ describe("RemoteSessionBridge", () => {
     await pairingStore.updateMetadata(deviceKeyId, {
       deviceId,
       credentialGeneration: 1,
-      hostKeyFingerprint: "a".repeat(64),
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -317,7 +423,7 @@ describe("RemoteSessionBridge", () => {
     await pairingStore.updateMetadata(deviceKeyId, {
       deviceId,
       credentialGeneration: 1,
-      hostKeyFingerprint: "a".repeat(64),
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const bridge = createRemoteSessionBridge({
@@ -350,6 +456,7 @@ describe("RemoteSessionBridge", () => {
       credentialGeneration: 1,
       deviceKeyId,
       origin: ORIGIN,
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await waitUntil(() => bridge.getState().kind === "ready");
@@ -369,7 +476,7 @@ describe("RemoteSessionBridge", () => {
     await pairingStore.updateMetadata(deviceKeyId, {
       deviceId,
       credentialGeneration: 1,
-      hostKeyFingerprint: "a".repeat(64),
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const bridge = createRemoteSessionBridge({
@@ -391,7 +498,7 @@ describe("RemoteSessionBridge", () => {
     await pairingStore.updateMetadata(deviceKeyId, {
       deviceId,
       credentialGeneration: 1,
-      hostKeyFingerprint: "a".repeat(64),
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     vi.spyOn(pairingStore, "get").mockRejectedValue(new Error("IndexedDB temporarily unavailable"));
@@ -417,7 +524,7 @@ describe("RemoteSessionBridge", () => {
     await pairingStore.updateMetadata(deviceKeyId, {
       deviceId,
       credentialGeneration: 1,
-      hostKeyFingerprint: "a".repeat(64),
+      hostKeyFingerprint: HOST_KEY_FINGERPRINT,
       listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const bridge = createRemoteSessionBridge({

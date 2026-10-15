@@ -52,7 +52,10 @@ export const REMOTE_AUTHENTICATION_ONLY_CAPABILITY_DIGEST = createHash("sha256")
  * the server never imports desktop code and never receives a private key.
  */
 export interface HostSigningPort {
+  /** SHA-256 (lowercase hex) of `hostPublicKey`'s DER bytes. */
   readonly hostKeyFingerprint: string;
+  /** Unpadded base64url of the host identity key's DER SubjectPublicKeyInfo. */
+  readonly hostPublicKey: string;
   signHostPayload(payload: string): string;
 }
 
@@ -194,6 +197,7 @@ export class RemoteProtocolService {
       hostId: this.#hostId,
       displayName: this.#displayName,
       hostKeyFingerprint: this.#signing.hostKeyFingerprint,
+      hostPublicKey: this.#signing.hostPublicKey,
       serverBuildVersion: this.#serverBuildVersion,
       supportedProtocolRange: this.#supportedProtocolRange,
       authenticationProtocolVersions: [...this.#authenticationProtocolVersions],
