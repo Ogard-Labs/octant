@@ -622,7 +622,13 @@ export class AppleToolchainService {
         recordScreen: true,
         ...(this.#options.injectSimulatorInput === undefined ? {} : { volume: true, rotate: true }),
       },
-      orientations: [...this.#orientations.values()],
+      // Only Simulators still discovered: a deleted one would otherwise stay
+      // here for good and, past the contract's bound, fail every snapshot.
+      orientations: [...this.#orientations.values()].filter((turned) =>
+        this.#lastSimulators.some(
+          (simulator) => String(simulator.simulatorId) === String(turned.simulatorId),
+        ),
+      ),
       recordings: [...this.#recordings.values()]
         .filter(
           (recording) =>
