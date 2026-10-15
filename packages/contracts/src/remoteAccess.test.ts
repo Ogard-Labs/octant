@@ -51,6 +51,33 @@ describe("remote-access contracts", () => {
     ).toMatchObject({ hostId: ids.host, securityFloor: 1 });
   });
 
+  it("carries the client's hello nonce and refuses one that is not plain base64url", () => {
+    const hello = {
+      productId: "octant",
+      hostId: ids.host,
+      displayName: "This Mac",
+      hostKeyFingerprint: "a".repeat(64),
+      serverBuildVersion: "0.1.0",
+      supportedProtocolRange: { min: 1, max: 1 },
+      authenticationProtocolVersions: [1],
+      securityFloor: 1,
+      remoteOrigin: "https://mac.example.test",
+      nonce: ids.nonce,
+      expiresAt: now,
+      signature: "sig_123",
+    };
+    const clientNonce = "c".repeat(43);
+    expect(decodeHostHelloV1({ ...hello, clientNonce })).toMatchObject({ clientNonce });
+    for (const malformed of [
+      "short",
+      "c".repeat(129),
+      `${"c".repeat(42)}=`,
+      `${"c".repeat(42)}\n`,
+    ]) {
+      expect(() => decodeHostHelloV1({ ...hello, clientNonce: malformed })).toThrow();
+    }
+  });
+
   it("rejects secret-bearing or excess host-hello fields", () => {
     expect(() =>
       decodeHostHelloV1({

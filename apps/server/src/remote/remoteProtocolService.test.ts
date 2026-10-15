@@ -400,6 +400,28 @@ describe("RemoteProtocolService host hello", () => {
     expect(verifyHostHello(fx, hello)).toBe(true);
   });
 
+  it("signs the client's hello nonce, so the hello answers that one request", () => {
+    const fx = createFixture();
+    const clientNonce = "n".repeat(43);
+    const hello = fx.service.issueHostHello({ clientNonce });
+    expect(hello.clientNonce).toBe(clientNonce);
+    expect(verifyHostHello(fx, hello)).toBe(true);
+    // The signature covers the nonce: the same hello answering another
+    // request, or stripped back to a version 1 hello, does not verify.
+    expect(verifyHostHello(fx, { ...hello, clientNonce: "m".repeat(43) })).toBe(false);
+    const { clientNonce: _answered, ...stripped } = hello;
+    expect(verifyHostHello(fx, stripped)).toBe(false);
+  });
+
+  it("answers a request without a client nonce with a version 1 hello", () => {
+    const fx = createFixture();
+    const hello = fx.service.issueHostHello();
+    expect("clientNonce" in hello).toBe(false);
+    const { signature, ...sans } = hello;
+    expect(buildHostHelloSignaturePayload(sans).startsWith("octant.host-hello.v1\n")).toBe(true);
+    expect(verifyHostHello(fx, { ...sans, signature })).toBe(true);
+  });
+
   it("produces WebCrypto-compatible P-256 signatures and the identity-only digest", async () => {
     const fx = createFixture();
     const hello = fx.service.issueHostHello();

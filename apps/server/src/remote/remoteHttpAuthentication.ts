@@ -36,6 +36,7 @@ import { withAdmissionRelease } from "./remoteAdmissionPolicy";
 import type {
   RemoteServerGrantOpening,
   RemoteServerRelayOutcome,
+  RemoteServerUpgradeOutcome,
 } from "./remoteServerGrantService";
 import {
   REMOTE_SERVER_PROXY_PATH,
@@ -80,7 +81,7 @@ const RELAY_REFUSAL: Record<
   },
   "upgrade-refused": {
     status: 501,
-    message: "This route does not carry connection upgrades.",
+    message: "This route carries only a WebSocket upgrade the server accepts.",
   },
 };
 
@@ -243,6 +244,17 @@ export interface RemoteServerProxyGrantPort {
     readonly stillAuthorized: () => boolean;
     readonly signal: AbortSignal;
   }) => Promise<RemoteServerRelayOutcome>;
+  /** Open a WebSocket under a grant to its dev server, for an authenticated upgrade. */
+  readonly relayUpgrade: (input: {
+    readonly request: Request;
+    readonly principal: Extract<RemoteClientPrincipal, { readonly kind: "remote-device" }>;
+    readonly sessionIdDigest: string;
+    readonly grantId: string;
+    readonly pathQuery: string;
+    readonly headers: ReadonlyArray<readonly [string, string]>;
+    readonly stillAuthorized: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<RemoteServerUpgradeOutcome>;
 }
 
 export interface RemoteServerProxyAuthentication {
@@ -699,8 +711,9 @@ export function createRemoteHttpAuthentication(
 /**
  * Relay a request whose proof the proxy session accepted. The grant id comes
  * from the path the proof signed; the grant service decides whether it opens
- * anything. A connection upgrade is refused here, before any check or
- * connection, because this route carries none.
+ * anything. A WebSocket upgrade (a `GET` asking for `websocket`) opens a socket
+ * under the grant; any other upgrade is refused here, before any check or
+ * connection.
  */
 async function relayToGrant(
   request: Request,
@@ -713,12 +726,38 @@ async function relayToGrant(
 > {
   const principal = handoff.principal;
   if (principal.kind !== "remote-device") throw new RemoteHttpAuthFailure(403, "invalid");
-  if (request.headers.has("upgrade")) return refusedRelay("upgrade-refused");
   const url = new URL(request.url);
   const target = RELAY_PATH_PATTERN.exec(url.pathname);
   const grantId = target?.[1];
   if (grantId === undefined) throw new RemoteHttpAuthFailure(404, "invalid");
   const method = handoff.requestFacts.method;
+  if (request.headers.has("upgrade")) {
+    if (method !== "GET" || request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+      return refusedRelay("upgrade-refused");
+    }
+    const upgrade = await proxy.grants.relayUpgrade({
+      request: handoff.request,
+      principal,
+      sessionIdDigest: digestRemoteServerProxySessionId(sessionId),
+      grantId,
+      pathQuery: `${target?.[2] ?? "/"}${url.search}`,
+      headers: [...request.headers],
+      stillAuthorized: () => proxy.sessions.describe(sessionId) !== undefined,
+      signal: request.signal,
+    });
+    switch (upgrade.kind) {
+      case "upgraded":
+        return { kind: "relayed", response: upgrade.response };
+      case "refused":
+        return refusedRelay(upgrade.reason);
+      case "busy":
+        throw new RemoteHttpAuthFailure(503, "rate-limited");
+      case "session-ended":
+        throw new RemoteHttpAuthFailure(401, "unauthorized", true);
+      case "unavailable":
+        throw new RemoteHttpAuthFailure(503, "unavailable");
+    }
+  }
   const outcome = await proxy.grants.relay({
     request: handoff.request,
     principal,

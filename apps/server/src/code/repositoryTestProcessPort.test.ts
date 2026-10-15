@@ -849,6 +849,72 @@ describe("RepositoryTestProcessPort", () => {
     },
   );
 
+  it("interrupts a cancelled launch first and waits for it to finish before any harsher signal", async () => {
+    const child = fakeChild(4321);
+    const signals: Array<[number, NodeJS.Signals]> = [];
+    const controller = new AbortController();
+    const port = new RepositoryTestProcessPort(
+      confinedOptions({
+        spawn: () => child,
+        killProcessGroup: (pid, signal) => {
+          signals.push([pid, signal]);
+          // The recorder finalizes its file, then exits a moment after SIGINT.
+          if (signal === "SIGINT") setTimeout(() => child.close(0, null), 20);
+        },
+        gracefulTimeoutMs: 1,
+        interruptTimeoutMs: 2_000,
+      }),
+    );
+    const execution = port.execute(
+      {
+        argv: ["/usr/bin/test"],
+        cwd: "/repo",
+        environment: {},
+        timeoutMs: 5_000,
+        interruptFirst: true,
+      },
+      controller.signal,
+    );
+    controller.abort();
+
+    await expect(execution).resolves.toMatchObject({
+      termination: "cancelled",
+      cleanupUncertain: false,
+    });
+    expect(signals).toEqual([[-4321, "SIGINT"]]);
+  });
+
+  it("escalates to SIGTERM when an interrupted launch does not exit in time", async () => {
+    const child = fakeChild(4321);
+    const signals: Array<[number, NodeJS.Signals]> = [];
+    const controller = new AbortController();
+    const port = new RepositoryTestProcessPort(
+      confinedOptions({
+        spawn: () => child,
+        killProcessGroup: (pid, signal) => {
+          signals.push([pid, signal]);
+          if (signal === "SIGTERM") child.close(null, signal);
+        },
+        gracefulTimeoutMs: 1,
+        interruptTimeoutMs: 5,
+      }),
+    );
+    const execution = port.execute(
+      {
+        argv: ["/usr/bin/test"],
+        cwd: "/repo",
+        environment: {},
+        timeoutMs: 5_000,
+        interruptFirst: true,
+      },
+      controller.signal,
+    );
+    controller.abort();
+
+    await expect(execution).resolves.toMatchObject({ termination: "cancelled" });
+    expect(signals.map(([, signal]) => signal)).toEqual(["SIGINT", "SIGTERM"]);
+  });
+
   it("bounds stdout and stderr together while retaining one overflow byte for the runner", async () => {
     const child = fakeChild(4321);
     const port = new RepositoryTestProcessPort(
@@ -1006,6 +1072,68 @@ describe("RepositoryTestProcessPort", () => {
     expect(profile).toContain(`(allow file-read* (subpath "${realpathSync(own)}"))`);
     expect(profile).not.toContain(`(allow file-read* (subpath "${realpathSync(scripts)}"))`);
     expect(profile).not.toContain(`(allow file-write* (subpath "${realpathSync(own)}"))`);
+    child.close(0, null);
+    await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
+  });
+
+  it("runs a proxied harness script with only its proxy port open, and never from an offline port", async () => {
+    const child = fakeChild(96);
+    const spawn = vi.fn(() => child);
+    const scripts = temporaryDirectory();
+    const own = join(scripts, "octant-harness-1");
+    mkdirSync(own);
+    const script = join(own, "command.sh");
+    writeFileSync(script, "curl https://registry.example.com/\n");
+    const egressProxy = {
+      endpoint: { kind: "loopback", port: 41_234 },
+      token: "launch-token",
+    } as const;
+
+    const offline = new RepositoryTestProcessPort(
+      confinedOptions({ spawn, harnessShellScriptDirectory: scripts, networkEgress: "none" }),
+    );
+    await expect(
+      offline.executeShellScript({
+        script,
+        cwd: temporaryDirectory(),
+        environment: {},
+        timeoutMs: 1_000,
+        egressProxy,
+      }),
+    ).resolves.toMatchObject({ termination: "unavailable" });
+    expect(spawn).not.toHaveBeenCalled();
+
+    const port = new RepositoryTestProcessPort(
+      confinedOptions({ spawn, harnessShellScriptDirectory: scripts }),
+    );
+    const execution = port.executeShellScript({
+      script,
+      cwd: temporaryDirectory(),
+      environment: {},
+      timeoutMs: 1_000,
+      egressProxy,
+    });
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+    const [, args, spawnOptions] = spawn.mock.calls[0] as unknown as [
+      string,
+      string[],
+      { readonly env: Record<string, string> },
+    ];
+    const profile = String(args[1]);
+    expect(profile).toContain('(allow network-outbound (remote ip "localhost:41234"))');
+    expect(profile).not.toContain("(allow network*)");
+    const proxyUrl = "http://octant:launch-token@127.0.0.1:41234";
+    expect(spawnOptions.env).toMatchObject({
+      HTTPS_PROXY: proxyUrl,
+      https_proxy: proxyUrl,
+      HTTP_PROXY: proxyUrl,
+      http_proxy: proxyUrl,
+      ALL_PROXY: proxyUrl,
+      all_proxy: proxyUrl,
+      NO_PROXY: "",
+      no_proxy: "",
+      NODE_USE_ENV_PROXY: "1",
+    });
     child.close(0, null);
     await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
   });

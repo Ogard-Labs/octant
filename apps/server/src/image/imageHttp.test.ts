@@ -1,5 +1,6 @@
+import { MAX_GENERATED_IMAGE_BYTES, MAX_IMAGE_VARIANTS } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { fetchApprovedImageUrl, type ImageHttpFetch } from "./imageHttp";
+import { fetchApprovedImageUrl, makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
 
 const APPROVED_URL = "https://provider.example/signed/generated.png?token=secret";
 const png = Uint8Array.from(
@@ -127,5 +128,30 @@ describe("fetchApprovedImageUrl", () => {
     expect(fetch).not.toHaveBeenCalled();
     expect(result).toHaveProperty("failure");
     if ("failure" in result) expect(result.failure.category).toBe("interrupted");
+  });
+});
+
+describe("image generation ports", () => {
+  it("accepts a base64 answer for every variant at the image ceiling", async () => {
+    const base64Bytes = 4 * Math.ceil(MAX_GENERATED_IMAGE_BYTES / 3) * MAX_IMAGE_VARIANTS;
+    const fetch = vi.fn(
+      async () =>
+        new Response("{}", { status: 200, headers: { "content-length": String(base64Bytes) } }),
+    );
+    const ports = makeImageGenerationPorts({
+      instanceId: "a1000000-0000-4000-8000-000000000001",
+      credentialResolver: { has: async () => true, resolve: async () => "sk-test" },
+      endpoint: { providerHosts: ["images.example.test"] },
+      fetch,
+    });
+
+    const response = await ports.request({
+      url: "https://images.example.test/v1/generate",
+      method: "POST",
+      auth: { header: "authorization", scheme: "Bearer" },
+      body: "{}",
+    });
+
+    expect(response.status).toBe(200);
   });
 });

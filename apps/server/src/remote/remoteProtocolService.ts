@@ -183,7 +183,13 @@ export class RemoteProtocolService {
     );
   }
 
-  issueHostHello(): HostHelloV1 {
+  /**
+   * Issues a signed hello. With a client nonce the hello echoes it and is
+   * signed as version 2, so the client knows the key holder answered its own
+   * request; without one (a client built before client nonces) it is the
+   * version 1 hello those clients verify.
+   */
+  issueHostHello(request: { readonly clientNonce?: string | undefined } = {}): HostHelloV1 {
     const now = this.#now();
     this.#purgeNonces(now);
     if (this.#nonces.size >= MAX_HOST_HELLO_NONCES) {
@@ -204,6 +210,7 @@ export class RemoteProtocolService {
       securityFloor: this.#securityFloor,
       remoteOrigin: this.#remoteOrigin,
       nonce,
+      ...(request.clientNonce === undefined ? {} : { clientNonce: request.clientNonce }),
       expiresAt: new Date(expiresAt).toISOString(),
     };
     const signature = this.#signing.signHostPayload(buildHostHelloSignaturePayload(unsigned));

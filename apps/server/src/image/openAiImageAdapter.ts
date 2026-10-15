@@ -6,22 +6,22 @@ import {
   type OpenAiImageSize,
   type ProviderInstanceId,
 } from "@octant/contracts";
-import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
-import { sniffGeneratedImageMediaType } from "./generatedImageStore";
-import type {
-  ImageAdapterRequest,
-  ImageAdapterResult,
-  ImageGenerationAdapter,
-} from "./imageAdapter";
 import {
-  OPENAI_IMAGE_API_BASE_URL,
   classifyImageHttpFailure,
-  fail,
-  interrupted,
+  imageFailure,
+  imageInterrupted,
   isProviderFailure,
-  performImageHttpRequest,
   readImageJson,
   sanitizeImageFailure,
+  type ImageAdapterRequest,
+  type ImageAdapterResult,
+  type ImageGenerationAdapter,
+} from "@octant/provider-sdk/image-generation";
+import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
+import { sniffGeneratedImageMediaType } from "./generatedImageStore";
+import {
+  OPENAI_IMAGE_API_BASE_URL,
+  performImageHttpRequest,
   type ImageHttpFetch,
   type ImageHttpLimits,
 } from "./imageHttp";
@@ -87,18 +87,21 @@ async function generateOpenAiImage(input: {
   readonly request: ImageAdapterRequest;
 }): Promise<ImageAdapterResult> {
   if (input.request.signal?.aborted) {
-    return { status: "failed", providerFailure: interrupted() };
+    return { status: "failed", providerFailure: imageInterrupted() };
   }
   if (input.request.prompt.trim().length === 0) {
     return {
       status: "failed",
-      providerFailure: fail("invalid-configuration", "The image prompt must not be empty."),
+      providerFailure: imageFailure("invalid-configuration", "The image prompt must not be empty."),
     };
   }
   if (input.request.prompt.length > MAX_IMAGE_PROMPT_CHARACTERS) {
     return {
       status: "failed",
-      providerFailure: fail("invalid-configuration", "The image prompt exceeded the length limit."),
+      providerFailure: imageFailure(
+        "invalid-configuration",
+        "The image prompt exceeded the length limit.",
+      ),
     };
   }
   const variantCount = input.request.variantCount ?? 1;
@@ -109,7 +112,7 @@ async function generateOpenAiImage(input: {
   ) {
     return {
       status: "failed",
-      providerFailure: fail(
+      providerFailure: imageFailure(
         "invalid-configuration",
         "The requested variant count is not supported.",
       ),
@@ -182,7 +185,7 @@ async function generateOpenAiImage(input: {
   if (decoded.kind === "url-rejected") {
     return {
       status: "failed",
-      providerFailure: fail(
+      providerFailure: imageFailure(
         "protocol",
         "The provider returned an image URL instead of inline image bytes.",
       ),
@@ -191,7 +194,7 @@ async function generateOpenAiImage(input: {
   if (decoded.kind === "invalid") {
     return {
       status: "failed",
-      providerFailure: fail("protocol", "The provider returned an invalid image response."),
+      providerFailure: imageFailure("protocol", "The provider returned an invalid image response."),
     };
   }
   if (decoded.kind === "refused") {
@@ -204,13 +207,13 @@ async function generateOpenAiImage(input: {
     if (bytes === undefined) {
       return {
         status: "failed",
-        providerFailure: fail("protocol", "The provider returned malformed image bytes."),
+        providerFailure: imageFailure("protocol", "The provider returned malformed image bytes."),
       };
     }
     if (bytes.byteLength > MAX_GENERATED_IMAGE_BYTES) {
       return {
         status: "failed",
-        providerFailure: fail(
+        providerFailure: imageFailure(
           "protocol",
           "The provider response exceeded the configured size limit.",
         ),
@@ -220,7 +223,7 @@ async function generateOpenAiImage(input: {
     if (mediaType === undefined) {
       return {
         status: "failed",
-        providerFailure: fail("protocol", "The provider returned malformed image bytes."),
+        providerFailure: imageFailure("protocol", "The provider returned malformed image bytes."),
       };
     }
     images.push({ bytes, mediaType });
@@ -228,7 +231,7 @@ async function generateOpenAiImage(input: {
   if (images.length === 0) {
     return {
       status: "failed",
-      providerFailure: fail("protocol", "The provider returned an invalid image response."),
+      providerFailure: imageFailure("protocol", "The provider returned an invalid image response."),
     };
   }
   return {

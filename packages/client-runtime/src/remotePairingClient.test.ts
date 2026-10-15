@@ -15,18 +15,29 @@ const ticketId = "00000000-0000-4000-8000-000000000001";
 const ticketProof = "proof1234567890abcdefghijklmnopqrstuvwxyz";
 const serverBaseUrl = "https://mac.example.test";
 
-const hostHello = signTestHostHello(HOST_KEY, {
-  productId: "octant",
-  hostId,
-  displayName: "This Mac",
-  serverBuildVersion: "0.1.0",
-  supportedProtocolRange: { min: 1, max: 1 },
-  authenticationProtocolVersions: [1],
-  securityFloor: 1,
-  remoteOrigin: serverBaseUrl,
-  nonce: "nonce1234567890",
-  expiresAt: new Date(Date.now() + 60_000).toISOString(),
-});
+/** The paired host's hello, answering the client nonce `clientNonce` if given. */
+function helloAnswering(clientNonce: string | undefined) {
+  return signTestHostHello(HOST_KEY, {
+    productId: "octant",
+    hostId,
+    displayName: "This Mac",
+    serverBuildVersion: "0.1.0",
+    supportedProtocolRange: { min: 1, max: 1 },
+    authenticationProtocolVersions: [1],
+    securityFloor: 1,
+    remoteOrigin: serverBaseUrl,
+    nonce: "nonce1234567890",
+    ...(clientNonce === undefined ? {} : { clientNonce }),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  });
+}
+
+function requestedClientNonce(input: string | Request | URL): string | undefined {
+  const url = new URL(typeof input === "string" ? input : input.toString());
+  return url.searchParams.get("clientNonce") ?? undefined;
+}
+
+const hostHello = helloAnswering(undefined);
 
 const pairingClaim = {
   kind: "pending" as const,
@@ -41,8 +52,8 @@ const pairingClaim = {
   expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
 };
 
-function hostHelloFetch(): ReturnType<typeof globalThis.fetch> {
-  return Promise.resolve(Response.json(hostHello));
+function hostHelloFetch(input: string | Request | URL): ReturnType<typeof globalThis.fetch> {
+  return Promise.resolve(Response.json(helloAnswering(requestedClientNonce(input))));
 }
 
 function pairingClaimFetch(): ReturnType<typeof globalThis.fetch> {
@@ -60,13 +71,13 @@ function pairingStatusApprovedFetch(): ReturnType<typeof globalThis.fetch> {
 }
 
 function createMockFetch(
-  responses: ReadonlyArray<() => ReturnType<typeof globalThis.fetch>>,
+  responses: ReadonlyArray<(input: string | Request | URL) => ReturnType<typeof globalThis.fetch>>,
 ): Mock<typeof globalThis.fetch> {
   let index = 0;
-  return vi.fn(async () => {
+  return vi.fn(async (input: string | Request | URL) => {
     const response = responses[index] ?? hostHelloFetch;
     index += 1;
-    return response();
+    return response(input);
   });
 }
 
@@ -256,9 +267,12 @@ describe("RemotePairingClient", () => {
 
     const hello = await client.requestHostHello();
     expect(hello.hostId).toBe(hostId);
-    expect(fetch).toHaveBeenCalledWith("https://mac.example.test/api/remote/hello", {
-      method: "GET",
-    });
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /^https:\/\/mac\.example\.test\/api\/remote\/hello\?clientNonce=[A-Za-z0-9_-]{43}$/,
+      ),
+      { method: "GET" },
+    );
 
     const claim = await client.claimPairing({
       ticket: { ticketId, ticketProof },
@@ -452,7 +466,15 @@ describe("RemotePairingClient", () => {
   it("refuses to pair through a hello whose signature does not verify", async () => {
     const forged = { ...hostHello, signature: createTestHostKey().sign("forged") };
     const store = createInMemoryDeviceKeyStore();
-    const fetch = createMockFetch([() => Promise.resolve(Response.json(forged))]);
+    const fetch = createMockFetch([
+      (input) =>
+        Promise.resolve(
+          Response.json({
+            ...helloAnswering(requestedClientNonce(input)),
+            signature: createTestHostKey().sign("forged"),
+          }),
+        ),
+    ]);
     const client = createRemotePairingClient({
       baseUrl: serverBaseUrl,
       fetch,
@@ -473,6 +495,52 @@ describe("RemotePairingClient", () => {
     // Only the hello was fetched: no claim was sent and no device key made.
     expect(fetch).toHaveBeenCalledTimes(1);
     await expect(store.findByOrigin(serverBaseUrl)).resolves.toBeUndefined();
+  });
+
+  it("refuses to pair through a genuine hello recorded from an earlier request", async () => {
+    // A hello the real host signed for someone else's request, served again.
+    const recorded = helloAnswering("r".repeat(43));
+    const store = createInMemoryDeviceKeyStore();
+    const fetch = createMockFetch([
+      () => Promise.resolve(Response.json(recorded)),
+      pairingClaimFetch,
+    ]);
+    const client = createRemotePairingClient({
+      baseUrl: serverBaseUrl,
+      fetch,
+      webBuildVersion: "0.1.0",
+      deviceKeyStore: store,
+    });
+
+    await expect(client.requestHostHello()).rejects.toThrow(
+      "This host could not prove its identity, so Octant did not connect.",
+    );
+    // Handed straight to a claim, a hello this client never asked for is
+    // refused before a device key is made or a claim is sent.
+    await expect(
+      client.claimPairing({
+        ticket: { ticketId, ticketProof },
+        deviceLabel: "Ada's Safari",
+        hostHello: decodeHostHelloV1(recorded),
+      }),
+    ).rejects.toThrow("This host could not prove its identity, so Octant did not connect.");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await expect(store.findByOrigin(serverBaseUrl)).resolves.toBeUndefined();
+  });
+
+  it("asks to update a host built before client nonces", async () => {
+    const fetch = createMockFetch([() => Promise.resolve(new Response(null, { status: 404 }))]);
+    const client = createRemotePairingClient({
+      baseUrl: serverBaseUrl,
+      fetch,
+      webBuildVersion: "0.1.0",
+      deviceKeyStore: createInMemoryDeviceKeyStore(),
+    });
+
+    await expect(client.requestHostHello()).rejects.toThrow(
+      "This host runs an older Octant that cannot prove its identity. Update Octant on the host, then connect again.",
+    );
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("generates a non-extractable P-256 device key", async () => {
@@ -567,7 +635,7 @@ describe("RemotePairingClient", () => {
       clientB.claimPairing({
         ticket: { ticketId, ticketProof },
         deviceLabel: "Ada's Chrome",
-        hostHello: hello,
+        hostHello: await clientB.requestHostHello(),
       }),
     ).rejects.toBeInstanceOf(RemotePairingFailure);
 
@@ -605,7 +673,7 @@ function createMockRemotePairingServer() {
     fetch: vi.fn(async (input: string | Request | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input.toString());
       if (url.pathname === "/api/remote/hello") {
-        return Response.json(hostHello);
+        return Response.json(helloAnswering(url.searchParams.get("clientNonce") ?? undefined));
       }
       if (url.pathname === "/api/remote/pairing" && init?.method === "POST") {
         if (isClaimed) {

@@ -302,6 +302,25 @@ describe("what the session already held", () => {
     ).toEqual({ status: "counted", parts: [] });
   });
 
+  it("reads compacted after a compaction when the prior report is the runtime's own breakdown", () => {
+    // Claude's last report of a turn is its own breakdown, which has no sent-context field.
+    const runtimeOwn = {
+      parts: [
+        { kind: "system-prompt", tokens: 5200, accuracy: "provider-reported" },
+        { kind: "messages", tokens: 9100, accuracy: "provider-reported" },
+      ],
+    } as const;
+    expect(
+      carriedSentContext({
+        freshSession: false,
+        forkSeeded: false,
+        priorTurn: true,
+        previousBreakdown: runtimeOwn,
+        compactedSinceReport: true,
+      }),
+    ).toEqual({ status: "uncounted", reason: "compacted" });
+  });
+
   it("stays uncounted once a turn of the session was", () => {
     expect(
       carriedSentContext({

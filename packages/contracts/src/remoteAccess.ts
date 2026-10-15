@@ -47,6 +47,16 @@ export const REMOTE_SECURITY_FLOOR = 1 as const;
 export const REMOTE_AUTHENTICATION_ONLY_CAPABILITY_VECTOR =
   "remote-authentication-only:v1" as const;
 
+/**
+ * The query parameter a client names its hello nonce with:
+ * `GET /api/remote/hello?clientNonce=<base64url>`. A host that answers it
+ * echoes the nonce in `HostHelloV1.clientNonce` and signs it, so the hello
+ * proves the key holder answered this request rather than an earlier one.
+ */
+export const HOST_HELLO_CLIENT_NONCE_PARAMETER = "clientNonce" as const;
+/** Base64url of 16 to 96 random bytes; clients send 32. */
+export const HostHelloClientNonce = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{22,128}$/));
+
 export const ProtocolRange = Schema.Struct({
   min: positiveInteger,
   max: positiveInteger,
@@ -79,6 +89,10 @@ export const HostHelloV1 = Schema.Struct({
   securityFloor: positiveInteger,
   remoteOrigin: origin,
   nonce: base64Url,
+  // The nonce the client sent with this hello request. Present only when the
+  // client sent one; the hello is then signed as version 2. A client that
+  // sent a nonce refuses a hello without it or with another one.
+  clientNonce: Schema.optional(HostHelloClientNonce),
   expiresAt: UtcTimestamp,
   signature: base64Url,
 }).annotations(strict);

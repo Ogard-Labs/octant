@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_APPROVAL_OUTSIDE_CONTENT_SOURCES,
   MAX_CONTENT_INGESTED_PAYLOAD_BYTES,
   MAX_CONTENT_REFERENCE_LENGTH,
   MAX_CONTENT_SOURCE_LABEL_LENGTH,
   THREAD_EXTERNAL_CONTENT_AGGREGATE,
   THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
+  decodeApprovalOutsideContent,
   decodeContentClearedPayload,
   decodeContentIngestedPayload,
   decodeContentOrigin,
@@ -200,6 +202,49 @@ describe("the external-content request a local window sends", () => {
     ).toEqual({ kind: "refused", reason: "stale", state });
     expect(() =>
       decodeThreadExternalContentClearOutcome({ kind: "refused", reason: "busy" }),
+    ).toThrow();
+  });
+});
+
+describe("the outside content an approval names", () => {
+  const source = {
+    sourceLabel: "web-fetch",
+    ingestionCount: 2,
+    firstIngestedAt: "2026-10-15T08:00:00.000Z",
+    lastIngestedAt: "2026-10-15T09:00:00.000Z",
+  };
+
+  it("names a bounded list of sources with counts and times, and a total", () => {
+    expect(decodeApprovalOutsideContent({ sources: [source], sourceCount: 3 })).toEqual({
+      sources: [source],
+      sourceCount: 3,
+    });
+    expect(decodeApprovalOutsideContent({ sources: [], sourceCount: 0 })).toEqual({
+      sources: [],
+      sourceCount: 0,
+    });
+    const tooMany = Array.from({ length: MAX_APPROVAL_OUTSIDE_CONTENT_SOURCES + 1 }, () => source);
+    expect(() =>
+      decodeApprovalOutsideContent({ sources: tooMany, sourceCount: tooMany.length }),
+    ).toThrow();
+    expect(() => decodeApprovalOutsideContent({ sources: [source], sourceCount: 0 })).toThrow();
+  });
+
+  it("refuses a content reference, a body, or a path in a source", () => {
+    expect(() =>
+      decodeApprovalOutsideContent({
+        sources: [{ ...source, contentReference: "sha256-abc" }],
+        sourceCount: 1,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeApprovalOutsideContent({ sources: [source], sourceCount: 1, body: "page text" }),
+    ).toThrow();
+    expect(() =>
+      decodeApprovalOutsideContent({
+        sources: [{ ...source, sourceLabel: "/Users/someone/secret.txt" }],
+        sourceCount: 1,
+      }),
     ).toThrow();
   });
 });
