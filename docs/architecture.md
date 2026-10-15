@@ -3160,7 +3160,9 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   own sits ahead of the reply it happened in (Work rows carry a time only on
   the person's messages, so there it falls before the next message of theirs).
   A compaction older than the loaded history is not drawn until that history
-  loads.
+  loads. Each pane asks the host about its own thread, so a split workspace
+  shows every pane its own dividers, active or not, and no pane draws another
+  thread's; a pane asks again when its rows change.
 - A completed compaction marks a runtime's session `compacted`, so the window
   breakdown goes `uncounted` with that reason under the existing rule. Within
   a turn, the runner that sees `context-compacted` reports the turn's later

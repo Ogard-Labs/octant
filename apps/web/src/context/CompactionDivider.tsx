@@ -1,17 +1,59 @@
-import type { ContextCompactionReceipt } from "@octant/contracts/context";
+import {
+  decodeContextSubjectRef,
+  type ContextCompactionReceipt,
+  type ContextSubjectRef,
+} from "@octant/contracts/context";
+import { useEffect, useState } from "react";
 import { OctantSeparatorWithLabel } from "../ui/base/OctantSeparator";
 import { useComposerContextMeterScope } from "./composerContextMeterScope";
 import { compactionResultLine } from "./sessionCompactionPresentation";
 
 /**
- * The compactions the host journaled for the open thread, oldest first. The
- * controller answers for the active pane's thread only, so a transcript in any
- * other pane gets none rather than another thread's receipts.
+ * The compactions the host journaled for one thread, oldest first. Each pane
+ * asks the host about its own thread, so a pane that is not the active one
+ * still shows its dividers and no pane ever shows another thread's. It asks
+ * again when the transcript's rows change, which is when a turn may have
+ * compacted the session, and when the active thread's own compaction state
+ * moves.
  */
-export function useCompactionReceipts(): ReadonlyArray<ContextCompactionReceipt> {
-  const scope = useComposerContextMeterScope();
-  return scope.visible ? (scope.compaction?.controller.state?.completedCompactions ?? []) : [];
+export function useCompactionReceipts(
+  subject: ContextSubjectRef | undefined,
+  rowCount: number,
+): ReadonlyArray<ContextCompactionReceipt> {
+  const compaction = useComposerContextMeterScope().compaction;
+  const client = compaction?.client;
+  const activeCount = compaction?.controller.state?.completedCompactions?.length;
+  const [read, setRead] = useState<{
+    readonly key: string;
+    readonly receipts: ReadonlyArray<ContextCompactionReceipt>;
+  }>();
+  const aggregateType = subject?.aggregateType;
+  const aggregateId = subject?.aggregateId;
+  const key = aggregateType === undefined ? "" : `${aggregateType}:${aggregateId}`;
+  useEffect(() => {
+    if (client === undefined || aggregateType === undefined || aggregateId === undefined) return;
+    const abort = new AbortController();
+    client
+      .readCompaction({ aggregateType, aggregateId }, abort.signal)
+      .then((state) => {
+        if (!abort.signal.aborted) setRead({ key, receipts: state.completedCompactions ?? NONE });
+      })
+      .catch(() => undefined);
+    return () => abort.abort();
+  }, [activeCount, aggregateId, aggregateType, client, key, rowCount]);
+  // An answer for a thread this transcript no longer shows is never drawn.
+  return read !== undefined && read.key === key ? read.receipts : NONE;
 }
+
+/** The compaction subject of one thread, for a transcript to show its own dividers. */
+export function threadCompactionSubject(
+  aggregateType: "chat-thread" | "work-thread" | "code-thread",
+  threadId: string,
+): ContextSubjectRef {
+  return decodeContextSubjectRef({ aggregateType, aggregateId: threadId });
+}
+
+const NONE: ReadonlyArray<ContextCompactionReceipt> = [];
 
 /**
  * Where each compaction falls among a transcript's rows: before the first row

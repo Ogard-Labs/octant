@@ -1,3 +1,4 @@
+import type { ContextSubjectRef } from "@octant/contracts/context";
 import {
   defaultRangeExtractor,
   useVirtualizer,
@@ -46,6 +47,8 @@ export interface TranscriptWindowProps<T> {
    * thread's session was compacted, from the host's journaled receipts.
    */
   readonly itemAt?: (item: T) => string | undefined;
+  /** The thread whose compactions the dividers show; with `itemAt`, it turns them on. */
+  readonly compactionSubject?: ContextSubjectRef;
   /** Identifies the thread so leaving and returning restores this scroll offset. */
   readonly restoreKey: string;
   readonly estimateSize?: number;
@@ -128,7 +131,7 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const follows = align === "end" && props.followOutput !== false;
   const ListTag = props.listTag ?? "div";
   const ItemTag = props.itemTag ?? "div";
-  const compactionReceipts = useCompactionReceipts();
+  const compactionReceipts = useCompactionReceipts(props.compactionSubject, props.items.length);
   const { itemAt } = props;
   const compactionPlacement = useMemo(
     () =>

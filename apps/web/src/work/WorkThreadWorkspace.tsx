@@ -1,3 +1,4 @@
+import { threadCompactionSubject } from "../context/CompactionDivider";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import {
   BrowserUseMention,
@@ -1695,6 +1696,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         className="work-thread-workspace__conversation transcript-scroll"
         estimateSize={92}
         gap={20}
+        compactionSubject={threadCompactionSubject("work-thread", String(props.threadId))}
         itemAt={workRowHappenedAt}
         itemKey={(row) => row.key}
         items={transcriptRows}
