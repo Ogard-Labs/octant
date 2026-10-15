@@ -350,6 +350,36 @@ describe("forgetting a paired computer", () => {
     expect(pins.list()).toEqual([]);
   });
 
+  it("attempts every clearing step even when an earlier one fails", async () => {
+    const storage = {
+      ...storagePort(),
+      clearStorageData: vi.fn().mockRejectedValue(new Error("x")),
+    };
+
+    await expect(clearRemotePageStorage(storage, ORIGIN)).rejects.toThrow("x");
+    expect(storage.clearCache).toHaveBeenCalledOnce();
+    expect(storage.clearAuthCache).toHaveBeenCalledOnce();
+  });
+
+  it("opens no window for an Open still connecting when the computer is forgotten", async () => {
+    const pins = freshPins();
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
+    const open = vi.fn();
+
+    const outcome = await openPairedComputer({
+      origin: ORIGIN,
+      pins,
+      windows: { open, closeAll: vi.fn() },
+      connect: async () => {
+        pins.forget(ORIGIN);
+        return { status: "connected", socket: { destroy: vi.fn() } } as never;
+      },
+    });
+
+    expect(outcome.status).toBe("refused");
+    expect(open).not.toHaveBeenCalled();
+  });
+
   it("clears one origin's page storage through the helper any unpair path can call", async () => {
     const storage = storagePort();
     await clearRemotePageStorage(storage, ORIGIN);

@@ -159,9 +159,16 @@ export async function clearRemotePageStorage(
   storage: PageStoragePort,
   origin: string,
 ): Promise<void> {
-  await storage.clearStorageData({ origin });
-  await storage.clearCache();
-  await storage.clearAuthCache();
+  // Each step is attempted whatever an earlier one did: the pin is already
+  // gone by the time a caller clears, so a step skipped here would never
+  // be retried.
+  const results = await Promise.allSettled([
+    storage.clearStorageData({ origin }),
+    storage.clearCache(),
+    storage.clearAuthCache(),
+  ]);
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed !== undefined) throw failed.reason;
 }
 
 export type ForgetOutcome =
@@ -255,6 +262,11 @@ export async function openPairedComputer(input: {
   const connection = await (input.connect ?? connectListener)({ origin, trust: pinnedTrust(pin) });
   if (connection.status === "connected") {
     connection.socket.destroy();
+    // The person may have forgotten this computer while the connection was
+    // being made; a window opened now would outlive its trust.
+    if (input.pins.pinFor(origin) !== pin) {
+      return { status: "refused", message: "Octant isn't paired with that computer." };
+    }
     input.windows.open({ origin, url: `${origin}/` });
     return { status: "opened", computer };
   }
