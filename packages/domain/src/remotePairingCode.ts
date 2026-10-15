@@ -113,17 +113,31 @@ export function readPairingCode(text: string): PairingCodeReading {
   return { status: "read", contents };
 }
 
-function refuseContents(contents: PairingCodeContents): PairingCodeRefusal | undefined {
+/**
+ * Whether a listener's origin and pin could go into a code. The host checks
+ * this before it mints a ticket, so a listener a code cannot name never
+ * leaves a live ticket behind.
+ */
+export function refusePairingCodeListener(listener: {
+  readonly origin: string;
+  readonly pin: string;
+}): PairingCodeRefusal | undefined {
   // The pin algorithm is judged first: a code from a later Octant that pins
   // with another hash must say so rather than look damaged.
-  const algorithm = PIN_ALGORITHM.exec(contents.pin)?.[1];
+  const algorithm = PIN_ALGORITHM.exec(listener.pin)?.[1];
   if (algorithm === undefined) return "damaged";
   if (algorithm !== PAIRING_CODE_PIN_ALGORITHM) return "newer-version";
-  if (!BASE64URL_32_BYTES.test(contents.pin.slice(algorithm.length + 1))) return "damaged";
+  if (!BASE64URL_32_BYTES.test(listener.pin.slice(algorithm.length + 1))) return "damaged";
+  return refuseOrigin(listener.origin);
+}
+
+function refuseContents(contents: PairingCodeContents): PairingCodeRefusal | undefined {
+  const listenerRefusal = refusePairingCodeListener(contents);
+  if (listenerRefusal !== undefined) return listenerRefusal;
   if (!TICKET_ID.test(contents.ticketId) || !BASE64URL_32_BYTES.test(contents.ticketProof)) {
     return "damaged";
   }
-  return refuseOrigin(contents.origin);
+  return undefined;
 }
 
 function refuseOrigin(origin: string): PairingCodeRefusal | undefined {

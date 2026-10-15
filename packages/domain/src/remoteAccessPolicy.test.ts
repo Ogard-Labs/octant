@@ -72,6 +72,24 @@ describe("remote access policy", () => {
     expect(classifyRemoteListenerAddress("100.64.999.999")).toBe("public");
   });
 
+  it("judges IPv6 private ranges on the expanded address, not its text prefix", () => {
+    // Each of these starts with the letters of a private prefix but expands to
+    // a first group outside fc00::/7 and fe80::/10.
+    for (const address of ["fd::1", "fc::1", "fe8::1", "fe::1"]) {
+      expect(classifyRemoteListenerAddress(address)).toBe("public");
+    }
+    for (const address of ["fd00::1", "fc00::1", "fdff:1234::9", "fe80::1", "febf::1"]) {
+      expect(classifyRemoteListenerAddress(address)).toBe("lan-private");
+    }
+    expect(classifyRemoteListenerAddress("fec0::1")).toBe("public");
+    expect(classifyRemoteListenerAddress("fd7a:115c:a1e0::7033:4105")).toBe("tailscale");
+    expect(classifyRemoteListenerAddress("fd7a:115c:a1e0:ab12:4843:cd96:6258:b240")).toBe(
+      "tailscale",
+    );
+    expect(classifyRemoteListenerAddress("fd7a:115c:a1e:ab12::1")).toBe("lan-private");
+    expect(classifyRemoteListenerAddress("fd7a:115c::1")).toBe("lan-private");
+  });
+
   it("builds a listener origin that brackets IPv6 and drops the default port", () => {
     expect(remoteListenerOrigin("192.168.1.20", 13774)).toBe("https://192.168.1.20:13774");
     expect(remoteListenerOrigin("fd7a:115c:a1e0::7033:4105", 8455)).toBe(

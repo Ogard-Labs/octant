@@ -5685,8 +5685,13 @@ mechanisms are:
     approved on the host — minted for the listener's own network class,
     because the device claims it over the listener; `octant pair --source`
     naming another class is refused, and a pasted-certificate listener keeps
-    the browser link and `octant pair`'s bare ticket. Settings drops a code
-    when the listener moves or turns off, since it names the old origin.
+    the browser link and `octant pair`'s bare ticket. A listener whose origin
+    or pin no code can carry is refused before a ticket is minted. Settings
+    keeps a code only while its ticket is live and the listener it names is
+    unchanged: it drops the code when the ticket expires, when the listener
+    moves or turns off there, and when a status it re-reads on window focus
+    and every five seconds names another origin or pin, as after an
+    `octant listener` change.
     Both show the same text as a QR code, dark on light with a four-module
     quiet zone, drawn by `lean-qr` (MIT, no dependencies), the one QR encoder
     Settings and the CLI share: an in-tree encoder would be more code than
@@ -5697,10 +5702,16 @@ mechanisms are:
     algorithm other than `sha256` is refused as needing a newer Octant,
     never skipped. A missing, extra, or repeated field, a malformed id,
     proof, or pin, a non-canonical base64url spelling, or an origin that is
-    not exactly an HTTPS origin is refused as damaged, and an origin outside
-    a private LAN or Tailscale address is refused as such. The builder
-    refuses the same contents, so the host never shows a code a client would
-    refuse.
+    not exactly an HTTPS origin is refused as damaged. An origin the listener
+    address classifier does not call private LAN or Tailscale is refused as
+    not private: for an address literal that means `10/8`, `172.16/12`,
+    `192.168/16`, `100.64/10`, `fc00::/7`, and `fe80::/10`, judged on the
+    parsed address, never its text prefix. A name is judged by its spelling
+    only, so the reader cannot prove a named origin is private: any
+    `*.ts.net` name passes, and public Tailscale Funnel names are `*.ts.net`
+    too. The plan's client rule closes that before a client sends anything.
+    The builder refuses the same contents, so the host never shows a code a
+    client would refuse.
 - **Adding a computer in one step.** Partly built: the host certificate and
   pairing code above. The client pin rule, reading the code on each client,
   and the rest are planned in [the plan](plans/one-step-pairing.md).

@@ -1,5 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { buildPairingCode, PAIRING_CODE_REFUSAL_COPY, remoteListenerOrigin } from "@octant/domain";
+import {
+  buildPairingCode,
+  PAIRING_CODE_REFUSAL_COPY,
+  refusePairingCodeListener,
+  remoteListenerOrigin,
+} from "@octant/domain";
 import {
   failureMessage,
   type LocalControlResponse,
@@ -257,6 +262,13 @@ async function printPairingCode(
     input.stderr.write(
       `A pairing code is claimed over the listener's own network (${exposureClass}). Leave out --source.\n`,
     );
+    return 1;
+  }
+  // A listener no code can name is refused before a ticket exists, so a
+  // refusal never leaves a live, unprinted ticket on the host.
+  const refusal = refusePairingCodeListener({ origin, pin: tlsPin });
+  if (refusal !== undefined) {
+    input.stderr.write(`${PAIRING_CODE_REFUSAL_COPY[refusal]}\n`);
     return 1;
   }
   const response = await input.session.send({

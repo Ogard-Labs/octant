@@ -2,6 +2,7 @@ import {
   buildPairingCode,
   classifyRemoteListenerAddress,
   PAIRING_CODE_REFUSAL_COPY,
+  refusePairingCodeListener,
   remoteListenerOrigin,
 } from "@octant/domain";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
@@ -99,9 +100,12 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
   const [devices, setDevices] = useState<ReadonlyArray<RemoteDeviceInventoryEntry>>([]);
   const [inventoryMessage, setInventoryMessage] = useState<string>();
   const [ticket, setTicket] = useState<RemoteMintedPairingTicket>();
-  // The app pairing code minted with `ticket` for a self-made listener, built
-  // from the listener status that was current when the ticket was minted.
-  const [pairingCode, setPairingCode] = useState<string>();
+  // The app pairing code for a self-made listener, with the listener it names.
+  // It is held only while its ticket is live and that listener is unchanged.
+  const [mintedCode, setMintedCode] = useState<MintedPairingCode>();
+  const [pairingCodeExpired, setPairingCodeExpired] = useState(false);
+  const clockRef = useRef(clock);
+  clockRef.current = clock;
   const [ticketSource, setTicketSource] = useState<RemotePairingTicketSourceClass>("lan-private");
   const [pairingMessage, setPairingMessage] = useState<string>();
   const [renameDraft, setRenameDraft] = useState<{ deviceId: string; label: string }>();
@@ -188,7 +192,7 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
       // A code names the listener's origin and key pin, so one minted before
       // the move would point the device at the old listener.
       setTicket(undefined);
-      setPairingCode(undefined);
+      setMintedCode(undefined);
       if (next.state === "failed") {
         setListenerMessage(
           LISTENER_FAILURE_COPY[next.errorCode ?? ""] ?? "The remote listener could not start.",
@@ -212,7 +216,7 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
     try {
       setListener({ kind: "ready", status: await bridge.disablePrivateListener() });
       setTicket(undefined);
-      setPairingCode(undefined);
+      setMintedCode(undefined);
     } catch (error) {
       setListenerMessage(failureMessage(error, "The remote listener could not be disabled."));
     } finally {
@@ -224,7 +228,7 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
     setPairingMessage(undefined);
     try {
       setTicket(await bridge.mintRemotePairingTicket(ticketSource));
-      setPairingCode(undefined);
+      setMintedCode(undefined);
     } catch (error) {
       setPairingMessage(failureMessage(error, "Octant could not create a pairing link."));
     }
@@ -233,7 +237,15 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
   const mintPairingCode = async (listenerForCode: PairingCodeListener) => {
     setPairingMessage(undefined);
     setTicket(undefined);
-    setPairingCode(undefined);
+    setMintedCode(undefined);
+    setPairingCodeExpired(false);
+    // A listener no code can name is refused before a ticket exists, so a
+    // refusal never leaves a live, unshown ticket on the host.
+    const refusal = refusePairingCodeListener(listenerForCode);
+    if (refusal !== undefined) {
+      setPairingMessage(PAIRING_CODE_REFUSAL_COPY[refusal]);
+      return;
+    }
     try {
       // The device claims the ticket over the listener itself, so the ticket
       // names the listener's own network rather than a network the person picks.
@@ -248,8 +260,13 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
         setPairingMessage(PAIRING_CODE_REFUSAL_COPY[built.reason]);
         return;
       }
-      setTicket(minted);
-      setPairingCode(built.code);
+      setMintedCode({
+        code: built.code,
+        expiresAt: minted.expiresAt,
+        sourceClass: minted.sourceClass,
+        origin: listenerForCode.origin,
+        pin: listenerForCode.pin,
+      });
     } catch (error) {
       setPairingMessage(failureMessage(error, "Octant could not create a pairing code."));
     }
@@ -310,6 +327,52 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
   // browser pairing link is never offered for one.
   const browserCannotVerify = status?.certificateSource === "self-made";
   const codeListener = pairingCodeListenerOf(status);
+
+  // An expired code is dropped from state, not merely hidden, so nothing keeps
+  // a dead ticket's proof around.
+  useEffect(() => {
+    if (mintedCode === undefined) return;
+    const expire = () => {
+      setMintedCode(undefined);
+      setPairingCodeExpired(true);
+    };
+    const remaining = mintedCode.expiresAt - clockRef.current();
+    if (remaining <= 0) {
+      expire();
+      return;
+    }
+    const timer = setTimeout(expire, remaining);
+    return () => clearTimeout(timer);
+  }, [mintedCode]);
+
+  // `octant listener` can move or turn off the listener behind this page, so
+  // while a code is shown the status is re-read on focus and every few seconds.
+  useEffect(() => {
+    if (mintedCode === undefined) return;
+    const refresh = () => void refreshListener();
+    window.addEventListener("focus", refresh);
+    const timer = setInterval(refresh, PAIRING_CODE_STATUS_REFRESH_MS);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      clearInterval(timer);
+    };
+  }, [mintedCode, refreshListener]);
+
+  // A code names one origin and key pin; once the listener differs it would
+  // send a device to the wrong place or fail its pin check, so it is dropped.
+  useEffect(() => {
+    if (mintedCode === undefined || listener.kind !== "ready") return;
+    if (
+      codeListener === undefined ||
+      codeListener.origin !== mintedCode.origin ||
+      codeListener.pin !== mintedCode.pin
+    ) {
+      setMintedCode(undefined);
+      setPairingMessage(
+        "The listener changed, so that pairing code was dropped. Create a new one.",
+      );
+    }
+  }, [mintedCode, listener.kind, codeListener?.origin, codeListener?.pin]);
   const activeDevices = devices.filter((device) => device.state === "active");
 
   return (
@@ -572,38 +635,32 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
             </SettingRow>
           </div>
         )}
-        {ticket !== undefined && pairingCode !== undefined && browserCannotVerify ? (
-          ticketLive ? (
-            <div className="settings-panel__stack">
-              <PairingCodeQr code={pairingCode} />
-              <SettingsFactList
-                facts={[
-                  {
-                    label: "Code",
-                    value: (
-                      <code
-                        aria-label="Pairing code"
-                        className="oct-meta--mono remote-pairing-code"
-                      >
-                        {pairingCode}
-                      </code>
-                    ),
-                  },
-                  { label: "Network", value: SOURCE_CLASS_LABELS[ticket.sourceClass] },
-                  { label: "Expires", value: new Date(ticket.expiresAt).toLocaleTimeString() },
-                ]}
-              />
-              <p className="settings-section-line">
-                Octant's phone and desktop apps can't read pairing codes yet. Until they can, pair
-                them with a listener that uses a Tailscale certificate or your own.
-              </p>
-            </div>
-          ) : (
-            <SettingsState kind="empty">That pairing code expired. Create a new one.</SettingsState>
-          )
+        {mintedCode !== undefined && browserCannotVerify ? (
+          <div className="settings-panel__stack">
+            <PairingCodeQr code={mintedCode.code} />
+            <SettingsFactList
+              facts={[
+                {
+                  label: "Code",
+                  value: (
+                    <code aria-label="Pairing code" className="oct-meta--mono remote-pairing-code">
+                      {mintedCode.code}
+                    </code>
+                  ),
+                },
+                { label: "Network", value: SOURCE_CLASS_LABELS[mintedCode.sourceClass] },
+                { label: "Expires", value: new Date(mintedCode.expiresAt).toLocaleTimeString() },
+              ]}
+            />
+            <p className="settings-section-line">
+              Octant's phone and desktop apps can't read pairing codes yet. Until they can, pair
+              them with a listener that uses a Tailscale certificate or your own.
+            </p>
+          </div>
+        ) : pairingCodeExpired && browserCannotVerify ? (
+          <SettingsState kind="empty">That pairing code expired. Create a new one.</SettingsState>
         ) : null}
         {ticket !== undefined &&
-        pairingCode === undefined &&
         !browserCannotVerify &&
         status?.origin !== null &&
         status?.origin !== undefined ? (
@@ -782,6 +839,18 @@ export function RemoteAccessSettingsSection({ bridge, now }: RemoteAccessSetting
       </SettingsPanel>
     </section>
   );
+}
+
+/** How often a shown pairing code re-reads the listener it names. */
+const PAIRING_CODE_STATUS_REFRESH_MS = 5_000;
+
+interface MintedPairingCode {
+  readonly code: string;
+  /** Epoch milliseconds. */
+  readonly expiresAt: number;
+  readonly sourceClass: RemotePairingTicketSourceClass;
+  readonly origin: string;
+  readonly pin: string;
 }
 
 interface PairingCodeListener {

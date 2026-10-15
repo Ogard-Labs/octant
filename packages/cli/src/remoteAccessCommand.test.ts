@@ -272,6 +272,16 @@ describe("runRemoteAccessCliCommand", () => {
     expect(test.err.join("")).toContain("listener's own network (tailscale)");
   });
 
+  it("mints no ticket for a listener a pairing code cannot name", async () => {
+    const test = fixture(() => ({
+      status: 200,
+      body: { status: { ...SELF_MADE_STATUS, tlsPin: `sha512-${"Q".repeat(86)}` } },
+    }));
+    expect(await test.run({ action: "pair" })).toBe(1);
+    expect(test.sent).toHaveLength(1);
+    expect(test.err.join("")).toContain("needs a newer version of Octant");
+  });
+
   it("mints nothing when the listener status cannot be read", async () => {
     const test = fixture(() => ({
       status: 503,

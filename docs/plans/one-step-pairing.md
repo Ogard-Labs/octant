@@ -72,7 +72,18 @@ anything.
   The only exception is a rotation window the host announced over a proven
   session (below). Validation is replaced for a pinned origin, never turned
   off.
-  - **Phone.** Requests to a pinned origin go through a small in-tree native
+  - **Resolve before the first request.** The code reader judges a name by
+    its spelling, so any `*.ts.net` name passes it, including a public
+    Tailscale Funnel name. Before its first request to a code's origin, a
+    client resolves the name and refuses unless the address it will connect
+    to classifies as private LAN or Tailscale (`100.64.0.0/10` or
+    `fd7a:115c:a1e0::/48`), and it checks the connected peer address the same
+    way. The reader keeps accepting names, because a self-made certificate
+    may name a DNS name.
+  - **Phone.** Before the phone reuses `readPairingCode`, its tests run on
+    the phone's JavaScript engine, whose built-in `URL` is not fully
+    standard; the reader's origin check leans on `URL.origin`.
+  - **Phone transport.** Requests to a pinned origin go through a small in-tree native
     module that checks the pins in the platform's TLS trust callback on iOS
     and Android; the app's ordinary fetch is not used for those origins. It
     must work under the platform's transport security rules without an

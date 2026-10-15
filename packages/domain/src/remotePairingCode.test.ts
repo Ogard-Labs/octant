@@ -4,6 +4,7 @@ import {
   PAIRING_CODE_PREFIX,
   PAIRING_CODE_REFUSAL_COPY,
   readPairingCode,
+  refusePairingCodeListener,
   type PairingCodeContents,
 } from "./remotePairingCode";
 
@@ -165,5 +166,22 @@ describe("the app pairing code", () => {
         reason: "damaged",
       });
     }
+  });
+
+  it("judges a listener's origin and pin on their own, before any ticket exists", () => {
+    expect(
+      refusePairingCodeListener({ origin: contents.origin, pin: contents.pin }),
+    ).toBeUndefined();
+    expect(
+      refusePairingCodeListener({ origin: contents.origin, pin: `sha512-${"Q".repeat(86)}` }),
+    ).toBe("newer-version");
+    expect(refusePairingCodeListener({ origin: "https://8.8.8.8:8443", pin: contents.pin })).toBe(
+      "not-private",
+    );
+    // A name is judged by its spelling only: any `.ts.net` name passes, though
+    // a public one exists. A client must resolve it and check the peer address.
+    expect(
+      refusePairingCodeListener({ origin: "https://anything.ts.net", pin: contents.pin }),
+    ).toBeUndefined();
   });
 });

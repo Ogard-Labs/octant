@@ -435,19 +435,42 @@ describe("RemoteAccessSettingsSection", () => {
     expect(screen.getByText(/can't read pairing codes yet/)).toBeInTheDocument();
   });
 
-  it("drops an expired pairing code and the code of a listener that moved", async () => {
+  it("drops a pairing code from the page when its ticket expires", async () => {
     const user = userEvent.setup();
-    let now = Date.parse("2026-08-01T10:01:00.000Z");
     const host = bridge(selfMade, {
       mintRemotePairingTicket: vi.fn(async (sourceClass) => ({
         ticketId,
         ticketProof: canonicalProof,
-        expiresAt: Date.parse("2026-08-01T10:05:00.000Z"),
+        expiresAt: Date.now() + 200,
+        sourceClass,
+      })),
+    });
+    render(<RemoteAccessSettingsSection bridge={host} />);
+    await user.click(await screen.findByRole("button", { name: "Create pairing code" }));
+    expect(await screen.findByLabelText("Pairing code")).toBeInTheDocument();
+
+    expect(
+      await screen.findByText("That pairing code expired. Create a new one."),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Pairing code")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "Pairing code QR" })).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(canonicalProof);
+  });
+
+  it("drops a pairing code when the listener moves here or behind the page", async () => {
+    const user = userEvent.setup();
+    let current = selfMade;
+    const host = bridge(selfMade, {
+      getPrivateListenerStatus: vi.fn(async () => current),
+      mintRemotePairingTicket: vi.fn(async (sourceClass) => ({
+        ticketId,
+        ticketProof: canonicalProof,
+        expiresAt: Date.now() + 300_000,
         sourceClass,
       })),
       restartPrivateListener: vi.fn(async () => selfMade),
     });
-    const view = render(<RemoteAccessSettingsSection bridge={host} now={() => now} />);
+    render(<RemoteAccessSettingsSection bridge={host} />);
     await user.click(await screen.findByRole("button", { name: "Create pairing code" }));
     expect(await screen.findByLabelText("Pairing code")).toBeInTheDocument();
 
@@ -464,13 +487,27 @@ describe("RemoteAccessSettingsSection", () => {
     await waitFor(() => expect(host.restartPrivateListener).toHaveBeenCalled());
     await waitFor(() => expect(screen.queryByLabelText("Pairing code")).not.toBeInTheDocument());
 
+    // `octant listener` replaced the key while the page was open; coming back
+    // to the window re-reads the status and drops the code naming the old pin.
     await user.click(screen.getByRole("button", { name: "Create pairing code" }));
     expect(await screen.findByLabelText("Pairing code")).toBeInTheDocument();
-    now = Date.parse("2026-08-01T10:05:00.000Z");
-    view.rerender(<RemoteAccessSettingsSection bridge={host} now={() => now} />);
-    expect(screen.queryByLabelText("Pairing code")).not.toBeInTheDocument();
-    expect(screen.queryByRole("img", { name: "Pairing code QR" })).not.toBeInTheDocument();
-    expect(screen.getByText("That pairing code expired. Create a new one.")).toBeInTheDocument();
+    current = { ...selfMade, tlsPin: `sha256-${"R".repeat(42)}A` };
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(screen.queryByLabelText("Pairing code")).not.toBeInTheDocument());
+    expect(
+      screen.getByText(/The listener changed, so that pairing code was dropped/),
+    ).toBeInTheDocument();
+  });
+
+  it("mints no ticket for a listener a pairing code cannot name", async () => {
+    const user = userEvent.setup();
+    const host = bridge({ ...selfMade, tlsPin: `sha512-${"Q".repeat(86)}` });
+    render(<RemoteAccessSettingsSection bridge={host} />);
+    await user.click(await screen.findByRole("button", { name: "Create pairing code" }));
+    expect(
+      await screen.findByText("This pairing code needs a newer version of Octant."),
+    ).toBeInTheDocument();
+    expect(host.mintRemotePairingTicket).not.toHaveBeenCalled();
   });
 
   it("refuses to show a code the host's ticket could not make, with its copy", async () => {
