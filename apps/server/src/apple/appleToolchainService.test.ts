@@ -29,6 +29,7 @@ type ServiceConstructor = new (options: Record<string, unknown>) => {
   ): Promise<any>;
   cancel(request: ToolActionCancellation, context: ExecutionContext): Promise<boolean>;
   snapshot(context: ExecutionContext): any;
+  noteOrientation(simulatorId: never, orientation: "portrait" | "landscape"): void;
   requestPaneOpen(
     context: ExecutionContext,
     simulatorId: AppleSimulatorRecord["simulatorId"],
@@ -2186,15 +2187,16 @@ describe("AppleToolchainService Rotate", () => {
 
   function rotateService(reply: SimulatorDeviceInputResult = { kind: "delivered" }) {
     const deliver = vi.fn(async (_input: SimulatorDeviceInput, _signal?: AbortSignal) => reply);
+    const execute = discoveryExecutor();
     const service = new AppleToolchainService({
-      execute: discoveryExecutor(),
+      execute,
       injectSimulatorInput: simulatorInputThroughDesktop({ deliver }),
       writeArtifact: async () => undefined,
       realpath: async (path: string) => path,
       now: () => "2026-10-14T20:00:00.000Z",
       newId: () => "30000000-0000-4000-8000-000000000012",
     });
-    return { service, deliver };
+    return { service, deliver, execute };
   }
 
   function rotateRequest(overrides: Partial<AppleSimulatorRequest> = {}) {
@@ -2224,6 +2226,60 @@ describe("AppleToolchainService Rotate", () => {
         orientation: "landscape",
       }),
     ]);
+  });
+
+  it("reports which way a rotated Simulator sits until it is shut down", async () => {
+    const { service, execute } = rotateService({ kind: "delivered", orientation: "landscape" });
+    await service.discover(discoveryRequest, context);
+    expect(service.snapshot(context).orientations).toEqual([]);
+
+    await service.execute(rotateRequest(), context);
+    expect(service.snapshot(context).orientations).toEqual([
+      { simulatorId: ids.simulator, orientation: "landscape" },
+    ]);
+
+    execute.mockResolvedValue(processResult("ok\n"));
+    await service.execute(
+      simulatorRequest({ kind: "shutdown", approval: buildRequest().approval }),
+      context,
+    );
+    expect(service.snapshot(context).orientations).toEqual([]);
+  });
+
+  it("reports a Simulator already turned when its live view began, without a rotate", async () => {
+    const { service } = rotateService();
+    await service.discover(discoveryRequest, context);
+
+    service.noteOrientation(ids.simulator as never, "portrait");
+    expect(service.snapshot(context).orientations).toEqual([]);
+
+    service.noteOrientation(ids.simulator as never, "landscape");
+    expect(service.snapshot(context).orientations).toEqual([
+      { simulatorId: ids.simulator, orientation: "landscape" },
+    ]);
+
+    service.noteOrientation(ids.simulator as never, "portrait");
+    expect(service.snapshot(context).orientations).toEqual([
+      { simulatorId: ids.simulator, orientation: "portrait" },
+    ]);
+  });
+
+  it("leaves out the orientation of a Simulator that is no longer discovered", async () => {
+    const { service, execute } = rotateService({ kind: "delivered", orientation: "landscape" });
+    await service.discover(discoveryRequest, context);
+    await service.execute(rotateRequest(), context);
+    expect(service.snapshot(context).orientations).toHaveLength(1);
+
+    // The Simulator was deleted: the next discovery lists none.
+    const listing = execute.getMockImplementation()!;
+    execute.mockImplementation(async (input) =>
+      input.argv.join(" ") === "xcrun simctl list devices available --json"
+        ? processResult(JSON.stringify({ devices: {} }))
+        : listing(input),
+    );
+    await service.discover(discoveryRequest, context);
+    expect(service.snapshot(context).simulators).toEqual([]);
+    expect(service.snapshot(context).orientations).toEqual([]);
   });
 
   it("reports a rotation the helper refused as failed and says why", async () => {

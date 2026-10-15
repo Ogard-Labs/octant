@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { failureMessage } from "../lib/failureMessage";
 import { SettingRow, SettingsSection, SettingsState } from "../settings/primitives";
 import type { PairedComputer, PairedComputersBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantField, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 
@@ -25,6 +26,8 @@ export function PairedComputersSettingsSection({
     readonly kind: "success" | "error";
     readonly text: string;
   }>();
+  const [forgetting, setForgetting] = useState<PairedComputer>();
+  const forgetOpener = useRef<HTMLElement | null>(null);
   const [computers, setComputers] = useState<ReadonlyArray<PairedComputer>>([]);
 
   const refresh = useCallback(async () => {
@@ -80,6 +83,22 @@ export function PairedComputersSettingsSection({
     }
   };
 
+  const forget = async (computer: PairedComputer) => {
+    setForgetting(undefined);
+    setMessage(undefined);
+    try {
+      const outcome = await bridge.forgetPairedComputer(computer.origin);
+      if (outcome.status === "refused") setMessage({ kind: "error", text: outcome.message });
+      else setMessage({ kind: "success", text: `Forgot ${computer.displayName}.` });
+    } catch (error) {
+      setMessage({
+        kind: "error",
+        text: failureMessage(error, "Octant couldn't forget that computer."),
+      });
+    }
+    await refresh();
+  };
+
   return (
     <SettingsSection title="Other computers">
       <div className="setgroup">
@@ -132,10 +151,38 @@ export function PairedComputersSettingsSection({
               >
                 Open
               </OctantButton>
+              <OctantButton
+                aria-haspopup="dialog"
+                aria-label={`Forget ${computer.displayName}`}
+                onClick={(event) => {
+                  forgetOpener.current = event.currentTarget;
+                  setForgetting(computer);
+                }}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                Forget…
+              </OctantButton>
             </div>
           </SettingRow>
         ))}
       </div>
+      {forgetting === undefined ? null : (
+        <OctantConfirmDialog
+          cancelLabel="Keep it"
+          confirmLabel="Forget computer"
+          destructive
+          onCancel={() => setForgetting(undefined)}
+          onConfirm={() => void forget(forgetting)}
+          restoreFocus={forgetOpener}
+          title={`Forget ${forgetting.displayName}?`}
+        >
+          Octant closes its windows, removes its saved key, and clears the sign-in and data its page
+          stored here. To pair again, make a new pairing code on that computer. That computer keeps
+          listing this device until you revoke it there.
+        </OctantConfirmDialog>
+      )}
       {message === undefined ? null : (
         <SettingsState kind={message.kind}>{message.text}</SettingsState>
       )}

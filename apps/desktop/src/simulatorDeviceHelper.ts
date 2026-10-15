@@ -53,6 +53,8 @@ export type DeviceHelperReply =
       readonly status: "delivered";
       /** The device's screen in pixels, when the helper reported one. */
       readonly screen?: { readonly width: number; readonly height: number };
+      /** After a rotate: which way the Simulator sits now. */
+      readonly orientation?: "portrait" | "landscape";
     }
   /** The helper answered and refused: a bad request, or a Simulator it cannot reach. */
   | { readonly status: "refused"; readonly code: string; readonly message: string }
@@ -73,7 +75,12 @@ export interface DeviceViewer {
 }
 
 export type DeviceWatch =
-  | { readonly status: "watching"; readonly stop: () => void }
+  | {
+      readonly status: "watching";
+      readonly stop: () => void;
+      /** Which way the Simulator sat when the watch began, when the helper read it. */
+      readonly orientation?: "portrait" | "landscape";
+    }
   | { readonly status: "refused"; readonly code: string; readonly message: string }
   | { readonly status: "unavailable"; readonly message: string };
 

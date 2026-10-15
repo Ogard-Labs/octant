@@ -1,3 +1,4 @@
+import { approvalOutsideContentLines } from "@octant/domain";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
@@ -239,6 +240,27 @@ export function approvalMayBeRemembered(
   approval: Pick<NativeHarnessApproval, "source" | "singleUse">,
 ): boolean {
   return approval.source === undefined && approval.singleUse !== true;
+}
+
+/**
+ * The lines an approval prints ahead of its question when the thread took in
+ * outside content: why it asks and each source that marked the thread. Empty
+ * for an approval on a clean thread.
+ */
+export function approvalOutsideContentText(
+  approval: Pick<NativeHarnessApproval, "outsideContent">,
+): ReadonlyArray<string> {
+  if (approval.outsideContent === undefined) return [];
+  const { reason, rows, more } = approvalOutsideContentLines(approval.outsideContent, (at) => {
+    if (at === undefined) return undefined;
+    const parsed = new Date(at);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toLocaleString();
+  });
+  return [
+    reason,
+    ...rows.map((row) => `  - ${row.name}: ${row.reads}`),
+    ...(more ? [`  ${more}`] : []),
+  ];
 }
 
 export async function decideAgentApproval(

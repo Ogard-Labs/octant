@@ -51,6 +51,9 @@ export function DeviceStage(props: {
         className="device-body"
         data-dimmed={props.dimmed === true ? "true" : undefined}
         data-ghost={props.ghost === true ? "true" : undefined}
+        data-orientation={
+          screen.kind === "stream" && screen.turned === true ? "landscape" : undefined
+        }
         data-platform={props.platform}
         ref={bodyRef}
       >
@@ -66,6 +69,7 @@ export function DeviceStage(props: {
             onPress={press}
             pictureLabel={`${props.name} live screen`}
             screen={screen.size}
+            turned={screen.turned === true}
           />
         ) : screen.kind === "still" ? (
           <StillScreen

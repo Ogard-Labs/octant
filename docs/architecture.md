@@ -1787,10 +1787,14 @@ flowchart LR
   time, at most eight, and the total number of sources. The host reads them
   from the ingestion projection when it asks; no client supplies them, and
   they hold labels and times only, never content or a content reference. The
-  web prompt says the thread took in outside content, so the call is
-  approved once, and lists them in the words the Clear review uses, ahead of
-  the answer controls; the mobile and CLI approval surfaces do not show them
-  yet. A
+  web, phone, and terminal prompts say the thread took in outside content,
+  so the call is approved once, and list them in the words the Clear review
+  uses (one definition in `@octant/domain`), ahead of the answer controls.
+  The full-screen terminal panel cannot scroll, so it runs the source names
+  and counts together on a few wrapped lines and leaves times to the plain
+  prompt and `--json`.
+  The collapsed Computer use strip never offers Approve for a marked
+  approval: it offers a review that opens the full prompt. A
   Computer use approval the host gates as marked but whose sources it cannot
   read carries an empty list, so it still says so. A child run's approval
   names no sources: it is never remembered in the first place.
@@ -2435,6 +2439,20 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   or given an empty prompt, records unreachable providers and unexpected
   errors as sanitized failures, and returns only bytes the host's media-type
   check accepted.
+  The OpenAI, Gemini, Black Forest Labs, and Ideogram drivers ship in-tree but
+  import only `@octant/contracts` and the image seam, as a third-party image
+  plugin would; a test fails on any other import. They declare their hosts:
+  `api.openai.com`, `generativelanguage.googleapis.com`, `*.bfl.ai` (its
+  polling URLs name regional subdomains), and `api.ideogram.ai`. The OpenAI
+  and Gemini endpoints stay fixed, with no base URL. The Black Forest Labs and
+  Ideogram profiles take an optional
+  base URL (HTTPS, or HTTP on loopback), absent meaning the provider's own
+  endpoint; setting, moving, or clearing it deletes the stored key first, as
+  for any endpoint. The signed-URL exception stays bound to the provider's
+  own result: the image is fetched exactly at the URL the provider's
+  authenticated response named, without the credential, and a configured
+  base URL neither rewrites that URL to the base URL's host nor approves
+  any other URL on that host.
   The **Image generator** surface (profile menu, host-wide `image-library`
   scope; see
   [decisions/0081-image-generation-is-its-own-surface.md](decisions/0081-image-generation-is-its-own-surface.md);
@@ -4105,7 +4123,8 @@ the `proxied` level in the Seatbelt builder (`process/seatbeltProfile.ts`) and
 the bubblewrap capsule with its forwarder (`process/linuxConfinement.ts`,
 `process/proxiedNetworkEgress.ts`), chosen per command by the harness
 composition (`nativeHarnessComposition.ts`) and launched by
-`nativeHarnessShell.ts`.** What is not yet verified or wired is listed under
+`nativeHarnessShell.ts`, and the tainted thread's command confirmation that
+grants `call` rules (`nativeHarnessApprovals.ts`).** What is not yet verified or wired is listed under
 **Phase 4 settled** below. The design's approval replaces the "no local egress
 proxy in this release" decision in the
 [threat model](security/security-architecture-threat-model.md#approved-decisions-henrik-2026-08-12)
@@ -4480,12 +4499,32 @@ where it was or narrows it:
   Linux host with `/usr/bin/bwrap`. The forwarder's relay and exit behaviour
   run on every host as plain Node. The bubblewrap arguments are checked as
   strings.
-- _What is not wired._ The tainted thread's single-use confirmation does not
-  yet list the thread's and Project's hosts, so no `call` rule can be granted
-  and a tainted thread's commands reach no host until a person clears the
-  thread's outside-content mark. A tainted proposal shows on the card and
-  cannot be granted there. The reviewer that may answer a per-call
-  `network-access` prompt is not built. Both fail closed.
+- _The tainted thread's command confirmation._ When a lead's `bash` or
+  `goal-check` on a tainted Code thread will run on `proxied`, its single-use
+  approval lists the hosts the thread's live thread and Project rules name,
+  preselected, then the thread's open proposals, unticked, at most 192 entries
+  and none of them a `call` rule; an aggregate whose revocations cannot be read
+  offers neither its rules nor, for the thread's, its proposals, as nothing can
+  be granted there. The person answers with the listed hosts
+  they keep; the host canonicalizes each like a rule host and refuses the
+  whole answer (`host-not-offered`) when one was not listed, or when hosts
+  come with "always" or a denial. Approving with no hosts, as a surface that
+  shows none does, lets the command reach none. The answering principal comes
+  from the authenticated request. The confirmed hosts are held under the
+  call's own id until its command starts; the launch's start is journaled
+  first, then they are granted as `call` rules naming that launch and the
+  approval, before the command runs. A grant that cannot be appended, or would
+  pass the 64-rule limit, ends the launch and the command reports
+  `unavailable`. The rules retire when the launch is summarized, so the next
+  command lists the same hosts afresh and reaches nothing it was not given. A
+  confirmation whose command never runs on `proxied` (the posture changed
+  meanwhile, or a check stopped first) is dropped and grants nothing.
+- _What is not wired._ A child's command on a tainted parent asks on the
+  parent's thread without a host list, so it reaches no host. A tainted
+  proposal shows on the card and cannot be granted there; the command
+  confirmation is where it is granted. The CLI approves without hosts. The
+  reviewer that may answer a per-call `network-access` prompt is not built.
+  Each fails closed.
 
 **Failure modes.** Each fails closed:
 
@@ -5022,7 +5061,7 @@ feature is already an independently packaged plugin:
 | Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Only presentation and optional adapters are extraction candidates; core capability, lifecycle, and security remain app-managed |
 | Marketplace and plugin registry                                       | Stay in the host because they admit and activate other components                                                              |
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned           |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | The provider-sdk image seam and image-driver admission exist; adapters move behind them, image jobs stay host-owned            |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                          |
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -6159,7 +6198,12 @@ mechanisms are:
       first resolves and judges its address and checks its key over the Node
       transport; Chromium then resolves the name itself, so the pin, not the
       address, is what that window relies on. Settings → Remote access lists
-      paired computers with an Open action.
+      paired computers with Open and Forget actions. Forget asks first, then
+      main closes that origin's windows, drops its pin (so nothing trusts that
+      key), and clears the origin's page storage and the session's HTTP and
+      authentication caches through one helper, `clearRemotePageStorage`, that
+      every unpair path calls. It ends only this app's side: the other
+      computer keeps listing the device until it is revoked there.
 - **Adding a computer in one step.** Partly built: the host certificate,
   pairing code, client trust rule, and desktop pinning above, and the
   one-line start. The phone's pinned transport and scanner, and key rotation,

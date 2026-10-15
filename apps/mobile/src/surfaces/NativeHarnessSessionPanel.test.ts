@@ -56,6 +56,21 @@ function sessionView(approval: {
   readonly status: "pending";
   readonly askedAt: string;
   readonly singleUse?: boolean;
+  readonly commandHosts?: ReadonlyArray<{
+    readonly host: string;
+    readonly port: number;
+    readonly from: "thread-rule" | "project-rule" | "proposal";
+    readonly preselected: boolean;
+  }>;
+  readonly outsideContent?: {
+    readonly sourceCount: number;
+    readonly sources: ReadonlyArray<{
+      readonly sourceLabel: string;
+      readonly ingestionCount: number;
+      readonly firstIngestedAt: string;
+      readonly lastIngestedAt: string;
+    }>;
+  };
   readonly source?: {
     readonly runId: string;
     readonly providerInstanceId: string;
@@ -97,7 +112,10 @@ function approvalChoices(container: ParentNode): readonly string[] {
     .filter((label) => label === "Allow" || label === "Allow this session" || label === "Deny");
 }
 
-async function renderPanel(view: NativeHarnessSessionView): Promise<HTMLElement> {
+async function renderPanel(
+  view: NativeHarnessSessionView,
+  panelTransport: MobileRemoteTransport = transport,
+): Promise<HTMLElement> {
   vi.mocked(loadMobileNativeHarnessSession).mockResolvedValue(view);
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -109,7 +127,7 @@ async function renderPanel(view: NativeHarnessSessionView): Promise<HTMLElement>
         preference: "light",
         surfaceStyle: "flat",
         children: createElement(NativeHarnessSessionPanel, {
-          transport,
+          transport: panelTransport,
           threadId,
           refreshIntervalMs: 60_000,
         }),
@@ -174,5 +192,106 @@ describe("phone harness approvals", () => {
 
     expect(approvalChoices(container)).toEqual(["Allow", "Deny"]);
     expect(container.textContent).toContain("Needs your say-so (shell-commands).");
+  });
+  it("lists a marked thread's command hosts and sends only the ones left selected", async () => {
+    const bodies: unknown[] = [];
+    const recording: MobileRemoteTransport = {
+      hostId: transport.hostId,
+      authenticatedFetch: async (request) => {
+        bodies.push(JSON.parse(String(request.body)));
+        return new Response(JSON.stringify({ kind: "approval-refused" }), { status: 409 });
+      },
+    };
+    const container = await renderPanel(
+      sessionView({
+        id: "00000000-0000-4000-8000-000000000066",
+        toolName: "bash",
+        summary: "bash: npm install",
+        approvalClass: "shell-commands",
+        status: "pending",
+        askedAt: "2026-09-05T12:06:00.000Z",
+        singleUse: true,
+        commandHosts: [
+          { host: "registry.npmjs.org", port: 443, from: "thread-rule", preselected: true },
+          { host: "mirror.example.com", port: 8080, from: "project-rule", preselected: true },
+          { host: "cdn.example.com", port: 443, from: "proposal", preselected: false },
+        ],
+      }),
+      recording,
+    );
+    const hosts = container.querySelector('[data-testid="mobile-native-harness-command-hosts"]');
+    const chip = (label: string) =>
+      [...container.querySelectorAll<HTMLElement>('[role="button"]')].find(
+        (node) => node.textContent?.trim() === label,
+      );
+    expect(hosts?.textContent).toContain("mirror.example.com:8080");
+    await act(async () => chip("mirror.example.com:8080")?.click());
+    await act(async () => chip("cdn.example.com")?.click());
+    await act(async () => chip("Allow")?.click());
+
+    expect(bodies).toEqual([
+      {
+        approvalId: "00000000-0000-4000-8000-000000000066",
+        decision: "approve",
+        commandHosts: [
+          { host: "registry.npmjs.org", port: 443 },
+          { host: "cdn.example.com", port: 443 },
+        ],
+      },
+    ]);
+  });
+
+  it("shows why a marked thread asks and what marked it before the choices", async () => {
+    const container = await renderPanel(
+      sessionView({
+        id: "00000000-0000-4000-8000-000000000082",
+        toolName: "bash",
+        summary: "bash: bun run test",
+        approvalClass: "shell-commands",
+        singleUse: true,
+        status: "pending",
+        askedAt: "2026-09-05T12:06:00.000Z",
+        outsideContent: {
+          sourceCount: 3,
+          sources: [
+            {
+              sourceLabel: "web-fetch",
+              ingestionCount: 2,
+              firstIngestedAt: "2026-09-05T11:00:00.000Z",
+              lastIngestedAt: "2026-09-05T11:30:00.000Z",
+            },
+          ],
+        },
+      }),
+    );
+
+    const note = container.querySelector(
+      '[data-testid="mobile-native-harness-approval-outside-content"]',
+    );
+    expect(note?.textContent).toContain("This thread took in outside content");
+    expect(note?.textContent).toContain("Web pages · Read 2 times");
+    expect(note?.textContent).toContain("and 2 more sources");
+    const choice = [...container.querySelectorAll('[role="button"]')].find(
+      (node) => node.textContent?.trim() === "Allow",
+    );
+    expect(
+      note !== null &&
+        choice !== undefined &&
+        (note.compareDocumentPosition(choice) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    ).toBe(true);
+  });
+
+  it("shows no outside content note on a clean thread", async () => {
+    const container = await renderPanel(
+      sessionView({
+        id: "00000000-0000-4000-8000-000000000083",
+        toolName: "bash",
+        summary: "bash: bun run test",
+        approvalClass: "shell-commands",
+        status: "pending",
+        askedAt: "2026-09-05T12:06:00.000Z",
+      }),
+    );
+    expect(container.textContent).not.toContain("outside content");
   });
 });
