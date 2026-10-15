@@ -227,6 +227,8 @@ export interface PrivateListenerPublicStatus {
   readonly certificateReady: boolean;
   /** `self-made`: no browser can verify this listener, so Settings offers no browser link. */
   readonly certificateSource: "self-made" | "pasted" | null;
+  /** The self-made certificate's key pin, which a pairing code carries; null otherwise. */
+  readonly tlsPin: string | null;
   readonly errorCode?: string;
 }
 

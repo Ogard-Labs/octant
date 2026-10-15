@@ -93,6 +93,7 @@ describe("remote server grant contracts", () => {
           "not-octant-owned",
           "not-in-thread",
           "open-denied",
+          "grant-limit",
         ] as const
       ).map((reason) => ({
         kind: "remote-server-grant-refused",

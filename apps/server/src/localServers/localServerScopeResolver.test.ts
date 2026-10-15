@@ -29,6 +29,7 @@ function resolver(
     readonly root?: string | undefined;
     readonly projectType?: "code" | "work";
     readonly ownedPids?: ReadonlySet<number>;
+    readonly checkout?: CodeCheckoutIdentity;
   } = {},
 ) {
   return createCodeThreadLocalServerScopeResolver({
@@ -50,7 +51,7 @@ function resolver(
     } as never,
     source: {
       readThread: () => ("thread" in overrides ? overrides.thread : thread),
-      readCheckout: () => checkout,
+      readCheckout: () => overrides.checkout ?? checkout,
       resolveCheckoutRoot: async () => ("root" in overrides ? overrides.root : "/repo"),
       ownedPids: () => overrides.ownedPids ?? new Set<number>(),
     },
@@ -71,7 +72,28 @@ describe("code thread local server scope", () => {
       userProjectRoots: ["/repo", "/other"],
       posture: "plan",
       ownedPids: new Set([4213]),
+      checkoutIsOwnWorktree: false,
     });
+  });
+
+  it("names the checkout the thread's own only for a managed worktree outside the Project folder", async () => {
+    const worktree = {
+      id: checkoutId,
+      kind: "managed-worktree",
+    } as unknown as CodeCheckoutIdentity;
+    expect(
+      (
+        await resolver({ checkout: worktree, root: "/worktrees/a" }).resolve(
+          windowId,
+          threadId,
+          projectId,
+        )
+      )?.checkoutIsOwnWorktree,
+    ).toBe(true);
+    expect(
+      (await resolver({ checkout: worktree, root: "/repo" }).resolve(windowId, threadId, projectId))
+        ?.checkoutIsOwnWorktree,
+    ).toBe(false);
   });
 
   it("fails closed when the thread is missing or belongs to another Project", async () => {

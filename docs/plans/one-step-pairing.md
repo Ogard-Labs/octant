@@ -1,11 +1,13 @@
 # One-step pairing with a self-made listener certificate
 
-**Status: approved by the maintainer on 2026-10-14; slice 1 is built, the
-rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
+**Status: approved by the maintainer on 2026-10-14; slices 1 and 2 are built,
+the rest is not.** Nothing else here is in force. [Architecture](../architecture.md)
 holds only the rules that are true today, and each slice below moves its rules
 there when it lands; the host certificate's key, storage, renewal, pin format,
-and status fields are already there. Today the host can serve a certificate it
-makes itself, but no client pins it, so a client reaches only a listener that
+and status fields, and the pairing code's format, QR code, and reading rules,
+are already there. Today the host can serve a certificate it makes itself and
+show a pairing code that pins it, but no client reads the code or pins the
+key, so a client reaches only a listener that
 serves a certificate the person brings, and a second, always-on computer first
 needs a Tailscale certificate or the person's own certificate authority. This plan lets
 the host make its own certificate and has the pairing code carry a fingerprint
@@ -70,7 +72,18 @@ anything.
   The only exception is a rotation window the host announced over a proven
   session (below). Validation is replaced for a pinned origin, never turned
   off.
-  - **Phone.** Requests to a pinned origin go through a small in-tree native
+  - **Resolve before the first request.** The code reader judges a name by
+    its spelling, so any `*.ts.net` name passes it, including a public
+    Tailscale Funnel name. Before its first request to a code's origin, a
+    client resolves the name and refuses unless the address it will connect
+    to classifies as private LAN or Tailscale (`100.64.0.0/10` or
+    `fd7a:115c:a1e0::/48`), and it checks the connected peer address the same
+    way. The reader keeps accepting names, because a self-made certificate
+    may name a DNS name.
+  - **Phone.** Before the phone reuses `readPairingCode`, its tests run on
+    the phone's JavaScript engine, whose built-in `URL` is not fully
+    standard; the reader's origin check leans on `URL.origin`.
+  - **Phone transport.** Requests to a pinned origin go through a small in-tree native
     module that checks the pins in the platform's TLS trust callback on iOS
     and Android; the app's ordinary fetch is not used for those origins. It
     must work under the platform's transport security rules without an
@@ -251,10 +264,9 @@ and the plan shrinks accordingly.
    the key is absent from every administration response, status read,
    log line, journal event, and diagnostics export; a key file another
    user can read is refused; a restart and a renewal keep the pin.
-2. _Pairing code._ Building and parsing the code, Settings and `octant pair`
-   output, QR code, no human-entry code for a self-made listener (Settings
-   already offers it no browser link). Tests: the code round-trips; a code with a missing or
-   unknown pin is refused with its copy.
+2. _Pairing code._ **Built**; its rules are in Architecture. Building and
+   reading the code, Settings and `octant pair` output, the QR code, and no
+   browser link or bare ticket for a self-made listener.
 3. _Client pin rule._ The pin and trust mode in device-key metadata and the
    host registry, and a pinned transport port in the client runtime.
    Tests: a client refuses a host whose key does not match the pin before

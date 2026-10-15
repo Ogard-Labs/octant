@@ -87,6 +87,7 @@ export * from "./hostExportPolicy";
 export * from "./hostPolicy";
 export * from "./hostCreateSelectionPolicy";
 export * from "./remoteAccessPolicy";
+export * from "./remotePairingCode";
 export * from "./remoteClockRecoveryPolicy";
 export * from "./remoteCredentialPolicy";
 export * from "./remoteProtocolPolicy";

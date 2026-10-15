@@ -5688,17 +5688,55 @@ mechanisms are:
     PEM text and is not a pin. Only the loopback administration status
     carries the pin; `octant listener status` prints it.
   - **No client pins yet.** A self-made listener is served, but no Octant
-    client takes or checks a pin, and a client that relies on platform trust
-    refuses the certificate, so only a pasted certificate can be reached by
-    a client today. Settings still asks for a certificate and key, and
-    `octant listener`'s usage line still names them.
+    client reads a pairing code or takes or checks a pin, and a client that
+    relies on platform trust refuses the certificate, so only a pasted
+    certificate can be reached by a client today. Settings still asks for a
+    certificate and key, and `octant listener`'s usage line still names them.
   - **No browser link.** A browser decides whether to trust the listener
     before any Octant page loads and cannot check a certificate the host made
     itself, so Settings offers no browser pairing link for a self-made
     listener and says why; a browser pairs only with a pasted certificate.
-- **Adding a computer in one step.** Partly built: the host certificate above.
-  The pairing code that carries the pin, the client pin rule, and the rest are
-  planned in [the plan](plans/one-step-pairing.md).
+  - **Pairing code.** For a self-made listener that is up, Settings → Remote
+    access and `octant pair` offer an app pairing code instead:
+    `octant-pair-1.` followed by the unpadded base64url of the JSON object
+    `{"origin","ticketId","ticketProof","pin"}`, in that key order with no
+    whitespace, holding the listener's origin, a pairing ticket's id and
+    proof, and its `tlsPin`. It carries no key material, and it has no URL
+    scheme, so no operating system hands it to an app that registered one.
+    The ticket is an ordinary pairing ticket — five minutes, single use,
+    approved on the host — minted for the listener's own network class,
+    because the device claims it over the listener; `octant pair --source`
+    naming another class is refused, and a pasted-certificate listener keeps
+    the browser link and `octant pair`'s bare ticket. A listener whose origin
+    or pin no code can carry is refused before a ticket is minted. Settings
+    keeps a code only while its ticket is live and the listener it names is
+    unchanged: it drops the code when the ticket expires, when the listener
+    moves or turns off there, and when a status it re-reads on window focus
+    and every five seconds names another origin or pin, as after an
+    `octant listener` change.
+    Both show the same text as a QR code, dark on light with a four-module
+    quiet zone, drawn by `lean-qr` (MIT, no dependencies), the one QR encoder
+    Settings and the CLI share: an in-tree encoder would be more code than
+    the rest of one-step pairing. Settings shows the code only in the host's
+    own window, the only one with the loopback administration bridge.
+  - **Reading a code.** A reader accepts only the exact text the builder
+    makes, so one ticket has one code. A later code version or a pin
+    algorithm other than `sha256` is refused as needing a newer Octant,
+    never skipped. A missing, extra, or repeated field, a malformed id,
+    proof, or pin, a non-canonical base64url spelling, or an origin that is
+    not exactly an HTTPS origin is refused as damaged. An origin the listener
+    address classifier does not call private LAN or Tailscale is refused as
+    not private: for an address literal that means `10/8`, `172.16/12`,
+    `192.168/16`, `100.64/10`, `fc00::/7`, and `fe80::/10`, judged on the
+    parsed address, never its text prefix. A name is judged by its spelling
+    only, so the reader cannot prove a named origin is private: any
+    `*.ts.net` name passes, and public Tailscale Funnel names are `*.ts.net`
+    too. The plan's client rule closes that before a client sends anything.
+    The builder refuses the same contents, so the host never shows a code a
+    client would refuse.
+- **Adding a computer in one step.** Partly built: the host certificate and
+  pairing code above. The client pin rule, reading the code on each client,
+  and the rest are planned in [the plan](plans/one-step-pairing.md).
 - **Provider keys on a host without the desktop app.** _Designed, not yet
   built._ The desktop saves an endpoint's API key or bearer token over
   native IPC from its own renderer, so a browser client — local or paired —
@@ -5892,8 +5930,54 @@ mechanisms are:
   paired device may stop only a server Octant owns; the actor comes
   from the request's authenticated principal. A window reads the host it is
   connected to; All Hosts federation does not carry these rows.
-  Planned, not built: opening such a server live on a paired computer, in
-  [the plan](plans/open-a-dev-server-from-another-computer.md).
+  Opening such a server live on a paired computer is being built in
+  [the plan](plans/open-a-dev-server-from-another-computer.md); today the
+  host can grant it, and nothing forwards a request yet.
+- **Proxy sessions and server grants.** A paired device asks for a grant to
+  open one dev server from its own computer, under a proxy session that is
+  separate from its product session. The rules in force:
+  - **Proxy session.** Minted at `/api/remote/auth/server-proxy-session` from
+    the ordinary device challenge, signed over a proxy transcript that differs
+    from the product one only in its label, so neither signature becomes the
+    other kind of session. It lives in the host's memory only, travels in its
+    own `HttpOnly` cookie scoped to `/api/server-proxy/`, and reaches only the
+    routes under that prefix, which are their own route-policy surface: never
+    product routes, never forwarded or classified as product actions. A
+    product session never reaches a proxy route. Each request carries the same
+    signed envelope product routes use, re-reads the device, and spends a
+    nonce from the session's own store (16,384 in the retention window). The
+    proxy surface has its own concurrency: 64 on the listener and in the route
+    policy, 32 per device in the session store, answered 503 with a one-second
+    `Retry-After`, apart from the product budget, and a device decides one
+    grant request at a time. A device holds at most four proxy sessions (a
+    fifth ends its oldest) and the host 64. A session whose device is found
+    revoked, expired, or rotated, by a request or by the minute sweep, ends at
+    once, as a backstop to the credential hooks. A host restart ends every
+    proxy session.
+  - **Grant.** `POST /api/server-proxy/grants` names the listing its listener id
+    came from. The host gathers every fact itself: the principal, whether the
+    device can open the thread (an archived thread counts as unreadable), the
+    listener re-observed and re-classified by that id, its ownership and health,
+    the thread whose own worktree it runs in, and that thread's posture, and
+    decides with the grant policy in its fixed order. A device holds at most 8
+    open grants and the host 32, refused `grant-limit` after every other rule.
+    The thread is read again just before a grant is minted, and a thread or
+    server closed while the request was being decided mints nothing. The same
+    session opening the same server again gets the same grant. A
+    listing the host could not finish answers 503, never a refusal. A local
+    window reaching the route on the loopback listener is answered
+    `local-principal` and nothing about the server is read.
+  - **Record and revocation.** Each opening (actor: the device) and closing
+    (actor: the host) is journaled as `remote-server.grant-opened@1` and
+    `remote-server.grant-closed@1` with the grant, device, thread, and port,
+    never the endpoint, and an open-grant projection is rebuilt from them. A
+    starting host closes every grant still open as `proxy-session-ended`. A
+    grant closes when its proxy session ends or expires, when its device is
+    revoked, rotated, expired, or signs out (before that credential change
+    returns), when the listener is disabled, when its thread is archived or
+    purged, and when Octant stops its server. A thread purge erases the grant's
+    records with the thread's. Nothing erases a device's records, so a revoked
+    device's grant history stays with its revoke.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and

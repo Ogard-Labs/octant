@@ -407,6 +407,7 @@ describe("Project restart recovery", () => {
       { projection_name: "projects", reason: "unknown-event-name" },
       { projection_name: "providers", reason: "unknown-event-name" },
       { projection_name: "remote-access", reason: "unknown-event-name" },
+      { projection_name: "remote-server-grant", reason: "unknown-event-name" },
       { projection_name: "replica-artifacts", reason: "unknown-event-name" },
       { projection_name: "replica-membership", reason: "unknown-event-name" },
       { projection_name: "shell", reason: "unknown-event-name" },

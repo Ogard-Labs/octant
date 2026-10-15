@@ -194,7 +194,7 @@ export class Journal {
       LIMIT ?
     `);
     // `aggregate_version > 0` is always true; it is the condition of the
-    // (type, sequence) index (migration 78), which only a query that repeats
+    // (type, sequence) index (migration 79), which only a query that repeats
     // it may use. That index returns the type's rows already in journal order.
     this.#replayAggregateTypeRows = options.connection.prepare(`
       SELECT

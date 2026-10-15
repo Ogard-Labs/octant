@@ -4,6 +4,13 @@ import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
 const DEFAULT_BODY_BYTES = 1_048_576;
 const DEFAULT_RESPONSE_BYTES = 8 * 1_024 * 1_024;
 const DEFAULT_CONCURRENT_REQUESTS = 32;
+/**
+ * The proxy surface's own concurrency, counted apart from every other surface,
+ * so a dev page's requests cannot take the slots the Octant interface needs,
+ * nor the reverse.
+ */
+const DEFAULT_CONCURRENT_SERVER_PROXY_REQUESTS = 64;
+const SERVER_PROXY_PREFIX = "/api/server-proxy/";
 
 const REMOTE_REQUEST_HEADERS = [
   "accept",
@@ -141,6 +148,37 @@ const DEFAULT_PRE_AUTH_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 8_192,
     maxResponseBytes: 8_192,
+  },
+  {
+    id: "remote-auth-server-proxy-session",
+    match: { kind: "exact", path: "/api/remote/auth/server-proxy-session" },
+    surface: "pre-auth",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: ["content-type"],
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 8_192,
+    maxResponseBytes: 8_192,
+  },
+];
+
+/**
+ * Routes only a proxy session reaches. They are their own surface, never
+ * product routes: the product forward list, the product action classifier, and
+ * product dispatch never see them, and a product session cannot authenticate
+ * here.
+ */
+const DEFAULT_SERVER_PROXY_ROUTES: readonly RemoteRouteDefinition[] = [
+  {
+    id: "server-proxy-grants",
+    match: { kind: "exact", path: "/api/server-proxy/grants" },
+    surface: "server-proxy",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["application/json"],
+    maxBodyBytes: 4_096,
+    maxResponseBytes: 4_096,
   },
 ];
 
@@ -337,7 +375,7 @@ export function listDefaultRemoteAuthenticatedRoutes(): readonly RemoteRouteDefi
 }
 
 type RemoteHttpMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
-type RemoteRouteSurface = "pre-auth" | "authenticated-product";
+type RemoteRouteSurface = "pre-auth" | "authenticated-product" | "server-proxy";
 type RemoteRouteMatch =
   | { readonly kind: "exact"; readonly path: string }
   | { readonly kind: "prefix"; readonly path: string };
@@ -391,14 +429,17 @@ export interface RemoteRoutePolicyOptions {
   readonly origin: string;
   readonly preAuthRoutes?: readonly RemoteRouteDefinition[];
   readonly authenticatedRoutes?: readonly RemoteRouteDefinition[];
+  readonly serverProxyRoutes?: readonly RemoteRouteDefinition[];
   readonly maxBodyBytes?: number;
   readonly maxResponseBytes?: number;
   readonly maxConcurrentRequests?: number;
+  readonly maxConcurrentServerProxyRequests?: number;
 }
 
 export interface RemoteRoutePolicy {
   readonly inspect: (request: Request) => RemoteRouteDecision;
-  readonly acquire: () => (() => void) | undefined;
+  /** A concurrency slot on the proxy surface's budget, or on everything else's. */
+  readonly acquire: (surface?: "web-assets" | RemoteRouteSurface) => (() => void) | undefined;
   readonly maxBodyBytes: number;
   readonly maxResponseBytes: number;
 }
@@ -412,6 +453,12 @@ export interface RemoteRouteHandlerOptions {
     facts?: RemoteRouteFacts,
   ) => RemoteRouteResponse | Promise<RemoteRouteResponse>;
   readonly authenticatedProduct: (
+    request: Request,
+    route: RemoteRouteDefinition,
+    facts?: RemoteRouteFacts,
+  ) => RemoteRouteResponse | Promise<RemoteRouteResponse>;
+  /** Absent, every proxy route answers not found. */
+  readonly serverProxy?: (
     request: Request,
     route: RemoteRouteDefinition,
     facts?: RemoteRouteFacts,
@@ -446,7 +493,11 @@ export function createRemoteRoutePolicy(options: RemoteRoutePolicyOptions): Remo
     options.authenticatedRoutes ?? DEFAULT_AUTHENTICATED_ROUTES,
     "authenticated-product",
   );
-  const routes = [...preAuthRoutes, ...authenticatedRoutes];
+  const serverProxyRoutes = validateRoutes(
+    options.serverProxyRoutes ?? DEFAULT_SERVER_PROXY_ROUTES,
+    "server-proxy",
+  );
+  const routes = [...preAuthRoutes, ...authenticatedRoutes, ...serverProxyRoutes];
   const maxBodyBytes = boundedPositiveInteger(
     options.maxBodyBytes ?? DEFAULT_BODY_BYTES,
     "remote request body budget",
@@ -459,19 +510,26 @@ export function createRemoteRoutePolicy(options: RemoteRoutePolicyOptions): Remo
     options.maxConcurrentRequests ?? DEFAULT_CONCURRENT_REQUESTS,
     "remote concurrency budget",
   );
-  let activeRequests = 0;
+  const maxConcurrentServerProxyRequests = boundedPositiveInteger(
+    options.maxConcurrentServerProxyRequests ?? DEFAULT_CONCURRENT_SERVER_PROXY_REQUESTS,
+    "remote proxy concurrency budget",
+  );
+  const active = { other: 0, "server-proxy": 0 };
 
   return {
     maxBodyBytes,
     maxResponseBytes,
-    acquire: () => {
-      if (activeRequests >= maxConcurrentRequests) return undefined;
-      activeRequests += 1;
+    acquire: (surface) => {
+      const budget = surface === "server-proxy" ? "server-proxy" : "other";
+      const limit =
+        budget === "server-proxy" ? maxConcurrentServerProxyRequests : maxConcurrentRequests;
+      if (active[budget] >= limit) return undefined;
+      active[budget] += 1;
       let released = false;
       return () => {
         if (released) return;
         released = true;
-        activeRequests -= 1;
+        active[budget] -= 1;
       };
     },
     inspect: (request) =>
@@ -488,7 +546,7 @@ export function createRemoteRouteHandler(
     if (decision.kind === "preflight")
       return new Response(null, { status: 204, headers: decision.headers });
 
-    const release = options.policy.acquire();
+    const release = options.policy.acquire(decision.surface);
     if (release === undefined) {
       return rejectionResponse(429, decision.headers);
     }
@@ -509,6 +567,12 @@ export function createRemoteRouteHandler(
         response = await options.webAssets(prepared.request);
       } else if (decision.surface === "pre-auth") {
         response = await options.preAuth(
+          prepared.request,
+          decision.route as RemoteRouteDefinition,
+          facts,
+        );
+      } else if (decision.surface === "server-proxy") {
+        response = await options.serverProxy?.(
           prepared.request,
           decision.route as RemoteRouteDefinition,
           facts,
@@ -680,6 +744,7 @@ function validateRoutes(
       !validRouteBudget(route.maxBodyBytes) ||
       !validRouteBudget(route.maxResponseBytes) ||
       (surface === "authenticated-product" && !route.match.path.startsWith("/api/")) ||
+      (surface === "server-proxy") !== pathMatchesPrefix(route.match.path, SERVER_PROXY_PREFIX) ||
       isLocalOnlyMatch(route.match)
     ) {
       throw new Error("Remote route definition is invalid or local-only.");

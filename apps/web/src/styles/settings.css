@@ -2086,6 +2086,33 @@ html[data-octant-increased-contrast="true"]
   gap: 8px;
 }
 
+/* Large enough for a phone camera at arm's length; the module count grows with
+   the code, so the symbol scales into a fixed box instead of a fixed module. */
+.remote-pairing-qr {
+  display: block;
+  width: 240px;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+/* A scanner reads an inverted symbol unreliably, so the QR stays dark on light
+   in every theme. */
+/* ui-style-exception: fixed-scheme */
+.remote-pairing-qr__ground {
+  fill: #ffffff;
+}
+
+/* ui-style-exception: fixed-scheme */
+.remote-pairing-qr__modules {
+  fill: #000000;
+}
+
+.remote-pairing-code {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
 .host-settings__note {
   margin: 0;
   max-width: 560px;

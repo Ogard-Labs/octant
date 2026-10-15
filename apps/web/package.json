@@ -25,6 +25,7 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "katex": "0.18.9",
+    "lean-qr": "2.7.4",
     "lucide-react": "1.24.0",
     "monaco-editor": "catalog:",
     "react": "catalog:",

@@ -407,6 +407,21 @@ CREATE TABLE project_terminal_projection (
 ) STRICT;
 `;
 
+const REMOTE_SERVER_GRANT_PROJECTION_SQL = `
+CREATE TABLE remote_server_grant_projection (
+  grant_id TEXT PRIMARY KEY CHECK(length(grant_id) = 68),
+  aggregate_id TEXT NOT NULL CHECK(length(trim(aggregate_id)) > 0),
+  device_id TEXT NOT NULL CHECK(length(trim(device_id)) > 0),
+  thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+  port INTEGER NOT NULL CHECK(port > 0 AND port <= 65535),
+  state TEXT NOT NULL CHECK(state IN ('open', 'closed')),
+  close_reason TEXT CHECK(close_reason IS NULL OR length(trim(close_reason)) > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+) STRICT;
+CREATE INDEX remote_server_grant_open_idx
+  ON remote_server_grant_projection(state, last_sequence);
+`;
+
 const SPEND_CEILING_PROJECTION_SQL = `
 CREATE TABLE spend_ceiling_projection (
   scope_kind TEXT NOT NULL CHECK(scope_kind IN ('project', 'thread')),
@@ -2141,6 +2156,11 @@ ALTER TABLE code_runtime_projection
   },
   {
     version: 78,
+    name: "create_remote_server_grant_projection",
+    sql: REMOTE_SERVER_GRANT_PROJECTION_SQL,
+  },
+  {
+    version: 79,
     name: "index_event_journal_type_sequence",
     // Startup rebuilds each in-memory store from its own aggregate type in
     // journal order. The other indexes that lead with the type are not in

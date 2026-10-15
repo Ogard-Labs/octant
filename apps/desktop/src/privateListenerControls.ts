@@ -79,6 +79,8 @@ export interface PrivateListenerPublicStatus {
   readonly certificateFingerprint: string | null;
   readonly certificateReady: boolean;
   readonly certificateSource: PrivateListenerCertificateSource | null;
+  /** The self-made certificate's key pin; null for a pasted certificate. */
+  readonly tlsPin: string | null;
   readonly errorCode?: PrivateListenerControlFailureCode;
 }
 
@@ -90,6 +92,7 @@ export interface PrivateListenerRuntimeStartResult {
   readonly certificateFingerprint: string;
   readonly certificateReady: boolean;
   readonly certificateSource: PrivateListenerCertificateSource | null;
+  readonly tlsPin: string | null;
 }
 
 export interface PrivateListenerRuntimeStartInput {
@@ -214,6 +217,7 @@ export function createPrivateListenerControlService(
         certificateFingerprint: started.certificateFingerprint,
         certificateReady: started.certificateReady,
         certificateSource: started.certificateSource,
+        tlsPin: started.tlsPin,
       };
       return getStatus();
     } catch (error) {
@@ -281,6 +285,7 @@ function normalizeStatus(status: PrivateListenerPublicStatus): PrivateListenerPu
       certificateFingerprint: status.certificateFingerprint,
       certificateReady: status.certificateReady,
       certificateSource: status.certificateSource,
+      tlsPin: status.tlsPin,
     };
   }
   if (status.state === "failed") {
@@ -304,6 +309,7 @@ function disabledStatus(): PrivateListenerPublicStatus {
     certificateFingerprint: null,
     certificateReady: false,
     certificateSource: null,
+    tlsPin: null,
   };
 }
 
@@ -456,6 +462,7 @@ function requireReady(status: PrivateListenerPublicStatus): PrivateListenerRunti
     certificateFingerprint: status.certificateFingerprint,
     certificateReady: status.certificateReady,
     certificateSource: status.certificateSource,
+    tlsPin: status.tlsPin,
   };
 }
 
@@ -512,6 +519,7 @@ function decodeStatus(value: unknown): PrivateListenerPublicStatus {
     !nullableString(record.certificateFingerprint) ||
     typeof record.certificateReady !== "boolean" ||
     !certificateSourceOrAbsent(record.certificateSource) ||
+    !tlsPinOrAbsent(record.tlsPin) ||
     (record.errorCode !== undefined && !FAILURE_CODES.has(String(record.errorCode)))
   ) {
     throw new PrivateListenerControlFailure("unavailable");
@@ -529,6 +537,7 @@ function decodeStatus(value: unknown): PrivateListenerPublicStatus {
     // serve a pasted one.
     certificateSource: (record.certificateSource ??
       null) as PrivateListenerCertificateSource | null,
+    tlsPin: (record.tlsPin ?? null) as string | null,
     ...(record.errorCode === undefined
       ? {}
       : { errorCode: record.errorCode as PrivateListenerControlFailureCode }),
@@ -561,4 +570,13 @@ function nullableExposureClass(value: unknown): boolean {
 
 function certificateSourceOrAbsent(value: unknown): boolean {
   return value === undefined || value === null || value === "self-made" || value === "pasted";
+}
+
+/** `sha256-` and 32 bytes of unpadded base64url, the only pin a host makes today. */
+function tlsPinOrAbsent(value: unknown): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    (typeof value === "string" && /^sha256-[A-Za-z0-9_-]{43}$/.test(value))
+  );
 }
