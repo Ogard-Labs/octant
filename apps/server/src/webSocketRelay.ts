@@ -144,10 +144,12 @@ export class WebSocketEndpoint implements WebSocketPeer {
 
   send(message: WebSocketMessage): void {
     if (this.#closeSent || this.#ended) return;
-    this.#write(message.text ? OPCODE.text : OPCODE.binary, Buffer.from(message.data));
-    if (this.#socket.writableLength > 2 * this.#maxMessageBytes) {
+    // Checked before queueing, so a stalled reader never holds more than the bound.
+    if (this.#socket.writableLength + message.data.byteLength > 2 * this.#maxMessageBytes) {
       this.#fail(1008, "The other end is not reading.");
+      return;
     }
+    this.#write(message.text ? OPCODE.text : OPCODE.binary, Buffer.from(message.data));
   }
 
   close(code: number, reason: string): void {
