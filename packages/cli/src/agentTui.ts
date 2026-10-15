@@ -1,4 +1,8 @@
-import type { NativeHarnessSessionView, OctantMode } from "@octant/contracts";
+import type {
+  NativeHarnessApproval,
+  NativeHarnessSessionView,
+  OctantMode,
+} from "@octant/contracts";
 import {
   agentThreadPort,
   attachAgentThread,
@@ -16,8 +20,11 @@ import {
   changeAgentModel,
   commandAgentSession,
   contextPercent,
+  approvalDecisionBody,
   approvalMayBeRemembered,
+  chosenCommandHosts,
   decideAgentApproval,
+  preselectedCommandHosts,
   listAgentModels,
   listAgentThreads,
   openAgentSideChat,
@@ -47,7 +54,9 @@ import { notifyDesktop } from "./agentNotify";
 import {
   defaultCheckpointLabel,
   describeAgentGoal,
+  approvalPanelHosts,
   paletteFor,
+  readTuiApprovalAnswer,
   retryFooterText,
   statusLineFrom,
   tasksFrom,
@@ -139,6 +148,10 @@ class AgentScreen {
   #session: NativeHarnessSessionView | null | undefined;
   /** A Browser call waiting on a site; not a harness approval, so read on its own. */
   #siteApproval: AgentSiteApproval | undefined;
+  /** The hosts ticked on the waiting command approval that lists them. */
+  #hostTicks:
+    | { readonly approvalId: string; readonly ticked: ReadonlySet<number>; readonly page: number }
+    | undefined;
   #note = "";
   #drawn = "";
   #ticks = 0;
@@ -544,6 +557,23 @@ class AgentScreen {
     await this.refresh();
   }
 
+  /**
+   * The hosts ticked on this approval: the person's own ticks, or the host's
+   * preselection until they change one.
+   */
+  #ticked(approval: NativeHarnessApproval): ReadonlySet<number> {
+    return this.#hostTicks !== undefined && this.#hostTicks.approvalId === String(approval.id)
+      ? this.#hostTicks.ticked
+      : preselectedCommandHosts(approval);
+  }
+
+  /** The page of the approval's host list on screen. */
+  #hostPage(approval: NativeHarnessApproval): number {
+    return this.#hostTicks !== undefined && this.#hostTicks.approvalId === String(approval.id)
+      ? this.#hostTicks.page
+      : 0;
+  }
+
   #draw(): void {
     const { t, fg, bold, dim } = this.#tui;
     const p = this.#palette;
@@ -657,11 +687,16 @@ class AgentScreen {
           ? ""
           : approvalPanelOutsideContent(approval.outsideContent);
       const outsideBlock = outside === "" ? "" : `${outside}\n`;
+      const listed = approvalPanelHosts(approval, this.#ticked(approval), this.#hostPage(approval));
+      const hosts = listed.summary === undefined ? listed.rows : [...listed.rows, listed.summary];
       // A child's ask and a single-use ask (the thread took in outside content)
       // have no session-wide choice: the host would take it as a single approval.
-      this.#panelText.content = !approvalMayBeRemembered(approval)
-        ? t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${fg(p.warning)(outsideBlock)}${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`
-        : t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${fg(p.warning)(outsideBlock)}${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" allow for this session · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
+      this.#panelText.content =
+        hosts.length > 0
+          ? t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${fg(p.warning)(outsideBlock)}${dim(fg(p.muted)("may reach only the hosts you tick, for this command alone"))}\n${fg(p.textSecondary)(hosts.join("\n"))}\n${fg(p.accent)("number")}${fg(p.textSecondary)(" tick or untick · ")}${fg(p.success)("y")}${fg(p.textSecondary)(" allow with the ticked hosts · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`
+          : !approvalMayBeRemembered(approval)
+            ? t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${fg(p.warning)(outsideBlock)}${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`
+            : t`${fg(p.text)(bold(approval.toolName))} ${fg(p.textSecondary)(summary)}\n${fg(p.warning)(outsideBlock)}${dim(fg(p.muted)(`needs your say-so (${approval.approvalClass})`))}\n${fg(p.success)("y")}${fg(p.textSecondary)(" allow · ")}${fg(p.accent)("a")}${fg(p.textSecondary)(" allow for this session · ")}${fg(p.danger)("n")}${fg(p.textSecondary)(" deny — then Enter")}`;
       this.#panel.visible = true;
     } else if (site !== undefined) {
       this.#panel.title = " Site approval ";
@@ -1095,28 +1130,47 @@ class AgentScreen {
     }
     const approval = this.#session?.approvals?.find((entry) => entry.status === "pending");
     if (approval !== undefined) {
-      const lowered = text.toLowerCase();
-      const decision =
-        lowered === "y" || lowered === "yes"
-          ? "approve"
-          : (lowered === "a" || lowered === "always") && approvalMayBeRemembered(approval)
-            ? "approve-always"
-            : lowered === "n" || lowered === "no"
-              ? "deny"
-              : undefined;
-      if (decision === undefined) {
-        this.#note = approvalMayBeRemembered(approval)
-          ? "Answer the approval first: y, a, or n."
-          : "Answer the approval first: y or n.";
+      const ticked = this.#ticked(approval);
+      const answer = readTuiApprovalAnswer(
+        text,
+        approval,
+        ticked,
+        approvalMayBeRemembered(approval),
+      );
+      if (answer.kind === "tick") {
+        this.#hostTicks = {
+          approvalId: String(approval.id),
+          ticked: answer.ticked,
+          page: this.#hostPage(approval),
+        };
+        this.#draw();
+        return;
+      }
+      if (answer.kind === "page") {
+        this.#hostTicks = {
+          approvalId: String(approval.id),
+          ticked,
+          page: approvalPanelHosts(approval, ticked, this.#hostPage(approval) + answer.step).page,
+        };
+        this.#draw();
+        return;
+      }
+      if (answer.kind === "unknown") {
+        this.#note =
+          (approval.commandHosts?.length ?? 0) > 0
+            ? "Answer the approval first: a host's number, y, or n."
+            : approvalMayBeRemembered(approval)
+              ? "Answer the approval first: y, a, or n."
+              : "Answer the approval first: y or n.";
         this.#draw();
         return;
       }
       const result = await decideAgentApproval(
         this.#input.session,
         this.#threadId,
-        String(approval.id),
-        decision,
+        approvalDecisionBody(approval, answer.decision, chosenCommandHosts(approval, ticked)),
       );
+      this.#hostTicks = undefined;
       if (result.kind === "approval-refused") this.#note = result.message;
       await this.refresh();
       return;

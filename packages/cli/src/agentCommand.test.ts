@@ -471,4 +471,73 @@ describe("octant agent approval prompt", () => {
       expect(allowed.sent).toMatchObject([{ body: { decision: "approve" } }]);
     },
   );
+
+  const markedCommand = {
+    ...leadRequest,
+    singleUse: true,
+    commandHosts: [
+      { host: "registry.example.com", port: 443, from: "thread-rule", preselected: true },
+      { host: "mirror.example.com", port: 8443, from: "project-rule", preselected: true },
+      { host: "cdn.example.com", port: 443, from: "proposal", preselected: false },
+    ],
+  };
+
+  it("lists a marked thread's command hosts and sends the ticked ones on y", async () => {
+    const { prompt, sent } = await answer(markedCommand, "y");
+    expect(prompt).toContain("[x] 1. registry.example.com:443  thread rule");
+    expect(prompt).toContain("[x] 2. mirror.example.com:8443  Project rule");
+    expect(prompt).toContain("[ ] 3. cdn.example.com:443  proposal");
+    expect(prompt).not.toContain("[a]lways");
+    expect(sent).toEqual([
+      expect.objectContaining({
+        body: {
+          approvalId: markedCommand.id,
+          decision: "approve",
+          commandHosts: [
+            { host: "registry.example.com", port: 443 },
+            { host: "mirror.example.com", port: 8443 },
+          ],
+        },
+      }),
+    ]);
+  });
+
+  it.each([
+    ["y 3", [{ host: "cdn.example.com", port: 443 }]],
+    [
+      "yes 1, 3",
+      [
+        { host: "registry.example.com", port: 443 },
+        { host: "cdn.example.com", port: 443 },
+      ],
+    ],
+    ["y none", []],
+  ])("sends only the hosts the person chose with %j", async (typed, hosts) => {
+    const { sent } = await answer(markedCommand, typed);
+    expect(sent).toEqual([
+      expect.objectContaining({
+        body: { approvalId: markedCommand.id, decision: "approve", commandHosts: hosts },
+      }),
+    ]);
+  });
+
+  it.each(["y 4", "y 0", "y registry.example.com", "n", "a"])(
+    "refuses the command and sends no host when the answer is %j",
+    async (typed) => {
+      const { sent } = await answer(markedCommand, typed);
+      expect(sent).toEqual([
+        expect.objectContaining({ body: { approvalId: markedCommand.id, decision: "deny" } }),
+      ]);
+    },
+  );
+
+  it("sends no host for an approval that lists none", async () => {
+    const { prompt, sent } = await answer(leadRequest, "y 1");
+    expect(prompt).not.toContain("[x]");
+    expect(sent).toEqual([
+      expect.objectContaining({ body: { approvalId: leadRequest.id, decision: "deny" } }),
+    ]);
+    const allowed = await answer(leadRequest, "y");
+    expect(allowed.sent[0]?.body).toEqual({ approvalId: leadRequest.id, decision: "approve" });
+  });
 });

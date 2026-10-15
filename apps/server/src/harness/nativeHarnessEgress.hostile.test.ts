@@ -17,6 +17,7 @@ import {
   ToolEgressRuleId,
   decodeWindowId,
   type ToolEgressLaunch,
+  type AgentRun,
   type AgentRunAuthority,
   type NativeHarnessApproval,
   type CodeThread,
@@ -28,6 +29,7 @@ import {
   type ToolEgressLaunchFacts,
   type ToolEgressRule,
 } from "@octant/domain/tool-egress-policy";
+import { createAgentRunInteractions } from "../agentRun/agentRunInteractions";
 import { ExternalContentClearStore } from "../context/externalContentClearStore";
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
@@ -212,6 +214,69 @@ const authority = {
   providerInstanceId: "00000000-0000-4000-8000-0000000000ee",
   extension: { kind: "core" },
 } as unknown as ToolActionAuthority;
+
+/**
+ * A running Code child of `egressThread` in `egressProject` that holds network
+ * authority, admitted under `executionPolicy`.
+ */
+function markedThreadChild(executionPolicy: ProviderExecutionPolicy): AgentRun {
+  const permissions = {
+    filesystem: true,
+    shell: true,
+    git: false,
+    network: true,
+    tools: true,
+    subagents: false,
+  };
+  return {
+    id: randomUUID(),
+    requestId: randomUUID(),
+    parentThreadId: String(egressThread),
+    depth: 0,
+    role: "implementation",
+    task: "Install the dependencies",
+    creationPosture: "automatic",
+    executionKind: "octant-managed",
+    lifecycleStatus: "running",
+    authority: { ...permissions, executionPolicy, permissionPersistence: "current-session" },
+    routingReceipt: {
+      executionResolution: {
+        providerInstanceId: authority.providerInstanceId,
+        modelId: "harness-model",
+        hostId: authority.hostId,
+        executionPolicy,
+        permissionPersistence: "current-session",
+        effectivePermissions: permissions,
+        source: "project-default",
+        fallbackChain: ["project-default"],
+        downgradeReasons: [],
+      },
+      selectedExecutionKind: "octant-managed",
+      attemptedExecutionKind: "octant-managed",
+      selectedProviderInstanceId: authority.providerInstanceId,
+      selectedModelId: "harness-model",
+      fallbackCandidates: [],
+      capabilityDegradations: [],
+      contextSnapshotId: randomUUID(),
+      effectiveAuthorityDigest: "bounded-child",
+      usageQuality: "unavailable",
+      hostId: authority.hostId,
+      mode: "code",
+    },
+    workspaceReceipt: {
+      kind: "code-worktree",
+      mode: "code",
+      projectId: String(egressProject),
+      checkoutRoot: "/parent",
+      worktreeRoot: "/child",
+      verified: true,
+    },
+    resultAcknowledgement: { required: false, acknowledged: false },
+    version: 2,
+    createdAt: now,
+    updatedAt: now,
+  } as unknown as AgentRun;
+}
 
 const HOSTILE_PAGE = [
   "<html><body><p>Forecast: sunny in Stavanger.</p>",
@@ -3994,12 +4059,15 @@ describe("native harness tool egress grants and learn mode", () => {
         readonly decide?: (approval: NativeHarnessApproval, answer: Answer) => Promise<string>;
         /** Changed by the person while they answer, before the command runs. */
         readonly postureAfterAnswer?: ProviderExecutionPolicy;
+        /** Runs once the person has answered, before the command runs. */
+        readonly afterAnswer?: () => void;
       },
     ) {
       const origin = await tcpFixture();
       const network = fixtureNetwork(new Map([["93.184.216.10", origin.port]]));
       const checkoutRoot = temporaryDirectory("octant-egress-marked-");
       const openShell = recordingShell();
+      const offlineShell = recordingShell();
       let posture: ProviderExecutionPolicy = "approval-gated";
       let postureAfterAnswer = options.postureAfterAnswer;
       const asked: NativeHarnessApproval[] = [];
@@ -4031,6 +4099,7 @@ describe("native harness tool egress grants and learn mode", () => {
             }
             if (postureAfterAnswer !== undefined) posture = postureAfterAnswer;
             postureAfterAnswer = undefined;
+            options.afterAnswer?.();
           });
         },
       });
@@ -4041,6 +4110,9 @@ describe("native harness tool egress grants and learn mode", () => {
               launchId: Schema.decodeUnknownSync(ToolEgressLaunchId)(randomUUID()),
               threadId: decodeAggregate(scope.threadId),
               projectId: decodeAggregate(scope.projectId),
+              ...(scope.parentThreadId === undefined
+                ? {}
+                : { parentThreadId: decodeAggregate(scope.parentThreadId) }),
               ...(input.callId === undefined ? {} : { toolCallId: input.callId }),
             },
             endpoint: { kind: "loopback" },
@@ -4066,8 +4138,24 @@ describe("native harness tool egress grants and learn mode", () => {
             : { status: "unavailable", output: "", truncated: false };
         },
       });
+      // A child asks on its parent's thread through the host's own child
+      // interactions; it counts as current until a test says otherwise.
+      const childRuns = new Map<string, AgentRun>();
+      const children = createAgentRunInteractions({
+        getById: (id) => childRuns.get(String(id)),
+        approvals,
+        questions: { ask: () => Promise.reject(new Error("no question is asked here")) },
+        parentLead: () =>
+          ({
+            hostId: authority.hostId,
+            providerInstanceId: authority.providerInstanceId,
+            modelId: "harness-model",
+          }) as never,
+        parentAuthority: (run) => run.authority,
+      });
       const composition = createNativeHarnessComposition({
-        isChildAuthorityCurrent: () => true,
+        isChildAuthorityCurrent: (run) => children.isCurrent(run),
+        childInteractions: (run) => children.toolsFor(run),
         authority: {
           resolve: () => authority,
           service: new ToolCallAuthorityService({
@@ -4083,6 +4171,7 @@ describe("native harness tool egress grants and learn mode", () => {
         },
         isHarnessProvider: () => true,
         shell: openShell,
+        offlineShell: offlineShell,
         proxiedShell,
         commandHosts: (threadId) => host.rules.commandConfirmationHosts(threadId),
         approvals,
@@ -4104,26 +4193,48 @@ describe("native harness tool egress grants and learn mode", () => {
         windowId: "window-1",
       });
       if (tools === undefined) throw new Error("the harness offered no tools");
-      const bash = async (...targets: ReadonlyArray<string>) => {
-        const outcome = await tools.execute({
-          name: "bash",
-          inputJson: JSON.stringify({ command: targets.join(" ") }),
+      const bashOn =
+        (on: NonNullable<typeof tools>) =>
+        async (...targets: ReadonlyArray<string>) => {
+          const outcome = await on.execute({
+            name: "bash",
+            inputJson: JSON.stringify({ command: targets.join(" ") }),
+            // A child's ask counts only while its turn is live.
+            signal: new AbortController().signal,
+          });
+          const result = outcome.result as { readonly output?: string; readonly error?: string };
+          return result.output === undefined
+            ? result
+            : Object.fromEntries(
+                result.output.split("\n").map((line) => {
+                  const [target = "", ...answer] = line.split(" ");
+                  return [target, answer.join(" ")];
+                }),
+              );
+        };
+      /** A networked Code child of the marked thread, admitted under `executionPolicy`. */
+      const child = (executionPolicy: ProviderExecutionPolicy = "approval-gated") => {
+        const run = markedThreadChild(executionPolicy);
+        childRuns.set(String(run.id), run);
+        const childTools = composition.forAgentRun({
+          run,
+          authority: run.authority,
+          projectRoot: checkoutRoot,
         });
-        const result = outcome.result as { readonly output?: string; readonly error?: string };
-        return result.output === undefined
-          ? result
-          : Object.fromEntries(
-              result.output.split("\n").map((line) => {
-                const [target = "", ...answer] = line.split(" ");
-                return [target, answer.join(" ")];
-              }),
-            );
+        if (childTools === undefined) throw new Error("the harness offered the child no tools");
+        return {
+          runId: String(run.id),
+          bash: bashOn(childTools),
+          lapse: () => childRuns.delete(String(run.id)),
+        };
       };
       return {
-        bash,
+        bash: bashOn(tools),
+        child,
         asked,
         decisions,
         openShell,
+        offlineShell,
         approvals,
         setPosture: (next: ProviderExecutionPolicy) => {
           posture = next;
@@ -4469,6 +4580,189 @@ describe("native harness tool egress grants and learn mode", () => {
       expect(lead.asked[0]?.singleUse).toBeUndefined();
       expect(callGrants(host)).toEqual([]);
     });
+
+    describe("on a child of the marked thread", () => {
+      /** The launches each thread started, by the thread that ran them. */
+      const launchesOf = (host: EgressHost, threadId: string) =>
+        host
+          .events(TOOL_EGRESS_THREAD_AGGREGATE)
+          .filter((event) => event.eventName === TOOL_EGRESS_EVENT_NAMES.launchStarted)
+          .map((event) => (event.payload as { launch: ToolEgressLaunch }).launch)
+          .filter((launch) => String(launch.threadId) === threadId);
+
+      it("lists the parent's hosts and lets the child's command reach only the ticked ones", async () => {
+        const host = await markedThreadWithHosts();
+        const lead = await markedCommandLead(host, {
+          answers: [
+            [
+              {
+                decision: "approve",
+                commandHosts: [
+                  { host: "registry.example.com", port: 443 },
+                  { host: "cdn.example.com", port: 443 },
+                ],
+              },
+            ],
+          ],
+        });
+        const child = lead.child();
+
+        const reached = await child.bash(
+          "registry.example.com:443",
+          "mirror.example.com:443",
+          "cdn.example.com:443",
+          "elsewhere.example.com:443",
+        );
+
+        // Asked on the parent's thread, naming the child, with the parent's list.
+        expect(lead.asked).toEqual([
+          expect.objectContaining({
+            toolName: "bash",
+            singleUse: true,
+            source: expect.objectContaining({ runId: child.runId }),
+            commandHosts: [
+              { host: "registry.example.com", port: 443, from: "thread-rule", preselected: true },
+              { host: "mirror.example.com", port: 443, from: "project-rule", preselected: true },
+              { host: "cdn.example.com", port: 443, from: "proposal", preselected: false },
+            ],
+          }),
+        ]);
+        expect(reached).toEqual({
+          "registry.example.com:443": "connected",
+          "mirror.example.com:443": "octant-egress-refused: no-rule mirror.example.com:443",
+          "cdn.example.com:443": "connected",
+          "elsewhere.example.com:443": "octant-egress-refused: no-rule elsewhere.example.com:443",
+        });
+        // The grants are the parent's `call` rules for the child's own launch.
+        const [launch] = launchesOf(host, child.runId);
+        expect(String(launch?.parentThreadId)).toBe(String(egressThread));
+        expect(callGrants(host)).toEqual([
+          expect.objectContaining({
+            host: "registry.example.com",
+            approvalId: lead.asked[0]?.id,
+            scope: { kind: "call", launchId: launch?.launchId },
+          }),
+          expect.objectContaining({
+            host: "cdn.example.com",
+            scope: { kind: "call", launchId: launch?.launchId },
+          }),
+        ]);
+        expect(
+          host.rules
+            .view(String(egressThread), "local-window")
+            ?.threadRules.filter((rule) => rule.scope === "call"),
+        ).toEqual([]);
+      });
+
+      it("keeps a child within its parent's list and gives the parent's next command nothing", async () => {
+        const host = await markedThreadWithHosts();
+        const lead = await markedCommandLead(host, {
+          answers: [
+            [
+              // A host only the child's command names, and a parent host on
+              // another port, are not the parent's to give.
+              { decision: "approve", commandHosts: [{ host: "collector.example.com", port: 443 }] },
+              { decision: "approve", commandHosts: [{ host: "registry.example.com", port: 80 }] },
+              { decision: "approve", commandHosts: [{ host: "*.example.com", port: 443 }] },
+              { decision: "approve", commandHosts: [{ host: "registry.example.com", port: 443 }] },
+            ],
+            [{ decision: "approve" }],
+            [{ decision: "approve" }],
+          ],
+        });
+        const child = lead.child();
+
+        expect(await child.bash("registry.example.com:443", "collector.example.com:443")).toEqual({
+          "registry.example.com:443": "connected",
+          "collector.example.com:443": "octant-egress-refused: no-rule collector.example.com:443",
+        });
+        expect(lead.decisions).toEqual([
+          "host-not-offered",
+          "host-not-offered",
+          "host-not-offered",
+          "decided",
+        ]);
+        // Neither the parent's next command nor the child's reaches what the
+        // child was given once.
+        expect(await lead.bash("registry.example.com:443")).toEqual({
+          "registry.example.com:443": "octant-egress-refused: no-rule registry.example.com:443",
+        });
+        expect(await child.bash("registry.example.com:443")).toEqual({
+          "registry.example.com:443": "octant-egress-refused: no-rule registry.example.com:443",
+        });
+        // What the child was refused is proposed on the parent, marked; the
+        // child holds no rules of its own.
+        expect(
+          host.rules
+            .view(String(egressThread), "local-window")
+            ?.proposals.map((proposal) => [proposal.host, proposal.threadTainted]),
+        ).toContainEqual(["collector.example.com", true]);
+        expect(host.rules.view(child.runId, "local-window")).toBeUndefined();
+        expect(callGrants(host).map((grant) => grant.host)).toEqual(["registry.example.com"]);
+      });
+
+      it("lists the parent's hosts for a marked child on a clean parent", async () => {
+        const host = egressHost();
+        expect(grantThreadRule(host, "registry.example.com")).toMatchObject({ kind: "answered" });
+        const lead = await markedCommandLead(host, {
+          answers: [
+            [{ decision: "approve", commandHosts: [{ host: "registry.example.com", port: 443 }] }],
+          ],
+        });
+        const child = lead.child();
+        host.taint(child.runId);
+
+        expect(await child.bash("registry.example.com:443")).toEqual({
+          "registry.example.com:443": "connected",
+        });
+        expect(lead.asked[0]?.commandHosts).toEqual([
+          { host: "registry.example.com", port: 443, from: "thread-rule", preselected: true },
+        ]);
+        expect(callGrants(host)).toHaveLength(1);
+      });
+
+      it("lists nothing and grants nothing when the parent's posture closes the child's network", async () => {
+        const host = await markedThreadWithHosts();
+        const lead = await markedCommandLead(host, {
+          answers: [
+            [
+              { decision: "approve", commandHosts: [{ host: "registry.example.com", port: 443 }] },
+              { decision: "approve" },
+            ],
+          ],
+        });
+        const child = lead.child();
+        lead.setPosture("plan");
+
+        await child.bash("registry.example.com:443");
+
+        expect(lead.decisions).toEqual(["host-not-offered", "decided"]);
+        expect(lead.asked[0]?.commandHosts).toBeUndefined();
+        expect(lead.offlineShell.commands).toEqual(["registry.example.com:443"]);
+        expect(callGrants(host)).toEqual([]);
+      });
+
+      it("drops the hosts a person confirmed for a child whose authority lapsed meanwhile", async () => {
+        const host = await markedThreadWithHosts();
+        let lapse = () => {};
+        const lead = await markedCommandLead(host, {
+          answers: [
+            [{ decision: "approve", commandHosts: [{ host: "registry.example.com", port: 443 }] }],
+          ],
+          afterAnswer: () => lapse(),
+        });
+        const child = lead.child();
+        lapse = () => {
+          child.lapse();
+        };
+
+        expect(await child.bash("registry.example.com:443")).toMatchObject({
+          error: expect.any(String),
+        });
+        expect(launchesOf(host, child.runId)).toEqual([]);
+        expect(callGrants(host)).toEqual([]);
+      });
+    });
   });
 
   describe.runIf(
@@ -4515,6 +4809,9 @@ describe("native harness tool egress grants and learn mode", () => {
             scope: {
               threadId: decodeAggregate(scope.threadId),
               projectId: decodeAggregate(scope.projectId),
+              ...(scope.parentThreadId === undefined
+                ? {}
+                : { parentThreadId: decodeAggregate(scope.parentThreadId) }),
             },
             startLaunch: (launch, confirmed) =>
               host.rules.startLaunch({
@@ -4555,8 +4852,25 @@ describe("native harness tool egress grants and learn mode", () => {
                 );
               },
             });
+      const childRuns = new Map<string, AgentRun>();
+      const children =
+        approvals === undefined
+          ? undefined
+          : createAgentRunInteractions({
+              getById: (id) => childRuns.get(String(id)),
+              approvals,
+              questions: { ask: () => Promise.reject(new Error("no question is asked here")) },
+              parentLead: () =>
+                ({
+                  hostId: authority.hostId,
+                  providerInstanceId: authority.providerInstanceId,
+                  modelId: "harness-model",
+                }) as never,
+              parentAuthority: (run) => run.authority,
+            });
       const composition = createNativeHarnessComposition({
-        isChildAuthorityCurrent: () => true,
+        isChildAuthorityCurrent: (run) => children?.isCurrent(run) ?? true,
+        ...(children === undefined ? {} : { childInteractions: (run) => children.toolsFor(run) }),
         authority: {
           resolve: () => authority,
           service: new ToolCallAuthorityService({
@@ -4581,7 +4895,7 @@ describe("native harness tool egress grants and learn mode", () => {
             }),
         readCodeExecutionPolicy: () => posture,
         hostId: authority.hostId,
-        readThreadTaint: () => false,
+        readThreadTaint: (threadId) => confirms !== undefined && host.tainted(threadId),
         recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
         uuid: randomUUID,
         clock: () => now,
@@ -4597,10 +4911,11 @@ describe("native harness tool egress grants and learn mode", () => {
         windowId: "window-1",
       });
       if (tools === undefined) throw new Error("the harness offered no tools");
-      const bash = async (command: string) => {
-        const outcome = await tools.execute({
+      const bashOn = (on: NonNullable<typeof tools>) => async (command: string) => {
+        const outcome = await on.execute({
           name: "bash",
           inputJson: JSON.stringify({ command, timeoutMs: 30_000 }),
+          signal: new AbortController().signal,
         });
         return outcome.result as {
           readonly status?: string;
@@ -4609,7 +4924,19 @@ describe("native harness tool egress grants and learn mode", () => {
           readonly error?: string;
         };
       };
-      return { bash, origin, network, checkoutRoot, asked };
+      /** A networked Code child of the thread, admitted approval-gated. */
+      const child = () => {
+        const run = markedThreadChild("approval-gated");
+        childRuns.set(String(run.id), run);
+        const childTools = composition.forAgentRun({
+          run,
+          authority: run.authority,
+          projectRoot: checkoutRoot,
+        });
+        if (childTools === undefined) throw new Error("the harness offered the child no tools");
+        return bashOn(childTools);
+      };
+      return { bash: bashOn(tools), child, origin, network, checkoutRoot, asked };
     }
 
     it.each(["approval-gated", "auto-accept-edits"] as const)(
@@ -4772,6 +5099,35 @@ describe("native harness tool egress grants and learn mode", () => {
         { host: "registry.example.com", port: 8080, from: "thread-rule", preselected: true },
         { host: "other.example.com", port: 8080, from: "thread-rule", preselected: true },
       ]);
+      expect(confirmed).toMatchObject({ status: "ran" });
+      expect(confirmed.output?.split("\n")[0]).toBe("package-body 200");
+      expect(confirmed.output).toContain("octant-egress-refused: no-rule other.example.com:8080");
+      expect(next.output).toContain("octant-egress-refused: no-rule registry.example.com:8080");
+      expect(code.origin.seen).toHaveLength(1);
+    });
+
+    it("lets a marked thread's child command reach only the parent's hosts the person ticked", async () => {
+      const host = egressHost();
+      grantThreadRuleOn(host, "registry.example.com", 8080);
+      grantThreadRuleOn(host, "other.example.com", 8080);
+      host.taint(String(egressThread));
+      const code = await proxiedCode(host, {
+        confirms: [[{ host: "registry.example.com", port: 8080 }], []],
+      });
+      const child = code.child();
+      const other = "curl -sS --max-time 10 -w ' %{http_code}' http://other.example.com:8080/pkg";
+
+      const confirmed = await child(`${fetchPackage}; echo; ${other}`);
+      const next = await child(fetchPackage);
+
+      expect(code.asked[0]).toMatchObject({
+        source: expect.objectContaining({ runId: expect.any(String) }),
+        singleUse: true,
+        commandHosts: [
+          { host: "registry.example.com", port: 8080, from: "thread-rule", preselected: true },
+          { host: "other.example.com", port: 8080, from: "thread-rule", preselected: true },
+        ],
+      });
       expect(confirmed).toMatchObject({ status: "ran" });
       expect(confirmed.output?.split("\n")[0]).toBe("package-body 200");
       expect(confirmed.output).toContain("octant-egress-refused: no-rule other.example.com:8080");

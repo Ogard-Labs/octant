@@ -4519,10 +4519,28 @@ where it was or narrows it:
   command lists the same hosts afresh and reaches nothing it was not given. A
   confirmation whose command never runs on `proxied` (the posture changed
   meanwhile, or a check stopped first) is dropped and grants nothing.
-- _What is not wired._ A child's command on a tainted parent asks on the
-  parent's thread without a host list, so it reaches no host. A tainted
-  proposal shows on the card and cannot be granted there; the command
-  confirmation is where it is granted. The CLI approves without hosts. The
+- _A child's command confirmation._ A networked Code child's `bash` or
+  `goal-check` that will run on `proxied`, clamped to its parent's posture,
+  while the parent or the child is tainted asks on the parent's thread the
+  same way: single-use, naming the child, and listing the parent's hosts
+  (the parent's thread and Project rules and the parent's open proposals). The
+  child adds nothing to that list and holds no rules of its own. What the
+  person ticks is granted as `call` rules on the parent's aggregate naming the
+  child's launch, so the parent's next command and the child's next command
+  reach none of it. A child whose authority lapses while the person answers
+  gets `cancelled`, and its confirmation grants nothing.
+- _The terminal._ `octant agent` shows the list with the host's preselection
+  ticked. Line mode takes `y` (the ticked hosts), `y 1,3` (exactly those), or
+  `y none`, and a number the list lacks refuses the call; the full-screen panel
+  toggles a host by its number and sends the ticked ones on `y`. The panel
+  cannot scroll, so it shows eight hosts a page (`>` and `<` turn it) with the
+  ticked count and the numbers of ticked hosts on other pages, and its answer
+  line stays on screen. Both send
+  hosts only with an approval of a command that listed them.
+- _What is not wired._ A child admitted with Full access whose parent has
+  since narrowed to a posture that clamps it to `proxied` runs its commands
+  unasked, so on a tainted parent they reach no host. A tainted proposal shows on the card and cannot
+  be granted there; the command confirmation is where it is granted. The
   reviewer that may answer a per-call `network-access` prompt is not built.
   Each fails closed.
 
