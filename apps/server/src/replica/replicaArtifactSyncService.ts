@@ -315,7 +315,12 @@ export class ReplicaArtifactImport implements ReplicaArtifactReconciler {
       instances.push(
         node.cut === undefined
           ? { instanceId: node.instanceId, status: "member" }
-          : { instanceId: node.instanceId, status: "revoked", lastAcceptedSequence: node.cut },
+          : {
+              instanceId: node.instanceId,
+              status: "revoked",
+              lastAcceptedSequence: node.cut,
+              ...(node.kept === undefined ? {} : { kept: node.kept }),
+            },
       );
     }
     return {
