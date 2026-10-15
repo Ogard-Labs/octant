@@ -492,10 +492,10 @@ guidance instead.
   decision 3 below: the output of a command launched under OS-level `allow` does not taint its
   thread, because the host cannot observe what the command received, so standing approvals stay
   active after it. The harness tool egress rules remove the exception for native-harness tool
-  processes on `provider-endpoints-only` threads once built; it remains under `unrestricted`,
+  processes on `provider-endpoints-only` threads; it remains under `unrestricted`,
   where the person accepted open network.
-- **Harness tool egress rules (approved 2026-10-13; decision and host proxy built, not wired).** For native-harness tool processes
-  on a `provider-endpoints-only` thread, a host-owned per-launch forward proxy will replace OS
+- **Harness tool egress rules (approved 2026-10-13; built).** For native-harness tool processes
+  on a `provider-endpoints-only` thread, a host-owned per-launch forward proxy replaces OS
   `allow` with a third OS level, `proxied`: Seatbelt opens only the proxy's loopback port and
   bubblewrap gives a private network namespace an in-capsule forwarder, so direct egress and DNS
   are denied and every connection is checked against per-host, per-thread or per-Project rules
@@ -503,8 +503,9 @@ guidance instead.
   standing rules, and learn mode only proposes. The design, its audit events, failure modes, and
   phased acceptance live in
   [`docs/architecture.md`, Harness tool egress rules](../architecture.md#harness-tool-egress-rules);
-  its approval supersedes decision 4 below for those processes only, and decision 4 still
-  describes what runs until the design is built.
+  its approval supersedes decision 4 below for those processes only. The Linux native probes
+  have not run, and a tainted thread cannot yet grant a single-use `call` rule, so its commands
+  reach no host until a person clears its mark; both are listed in that section.
 - **Equal-or-narrower child sandboxes.** A child agent's sandbox profile derives from its clamped
   authority, never from its parent's raw profile: a child without `network` gets a no-egress
   profile even if the parent had egress; a child's write scope is its own isolated worktree, never
@@ -631,7 +632,7 @@ Waived or skipped rows never count as passing (consistent with the Phase 4/16 ev
 - A thread's `external-content-ingested` mark cleared by anything other than a person at a local
   window.
 - Network egress from a tool subprocess whose resolved egress policy was `none`.
-- Under the harness tool egress rules, once built, a connection from a `proxied` launch to a
+- Under the harness tool egress rules, a connection from a `proxied` launch to a
   destination no live applicable rule covers, after its rule expired, or to a private address.
   Applicable means a `call` rule of that launch, a rule of that thread, a rule of its Project, or,
   for a child, its parent's live rules; none applies while the thread or its parent is tainted,

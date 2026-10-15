@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { connect as netConnect } from "node:net";
 import { tmpdir } from "node:os";
@@ -45,9 +45,13 @@ import {
   makeOpenAiCompatibleEndpoint,
   requestGeneration,
 } from "../providers/openAiCompatibleEndpoint";
+import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
-import { createNativeHarnessComposition } from "./nativeHarnessComposition";
+import {
+  createNativeHarnessComposition,
+  type HarnessEgressScope,
+} from "./nativeHarnessComposition";
 import { startToolEgressProxy } from "./nativeHarnessEgressProxy";
 import { createNativeHarnessEgressRouteHandler } from "./nativeHarnessEgressRoutes";
 import {
@@ -85,6 +89,7 @@ import {
   PublicFetchRefused,
 } from "./nativeHarnessWebFetch";
 import { searxngHarnessWebSearch } from "./nativeHarnessWebSearch";
+import { createNativeHarnessShell } from "./nativeHarnessShell";
 
 /*
  * Adversarial proofs for the native harness's network and hostile-content
@@ -1049,6 +1054,189 @@ describe("native harness child egress", () => {
     await tools.execute({ name: "bash", inputJson: JSON.stringify({ command: "bun test" }) });
     expect(networked.commands).toEqual(["bun test"]);
     expect(offline.commands).toEqual([]);
+  });
+});
+
+describe("native harness command network", () => {
+  /**
+   * A Code lead and a child composed with every shell the server has, each
+   * recording what it ran, and a posture the test can change between calls.
+   */
+  function postureCode(options: { readonly proxied: boolean }) {
+    const networked = recordingShell();
+    const offline = recordingShell();
+    const proxiedScopes: HarnessEgressScope[] = [];
+    const proxiedCommands: string[] = [];
+    const postures = new Map<string, ProviderExecutionPolicy | undefined>();
+    const threadId = randomUUID();
+    const checkoutRoot = temporaryDirectory("octant-egress-posture-");
+    const composition = createNativeHarnessComposition({
+      isChildAuthorityCurrent: () => true,
+      // A child below Full access asks before a command; the person allows it.
+      childInteractions: () => ({ approvals: async () => "approved" }),
+      authority: {
+        resolve: () => authority,
+        service: new ToolCallAuthorityService({
+          resolveGrantedAuthority: () => authority,
+          resolveLiveFacts: ({ threadId: subject }) => ({
+            providerAppManagedTools: "supported",
+            host: { computerUseEnabled: false },
+            executionPolicy: postures.get(subject) ?? "approval-gated",
+            // This suite is about which network a command gets, not whether it is asked.
+            approvalSatisfied: true,
+            externalContentIngested: false,
+          }),
+        }),
+      },
+      isHarnessProvider: () => true,
+      shell: networked,
+      offlineShell: offline,
+      ...(options.proxied
+        ? {
+            proxiedShell: (scope: HarnessEgressScope) => {
+              proxiedScopes.push(scope);
+              return {
+                run: async (input) => {
+                  proxiedCommands.push(input.command);
+                  return { status: "ran", exitCode: 0, output: "", truncated: false } as const;
+                },
+              };
+            },
+          }
+        : {}),
+      readCodeExecutionPolicy: (subject) => postures.get(subject),
+      hostId: authority.hostId,
+      readThreadTaint: () => false,
+      recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+      uuid: randomUUID,
+      clock: () => now,
+    });
+    const thread = {
+      id: threadId,
+      projectId: authority.projectId,
+      providerInstanceId: authority.providerInstanceId,
+      modelId: "harness-model",
+    } as unknown as CodeThread;
+    const lead = composition.forCode({ thread, checkoutRoot, windowId: "window-1" });
+    if (lead === undefined) throw new Error("the harness offered no tools");
+    const child = (childAuthority: Pick<AgentRunAuthority, "network" | "executionPolicy">) => {
+      const runId = randomUUID();
+      const tools = composition.forAgentRun({
+        run: {
+          id: runId,
+          parentThreadId: threadId,
+          routingReceipt: {
+            mode: "code",
+            selectedProviderInstanceId: authority.providerInstanceId,
+          },
+          workspaceReceipt: { kind: "code-worktree", mode: "code", projectId: authority.projectId },
+        } as never,
+        authority: {
+          filesystem: true,
+          shell: true,
+          git: false,
+          tools: true,
+          subagents: false,
+          permissionPersistence: "current-session",
+          ...childAuthority,
+        },
+        projectRoot: checkoutRoot,
+      });
+      if (tools === undefined) throw new Error("the harness offered the child no tools");
+      postures.set(runId, childAuthority.executionPolicy);
+      return { tools, runId };
+    };
+    const bash = (tools: typeof lead, command: string) =>
+      tools.execute({ name: "bash", inputJson: JSON.stringify({ command }) });
+    return {
+      threadId,
+      lead,
+      child,
+      bash,
+      setPosture: (posture: ProviderExecutionPolicy | undefined) => postures.set(threadId, posture),
+      ran: () => ({
+        networked: networked.commands,
+        offline: offline.commands,
+        proxied: proxiedCommands,
+      }),
+      proxiedScopes,
+    };
+  }
+
+  it.each(["approval-gated", "auto-accept-edits"] as const)(
+    "runs a %s Code command on proxied network under its own thread's rules",
+    async (posture) => {
+      const code = postureCode({ proxied: true });
+      code.setPosture(posture);
+      await code.bash(code.lead, "npm install");
+      expect(code.ran()).toEqual({ networked: [], offline: [], proxied: ["npm install"] });
+      expect(code.proxiedScopes).toEqual([
+        { threadId: code.threadId, projectId: String(authority.projectId) },
+      ]);
+    },
+  );
+
+  it("keeps open network under Full access and closes it for a posture it cannot read", async () => {
+    const code = postureCode({ proxied: true });
+    code.setPosture("full-access");
+    await code.bash(code.lead, "curl https://example.com/");
+    code.setPosture(undefined);
+    await code.bash(code.lead, "curl https://example.org/");
+    expect(code.ran()).toEqual({
+      networked: ["curl https://example.com/"],
+      offline: ["curl https://example.org/"],
+      proxied: [],
+    });
+  });
+
+  it("applies a posture changed mid-turn to the next command", async () => {
+    const code = postureCode({ proxied: true });
+    code.setPosture("full-access");
+    await code.bash(code.lead, "first");
+    code.setPosture("approval-gated");
+    await code.bash(code.lead, "second");
+    expect(code.ran()).toMatchObject({ networked: ["first"], proxied: ["second"] });
+  });
+
+  it("leaves every networked command on open network with the switch off", async () => {
+    const code = postureCode({ proxied: false });
+    code.setPosture("approval-gated");
+    await code.bash(code.lead, "npm install");
+    const { tools } = code.child({ network: true, executionPolicy: "approval-gated" });
+    await code.bash(tools, "bun test");
+    const offline = code.child({ network: false, executionPolicy: "approval-gated" });
+    await code.bash(offline.tools, "cat README.md");
+    expect(code.ran()).toEqual({
+      networked: ["npm install", "bun test"],
+      offline: ["cat README.md"],
+      proxied: [],
+    });
+  });
+
+  it("runs a networked child under its parent's rules and never wider than its parent", async () => {
+    const code = postureCode({ proxied: true });
+    code.setPosture("approval-gated");
+    const narrow = code.child({ network: true, executionPolicy: "full-access" });
+    await code.bash(narrow.tools, "npm install");
+    expect(code.ran()).toEqual({ networked: [], offline: [], proxied: ["npm install"] });
+    expect(code.proxiedScopes).toContainEqual({
+      threadId: narrow.runId,
+      projectId: String(authority.projectId),
+      parentThreadId: code.threadId,
+    });
+    // The parent's Full access does not widen a child admitted below it.
+    code.setPosture("full-access");
+    const gated = code.child({ network: true, executionPolicy: "approval-gated" });
+    await code.bash(gated.tools, "bun test");
+    expect(code.ran().proxied).toEqual(["npm install", "bun test"]);
+    const open = code.child({ network: true, executionPolicy: "full-access" });
+    await code.bash(open.tools, "make fetch");
+    expect(code.ran().networked).toEqual(["make fetch"]);
+    // A parent moved to Plan closes the network for its children too.
+    code.setPosture("plan");
+    await code.bash(open.tools, "make again");
+    expect(code.ran().offline).toEqual(["make again"]);
+    expect(code.ran().networked).toEqual(["make fetch"]);
   });
 });
 
@@ -3745,4 +3933,276 @@ describe("native harness tool egress grants and learn mode", () => {
       ).toEqual({ kind: "refused", reason: "rule-not-found" });
     });
   });
+
+  // Native probes: real Seatbelt on macOS, the real bubblewrap capsule and its
+  // forwarder on Linux. Each command runs exactly as a harness `bash` call
+  // does, composed for an approval-gated or auto-accept-edits Code thread; the
+  // only fixture is "the public internet", one loopback origin the proxy
+  // reaches through its injected resolver and dialer.
+  describe.runIf(
+    process.platform === "darwin" || (process.platform === "linux" && existsSync("/usr/bin/bwrap")),
+  )("commands on proxied network", () => {
+    const fetchPackage =
+      "curl -sS --max-time 10 -w ' %{http_code}' http://registry.example.com:8080/pkg";
+
+    async function proxiedCode(
+      host: EgressHost,
+      options: {
+        readonly posture?: ProviderExecutionPolicy;
+        readonly resolveAll?: (name: string) => Promise<ReadonlyArray<string>>;
+        readonly socketParent?: string;
+        /** Composes without the proxied shell, as a host with the switch off. */
+        readonly switchOff?: boolean;
+      } = {},
+    ) {
+      const origin = await listen(() => ({ status: 200, body: "package-body" }));
+      const network = fixtureNetwork(new Map([["93.184.216.10", origin.port]]));
+      const root = temporaryDirectory("octant-egress-native-");
+      const checkoutRoot = join(root, "checkout");
+      const work = join(root, "work");
+      const scripts = join(root, "scripts");
+      const sockets = join(root, "sockets");
+      mkdirSync(checkoutRoot);
+      for (const directory of [work, scripts, sockets]) mkdirSync(directory, { mode: 0o700 });
+      const processPort = new RepositoryTestProcessPort({
+        receiptDirectory: join(root, "receipts"),
+        temporaryDirectory: work,
+        harnessShellScriptDirectory: scripts,
+      });
+      const decodeAggregate = Schema.decodeUnknownSync(AggregateId);
+      const proxiedShell = (scope: HarnessEgressScope) =>
+        createNativeHarnessShell({
+          process: processPort,
+          scriptDirectory: scripts,
+          egress: {
+            scope: {
+              threadId: decodeAggregate(scope.threadId),
+              projectId: decodeAggregate(scope.projectId),
+            },
+            startLaunch: (launch) =>
+              host.rules.startLaunch({
+                launch,
+                endpoint:
+                  process.platform === "darwin" && options.socketParent === undefined
+                    ? { kind: "loopback" }
+                    : { kind: "unix-socket", parentDirectory: options.socketParent ?? sockets },
+                resolveAll: options.resolveAll ?? network.resolveAll,
+                connect: network.connect,
+              }),
+            launchId: () => Schema.decodeUnknownSync(ToolEgressLaunchId)(randomUUID()),
+          },
+        });
+      const posture = options.posture ?? "approval-gated";
+      const composition = createNativeHarnessComposition({
+        isChildAuthorityCurrent: () => true,
+        authority: {
+          resolve: () => authority,
+          service: new ToolCallAuthorityService({
+            resolveGrantedAuthority: () => authority,
+            resolveLiveFacts: () => ({
+              providerAppManagedTools: "supported",
+              host: { computerUseEnabled: false },
+              executionPolicy: posture,
+              approvalSatisfied: true,
+              externalContentIngested: false,
+            }),
+          }),
+        },
+        isHarnessProvider: () => true,
+        shell: createNativeHarnessShell({ process: processPort, scriptDirectory: scripts }),
+        ...(options.switchOff === true ? {} : { proxiedShell }),
+        readCodeExecutionPolicy: () => posture,
+        hostId: authority.hostId,
+        readThreadTaint: () => false,
+        recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+        uuid: randomUUID,
+        clock: () => now,
+      });
+      const tools = composition.forCode({
+        thread: {
+          id: String(egressThread),
+          projectId: String(egressProject),
+          providerInstanceId: authority.providerInstanceId,
+          modelId: "harness-model",
+        } as unknown as CodeThread,
+        checkoutRoot,
+        windowId: "window-1",
+      });
+      if (tools === undefined) throw new Error("the harness offered no tools");
+      const bash = async (command: string) => {
+        const outcome = await tools.execute({
+          name: "bash",
+          inputJson: JSON.stringify({ command, timeoutMs: 30_000 }),
+        });
+        return outcome.result as {
+          readonly status?: string;
+          readonly exitCode?: number;
+          readonly output?: string;
+          readonly error?: string;
+        };
+      };
+      return { bash, origin, network, checkoutRoot };
+    }
+
+    it.each(["approval-gated", "auto-accept-edits"] as const)(
+      "reaches a granted host only through the proxy on a %s thread",
+      async (posture) => {
+        const host = egressHost();
+        grantThreadRuleOn(host, "registry.example.com", 8080);
+        const code = await proxiedCode(host, { posture });
+
+        // One command, because the bytes it receives taint the thread when it
+        // ends, and a tainted thread's standing rules stop applying.
+        const run = await code.bash(
+          `${fetchPackage}; echo; curl -sS --max-time 10 --proxytunnel -w ' %{http_code}' http://registry.example.com:8080/pkg`,
+        );
+
+        expect(run).toMatchObject({ status: "ran", exitCode: 0 });
+        expect(run.output?.split("\n").slice(0, 2)).toEqual([
+          "package-body 200",
+          "package-body 200",
+        ]);
+        expect(code.origin.seen.map((request) => request.url)).toEqual(["/pkg", "/pkg"]);
+        expect(code.origin.seen[0]?.headers["proxy-authorization"]).toBeUndefined();
+        expect(code.network.resolved).toEqual(["registry.example.com", "registry.example.com"]);
+        const summaries = host
+          .events(TOOL_EGRESS_THREAD_AGGREGATE)
+          .filter((event) => event.eventName === TOOL_EGRESS_EVENT_NAMES.launchSummarized);
+        expect(summaries).toHaveLength(1);
+        expect(summaries[0]?.payload).toMatchObject({
+          entries: [{ host: "registry.example.com", port: 8080, decision: "allowed", requests: 2 }],
+        });
+        expect(host.tainted(String(egressThread))).toBe(true);
+      },
+    );
+
+    it("refuses a direct connection, a name lookup, and a client that ignores the proxy", async () => {
+      const host = egressHost();
+      grantThreadRuleOn(host, "registry.example.com", 8080);
+      const code = await proxiedCode(host);
+
+      const direct = await code.bash(
+        `curl -sS --max-time 5 --noproxy '*' http://127.0.0.1:${code.origin.port}/pkg`,
+      );
+      const lookup = await code.bash(
+        "curl -sS --max-time 5 --noproxy '*' http://registry.example.com:8080/pkg",
+      );
+      const unset = await code.bash(
+        "env -u http_proxy -u HTTP_PROXY -u ALL_PROXY -u all_proxy curl -sS --max-time 5 http://registry.example.com:8080/pkg",
+      );
+
+      expect(direct.status).toBe("ran");
+      expect(direct.exitCode).not.toBe(0);
+      // curl's "could not resolve host": the command has no resolver to ask.
+      expect(lookup).toMatchObject({ status: "ran", exitCode: 6 });
+      expect(unset).toMatchObject({ status: "ran", exitCode: 6 });
+      expect(code.origin.seen).toEqual([]);
+      expect(code.network.resolved).toEqual([]);
+    });
+
+    it("refuses a host no rule names, proposes it, and reaches it once a person grants it", async () => {
+      const host = egressHost();
+      const code = await proxiedCode(host);
+
+      const refused = await code.bash(fetchPackage);
+      expect(refused.status).toBe("ran");
+      expect(refused.output).toContain("octant-egress-refused: no-rule registry.example.com:8080");
+      expect(refused.output).toContain(" 403");
+      expect(code.origin.seen).toEqual([]);
+      expect(host.rules.view(String(egressThread), "local-window")?.proposals).toEqual([
+        expect.objectContaining({ host: "registry.example.com", port: 8080, reason: "no-rule" }),
+      ]);
+
+      expect(grantThreadRuleOn(host, "registry.example.com", 8080)).toMatchObject({
+        kind: "answered",
+      });
+      const retried = await code.bash(fetchPackage);
+      expect(retried).toMatchObject({ status: "ran", exitCode: 0, output: "package-body 200" });
+      expect(code.origin.seen).toHaveLength(1);
+      // A rule for one host and port reaches nothing else.
+      const elsewhere = await code.bash(
+        "curl -sS --max-time 10 -w ' %{http_code}' http://other.example.com:8080/",
+      );
+      expect(elsewhere.output).toContain("octant-egress-refused: no-rule other.example.com:8080");
+      expect(code.origin.seen).toHaveLength(1);
+    });
+
+    it("refuses a ruled host whose name answers a private address", async () => {
+      const host = egressHost();
+      grantThreadRuleOn(host, "intranet.example.com", 8080);
+      const code = await proxiedCode(host, { resolveAll: async () => ["10.20.30.40"] });
+
+      const run = await code.bash(
+        "curl -sS --max-time 10 -w ' %{http_code}' http://intranet.example.com:8080/",
+      );
+
+      expect(run.output).toContain(
+        "octant-egress-refused: private-destination intranet.example.com:8080",
+      );
+      expect(code.network.dialed).toEqual([]);
+    });
+
+    it("fails closed once the host's rule has expired", async () => {
+      const host = egressHost();
+      host.rules.answer({
+        threadId: String(egressThread),
+        principal: person,
+        grants: [
+          { host: "registry.example.com", port: 8080, scope: { kind: "thread", lifetime: "1h" } },
+        ],
+      });
+      const code = await proxiedCode(host);
+      host.advance(3_600_000);
+
+      const run = await code.bash(fetchPackage);
+
+      expect(run.output).toContain("octant-egress-refused: expired registry.example.com:8080");
+      expect(code.origin.seen).toEqual([]);
+    });
+
+    it("never runs a command whose listener cannot bind or whose start cannot be recorded", async () => {
+      const unbound = await proxiedCode(egressHost(), {
+        socketParent: join(temporaryDirectory("octant-egress-gone-"), "missing"),
+      });
+      expect(await unbound.bash("touch ran")).toMatchObject({ error: "shell-unavailable" });
+      expect(existsSync(join(unbound.checkoutRoot, "ran"))).toBe(false);
+
+      const unrecorded = await proxiedCode(
+        egressHost({ journal: refusing(TOOL_EGRESS_EVENT_NAMES.launchStarted) }),
+      );
+      expect(await unrecorded.bash("touch ran")).toMatchObject({ error: "shell-unavailable" });
+      expect(existsSync(join(unrecorded.checkoutRoot, "ran"))).toBe(false);
+    });
+
+    it("withholds a command's output when its launch summary cannot be recorded", async () => {
+      const host = egressHost({ journal: refusing(TOOL_EGRESS_EVENT_NAMES.launchSummarized) });
+      grantThreadRuleOn(host, "registry.example.com", 8080);
+      const code = await proxiedCode(host);
+
+      const run = await code.bash(fetchPackage);
+
+      expect(run).toMatchObject({ error: "shell-unavailable" });
+      expect(JSON.stringify(run)).not.toContain("package-body");
+      // Its byte count is unknown, so the thread is marked as recovery would.
+      expect(host.tainted(String(egressThread))).toBe(true);
+    });
+
+    it("leaves a command on open network with the switch off, as before the rules", async () => {
+      const code = await proxiedCode(egressHost(), { switchOff: true });
+
+      const run = await code.bash(
+        `curl -sS --max-time 10 --noproxy '*' -w ' %{http_code}' http://127.0.0.1:${code.origin.port}/pkg`,
+      );
+
+      expect(run).toMatchObject({ status: "ran", exitCode: 0, output: "package-body 200" });
+    });
+  });
+
+  function grantThreadRuleOn(host: EgressHost, name: string, port: number) {
+    return host.rules.answer({
+      threadId: String(egressThread),
+      principal: person,
+      grants: [{ host: name, port, scope: eightHours }],
+    });
+  }
 });

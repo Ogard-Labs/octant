@@ -1010,6 +1010,68 @@ describe("RepositoryTestProcessPort", () => {
     await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
   });
 
+  it("runs a proxied harness script with only its proxy port open, and never from an offline port", async () => {
+    const child = fakeChild(96);
+    const spawn = vi.fn(() => child);
+    const scripts = temporaryDirectory();
+    const own = join(scripts, "octant-harness-1");
+    mkdirSync(own);
+    const script = join(own, "command.sh");
+    writeFileSync(script, "curl https://registry.example.com/\n");
+    const egressProxy = {
+      endpoint: { kind: "loopback", port: 41_234 },
+      token: "launch-token",
+    } as const;
+
+    const offline = new RepositoryTestProcessPort(
+      confinedOptions({ spawn, harnessShellScriptDirectory: scripts, networkEgress: "none" }),
+    );
+    await expect(
+      offline.executeShellScript({
+        script,
+        cwd: temporaryDirectory(),
+        environment: {},
+        timeoutMs: 1_000,
+        egressProxy,
+      }),
+    ).resolves.toMatchObject({ termination: "unavailable" });
+    expect(spawn).not.toHaveBeenCalled();
+
+    const port = new RepositoryTestProcessPort(
+      confinedOptions({ spawn, harnessShellScriptDirectory: scripts }),
+    );
+    const execution = port.executeShellScript({
+      script,
+      cwd: temporaryDirectory(),
+      environment: {},
+      timeoutMs: 1_000,
+      egressProxy,
+    });
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+    const [, args, spawnOptions] = spawn.mock.calls[0] as unknown as [
+      string,
+      string[],
+      { readonly env: Record<string, string> },
+    ];
+    const profile = String(args[1]);
+    expect(profile).toContain('(allow network-outbound (remote ip "localhost:41234"))');
+    expect(profile).not.toContain("(allow network*)");
+    const proxyUrl = "http://octant:launch-token@127.0.0.1:41234";
+    expect(spawnOptions.env).toMatchObject({
+      HTTPS_PROXY: proxyUrl,
+      https_proxy: proxyUrl,
+      HTTP_PROXY: proxyUrl,
+      http_proxy: proxyUrl,
+      ALL_PROXY: proxyUrl,
+      all_proxy: proxyUrl,
+      NO_PROXY: "",
+      no_proxy: "",
+      NODE_USE_ENV_PROXY: "1",
+    });
+    child.close(0, null);
+    await expect(execution).resolves.toMatchObject({ termination: "exited", exitCode: 0 });
+  });
+
   it("refuses a harness shell script outside its own script subdirectory or from a port with none", async () => {
     const spawn = vi.fn();
     const scripts = temporaryDirectory();
