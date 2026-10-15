@@ -66,7 +66,7 @@ export function RoutineComposer(props: RoutineComposerProps) {
               className="routine-composer__chip"
               onClick={() => read(suggestion.request)}
               type="button"
-              variant="bare"
+              variant="ghost"
             >
               {suggestion.label}
             </OctantButton>
