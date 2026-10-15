@@ -143,14 +143,14 @@ A trusted-looking extension ships an MCP server that requests filesystem, shell,
 credential capability it never declared, floods oversized results, or registers tools whose names
 shadow Octant core tools.
 
-| Layer               | Control                                                                                                      | Module                                                                                                  | State           |
-| ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | --------------- |
-| Activation ladder   | Host → mode → Project → thread → trust → enablement → compatibility all fail closed; quarantine blocks first | `packages/plugin-host/src/activation.ts` (`resolveExtensionActivation`, `isExtensionComponentModeSafe`) | Exists today    |
-| Manifest validation | Declared capabilities, entry points, paths, symlinks, and integrity validated before install                 | `apps/server/src/extensions/packageInspector.ts`, `packages/plugin-host/src/agentPlugins/mcp.ts`        | Exists today    |
-| Supervised process  | Executable components run under `sandbox-exec` with a minimal `PATH`, ready-handshake, and durable receipts  | `apps/server/src/extensions/nodeExtensionProcessPort.ts`, `extensionSupervisor.ts`                      | Exists today    |
-| Per-call approval   | Each MCP tool invocation is approval-gated with a bounded TTL that denies on timeout or abort                | `apps/server/src/extensions/extensionToolApprovalService.ts`                                            | Exists today    |
-| Policy engine       | An MCP-originated call carries `extension: trusted-extension` authority and cannot claim `core` identity     | `packages/contracts/src/toolActions.ts` (`ToolActionAuthority.extension`), `toolActionPolicy.ts`        | Exists today    |
-| Capability ceiling  | Requested-versus-declared capability mismatch is rejected at resolution, not merely surfaced in review UI    | Unified policy engine (see Policy engine)                                                               | Newly specified |
+| Layer               | Control                                                                                                                                                                           | Module                                                                                                  | State           |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | --------------- |
+| Activation ladder   | Host → mode → Project → thread → trust → enablement → compatibility all fail closed; quarantine blocks first                                                                      | `packages/plugin-host/src/activation.ts` (`resolveExtensionActivation`, `isExtensionComponentModeSafe`) | Exists today    |
+| Manifest validation | Declared capabilities, entry points, paths, symlinks, and integrity validated before install                                                                                      | `apps/server/src/extensions/packageInspector.ts`, `packages/plugin-host/src/agentPlugins/mcp.ts`        | Exists today    |
+| Supervised process  | Executable components run under `sandbox-exec` with a minimal `PATH`, ready-handshake, and durable receipts                                                                       | `apps/server/src/extensions/nodeExtensionProcessPort.ts`, `extensionSupervisor.ts`                      | Exists today    |
+| Per-call approval   | Each MCP tool invocation is approval-gated with a bounded TTL that denies on timeout or abort; a paired device answers only its own turns' prompts, once, and never remembers one | `apps/server/src/extensions/extensionToolApprovalService.ts`                                            | Exists today    |
+| Policy engine       | An MCP-originated call carries `extension: trusted-extension` authority and cannot claim `core` identity                                                                          | `packages/contracts/src/toolActions.ts` (`ToolActionAuthority.extension`), `toolActionPolicy.ts`        | Exists today    |
+| Capability ceiling  | Requested-versus-declared capability mismatch is rejected at resolution, not merely surfaced in review UI                                                                         | Unified policy engine (see Policy engine)                                                               | Newly specified |
 
 ### AC3 — Child agent widening scope
 
@@ -307,8 +307,11 @@ guidance instead.
   (privilege expansion) is the only entry in one of the four classes; the flag also covers
   `computer-use`, `web-fetch`, and the harness `bash`, `edit`, `write`, and `goal-check`. A Code Git action a person takes from a window (discard, restore, push, create a
   pull request, bring a run home) is that person's own per-action act, and no agent tool issues
-  one. Residual gaps: the prompt does not yet name the ingested sources or say that the mark is
-  why it asks, and a provider runtime's own tools sit outside this gate (below). In the native
+  one. The prompt says the mark is why it asks and names the sources that marked the thread,
+  with how often and when each was last read: the harness, MCP tool, and Computer use approvals
+  carry `outsideContent`, which the host reads from the ingestion projection when it asks, bounded
+  to eight labels plus a total and holding no content or content reference. Residual gap: a
+  provider runtime's own tools sit outside this gate (below). In the native
   harness only results that bring in outside content mark the thread
   (`web-fetch`, `web-search`, a child's collected or delivered reply); local reads, searches, edits, and
   commands do not. On a tainted thread a harness "always" approval stops covering its class, and

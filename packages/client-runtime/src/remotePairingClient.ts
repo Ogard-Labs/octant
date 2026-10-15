@@ -5,7 +5,13 @@ import {
 } from "@octant/contracts/remote-access";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
-import { verifyHostHello } from "./hostHelloVerification";
+import {
+  createHelloClientNonce,
+  HOST_HELLO_OUTDATED_STATUS,
+  HOST_OUTDATED_MESSAGE,
+  hostHelloUrl,
+  verifyHostHello,
+} from "./hostHelloVerification";
 import {
   decodeListenerOriginTrust,
   PLATFORM_LISTENER_TRUST,
@@ -180,6 +186,9 @@ export interface RemotePairingClient {
   readonly removeDeviceKey: (keyId: string) => Promise<void>;
 }
 
+/** How many recent hello requests a claim may answer; the UI asks once or twice. */
+const MAX_REQUESTED_CLIENT_NONCES = 8;
+
 export function createRemotePairingClient(
   options: RemotePairingClientOptions,
 ): RemotePairingClient {
@@ -194,13 +203,23 @@ export function createRemotePairingClient(
       ? PLATFORM_LISTENER_TRUST
       : { current: options.listenerTrust };
 
+  // Client nonces this client sent with a hello request, newest last. A claim
+  // is made only through a hello that answers one of them, so a hello this
+  // client did not ask for (a recorded one, say) cannot become the pin.
+  const requestedClientNonces: string[] = [];
+
   const requestHostHello = async (): Promise<HostHelloV1> => {
-    const url = new URL("/api/remote/hello", baseUrl);
+    const clientNonce = createHelloClientNonce();
+    requestedClientNonces.push(clientNonce);
+    if (requestedClientNonces.length > MAX_REQUESTED_CLIENT_NONCES) requestedClientNonces.shift();
     let response: Response;
     try {
-      response = await fetch(url.toString(), { method: "GET" });
+      response = await fetch(hostHelloUrl(baseUrl, clientNonce), { method: "GET" });
     } catch (error) {
       throw transportFailure(error);
+    }
+    if (response.status === HOST_HELLO_OUTDATED_STATUS) {
+      throw new RemotePairingFailure("invalid", HOST_OUTDATED_MESSAGE);
     }
     if (!response.ok) {
       throw statusFailure(response.status);
@@ -223,7 +242,7 @@ export function createRemotePairingClient(
     if (new Date(hello.expiresAt).getTime() <= now()) {
       throw new RemotePairingFailure("unavailable", "Host hello has expired.");
     }
-    await requireSelfProvenHello(hello, now());
+    await requireSelfProvenHello(hello, now(), clientNonce);
     return hello;
   };
 
@@ -240,7 +259,16 @@ export function createRemotePairingClient(
     }
     // The fingerprint this hello proves becomes the pin every later
     // connection is checked against.
-    await requireSelfProvenHello(input.hostHello, now());
+    // A hello answering no nonce this client sent is checked against a fresh
+    // one it cannot match, so it is refused as unproven.
+    const answered = input.hostHello.clientNonce;
+    await requireSelfProvenHello(
+      input.hostHello,
+      now(),
+      answered !== undefined && requestedClientNonces.includes(answered)
+        ? answered
+        : createHelloClientNonce(),
+    );
     const trimmedLabel = input.deviceLabel.trim();
     if (trimmedLabel.length === 0) {
       throw new RemotePairingFailure("invalid", "Device label is required.");
@@ -438,8 +466,12 @@ export function createRemotePairingClient(
  * First contact: nothing is pinned yet, so the hello must at least prove the
  * key it names. A refused hello stops pairing before a device key is made.
  */
-async function requireSelfProvenHello(hello: HostHelloV1, now: number): Promise<void> {
-  const verification = await verifyHostHello(hello, { now });
+async function requireSelfProvenHello(
+  hello: HostHelloV1,
+  now: number,
+  clientNonce: string,
+): Promise<void> {
+  const verification = await verifyHostHello(hello, { now, clientNonce });
   if (verification.status === "refused") {
     throw new RemotePairingFailure("invalid", verification.message);
   }

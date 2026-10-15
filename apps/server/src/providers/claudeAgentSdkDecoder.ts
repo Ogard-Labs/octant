@@ -1009,6 +1009,74 @@ function decodeResult(
   };
 }
 
+function decodeRateLimit(message: Record<string, unknown>): ClaudeDecodedMessage {
+  const info = object(message.rate_limit_info);
+  const resetsAt = optionalNonNegativeNumber(info?.resetsAt);
+  const utilization = optionalNonNegativeNumber(info?.utilization);
+  if (
+    typeof message.session_id !== "string" ||
+    info === undefined ||
+    (info.status !== "allowed" &&
+      info.status !== "allowed_warning" &&
+      info.status !== "rejected") ||
+    (info.rateLimitType !== undefined &&
+      (typeof info.rateLimitType !== "string" || !RATE_LIMIT_TYPES.has(info.rateLimitType)))
+  )
+    throw protocol("Claude returned an unsupported runtime message.");
+  const overageResetsAt = optionalNonNegativeNumber(info.overageResetsAt);
+  const overageStatus = info.overageStatus;
+  return {
+    kind: "rate-limit",
+    sessionId: message.session_id,
+    status: info.status,
+    ...(resetsAt === undefined ? {} : { resetsAt }),
+    ...(typeof info.rateLimitType === "string" ? { rateLimitType: info.rateLimitType } : {}),
+    ...(utilization === undefined ? {} : { utilization }),
+    ...(overageStatus === "allowed" ||
+    overageStatus === "allowed_warning" ||
+    overageStatus === "rejected"
+      ? { overageStatus }
+      : {}),
+    ...(overageResetsAt === undefined ? {} : { overageResetsAt }),
+    ...(typeof info.overageDisabledReason === "string"
+      ? { overageDisabledReason: info.overageDisabledReason }
+      : {}),
+    ...(info.overageInUse === true || info.isUsingOverage === true ? { overageInUse: true } : {}),
+  };
+}
+
+function decodeStatus(
+  message: Record<string, unknown>,
+  input: ClaudeOpenQueryInput,
+): ClaudeDecodedMessage {
+  const mode = message.permissionMode;
+  if (
+    typeof message.session_id !== "string" ||
+    (message.status !== null &&
+      message.status !== "compacting" &&
+      message.status !== "requesting") ||
+    (mode !== undefined &&
+      ((mode !== "default" && mode !== "bypassPermissions" && mode !== "plan" && mode !== "auto") ||
+        mode !== permissionMode(input.executionPolicy, input.autoApprove))) ||
+    (message.compact_result !== undefined &&
+      message.compact_result !== "success" &&
+      message.compact_result !== "failed") ||
+    (message.compact_error !== undefined && typeof message.compact_error !== "string")
+  )
+    throw protocol("Claude returned an unsupported runtime message.");
+  return {
+    kind: "status",
+    sessionId: message.session_id,
+    status: message.status,
+    ...(mode === "default" || mode === "bypassPermissions" || mode === "plan" || mode === "auto"
+      ? { permissionMode: mode }
+      : {}),
+    ...(message.compact_result === "success" || message.compact_result === "failed"
+      ? { compactResult: message.compact_result }
+      : {}),
+  };
+}
+
 export type ClaudeDecodePhase =
   | {
       readonly kind: "initializing";
@@ -1032,6 +1100,17 @@ export function decodeMessage(
     // Since Claude Code 2.1.258 the runtime does not initialize until the
     // first user message arrives; what it sends before that is informational.
     if (isHarmlessInformational(message)) return { kind: "ignored" };
+    // The runtime writes its status notes and rate-limit frames straight to
+    // its output, beside the stream that opens with the initialized message.
+    // A resumed session whose first input is `/compact` says `compacting`,
+    // and passes on the limits its summarizing request reported, before it
+    // initializes; refusing them failed every requested compaction. They are
+    // decoded as they would be later, and the port holds them until the
+    // runtime has initialized.
+    if (message.type === "system" && message.subtype === "status") {
+      return decodeStatus(message, input);
+    }
+    if (message.type === "rate_limit_event") return decodeRateLimit(message);
     throw protocol("Claude returned an unsupported runtime message.");
   }
   if (
@@ -1137,41 +1216,7 @@ export function decodeMessage(
       toolUseIds,
     };
   }
-  if (message.type === "rate_limit_event") {
-    const info = object(message.rate_limit_info);
-    const resetsAt = optionalNonNegativeNumber(info?.resetsAt);
-    const utilization = optionalNonNegativeNumber(info?.utilization);
-    if (
-      typeof message.session_id !== "string" ||
-      info === undefined ||
-      (info.status !== "allowed" &&
-        info.status !== "allowed_warning" &&
-        info.status !== "rejected") ||
-      (info.rateLimitType !== undefined &&
-        (typeof info.rateLimitType !== "string" || !RATE_LIMIT_TYPES.has(info.rateLimitType)))
-    )
-      throw protocol("Claude returned an unsupported runtime message.");
-    const overageResetsAt = optionalNonNegativeNumber(info.overageResetsAt);
-    const overageStatus = info.overageStatus;
-    return {
-      kind: "rate-limit",
-      sessionId: message.session_id,
-      status: info.status,
-      ...(resetsAt === undefined ? {} : { resetsAt }),
-      ...(typeof info.rateLimitType === "string" ? { rateLimitType: info.rateLimitType } : {}),
-      ...(utilization === undefined ? {} : { utilization }),
-      ...(overageStatus === "allowed" ||
-      overageStatus === "allowed_warning" ||
-      overageStatus === "rejected"
-        ? { overageStatus }
-        : {}),
-      ...(overageResetsAt === undefined ? {} : { overageResetsAt }),
-      ...(typeof info.overageDisabledReason === "string"
-        ? { overageDisabledReason: info.overageDisabledReason }
-        : {}),
-      ...(info.overageInUse === true || info.isUsingOverage === true ? { overageInUse: true } : {}),
-    };
-  }
+  if (message.type === "rate_limit_event") return decodeRateLimit(message);
   if (message.type === "auth_status") {
     if (
       typeof message.session_id !== "string" ||
@@ -1188,37 +1233,8 @@ export function decodeMessage(
       failed: typeof message.error === "string",
     };
   }
-  if (message.type === "system" && message.subtype === "status") {
-    const mode = message.permissionMode;
-    if (
-      typeof message.session_id !== "string" ||
-      (message.status !== null &&
-        message.status !== "compacting" &&
-        message.status !== "requesting") ||
-      (mode !== undefined &&
-        ((mode !== "default" &&
-          mode !== "bypassPermissions" &&
-          mode !== "plan" &&
-          mode !== "auto") ||
-          mode !== permissionMode(input.executionPolicy, input.autoApprove))) ||
-      (message.compact_result !== undefined &&
-        message.compact_result !== "success" &&
-        message.compact_result !== "failed") ||
-      (message.compact_error !== undefined && typeof message.compact_error !== "string")
-    )
-      throw protocol("Claude returned an unsupported runtime message.");
-    return {
-      kind: "status",
-      sessionId: message.session_id,
-      status: message.status,
-      ...(mode === "default" || mode === "bypassPermissions" || mode === "plan" || mode === "auto"
-        ? { permissionMode: mode }
-        : {}),
-      ...(message.compact_result === "success" || message.compact_result === "failed"
-        ? { compactResult: message.compact_result }
-        : {}),
-    };
-  }
+  if (message.type === "system" && message.subtype === "status")
+    return decodeStatus(message, input);
   // Claude Code compacts its own session when the window nears its threshold
   // (or on `/compact`) and marks the cut with a boundary. It used to end the
   // turn as an unsupported message the moment a long turn compacted. The

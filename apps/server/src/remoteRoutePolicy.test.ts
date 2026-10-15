@@ -648,11 +648,11 @@ describe("remote route policy", () => {
     expect(accepted.status).toBe(200);
   });
 
-  it("refuses a paired device listing or answering extension tool approvals", () => {
+  it("forwards a paired device's MCP tool prompt list and answer, and keeps remembered approvals local", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
-    for (const method of ["GET", "POST"] as const) {
-      const decision = routePolicy.inspect(
-        request("/api/extensions/tool-approvals", {
+    const inspect = (path: string, method: "GET" | "POST") =>
+      routePolicy.inspect(
+        request(path, {
           method,
           headers: {
             origin,
@@ -662,6 +662,14 @@ describe("remote route policy", () => {
           ...(method === "POST" ? { body: "{}" } : {}),
         }),
       );
+    expect(inspect("/api/extensions/tool-approvals", "POST")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+      maxBodyBytes: 4_096,
+    });
+    expect(inspect("/api/extensions/tool-approvals", "GET")).toMatchObject({ kind: "reject" });
+    for (const method of ["GET", "POST"] as const) {
+      const decision = inspect("/api/extensions/tool-grants", method);
       expect(decision).toMatchObject({ kind: "reject", facts: { surface: "local-only" } });
       if (decision.kind === "reject") expect(decision.response.status).toBe(404);
     }
@@ -670,8 +678,8 @@ describe("remote route policy", () => {
         origin,
         authenticatedRoutes: [
           {
-            id: "extension-tool-approvals",
-            match: { kind: "exact", path: "/api/extensions/tool-approvals" },
+            id: "extension-tool-grants",
+            match: { kind: "exact", path: "/api/extensions/tool-grants" },
             surface: "authenticated-product",
             methods: ["GET", "POST"],
           },

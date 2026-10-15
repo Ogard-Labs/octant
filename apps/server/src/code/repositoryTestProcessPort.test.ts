@@ -849,6 +849,72 @@ describe("RepositoryTestProcessPort", () => {
     },
   );
 
+  it("interrupts a cancelled launch first and waits for it to finish before any harsher signal", async () => {
+    const child = fakeChild(4321);
+    const signals: Array<[number, NodeJS.Signals]> = [];
+    const controller = new AbortController();
+    const port = new RepositoryTestProcessPort(
+      confinedOptions({
+        spawn: () => child,
+        killProcessGroup: (pid, signal) => {
+          signals.push([pid, signal]);
+          // The recorder finalizes its file, then exits a moment after SIGINT.
+          if (signal === "SIGINT") setTimeout(() => child.close(0, null), 20);
+        },
+        gracefulTimeoutMs: 1,
+        interruptTimeoutMs: 2_000,
+      }),
+    );
+    const execution = port.execute(
+      {
+        argv: ["/usr/bin/test"],
+        cwd: "/repo",
+        environment: {},
+        timeoutMs: 5_000,
+        interruptFirst: true,
+      },
+      controller.signal,
+    );
+    controller.abort();
+
+    await expect(execution).resolves.toMatchObject({
+      termination: "cancelled",
+      cleanupUncertain: false,
+    });
+    expect(signals).toEqual([[-4321, "SIGINT"]]);
+  });
+
+  it("escalates to SIGTERM when an interrupted launch does not exit in time", async () => {
+    const child = fakeChild(4321);
+    const signals: Array<[number, NodeJS.Signals]> = [];
+    const controller = new AbortController();
+    const port = new RepositoryTestProcessPort(
+      confinedOptions({
+        spawn: () => child,
+        killProcessGroup: (pid, signal) => {
+          signals.push([pid, signal]);
+          if (signal === "SIGTERM") child.close(null, signal);
+        },
+        gracefulTimeoutMs: 1,
+        interruptTimeoutMs: 5,
+      }),
+    );
+    const execution = port.execute(
+      {
+        argv: ["/usr/bin/test"],
+        cwd: "/repo",
+        environment: {},
+        timeoutMs: 5_000,
+        interruptFirst: true,
+      },
+      controller.signal,
+    );
+    controller.abort();
+
+    await expect(execution).resolves.toMatchObject({ termination: "cancelled" });
+    expect(signals.map(([, signal]) => signal)).toEqual(["SIGINT", "SIGTERM"]);
+  });
+
   it("bounds stdout and stderr together while retaining one overflow byte for the runner", async () => {
     const child = fakeChild(4321);
     const port = new RepositoryTestProcessPort(

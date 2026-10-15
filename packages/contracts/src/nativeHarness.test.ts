@@ -456,3 +456,34 @@ describe("a compacted harness transcript", () => {
     expect(() => decodeNativeHarnessTranscriptCompacted(value)).toThrow();
   });
 });
+
+describe("a harness approval on a marked thread", () => {
+  const pending = {
+    id: "00000000-0000-4000-8000-000000000020",
+    toolName: "bash",
+    summary: "bash: git push",
+    approvalClass: "shell-commands",
+    status: "pending",
+    askedAt: at,
+  };
+  const outsideContent = {
+    sources: [{ sourceLabel: "web-fetch", ingestionCount: 1, lastIngestedAt: at }],
+    sourceCount: 1,
+  };
+
+  it("names the sources that marked the thread on a single-use approval", () => {
+    expect(
+      decodeNativeHarnessApproval({ ...pending, singleUse: true, outsideContent }).outsideContent,
+    ).toEqual(outsideContent);
+  });
+
+  it("refuses sources on an approval that may still be remembered", () => {
+    expect(() => decodeNativeHarnessApproval({ ...pending, outsideContent })).toThrow();
+  });
+
+  it("still reads an approval journaled before sources were recorded", () => {
+    expect(decodeNativeHarnessApproval({ ...pending, singleUse: true }).outsideContent).toBe(
+      undefined,
+    );
+  });
+});

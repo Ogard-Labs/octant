@@ -528,6 +528,12 @@ export interface ClaudeAgentSdkPortOptions {
 }
 
 const DEFAULT_INPUT_CAPACITY = 1;
+/**
+ * A resumed `/compact` sends a status or two and a rate-limit frame before
+ * the runtime initializes; a runtime that sends more than this without ever
+ * initializing is not holding a session open.
+ */
+const MAX_NOTES_BEFORE_INITIALIZATION = 64;
 /** The answer is a local control request; one that takes longer is not coming. */
 const CONTEXT_USAGE_TIMEOUT_MS = 3_000;
 /**
@@ -925,6 +931,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               spawnClaudeCodeProcess: options.spawnClaudeCodeProcess({
                 projectRoot: input.projectRoot,
                 executionPolicy: input.executionPolicy,
+                runsCommands: input.tools.includes("Bash"),
               }),
               canUseTool,
               hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
@@ -967,9 +974,14 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
             const streamEnded = (failed: ProviderFailure) => {
               sessionAnnounced.reject(failed);
             };
-            const decodeNext = (message: unknown): ClaudeDecodedMessage | undefined => {
+            // Status notes and rate-limit frames the runtime sends before it
+            // initializes (a resumed `/compact` does) are held and delivered
+            // right after the initialized message, so a consumer still sees
+            // the session initialize first and the notes in their own order.
+            const heldBeforeInitialization: ClaudeDecodedMessage[] = [];
+            const decodeNext = (message: unknown): readonly ClaudeDecodedMessage[] => {
               if (phase.kind !== "initializing")
-                return decodeMessage(message, decodingInput(), phase);
+                return [decodeMessage(message, decodingInput(), phase)];
               const decoded = decodeMessage(message, decodingInput(), phase);
               if (decoded.kind === "initialized") {
                 if (announcedSessionId !== undefined && announcedSessionId !== decoded.sessionId) {
@@ -979,11 +991,20 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 hasInterruptReceipt = decoded.capabilities.includes("interrupt_receipt_v1");
                 phase = { kind: "active", sessionId: decoded.sessionId };
                 announce(decoded.sessionId);
-                return decoded;
+                // Each held note already named the session announced here.
+                return [decoded, ...heldBeforeInitialization.splice(0)];
               }
               const sessionId = rawSessionId(message);
               if (sessionId !== undefined) announce(sessionId);
-              return undefined;
+              if (decoded.kind === "ignored") return [];
+              if (
+                heldBeforeInitialization.length >= MAX_NOTES_BEFORE_INITIALIZATION ||
+                (announcedSessionId !== undefined && decoded.sessionId !== announcedSessionId)
+              ) {
+                throw protocol("Claude returned an unsupported runtime message.");
+              }
+              heldBeforeInitialization.push(decoded);
+              return [];
             };
             const remaining: AsyncIterable<unknown> = {
               [Symbol.asyncIterator]: () => ({
@@ -1047,7 +1068,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   },
                 }),
               ),
-              Stream.filter((message): message is ClaudeDecodedMessage => message !== undefined),
+              Stream.flattenIterables,
               // The window's make-up is asked for where a turn settles. The
               // answer is the runtime's, so it rides on the result that carries
               // the turn's usage and nowhere else.

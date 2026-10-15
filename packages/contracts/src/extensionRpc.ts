@@ -1,3 +1,4 @@
+import { ApprovalOutsideContent } from "./contentProvenance";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { AggregateVersion, EventVersion, GlobalSequence, UtcTimestamp } from "./events";
@@ -75,6 +76,8 @@ export const ExtensionToolApproval = Schema.Struct({
    * those are approved one call at a time.
    */
   rememberable: Schema.Boolean,
+  /** Present when the thread has taken in outside content; see `ApprovalOutsideContent`. */
+  outsideContent: Schema.optional(ApprovalOutsideContent),
 }).annotations({ ...strict, ...personDecides });
 export type ExtensionToolApproval = typeof ExtensionToolApproval.Type;
 

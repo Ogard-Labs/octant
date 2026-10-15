@@ -36,7 +36,14 @@ import {
   shouldRotateSession,
 } from "@octant/domain";
 import { bindFetchPort } from "./bindFetchPort";
-import { verifyHostHello, type PinnedHostIdentity } from "./hostHelloVerification";
+import {
+  createHelloClientNonce,
+  HOST_HELLO_OUTDATED_STATUS,
+  HOST_OUTDATED_MESSAGE,
+  hostHelloUrl,
+  verifyHostHello,
+  type PinnedHostIdentity,
+} from "./hostHelloVerification";
 
 const SESSION_COOKIE_NAME = "__Secure-octant-remote-session";
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
@@ -253,16 +260,19 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
     deviceIdentity = undefined;
   };
 
-  const fetchHello = async (): Promise<HostHelloV1> => {
-    const response = await fetch(new URL("/api/remote/hello", config.origin).toString(), {
-      method: "GET",
-    });
+  /** Fetches a hello that must answer a nonce this call chose. */
+  const fetchHello = async (): Promise<AnsweredHostHello> => {
+    const clientNonce = createHelloClientNonce();
+    const response = await fetch(hostHelloUrl(config.origin, clientNonce), { method: "GET" });
+    if (response.status === HOST_HELLO_OUTDATED_STATUS) {
+      throw new RemoteConnectionError("incompatible", HOST_OUTDATED_MESSAGE);
+    }
     if (!response.ok) throw await protocolStatusError(response);
-    return decodeHostAnswer(HostHelloV1)(await response.json());
+    return { hello: decodeHostAnswer(HostHelloV1)(await response.json()), clientNonce };
   };
 
   const verifyHelloIdentity = async (
-    hello: HostHelloV1,
+    { hello, clientNonce }: AnsweredHostHello,
     known: DeviceIdentity | undefined,
   ): Promise<void> => {
     if (hello.remoteOrigin !== config.origin) {
@@ -278,7 +288,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
     if (negotiation.kind === "rejected") {
       throw new RemoteConnectionError("incompatible", "Remote protocol versions are incompatible.");
     }
-    await requireProvenHostHello(hello, known, now());
+    await requireProvenHostHello(hello, known, now(), clientNonce);
   };
 
   const requestChallenge = async (known: DeviceIdentity): Promise<RemoteAuthChallengeV1> => {
@@ -373,12 +383,11 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
    * -> hello (fresh nonce) -> negotiate -> prove possession -> session.
    */
   const authenticate = async (known: DeviceIdentity): Promise<RemoteSessionFacts> => {
-    const hello = await fetchHello();
-    await verifyHelloIdentity(hello, known);
+    await verifyHelloIdentity(await fetchHello(), known);
     const challenge = await requestChallenge(known);
     const helloForNegotiate = await fetchHello();
     await verifyHelloIdentity(helloForNegotiate, known);
-    const negotiated = await negotiate(known, challenge, helloForNegotiate.nonce);
+    const negotiated = await negotiate(known, challenge, helloForNegotiate.hello.nonce);
     setState("authenticating");
     return issueSession(known, challenge, negotiated);
   };
@@ -387,8 +396,9 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
     if (config.pairing === undefined) {
       throw new RemoteConnectionError("invalid", "No pairing ticket or known device was supplied.");
     }
-    const hello = await fetchHello();
-    await verifyHelloIdentity(hello, undefined);
+    const answered = await fetchHello();
+    await verifyHelloIdentity(answered, undefined);
+    const hello = answered.hello;
     const deviceKey = await config.deviceKey.loadOrCreate();
     setState("negotiating");
     const claimBody = {
@@ -653,16 +663,24 @@ function sessionNeedsRenewal(session: RemoteSessionFacts, nowMs: number): boolea
   return shouldRotateSession(session.issuedAt, nowMs);
 }
 
+/** A hello and the client nonce the request for it named. */
+interface AnsweredHostHello {
+  readonly hello: HostHelloV1;
+  readonly clientNonce: string;
+}
+
 /**
- * Refuses a host hello that does not prove the host identity key, or (with a
- * pin) proves a different one than the device recorded at pairing.
+ * Refuses a host hello that does not prove the host identity key in answer to
+ * `clientNonce`, or (with a pin) proves a different key than the device
+ * recorded at pairing.
  */
 export async function requireProvenHostHello(
   hello: HostHelloV1,
   pinned: PinnedHostIdentity | undefined,
   now: number,
+  clientNonce: string,
 ): Promise<void> {
-  const verification = await verifyHostHello(hello, { pinned, now });
+  const verification = await verifyHostHello(hello, { pinned, now, clientNonce });
   if (verification.status === "verified") return;
   switch (verification.reason) {
     case "host-changed":

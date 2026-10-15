@@ -134,7 +134,7 @@ export function resolveProbeEgressPolicy(): ThreadEgressPolicy {
  * call with `fetch failed` and no connection, `allow` reaches
  * api.anthropic.com and returns its status. A Plan runtime on `none` therefore
  * cannot answer at all — it retries until the turn times out — while what Plan
- * actually withholds, writing to the checkout and executing a process, is
+ * actually withholds, writing to the checkout and executing a program off its list, is
  * withheld by the filesystem and process rules rather than by this one.
  */
 export function resolveProviderRuntimeEgressPolicy(

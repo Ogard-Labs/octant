@@ -66,6 +66,8 @@ interface RepositoryTestProcessPortOptions {
   ) => SpawnedProcess;
   readonly killProcessGroup?: (groupId: number, signal: NodeJS.Signals) => void;
   readonly gracefulTimeoutMs?: number;
+  /** How long an interrupt-first launch gets to finish its output after SIGINT. */
+  readonly interruptTimeoutMs?: number;
   readonly maxOutputBytes?: number;
   readonly receiptDirectory?: string;
   readonly processIdentity?: (pid: number) => Promise<string | undefined>;
@@ -184,6 +186,13 @@ export interface RepositoryTestProcessInput {
    */
   readonly allowSignal?: boolean;
   /**
+   * End this launch with SIGINT first when it is cancelled or times out, and
+   * wait for it to exit before escalating to SIGTERM then SIGKILL. A recorder
+   * writes its file only on SIGINT; SIGTERM leaves it empty and the device
+   * refusing any new recorder.
+   */
+  readonly interruptFirst?: boolean;
+  /**
    * Directories this launch may read and write on top of the port-wide set,
    * for host state only one kind of launch should reach. The Apple screenshot
    * is the caller: its raw capture lands in a host-private directory no other
@@ -227,6 +236,7 @@ export class RepositoryTestProcessPort {
   readonly #spawn: NonNullable<RepositoryTestProcessPortOptions["spawn"]>;
   readonly #killProcessGroup: NonNullable<RepositoryTestProcessPortOptions["killProcessGroup"]>;
   readonly #gracefulTimeoutMs: number;
+  readonly #interruptTimeoutMs: number;
   readonly #maxOutputBytes: number;
   readonly #receiptDirectory: string | undefined;
   readonly #processIdentity: ((pid: number) => Promise<string | undefined>) | undefined;
@@ -248,6 +258,7 @@ export class RepositoryTestProcessPort {
     this.#killProcessGroup =
       options.killProcessGroup ?? ((groupId, signal) => process.kill(groupId, signal));
     this.#gracefulTimeoutMs = options.gracefulTimeoutMs ?? 1_000;
+    this.#interruptTimeoutMs = options.interruptTimeoutMs ?? 10_000;
     this.#maxOutputBytes = options.maxOutputBytes ?? MAX_REPOSITORY_TEST_OUTPUT_BYTES;
     this.#receiptDirectory = options.receiptDirectory;
     this.#processIdentity = options.processIdentity;
@@ -499,14 +510,18 @@ export class RepositoryTestProcessPort {
         : unavailable(!groupReleased, output);
     }
     if (settledProcess?.kind === "timed-out" || settledProcess?.kind === "cancelled") {
-      const cleanup = await this.#terminate(child, closed);
+      const cleanup = await this.#terminate(child, closed, input.interruptFirst === true);
       void receiptAttempt
         .then(async (value) => {
           if (await this.#waitForProcessGroupExit(child.pid ?? -1)) {
             await value.remove();
             return;
           }
-          const receiptCleanup = await this.#terminate(child, closed);
+          const receiptCleanup = await this.#terminate(
+            child,
+            closed,
+            input.interruptFirst === true,
+          );
           if (!receiptCleanup.uncertain) await value.remove();
         })
         .catch(() => undefined);
@@ -518,7 +533,7 @@ export class RepositoryTestProcessPort {
       };
     }
     if (receiptOutcome.kind === "receipt-error") {
-      const cleanup = await this.#terminate(child, closed);
+      const cleanup = await this.#terminate(child, closed, input.interruptFirst === true);
       return unavailable(cleanup.uncertain, output);
     }
     if (receiptOutcome.kind !== "receipt") return unavailable(true, output);
@@ -534,7 +549,7 @@ export class RepositoryTestProcessPort {
       return exited(first.code, output, !groupReleased);
     }
 
-    const cleanup = await this.#terminate(child, closed);
+    const cleanup = await this.#terminate(child, closed, input.interruptFirst === true);
     if (!cleanup.uncertain) await receipt.remove();
     return {
       termination: first.kind === "cancelled" ? "cancelled" : "timed-out",
@@ -595,10 +610,23 @@ export class RepositoryTestProcessPort {
   async #terminate(
     child: SpawnedProcess,
     closed: Promise<ProcessClose>,
+    interruptFirst = false,
   ): Promise<{ readonly code: number | null; readonly uncertain: boolean }> {
     if (!Number.isSafeInteger(child.pid) || (child.pid ?? 0) <= 0)
       return { code: null, uncertain: true };
-    const groupId = -Math.abs(child.pid!);
+    const pid = child.pid ?? -1;
+    const groupId = -Math.abs(pid);
+    if (interruptFirst) {
+      try {
+        this.#killProcessGroup(groupId, "SIGINT");
+        const interrupted = await closeWithin(closed, this.#interruptTimeoutMs);
+        if (interrupted?.kind === "closed" && (await this.#waitForProcessGroupExit(pid))) {
+          return { code: interrupted.code, uncertain: false };
+        }
+      } catch {
+        return { code: null, uncertain: true };
+      }
+    }
     try {
       this.#killProcessGroup(groupId, "SIGTERM");
     } catch {

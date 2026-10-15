@@ -4,7 +4,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { connect as netConnect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
 import {
   AggregateId,
@@ -32,7 +32,10 @@ import { ExternalContentClearStore } from "../context/externalContentClearStore"
 import { bindPrincipalRouteContext } from "../principalRouteContext";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import {
+  readApprovalOutsideContent,
+  readThreadExternalContentTaint,
+} from "../context/externalContentTaintProjection";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
@@ -276,6 +279,7 @@ async function hostileCodeLead(options: {
     readonly summary: string;
     readonly approvalClass: string;
     readonly singleUse: boolean;
+    readonly outsideSources?: ReadonlyArray<string>;
   }> = [];
   const answers = options.answers;
   let approvals: NativeHarnessApprovalStore | undefined;
@@ -288,12 +292,18 @@ async function hostileCodeLead(options: {
       },
       uuid: randomUUID,
       clock: () => now,
+      outsideContent: (subject) => readApprovalOutsideContent(connection, subject),
       onAsked: ({ approval }) => {
         asked.push({
           toolName: approval.toolName,
           summary: approval.summary,
           approvalClass: approval.approvalClass,
           singleUse: approval.singleUse === true,
+          ...(approval.outsideContent === undefined
+            ? {}
+            : {
+                outsideSources: approval.outsideContent.sources.map((source) => source.sourceLabel),
+              }),
         });
         const answer = answers.shift() ?? "deny";
         setImmediate(() => approvals?.decide(threadId, String(approval.id), answer));
@@ -474,6 +484,7 @@ describe("native harness hostile content", () => {
     expect(await lead.call("bash", { command: "bun run lint" })).toMatchObject({ isError: false });
     expect(lead.asked).toHaveLength(1);
     expect(lead.asked[0]).toMatchObject({ approvalClass: "shell-commands", singleUse: false });
+    expect(lead.asked[0]?.outsideSources).toBeUndefined();
 
     await lead.call("web-fetch", { url: lead.pageUrl });
     expect(lead.tainted()).toBe(true);
@@ -484,6 +495,8 @@ describe("native harness hostile content", () => {
     });
     expect(lead.asked).toHaveLength(2);
     expect(lead.asked[1]).toMatchObject({ approvalClass: "shell-commands", singleUse: true });
+    // It names what marked the thread, so the person knows why it asks.
+    expect(lead.asked[1]?.outsideSources).toEqual(["web-fetch"]);
 
     // An "always" answered on the tainted thread covers only that one command.
     expect(await lead.call("bash", { command: "bun test" })).toMatchObject({ isError: false });
@@ -2247,18 +2260,24 @@ describe("native harness tool egress proxy", () => {
     });
 
     it("closes an idle tunnel when its rule expires", async () => {
-      const { harness, tunnel } = await openAllowedTunnel({
-        clock: () => new Date().toISOString(),
-        rules: [
-          threadRule("registry.example.com", 443, {
-            expiresAt: new Date(Date.now() + 300).toISOString(),
-          }),
-        ],
-      });
-      await new Promise<void>((resolve) => tunnel.socket.once("close", () => resolve()));
-      expect(await summaryEntries(harness)).toContainEqual(
-        expect.objectContaining({ decision: "refused", reason: "expired" }),
-      );
+      // Only the proxy's expiry timer is faked, so the rule's lifetime follows
+      // the host clock instead of how long a loaded machine takes to open the
+      // tunnel.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const { harness, tunnel } = await openAllowedTunnel({
+          rules: [threadRule("registry.example.com", 443)],
+        });
+        const closed = new Promise<void>((resolve) => tunnel.socket.once("close", () => resolve()));
+        harness.advance(3_600_000);
+        vi.advanceTimersByTime(3_600_000);
+        await closed;
+        expect(await summaryEntries(harness)).toContainEqual(
+          expect.objectContaining({ decision: "refused", reason: "expired" }),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("closes the tunnel at once when its rule is revoked", async () => {

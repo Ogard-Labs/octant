@@ -271,6 +271,69 @@ describe("NativeHarnessSessionCard", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Allow" })).toBeVisible());
     expect(screen.queryByRole("button", { name: "Allow for this session" })).toBeNull();
   });
+
+  it("says the thread took in outside content and names what it read", async () => {
+    const approval = {
+      id: "00000000-0000-4000-8000-000000000065",
+      toolName: "bash",
+      summary: "bash: git push",
+      approvalClass: "shell-commands",
+      singleUse: true,
+      outsideContent: {
+        sources: [
+          {
+            sourceLabel: "web-fetch",
+            ingestionCount: 2,
+            lastIngestedAt: "2026-09-05T12:05:00.000Z",
+          },
+          { sourceLabel: "github-issue", ingestionCount: 1 },
+        ],
+        sourceCount: 3,
+      },
+      status: "pending",
+      askedAt: "2026-09-05T12:06:00.000Z",
+    };
+    const client = {
+      session: vi.fn(async () => ({ ...view(), approvals: [approval] })),
+      command: vi.fn(),
+      answerQuestion: vi.fn(),
+      decideApproval: vi.fn(),
+    };
+    render(<NativeHarnessSessionCard client={client as never} threadId={threadId} />);
+    const prompt = await screen.findByRole("region", { name: "Approval requested" });
+    expect(prompt).toHaveTextContent("This thread took in outside content");
+    const sources = within(prompt).getByRole("list", {
+      name: "Outside content that marked this thread",
+    });
+    expect(
+      within(sources)
+        .getAllByRole("listitem")
+        .map((row) => row.textContent),
+    ).toEqual([expect.stringContaining("Web pages"), expect.stringContaining("A GitHub issue")]);
+    expect(within(sources).getAllByRole("listitem")[0]).toHaveTextContent("Read 2 times");
+    expect(prompt).toHaveTextContent("and 1 more source");
+  });
+
+  it("names no outside content on an ordinary approval", async () => {
+    const approval = {
+      id: "00000000-0000-4000-8000-000000000066",
+      toolName: "bash",
+      summary: "bash: bun test",
+      approvalClass: "shell-commands",
+      status: "pending",
+      askedAt: "2026-09-05T12:06:00.000Z",
+    };
+    const client = {
+      session: vi.fn(async () => ({ ...view(), approvals: [approval] })),
+      command: vi.fn(),
+      answerQuestion: vi.fn(),
+      decideApproval: vi.fn(),
+    };
+    render(<NativeHarnessSessionCard client={client as never} threadId={threadId} />);
+    const prompt = await screen.findByRole("region", { name: "Approval requested" });
+    expect(prompt).not.toHaveTextContent("outside content");
+  });
+
   it("lists the hosts a marked thread's command may reach and sends only the ones left ticked", async () => {
     const approval = {
       id: "00000000-0000-4000-8000-000000000065",

@@ -39,18 +39,27 @@ import {
   type OpenAiImageQuality,
   type OpenAiImageSize,
   type ProviderInstance,
+  type ProviderDriverKind,
   type ProviderInstanceId,
   type ProviderModelId,
   type UtcTimestamp,
 } from "@octant/contracts";
+import {
+  configuredImageBaseUrl,
+  type ImageAdapterRequest,
+  type ImageGenerationAdapter,
+  type ImageGenerationDriver,
+} from "@octant/provider-sdk/image-generation";
 import {
   assertCustomImageSourceEligible,
   assertImageJobExpectedVersion,
   assertImageJobProfileEligible,
   assertImageJobTransitionAllowed,
   isImageJobTerminalStatus,
+  isImageProfileDriverKind,
   nextImageJobVersion,
 } from "@octant/domain";
+import { admittedBundledImageDriverKinds } from "@octant/plugin-host/provider-drivers";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
 import { ConcurrencyConflict } from "../persistence/journalErrors";
@@ -59,8 +68,7 @@ import { makeBflImageAdapter } from "./bflImageAdapter";
 import { makeGeminiImageAdapter } from "./geminiImageAdapter";
 import type { GeneratedImageStore } from "./generatedImageStore";
 import { makeIdeogramImageAdapter } from "./ideogramImageAdapter";
-import type { ImageAdapterRequest, ImageGenerationAdapter } from "./imageAdapter";
-import type { ImageHttpFetch } from "./imageHttp";
+import { makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
 import { ImageJobProjection } from "./imageJobProjection";
 import { makeOpenAiCompatibleImageAdapter } from "./openAiCompatibleImageAdapter";
 import { makeOpenAiImageAdapter } from "./openAiImageAdapter";
@@ -72,6 +80,20 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 
 type JournalPort = Pick<Journal, "append">;
+
+/**
+ * What a profile gets when its image driver plugin is disabled: every job
+ * fails as unsupported instead of reaching the provider.
+ */
+const unavailableImageAdapter: ImageGenerationAdapter = {
+  generate: async () => ({
+    status: "failed",
+    providerFailure: {
+      category: "unsupported",
+      message: "This image provider's plugin is not enabled.",
+    },
+  }),
+};
 
 export class ImageJobServiceError extends Error {
   override readonly name = "ImageJobServiceError";
@@ -110,6 +132,10 @@ export interface ImageJobServiceOptions {
   readonly actor: typeof EventActor.Type;
   readonly fetch?: ImageHttpFetch;
   readonly createAdapter?: (instance: ProviderInstance) => ImageGenerationAdapter;
+  /** Image providers that reach this service through the provider-sdk image seam. */
+  readonly imageDrivers?: ReadonlyArray<ImageGenerationDriver>;
+  /** Image driver kinds the plugin activation ladder admits; bundled policy by default. */
+  readonly admittedImageDriverKinds?: ReadonlySet<ProviderDriverKind>;
   readonly concurrency?: number;
 }
 
@@ -131,6 +157,8 @@ export class ImageJobService {
   readonly #actor: typeof EventActor.Type;
   readonly #fetch: ImageHttpFetch | undefined;
   readonly #createAdapter: (instance: ProviderInstance) => ImageGenerationAdapter;
+  readonly #imageDrivers: ReadonlyArray<ImageGenerationDriver>;
+  readonly #admittedImageDriverKinds: ReadonlySet<ProviderDriverKind>;
   readonly #concurrency: number;
   readonly #abort = new Map<string, AbortController>();
   readonly #waiters = new Map<string, Deferred<ImageJob>>();
@@ -151,6 +179,9 @@ export class ImageJobService {
     this.#actor = decodeActor(options.actor);
     this.#fetch = options.fetch;
     this.#createAdapter = options.createAdapter ?? ((instance) => this.#defaultAdapter(instance));
+    this.#imageDrivers = options.imageDrivers ?? [];
+    this.#admittedImageDriverKinds =
+      options.admittedImageDriverKinds ?? admittedBundledImageDriverKinds();
     this.#concurrency = options.concurrency ?? IMAGE_JOB_HOST_CONCURRENCY;
     if (!Number.isSafeInteger(this.#concurrency) || this.#concurrency < 1) {
       throw new ImageJobServiceError(
@@ -379,6 +410,30 @@ export class ImageJobService {
   >();
 
   #defaultAdapter(instance: ProviderInstance): ImageGenerationAdapter {
+    if (
+      isImageProfileDriverKind(instance.driverKind) &&
+      !this.#admittedImageDriverKinds.has(instance.driverKind)
+    ) {
+      return unavailableImageAdapter;
+    }
+    const driver = this.#imageDrivers.find(
+      (candidate) => candidate.driverKind === instance.driverKind,
+    );
+    if (driver !== undefined) {
+      const baseUrl = configuredImageBaseUrl(instance);
+      return driver.create({
+        instance,
+        ports: makeImageGenerationPorts({
+          instanceId: String(instance.id),
+          credentialResolver: this.#credentialResolver,
+          endpoint: {
+            providerHosts: driver.providerHosts,
+            ...(baseUrl === undefined ? {} : { baseUrl }),
+          },
+          ...(this.#fetch === undefined ? {} : { fetch: this.#fetch }),
+        }),
+      });
+    }
     const options = {
       instanceId: instance.id,
       credentialResolver: this.#credentialResolver,

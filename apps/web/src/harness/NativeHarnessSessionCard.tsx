@@ -10,6 +10,7 @@ import {
   sessionStatsInputOf,
   threadStats,
 } from "@octant/domain";
+import { ApprovalOutsideContentNote } from "../composer/ApprovalOutsideContentNote";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -254,6 +255,9 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
               ? `Needs your say-so (${pendingApproval.approvalClass}).`
               : "Allow this request for this child."}
           </p>
+          {pendingApproval.outsideContent === undefined ? null : (
+            <ApprovalOutsideContentNote outsideContent={pendingApproval.outsideContent} />
+          )}
           {pendingApproval.detail === undefined ? null : (
             <pre className="native-harness-question__detail">{pendingApproval.detail}</pre>
           )}

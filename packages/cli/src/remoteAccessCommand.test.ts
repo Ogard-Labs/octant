@@ -5,7 +5,9 @@ import {
   resolveAuthCliCommand,
   resolveListenerCliCommand,
   resolvePairCliCommand,
+  resolveServerPairingFlags,
   runRemoteAccessCliCommand,
+  runServerPairing,
 } from "./remoteAccessCommand";
 import { renderTerminalQr } from "./terminalQr";
 
@@ -60,6 +62,10 @@ function fixture(
     sent,
     out,
     err,
+    respond: async (request: LocalControlRequest): Promise<LocalControlResponse> => {
+      sent.push(request);
+      return responses(request);
+    },
     run: (command: Parameters<typeof runRemoteAccessCliCommand>[0]["command"]) =>
       runRemoteAccessCliCommand({
         command,
@@ -564,5 +570,162 @@ describe("runRemoteAccessCliCommand", () => {
     expect(await test.run({ action: "approve-pairing", ticketId: TICKET })).toBe(1);
     expect(test.sent).toHaveLength(1);
     expect(test.err.join("")).toContain("No pending pairing request");
+  });
+});
+
+describe("resolveServerPairingFlags", () => {
+  it("leaves flags untouched without --pair so other flags stay usage errors", () => {
+    expect(resolveServerPairingFlags({ artifact: "/a" })).toEqual({ rest: { artifact: "/a" } });
+    expect(resolveServerPairingFlags({ hostname: "x" })).toEqual({ rest: { hostname: "x" } });
+  });
+
+  it("defaults the listener to port 8443 and a self-made certificate", () => {
+    expect(resolveServerPairingFlags({ pair: true, artifact: "/a" })).toEqual({
+      rest: { artifact: "/a" },
+      pairing: { port: 8443 },
+    });
+  });
+
+  it("takes an address, a port, and a certificate with its key", () => {
+    expect(
+      resolveServerPairingFlags({
+        pair: true,
+        hostname: "100.64.0.1",
+        port: "9000",
+        cert: "c",
+        key: "k",
+      }),
+    ).toEqual({
+      rest: {},
+      pairing: {
+        hostname: "100.64.0.1",
+        port: 9000,
+        pasted: { certificatePath: "c", privateKeyPath: "k" },
+      },
+    });
+  });
+
+  it("refuses a certificate without its key and a bad port", () => {
+    expect(resolveServerPairingFlags({ pair: true, cert: "c" })).toBeUndefined();
+    expect(resolveServerPairingFlags({ pair: true, port: "70000" })).toBeUndefined();
+    expect(resolveServerPairingFlags({ pair: "yes" })).toBeUndefined();
+  });
+});
+
+describe("runServerPairing", () => {
+  const WAITING = { ...PENDING, ticketId: TICKET };
+  function pairing(options: {
+    readonly answer: string | undefined;
+    readonly claimed?: boolean;
+    readonly interfaces?: Record<string, { address: string; family: string; internal: boolean }[]>;
+    readonly hostname?: string;
+  }) {
+    let clock = 1_767_225_000_000;
+    const test = fixture((request) => {
+      if (request.path === "/api/desktop/remote/pairing-requests" && request.method === "GET") {
+        return { status: 200, body: { pending: options.claimed === false ? [] : [WAITING] } };
+      }
+      if (request.path === "/api/desktop/remote/pairing-tickets") {
+        return { status: 201, body: MINTED };
+      }
+      if (request.path.startsWith("/api/desktop/private-listener/")) {
+        return { status: 200, body: { status: SELF_MADE_STATUS } };
+      }
+      return { status: 201, body: {} };
+    });
+    const asked: string[] = [];
+    const run = () =>
+      runServerPairing({
+        options: {
+          port: 8443,
+          ...(options.hostname === undefined ? {} : { hostname: options.hostname }),
+        },
+        session: {
+          kind: "opened",
+          windowId: "11111111-1111-4111-8111-111111111111",
+          send: async (request) => test.respond(request),
+          close: async () => undefined,
+        },
+        stdout: { write: (chunk) => test.out.push(chunk) },
+        stderr: { write: (chunk) => test.err.push(chunk) },
+        networkInterfaces: () =>
+          options.interfaces ?? {
+            en0: [{ address: "192.168.1.20", family: "IPv4", internal: false }],
+            tailscale0: [{ address: "100.101.102.103", family: "IPv4", internal: false }],
+            lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true }],
+          },
+        ask: async (question) => {
+          asked.push(question);
+          return options.answer;
+        },
+        // A wait that never sees a claim runs the clock past the ticket's end.
+        now: () => clock,
+        sleep: async (ms) => {
+          clock += ms * 100_000;
+        },
+      });
+    return { test, asked, run };
+  }
+
+  it("listens on the Tailscale address, prints the code, and approves on a typed y", async () => {
+    const run = pairing({ answer: "y" });
+    expect(await run.run()).toBe(0);
+    expect(run.test.sent[0]).toMatchObject({
+      path: "/api/desktop/private-listener/enable",
+      body: { hostname: "100.101.102.103", port: 8443, origin: "https://100.101.102.103:8443" },
+    });
+    expect(run.test.sent[0]?.body).not.toHaveProperty("certificatePem");
+    const out = run.test.out.join("");
+    expect(out).toMatch(/^Pairing code octant-pair-1\./m);
+    expect(out).toContain("Comparison code 482913");
+    expect(out).toContain("Key fingerprint");
+    expect(run.asked).toEqual(["Approve? [y/N] "]);
+    expect(run.test.sent.at(-1)).toMatchObject({
+      path: "/api/desktop/remote/pairing-requests/approve",
+      body: { ticketId: TICKET },
+    });
+  });
+
+  it("denies the request on any answer but y", async () => {
+    const run = pairing({ answer: "" });
+    await run.run();
+    expect(run.test.sent.at(-1)).toMatchObject({
+      path: "/api/desktop/remote/pairing-requests/deny",
+    });
+  });
+
+  it("leaves the request pending when no answer can be read", async () => {
+    const run = pairing({ answer: undefined });
+    expect(await run.run()).toBe(1);
+    expect(run.test.sent.some((r) => r.path.endsWith("/approve") || r.path.endsWith("/deny"))).toBe(
+      false,
+    );
+    expect(run.test.err.join("")).toContain("octant pair approve");
+  });
+
+  it("gives up after the ticket expires without a claim", async () => {
+    const run = pairing({ answer: "y", claimed: false });
+    expect(await run.run()).toBe(1);
+    expect(run.test.err.join("")).toContain("No device used the pairing code within five minutes");
+    expect(run.asked).toEqual([]);
+  });
+
+  it("enables nothing when several private addresses are found", async () => {
+    const run = pairing({
+      answer: "y",
+      interfaces: {
+        a: [{ address: "192.168.1.20", family: "IPv4", internal: false }],
+        b: [{ address: "10.0.0.5", family: "IPv4", internal: false }],
+      },
+    });
+    expect(await run.run()).toBe(1);
+    expect(run.test.sent).toEqual([]);
+    expect(run.test.err.join("")).toContain("192.168.1.20, 10.0.0.5");
+  });
+
+  it("refuses a --hostname that is public before enabling anything", async () => {
+    const run = pairing({ answer: "y", hostname: "203.0.113.9" });
+    expect(await run.run()).toBe(1);
+    expect(run.test.sent).toEqual([]);
   });
 });

@@ -140,6 +140,44 @@ on its next start. Pairing commands need the listener on, and say so when it
 is off. Approve only when the comparison code matches the one the device shows.
 The desktop app's Settings → Remote access shows the same listener state.
 
+## Add a computer in one step
+
+A second, always-on computer needs one command on that computer and one
+approval, with no certificate work. Run it in a shell on the computer you are
+adding:
+
+```sh
+octant server install --artifact <path> --pair   # from an unpacked headless build
+octant server start --pair                       # from a checkout
+```
+
+The command installs and starts the service as usual, then:
+
+1. Looks for this computer's address: an address on a Tailscale interface,
+   else the one private LAN address. With none, or with more than one of that
+   kind, it stops and names what it found; pass `--hostname <address>` to
+   choose. It never picks a public address.
+2. Turns the listener on at port 8443 (`--port` changes it) with a
+   certificate the host makes itself. `--cert` and `--key` use your own
+   certificate instead, and then the command prints the browser link.
+3. Prints a pairing code and its QR code in the terminal. The code is
+   single-use and expires in five minutes.
+4. Waits for a device to use it, shows the device label, key fingerprint, and
+   comparison code, and asks `Approve? [y/N]`. Only a typed `y` approves.
+   `octant pair approve <ticket-id>` is the same decision from another shell.
+
+The command changes no firewall rule and runs no Tailscale command: allow the
+port on the `tailscale0` interface yourself if the machine has a firewall.
+A LAN address that changes later changes the origin, and the device pairs
+again, which is why Tailscale is tried first.
+
+The pairing code carries a fingerprint of the host's own key, which Octant's
+own clients pin. A browser cannot check a certificate the host made itself, so
+there is no browser link for it; if a browser opens the address anyway and
+shows a certificate warning, stop there. Octant's phone and desktop apps
+cannot read the code yet, so today only a listener with a pasted certificate
+can be reached by a client.
+
 ## Device management
 
 The host can rename or revoke devices, revoke all devices, and rotate host
@@ -150,14 +188,16 @@ own metadata and can sign out or self-revoke.
 
 Disconnected host data is explicitly stale and read-only; there are no
 offline authority queues and no durable offline browser cache. On reconnect,
-the client checks the host's signed hello against the host key fingerprint it
-recorded at pairing, re-negotiates, re-authenticates, fetches an authoritative
+the client asks for a hello signed over a one-time value it chose, checks it
+against the host key fingerprint it recorded at pairing, re-negotiates, re-authenticates, fetches an authoritative
 snapshot, and resumes streams from the last applied cursor. Gaps stop the
 stream and require a fresh snapshot — never skip ahead. A host restart renews
 and replays; a host ID or key change requires re-pairing. A host that cannot
 prove it holds the paired key is refused ("This host could not prove its
-identity") and the pairing is kept; a host too old to send its key is refused
-with a request to update it. Revocation or expiry cancels streams and blocks
+identity") and the pairing is kept, and so is a copy of an earlier hello
+replayed by something at the host's address. A host too old to sign the
+client's value is refused with a request to update it, so update the host
+with or before the devices that reach it. Revocation or expiry cancels streams and blocks
 background reconnect until the user starts a new pairing flow. Remote
 authentication failures remain generic to avoid revealing device lifecycle
 state over the network.

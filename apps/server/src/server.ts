@@ -384,7 +384,7 @@ import {
 } from "./persistence/persistenceService";
 import { readAgentRunAdmittedContext } from "./persistence/agentRunContentStore";
 import { purgeThreadArtifacts, removeMirrorFiles } from "./persistence/threadArtifactPurge";
-import { readHostIdentity } from "./persistence/remoteAccessProjection";
+import { readDeviceRegistration, readHostIdentity } from "./persistence/remoteAccessProjection";
 import { createProjectBindingRouteHandler } from "./projectBindingRoutes";
 import { createProjectRouteHandler } from "./projectRoutes";
 import { createAgentProfileRouteHandler } from "./agentProfileRoutes";
@@ -533,6 +533,7 @@ import type { CompatibleFetch } from "./providers/openAiCompatibleEndpoint";
 import { makeClaudeAgentSdkPort, type ClaudeAgentSdkPort } from "./providers/claudeAgentSdkPort";
 import type { ClaudeResumeIdentityPort } from "./providers/claudeDriver";
 import { makeClaudeProcessLive, type ClaudeProcessPort } from "./providers/claudeProcess";
+import { ClaudeResumeIdentityJournal } from "./providers/claudeResumeIdentityJournal";
 import { ClaudeResumeIdentityStore } from "./providers/claudeResumeIdentityStore";
 import { makeCodexProcessLive } from "./providers/codexProcess";
 import type { CodexProcessPort } from "./providers/codexProcess";
@@ -715,6 +716,10 @@ import { AgentPluginMcpSessionManager } from "./extensions/agentPluginMcpSession
 import { LocalPluginFolderRegistry } from "./extensions/localPluginFolderRegistry";
 import { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
 import { ExtensionToolApprovalService } from "./extensions/extensionToolApprovalService";
+import {
+  chatThreadStandsInProject,
+  isDeviceRegistrationCurrent,
+} from "./extensions/pairedDeviceApprovalAuthority";
 import { createExtensionToolCallAuthorizer } from "./extensions/extensionToolCallAuthorizer";
 import { ExtensionToolGrantStore } from "./extensions/extensionToolGrantStore";
 import {
@@ -749,7 +754,10 @@ import {
   SiblingThreadsService,
   createSiblingThreadTools,
 } from "./siblingThreads/siblingThreadTools";
-import { readThreadExternalContentTaint } from "./context/externalContentTaintProjection";
+import {
+  readApprovalOutsideContent,
+  readThreadExternalContentTaint,
+} from "./context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "./harness/nativeHarnessAuthority";
 import {
   createNativeHarnessComposition,
@@ -1889,9 +1897,38 @@ export function startOctantServer(
       now: Date.now,
       clampNow: processAuthorityNow,
     });
+    // A paired device's service scope is its device id. Only a device still
+    // paired counts: a revoked or expired one's prompts are answered by
+    // nobody else and run out.
+    const isPairedDeviceScope = (scopeId: WindowId): boolean =>
+      isDeviceRegistrationCurrent(
+        readDeviceRegistration(persistence.connection, String(scopeId)),
+        Date.now(),
+      );
     const extensionToolApprovalService = new ExtensionToolApprovalService({
       uuid: randomUUID,
       now: Date.now,
+      isPairedDeviceScope,
+      // The thread must still be active and in the Project the prompt
+      // recorded, which is what a paired device's turn was admitted under. A
+      // prompt with no Project is a Chat thread's, which must still have none.
+      threadAuthorityIsCurrent: (threadId, projectId) => {
+        const chatThread = () => {
+          try {
+            return persistence.readChatThread(decodeChatThreadId(threadId));
+          } catch {
+            return undefined;
+          }
+        };
+        if (projectId === undefined) return chatThreadStandsInProject(chatThread(), undefined);
+        const project = persistence.readProject(decodeProjectId(projectId));
+        if (project === undefined || project.lifecycle !== "active") return false;
+        if (project.type !== "work" && project.type !== "code") {
+          return chatThreadStandsInProject(chatThread(), projectId);
+        }
+        const authority = browserAuthority.resolve(decodeBrowserThreadId(threadId), project.type);
+        return authority !== undefined && String(authority.projectId) === String(project.id);
+      },
       // A usage-limit resume replays its stopped Work turn's extension
       // selections as the host, so that turn's tool prompts go to the windows
       // bound to the thread's Project, as a routine's browser prompts do.
@@ -3142,6 +3179,8 @@ export function startOctantServer(
             externalContentIngested: (owner) =>
               readThreadExternalContentTaint(persistence.connection, owner.threadId)
                 .externalContentIngested,
+            outsideContent: (owner) =>
+              readApprovalOutsideContent(persistence.connection, owner.threadId),
             threadTitle: (owner) =>
               (owner.mode === "chat"
                 ? persistence.readChatThread(decodeChatThreadId(owner.threadId))?.title
@@ -4113,9 +4152,12 @@ export function startOctantServer(
           grants: extensionToolGrantStore,
           approvals: extensionToolApprovalService,
           isHostScope: isRoutineHostScope,
+          isPairedDeviceScope,
           threadTainted: (threadId) =>
             readThreadExternalContentTaint(persistence.connection, threadId)
               .externalContentIngested,
+          outsideContent: (threadId) =>
+            readApprovalOutsideContent(persistence.connection, threadId),
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         ...(extensionSupervisor instanceof ExtensionSupervisor
@@ -4348,7 +4390,14 @@ export function startOctantServer(
     const claudeSdk =
       options.claudeSdk ?? makeClaudeAgentSdkPort({ spawnClaudeCodeProcess: claudeProcess.spawn });
     const claudeResumeIdentityStore =
-      options.claudeResumeIdentityStore ?? new ClaudeResumeIdentityStore();
+      options.claudeResumeIdentityStore ??
+      new ClaudeResumeIdentityStore({
+        journal: new ClaudeResumeIdentityJournal({
+          persistence,
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        }),
+      });
     const ollamaHistoryStore =
       options.ollamaHistoryStore ??
       new JournalOllamaHistoryStore({
@@ -6447,6 +6496,7 @@ export function startOctantServer(
       sessions: nativeHarnessSessionsLive,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+      outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
     });
     agentRunInteractions = createAgentRunInteractions({
       getById: (id) => agentRunPersistence.getById(id),
@@ -10998,8 +11048,32 @@ export function startOctantServer(
           }),
         );
       },
+      relayUpgrade: (input) => {
+        const context = resolvePrincipalRouteContext({
+          request: input.request,
+          principal: input.principal,
+          abortSignal: input.signal,
+        });
+        return codeProjectAccess.run(context, () =>
+          remoteServerGrants.relayUpgrade({
+            principal: {
+              deviceId: String(input.principal.deviceId),
+              credentialGeneration: input.principal.credentialGeneration,
+              sessionIdDigest: input.sessionIdDigest,
+              origin: input.principal.origin,
+            },
+            scopeId: context.scopeId,
+            grantId: input.grantId,
+            pathQuery: input.pathQuery,
+            headers: input.headers,
+            stillAuthorized: input.stillAuthorized,
+            signal: input.signal,
+          }),
+        );
+      },
       closeSession: (sessionIdDigest, reason) =>
         remoteServerGrants.closeSession(sessionIdDigest, reason),
+      holdsOpenSockets: (sessionIdDigest) => remoteServerGrants.holdsOpenSockets(sessionIdDigest),
     };
     let remoteListener: PrivateListener | undefined;
     let remoteListenerError: PrivateListenerFailureCode | undefined;

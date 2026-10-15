@@ -15,6 +15,7 @@
  * pointer at durable evidence.
  */
 
+import { ApprovalOutsideContent } from "./contentProvenance";
 import { personDecides } from "./hostAnswer";
 import { Schema } from "effect";
 import { AgentRunDependencies, AgentRunId, MAX_AGENT_RUN_DEPENDENCIES } from "./agentRun";
@@ -1044,6 +1045,11 @@ export const NativeHarnessApproval = Schema.Struct({
    */
   singleUse: Schema.optional(Schema.Boolean),
   /**
+   * The sources that marked the thread, read by the host when it asked. Set
+   * only with `singleUse`; an approval journaled before it existed has none.
+   */
+  outsideContent: Schema.optional(ApprovalOutsideContent),
+  /**
    * On a marked thread's command that runs through the egress rules: the
    * hosts the person may let this one command reach. What they confirm is
    * granted for that command alone and ends with it.
@@ -1059,6 +1065,7 @@ export const NativeHarnessApproval = Schema.Struct({
     Schema.filter(
       (approval) =>
         (approval.status === "pending") === (approval.settledAt === undefined) &&
+        (approval.outsideContent === undefined || approval.singleUse === true) &&
         // Only a single-use confirmation can name hosts: a remembered approval
         // would otherwise carry them to calls nobody saw.
         (approval.commandHosts === undefined || approval.singleUse === true),

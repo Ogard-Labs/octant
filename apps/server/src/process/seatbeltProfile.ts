@@ -176,7 +176,7 @@ export interface PrivateHomeDenyReadRulesInput {
   readonly usersDirectory?: string;
 }
 
-const DEFAULT_SANDBOX_PATH = "/usr/bin/sandbox-exec";
+export const DEFAULT_SANDBOX_PATH = "/usr/bin/sandbox-exec";
 /**
  * Paths that must remain unreadable even for toolchain launches that need the
  * broad `file-read*` rule. The latter is a compatibility escape hatch for
