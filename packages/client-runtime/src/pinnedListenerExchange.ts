@@ -28,6 +28,8 @@ export interface PinnedListenerExchangeRequest {
   readonly pins: ReadonlyArray<string>;
   /** The whole HTTP/1.1 request, written only after the handshake passed the pin. */
   readonly request: Uint8Array;
+  /** Aborting while the exchange opens stops it before the request is written, if it can. */
+  readonly signal: AbortSignal | undefined;
 }
 
 /** The next bytes of an opened exchange's reply, in the order the listener sent them. */
@@ -146,12 +148,16 @@ export function createExchangeListenerFetch(options: {
     request.set(head, 0);
     if (body !== undefined) request.set(body, head.byteLength);
 
+    // Resolving and reading the body awaited; an abort meanwhile must stop
+    // the request before anything is dialled, not discard its answer after.
+    signal?.throwIfAborted();
     const opening = await options.port.open({
       address: judged.address,
       port,
       serverName: isAddress ? undefined : hostname,
       pins,
       request,
+      signal,
     });
     if (opening.status === "failed") throw new TypeError("The listener could not be reached.");
     if (opening.status === "refused") {

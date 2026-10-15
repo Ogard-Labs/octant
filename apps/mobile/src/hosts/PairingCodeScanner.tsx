@@ -1,11 +1,11 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from "expo-camera";
-import { PAIRING_CODE_PREFIX } from "@octant/domain";
 import { MOBILE_COPY } from "../copy";
 import { useTheme } from "../../design-system";
 import { mobileRadii, mobileSpacing, mobileTypography } from "../theme/tokens";
 import { BottomSheet } from "../ui/BottomSheet";
+import { createPairingScanGate } from "./pairingScanGate";
 
 export interface PairingCodeScannerProps {
   readonly visible: boolean;
@@ -23,7 +23,14 @@ export function PairingCodeScanner(props: PairingCodeScannerProps) {
   const { colors } = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
   const [otherCodeSeen, setOtherCodeSeen] = useState(false);
-  const delivered = useRef(false);
+  const [gate] = useState(createPairingScanGate);
+  // Every opening starts afresh, however the sheet was closed: a code whose
+  // pairing failed must scan again the next time.
+  useEffect(() => {
+    if (!props.visible) return;
+    gate.reset();
+    setOtherCodeSeen(false);
+  }, [gate, props.visible]);
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -55,24 +62,14 @@ export function PairingCodeScanner(props: PairingCodeScannerProps) {
   );
 
   const scanned = (result: BarcodeScanningResult) => {
-    if (delivered.current) return;
-    if (!result.data.startsWith(PAIRING_CODE_PREFIX)) {
-      setOtherCodeSeen(true);
-      return;
-    }
-    delivered.current = true;
-    props.onScanned(result.data);
-  };
-
-  const close = () => {
-    delivered.current = false;
-    setOtherCodeSeen(false);
-    props.onClose();
+    const verdict = gate.offer(result.data);
+    if (verdict === "other") setOtherCodeSeen(true);
+    if (verdict === "deliver") props.onScanned(result.data);
   };
 
   return (
     <BottomSheet
-      onClose={close}
+      onClose={props.onClose}
       testID="mobile-pairing-scanner"
       title={MOBILE_COPY.pairScanTitle}
       visible={props.visible}

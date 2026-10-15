@@ -12,7 +12,6 @@ import { createServer as createHttpsServer, type Server } from "node:https";
 import { connect as connectTcp, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { connect as connectTls } from "node:tls";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -167,27 +166,29 @@ async function startHost(options: { readonly now: () => number }) {
   return { port: address.port, pin: certificate.tlsPin, administration, requests };
 }
 
+/** The network seams of the Node transport, dialling the listener's address on loopback. */
+function loopbackNetwork(port: number) {
+  return {
+    resolve: async () => [ADDRESS],
+    dial: (address: string) =>
+      new Promise<Socket>((resolve, reject) => {
+        expect(address).toBe(ADDRESS);
+        const socket = connectTcp({ host: "127.0.0.1", port });
+        socket.once("error", reject);
+        socket.once("connect", () => {
+          Object.defineProperty(socket, "remoteAddress", { value: ADDRESS });
+          resolve(socket);
+        });
+      }),
+    handshakeTimeoutMs: 5_000,
+  };
+}
+
 /** The Node transport held to the code's pin, dialling the listener's address on loopback. */
 function pinnedTransport(port: number): PinnedListenerTransportPort {
   return ({ origin, trust }) => ({
     status: "available",
-    fetch: testOnlyListenerTls.createListenerFetchOver(
-      { origin, trust },
-      {
-        resolve: async () => [ADDRESS],
-        dial: (address) =>
-          new Promise<Socket>((resolve, reject) => {
-            expect(address).toBe(ADDRESS);
-            const socket = connectTcp({ host: "127.0.0.1", port });
-            socket.once("error", reject);
-            socket.once("connect", () => {
-              Object.defineProperty(socket, "remoteAddress", { value: ADDRESS });
-              resolve(socket);
-            });
-          }),
-        handshakeTimeoutMs: 5_000,
-      },
-    ),
+    fetch: testOnlyListenerTls.createListenerFetchOver({ origin, trust }, loopbackNetwork(port)),
   });
 }
 
@@ -360,50 +361,47 @@ function readQueue() {
   };
 }
 
-/** The native contract kept in Node: the pin decides inside the handshake, before any write. */
+/**
+ * The native contract kept in Node, over the client runtime's own judged
+ * connection: the pin decides inside the handshake, before any write.
+ */
 function nodeExchange(listenerPort: number): Exchange {
-  return (request) =>
-    new Promise<PinnedListenerExchangeOpening>((resolveOpening) => {
-      expect(request.address).toBe(ADDRESS);
-      const socket = connectTls({
-        host: "127.0.0.1",
-        port: listenerPort,
-        minVersion: "TLSv1.3",
-        rejectUnauthorized: false,
-      });
-      const reads = readQueue();
-      socket.once("secureConnect", () => {
-        const spki = socket
-          .getPeerX509Certificate()
-          ?.publicKey.export({ type: "spki", format: "der" });
-        const servedPin =
-          spki === undefined
-            ? undefined
-            : `sha256-${createHash("sha256").update(spki).digest("base64url")}`;
-        if (servedPin === undefined || !request.pins.includes(servedPin)) {
-          socket.destroy();
-          resolveOpening({ status: "refused", servedPin });
-          return;
-        }
-        socket.on("data", (chunk: Buffer) =>
-          reads.push({ status: "data", chunk: new Uint8Array(chunk) }),
-        );
-        socket.once("end", () => reads.push({ status: "end" }));
-        socket.once("close", () => reads.push({ status: "end" }));
-        socket.write(request.request, () => {
-          resolveOpening({
-            status: "opened",
-            servedPin,
-            read: reads.read,
-            close: () => socket.destroy(),
-          });
-        });
-      });
-      socket.once("error", () => {
-        reads.push({ status: "failed" });
-        resolveOpening({ status: "failed", reason: "connection-failed" });
-      });
-    });
+  return async (request) => {
+    expect(request.address).toBe(ADDRESS);
+    const [current, staged] = request.pins;
+    if (current === undefined) return { status: "refused", servedPin: undefined };
+    const connection = await testOnlyListenerTls.connectListenerOver(
+      {
+        origin: ORIGIN,
+        trust: {
+          current: { kind: "pinned", pin: current },
+          ...(staged === undefined
+            ? {}
+            : {
+                staged: {
+                  trust: { kind: "pinned", pin: staged },
+                  until: new Date(Date.now() + 60_000).toISOString(),
+                },
+              }),
+        },
+      },
+      loopbackNetwork(listenerPort),
+    );
+    if (connection.status === "refused") return { status: "refused", servedPin: undefined };
+    if (connection.status === "failed") return { status: "failed", reason: "connection-failed" };
+    const socket = connection.socket;
+    const servedPin =
+      connection.trust.current.kind === "pinned" ? connection.trust.current.pin : "";
+    const reads = readQueue();
+    socket.on("data", (chunk: Buffer) =>
+      reads.push({ status: "data", chunk: new Uint8Array(chunk) }),
+    );
+    socket.once("end", () => reads.push({ status: "end" }));
+    socket.once("close", () => reads.push({ status: "end" }));
+    socket.once("error", () => reads.push({ status: "failed" }));
+    await new Promise<void>((written) => socket.write(request.request, () => written()));
+    return { status: "opened", servedPin, read: reads.read, close: () => socket.destroy() };
+  };
 }
 
 /** The phone's iOS exchange, run as a command built from the app's own Swift source. */

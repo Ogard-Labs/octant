@@ -305,6 +305,31 @@ describe("a listener fetch over the phone's pinned exchange", () => {
     expect(close).toHaveBeenCalled();
   });
 
+  it("stops before the exchange opens when the request is aborted while the name resolves", async () => {
+    const host = listener({ served: PIN });
+    const controller = new AbortController();
+    const port: PinnedListenerExchangePort = {
+      ...host.port,
+      resolve: async () => {
+        controller.abort();
+        return ["100.101.102.103"];
+      },
+    };
+
+    await expect(
+      createExchangeListenerFetch({
+        origin: "https://studio.tail1234.ts.net:8443",
+        trust: PINNED,
+        port,
+      })("https://studio.tail1234.ts.net:8443/api/remote/pairing", {
+        method: "POST",
+        body: "{}",
+        signal: controller.signal,
+      }),
+    ).rejects.toBeDefined();
+    expect(host.port.open).not.toHaveBeenCalled();
+  });
+
   it("stops before connecting when the request was already aborted", async () => {
     const host = listener({ served: PIN });
     const controller = new AbortController();

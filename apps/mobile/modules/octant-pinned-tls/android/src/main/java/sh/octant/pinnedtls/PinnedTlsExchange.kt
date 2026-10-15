@@ -121,6 +121,10 @@ class PinnedTlsExchange(
       tls.close()
       return PinnedTlsOpening.Refused(pin)
     }
+    if (cancelled) {
+      tls.close()
+      return PinnedTlsOpening.Failed("connection-failed")
+    }
     try {
       tls.soTimeout = 0
       tls.outputStream.write(request)

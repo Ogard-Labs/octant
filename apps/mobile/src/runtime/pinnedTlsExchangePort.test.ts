@@ -23,6 +23,7 @@ const request = {
   serverName: undefined,
   pins: [PIN],
   request: new Uint8Array(Buffer.from("GET / HTTP/1.1\r\n\r\n")),
+  signal: undefined,
 };
 
 describe("the phone's native pinned exchange", () => {
@@ -81,5 +82,33 @@ describe("the phone's native pinned exchange", () => {
         request,
       ),
     ).resolves.toEqual({ status: "refused", servedPin: PIN });
+  });
+
+  it("cancels the native handshake when the request is aborted while it opens, and never opens an aborted one", async () => {
+    const controller = new AbortController();
+    let finishOpen: (answer: unknown) => void = () => undefined;
+    const native: OctantPinnedTlsNativeModule = {
+      resolve: vi.fn(async () => []),
+      open: vi.fn(() => new Promise((resolveOpen) => (finishOpen = resolveOpen))),
+      read: vi.fn(),
+      cancel: vi.fn(),
+    };
+
+    const pending = nativePinnedTlsExchangePort(native).open({
+      ...request,
+      signal: controller.signal,
+    });
+    controller.abort();
+    finishOpen({ status: "failed", reason: "connection-failed" });
+    await pending;
+    const id = vi.mocked(native.open).mock.calls[0]?.[0];
+    expect(native.cancel).toHaveBeenCalledWith(id);
+
+    const again = await nativePinnedTlsExchangePort(native).open({
+      ...request,
+      signal: controller.signal,
+    });
+    expect(again).toEqual({ status: "failed", reason: "connection-failed" });
+    expect(native.open).toHaveBeenCalledTimes(1);
   });
 });

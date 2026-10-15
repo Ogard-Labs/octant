@@ -34,14 +34,25 @@ export function nativePinnedTlsExchangePort(
     open: async (request) => {
       nextExchange += 1;
       const id = `exchange-${nextExchange}`;
-      const answer = await native.open(
-        id,
-        request.address,
-        request.port,
-        request.serverName ?? null,
-        request.pins,
-        toBase64(request.request),
-      );
+      if (request.signal?.aborted === true) {
+        return { status: "failed", reason: "connection-failed" };
+      }
+      // An abort while the handshake runs cancels it before the request is written.
+      const cancel = () => native.cancel(id);
+      request.signal?.addEventListener("abort", cancel, { once: true });
+      let answer: unknown;
+      try {
+        answer = await native.open(
+          id,
+          request.address,
+          request.port,
+          request.serverName ?? null,
+          request.pins,
+          toBase64(request.request),
+        );
+      } finally {
+        request.signal?.removeEventListener("abort", cancel);
+      }
       const opening = readOpening(answer);
       if (opening.status !== "opened") return opening;
       return {
