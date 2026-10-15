@@ -1722,6 +1722,17 @@ flowchart LR
     read. The journal is untouched; the state clears on a start that can read
     it.
   - Work requests and the uncapped stores read all of their own rows.
+- **Reads while a window is open stay off the full journal.** Every service
+  checks that the store is usable before each read, and that check answers
+  from the latest store inspection (the integrity check plus a decode of every
+  journal row): the one startup ran, or a newer one host diagnostics asked
+  for. It never starts one itself. A Code thread's whole operation history,
+  which the board, the sidebar's pull-request join and child observations
+  read every few seconds, is read through a (type, thread, sequence) index
+  and kept decoded between reads: a later read decodes only the rows appended
+  since, and a thread whose slice shrank (a purge) is read afresh. The kept
+  histories are shared by every reader of the journal and bounded at 100,000
+  frames across threads, least recently read dropped first.
 - **Migrations.** Ordered, forward-only, checksum-verified, applied in
   transactions before the server reports ready. A changed checksum or an
   unknown newer migration fails closed; a store backup is taken before a

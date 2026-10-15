@@ -2175,6 +2175,20 @@ ALTER TABLE code_runtime_projection
     sql: `CREATE INDEX event_journal_type_sequence ON event_journal (aggregate_type, global_sequence)
       WHERE aggregate_version > 0;`,
   },
+  {
+    version: 80,
+    name: "index_event_journal_thread_sequence",
+    // A thread's whole history is read in journal order, 1,000 rows a batch.
+    // The thread indexes put the event or result kind before the sequence, so
+    // every batch walked all of the thread's rows and sorted them to find the
+    // ones after the cursor: about 1.6 s per read of a 2,000-turn Code thread
+    // (28,000 rows) on a loaded machine, and a window's board and sidebar
+    // read every thread's history every few seconds.
+    sql: `CREATE INDEX event_journal_thread_sequence ON event_journal (
+      aggregate_type, CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END,
+      global_sequence
+    );`,
+  },
 ];
 
 interface AppliedMigrationRow {

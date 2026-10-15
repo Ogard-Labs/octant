@@ -862,13 +862,55 @@ describe("Journal", () => {
       const plan = JSON.stringify(
         connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters),
       );
-      // Either thread index serves the (type, thread) prefix; which one the
+      // Any thread index serves the (type, thread) prefix; which one the
       // planner picks is its call.
       expect(plan).toMatch(
-        /event_journal_thread_(?:result_)?kind_sequence \(aggregate_type=\? AND <expr>=\?/,
+        /event_journal_thread_(?:(?:result_)?kind_)?sequence \(aggregate_type=\? AND <expr>=\?/,
       );
       expect(plan).not.toMatch(/SCAN event_journal\b/);
     }
+    connection.close();
+  });
+
+  it("reads a thread's whole slice in journal order through its own index, without sorting the thread", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    const wholeThreadReads = prepare.mock.calls
+      .map(([sql]) => sql)
+      .filter((sql) => sql.includes("'$.threadId'") && !sql.includes("'$.event."));
+    prepare.mockRestore();
+
+    // The batched replay and the size-and-newest-row read that tells a reader
+    // whether its remembered history is still the thread's.
+    expect(wholeThreadReads).toHaveLength(2);
+    for (const sql of wholeThreadReads) {
+      const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
+      const plan = JSON.stringify(
+        connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters),
+      );
+      expect(plan).toMatch(/event_journal_thread_sequence \(aggregate_type=\? AND <expr>=\?/);
+      expect(plan).not.toMatch(/TEMP B-TREE/);
+    }
+    connection.close();
+  });
+
+  it("counts a thread's slice and finds its newest row", () => {
+    const connection = openMigratedConnection();
+    const journal = createJournal(connection);
+    const threadA = "00000000-0000-4000-8000-0000000000aa";
+    const threadB = "00000000-0000-4000-8000-0000000000bb";
+    const slice = { aggregateType: "fixture", threadId: threadA };
+    expect(journal.aggregateTypeThreadHead(slice)).toEqual({ eventCount: 0, lastSequence: 0 });
+    journal.append(
+      appendRequest([
+        pendingEvent(ids.event1, { payload: { value: "a1", threadId: threadA } }),
+        pendingEvent(ids.event2, { payload: { value: "a2", threadId: threadA } }),
+        pendingEvent(ids.event3, { payload: { value: "b1", threadId: threadB } }),
+      ]),
+    );
+
+    expect(journal.aggregateTypeThreadHead(slice)).toEqual({ eventCount: 2, lastSequence: 2 });
     connection.close();
   });
 
