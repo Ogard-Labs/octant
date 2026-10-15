@@ -110,8 +110,13 @@ export function buildRemoteChallengeProofPayload(input: {
     readonly absoluteExpiresAt: string;
   };
 }): string {
+  return ["octant.remote-session-challenge.v1", ...challengeTranscriptFields(input)].join("\n");
+}
+
+function challengeTranscriptFields(
+  input: Parameters<typeof buildRemoteChallengeProofPayload>[0],
+): ReadonlyArray<string | number> {
   return [
-    "octant.remote-session-challenge.v1",
     input.challenge.challengeId,
     input.challenge.hostId,
     input.challenge.deviceId,
@@ -126,6 +131,22 @@ export function buildRemoteChallengeProofPayload(input: {
     input.sessionFacts.issuedAt,
     input.sessionFacts.idleExpiresAt,
     input.sessionFacts.absoluteExpiresAt,
+  ];
+}
+
+/**
+ * Canonical transcript a device signs to turn a challenge into a proxy session
+ * for opening dev servers, rather than a product session. Same fields as the
+ * product transcript under its own label, so a signature over one can never be
+ * presented as the other: a page's traffic and the Octant interface each get a
+ * session only when the device asked for that kind.
+ */
+export function buildRemoteServerProxySessionProofPayload(
+  input: Parameters<typeof buildRemoteChallengeProofPayload>[0],
+): string {
+  return [
+    "octant.remote-server-proxy-session-challenge.v1",
+    ...challengeTranscriptFields(input),
   ].join("\n");
 }
 

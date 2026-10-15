@@ -19,6 +19,7 @@ import {
   type RunningServiceCommand,
   type RunningServiceCommandResult,
   type RunningServicesSnapshot,
+  type RemoteServerGrantSource,
   type WindowId,
   MAX_LOCAL_SERVER_LISTENERS,
 } from "@octant/contracts";
@@ -127,6 +128,13 @@ export interface LocalServerScopeBinding {
   readonly posture: LocalServerPosture;
   /** PIDs of processes Octant itself started and still owns. */
   readonly ownedPids: ReadonlySet<number>;
+  /**
+   * Whether the checkout is the thread's own worktree rather than the Project
+   * folder. Only a server in a thread's own worktree belongs to that thread;
+   * absent is read as not, so a resolver that cannot say never scopes a
+   * server to the thread.
+   */
+  readonly checkoutIsOwnWorktree?: boolean;
 }
 
 /** Everything the host must decide before it may observe or act for one thread. */
@@ -200,6 +208,34 @@ export interface LocalServerStopPort {
   stop(input: { readonly pid: number }): Promise<"stopped" | "failed">;
 }
 
+/**
+ * Where a grant request's listener id leads after the host re-observes it. The
+ * endpoint stays on the host: the grant service binds a grant to it and the
+ * client is never told it.
+ */
+export type RemoteServerGrantTarget =
+  | { readonly status: "unavailable" }
+  | { readonly status: "not-listed" }
+  | {
+      readonly status: "listed";
+      readonly ownership: "octant-owned" | "leftover";
+      readonly health: LocalServerHealth;
+      /** The thread whose own worktree the server runs in, if any. */
+      readonly threadId?: CodeThreadId;
+      readonly endpoint: {
+        readonly url: string;
+        readonly port: number;
+        readonly pid: number;
+        readonly processName: string;
+      };
+    };
+
+/** A local server Octant signalled to stop, for whoever bound something to it. */
+export interface LocalServerStopped {
+  readonly pid: number;
+  readonly port: number;
+}
+
 export interface LocalServerServiceOptions {
   readonly listeners: LocalListenerPort;
   readonly scopes: LocalServerScopeResolver;
@@ -208,6 +244,8 @@ export interface LocalServerServiceOptions {
   readonly stopPort: LocalServerStopPort;
   readonly clock?: () => string;
   readonly maxListeners?: number;
+  /** Told after a Stop signal lands, whichever surface asked. */
+  readonly onStopped?: (stopped: LocalServerStopped) => void;
 }
 
 /**
@@ -270,6 +308,7 @@ export class LocalServerService {
   readonly #stopPort: LocalServerStopPort;
   readonly #clock: () => string;
   readonly #maxListeners: number;
+  readonly #onStopped: ((stopped: LocalServerStopped) => void) | undefined;
 
   constructor(options: LocalServerServiceOptions) {
     this.#listeners = options.listeners;
@@ -279,6 +318,55 @@ export class LocalServerService {
     this.#stopPort = options.stopPort;
     this.#clock = options.clock ?? (() => new Date().toISOString());
     this.#maxListeners = options.maxListeners ?? MAX_LOCAL_SERVER_LISTENERS;
+    this.#onStopped = options.onStopped;
+  }
+
+  /**
+   * Re-observe and re-classify the listener a grant request names, by the
+   * listing it came from, exactly as Open and Stop do. An id the listing does
+   * not hold now, a thread with no resolvable scope, and a Running services row
+   * the window cannot see all answer `not-listed`, so a stopped server and an id
+   * that was never listed look the same.
+   */
+  async observeGrantTarget(
+    authenticatedWindowId: WindowId,
+    source: RemoteServerGrantSource,
+    options: { readonly actor: LocalServerActor; readonly signal?: AbortSignal },
+  ): Promise<RemoteServerGrantTarget> {
+    if (source.surface === "local-servers") {
+      const binding = await this.#scopes.resolve(
+        authenticatedWindowId,
+        source.threadId,
+        source.projectId,
+        options.signal,
+      );
+      if (binding === undefined) return { status: "not-listed" };
+      const scan = await this.#observe(
+        threadObservationScope({ ...binding, actor: options.actor }),
+        options.signal,
+      );
+      if (scan.status === "unavailable") return { status: "unavailable" };
+      const target = scan.listeners.find(
+        (entry) => entry.listener.listenerId === source.listenerId,
+      );
+      if (target === undefined) return { status: "not-listed" };
+      // Ownership is host-wide, so a server outside this thread's own worktree
+      // may be another thread's, and the Project folder is no one thread's.
+      const inThread =
+        binding.checkoutIsOwnWorktree === true &&
+        target.listener.attribution === "current-checkout";
+      return grantTarget(target, inThread ? binding.threadId : undefined);
+    }
+
+    const binding = await this.#hostScopes.resolve(authenticatedWindowId, options.signal);
+    if (binding === undefined || binding.origins.length === 0) return { status: "not-listed" };
+    const scan = await this.#observe(hostObservationScope(binding, options.actor), options.signal);
+    if (scan.status === "unavailable") return { status: "unavailable" };
+    const target = scan.listeners.find((entry) => entry.listener.listenerId === source.listenerId);
+    if (target === undefined) return { status: "not-listed" };
+    const origin = attributeLocalListener(target.observation.workingDirectory, binding.origins);
+    if (origin === undefined) return { status: "not-listed" };
+    return grantTarget(target, origin.thread?.threadId);
   }
 
   /**
@@ -531,6 +619,11 @@ export class LocalServerService {
         category: "unavailable",
         message: "Octant could not stop that local server.",
       });
+    }
+    try {
+      this.#onStopped?.({ pid: current.observation.pid, port: current.observation.port });
+    } catch {
+      // Whoever bound something to the server re-checks it before using it.
     }
 
     const after = await this.#observe(scope, signal);
@@ -844,6 +937,24 @@ function hostObservationScope(
     admit: (observation, facts) =>
       attributeLocalListener(observation.workingDirectory, binding.origins) !== undefined &&
       (facts.owned || !startedByAnotherEditor(facts.startSource)),
+  };
+}
+
+function grantTarget(
+  target: ResolvedListener,
+  threadId: CodeThreadId | undefined,
+): RemoteServerGrantTarget {
+  return {
+    status: "listed",
+    ownership: target.ownership,
+    health: target.listener.health,
+    ...(threadId === undefined ? {} : { threadId }),
+    endpoint: {
+      url: String(target.listener.url),
+      port: target.observation.port,
+      pid: target.observation.pid,
+      processName: target.observation.processName,
+    },
   };
 }
 
