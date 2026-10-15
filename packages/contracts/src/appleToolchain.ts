@@ -409,6 +409,20 @@ export const AppleRuntimeSnapshot = Schema.Struct({
     }).annotations(strict),
   ),
   capabilities: Schema.optional(DeviceHostCapabilities),
+  /**
+   * Which way a Simulator sits, for the ones this host has turned. The
+   * streamed picture stays portrait-sized after a turn, so the pane learns the
+   * orientation here; a Simulator not listed sits in portrait as far as the
+   * host knows.
+   */
+  orientations: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        simulatorId: AppleSimulatorId,
+        orientation: DeviceOrientation,
+      }).annotations(strict),
+    ).pipe(Schema.maxItems(256)),
+  ),
   /** Simulators this host is recording right now, so the pane offers Stop instead of Record. */
   recordings: Schema.optional(
     Schema.Array(

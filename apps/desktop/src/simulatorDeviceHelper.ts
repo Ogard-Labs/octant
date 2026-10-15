@@ -53,6 +53,8 @@ export type DeviceHelperReply =
       readonly status: "delivered";
       /** The device's screen in pixels, when the helper reported one. */
       readonly screen?: { readonly width: number; readonly height: number };
+      /** After a rotate: which way the Simulator sits now. */
+      readonly orientation?: "portrait" | "landscape";
     }
   /** The helper answered and refused: a bad request, or a Simulator it cannot reach. */
   | { readonly status: "refused"; readonly code: string; readonly message: string }

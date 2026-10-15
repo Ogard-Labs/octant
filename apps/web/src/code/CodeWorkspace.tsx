@@ -577,6 +577,9 @@ function AppleWorkbenchSurface(props: {
       (appleInputGrantIsLive(controller.runtime, String(liveSimulatorId), Date.now()) ||
         rememberedUntil > Date.now()));
   const needsAllowInput = approvalGated && !inputAllowed;
+  const liveSimulatorOrientation = controller.runtime?.orientations?.find(
+    (one) => String(one.simulatorId) === String(liveSimulatorId),
+  )?.orientation;
   const screenStreamRequest = useMemo(
     () =>
       liveSimulatorId === undefined
@@ -597,6 +600,7 @@ function AppleWorkbenchSurface(props: {
     enabled: liveFrame.status === "live" && !liveViewStopped && !awaitingChoice,
     attempt: liveViewAttempt,
     ...(screenStreamRequest === undefined ? {} : { request: screenStreamRequest }),
+    ...(liveSimulatorOrientation === undefined ? {} : { orientation: liveSimulatorOrientation }),
   });
 
   const run = useCallback(

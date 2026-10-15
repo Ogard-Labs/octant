@@ -321,6 +321,16 @@ export class AppleToolchainService {
       readonly finished: Promise<AppleProcessResult>;
     }
   >();
+  // Which way each Simulator this host has turned sits. Only a rotate sets
+  // it, and a shutdown clears it: the desktop reads the real orientation when
+  // it rotates, and the streamed picture never shows it.
+  readonly #orientations = new Map<
+    string,
+    {
+      readonly simulatorId: AppleSimulatorRecord["simulatorId"];
+      readonly orientation: "portrait" | "landscape";
+    }
+  >();
   // Simulators whose recorder is still starting; a second start must not launch another.
   readonly #recordingStarts = new Set<string>();
   #stateChangesDuringDiscovery: Array<{
@@ -597,6 +607,7 @@ export class AppleToolchainService {
         recordScreen: true,
         ...(this.#options.injectSimulatorInput === undefined ? {} : { volume: true, rotate: true }),
       },
+      orientations: [...this.#orientations.values()],
       recordings: [...this.#recordings.values()]
         .filter(
           (recording) =>
@@ -1039,6 +1050,17 @@ export class AppleToolchainService {
         // rotate command, and Octant never scripts Simulator.app.
         terminal = await this.#injectInput(request, context, signal);
         const outcome = outcomeFor(terminal);
+        const turned = text(terminal.stdout).trim();
+        if (
+          outcome === "succeeded" &&
+          request.simulatorId !== undefined &&
+          (turned === "portrait" || turned === "landscape")
+        ) {
+          this.#orientations.set(String(request.simulatorId), {
+            simulatorId: request.simulatorId,
+            orientation: turned,
+          });
+        }
         const note = {
           severity: "note" as const,
           message:
@@ -1197,6 +1219,7 @@ export class AppleToolchainService {
       outputs.push(terminal.stdout, terminal.stderr);
       if (succeeded(terminal) && request.kind === "shutdown") {
         this.#setSimulatorState(request.simulatorId, "shutdown");
+        this.#orientations.delete(String(request.simulatorId));
       }
       cleanup = terminal.cleanupUncertain ? "uncertain" : "complete";
       const logReference = `apple-log-${request.actionId}`;

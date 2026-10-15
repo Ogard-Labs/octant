@@ -227,6 +227,14 @@ describe("Simulator input delivery", () => {
     ]);
   });
 
+  it("passes on which way the Simulator sits after a rotation", async () => {
+    const { fake } = helpers(() => ({ status: "delivered", orientation: "landscape" }));
+
+    await expect(
+      createSimulatorInputDelivery(fake)({ kind: "rotate", udid, budgetMs: 30_000 }),
+    ).resolves.toEqual({ kind: "delivered", orientation: "landscape" });
+  });
+
   it("asks the helper for the screen again after a rotation, since its size turned", async () => {
     const screens = [
       { width: 1206, height: 2622 },
