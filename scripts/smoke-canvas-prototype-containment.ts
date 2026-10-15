@@ -8,7 +8,11 @@
 // - TCP: a TURN server named over TCP, and anything that connects to a port;
 // - HTTP: fetch, XHR, an image beacon, `sendBeacon`, an event source, a
 //   WebSocket, a form post, a popup, and the page moving itself;
-// - the design server's other routes, which stand for the Octant host API.
+// - the design server's other routes, which stand for the Octant host API;
+// - name lookups: a `dns-prefetch` link, a `preconnect` link, and STUN and
+//   TURN servers named by host name, each under `canary.example`. Lookups are
+//   read from the network logs of every process that runs Chromium's network
+//   stack in the run, and a contained run may record none.
 //
 // The page tries each from its own realm and from a fresh `about:blank` frame,
 // because removing `RTCPeerConnection` from the page is not a boundary.
@@ -16,15 +20,18 @@
 // Three runs:
 // 1. `uncontained-frame`: a sandboxed frame of the app window, with the WebRTC
 //    policy the renderer used to set. The control: it must still reach a TCP
-//    listener, or this probe could not see an escape.
-// 2. `contained`: the desktop app's prototype surface. Nothing may arrive.
-// 3. `contained, page policy removed`: the same surface with the design
-//    page's own content policy stripped, so only the surface's session stands
+//    listener and look up a page-chosen name, or this probe could not see an
+//    escape.
+// 2. `contained`: the desktop app's prototype host, a process of its own,
+//    driven through the desktop's own surface code. Nothing may arrive and no
+//    name may be looked up.
+// 3. `contained, page policy removed`: the same with the design page's own
+//    content policy stripped, so only the host process's switches stand
 //    between the page and the network.
 //
-// Host names the page asks the resolver for are read from the network log and
-// reported, not asserted: Electron has no per-session resolver rule, so a
-// name lookup (a `dns-prefetch` link, a WebRTC server name) still leaves.
+// A fourth run clicks a benign page through the same path a person's pointer
+// takes and reads back what the page drew, so the contained page still renders
+// and interacts.
 //
 // Run, from the repository root:
 //   bun scripts/smoke-canvas-prototype-containment.ts
@@ -79,6 +86,7 @@ const peer = (RTC, what) => attempt(what, () => {
     { urls: "stun:127.0.0.1:${String(udp)}" },
     { urls: "turn:127.0.0.1:${String(tcp)}?transport=tcp", username: "a", credential: "b" },
     { urls: "turn:turn.canary.example:3478?transport=tcp", username: "a", credential: "b" },
+    { urls: "stun:stun.canary.example:3478" },
   ] });
   connection.createDataChannel("probe");
   return connection.createOffer().then((offer) => connection.setLocalDescription(offer));
@@ -97,6 +105,7 @@ attempt("send-beacon", () => navigator.sendBeacon(${inScript(`${beacon}/send-bea
 attempt("event-source", () => new EventSource(${inScript(`${beacon}/event-source`)}));
 attempt("websocket", () => new WebSocket(${inScript(`${beacon.replace("http", "ws")}/websocket`)}));
 attempt("dns-prefetch", () => { const link = document.createElement("link"); link.rel = "dns-prefetch"; link.href = "//prefetch.canary.example"; document.head.appendChild(link); });
+attempt("preconnect", () => { const link = document.createElement("link"); link.rel = "preconnect"; link.href = "https://preconnect.canary.example"; document.head.appendChild(link); });
 attempt("window-open", () => window.open(${inScript(`${beacon}/popup`)}));
 attempt("form", () => { const form = document.createElement("form"); form.action = ${inScript(`${beacon}/form`)}; document.body.appendChild(form); form.submit(); });
 addEventListener("keydown", (event) => note("saw-key:" + event.key + (event.metaKey ? "+meta" : "") + (event.ctrlKey ? "+ctrl" : "")), true);
@@ -271,17 +280,16 @@ async function electronBinary(): Promise<string | undefined> {
 
 interface ProbeResult {
   readonly mode: string;
-  readonly prepared?: { readonly status: string };
-  readonly sessions?: ReadonlyArray<{ readonly shared: boolean; readonly url: string }>;
-  readonly refusals?: Record<string, unknown>;
-  readonly focusEscapes?: number;
+  readonly prepared?: { readonly status: string; readonly reason?: string };
+  readonly refusals?: { readonly refusedAddresses?: number; readonly opened?: string };
+  readonly painted?: number;
   readonly pointer?: {
-    readonly scale: number;
     readonly target: ReadonlyArray<string>;
     readonly decoy: ReadonlyArray<string>;
-    readonly pastRightEdge: ReadonlyArray<string>;
-    readonly pastBottomEdge: ReadonlyArray<string>;
-    readonly whereUnscaledTargetWouldBe: ReadonlyArray<string>;
+    readonly frames: number;
+    readonly frameSize: ReadonlyArray<number>;
+    readonly decoyColour: ReadonlyArray<number>;
+    readonly targetColour: ReadonlyArray<number>;
   };
   readonly bridge?: {
     readonly heartbeats: number;
@@ -289,12 +297,15 @@ interface ProbeResult {
     readonly attempts: ReadonlyArray<string | undefined>;
   };
   readonly dnsLookups?: ReadonlyArray<string>;
+  readonly namesInLog?: ReadonlyArray<string>;
+  readonly logEvents?: number;
+  readonly beaconInLog?: boolean;
 }
 
 async function runElectron(input: {
   readonly binary: string;
   readonly main: string;
-  readonly preload: string;
+  readonly host: string;
   readonly mode: string;
   readonly listeners: Listeners;
 }): Promise<ProbeResult | undefined> {
@@ -305,7 +316,7 @@ async function runElectron(input: {
       OCTANT_PROBE_ISSUE_URL: input.listeners.issueUrl,
       OCTANT_PROBE_SERVER_URL: input.listeners.hostUrl,
       OCTANT_PROBE_BEACON_URL: input.listeners.beaconUrl,
-      OCTANT_PROBE_PRELOAD: input.preload,
+      OCTANT_PROBE_HOST: input.host,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -313,11 +324,16 @@ async function runElectron(input: {
   child.stdout.on("data", (chunk: Buffer) => {
     output += chunk.toString("utf8");
   });
-  child.stderr.on("data", () => undefined);
+  let errors = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    errors = `${errors}${chunk.toString("utf8")}`.slice(-4_000);
+  });
   const killer = setTimeout(() => child.kill("SIGKILL"), 60_000);
   await new Promise<void>((done) => child.once("exit", () => done()));
   clearTimeout(killer);
   const line = output.split("\n").find((entry) => entry.startsWith("OCTANT_PROBE_RESULT "));
+  // A run that reports nothing says why on its error output.
+  if (line === undefined) console.error(`${input.mode}: ${errors}`);
   return line === undefined
     ? undefined
     : (JSON.parse(line.slice("OCTANT_PROBE_RESULT ".length)) as ProbeResult);
@@ -343,6 +359,21 @@ const built = await Bun.build({
   format: "esm",
   external: ["electron"],
 });
+// The prototype host, built the way the desktop entry runs it: its program
+// and, beside it, the page preload it loads.
+const hostEntry = join(work, "probe-host-entry.ts");
+await Bun.write(
+  hostEntry,
+  `import { runCanvasPrototypeHost } from ${JSON.stringify(join(root, "apps/desktop/src/canvasPrototypeHost.ts"))};\nvoid runCanvasPrototypeHost();\n`,
+);
+const builtHost = await Bun.build({
+  entrypoints: [hostEntry],
+  outdir: work,
+  naming: "probe-host.mjs",
+  target: "node",
+  format: "esm",
+  external: ["electron"],
+});
 const builtPreload = await Bun.build({
   entrypoints: [join(root, "apps/desktop/src/canvasPrototypePreload.ts")],
   outdir: work,
@@ -351,11 +382,11 @@ const builtPreload = await Bun.build({
   format: "cjs",
   external: ["electron"],
 });
-if (!built.success || !builtPreload.success) {
+if (!built.success || !builtHost.success || !builtPreload.success) {
   console.error(
     JSON.stringify({
       status: "build-failed",
-      logs: [...built.logs, ...builtPreload.logs].map(String),
+      logs: [...built.logs, ...builtHost.logs, ...builtPreload.logs].map(String),
     }),
   );
   process.exit(1);
@@ -388,7 +419,7 @@ try {
     const result = await runElectron({
       binary,
       main: join(work, "probe-main.mjs"),
-      preload: join(work, "canvasPrototypePreload.cjs"),
+      host: join(work, "probe-host.mjs"),
       mode: run.mode,
       listeners,
     });
@@ -407,7 +438,7 @@ try {
   pointerRun = await runElectron({
     binary,
     main: join(work, "probe-main.mjs"),
-    preload: join(work, "canvasPrototypePreload.cjs"),
+    host: join(work, "probe-host.mjs"),
     mode: "contained-pointer",
     listeners,
   });
@@ -424,6 +455,9 @@ if (control.result === undefined) failures.push("the control run reported nothin
 if (control.tcp < 1) {
   failures.push("the control reached no TCP listener, so this probe could not see an escape");
 }
+if ((control.result?.dnsLookups ?? []).length === 0) {
+  failures.push("the control looked up no page-chosen name, so this probe could not see a lookup");
+}
 for (const row of [contained, stripped]) {
   if (row.result === undefined) failures.push(`${row.run}: nothing reported`);
   if (row.udp !== 0) failures.push(`${row.run}: ${String(row.udp)} UDP datagrams arrived`);
@@ -439,32 +473,39 @@ for (const row of [contained, stripped]) {
   if (bridge !== undefined && !bridge.attempts.includes("tried:self-navigation")) {
     failures.push(`${row.run}: the page did not reach its last attempt`);
   }
-  if (row.result?.sessions?.some((session) => session.shared) === true) {
-    failures.push(`${row.run}: the page shares the app's session`);
+  const lookups = row.result?.dnsLookups;
+  if (lookups === undefined || lookups.length !== 0) {
+    failures.push(`${row.run}: page-chosen names were looked up: ${String(lookups)}`);
   }
-  // The shortcut reaches the window once and never the page; a plain Escape
-  // reaches the page and not the window.
-  if (row.result?.focusEscapes !== 1) {
-    failures.push(
-      `${row.run}: the reserved shortcut reached the window ${String(row.result?.focusEscapes)} times`,
-    );
+  // An empty log would show no lookups too. A name the rule refuses never
+  // reaches the resolver, so it is not in the log either; what shows the log
+  // is the page's is the page's own requests to the beacon, which reach the
+  // network stack once the page's policy is removed.
+  if ((row.result?.logEvents ?? 0) === 0) {
+    failures.push(`${row.run}: the prototype host wrote no network log`);
   }
+  if (row === stripped && row.result?.beaconInLog !== true) {
+    failures.push(`${row.run}: the prototype host's network log holds none of the page's requests`);
+  }
+  if ((row.result?.painted ?? 0) < 1) failures.push(`${row.run}: the page painted nothing`);
+  // The reserved shortcut never reaches the page; a plain Escape does.
   const keys = (bridge?.attempts ?? []).filter((entry) => entry?.startsWith("tried:saw-key:"));
   if (keys.length !== 1 || keys[0] !== "tried:saw-key:Escape") {
     failures.push(
       `${row.run}: the page saw ${keys.join(", ") || "no key"}; it may see a plain Escape only`,
     );
   }
-  if (row.result?.refusals?.guests !== 1) {
+  if (row.result?.refusals?.refusedAddresses !== 3) {
     failures.push(
-      `${row.run}: ${String(row.result?.refusals?.guests)} surfaces exist; only the design page may open one`,
+      `${row.run}: ${String(row.result?.refusals?.refusedAddresses)} of 3 other addresses were refused`,
     );
   }
 }
 
-// A click through the scaled surface lands on the element drawn under the
-// pointer, in the page's own pixels, and a click outside the clipped box
-// reaches nothing.
+// A click through the surface's input path lands on the element drawn under
+// it, in the page's own pixels, and what the page drew comes back. Where a
+// click lands on a scaled prototype is the renderer's to compute, and its
+// tests hold that.
 const landed = (events: ReadonlyArray<string> | undefined, id: string, x: number, y: number) => {
   const click = events?.find((entry) => entry.startsWith("click:"));
   const match = /^click:([^@]+)@(-?\d+),(-?\d+)$/.exec(click ?? "");
@@ -476,21 +517,24 @@ const landed = (events: ReadonlyArray<string> | undefined, id: string, x: number
     events?.every((entry) => entry.includes(`:${id}@`)) === true
   );
 };
+/** Near the page's own colours: #c33 for the decoy, #33c for the target. */
+const near = (colour: ReadonlyArray<number>, expected: ReadonlyArray<number>) =>
+  colour.length === 3 &&
+  colour.every((value, index) => Math.abs(value - (expected[index] ?? 0)) <= 8);
 const pointer = pointerRun?.pointer;
-if (pointer === undefined) failures.push("the scaled-pointer run reported nothing");
+if (pointer === undefined) failures.push("the pointer run reported nothing");
 else {
   if (!landed(pointer.target, "target", 260, 660)) {
-    failures.push(`a click on the scaled target landed as ${pointer.target.join(" ")}`);
+    failures.push(`a click on the target landed as ${pointer.target.join(" ")}`);
   }
   if (!landed(pointer.decoy, "decoy", 50, 50)) {
-    failures.push(`a click on the scaled decoy landed as ${pointer.decoy.join(" ")}`);
+    failures.push(`a click on the decoy landed as ${pointer.decoy.join(" ")}`);
   }
-  for (const [name, events] of [
-    ["past the right edge", pointer.pastRightEdge],
-    ["past the bottom edge", pointer.pastBottomEdge],
-    ["where the unscaled target would be", pointer.whereUnscaledTargetWouldBe],
-  ] as const) {
-    if (events.length !== 0) failures.push(`a click ${name} reached the page: ${events.join(" ")}`);
+  if (pointer.frames < 1) failures.push("the page painted nothing");
+  if (!near(pointer.decoyColour, [204, 51, 51]) || !near(pointer.targetColour, [51, 51, 204])) {
+    failures.push(
+      `the page did not draw what it holds: decoy ${pointer.decoyColour.join(",")}, target ${pointer.targetColour.join(",")}`,
+    );
   }
 }
 
@@ -499,7 +543,7 @@ console.log(
     {
       status: failures.length === 0 ? "passed" : "failed",
       failures,
-      scaledPointer: pointerRun?.pointer,
+      pointer: pointerRun?.pointer,
       runs: rows.map((row) => ({
         run: row.run,
         udpDatagrams: row.udp,
@@ -509,9 +553,13 @@ console.log(
         heartbeats: row.result?.bridge?.heartbeats,
         sizes: row.result?.bridge?.sizes,
         attempts: row.result?.bridge?.attempts,
-        proxy: row.result?.refusals,
-        reservedShortcutsReachingTheWindow: row.result?.focusEscapes,
+        prepared: row.result?.prepared,
+        refusals: row.result?.refusals,
+        framesPainted: row.result?.painted,
         nameLookups: row.result?.dnsLookups,
+        namesInNetworkLog: row.result?.namesInLog,
+        networkLogEvents: row.result?.logEvents,
+        pageRequestsInNetworkLog: row.result?.beaconInLog,
       })),
     },
     null,

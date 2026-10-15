@@ -2243,12 +2243,6 @@ export const CANVAS_DESIGN_RUN_TICKET_TTL_MS = 10_000;
  * never as a command.
  */
 export const CANVAS_DESIGN_BRIDGE_CHANNEL = "octant-design-frame@1";
-/**
- * What the desktop app's surface for a running design calls each bridge message
- * it forwards to the window that draws the design. Outside the desktop app the
- * page posts to its parent frame and this is not used.
- */
-export const CANVAS_DESIGN_SURFACE_BRIDGE_EVENT = "octant-canvas-prototype-bridge";
 export const CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS = 1_000;
 export const CANVAS_DESIGN_BRIDGE_MAX_ERROR_LENGTH = 280;
 

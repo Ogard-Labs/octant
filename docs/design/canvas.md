@@ -704,8 +704,8 @@ which would starve the renderer that holds **Stop**, and a page that loads a
 second time, which is a page it navigated to. Host chrome holds a running label
 and **Stop**. In the thread a prototype starts only on **Run**; the sidebar
 runs it on open. A running page is in the tab order, right after Stop, and Octant
-never moves focus into it when it opens; page script can still take focus on
-its own in some cases (see the frame threat model, F10).
+never moves focus into it when it opens; in a browser, page script can still
+take focus on its own in some cases (see the frame threat model, F10).
 
 In a browser the page is drawn in a frame sandboxed to `allow-scripts` alone,
 and the renderer accepts only messages whose `source` is that frame's window
@@ -717,58 +717,77 @@ script can still connect to another computer, under the
 On desktop a running prototype is never drawn in a frame. A page policy does
 not cover WebRTC, and the renderer's WebRTC policy stops only UDP: on Electron
 43.5.0 a peer connection naming a TURN server over TCP still reached a local
-listener from a sandboxed frame. So the prototype is a `<webview>` whose guest
-lives in a session of its own with no route out, the same boundary the preview
-browser has:
+listener from a sandboxed frame. A session of the app's own process can be kept
+off the network but not off the app's resolver: Electron 43 has no resolver
+rule for one session, and the app's other sessions need to resolve names, so
+in such a session a `dns-prefetch` link made the app look up a name the page
+chose. So the prototype runs in the **prototype host**, a process of its own
+with the same no-route switches as the preview browser, a resolver rule that
+answers every name with not-found among them:
 
+- **The process.** `apps/desktop` starts the host from its own executable with
+  a host switch (a packaged app always runs its own entry, so the entry runs
+  either the app or the host). It has no Dock icon or windows on screen, a
+  throwaway data directory, and leaves when the app's IPC channel closes.
 - **Preparing.** A run is two separate facts: whether it is contained (what the
   person is told) and where it is drawn (the desktop's own surface, or a frame).
   Whatever builds the run, a prototype drawn on the surface is not asked for a
   ticket until the renderer has asked the main process to prepare the surface;
   a shared snapshot's prototype takes the same path as a live one. The agent's
   preview browser is contained and draws a frame, because it is an ordinary
-  browser with no such surface. The main process points the surface's session
-  at a SOCKS address that is never a proxy, with `<-loopback>` so loopback is
-  not exempt, reads back that a public and a loopback address both resolve to
-  it and neither to `DIRECT`, and refuses every permission, device, screen
+  browser with no such surface. Preparing starts the host, which points its
+  in-memory session at a SOCKS address that is never a proxy, with
+  `<-loopback>` so loopback is not exempt, reads back that a public and a
+  loopback address both resolve to it and neither to `DIRECT`, reads back that
+  `localhost` does not resolve, and refuses every permission, device, screen
   capture, and download. When it cannot, the prototype reports why and does not
   run; it is never drawn in a frame instead, and the app window cancels any
-  frame navigation to the design page.
-- **What may attach.** The renderer names only the host's ticketed address. The
-  main process (`will-attach-webview`) cancels an element naming anything else,
-  or arriving before the surface is ready, and replaces the element's partition,
-  preload, and preferences with the surface's own: an in-memory partition shared
-  with no cookies, storage, or permissions of the app's, sandboxed and
-  context-isolated, no Node. The renderer never passes a session name, URL of
-  its choosing, or preference.
-- **The page.** The page is served to the guest under an `octant-prototype:`
-  scheme the surface's session answers from the main process, which asks the
-  host for the ticketed design page itself and keeps its content type and
-  policy. Nothing else is served, so the guest needs no route to the host's
-  loopback address and the host API is unreachable from it.
-- **The bridge.** The guest's preload forwards the page's bridge messages, cut
-  to type, height, and message text, as `ipc-message` events of the element. The
-  renderer applies the same channel, type, bounds, heartbeat, and flood checks,
-  and also stops a prototype whose surface goes away. There is no window or
-  origin to check because the page has no parent frame to post to.
-- **What the guest may do.** The main process refuses new windows, every
-  navigation and redirect after the first load, non-proxied UDP, and every
-  permission. It reads Command-Escape (Control-Escape elsewhere) through the
-  guest's `before-input-event` before the page sees it, and the renderer moves
-  focus to the surface's Stop, stopping a page that takes focus straight back.
-  A guest is its own process, and the surface is drawn with the same size,
-  scale, and placement as a frame, so expanded and in-thread placements,
-  sizing to content, and redraw without restart are unchanged.
+  frame navigation to the design page. The app window has no `<webview>`.
+- **What may open.** The renderer names only the host's ticketed address and
+  the page's size, under a surface id it chose. The main process refuses any
+  other address and opens a prototype only once the host is ready. Each
+  prototype belongs to the window that opened it: only that window hears its
+  events or may send it input, and its prototypes close when it closes or
+  loads another page.
+- **The page.** The main process asks the host for the ticketed design page
+  itself and hands the prototype host the page with its content type and
+  policy. The host serves it once, under an `octant-prototype:` scheme of its
+  session, to an offscreen window sandboxed and context-isolated with no Node.
+  Nothing else is served, so the page needs no route to the host's loopback
+  address and the host API is unreachable from it.
+- **Drawing and input.** The host paints the page offscreen, at twice its
+  pixels on a Retina display, and sends each changed rectangle; the renderer
+  paints it on a canvas the same size, scale, and placement as a frame, so
+  expanded and in-thread placements, sizing to content, and redraw without
+  restart are unchanged. The renderer forwards pointer, wheel, and key events
+  in the page's own pixels, copy, cut, paste, select all, undo, and redo as
+  edit commands, and the page's cursor back. The main process checks each
+  input's shape before the host plays it back. Text typed through an input
+  method's composition, and assistive technology reading inside the page, do
+  not reach it: the page is a picture to the window.
+- **The bridge.** The page's preload forwards its bridge messages, cut to type,
+  height, and message text, to the host, which passes them on as events of
+  that prototype. The renderer applies the same channel, type, bounds,
+  heartbeat, and flood checks, and also stops a prototype whose page goes away.
+  There is no window or origin to check because the page has no parent frame to
+  post to.
+- **What the page may do.** The host refuses new windows, every navigation and
+  redirect, non-proxied UDP, and every permission. The renderer reads
+  Command-Escape (Control-Escape elsewhere) before anything is forwarded and
+  moves focus to the prototype's Stop; the main process also refuses to forward
+  it. The page never holds the window's focus, so it cannot take the keyboard
+  back.
 
 The app window still gives each sandboxed document its own process
 (`IsolateSandboxedIframes`, per-document grouping), because Electron 43 grouped
 one site's sandboxed frames into one process, so a page spinning in a loop held
 the next frame.
 
-What stays open on desktop is a host-name lookup the page asks the app's
-resolver for (a `dns-prefetch` link): Electron has no per-session resolver rule,
-so the notice under a running prototype says that it can still make Octant look
-up host names, and that this can carry a little of what it holds.
+The containment probe (`bun run smoke:canvas-prototype-containment`) holds this:
+a hostile page in the prototype host reaches no UDP, TCP, HTTP, or host
+listener and asks the resolver for none of its names (`dns-prefetch` and
+`preconnect` links, STUN and TURN servers named by host name), while the same
+page in a frame of the app's own process does look them up.
 
 ## Verification
 

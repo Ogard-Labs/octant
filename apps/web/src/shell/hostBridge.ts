@@ -158,6 +158,18 @@ export type CanvasPrototypeSurfacePreparation =
   | { readonly status: "ready" }
   | { readonly status: "unavailable"; readonly reason: string };
 
+export interface CanvasPrototypeOpenRequest {
+  readonly surfaceId: string;
+  readonly src: string;
+  readonly width: number;
+  readonly height: number;
+  readonly scaleFactor: number;
+}
+
+export type CanvasPrototypeOpenResult =
+  | { readonly status: "open" }
+  | { readonly status: "refused"; readonly reason: string };
+
 export interface BrowserSurfaceRequest {
   readonly contextId: string;
   readonly threadId: string;
@@ -376,6 +388,22 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
    * else there. Absent outside the desktop app.
    */
   readonly prepareCanvasPrototypeSurface?: () => Promise<CanvasPrototypeSurfacePreparation>;
+  /**
+   * The prototype host: a running prototype is opened there under an id this
+   * window chose, its pixels and bridge messages come back as events, and a
+   * person's input goes to it. Absent outside the desktop app.
+   */
+  readonly openCanvasPrototype?: (
+    request: CanvasPrototypeOpenRequest,
+  ) => Promise<CanvasPrototypeOpenResult>;
+  readonly sendCanvasPrototypeInput?: (surfaceId: string, input: unknown) => Promise<void>;
+  readonly resizeCanvasPrototype?: (
+    surfaceId: string,
+    width: number,
+    height: number,
+  ) => Promise<void>;
+  readonly closeCanvasPrototype?: (surfaceId: string) => Promise<void>;
+  readonly subscribeCanvasPrototypeEvents?: (listener: (event: unknown) => void) => () => void;
   readonly attachBrowserSurface?: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds?: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface?: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
@@ -496,11 +524,6 @@ export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBrid
    * translucency without host vibrancy shows the desktop behind sharp. Absent
    * on hosts that never apply vibrancy.
    */
-  /**
-   * The desktop's reserved shortcut for leaving a running Canvas prototype,
-   * read before the prototype sees the key. Absent outside the desktop app.
-   */
-  readonly subscribeCanvasFrameFocusEscape?: (listener: () => void) => () => void;
   readonly subscribeResolvedSidebarVibrancy?: (
     listener: (vibrancy: "sidebar" | null) => void,
   ) => () => void;

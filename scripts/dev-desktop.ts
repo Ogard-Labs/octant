@@ -33,7 +33,7 @@ function shutdown(code = 0): never {
 process.on("SIGINT", () => shutdown(130));
 process.on("SIGTERM", () => shutdown(143));
 
-const desktopBundle = resolve(root, "apps/desktop/dist/main.mjs");
+const desktopBundle = resolve(root, "apps/desktop/dist/entry.mjs");
 const desktopSource = resolve(root, "apps/desktop/src");
 
 function newestModifiedAt(directory: string): number {
