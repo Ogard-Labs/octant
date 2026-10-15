@@ -4004,7 +4004,11 @@ function LaunchedShell(
       return provider === undefined ? thread : { ...thread, provider };
     };
     const providerByThreadId = new Map<string, ThreadProviderIdentity>();
+    // An open pane keeps the title its thread had when it opened, so the live
+    // title comes from the same rows the sidebar draws.
+    const liveThreadTitles = new Map<string, string>();
     const rememberThreadProvider = (thread: ChatThreadNavigationItem): void => {
+      liveThreadTitles.set(thread.threadId, thread.title);
       if (thread.provider === undefined) return;
       providerByThreadId.set(thread.threadId, thread.provider);
     };
@@ -4042,6 +4046,7 @@ function LaunchedShell(
     }
     return {
       codeProjectThreads,
+      liveThreadTitles,
       markedChatNavigation,
       markedThreadGroups,
       providerByThreadId,
@@ -4376,6 +4381,7 @@ function LaunchedShell(
     : activeSurfaceTitle(
         controller.workspace.layouts[activeMode],
         controller.workspace.activePaneIds[activeMode],
+        navigationModel.liveThreadTitles,
       );
   const archiveEntries: ReadonlyArray<ArchivedThreadEntry> = [
     ...(workNavigation.bootstrap?.threads ?? [])
@@ -4425,6 +4431,7 @@ function LaunchedShell(
 
   const {
     codeProjectThreads,
+    liveThreadTitles,
     markedChatNavigation,
     markedThreadGroups,
     providerByThreadId,
@@ -7856,6 +7863,7 @@ function LaunchedShell(
                         draftProviderGroups={draftProviderGroups}
                         codeProviderGroups={codeProviderGroups}
                         workProviderGroups={workProviderGroups}
+                        liveThreadTitles={liveThreadTitles}
                         providerByThreadId={providerByThreadId}
                         runningThreadIds={runningThreadIds}
                         showProviderIcons={controller.settings.showThreadProviderIcons}
@@ -7958,7 +7966,7 @@ function LaunchedShell(
                           ? {}
                           : { defaultFolder: controller.settings.defaultFolder })}
                         codeDefaultFolderThreads={
-                          codeController.bootstrap?.settings.allowDefaultFolderThreads === true
+                          codeController.bootstrap?.settings.requireGitRepository === false
                         }
                         onEnsureDefaultProject={(mode) => {
                           const destinationHostId = refuseUnlessCreatableDestination({
@@ -7980,7 +7988,7 @@ function LaunchedShell(
                         onOpenCodeSettings={() =>
                           void controller.openSettings({
                             section: "code",
-                            setting: "code-default-folder-threads",
+                            setting: "code-require-git",
                           })
                         }
                         onOpenProviderSettings={() =>

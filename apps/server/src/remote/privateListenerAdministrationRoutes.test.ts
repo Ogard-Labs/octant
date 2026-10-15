@@ -26,6 +26,8 @@ function readyStatus(): PrivateListenerHostStatus {
     exposureClass: "lan-private",
     certificateFingerprint: "a".repeat(64),
     certificateReady: true,
+    certificateSource: "pasted",
+    tlsPin: null,
   };
 }
 
@@ -39,6 +41,8 @@ function disabledStatus(): PrivateListenerHostStatus {
     exposureClass: null,
     certificateFingerprint: null,
     certificateReady: false,
+    certificateSource: null,
+    tlsPin: null,
   };
 }
 
@@ -130,6 +134,76 @@ describe("private listener administration routes", () => {
       port: 9443,
       origin: "https://192.168.1.20:9443",
       tls: { cert: CERT, key: KEY },
+    });
+  });
+
+  it("asks the host for its own certificate when neither PEM is sent and remembers no key", async () => {
+    const { handle, control, setting } = setup();
+    const response = await handle(
+      request("/api/desktop/private-listener/enable", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          hostname: "100.64.0.7",
+          port: 8443,
+          origin: "https://100.64.0.7:8443",
+        }),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    const selfMade = {
+      hostname: "100.64.0.7",
+      port: 8443,
+      origin: "https://100.64.0.7:8443",
+      tls: "self-made",
+    };
+    expect(control.enable).toHaveBeenCalledWith(selfMade);
+    expect(setting.save).toHaveBeenCalledWith(selfMade);
+  });
+
+  it("refuses an enable that sends only one of the certificate and key", async () => {
+    const { handle, control } = setup();
+    for (const pem of [{ certificatePem: CERT }, { privateKeyPem: KEY }]) {
+      const response = await handle(
+        request("/api/desktop/private-listener/enable", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            hostname: "100.64.0.7",
+            port: 8443,
+            origin: "https://100.64.0.7:8443",
+            ...pem,
+          }),
+        }),
+      );
+      expect(response?.status).toBe(400);
+    }
+    expect(control.enable).not.toHaveBeenCalled();
+  });
+
+  it("says plainly that a key other users can read was not used", async () => {
+    const { handle } = setup({
+      enable: vi.fn(async () => {
+        throw new PrivateListenerLifecycleError("tls-key-exposed");
+      }),
+    });
+    const response = await handle(
+      request("/api/desktop/private-listener/enable", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          hostname: "100.64.0.7",
+          port: 8443,
+          origin: "https://100.64.0.7:8443",
+        }),
+      }),
+    );
+    expect(response?.status).toBe(503);
+    expect(await response?.json()).toEqual({
+      category: "unavailable",
+      errorCode: "tls-key-exposed",
+      message:
+        "The listener's certificate key can be read by other users on this computer, so Octant won't use it.",
     });
   });
 

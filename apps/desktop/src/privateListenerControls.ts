@@ -3,11 +3,15 @@ import { classifyRemoteListenerAddress } from "@octant/domain";
 
 export type PrivateListenerExposureClass = "lan-private" | "tailscale";
 
+/** Whether the listener serves the certificate the host made or one the person pasted. */
+export type PrivateListenerCertificateSource = "self-made" | "pasted";
+
 export type PrivateListenerControlFailureCode =
   | "local-confirmation-required"
   | "invalid-bind"
   | "invalid-origin"
   | "invalid-tls"
+  | "tls-key-exposed"
   | "occupied-port"
   | "interface-unavailable"
   | "bind-failed"
@@ -20,6 +24,7 @@ const FAILURE_CODES: ReadonlySet<string> = new Set([
   "invalid-bind",
   "invalid-origin",
   "invalid-tls",
+  "tls-key-exposed",
   "occupied-port",
   "interface-unavailable",
   "bind-failed",
@@ -34,6 +39,8 @@ const FAILURE_MESSAGES: Readonly<Record<PrivateListenerControlFailureCode, strin
   "invalid-bind": "Octant rejected an invalid private listener address.",
   "invalid-origin": "Octant rejected an invalid private listener origin.",
   "invalid-tls": "Octant rejected an invalid private listener certificate.",
+  "tls-key-exposed":
+    "The listener's certificate key can be read by other users on this computer, so Octant won't use it.",
   "occupied-port": "Octant could not bind the private listener because the port is occupied.",
   "interface-unavailable":
     "Octant could not bind the private listener because the interface is unavailable.",
@@ -71,6 +78,9 @@ export interface PrivateListenerPublicStatus {
   readonly exposureClass: PrivateListenerExposureClass | null;
   readonly certificateFingerprint: string | null;
   readonly certificateReady: boolean;
+  readonly certificateSource: PrivateListenerCertificateSource | null;
+  /** The self-made certificate's key pin; null for a pasted certificate. */
+  readonly tlsPin: string | null;
   readonly errorCode?: PrivateListenerControlFailureCode;
 }
 
@@ -81,6 +91,8 @@ export interface PrivateListenerRuntimeStartResult {
   readonly exposureClass: PrivateListenerExposureClass;
   readonly certificateFingerprint: string;
   readonly certificateReady: boolean;
+  readonly certificateSource: PrivateListenerCertificateSource | null;
+  readonly tlsPin: string | null;
 }
 
 export interface PrivateListenerRuntimeStartInput {
@@ -214,6 +226,8 @@ export function createPrivateListenerControlService(
         exposureClass: started.exposureClass,
         certificateFingerprint: started.certificateFingerprint,
         certificateReady: started.certificateReady,
+        certificateSource: started.certificateSource,
+        tlsPin: started.tlsPin,
       };
       return getStatus();
     } catch (error) {
@@ -280,6 +294,8 @@ function normalizeStatus(status: PrivateListenerPublicStatus): PrivateListenerPu
       exposureClass: status.exposureClass,
       certificateFingerprint: status.certificateFingerprint,
       certificateReady: status.certificateReady,
+      certificateSource: status.certificateSource,
+      tlsPin: status.tlsPin,
     };
   }
   if (status.state === "failed") {
@@ -302,6 +318,8 @@ function disabledStatus(): PrivateListenerPublicStatus {
     exposureClass: null,
     certificateFingerprint: null,
     certificateReady: false,
+    certificateSource: null,
+    tlsPin: null,
   };
 }
 
@@ -453,6 +471,8 @@ function requireReady(status: PrivateListenerPublicStatus): PrivateListenerRunti
     exposureClass: status.exposureClass,
     certificateFingerprint: status.certificateFingerprint,
     certificateReady: status.certificateReady,
+    certificateSource: status.certificateSource,
+    tlsPin: status.tlsPin,
   };
 }
 
@@ -508,6 +528,8 @@ function decodeStatus(value: unknown): PrivateListenerPublicStatus {
     !nullableExposureClass(record.exposureClass) ||
     !nullableString(record.certificateFingerprint) ||
     typeof record.certificateReady !== "boolean" ||
+    !certificateSourceOrAbsent(record.certificateSource) ||
+    !tlsPinOrAbsent(record.tlsPin) ||
     (record.errorCode !== undefined && !FAILURE_CODES.has(String(record.errorCode)))
   ) {
     throw new PrivateListenerControlFailure("unavailable");
@@ -521,6 +543,11 @@ function decodeStatus(value: unknown): PrivateListenerPublicStatus {
     exposureClass: record.exposureClass as PrivateListenerExposureClass | null,
     certificateFingerprint: record.certificateFingerprint as string | null,
     certificateReady: record.certificateReady,
+    // A host from before self-made certificates sends no source; it can only
+    // serve a pasted one.
+    certificateSource: (record.certificateSource ??
+      null) as PrivateListenerCertificateSource | null,
+    tlsPin: (record.tlsPin ?? null) as string | null,
     ...(record.errorCode === undefined
       ? {}
       : { errorCode: record.errorCode as PrivateListenerControlFailureCode }),
@@ -549,4 +576,17 @@ function nullableInteger(value: unknown): boolean {
 
 function nullableExposureClass(value: unknown): boolean {
   return value === null || value === "lan-private" || value === "tailscale";
+}
+
+function certificateSourceOrAbsent(value: unknown): boolean {
+  return value === undefined || value === null || value === "self-made" || value === "pasted";
+}
+
+/** `sha256-` and 32 bytes of unpadded base64url, the only pin a host makes today. */
+function tlsPinOrAbsent(value: unknown): boolean {
+  return (
+    value === undefined ||
+    value === null ||
+    (typeof value === "string" && /^sha256-[A-Za-z0-9_-]{43}$/.test(value))
+  );
 }

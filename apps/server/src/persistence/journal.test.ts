@@ -11,6 +11,7 @@ import {
   ConcurrencyConflict,
   DuplicateEventIdentity,
   EventPayloadInvalid,
+  JournalInputInvalid,
   JournalWriteFailed,
   ThreadIdInUse,
   UnknownEventName,
@@ -710,6 +711,66 @@ describe("Journal", () => {
     connection.close();
   });
 
+  it("leaves out rows of an aggregate type by event name or payload prefix, and reports each aggregate's version", () => {
+    const connection = openMigratedConnection();
+    const journal = createJournal(connection);
+    const other = "00000000-0000-4000-8000-000000000099";
+    journal.append(
+      appendRequest([
+        pendingEvent(ids.event1, { payload: { value: "launch:a" } }),
+        pendingEvent(ids.event2, { payload: { value: "page:b" } }),
+      ]),
+    );
+    journal.append({
+      aggregate: { aggregateType: "fixture", aggregateId: other },
+      expectedVersion: 0,
+      events: [pendingEvent(ids.event3, { payload: { value: "launch:c" } })],
+    });
+    const read = (narrowing: object) =>
+      journal
+        .replayAggregateType({
+          aggregateType: "fixture",
+          afterSequence: 0,
+          limit: 10,
+          ...narrowing,
+        })
+        .map((event) => event.eventId);
+
+    expect(read({ eventName: "fixture.recorded" })).toEqual([ids.event1, ids.event2, ids.event3]);
+    expect(read({ exceptEventName: "fixture.recorded" })).toEqual([]);
+    expect(read({ payloadPrefix: { path: "value", prefix: "launch:" } })).toEqual([
+      ids.event1,
+      ids.event3,
+    ]);
+    expect(read({ payloadPrefix: { path: "missing.key", prefix: "launch:" } })).toEqual([]);
+    expect(() => read({ payloadPrefix: { path: "value') OR 1=1 --", prefix: "x" } })).toThrow(
+      JournalInputInvalid,
+    );
+    expect(
+      [...journal.aggregateVersions("fixture")].toSorted((left, right) =>
+        left.aggregateId.localeCompare(right.aggregateId),
+      ),
+    ).toEqual([
+      { aggregateId: ids.aggregate, aggregateVersion: 2 },
+      { aggregateId: other, aggregateVersion: 1 },
+    ]);
+
+    // A payload that is not JSON fails its read as the unnarrowed replay does,
+    // rather than failing the query or vanishing from it.
+    connection.exec("PRAGMA ignore_check_constraints = ON");
+    connection
+      .prepare("UPDATE event_journal SET payload_json = ? WHERE global_sequence = ?")
+      .run("{not-json", 2);
+    connection.exec("PRAGMA ignore_check_constraints = OFF");
+    expect(() => read({ payloadPrefix: { path: "value", prefix: "launch:" } })).toThrow(
+      expect.objectContaining({ _tag: "ReplayEventInvalid", reason: "malformed-json" }),
+    );
+    expect(() => read({})).toThrow(
+      expect.objectContaining({ _tag: "ReplayEventInvalid", reason: "malformed-json" }),
+    );
+    connection.close();
+  });
+
   it("replays one thread's slice of an aggregate type without other threads' rows", () => {
     const connection = openMigratedConnection();
     const journal = createJournal(connection);
@@ -753,6 +814,34 @@ describe("Journal", () => {
     connection.close();
   });
 
+  it("reads an aggregate type in journal order through its own index, without sorting the type", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    const typeReplays = prepare.mock.calls
+      .map(([sql]) => sql)
+      .filter(
+        (sql) =>
+          sql.includes("WHERE aggregate_type = ? AND global_sequence > ?") &&
+          !sql.includes("'$.threadId'"),
+      );
+    prepare.mockRestore();
+
+    // The plain read and the narrowed one; startup rebuilds every store through them.
+    expect(typeReplays).toHaveLength(2);
+    for (const sql of typeReplays) {
+      const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
+      const plan = JSON.stringify(
+        connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters),
+      );
+      expect(plan).toMatch(
+        /event_journal_type_sequence \(aggregate_type=\? AND global_sequence>\?\)/,
+      );
+      expect(plan).not.toMatch(/TEMP B-TREE/);
+    }
+    connection.close();
+  });
+
   it("finds a thread's rows through the thread index instead of reading every row of the type", () => {
     const connection = openMigratedConnection();
     const prepare = vi.spyOn(connection, "prepare");
@@ -773,13 +862,110 @@ describe("Journal", () => {
       const plan = JSON.stringify(
         connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters),
       );
-      // Either thread index serves the (type, thread) prefix; which one the
+      // Any thread index serves the (type, thread) prefix; which one the
       // planner picks is its call.
       expect(plan).toMatch(
-        /event_journal_thread_(?:result_)?kind_sequence \(aggregate_type=\? AND <expr>=\?/,
+        /event_journal_thread_(?:(?:result_)?kind_)?sequence \(aggregate_type=\? AND <expr>=\?/,
       );
       expect(plan).not.toMatch(/SCAN event_journal\b/);
     }
+    connection.close();
+  });
+
+  it("reads a thread's whole slice in journal order through its own index, without sorting the thread", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    const wholeThreadReads = prepare.mock.calls
+      .map(([sql]) => sql)
+      .filter((sql) => sql.includes("'$.threadId'") && !sql.includes("'$.event."));
+    prepare.mockRestore();
+
+    // The batched replay and the size-and-newest-row read that tells a reader
+    // whether its remembered history is still the thread's.
+    expect(wholeThreadReads).toHaveLength(2);
+    for (const sql of wholeThreadReads) {
+      const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
+      const plan = JSON.stringify(
+        connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters),
+      );
+      expect(plan).toMatch(/event_journal_thread_sequence \(aggregate_type=\? AND <expr>=\?/);
+      expect(plan).not.toMatch(/TEMP B-TREE/);
+    }
+    connection.close();
+  });
+
+  it("counts a thread's slice and finds its newest row", () => {
+    const connection = openMigratedConnection();
+    const journal = createJournal(connection);
+    const threadA = "00000000-0000-4000-8000-0000000000aa";
+    const threadB = "00000000-0000-4000-8000-0000000000bb";
+    const slice = { aggregateType: "fixture", threadId: threadA };
+    expect(journal.aggregateTypeThreadHead(slice)).toEqual({ eventCount: 0, lastSequence: 0 });
+    journal.append(
+      appendRequest([
+        pendingEvent(ids.event1, { payload: { value: "a1", threadId: threadA } }),
+        pendingEvent(ids.event2, { payload: { value: "a2", threadId: threadA } }),
+        pendingEvent(ids.event3, { payload: { value: "b1", threadId: threadB } }),
+      ]),
+    );
+
+    expect(journal.aggregateTypeThreadHead(slice)).toEqual({ eventCount: 2, lastSequence: 2 });
+    connection.close();
+  });
+
+  it("reads a thread's newest rows and one aggregate's first row of a kind through indexes", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    const sqls = prepare.mock.calls.map(([sql]) => sql);
+    prepare.mockRestore();
+    const newest = sqls.filter(
+      (sql) => sql.includes("'$.threadId'") && sql.includes("ORDER BY global_sequence DESC"),
+    );
+    const first = sqls.filter((sql) =>
+      sql.includes("ORDER BY aggregate_version ASC\n      LIMIT 1"),
+    );
+
+    // The newest events of a kind and the newest results of a kind.
+    expect(newest).toHaveLength(2);
+    expect(first).toHaveLength(1);
+    for (const sql of [...newest, ...first]) {
+      const parameters = Array.from({ length: sql.split("?").length - 1 }, () => "fixture");
+      const plan = JSON.stringify(
+        connection.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters),
+      );
+      expect(plan).toMatch(/USING INDEX/);
+      expect(plan).not.toMatch(/SCAN event_journal\b/);
+    }
+    connection.close();
+  });
+
+  it("finds each turn's last report through the thread index, never the aggregate's own index", () => {
+    const connection = openMigratedConnection();
+    const prepare = vi.spyOn(connection, "prepare");
+    createJournal(connection);
+    const perTurn = prepare.mock.calls
+      .map(([sql]) => sql)
+      .filter((sql) => sql.includes("anchor_sequence"));
+    prepare.mockRestore();
+
+    expect(perTurn).toHaveLength(1);
+    const [sql] = perTurn;
+    const parameters = Array.from({ length: (sql ?? "").split("?").length - 1 }, () => "fixture");
+    const searches = (
+      connection.prepare(`EXPLAIN QUERY PLAN ${sql ?? ""}`).all(...parameters) as Array<{
+        readonly detail: string;
+      }>
+    )
+      .map((row) => row.detail)
+      .filter((detail) => /\bevent_journal\b/.test(detail));
+    // Both groupings, the anchors and the reports: grouping by aggregate made
+    // the planner walk every row of the type through the aggregate's index.
+    expect(searches).toEqual([
+      expect.stringMatching(/^SEARCH event_journal USING INDEX event_journal_thread_kind_sequence/),
+      expect.stringMatching(/^SEARCH event_journal USING INDEX event_journal_thread_kind_sequence/),
+    ]);
     connection.close();
   });
 

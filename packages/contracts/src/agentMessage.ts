@@ -94,6 +94,14 @@ export const AgentMessageRefused = Schema.Struct({
   messageId: AgentMessageId,
   correlationId: CorrelationId,
   refuseReason: AgentMessageRefuseReason,
+  /**
+   * The endpoints a refusal names. A message refused before it was admitted has
+   * no `agent.message-sent@1` to say who sent it and to whom, so the refusal
+   * carries them itself; without them a view could not show it. Refusals
+   * journaled before these fields existed stay as journaled.
+   */
+  senderThreadId: Schema.optional(AgentMessageEndpointId),
+  recipientThreadId: Schema.optional(AgentMessageEndpointId),
   occurredAt: Schema.String,
 }).annotations(strict);
 export type AgentMessageRefused = typeof AgentMessageRefused.Type;

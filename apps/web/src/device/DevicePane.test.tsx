@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deviceProblemFor, type DeviceChoice, type DeviceView } from "./deviceModel";
@@ -237,6 +237,133 @@ describe("DevicePane", () => {
     await screen.findAllByRole("menuitem");
     expect(screen.queryByRole("menuitem", { name: "Type text…" })).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Lock" })).not.toBeInTheDocument();
+  });
+
+  it("offers Open URL in More once the host reports it, even before input is allowed", async () => {
+    const user = userEvent.setup();
+    const { onAction } = pane({ canOpenUrl: true, inputAllowed: false, needsApproval: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Open URL…" }));
+    const field = await screen.findByRole("textbox", { name: "Address to open on iPhone 17" });
+    await user.type(field, "example.com/welcome?from=octant");
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    // The surface above confirms the whole address before the device opens it.
+    expect(onAction).toHaveBeenCalledExactlyOnceWith({
+      kind: "open-url",
+      url: "https://example.com/welcome?from=octant",
+    });
+    expect(screen.queryByRole("textbox", { name: /Address to open/ })).not.toBeInTheDocument();
+  });
+
+  it("offers Volume up and down in More only once the host reports them, and sends the keys", async () => {
+    const user = userEvent.setup();
+    const older = pane({ canVolume: false });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Volume/ })).not.toBeInTheDocument();
+    older.unmount();
+
+    const { onInput } = pane({ canVolume: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Volume up" }));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Volume down" }));
+    await waitFor(() =>
+      expect(onInput.mock.calls.map(([input]) => input)).toEqual([
+        { kind: "key-press", key: "volume-up" },
+        { kind: "key-press", key: "volume-down" },
+      ]),
+    );
+  });
+
+  it("says in the line when an address is not one the host opens, and sends nothing", async () => {
+    const user = userEvent.setup();
+    const { onAction } = pane({ canOpenUrl: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Open URL…" }));
+    const field = await screen.findByRole("textbox", { name: "Address to open on iPhone 17" });
+    for (const refused of ["javascript:alert(1)", "file:///etc/hosts", "myapp://settings"]) {
+      await user.clear(field);
+      await user.type(field, refused);
+      await user.click(screen.getByRole("button", { name: "Open" }));
+      expect(screen.getByRole("alert")).toHaveTextContent("Use an http or https address.");
+    }
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("leaves Open URL out of More on a host that has not reported it", async () => {
+    const user = userEvent.setup();
+    pane({ canOpenUrl: false });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Open URL/ })).not.toBeInTheDocument();
+  });
+
+  it("offers Rotate in More once the host reports it, and asks for the orientation not showing", async () => {
+    const user = userEvent.setup();
+    const { onAction, rerender, props } = pane({ canRotate: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Rotate" }));
+    // The picture is taller than wide, so the change is to landscape.
+    expect(onAction).toHaveBeenLastCalledWith({ kind: "rotate", orientation: "landscape" });
+
+    rerender(
+      <DevicePane
+        {...props}
+        view={{
+          kind: "live",
+          device: iphone,
+          screen: { kind: "stream", size: { width: 2622, height: 1206 }, attach: () => undefined },
+          liveView: "streaming",
+        }}
+      />,
+    );
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Rotate" }));
+    expect(onAction).toHaveBeenLastCalledWith({ kind: "rotate", orientation: "portrait" });
+  });
+
+  it("leaves Rotate out of More on a host that has not reported it", async () => {
+    const user = userEvent.setup();
+    pane({ canRotate: false });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Rotate/ })).not.toBeInTheDocument();
+  });
+
+  it("offers Record screen in More once the host reports it, and Stop recording while it records", async () => {
+    const user = userEvent.setup();
+    const first = pane({ canRecordScreen: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Record screen" }));
+    expect(first.onAction).toHaveBeenCalledExactlyOnceWith({ kind: "start-recording" });
+    cleanup();
+
+    const second = pane({ canRecordScreen: true, recording: true });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("menuitem", { name: "Record screen" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("menuitem", { name: "Stop recording" }));
+    expect(second.onAction).toHaveBeenCalledExactlyOnceWith({ kind: "stop-recording" });
+  });
+
+  it("leaves Record screen out of More on a host that has not reported it", async () => {
+    const user = userEvent.setup();
+    pane({ canRecordScreen: false });
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Record screen|Stop recording/ })).toBeNull();
   });
 
   it("types text from More through the same queue", async () => {

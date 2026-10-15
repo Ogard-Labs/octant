@@ -39,7 +39,13 @@ import {
 
 export type AndroidEmulatorIntent =
   | {
-      readonly kind: "boot" | "shutdown" | "screenshot" | "open-input";
+      readonly kind:
+        | "boot"
+        | "shutdown"
+        | "screenshot"
+        | "open-input"
+        | "start-recording"
+        | "stop-recording";
       readonly emulatorId: AndroidEmulatorId;
     }
   | {
@@ -55,7 +61,13 @@ export type AndroidEmulatorIntent =
       readonly durationMs: number;
     }
   | { readonly kind: "type-text"; readonly emulatorId: AndroidEmulatorId; readonly text: string }
-  | { readonly kind: "key-press"; readonly emulatorId: AndroidEmulatorId; readonly key: string };
+  | { readonly kind: "key-press"; readonly emulatorId: AndroidEmulatorId; readonly key: string }
+  | { readonly kind: "open-url"; readonly emulatorId: AndroidEmulatorId; readonly url: string }
+  | {
+      readonly kind: "rotate";
+      readonly emulatorId: AndroidEmulatorId;
+      readonly orientation: "portrait" | "landscape";
+    };
 
 export function AndroidEmulatorPane(props: {
   readonly client: AndroidToolchainClient;
@@ -230,6 +242,7 @@ export function AndroidEmulatorPane(props: {
         if (
           approvalGated &&
           intent.kind !== "screenshot" &&
+          intent.kind !== "stop-recording" &&
           !(isAndroidEmulatorInputKind(intent.kind) && grantLive)
         ) {
           if (props.requestApproval === undefined) {
@@ -302,6 +315,23 @@ export function AndroidEmulatorPane(props: {
         if (liveEmulatorId !== undefined)
           void run({ kind: "shutdown", emulatorId: liveEmulatorId });
         return;
+      case "start-recording":
+      case "stop-recording":
+        if (liveEmulatorId !== undefined)
+          void run({ kind: action.kind, emulatorId: liveEmulatorId });
+        return;
+      case "open-url":
+        if (liveEmulatorId !== undefined)
+          void run({ kind: "open-url", emulatorId: liveEmulatorId, url: action.url });
+        return;
+      case "rotate":
+        if (liveEmulatorId !== undefined)
+          void run({
+            kind: "rotate",
+            emulatorId: liveEmulatorId,
+            orientation: action.orientation,
+          });
+        return;
       case "boot":
       case "select": {
         const emulator = emulators.find((one) => String(one.emulatorId) === action.deviceId);
@@ -340,6 +370,16 @@ export function AndroidEmulatorPane(props: {
   return (
     <DevicePane
       busy={busy}
+      canOpenUrl={controller.runtime?.capabilities?.openUrl === true}
+      canRotate={controller.runtime?.capabilities?.rotate === true}
+      canVolume={controller.runtime?.capabilities?.volume === true}
+      canRecordScreen={controller.runtime?.capabilities?.recordScreen === true}
+      recording={
+        liveEmulatorId !== undefined &&
+        (controller.runtime?.recordings ?? []).some(
+          (one) => String(one.emulatorId) === String(liveEmulatorId),
+        )
+      }
       devices={devices}
       diagnostics={androidDiagnostics({
         controller,
@@ -547,6 +587,9 @@ function androidActionRequest(input: {
       return { ...base, kind: "shutdown", timeoutMs: 30_000 };
     case "screenshot":
       return { ...base, kind: "screenshot", timeoutMs: 30_000 };
+    case "start-recording":
+    case "stop-recording":
+      return { ...base, kind: intent.kind, requestedBy: localUserActor(), timeoutMs: 60_000 };
     case "open-input":
       return {
         ...base,
@@ -586,6 +629,22 @@ function androidActionRequest(input: {
         kind: "key-press",
         requestedBy: localUserActor(),
         key: intent.key,
+        timeoutMs: 30_000,
+      };
+    case "open-url":
+      return {
+        ...base,
+        kind: "open-url",
+        requestedBy: localUserActor(),
+        url: intent.url,
+        timeoutMs: 30_000,
+      };
+    case "rotate":
+      return {
+        ...base,
+        kind: "rotate",
+        requestedBy: localUserActor(),
+        orientation: intent.orientation,
         timeoutMs: 30_000,
       };
   }

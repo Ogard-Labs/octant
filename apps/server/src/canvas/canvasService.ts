@@ -77,7 +77,12 @@ import {
 } from "@octant/domain";
 import { ParseResult } from "effect";
 import type { CanvasProjection } from "./canvasProjection";
-import { CanvasEventStore, CanvasEventStoreError } from "./canvasEventStore";
+import {
+  CanvasEventStore,
+  CanvasEventStoreError,
+  UNREADABLE_MARK_MESSAGE,
+} from "./canvasEventStore";
+import { replicaVersionAuthor } from "./canvasOutsideContentMark";
 
 export interface CanvasServiceOptions {
   readonly projection: CanvasProjection;
@@ -473,6 +478,9 @@ export class CanvasService {
           message: error.message,
         };
       }
+      if (isUnreadableMark(error)) {
+        return { kind: "denied", denialCode: "unavailable", message: UNREADABLE_MARK_MESSAGE };
+      }
       throw error;
     }
   }
@@ -585,12 +593,19 @@ export class CanvasService {
         message: admitted.message,
       };
     }
-    this.#eventStore.appendVersion({
-      canvasId,
-      current: entry.currentVersion,
-      next: admitted.next,
-      occurredAt: admitted.next.createdAt,
-    });
+    try {
+      this.#eventStore.appendVersion({
+        canvasId,
+        current: entry.currentVersion,
+        next: admitted.next,
+        occurredAt: admitted.next.createdAt,
+      });
+    } catch (error) {
+      if (isUnreadableMark(error)) {
+        return { kind: "denied", denialCode: "unavailable", message: UNREADABLE_MARK_MESSAGE };
+      }
+      throw error;
+    }
     this.#projection.applyVersionAppended({ canvasId, version: admitted.next });
     this.#announceVersion(admitted.next);
     return {
@@ -670,7 +685,7 @@ export class CanvasService {
               threadId: context.originThreadId,
             },
           },
-          createdBy: this.#actor,
+          createdBy: replicaVersionAuthor(input.versionId),
           createdAt: input.createdAt,
         });
         this.#eventStore.appendCreate({
@@ -695,7 +710,7 @@ export class CanvasService {
         versionId: input.versionId,
         sequence: current.sequence + 1,
         definition: { ...content, provenance: current.definition.provenance },
-        createdBy: this.#actor,
+        createdBy: replicaVersionAuthor(input.versionId),
         createdAt: input.createdAt,
       });
       this.#eventStore.appendVersion({
@@ -708,6 +723,9 @@ export class CanvasService {
       this.#announceVersion(next);
       return { kind: "adopted", version: next };
     } catch (error) {
+      if (isUnreadableMark(error)) {
+        return { kind: "denied", message: UNREADABLE_MARK_MESSAGE };
+      }
       if (error instanceof CanvasEventStoreError || error instanceof ParseResult.ParseError) {
         return { kind: "denied", message: "The version could not be recorded here." };
       }
@@ -1222,6 +1240,13 @@ export class CanvasService {
           message: error.message,
         });
       }
+      if (isUnreadableMark(error)) {
+        return decodeCanvasRefreshResult({
+          kind: "denied",
+          denialCode: "unavailable",
+          message: UNREADABLE_MARK_MESSAGE,
+        });
+      }
       if (error instanceof CanvasEventStoreError && error.category === "invalid") {
         return decodeCanvasRefreshResult({
           kind: "denied",
@@ -1674,6 +1699,10 @@ function sameCanvasSource(
  * arriving here is a policy bug reported as a malformed request rather than a
  * code the renderer has no wording for.
  */
+function isUnreadableMark(error: unknown): boolean {
+  return error instanceof CanvasEventStoreError && error.category === "unreadable-mark";
+}
+
 function layoutDenialCode(code: CanvasBoardRejectionCode): CanvasBoardDenialCode {
   switch (code) {
     case "malformed-request":

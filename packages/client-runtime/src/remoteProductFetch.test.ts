@@ -13,6 +13,7 @@ import {
   TICKET_ID,
   HOST_KEY_FINGERPRINT,
 } from "./remoteConnectionFixtures";
+import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const hostId = decodeStableHostId(HOST_ID);
 const now = "2026-08-03T00:00:00.000Z";
@@ -57,6 +58,7 @@ async function readyBridge(
     deviceKeyId,
     origin: ORIGIN,
     hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+    listenerTrust: PLATFORM_LISTENER_TRUST,
   });
   await waitUntil(() => bridge.getState().kind === "ready");
   return { bridge, server };

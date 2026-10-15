@@ -5,6 +5,10 @@ import {
   canonicalToolEgressHost,
   canonicalToolEgressRuleHost,
   decideToolEgress,
+  decideToolEgressGrant,
+  toolEgressRuleExpiresAt,
+  toolEgressRuleLive,
+  type ToolEgressGrantPrincipalKind,
   type ToolEgressLaunchFacts,
   type ToolEgressRequest,
   type ToolEgressRule,
@@ -364,5 +368,58 @@ describe("canonicalToolEgressRuleHost", () => {
       kind: "refused",
       reason: "invalid-name",
     });
+  });
+});
+
+describe("decideToolEgressGrant", () => {
+  const principals: ReadonlyArray<ToolEgressGrantPrincipalKind> = [
+    "local-window",
+    "remote-device",
+    "reviewer",
+  ];
+  const scopes: ReadonlyArray<ToolEgressRuleScope["kind"]> = ["call", "thread", "project"];
+
+  it.each(
+    principals.flatMap((principal) =>
+      scopes.flatMap((scope) =>
+        [false, true].map((threadTainted) => ({ principal, scope, threadTainted })),
+      ),
+    ),
+  )("decides $principal granting a $scope rule (tainted: $threadTainted)", (input) => {
+    const decision = decideToolEgressGrant(input);
+    const expected =
+      input.principal === "reviewer"
+        ? input.threadTainted
+          ? "needs-person"
+          : input.scope === "call"
+            ? "grant"
+            : "reviewer-call-only"
+        : input.threadTainted && input.scope !== "call"
+          ? "thread-tainted"
+          : input.scope === "project" && input.principal !== "local-window"
+            ? "needs-local-window"
+            : "grant";
+    expect(decision.kind === "grant" ? "grant" : decision.reason).toBe(expected);
+  });
+});
+
+describe("toolEgressRuleExpiresAt", () => {
+  it("counts each offered lifetime from the moment of granting", () => {
+    expect(toolEgressRuleExpiresAt("1h", now)).toBe(inAnHour);
+    expect(toolEgressRuleExpiresAt("8h", now)).toBe("2026-10-13T20:00:00.000Z");
+    expect(toolEgressRuleExpiresAt("7d", now)).toBe("2026-10-20T12:00:00.000Z");
+    expect(toolEgressRuleExpiresAt("30d", now)).toBe("2026-11-12T12:00:00.000Z");
+  });
+
+  it("gives no expiry for an unreadable clock, so nothing is granted with a made-up one", () => {
+    expect(toolEgressRuleExpiresAt("8h", "")).toBeUndefined();
+    expect(toolEgressRuleExpiresAt("8h", "yesterday")).toBeUndefined();
+  });
+
+  it("treats a rule as dead at its expiry and when either time is unreadable", () => {
+    expect(toolEgressRuleLive(inAnHour, now)).toBe(true);
+    expect(toolEgressRuleLive(inAnHour, inAnHour)).toBe(false);
+    expect(toolEgressRuleLive("", now)).toBe(false);
+    expect(toolEgressRuleLive(inAnHour, "")).toBe(false);
   });
 });

@@ -1326,6 +1326,149 @@ describe("single owner control socket", () => {
   });
 });
 
+describe("start after an aborted host", () => {
+  // These run the real process-identity check: the leftovers are a socket file
+  // nobody listens on plus the dead owner's receipt and control secret.
+  const unrelatedStart = `${filesystemTestPlatform}:Thu Jan 1 00:00:00 2026`;
+
+  it("takes over when the dead owner's pid now belongs to another user's process", async () => {
+    // pid 1 is the init process, owned by root; the probe signal reports EPERM.
+    const paths = await plantAbortedOwner("octant-aborted-root-reuse-", 1, unrelatedStart);
+
+    const replacement = await acquireAfterAbort(paths);
+
+    expect(replacement.kind).toBe("owner");
+    if (replacement.kind === "owner") owners.push(replacement);
+  });
+
+  it("takes over when the dead owner's pid now belongs to an unrelated process of this user", async () => {
+    const paths = await plantAbortedOwner("octant-aborted-own-reuse-", process.pid, unrelatedStart);
+
+    const replacement = await acquireAfterAbort(paths);
+
+    expect(replacement.kind).toBe("owner");
+    if (replacement.kind === "owner") owners.push(replacement);
+  });
+
+  it("takes over when the aborted owner is a zombie its parent has not reaped", async () => {
+    const zombie = await spawnZombie();
+    try {
+      const paths = await plantAbortedOwner(
+        "octant-aborted-zombie-",
+        zombie.pid,
+        await readHostRuntimeProcessStart(zombie.pid),
+      );
+
+      const replacement = await acquireAfterAbort(paths);
+
+      expect(replacement.kind).toBe("owner");
+      if (replacement.kind === "owner") owners.push(replacement);
+    } finally {
+      zombie.release();
+    }
+  }, 20_000);
+
+  it("still refuses when the recorded owner process is alive", async () => {
+    const paths = await plantAbortedOwner(
+      "octant-aborted-live-",
+      process.pid,
+      await readHostRuntimeProcessStart(process.pid),
+    );
+
+    await expect(acquireAfterAbort(paths)).rejects.toMatchObject({ code: "owner-unhealthy" });
+    expect((await lstat(paths.socketPath)).isSocket()).toBe(true);
+    await unlink(paths.socketPath);
+    await unlink(paths.controlSecretPath);
+  });
+});
+
+async function plantAbortedOwner(
+  prefix: string,
+  pid: number,
+  processStart: string,
+): Promise<ReturnType<typeof resolveHostRuntimePaths>> {
+  const runtimeBase = await realpath(tmpdir());
+  const root = await mkdtemp(join(runtimeBase, prefix));
+  temporaryRoots.push(root);
+  const paths = resolveHostRuntimePaths({
+    env: { OCTANT_DATA_DIR: join(root, "data") },
+    platform: filesystemTestPlatform,
+    home: join(root, "home"),
+    temporaryDirectory: runtimeBase,
+    uid: process.getuid?.() ?? 1000,
+  });
+  await prepareHostRuntimePaths(paths);
+  await leaveStaleSocket(paths.socketPath);
+  const secret = "aborted-owner-secret";
+  await writeFile(paths.controlSecretPath, secret, { mode: 0o600 });
+  await writeFile(
+    paths.ownerReceiptPath,
+    encodeOwnerReceipt({
+      schemaVersion: 1,
+      hostId: "11111111-1111-4111-8111-111111111111",
+      instanceId: "22222222-2222-4222-8222-222222222222",
+      endpoint: paths.socketPath,
+      pid,
+      processStart,
+      serverVersion: "1.2.2",
+      wireVersion: "1",
+      serviceMode: "desktop",
+      nonceDigest: createHash("sha256").update(secret).digest("hex"),
+      createdAt: "2026-08-09T10:00:00.000Z",
+    }),
+    { mode: 0o600 },
+  );
+  return paths;
+}
+
+function acquireAfterAbort(paths: ReturnType<typeof resolveHostRuntimePaths>) {
+  return acquireHostRuntimeOwner({
+    paths,
+    hostId: "11111111-1111-4111-8111-111111111111",
+    instanceId: "33333333-3333-4333-8333-333333333333",
+    serverVersion: "1.2.3",
+    wireVersion: "1",
+    serviceMode: "desktop",
+    processStart: "replacement-start",
+  });
+}
+
+/** A child that exited but stays unreaped because its parent exec'd into sleep. */
+async function spawnZombie(): Promise<{ readonly pid: number; readonly release: () => void }> {
+  const parent = spawn("/bin/sh", ["-c", "sleep 0 & echo $!; exec sleep 30"], {
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const release = () => {
+    parent.kill("SIGKILL");
+  };
+  const pid = await new Promise<number>((resolve, reject) => {
+    let stdout = "";
+    parent.stdout?.on("data", (chunk) => {
+      stdout += String(chunk);
+      const line = stdout.split("\n")[0];
+      if (stdout.includes("\n") && line !== undefined) resolve(Number(line.trim()));
+    });
+    parent.once("error", reject);
+  });
+  // A loaded runner can take seconds to schedule the exited child, so wait on the
+  // observable state against a wall-clock deadline rather than a fixed poll count.
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const state = await new Promise<string>((resolve) => {
+      const ps = spawn("/bin/ps", ["-o", "stat=", "-p", String(pid)], {
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      let output = "";
+      ps.stdout?.on("data", (chunk) => (output += String(chunk)));
+      ps.once("close", () => resolve(output.trim()));
+    });
+    if (state.startsWith("Z")) return { pid, release };
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  release();
+  throw new Error("zombie fixture never became a zombie");
+}
+
 async function leaveStaleSocket(path: string): Promise<number> {
   const source = `const {createServer}=require("node:net");const server=createServer();server.listen(${JSON.stringify(path)},()=>{process.stdout.write("ready\\n");process.exit(0)});`;
   const child = spawn(process.execPath, ["-e", source], { stdio: ["ignore", "pipe", "pipe"] });

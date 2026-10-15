@@ -242,6 +242,7 @@ import {
   type InheritedExternalContentMark,
   type RecordExternalContentIngestion,
 } from "../context/inheritedExternalContentMark";
+import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 
 const RESEARCH_TOOL_NAME = "octant_web_research";
 const DEFAULT_CHAT_PERSONALITY_INSTRUCTIONS = "Be calm, direct, and useful.";
@@ -512,6 +513,8 @@ export interface ChatServiceOptions {
    * needs nothing.
    */
   readonly recordExternalContentIngestion?: RecordExternalContentIngestion;
+  /** Marks a thread whose runtime read outside content with its own tools. */
+  readonly outsideContentMarks?: RuntimeOutsideContentMarking;
   readonly dataDirectory: string;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -632,6 +635,8 @@ export interface ChatServiceOptions {
    */
   readonly resolveThreadMentionContext?: (input: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+    /** The thread whose turn names the mentions; a marked mention marks it. */
+    readonly readerThreadId: string;
     readonly windowId?: WindowId;
     readonly dialogueEnabled?: boolean;
   }) => Promise<ReadonlyArray<ChatThreadMentionContext>>;
@@ -775,6 +780,7 @@ export interface ChatSubscribeOptions {
 export class ChatService {
   readonly #persistence: PersistenceService;
   readonly #recordExternalContentIngestion: RecordExternalContentIngestion | undefined;
+  readonly #outsideContentMarks: RuntimeOutsideContentMarking | undefined;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #driver: ChatServiceOptions["driver"];
@@ -830,6 +836,7 @@ export class ChatService {
   constructor(options: ChatServiceOptions) {
     this.#persistence = options.persistence;
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
+    this.#outsideContentMarks = options.outsideContentMarks;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#driver = options.driver;
@@ -3694,6 +3701,7 @@ export class ChatService {
             previous,
           });
     const threadMentionContexts = await this.#resolveThreadMentions(
+      thread.id,
       threadMentionIds,
       executionContext,
       tools?.definitions.some((definition) => definition.name === "octant_thread_message") === true,
@@ -3945,6 +3953,7 @@ export class ChatService {
    * unreadable one costs the mention, not the send.
    */
   async #resolveThreadMentions(
+    readerThreadId: ChatThreadId,
     threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
     executionContext: ChatServiceExecutionContext | undefined,
     dialogueEnabled: boolean,
@@ -3960,6 +3969,7 @@ export class ChatService {
     try {
       resolved = await this.#resolveThreadMentionContext({
         threadMentionIds,
+        readerThreadId: String(readerThreadId),
         ...(executionContext?.windowId === undefined
           ? {}
           : { windowId: executionContext.windowId }),
@@ -5208,6 +5218,9 @@ export class ChatService {
               thread: input.thread,
               attempt: input.attempt,
               prompt: input.prompt,
+              ...(this.#outsideContentMarks === undefined
+                ? {}
+                : { outsideContentMarks: this.#outsideContentMarks }),
               context: [
                 ...(this.#nativeHarness?.contextFor(harnessScope) ?? []),
                 ...input.prepared.context.providerContext,

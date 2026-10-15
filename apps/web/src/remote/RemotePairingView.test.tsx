@@ -11,6 +11,7 @@ import type {
   RemoteSessionBridge,
   RemoteSessionBridgeState,
 } from "@octant/client-runtime";
+import { PLATFORM_LISTENER_TRUST } from "@octant/client-runtime";
 import { RemotePairingView } from "./RemotePairingView";
 
 const hostId = "11111111-1111-4111-8111-111111111111";
@@ -324,6 +325,7 @@ describe("RemotePairingView", () => {
         deviceKeyId: "key-1",
         origin: serverBaseUrl,
         hostKeyFingerprint: "a".repeat(64),
+        listenerTrust: PLATFORM_LISTENER_TRUST,
       },
     };
     const client = createMockClient({

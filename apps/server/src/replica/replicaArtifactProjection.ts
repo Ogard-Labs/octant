@@ -47,7 +47,10 @@ import {
   type ReplicaArtifactQueued,
   type ReplicaCommentQueued,
 } from "./replicaArtifactEvents";
-import { REPLICA_MEMBERSHIP_AGGREGATE_TYPE } from "./replicaMembershipProjection";
+import {
+  REPLICA_MEMBERSHIP_AGGREGATE_TYPE,
+  REPLICA_MEMBERSHIP_EVENT_NAMES,
+} from "./replicaMembershipProjection";
 
 /** The computer that wrote an entry, as the entry names it. */
 export interface ReplicaEntryProvenance {
@@ -132,6 +135,7 @@ export class ReplicaArtifactProjection implements Projection {
   readonly name = "replica-artifacts";
   readonly dependencies: ReadonlyArray<string> = [];
   readonly holdsStateInMemory = true as const;
+  readonly aggregateTypes: ReadonlyArray<string> = [REPLICA_MEMBERSHIP_AGGREGATE_TYPE];
   readonly #queued = new Map<string, ReplicaQueuedEntry>();
   readonly #artifacts = new Map<string, MutableArtifact>();
   readonly #applied = new Map<string, ReplicaAppliedEntry>();
@@ -158,6 +162,11 @@ export class ReplicaArtifactProjection implements Projection {
     }
     const names = REPLICA_ARTIFACT_EVENT_NAMES;
     switch (event.eventName) {
+      case REPLICA_MEMBERSHIP_EVENT_NAMES.left:
+        // What was queued would publish under the identity that left, or
+        // under the next one into another store. The versions stay here.
+        this.#queued.clear();
+        break;
       case names.queued: {
         const queued = decodeReplicaArtifactQueued(event.payload);
         if (!this.#queued.has(queued.queueId)) {

@@ -189,7 +189,7 @@ export interface NativeHarnessToolPorts {
      */
     readonly freshConfirmation: boolean;
     readonly signal?: AbortSignal;
-  }) => Promise<"approved" | "denied" | "expired" | "cancelled">;
+  }) => Promise<"approved" | "denied" | "expired" | "cancelled" | "too-many-waiting">;
   /** The thread's goal, when the host can reach it. */
   readonly goal?: NativeHarnessGoalPort;
   /** Queued notes from the person, handed to the lead inside the next tool result. */
@@ -203,6 +203,7 @@ export interface NativeHarnessToolPorts {
     | { readonly status: "answered"; readonly answer: string }
     | { readonly status: "expired" }
     | { readonly status: "cancelled" }
+    | { readonly status: "too-many-waiting" }
   >;
 }
 
@@ -369,7 +370,9 @@ export function createNativeHarnessTools(
             ? `The person did not allow ${name} here. Do not retry it; say what you would have done.`
             : outcome === "expired"
               ? `Nobody answered the approval for ${name} in time. Continue without it and say so.`
-              : `The turn was cancelled while waiting for approval of ${name}.`,
+              : outcome === "too-many-waiting"
+                ? `Too many approvals are already waiting for a person, so ${name} was not asked. Continue without it and say so.`
+                : `The turn was cancelled while waiting for approval of ${name}.`,
         );
       }
     }
@@ -586,6 +589,12 @@ async function execute(
         ...(signal === undefined ? {} : { signal }),
       });
       if (outcome.status === "answered") return ok({ answer: outcome.answer });
+      if (outcome.status === "too-many-waiting") {
+        return refused(
+          "question-too-many-waiting",
+          "Too many questions are already waiting for a person, so this one was not asked. Continue with your best judgment and say what you assumed.",
+        );
+      }
       return refused(
         outcome.status === "expired" ? "question-expired" : "question-cancelled",
         outcome.status === "expired"

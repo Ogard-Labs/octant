@@ -463,6 +463,419 @@ describe("AndroidToolchainService", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  describe("Open URL", () => {
+    const url = "https://example.com/it's?a=1&token=do-not-keep-this";
+
+    function openUrlService(stdout = "") {
+      const discovery = discoveryExecutor();
+      const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) =>
+        input.argv.includes("am") ? processResult(stdout) : await discovery(input),
+      );
+      const artifacts = new Map<string, Uint8Array>();
+      const service = new AndroidToolchainService({
+        execute,
+        access: async () => undefined,
+        environment: () => ({ ANDROID_HOME: "/sdk" }),
+        writeArtifact: async (reference: string, bytes: Uint8Array) => {
+          artifacts.set(reference, bytes);
+        },
+        readArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-10-14T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      const opened = () => execute.mock.calls.filter(([input]) => input.argv.includes("am"));
+      return { service, artifacts, opened };
+    }
+
+    it("opens the approved address as one quoted word for the device shell and records only its origin", async () => {
+      const { service, artifacts, opened } = openUrlService("Starting: Intent { }\n");
+      const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: true };
+      await service.discover(discoveryRequest, gated);
+
+      const evidence = await service.execute(
+        action("open-url", {
+          requestedBy: actor,
+          url,
+          approval: { kind: "approved", approvalId: ids.approval },
+        }),
+        gated,
+      );
+
+      expect(evidence.outcome).toBe("succeeded");
+      // adb hands its argv to the device shell as one line, so the address
+      // must arrive as a single quoted word: `&` and `'` stay data.
+      expect(opened().map(([input]) => input.argv.slice(3))).toEqual([
+        [
+          "shell",
+          "am",
+          "start",
+          "-a",
+          "android.intent.action.VIEW",
+          "-d",
+          "'https://example.com/it'\\''s?a=1&token=do-not-keep-this'",
+        ],
+      ]);
+      expect(evidence.diagnostics[0]?.message).toContain("https://example.com");
+      expect(JSON.stringify(evidence)).not.toContain("do-not-keep-this");
+      for (const bytes of artifacts.values()) {
+        expect(new TextDecoder().decode(bytes)).not.toContain("do-not-keep-this");
+      }
+    });
+
+    it("reports an address no app on the device opens as failed, though am exits 0", async () => {
+      const { service } = openUrlService(
+        "Error: Activity not started, unable to resolve Intent { act=android.intent.action.VIEW }\n",
+      );
+      await service.discover(discoveryRequest, context);
+
+      const evidence = await service.execute(
+        action("open-url", { requestedBy: actor, url }),
+        context,
+      );
+
+      expect(evidence.outcome).toBe("failed");
+      expect(JSON.stringify(evidence)).not.toContain("do-not-keep-this");
+    });
+
+    it("asks before every Open URL: no approval, Plan, or an input grant never sends it", async () => {
+      const { service, opened } = openUrlService();
+      const gated = {
+        ...context,
+        executionPolicy: "approval-gated" as const,
+        approvalValid: false,
+      };
+      await service.discover(discoveryRequest, gated);
+
+      const unapproved = await service.execute(
+        action("open-url", { requestedBy: actor, url }),
+        gated,
+      );
+      expect(unapproved.outcome).toBe("unauthorized");
+
+      const underGrant = await service.execute(
+        action("open-url", {
+          actionId: "30000000-0000-4000-8000-000000000013",
+          requestedBy: actor,
+          url,
+        }),
+        { ...gated, approvalValid: true, inputGranted: true },
+      );
+      expect(underGrant.outcome).toBe("unauthorized");
+
+      const planned = await service.execute(
+        action("open-url", {
+          actionId: "30000000-0000-4000-8000-000000000014",
+          requestedBy: actor,
+          url,
+          approval: { kind: "approved", approvalId: ids.approval },
+        }),
+        { ...context, executionPolicy: "plan" as const },
+      );
+      expect(planned.outcome).toBe("unauthorized");
+
+      // Only a person asks for an address, never the host, even under Full access.
+      const byHost = await service.execute(
+        action("open-url", {
+          actionId: "30000000-0000-4000-8000-000000000015",
+          requestedBy: { ...actor, kind: "system" },
+          url,
+        }),
+        context,
+      );
+      expect(byHost.outcome).toBe("unauthorized");
+      expect(opened()).toEqual([]);
+    });
+
+    it("tells the pane this host can open an address", () => {
+      const { service } = openUrlService();
+      expect(service.snapshot(context).capabilities).toEqual({
+        openUrl: true,
+        recordScreen: true,
+        volume: true,
+        rotate: true,
+      });
+    });
+  });
+
+  describe("Rotate", () => {
+    function rotateService() {
+      const discovery = discoveryExecutor();
+      const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) =>
+        input.argv.includes("settings") ? processResult("") : await discovery(input),
+      );
+      const service = new AndroidToolchainService({
+        execute,
+        access: async () => undefined,
+        environment: () => ({ ANDROID_HOME: "/sdk" }),
+        writeArtifact: async () => undefined,
+        readArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-10-14T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      const rotated = () => execute.mock.calls.filter(([input]) => input.argv.includes("settings"));
+      return { service, rotated };
+    }
+
+    it("turns auto-rotate off and sets the approved orientation through adb", async () => {
+      const { service, rotated } = rotateService();
+      const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: true };
+      await service.discover(discoveryRequest, gated);
+
+      const evidence = await service.execute(
+        action("rotate", {
+          requestedBy: actor,
+          orientation: "landscape",
+          approval: { kind: "approved", approvalId: ids.approval },
+        }),
+        gated,
+      );
+
+      expect(evidence.outcome).toBe("succeeded");
+      expect(rotated().map(([input]) => input.argv.slice(3))).toEqual([
+        ["shell", "settings", "put", "system", "accelerometer_rotation", "0"],
+        ["shell", "settings", "put", "system", "user_rotation", "1"],
+      ]);
+    });
+
+    it("asks before every Rotate: no approval, Plan, an input grant, or a non-person never sends it", async () => {
+      const { service, rotated } = rotateService();
+      const gated = {
+        ...context,
+        executionPolicy: "approval-gated" as const,
+        approvalValid: false,
+      };
+      await service.discover(discoveryRequest, gated);
+
+      const unapproved = await service.execute(
+        action("rotate", { requestedBy: actor, orientation: "portrait" }),
+        gated,
+      );
+      expect(unapproved.outcome).toBe("unauthorized");
+
+      const underGrant = await service.execute(
+        action("rotate", {
+          actionId: "30000000-0000-4000-8000-000000000013",
+          requestedBy: actor,
+          orientation: "portrait",
+        }),
+        { ...gated, approvalValid: true, inputGranted: true },
+      );
+      expect(underGrant.outcome).toBe("unauthorized");
+
+      const planned = await service.execute(
+        action("rotate", {
+          actionId: "30000000-0000-4000-8000-000000000014",
+          requestedBy: actor,
+          orientation: "portrait",
+          approval: { kind: "approved", approvalId: ids.approval },
+        }),
+        { ...context, executionPolicy: "plan" as const },
+      );
+      expect(planned.outcome).toBe("unauthorized");
+
+      const byHost = await service.execute(
+        action("rotate", {
+          actionId: "30000000-0000-4000-8000-000000000015",
+          requestedBy: { ...actor, kind: "system" },
+          orientation: "portrait",
+        }),
+        context,
+      );
+      expect(byHost.outcome).toBe("unauthorized");
+      expect(rotated()).toEqual([]);
+    });
+  });
+
+  describe("Screen recording", () => {
+    const video = Uint8Array.from([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 1, 2, 3, 4, 5, 6, 7, 8]);
+    const startId = "30000000-0000-4000-8000-0000000000a1";
+    const stopId = "30000000-0000-4000-8000-0000000000a2";
+
+    function recordingService(options: { readonly endsAtOnce?: boolean } = {}) {
+      const discovery = discoveryExecutor();
+      let finishRecording: (() => void) | undefined;
+      const execute = vi.fn(
+        async (input: { readonly argv: ReadonlyArray<string> }, signal?: AbortSignal) => {
+          if (input.argv.includes("pkill")) {
+            finishRecording?.();
+            return processResult("");
+          }
+          if (input.argv.includes("screenrecord")) {
+            if (options.endsAtOnce === true) return { ...processResult(""), exitCode: 1 };
+            await new Promise<void>((resolve) => {
+              finishRecording = resolve;
+              signal?.addEventListener("abort", () => resolve());
+            });
+            return processResult("");
+          }
+          if (input.argv.includes("reboot")) return processResult("");
+          if (input.argv.includes("cat")) return { ...processResult(""), stdout: video };
+          if (input.argv.includes("rm")) return processResult("");
+          return await discovery(input);
+        },
+      );
+      const artifacts = new Map<string, Uint8Array>();
+      const service = new AndroidToolchainService({
+        execute: execute as never,
+        access: async () => undefined,
+        environment: () => ({ ANDROID_HOME: "/sdk" }),
+        writeArtifact: async (reference: string, bytes: Uint8Array) => {
+          artifacts.set(reference, bytes);
+        },
+        readArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-10-14T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      return { service, artifacts, execute };
+    }
+
+    const approved = { kind: "approved", approvalId: ids.approval };
+
+    it("records until stopped, then keeps the video as evidence like a screenshot", async () => {
+      const { service, artifacts, execute } = recordingService();
+      const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: true };
+      await service.discover(discoveryRequest, gated);
+
+      const started = await service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor, approval: approved }),
+        gated,
+      );
+      expect(started.outcome).toBe("succeeded");
+      expect(service.snapshot(gated).recordings).toEqual([
+        { emulatorId: "Pixel_8_API_34", startedAt: "2026-10-14T20:00:00.000Z" },
+      ]);
+
+      const stopped = await service.execute(
+        action("stop-recording", { actionId: stopId, requestedBy: actor }),
+        gated,
+      );
+
+      expect(stopped.outcome).toBe("succeeded");
+      expect(stopped.artifacts).toContainEqual({
+        kind: "recording",
+        reference: `android-recording-${stopId}`,
+      });
+      expect(artifacts.get(`android-recording-${stopId}`)).toEqual(video);
+      expect(service.snapshot(gated).recordings).toEqual([]);
+      // The device copy is removed, and the recording was asked to finish, not killed.
+      const argvs = execute.mock.calls.map(([input]) => input.argv.join(" "));
+      expect(argvs.some((line) => line.includes("shell pkill -2 screenrecord"))).toBe(true);
+      expect(argvs.some((line) => line.includes("shell rm -f /sdcard/octant-recording-"))).toBe(
+        true,
+      );
+    });
+
+    it("launches one recorder when two starts arrive together", async () => {
+      const { service, execute } = recordingService();
+      await service.discover(discoveryRequest, context);
+
+      const [one, two] = await Promise.all([
+        service.execute(
+          action("start-recording", { actionId: startId, requestedBy: actor }),
+          context,
+        ),
+        service.execute(
+          action("start-recording", {
+            actionId: "30000000-0000-4000-8000-0000000000a3",
+            requestedBy: actor,
+          }),
+          context,
+        ),
+      ]);
+
+      expect([one.outcome, two.outcome].sort()).toEqual(["failed", "succeeded"]);
+      expect(
+        execute.mock.calls.filter(
+          ([input]) => input.argv.includes("screenrecord") && input.argv.includes("--time-limit"),
+        ),
+      ).toHaveLength(1);
+      await service.close();
+    });
+
+    it("finishes the recording and deletes its device file before a shutdown or close", async () => {
+      const removed = (execute: ReturnType<typeof recordingService>["execute"]) =>
+        execute.mock.calls.filter(([input]) => input.argv.includes("rm")).length;
+
+      const shuttingDown = recordingService();
+      await shuttingDown.service.discover(discoveryRequest, context);
+      await shuttingDown.service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor }),
+        context,
+      );
+      await shuttingDown.service.execute(action("shutdown"), context);
+      expect(removed(shuttingDown.execute)).toBe(1);
+      expect(shuttingDown.service.snapshot(context).recordings).toEqual([]);
+
+      const closing = recordingService();
+      await closing.service.discover(discoveryRequest, context);
+      await closing.service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor }),
+        context,
+      );
+      await closing.service.close();
+      expect(removed(closing.execute)).toBe(1);
+    });
+
+    it("reports a recording that never started and a stop with nothing to stop", async () => {
+      const { service } = recordingService({ endsAtOnce: true });
+      await service.discover(discoveryRequest, context);
+
+      const started = await service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor }),
+        context,
+      );
+      expect(started.outcome).toBe("failed");
+      expect(service.snapshot(context).recordings).toEqual([]);
+
+      const stopped = await service.execute(
+        action("stop-recording", { actionId: stopId, requestedBy: actor }),
+        context,
+      );
+      expect(stopped.outcome).toBe("failed");
+    });
+
+    it("asks before starting, refuses Plan and anyone but a person, and never asks again to stop", async () => {
+      const { service, execute } = recordingService();
+      const gated = {
+        ...context,
+        executionPolicy: "approval-gated" as const,
+        approvalValid: false,
+      };
+      await service.discover(discoveryRequest, gated);
+
+      const unapproved = await service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor }),
+        gated,
+      );
+      expect(unapproved.outcome).toBe("unauthorized");
+
+      const planned = await service.execute(
+        action("start-recording", { actionId: startId, requestedBy: actor, approval: approved }),
+        { ...context, executionPolicy: "plan" as const },
+      );
+      expect(planned.outcome).toBe("unauthorized");
+
+      const byHost = await service.execute(
+        action("start-recording", {
+          actionId: startId,
+          requestedBy: { ...actor, kind: "system" },
+        }),
+        context,
+      );
+      expect(byHost.outcome).toBe("unauthorized");
+      expect(execute.mock.calls.some(([input]) => input.argv.includes("screenrecord"))).toBe(false);
+
+      const stop = await service.execute(
+        action("stop-recording", { actionId: stopId, requestedBy: actor }),
+        gated,
+      );
+      expect(stop.outcome).not.toBe("unauthorized");
+    });
+  });
+
   it("sends a tap through adb once the destination is booted", async () => {
     const execute = discoveryExecutor();
     const service = new AndroidToolchainService({
@@ -983,6 +1396,38 @@ describe("AndroidToolchainService", () => {
     );
     expect(evidence.outcome).toBe("failed");
     expect(execute).not.toHaveBeenCalled();
+    await service.close();
+  });
+
+  it("presses the volume keys through adb as key events", async () => {
+    const execute = discoveryExecutor();
+    const service = new AndroidToolchainService({
+      execute,
+      access: async () => undefined,
+      environment: () => ({ ANDROID_HOME: "/sdk" }),
+      writeArtifact: async () => undefined,
+      readArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-09-20T20:00:00.000Z",
+      newId: () => ids.action,
+    });
+    await service.discover(discoveryRequest, context);
+    for (const [index, [key, keycode]] of [
+      ["volume-up", "KEYCODE_VOLUME_UP"],
+      ["volume-down", "KEYCODE_VOLUME_DOWN"],
+    ].entries() as IterableIterator<[number, [string, string]]>) {
+      execute.mockClear();
+      const evidence = await service.execute(
+        action("key-press", {
+          key,
+          requestedBy: actor,
+          actionId: `30000000-0000-4000-8000-0000000002${String(index).padStart(2, "0")}`,
+        }),
+        context,
+      );
+      expect(evidence.outcome, key).toBe("succeeded");
+      expect(execute.mock.calls[0]?.[0].argv, key).toContain(keycode);
+    }
     await service.close();
   });
 

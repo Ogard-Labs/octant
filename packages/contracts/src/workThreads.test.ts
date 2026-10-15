@@ -238,7 +238,20 @@ describe("work thread contracts", () => {
     ).toMatchObject({ modelOptionValues: { effort: "high" } });
   });
 
-  it("requires a named delivery target and bounded satisfaction evidence for completion", () => {
+  it("marks a Work thread Done by its named delivery target, with an evidence note optional", () => {
+    expect(
+      decodeWorkThreadCommand({
+        kind: "confirm-work-thread-completion",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        deliveryTarget: "Release notes",
+      }),
+    ).toEqual({
+      kind: "confirm-work-thread-completion",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      deliveryTarget: "Release notes",
+    });
     expect(
       decodeWorkThreadCommand({
         kind: "confirm-work-thread-completion",
@@ -248,15 +261,23 @@ describe("work thread contracts", () => {
         satisfactionEvidence: "The notes were reviewed and delivered to the requester.",
       }),
     ).toMatchObject({
-      kind: "confirm-work-thread-completion",
-      deliveryTarget: "Release notes",
+      satisfactionEvidence: "The notes were reviewed and delivered to the requester.",
     });
     expect(() =>
       decodeWorkThreadCommand({
         kind: "confirm-work-thread-completion",
         threadId: ids.thread,
         expectedVersion: 1,
+        satisfactionEvidence: "The notes were delivered.",
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeWorkThreadCommand({
+        kind: "confirm-work-thread-completion",
+        threadId: ids.thread,
+        expectedVersion: 1,
         deliveryTarget: "Release notes",
+        satisfactionEvidence: "   ",
       }),
     ).toThrow();
   });

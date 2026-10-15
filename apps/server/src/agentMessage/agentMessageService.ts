@@ -67,11 +67,23 @@ export interface AgentMessageRecipient {
   readonly runId?: AgentMessageEndpointId;
 }
 
+/**
+ * Decides whether a refusal made before admission is journaled. A model that
+ * loops on a refused call must not grow the journal without bound, so the
+ * caller that owns the turn admits each distinct refusal once and stops after
+ * a small number. A refusal that is not journaled is still the answer the
+ * sender gets.
+ */
+export interface AgentMessageRefusalBudget {
+  admit(recipientThreadId: string, reason: AgentMessageRefuseReason): boolean;
+}
+
 export interface AgentMessageSendRequest {
   readonly senderThreadId: AgentMessageEndpointId;
   readonly senderRunId?: AgentMessageEndpointId;
   readonly recipients: ReadonlyArray<AgentMessageRecipient>;
   readonly body: string;
+  readonly refusalBudget?: AgentMessageRefusalBudget;
 }
 
 /**
@@ -172,11 +184,30 @@ export class AgentMessageService {
   }
 
   async send(request: AgentMessageSendRequest): Promise<ReadonlyArray<AgentMessageSendOutcome>> {
-    if (request.recipients.length < 1 || request.recipients.length > MAX_RECIPIENTS_PER_SEND) {
+    if (request.recipients.length < 1) {
       throw new AgentMessageDeliveryRefused(
         "policy",
-        `An agent message may name at most ${String(MAX_RECIPIENTS_PER_SEND)} recipients.`,
+        "An agent message must name at least one recipient.",
       );
+    }
+    if (request.recipients.length > MAX_RECIPIENTS_PER_SEND) {
+      // The whole petition is refused and answered as a refusal, like any
+      // other. The first recipients stand for it in the journal, as they do
+      // for a refusal the tool makes.
+      const correlationId = decodeCorrelationId(this.#uuid());
+      const refusals: AgentMessageSendOutcome[] = [];
+      for (const recipient of request.recipients.slice(0, MAX_RECIPIENTS_PER_SEND)) {
+        const messageId = Schema.decodeUnknownSync(AgentMessageId)(this.#uuid());
+        await this.#journalEarlyRefusal(request, messageId, correlationId, "policy", recipient);
+        refusals.push({
+          status: "refused",
+          messageId,
+          recipientThreadId: recipient.threadId,
+          reason: "policy",
+          message: `An agent message may name at most ${String(MAX_RECIPIENTS_PER_SEND)} recipients.`,
+        });
+      }
+      return refusals;
     }
     // A message whose recipient closed, or whose threads stopped sharing a
     // Project, would otherwise hold one of the sender's open slots for good.
@@ -301,6 +332,48 @@ export class AgentMessageService {
     }
   }
 
+  /**
+   * Journals the refusal of a send the tool refused before it reached
+   * admission (a turn in Plan, a profile that leaves the tool out). One
+   * message per named recipient, as a send makes, so the sender's refusals
+   * read the same wherever they were decided. No body is stored.
+   */
+  async recordRefusedSend(request: {
+    readonly senderThreadId: AgentMessageEndpointId;
+    readonly recipients: ReadonlyArray<AgentMessageRecipient>;
+    readonly reason: AgentMessageRefuseReason;
+    readonly refusalBudget?: AgentMessageRefusalBudget;
+  }): Promise<void> {
+    const correlationId = decodeCorrelationId(this.#uuid());
+    for (const recipient of request.recipients.slice(0, MAX_RECIPIENTS_PER_SEND)) {
+      await this.#journalEarlyRefusal(
+        request,
+        Schema.decodeUnknownSync(AgentMessageId)(this.#uuid()),
+        correlationId,
+        request.reason,
+        recipient,
+      );
+    }
+  }
+
+  /** Journals a refusal made before admission, unless the turn's budget is spent. */
+  async #journalEarlyRefusal(
+    request: {
+      readonly senderThreadId: AgentMessageEndpointId;
+      readonly refusalBudget?: AgentMessageRefusalBudget;
+    },
+    messageId: AgentMessageId,
+    correlationId: string,
+    reason: AgentMessageRefuseReason,
+    recipient: AgentMessageRecipient,
+  ): Promise<void> {
+    if (request.refusalBudget?.admit(String(recipient.threadId), reason) === false) return;
+    await this.#journalRefused(messageId, correlationId, reason, {
+      senderThreadId: request.senderThreadId,
+      recipientThreadId: recipient.threadId,
+    });
+  }
+
   async #admit(
     request: AgentMessageSendRequest,
     messageId: AgentMessageId,
@@ -309,7 +382,7 @@ export class AgentMessageService {
   ): Promise<AgentMessageSendOutcome> {
     const refusal = this.#decide(request, recipient.threadId);
     if (refusal !== undefined) {
-      await this.#journalRefused(messageId, correlationId, refusal.reason);
+      await this.#journalEarlyRefusal(request, messageId, correlationId, refusal.reason, recipient);
       return {
         status: "refused",
         messageId,
@@ -323,7 +396,7 @@ export class AgentMessageService {
     if (stored.status === "refused") {
       // The policy bounds were already checked; the store refuses only when
       // its own disk budget is exhausted, and that is the same honest refusal.
-      await this.#journalRefused(messageId, correlationId, "oversize");
+      await this.#journalEarlyRefusal(request, messageId, correlationId, "oversize", recipient);
       return {
         status: "refused",
         messageId,
@@ -367,7 +440,10 @@ export class AgentMessageService {
 
   /** Journals the refusal of an admitted message and drops the body it held. */
   async #refuse(record: AgentMessageRecord, reason: AgentMessageRefuseReason): Promise<void> {
-    await this.#journalRefused(record.messageId, record.correlationId, reason);
+    await this.#journalRefused(record.messageId, record.correlationId, reason, {
+      senderThreadId: record.senderThreadId,
+      recipientThreadId: record.recipientThreadId,
+    });
     await this.#bodyStore.forget(record.bodyReference.contentReference);
   }
 
@@ -445,7 +521,11 @@ export class AgentMessageService {
   async #journalRefused(
     messageId: AgentMessageId,
     correlationId: string,
-    reason: "unauthorized" | "depth-exceeded" | "recipient-terminal" | "oversize" | "policy",
+    reason: AgentMessageRefuseReason,
+    endpoints: {
+      readonly senderThreadId: AgentMessageEndpointId;
+      readonly recipientThreadId: AgentMessageEndpointId;
+    },
   ): Promise<void> {
     await this.#appendJournaled(
       AGENT_MESSAGE_EVENT_NAMES.refused,
@@ -454,6 +534,8 @@ export class AgentMessageService {
         messageId,
         correlationId,
         refuseReason: reason,
+        senderThreadId: endpoints.senderThreadId,
+        recipientThreadId: endpoints.recipientThreadId,
         occurredAt: this.#clock(),
       },
       String(messageId),

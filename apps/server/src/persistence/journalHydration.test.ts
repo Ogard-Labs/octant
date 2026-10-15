@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { hydrateJournalProjection, requireJournalHydration } from "./journalHydration";
+import {
+  hydrateJournalProjection,
+  replayAggregateTypesInOrder,
+  requireJournalHydration,
+} from "./journalHydration";
 
 describe("journal hydration", () => {
   it("replays every envelope when the scan stays inside the cap", () => {
@@ -60,5 +64,39 @@ describe("journal hydration", () => {
       apply: () => {},
     });
     expect(asked).toEqual(["work-thread"]);
+  });
+
+  it("merges a store's aggregate types in journal order and never asks for another type", () => {
+    // Interleaved past one batch, with a third type the store does not own.
+    const rows = Array.from({ length: 2_500 }, (_, index) => ({
+      globalSequence: index + 1,
+      aggregateType: ["automation-run", "code-operation", "automation-definition"][index % 3],
+    }));
+    const asked = new Set<string>();
+    const journal = {
+      replayAggregateType: (cursor: {
+        readonly aggregateType: string;
+        readonly afterSequence: number;
+        readonly limit: number;
+      }) => {
+        asked.add(cursor.aggregateType);
+        return rows
+          .filter(
+            (row) =>
+              row.aggregateType === cursor.aggregateType &&
+              row.globalSequence > cursor.afterSequence,
+          )
+          .slice(0, cursor.limit) as never;
+      },
+    };
+
+    const replayed = [
+      ...replayAggregateTypesInOrder(journal, ["automation-definition", "automation-run"]),
+    ].map((row) => row.globalSequence);
+
+    expect(asked).toEqual(new Set(["automation-definition", "automation-run"]));
+    expect(replayed).toEqual(
+      rows.filter((row) => row.aggregateType !== "code-operation").map((row) => row.globalSequence),
+    );
   });
 });

@@ -17,7 +17,13 @@ import {
   decodeRemotePushTokenClearV1,
   decodeRemotePushTokenReceiptV1,
   decodeRemotePushTokenRegistrationV1,
+  decodeRemoteServerGrantRequest,
+  encodeRemoteServerGrantResult,
+  encodeRemoteServerProxyRefusal,
+  type RemoteServerGrantRequest,
+  type RemoteServerProxyRefusalReason,
 } from "@octant/contracts";
+import type { RemoteAuthenticatedRequestResultV1 } from "@octant/contracts/remote-request-proof";
 import { buildRemoteSessionMetadataPayload, canonicalizeRemotePathQuery } from "@octant/domain";
 import {
   RemoteRequestProofError,
@@ -26,6 +32,17 @@ import {
 } from "../remoteRequestProofService";
 import type { RemoteRouteDefinition } from "../remoteRoutePolicy";
 import type { PushNotificationTokenStore } from "./pushNotificationTokenStore";
+import { withAdmissionRelease } from "./remoteAdmissionPolicy";
+import type {
+  RemoteServerGrantOpening,
+  RemoteServerRelayOutcome,
+} from "./remoteServerGrantService";
+import {
+  REMOTE_SERVER_PROXY_PATH,
+  REMOTE_SERVER_PROXY_SESSION_COOKIE,
+  digestRemoteServerProxySessionId,
+  type RemoteServerProxySessions,
+} from "./remoteServerProxySessions";
 
 export const REMOTE_SESSION_COOKIE = "__Secure-octant-remote-session";
 
@@ -37,7 +54,35 @@ export const REMOTE_AUTH_ROUTE_IDS = {
   rotateKey: "remote-auth-rotate-key",
   revokeSelf: "remote-auth-revoke-self",
   pushToken: "remote-auth-push-token",
+  serverProxySession: "remote-auth-server-proxy-session",
 } as const;
+
+/** Routes a proxy session reaches, and nothing else does. */
+export const REMOTE_SERVER_PROXY_ROUTE_IDS = {
+  grants: "server-proxy-grants",
+  relay: "server-proxy-relay",
+} as const;
+
+/** `/api/server-proxy/<grant id>` and the dev server's own path after it. */
+const RELAY_PATH_PATTERN = new RegExp(`^${REMOTE_SERVER_PROXY_PATH}(rsg_[a-f0-9]{64})(/.*)?$`);
+
+const RELAY_REFUSAL: Record<
+  RemoteServerProxyRefusalReason,
+  { readonly status: number; readonly message: string }
+> = {
+  "grant-closed": {
+    status: 404,
+    message: "That server stopped or changed. Open it again from its list.",
+  },
+  "server-unreachable": {
+    status: 502,
+    message: "The server did not answer on its own computer.",
+  },
+  "upgrade-refused": {
+    status: 501,
+    message: "This route does not carry connection upgrades.",
+  },
+};
 
 const SELF_SERVICE_ROUTE_IDS: ReadonlySet<string> = new Set([
   REMOTE_AUTH_ROUTE_IDS.signOut,
@@ -48,6 +93,9 @@ const SELF_SERVICE_ROUTE_IDS: ReadonlySet<string> = new Set([
 const PUSH_TOKEN_ROUTE_IDS: ReadonlySet<string> = new Set([REMOTE_AUTH_ROUTE_IDS.pushToken]);
 
 const CLEARING_COOKIE = `${REMOTE_SESSION_COOKIE}=; Secure; HttpOnly; SameSite=Strict; Path=/api/; Max-Age=0`;
+const CLEARING_PROXY_COOKIE = `${REMOTE_SERVER_PROXY_SESSION_COOKIE}=; Secure; HttpOnly; SameSite=Strict; Path=${REMOTE_SERVER_PROXY_PATH}; Max-Age=0`;
+/** A page retries a proxy request soon; the interface's 60-second back-off would stall it. */
+const SERVER_PROXY_RETRY_AFTER_SECONDS = "1";
 
 export interface RemoteSelfServiceReceipt {
   readonly commandId: string;
@@ -166,6 +214,46 @@ export interface RemoteClientPrincipalHandoff {
   readonly abortSignal?: AbortSignal;
 }
 
+/**
+ * The grant service as the proxy route reaches it. The route has already
+ * authenticated the proxy session and the request proof; the port re-derives
+ * the request's scope from the principal.
+ */
+export interface RemoteServerProxyGrantPort {
+  readonly open: (input: {
+    readonly request: Request;
+    readonly principal: Extract<RemoteClientPrincipal, { readonly kind: "remote-device" }>;
+    readonly sessionIdDigest: string;
+    readonly grantRequest: RemoteServerGrantRequest;
+    readonly stillAuthorized: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<RemoteServerGrantOpening>;
+  /** Relay one authenticated request under a grant to its dev server. */
+  readonly relay: (input: {
+    readonly request: Request;
+    readonly principal: Extract<RemoteClientPrincipal, { readonly kind: "remote-device" }>;
+    readonly sessionIdDigest: string;
+    readonly grantId: string;
+    readonly method: string;
+    /** The dev server's own path and query. */
+    readonly pathQuery: string;
+    /** The request's headers as they reached the proxy route. */
+    readonly headers: ReadonlyArray<readonly [string, string]>;
+    readonly body: Uint8Array | undefined;
+    readonly stillAuthorized: () => boolean;
+    readonly signal: AbortSignal;
+  }) => Promise<RemoteServerRelayOutcome>;
+}
+
+export interface RemoteServerProxyAuthentication {
+  readonly sessions: RemoteServerProxySessions;
+  readonly grants: RemoteServerProxyGrantPort;
+}
+
+interface RemoteRequestVerifier {
+  readonly verifyRequest: (input: unknown) => RemoteAuthenticatedRequestResultV1;
+}
+
 export interface RemoteHttpAuthenticationOptions {
   readonly proofService: RemoteRequestProofService;
   readonly signNegotiationMetadata: (payload: string) => string;
@@ -177,6 +265,8 @@ export interface RemoteHttpAuthenticationOptions {
   readonly productDispatch?: (
     handoff: RemoteClientPrincipalHandoff,
   ) => Promise<Response | undefined>;
+  /** The proxy session and its routes. Absent, both answer unavailable. */
+  readonly serverProxy?: RemoteServerProxyAuthentication;
 }
 
 export interface RemoteHttpAuthentication {
@@ -189,6 +279,17 @@ export interface RemoteHttpAuthentication {
     request: Request,
     transport: RequestTransportFacts,
     route?: RemoteRouteDefinition,
+  ) => Promise<Response>;
+  /**
+   * Whether a request's proxy cookie names a live proxy session whose device
+   * still stands. The listener asks before reading a proxy request's body.
+   */
+  readonly hasServerProxySession: (request: Request) => boolean;
+  /** A route only a proxy session reaches; a product session cookie is never read here. */
+  readonly handleServerProxy: (
+    request: Request,
+    transport: RequestTransportFacts,
+    route: RemoteRouteDefinition,
   ) => Promise<Response>;
 }
 
@@ -286,11 +387,69 @@ export function createRemoteHttpAuthentication(
     });
   };
 
+  /**
+   * Turn a challenge the device signed over the proxy transcript into a proxy
+   * session. It shares the auth budget with product session issuance, because
+   * both mint authority, but the session it makes lives in a store of its own.
+   */
+  const handleServerProxySession = async (
+    request: Request,
+    transport: RequestTransportFacts,
+  ): Promise<Response> => {
+    let release: (() => void) | undefined;
+    try {
+      const facts = requireTransportFacts(transport);
+      const proxy = options.serverProxy;
+      if (proxy === undefined) throw new RemoteHttpAuthFailure(503, "unavailable");
+      const body = decodeBounded(decodeRemoteSessionRequestV1, await readJsonBody(request));
+      release = options.admission?.acquire({
+        bucket: "auth",
+        deviceId: body.deviceId,
+        transport: facts,
+      });
+      if (options.admission !== undefined && release === undefined) {
+        throw new RemoteHttpAuthFailure(429, "rate-limited");
+      }
+      const issued = issueWithServiceErrors(() => proxy.sessions.issue(body), {
+        exposeLifecycleReason: false,
+      });
+      const response = decodeRemoteSessionResponseV1({
+        hostId: issued.facts.hostId,
+        deviceId: issued.facts.deviceId,
+        sessionId: issued.sessionId,
+        credentialGeneration: issued.facts.credentialGeneration,
+        origin: issued.facts.origin,
+        protocolVersion: issued.facts.protocolVersion,
+        authenticationVersion: issued.facts.authenticationVersion,
+        capabilityDigest: issued.facts.capabilityDigest,
+        issuedAt: issued.facts.issuedAt,
+        idleExpiresAt: issued.facts.idleExpiresAt,
+        absoluteExpiresAt: issued.facts.absoluteExpiresAt,
+        csrfToken: issued.csrfToken,
+        negotiationSignature: options.signNegotiationMetadata(
+          buildRemoteSessionMetadataPayload(issued.facts),
+        ),
+      });
+      return jsonResponse(200, response, {
+        "set-cookie": `${REMOTE_SERVER_PROXY_SESSION_COOKIE}=${issued.sessionId}; Secure; HttpOnly; SameSite=Strict; Path=${REMOTE_SERVER_PROXY_PATH}`,
+      });
+    } catch (error) {
+      // A refused proxy session clears the proxy cookie only; the product
+      // session it may sit beside is untouched.
+      return mapFailure(error, "server-proxy");
+    } finally {
+      release?.();
+    }
+  };
+
   const handlePreAuthRoute = async (
     request: Request,
     route: RemoteRouteDefinition,
     transport: RequestTransportFacts,
   ): Promise<Response | undefined> => {
+    if (route.id === REMOTE_AUTH_ROUTE_IDS.serverProxySession) {
+      return handleServerProxySession(request, transport);
+    }
     if (route.id !== REMOTE_AUTH_ROUTE_IDS.challenge && route.id !== REMOTE_AUTH_ROUTE_IDS.session)
       return undefined;
     let release: (() => void) | undefined;
@@ -352,7 +511,7 @@ export function createRemoteHttpAuthentication(
         sessionId,
         sessionFacts,
         facts,
-        options,
+        options.proofService,
         route,
       );
 
@@ -447,7 +606,155 @@ export function createRemoteHttpAuthentication(
     }
   };
 
-  return { handlePreAuthRoute, handleAuthenticated };
+  /**
+   * A proxy route: the proxy session cookie, the same signed envelope product
+   * routes use, verified against the proxy session's own nonces, and the
+   * proxy's own concurrency budget. The product session cookie, if a browser
+   * sends it too, is never read, and a product session id presented in the
+   * proxy cookie names no proxy session.
+   */
+  const handleServerProxy = async (
+    request: Request,
+    transport: RequestTransportFacts,
+    route: RemoteRouteDefinition,
+  ): Promise<Response> => {
+    let release: (() => void) | undefined;
+    let grantRelease: (() => void) | undefined;
+    try {
+      const facts = requireTransportFacts(transport);
+      const proxy = options.serverProxy;
+      if (proxy === undefined) throw new RemoteHttpAuthFailure(503, "unavailable");
+      const sessionId = readSessionCookie(request.headers, REMOTE_SERVER_PROXY_SESSION_COOKIE);
+      const session = proxy.sessions.describe(sessionId);
+      if (session === undefined) throw new RemoteHttpAuthFailure(401, "unauthorized", true);
+      release = proxy.sessions.acquire(session.deviceId);
+      if (release === undefined) throw new RemoteHttpAuthFailure(503, "rate-limited");
+      const handoff = await authenticateRequest(
+        request,
+        sessionId,
+        session,
+        facts,
+        proxy.sessions,
+        route,
+      );
+      if (handoff.principal.kind !== "remote-device") {
+        throw new RemoteHttpAuthFailure(403, "invalid");
+      }
+      if (route.id === REMOTE_SERVER_PROXY_ROUTE_IDS.relay) {
+        const relayed = await relayToGrant(request, handoff, sessionId, proxy);
+        if (relayed.kind !== "relayed") return relayed.response;
+        // The request keeps its place in the device's proxy budget until the
+        // dev server's response has finished streaming.
+        const held = release;
+        release = undefined;
+        return held === undefined ? relayed.response : withAdmissionRelease(relayed.response, held);
+      }
+      if (route.id !== REMOTE_SERVER_PROXY_ROUTE_IDS.grants) {
+        throw new RemoteHttpAuthFailure(404, "invalid");
+      }
+      const grantRequest = decodeBounded(
+        decodeRemoteServerGrantRequest,
+        await readJsonObject(handoff.request),
+      );
+      grantRelease = proxy.sessions.beginGrantRequest(session.deviceId);
+      if (grantRelease === undefined) throw new RemoteHttpAuthFailure(503, "rate-limited");
+      const opening = await proxy.grants.open({
+        request: handoff.request,
+        principal: handoff.principal,
+        sessionIdDigest: digestRemoteServerProxySessionId(sessionId),
+        grantRequest,
+        stillAuthorized: () => proxy.sessions.describe(sessionId) !== undefined,
+        signal: request.signal,
+      });
+      if (opening.kind === "session-ended") {
+        throw new RemoteHttpAuthFailure(401, "unauthorized", true);
+      }
+      if (opening.kind === "unavailable") throw new RemoteHttpAuthFailure(503, "unavailable");
+      return jsonResponse(200, encodeRemoteServerGrantResult(opening.result));
+    } catch (error) {
+      return mapFailure(error, "server-proxy");
+    } finally {
+      grantRelease?.();
+      release?.();
+    }
+  };
+
+  const hasServerProxySession = (request: Request): boolean => {
+    const sessions = options.serverProxy?.sessions;
+    if (sessions === undefined) return false;
+    try {
+      return (
+        sessions.describe(
+          readSessionCookie(request.headers, REMOTE_SERVER_PROXY_SESSION_COOKIE),
+        ) !== undefined
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  return { handlePreAuthRoute, handleAuthenticated, handleServerProxy, hasServerProxySession };
+}
+
+/**
+ * Relay a request whose proof the proxy session accepted. The grant id comes
+ * from the path the proof signed; the grant service decides whether it opens
+ * anything. A connection upgrade is refused here, before any check or
+ * connection, because this route carries none.
+ */
+async function relayToGrant(
+  request: Request,
+  handoff: RemoteClientPrincipalHandoff & { readonly body: Uint8Array },
+  sessionId: string,
+  proxy: RemoteServerProxyAuthentication,
+): Promise<
+  | { readonly kind: "relayed"; readonly response: Response }
+  | { readonly kind: "answered"; readonly response: Response }
+> {
+  const principal = handoff.principal;
+  if (principal.kind !== "remote-device") throw new RemoteHttpAuthFailure(403, "invalid");
+  if (request.headers.has("upgrade")) return refusedRelay("upgrade-refused");
+  const url = new URL(request.url);
+  const target = RELAY_PATH_PATTERN.exec(url.pathname);
+  const grantId = target?.[1];
+  if (grantId === undefined) throw new RemoteHttpAuthFailure(404, "invalid");
+  const method = handoff.requestFacts.method;
+  const outcome = await proxy.grants.relay({
+    request: handoff.request,
+    principal,
+    sessionIdDigest: digestRemoteServerProxySessionId(sessionId),
+    grantId,
+    method,
+    pathQuery: `${target?.[2] ?? "/"}${url.search}`,
+    headers: [...request.headers],
+    body: method === "GET" || method === "HEAD" ? undefined : handoff.body,
+    stillAuthorized: () => proxy.sessions.describe(sessionId) !== undefined,
+    signal: request.signal,
+  });
+  switch (outcome.kind) {
+    case "relayed":
+      return { kind: "relayed", response: outcome.response };
+    case "refused":
+      return refusedRelay(outcome.reason);
+    case "session-ended":
+      throw new RemoteHttpAuthFailure(401, "unauthorized", true);
+    case "unavailable":
+      throw new RemoteHttpAuthFailure(503, "unavailable");
+  }
+}
+
+function refusedRelay(reason: RemoteServerProxyRefusalReason): {
+  readonly kind: "answered";
+  readonly response: Response;
+} {
+  const { status, message } = RELAY_REFUSAL[reason];
+  return {
+    kind: "answered",
+    response: jsonResponse(
+      status,
+      encodeRemoteServerProxyRefusal({ kind: "remote-server-proxy-refused", reason, message }),
+    ),
+  };
 }
 
 async function handleOwnDeviceRoute(
@@ -769,11 +1076,23 @@ async function readJsonObject(request: Request): Promise<unknown> {
 async function authenticateRequest(
   request: Request,
   sessionId: string,
-  sessionFacts: RemoteSessionFacts,
+  sessionFacts: Pick<
+    RemoteSessionFacts,
+    | "hostId"
+    | "deviceId"
+    | "credentialGeneration"
+    | "origin"
+    | "protocolVersion"
+    | "capabilityDigest"
+  >,
   transport: RequestTransportFacts,
-  options: RemoteHttpAuthenticationOptions,
+  verifier: RemoteRequestVerifier,
   route: RemoteRouteDefinition | undefined,
-): Promise<RemoteClientPrincipalHandoff> {
+): Promise<RemoteClientPrincipalHandoff & { readonly body: Uint8Array }> {
+  // A request relayed to a dev server is the page's own: its query keeps the
+  // order and form the page wrote (the proof signs the canonical form), any
+  // media type passes, and its body budget is the relay route's.
+  const relay = route?.relaysDevServer === true;
   const method = request.method.toUpperCase();
   if (!/^[A-Z][A-Z0-9-]{0,15}$/.test(method)) throw new RemoteHttpAuthFailure(400, "invalid");
   const safe = SAFE_METHODS.has(method);
@@ -795,7 +1114,12 @@ async function authenticateRequest(
 
   const url = new URL(request.url);
   const canonicalPathQuery = canonicalizeRemotePathQuery(`${url.pathname}${url.search}`);
-  if (canonicalPathQuery === undefined || canonicalPathQuery !== `${url.pathname}${url.search}`) {
+  if (
+    canonicalPathQuery === undefined ||
+    (!relay && canonicalPathQuery !== `${url.pathname}${url.search}`) ||
+    // The path itself is already canonical; only a query may differ in form.
+    (relay && canonicalPathQuery.split("?", 1)[0] !== url.pathname)
+  ) {
     throw new RemoteHttpAuthFailure(400, "invalid");
   }
 
@@ -819,11 +1143,11 @@ async function authenticateRequest(
 
   const body = await readBoundedBody(
     request,
-    safe ? 0 : MAX_AUTHENTICATED_BODY_BYTES,
+    safe ? 0 : relay ? (route?.maxBodyBytes ?? 0) : MAX_AUTHENTICATED_BODY_BYTES,
     safe ? 400 : 413,
   );
   if (safe && body.byteLength > 0) throw new RemoteHttpAuthFailure(400, "invalid");
-  if (!safe) {
+  if (!safe && !relay) {
     const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
     // The outer route policy owns per-route media types (Code evidence is text).
     // Keep the conservative defaults for callers without a classified route.
@@ -847,7 +1171,7 @@ async function authenticateRequest(
   }
 
   const result = issueWithServiceErrors(() =>
-    options.proofService.verifyRequest({
+    verifier.verifyRequest({
       hostId: sessionFacts.hostId,
       deviceId: sessionFacts.deviceId,
       sessionId,
@@ -889,7 +1213,7 @@ async function authenticateRequest(
   const forwardInit: RequestInit = { headers: strippedHeaders(request.headers) };
   if (!safe) forwardInit.body = body as BodyInit;
   const forwarded = new Request(request, forwardInit);
-  return { request: forwarded, principal, freshness: result.freshness, requestFacts };
+  return { request: forwarded, principal, freshness: result.freshness, requestFacts, body };
 }
 
 const SOURCE_CLASSES: ReadonlySet<string> = new Set(["loopback", "lan-private", "tailscale"]);
@@ -977,7 +1301,7 @@ function decodeProofEnvelope(headers: Headers): RemoteRequestProofV1 {
   }
 }
 
-function readSessionCookie(headers: Headers): string {
+function readSessionCookie(headers: Headers, cookieName = REMOTE_SESSION_COOKIE): string {
   const header = headers.get("cookie");
   if (header === null) throw new RemoteHttpAuthFailure(401, "unauthorized");
   if (header.length > MAX_COOKIE_HEADER_LENGTH) {
@@ -987,7 +1311,7 @@ function readSessionCookie(headers: Headers): string {
   for (const part of header.split(";")) {
     const separator = part.indexOf("=");
     if (separator <= 0) continue;
-    if (part.slice(0, separator).trim() !== REMOTE_SESSION_COOKIE) continue;
+    if (part.slice(0, separator).trim() !== cookieName) continue;
     if (value !== undefined) throw new RemoteHttpAuthFailure(400, "invalid", true);
     value = part.slice(separator + 1).trim();
   }
@@ -1107,11 +1431,19 @@ function issueWithServiceErrors<T>(
   }
 }
 
-function mapFailure(error: unknown): Response {
+type RemoteSessionKind = "product" | "server-proxy";
+
+function mapFailure(error: unknown, session: RemoteSessionKind = "product"): Response {
   if (error instanceof RemoteHttpAuthFailure) {
-    return failureResponse(error.status, error.category, error.clearSession, error.reasonCode);
+    return failureResponse(
+      error.status,
+      error.category,
+      error.clearSession,
+      error.reasonCode,
+      session,
+    );
   }
-  return failureResponse(503, "unavailable");
+  return failureResponse(503, "unavailable", false, undefined, session);
 }
 
 function jsonResponse(
@@ -1130,6 +1462,7 @@ function failureResponse(
   category: RemoteAuthFailureCategory,
   clearSession = false,
   reasonCode?: "expired" | "revoked",
+  session: RemoteSessionKind = "product",
 ): Response {
   return jsonResponse(
     status,
@@ -1141,11 +1474,13 @@ function failureResponse(
       message: "Remote request rejected.",
     },
     {
-      ...(category === "rate-limited" ? { "retry-after": "60" } : {}),
-      ...(clearSession
+      ...(category === "rate-limited"
         ? {
-            "set-cookie": `${REMOTE_SESSION_COOKIE}=; Secure; HttpOnly; SameSite=Strict; Path=/api/; Max-Age=0`,
+            "retry-after": session === "server-proxy" ? SERVER_PROXY_RETRY_AFTER_SECONDS : "60",
           }
+        : {}),
+      ...(clearSession
+        ? { "set-cookie": session === "server-proxy" ? CLEARING_PROXY_COOKIE : CLEARING_COOKIE }
         : {}),
     },
   );

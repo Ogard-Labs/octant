@@ -407,6 +407,21 @@ CREATE TABLE project_terminal_projection (
 ) STRICT;
 `;
 
+const REMOTE_SERVER_GRANT_PROJECTION_SQL = `
+CREATE TABLE remote_server_grant_projection (
+  grant_id TEXT PRIMARY KEY CHECK(length(grant_id) = 68),
+  aggregate_id TEXT NOT NULL CHECK(length(trim(aggregate_id)) > 0),
+  device_id TEXT NOT NULL CHECK(length(trim(device_id)) > 0),
+  thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+  port INTEGER NOT NULL CHECK(port > 0 AND port <= 65535),
+  state TEXT NOT NULL CHECK(state IN ('open', 'closed')),
+  close_reason TEXT CHECK(close_reason IS NULL OR length(trim(close_reason)) > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+) STRICT;
+CREATE INDEX remote_server_grant_open_idx
+  ON remote_server_grant_projection(state, last_sequence);
+`;
+
 const SPEND_CEILING_PROJECTION_SQL = `
 CREATE TABLE spend_ceiling_projection (
   scope_kind TEXT NOT NULL CHECK(scope_kind IN ('project', 'thread')),
@@ -2138,6 +2153,41 @@ ALTER TABLE code_runtime_projection
           AND indexed.sequence < edit.sequence
       );
     `,
+  },
+  {
+    version: 78,
+    name: "create_remote_server_grant_projection",
+    sql: REMOTE_SERVER_GRANT_PROJECTION_SQL,
+  },
+  {
+    version: 79,
+    name: "index_event_journal_type_sequence",
+    // Startup rebuilds each in-memory store from its own aggregate type in
+    // journal order. The other indexes that lead with the type are not in
+    // sequence order, so every batch read and sorted all of the type's rows
+    // after the cursor: about 1.3 s per 1,000-row batch on a 500,000-row type,
+    // which made rebuilding a large type quadratic.
+    //
+    // The condition is always true (the column's CHECK) and is there so only a
+    // query that repeats it can use the index. Without it the planner chose
+    // this index for the thread reads too, trading their thread-and-kind
+    // lookups for a walk over every row of the type after the cursor.
+    sql: `CREATE INDEX event_journal_type_sequence ON event_journal (aggregate_type, global_sequence)
+      WHERE aggregate_version > 0;`,
+  },
+  {
+    version: 80,
+    name: "index_event_journal_thread_sequence",
+    // A thread's whole history is read in journal order, 1,000 rows a batch.
+    // The thread indexes put the event or result kind before the sequence, so
+    // every batch walked all of the thread's rows and sorted them to find the
+    // ones after the cursor: about 1.6 s per read of a 2,000-turn Code thread
+    // (28,000 rows) on a loaded machine, and a window's board and sidebar
+    // read every thread's history every few seconds.
+    sql: `CREATE INDEX event_journal_thread_sequence ON event_journal (
+      aggregate_type, CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END,
+      global_sequence
+    );`,
   },
 ];
 

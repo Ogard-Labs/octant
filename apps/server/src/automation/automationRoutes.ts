@@ -34,6 +34,12 @@ export interface AutomationRouteDependencies {
   readonly projects: Pick<ProjectService, "bootstrap">;
   /** The identity of the host that owns every Automation this server holds. */
   readonly hostId: string;
+  /**
+   * False when start-up could not rebuild Automation history. The list then
+   * says so instead of reading as empty, and commands are refused rather than
+   * written against history the host never loaded.
+   */
+  readonly historyAvailable?: () => boolean;
   readonly now?: () => number;
 }
 
@@ -180,6 +186,17 @@ async function handleList(
   }
   const search = url.searchParams.get("search") ?? undefined;
 
+  if (dependencies.historyAvailable?.() === false) {
+    return jsonResponse(
+      decodeAutomationQueryResponse({
+        kind: "automation-list",
+        items: [],
+        historyUnavailable: true,
+      }),
+      200,
+      origin,
+    );
+  }
   const accessible = await accessibleProjects(dependencies, context);
   if (projectId !== undefined && !accessible.has(String(projectId))) {
     return jsonResponse(
@@ -302,6 +319,17 @@ async function handleCommand(
     return failureResponse("Automation commands cannot supply principal or origin.", 400, origin);
   }
 
+  if (dependencies.historyAvailable?.() === false) {
+    return jsonResponse(
+      decodeAutomationCommandResult({
+        kind: "automation-command-failed",
+        reason: "unsupported",
+        message: "Automation history could not be loaded, so Automations cannot change.",
+      }),
+      200,
+      origin,
+    );
+  }
   const accessible = await accessibleProjects(dependencies, context);
   const denial = authorizeCommandProject(dependencies, body, accessible);
   if (denial !== undefined) {

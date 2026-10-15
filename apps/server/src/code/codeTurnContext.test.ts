@@ -280,6 +280,28 @@ describe("what the session already held", () => {
     ).toEqual({ status: "counted", parts: [counted.parts[1]] });
   });
 
+  it("stops carrying the prior turn's copies once the ledger records a compaction since its report", () => {
+    expect(
+      carriedSentContext({
+        freshSession: false,
+        forkSeeded: false,
+        priorTurn: true,
+        previousBreakdown: counted,
+        compactedSinceReport: true,
+      }),
+    ).toEqual({ status: "uncounted", reason: "compacted" });
+    // A new session holds nothing a compaction could have kept.
+    expect(
+      carriedSentContext({
+        freshSession: true,
+        forkSeeded: false,
+        priorTurn: true,
+        previousBreakdown: counted,
+        compactedSinceReport: true,
+      }),
+    ).toEqual({ status: "counted", parts: [] });
+  });
+
   it("stays uncounted once a turn of the session was", () => {
     expect(
       carriedSentContext({

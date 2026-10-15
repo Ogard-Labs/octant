@@ -1,7 +1,7 @@
 # Canvas
 
-This topic specification owns the Canvas agent tool's `describe` and `preview`
-operations, document recipes, thread presentation, the closed block catalogue,
+This topic specification owns the Canvas agent tool's `describe`, `read`, and
+`preview` operations, document recipes, thread presentation, the closed block catalogue,
 diagram boards and comments, and the `design` block. Architecture owns the
 Canvas boundary and authority rules
 ([Architecture: process topology](../architecture.md#process-topology)) and the
@@ -156,6 +156,21 @@ images in a tool result.
 The signed desktop app bundles the `playwright-core` driver but no browser
 binary, so it resolves Chromium from the host's installed browsers. On a host
 with none, `preview` is warnings-only, and the user guide says so.
+
+`read` and `preview` reach any Canvas of the reader's Project by id, so both
+carry its outside-content mark to the reader. After the Canvas is read or the
+preview is drawn, and before anything from it is returned, the host marks the
+reading thread (a managed child under its run) with label `canvas` when the
+Canvas records a marked writer other than the reader or the thread it belongs
+to is marked now. A reader that cannot be marked gets a refusal instead of the
+Canvas. Architecture owns the rule, including how a Canvas records a marked
+writer at write time
+([Architecture: modes](../architecture.md#modes-chat-work-and-code)).
+The mark follows the Canvas tool only. A Canvas's mirrored or exported files
+carry no marker, so a thread that reads one with its own file tools is not
+marked, as for any file a marked thread writes; this residual is kept on
+purpose, because a file tool cannot tell a mirror from any other file.
+Chat marks a reader by this same rule, not on every Canvas tool result.
 A thread reference card reports the effective presentation and the first
 version's time (`canvasCreatedAt`). A Canvas that has outgrown the bound, by a
 revision or a person's edit, is listed as `sidebar`.
@@ -688,8 +703,9 @@ with **Run again**, as is a page that posts more than 250 messages in a second,
 which would starve the renderer that holds **Stop**, and a page that loads a
 second time, which is a page it navigated to. Host chrome holds a running label
 and **Stop**. In the thread a prototype starts only on **Run**; the sidebar
-runs it on open, and the page is out of the tab order until the person pressed
-Run.
+runs it on open. A running page is in the tab order, right after Stop, and Octant
+never moves focus into it when it opens; page script can still take focus on
+its own in some cases (see the frame threat model, F10).
 
 In a browser the page is drawn in a frame sandboxed to `allow-scripts` alone,
 and the renderer accepts only messages whose `source` is that frame's window

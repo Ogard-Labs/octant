@@ -65,6 +65,8 @@ export const REPLICA_MEMBERSHIP_EVENT_NAMES = {
   joinReadStopped: "replica.join-read-stopped@2",
   joinReadResumed: "replica.join-read-resumed@2",
   joinReadFinished: "replica.join-read-finished@2",
+  left: "replica.left@2",
+  leftCleanup: "replica.left-cleanup@2",
 } as const;
 
 /**
@@ -143,6 +145,7 @@ export const ReplicaMembershipCommandRefused = Schema.Struct({
     "revoke-preview",
     "revoke",
     "pull",
+    "leave",
     "publish-artifact",
   ),
   reason: Schema.Literal(
@@ -199,6 +202,29 @@ export const ReplicaJoinReadMarked = Schema.Struct({
   instanceId: ReplicaInstanceId,
 }).annotations(strict);
 
+/**
+ * This computer left its replica: it forgets the identity, the founder it
+ * pinned, and the membership records it held, and queues nothing more under
+ * that identity. `toldStore` says whether its signed `replica-left` record
+ * landed in the store first. Artifacts and their history stay as they are.
+ */
+export const ReplicaLeft = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  toldStore: Schema.Boolean,
+}).annotations(strict);
+
+/**
+ * One step of the cleanup after leaving that happened outside the journal:
+ * sync turned off, or the device key deleted. Until both are journaled the
+ * host retries them, on start and before every membership command, so a
+ * stop or a failure right after `replica.left@2` does not leave a key or the
+ * switch behind with no identity to retry it from.
+ */
+export const ReplicaLeftCleanup = Schema.Struct({
+  instanceId: ReplicaInstanceId,
+  step: Schema.Literal("sync-off", "key-removed"),
+}).annotations(strict);
+
 export function registerReplicaMembershipEvents(registry: EventRegistry): EventRegistry {
   const names = REPLICA_MEMBERSHIP_EVENT_NAMES;
   let registered = registry
@@ -213,7 +239,9 @@ export function registerReplicaMembershipEvents(registry: EventRegistry): EventR
     .register(names.joinReadProgress, 1, ReplicaJoinReadProgressed)
     .register(names.joinReadStopped, 1, ReplicaJoinReadMarked)
     .register(names.joinReadResumed, 1, ReplicaJoinReadMarked)
-    .register(names.joinReadFinished, 1, ReplicaJoinReadMarked);
+    .register(names.joinReadFinished, 1, ReplicaJoinReadMarked)
+    .register(names.left, 1, ReplicaLeft)
+    .register(names.leftCleanup, 1, ReplicaLeftCleanup);
   for (const name of RETIRED_REPLICA_EVENT_NAMES) {
     registered = registered.register(name, 1, Schema.Unknown);
   }
@@ -229,6 +257,15 @@ const decodeStoreFailure = Schema.decodeUnknownSync(ReplicaMembershipStoreFailur
 const decodeJoinReadStarted = Schema.decodeUnknownSync(ReplicaJoinReadStarted);
 const decodeJoinReadProgressed = Schema.decodeUnknownSync(ReplicaJoinReadProgressed);
 const decodeJoinReadMarked = Schema.decodeUnknownSync(ReplicaJoinReadMarked);
+export const decodeReplicaLeft = Schema.decodeUnknownSync(ReplicaLeft);
+const decodeLeftCleanup = Schema.decodeUnknownSync(ReplicaLeftCleanup);
+
+/** An identity this computer left whose sync switch or device key is not cleaned up yet. */
+export interface ReplicaUnfinishedLeave {
+  readonly instanceId: ReplicaInstanceId;
+  readonly syncOff: boolean;
+  readonly keyRemoved: boolean;
+}
 
 /** This host's own identity in the store, once it founded one or asked to join. */
 export interface ReplicaLocalIdentity {
@@ -273,7 +310,7 @@ export interface ReplicaMembershipState {
   /**
    * The highest sequence of an instance among the valid signed entries this
    * host holds: membership records, and artifact entries it published or
-   * settled. It is the cut a revoke takes when the store cannot be read.
+   * settled.
    */
   readonly heldSequence: (instanceId: ReplicaInstanceId) => number;
   /**
@@ -306,6 +343,8 @@ export interface ReplicaMembershipState {
   readonly joinRead: ReplicaJoinReadState | undefined;
   /** Whether this identity's join confirmation already read that slot and holds nothing for it. */
   readonly joinReadPassed: (instanceId: ReplicaInstanceId, sequence: number) => boolean;
+  /** Identities this computer left whose cleanup has a step still to do. */
+  readonly unfinishedLeaves: ReadonlyArray<ReplicaUnfinishedLeave>;
 }
 
 export interface ReplicaJoinReadState {
@@ -336,6 +375,7 @@ export class ReplicaMembershipProjection implements Projection {
   readonly name = "replica-membership";
   readonly dependencies: ReadonlyArray<string> = [];
   readonly holdsStateInMemory = true as const;
+  readonly aggregateTypes: ReadonlyArray<string> = [REPLICA_MEMBERSHIP_AGGREGATE_TYPE];
   #local: ReplicaLocalIdentity | undefined;
   #founder: { readonly instanceId: ReplicaInstanceId; readonly publicKey: string } | undefined;
   readonly #records = new Map<string, ReplicaHeldFile>();
@@ -354,6 +394,8 @@ export class ReplicaMembershipProjection implements Projection {
   >();
   /** By identity: only the current one's is ever read. */
   readonly #joinReads = new Map<string, ReplicaJoinReadState & { readonly passed: Set<string> }>();
+  /** By identity that left: which cleanup steps are journaled. */
+  readonly #leaves = new Map<string, ReplicaUnfinishedLeave>();
   #state: ReplicaMembershipState | undefined;
 
   reset(_connection: SqliteConnection): void {
@@ -367,6 +409,7 @@ export class ReplicaMembershipProjection implements Projection {
     this.#artifactSlots.clear();
     this.#unreadableSlots.clear();
     this.#joinReads.clear();
+    this.#leaves.clear();
     this.#state = undefined;
   }
 
@@ -517,6 +560,38 @@ export class ReplicaMembershipProjection implements Projection {
         );
         break;
       }
+      case names.left: {
+        const left = decodeReplicaLeft(event.payload);
+        if (this.#local === undefined || !same(left.instanceId, this.#local.instanceId)) return;
+        // Records held from this replica would otherwise keep listing its
+        // join requests and computers here after joining another one. Slots
+        // whose artifact entries were settled stay settled: those versions
+        // stay in the library, and reading them again would change nothing.
+        this.#leaves.set(String(left.instanceId), {
+          instanceId: left.instanceId,
+          syncOff: false,
+          keyRemoved: false,
+        });
+        this.#local = undefined;
+        this.#founder = undefined;
+        this.#records.clear();
+        this.#skipped = 0;
+        this.#pending = undefined;
+        this.#lastStoreFailure = undefined;
+        break;
+      }
+      case names.leftCleanup: {
+        const cleanup = decodeLeftCleanup(event.payload);
+        const leave = this.#leaves.get(String(cleanup.instanceId));
+        if (leave === undefined) return;
+        this.#leaves.set(
+          String(cleanup.instanceId),
+          cleanup.step === "sync-off"
+            ? { ...leave, syncOff: true }
+            : { ...leave, keyRemoved: true },
+        );
+        break;
+      }
       default:
         return;
     }
@@ -603,6 +678,9 @@ export class ReplicaMembershipProjection implements Projection {
           : { state: joinRead.state, done: joinRead.done, total: joinRead.total },
       joinReadPassed: (instanceId, sequence) =>
         joinRead?.passed.has(slotKey(instanceId, sequence)) === true,
+      unfinishedLeaves: [...this.#leaves.values()].filter(
+        (leave) => !leave.syncOff || !leave.keyRemoved,
+      ),
     };
   }
 }

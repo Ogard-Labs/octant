@@ -20,6 +20,7 @@ import {
   TICKET_ID,
   HOST_KEY_FINGERPRINT,
 } from "./remoteConnectionFixtures";
+import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const hostId = decodeStableHostId(HOST_ID);
 const now = "2026-08-05T18:00:00.000Z";
@@ -162,6 +163,7 @@ describe("mobile chat create over remote session", () => {
       deviceKeyId,
       origin: ORIGIN,
       hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     await waitUntil(() => bridge.getState().kind === "ready");
     const connection = bridge.connection();

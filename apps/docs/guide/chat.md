@@ -79,7 +79,7 @@ Side Chat is a separate Chat conversation about one source thread. Open the righ
 
 Every Side Chat turn reads the source thread fresh: its newest 40 messages, and what it has done so far. For a Code thread that includes the branch, the uncommitted files Git sees, the files its turns changed, and the delivery target. For a Work thread it includes the Project folder. For every thread it includes the latest subagent results. About a Work or Code thread, Side Chat can also list and read the thread's files (and search them, for Code) when the model supports Octant's tools. Otherwise it says it cannot see the files.
 
-Side Chat can only read. It cannot send the source thread messages, approve, steer, change criteria, or write anything. If the source thread is deleted or no longer openable, Side Chat refuses rather than inventing an empty conversation.
+Side Chat can only read. It cannot send the source thread messages, approve, steer, change criteria, or write anything. If the source thread is deleted or no longer openable, Side Chat refuses rather than inventing an empty conversation. A Side Chat about a thread marked as having read outside content is marked too, because it reads that thread's conversation; the same holds for any thread you mention with `#`.
 
 ## Turn actions
 

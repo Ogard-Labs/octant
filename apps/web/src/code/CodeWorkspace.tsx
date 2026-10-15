@@ -645,6 +645,7 @@ function AppleWorkbenchSurface(props: {
         if (
           approvalGated &&
           intent.kind !== "screenshot" &&
+          intent.kind !== "stop-recording" &&
           !(isAppleSimulatorInputKind(intent.kind) && grantLive)
         ) {
           if (requestApproval === undefined) {
@@ -874,6 +875,33 @@ function appleActionRequest(input: {
         kind: "repair-input",
         simulatorId: intent.simulatorId,
         requestedBy: localUserActor(),
+        timeoutMs: 30_000,
+      };
+    case "start-recording":
+    case "stop-recording":
+      return {
+        ...base,
+        kind: intent.kind,
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        timeoutMs: 60_000,
+      };
+    case "open-url":
+      return {
+        ...base,
+        kind: "open-url",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        url: intent.url,
+        timeoutMs: 30_000,
+      };
+    case "rotate":
+      return {
+        ...base,
+        kind: "rotate",
+        simulatorId: intent.simulatorId,
+        requestedBy: localUserActor(),
+        orientation: intent.orientation,
         timeoutMs: 30_000,
       };
   }

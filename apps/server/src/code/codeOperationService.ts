@@ -68,6 +68,7 @@ import {
 } from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
+import type { TerminalLauncher } from "./terminalService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { CodeApprovalValidationPort } from "./codeOperationApprovalStore";
 import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoveryService";
@@ -199,6 +200,7 @@ export interface CodeOperationTerminalPort {
       readonly environmentName: string;
       readonly reference: string;
     }[];
+    readonly launcher?: TerminalLauncher;
     readonly executionPolicy?: CodeThread["executionPolicy"];
   }) => Promise<CodeOperationTerminalSnapshot>;
   readonly attach: (terminalId: string) => CodeOperationTerminalSnapshot;
@@ -616,6 +618,12 @@ export interface CodeOperationTurnPort {
   readonly start: (input: {
     readonly windowId: WindowId;
     readonly thread: CodeThread;
+    /**
+     * The start's own operation. Two starts on one thread can overlap (a
+     * stopped one still preparing, the next already sent), so the runtime
+     * keeps each one's bookkeeping under this, not the thread.
+     */
+    readonly operationId: CodeOperationId;
     readonly sessionId: string;
     readonly checkoutRoot: string;
     readonly prompt: string;
@@ -669,7 +677,12 @@ export interface CodeOperationTurnPort {
   readonly cancel: (input: {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
-  }) => Promise<CodeOperationTurnResult>;
+  }) => Promise<
+    CodeOperationTurnResult & {
+      /** The operation of the live turn this stopped, when there was one. */
+      readonly stoppedOperationId?: CodeOperationId;
+    }
+  >;
   /** What running turns are waiting on, before any window's authority is applied. */
   readonly pendingRequests?: () => ReadonlyArray<CodeTurnPendingRequest>;
   /**
@@ -820,6 +833,8 @@ export interface CodeOperationServiceOptions {
    */
   readonly resolveThreadMentionContext?: (input: {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+    /** The thread whose turn names the mentions; a marked mention marks it. */
+    readonly readerThreadId: string;
     readonly windowId: WindowId;
   }) => Promise<ReadonlyArray<CodeThreadMentionContext>>;
   /**
@@ -889,8 +904,16 @@ export interface CodeOperationServiceOptions {
  */
 interface StartingTurn {
   readonly thread: CodeThread;
+  readonly operationId: CodeOperationId;
   readonly checkoutRoot: string;
+  /** What the start's operation reads as once it was stopped. */
+  readonly stopped: CodeOperationResult;
   cancelled: boolean;
+  /**
+   * Whether the start's own result is journaled, by the start or by the Stop
+   * that released it. Exactly one of them writes it.
+   */
+  journaled: boolean;
 }
 
 export class CodeOperationService {
@@ -970,6 +993,26 @@ export class CodeOperationService {
       } => frame.event.kind === "operation-result",
     );
     if (existing !== undefined) {
+      // A start stopped after its `running` result was journaled (one
+      // recovered after a restart) carries its stop as a later result. That
+      // one answers, not the stale `running` beside it.
+      const stoppedStart =
+        command.kind === "start-provider-turn"
+          ? replay.frames.findLast(
+              (
+                frame,
+              ): frame is CodeOperationEventFrame & {
+                readonly event: {
+                  readonly kind: "operation-result";
+                  readonly result: CodeOperationResult;
+                };
+              } =>
+                frame !== existing &&
+                frame.event.kind === "operation-result" &&
+                isTerminalSettlement(frame.event),
+            )
+          : undefined;
+      if (stoppedStart !== undefined) return deliveredResult(stoppedStart.event.result);
       if (
         command.kind === "start-provider-turn" &&
         isStaleRunningProviderTurn(existing.event.result, replay.frames)
@@ -981,6 +1024,7 @@ export class CodeOperationService {
             scope.thread,
             scope.checkout,
             existing.event.result,
+            deliveredResult(this.#providerResult(command.operationId, { state: "interrupted" })),
             options.admissionCurrent,
           ),
         );
@@ -1035,6 +1079,8 @@ export class CodeOperationService {
 
     let result: CodeOperationResult;
     let resultCursor = replay.nextCursor;
+    /** A Stop journaled this start's result while it was still preparing. */
+    let journaledByStop: CodeOperationResult | undefined;
     const gate = await this.#authorize(windowId, command, scope.thread, scope.checkout, initiator);
     if (gate !== "allow") {
       result = this.#failed(
@@ -1124,7 +1170,16 @@ export class CodeOperationService {
             // either taken it on, and so reports it live, or let it go.
             const startingTurn: StartingTurn | undefined =
               command.kind === "start-provider-turn"
-                ? { thread: turnThread, checkoutRoot: root.checkoutRoot, cancelled: false }
+                ? {
+                    thread: turnThread,
+                    operationId: command.operationId,
+                    checkoutRoot: root.checkoutRoot,
+                    stopped: deliveredResult(
+                      this.#providerResult(command.operationId, { state: "interrupted" }),
+                    ),
+                    cancelled: false,
+                    journaled: false,
+                  }
                 : undefined;
             if (startingTurn !== undefined) this.#startingTurns.add(startingTurn);
             // A start stopped while it prepares is refused at its next
@@ -1143,6 +1198,23 @@ export class CodeOperationService {
                 command.kind === "start-provider-turn"
                   ? this.#refuseInvalidAgentRunDelivery(command)
                   : undefined;
+              const admissionRefusal = () =>
+                this.#failed(
+                  command.operationId,
+                  "unauthorized",
+                  "Code turn admission is no longer current.",
+                  "refused",
+                );
+              // A start stopped while it waited for a restore captures no
+              // checkpoint only to throw it away.
+              if (
+                command.kind === "start-provider-turn" &&
+                recordedStart === undefined &&
+                turnRefusal === undefined &&
+                admissionCurrent?.() === false
+              ) {
+                turnRefusal = admissionRefusal();
+              }
               if (
                 command.kind === "start-provider-turn" &&
                 recordedStart === undefined &&
@@ -1156,14 +1228,15 @@ export class CodeOperationService {
                 // Check again after the asynchronous checkpoint so a changed generation or
                 // an intervening parent admission cannot acquire a stale delivery mark.
                 const afterCheckpoint = this.#agentResultDelivery(command);
-                if (afterCheckpoint !== undefined) return afterCheckpoint;
+                if (afterCheckpoint !== undefined) {
+                  // The delivery's own result stands, unless a Stop already
+                  // journaled this start; then a Stop has nothing more to journal.
+                  if (startingTurn?.journaled === true) return startingTurn.stopped;
+                  if (startingTurn !== undefined) startingTurn.journaled = true;
+                  return afterCheckpoint;
+                }
                 if (admissionCurrent?.() === false) {
-                  turnRefusal = this.#failed(
-                    command.operationId,
-                    "unauthorized",
-                    "Code turn admission is no longer current.",
-                    "refused",
-                  );
+                  turnRefusal = admissionRefusal();
                 } else {
                   this.#options.events.append({
                     threadId: command.threadId,
@@ -1221,15 +1294,20 @@ export class CodeOperationService {
                 "admission" in result &&
                 result.admission === "refused"
               ) {
-                result = this.#providerResult(command.operationId, { state: "interrupted" });
+                result = startingTurn.stopped;
               }
             } finally {
               if (startingTurn !== undefined) this.#startingTurns.delete(startingTurn);
             }
+            // Nothing awaits between here and the append below, so a Stop
+            // still holding this start either journaled first or never will.
+            if (startingTurn?.journaled === true) journaledByStop = startingTurn.stopped;
+            else if (startingTurn !== undefined) startingTurn.journaled = true;
           }
         }
       }
     }
+    if (journaledByStop !== undefined) return journaledByStop;
     result = deliveredResult(result);
     this.#options.events.append({
       threadId: command.threadId,
@@ -1261,6 +1339,7 @@ export class CodeOperationService {
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
     cached: CodeOperationResult,
+    stopped: CodeOperationResult,
     admissionCurrent?: () => boolean,
   ): Promise<CodeOperationResult> {
     // A stale turn can be resumed long after the Project's provider policy
@@ -1303,8 +1382,11 @@ export class CodeOperationService {
       );
       const held: StartingTurn = {
         thread: turnThread,
+        operationId: command.operationId,
         checkoutRoot: root.checkoutRoot,
+        stopped,
         cancelled: false,
+        journaled: false,
       };
       startingTurn = held;
       this.#startingTurns.add(held);
@@ -1318,16 +1400,57 @@ export class CodeOperationService {
         recordedTurnAttachments(frames),
         () => !held.cancelled && admissionCurrent?.() !== false,
       );
-      if (held.cancelled && "admission" in recovered && recovered.admission === "refused")
-        return this.#providerResult(command.operationId, { state: "interrupted" });
+      // Stopped before the runtime took it on: whatever the preparation then
+      // answered (the admission refusal, or a failure of its own), the start
+      // reads as stopped, as Stop may already have journaled. Its journal
+      // still says `running`; without the stop on record, a retry of this
+      // operation would recover and launch it again.
+      const takenOn =
+        recovered.kind === "provider-turn-state" &&
+        (recovered.state === "running" || recovered.state === "waiting");
+      if (held.journaled || (held.cancelled && !takenOn)) {
+        this.#journalStoppedStart(held);
+        return stopped;
+      }
       return recovered.kind === "provider-turn-state" ||
         (recovered.kind === "operation-failed" && recovered.failure.category === "unauthorized")
         ? recovered
         : cached;
     } catch {
+      if (startingTurn?.cancelled === true) {
+        this.#journalStoppedStart(startingTurn);
+        return stopped;
+      }
       return this.#failed(command.operationId, "failed", "Code provider turn recovery failed.");
     } finally {
       if (startingTurn !== undefined) this.#startingTurns.delete(startingTurn);
+    }
+  }
+
+  /**
+   * Journal a stopped start's result unless the start already did. It reads
+   * as stopped in the transcript and counts as settled, so a retry of its
+   * operation answers from the journal instead of launching it.
+   */
+  #journalStoppedStart(starting: StartingTurn): void {
+    if (starting.journaled) return;
+    try {
+      let cursor = 0;
+      for (;;) {
+        const page = this.#replay(starting.thread.id, starting.operationId, cursor, 256);
+        cursor = page.nextCursor;
+        if (page.frames.length < 256) break;
+      }
+      this.#options.events.append({
+        threadId: starting.thread.id,
+        operationId: starting.operationId,
+        expectedCursor: cursor,
+        event: { kind: "operation-result", result: starting.stopped },
+      });
+      starting.journaled = true;
+    } catch {
+      // The Stop still stands; a start that settles later journals its own
+      // result instead.
     }
   }
 
@@ -1980,6 +2103,9 @@ export class CodeOperationService {
             browserGrant?.kind === "granted"
               ? [...credentialReferences, ...browserGrant.credentialReferences]
               : credentialReferences,
+          ...(browserGrant?.kind === "granted" && browserGrant.launcher !== undefined
+            ? { launcher: browserGrant.launcher }
+            : {}),
           executionPolicy: thread.executionPolicy,
         });
         owner.starting = starting;
@@ -2396,7 +2522,7 @@ export class CodeOperationService {
         // A turn still preparing is not the runtime's yet, so the runtime
         // cannot stop it; releasing it here is what lets a refused restore
         // through, as the refusal promised.
-        let stoppedStart = false;
+        const stoppedStarts: StartingTurn[] = [];
         for (const starting of this.#startingTurns) {
           if (
             String(starting.thread.id) === String(thread.id) &&
@@ -2404,16 +2530,30 @@ export class CodeOperationService {
           ) {
             starting.cancelled = true;
             this.#startingTurns.delete(starting);
-            stoppedStart = true;
+            stoppedStarts.push(starting);
           }
         }
         const cancelled = await this.#options.turns.cancel({
           thread,
           checkoutRoot: root.checkoutRoot,
         });
+        // A start the runtime has not taken on never will be now, so it is
+        // journaled as stopped here: its preparation may not return for a long
+        // time, and until then the transcript would show it running. One the
+        // runtime took on just before this Stop is its live turn, stopped and
+        // settled the way any live turn is.
+        for (const starting of stoppedStarts) {
+          const takenOn =
+            cancelled.state !== "failed" &&
+            (cancelled.stoppedOperationId === undefined ||
+              String(cancelled.stoppedOperationId) === String(starting.operationId));
+          if (!takenOn) this.#journalStoppedStart(starting);
+        }
         return this.#providerResult(
           command.operationId,
-          stoppedStart && cancelled.state === "failed" ? { state: "interrupted" } : cancelled,
+          stoppedStarts.length > 0 && cancelled.state === "failed"
+            ? { state: "interrupted" }
+            : cancelled,
         );
       }
     }
@@ -3123,7 +3263,7 @@ export class CodeOperationService {
     const context = [
       ...skillContext,
       ...profileContext.blocks,
-      ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
+      ...(await this.#resolveThreadMentions(thread.id, command.threadMentionIds, windowId)),
       ...(await this.#resolveFileMentions(command.fileMentionPaths, windowId, thread)),
       ...(issueContext === undefined
         ? []
@@ -3170,6 +3310,7 @@ export class CodeOperationService {
     const turn = await this.#options.turns.start({
       windowId,
       thread,
+      operationId: command.operationId,
       sessionId: command.sessionId,
       checkoutRoot,
       prompt,
@@ -3316,6 +3457,7 @@ export class CodeOperationService {
    * costs only the turn that named it.
    */
   async #resolveThreadMentions(
+    readerThreadId: CodeThreadId,
     threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
     windowId: WindowId,
   ): Promise<ReadonlyArray<ProviderContextBlock>> {
@@ -3328,7 +3470,11 @@ export class CodeOperationService {
     if (resolve === undefined) return unreadable();
     let resolved: ReadonlyArray<CodeThreadMentionContext>;
     try {
-      resolved = await resolve({ threadMentionIds, windowId });
+      resolved = await resolve({
+        threadMentionIds,
+        readerThreadId: String(readerThreadId),
+        windowId,
+      });
     } catch {
       // A resolver that throws proves nothing about any one mention, so every
       // named thread is reported unread rather than half of them guessed.

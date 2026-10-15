@@ -15,6 +15,9 @@ import {
   decodeCanvasId,
   decodeCanvasVersion,
   decodeCanvasVersionAppended,
+  decodeContentIngestedPayload,
+  THREAD_EXTERNAL_CONTENT_AGGREGATE,
+  THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
   type CanvasActionReceipt,
   type CanvasCreated,
   type CanvasRefreshReceipt,
@@ -31,7 +34,16 @@ import {
 } from "@octant/domain";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import { ConcurrencyConflict, DuplicateEventIdentity } from "../persistence/journalErrors";
+import {
+  CANVAS_OUTSIDE_CONTENT_AGGREGATE_TYPE,
+  CANVAS_OUTSIDE_CONTENT_CARRIED,
+  canvasOutsideContentWriters,
+  isReplicaWriter,
+  canvasVersionWriters,
+  decodeCanvasOutsideContentCarried,
+} from "./canvasOutsideContentMark";
 
 export { CANVAS_AGGREGATE_TYPE, CANVAS_CREATED, CANVAS_VERSION_APPENDED };
 export const MAX_CANVAS_REPLAY_LIMIT = 256;
@@ -49,11 +61,12 @@ const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replay" | "replayAggregateType"> &
+  Partial<Pick<Journal, "transaction" | "replayAggregate">>;
 
 export class CanvasEventStoreError extends Error {
   override readonly name = "CanvasEventStoreError";
-  readonly category: "invalid" | "journal-mismatch";
+  readonly category: "invalid" | "journal-mismatch" | "unreadable-mark";
 
   constructor(category: CanvasEventStoreError["category"], message: string) {
     super(message);
@@ -65,6 +78,13 @@ export interface CanvasEventStoreOptions {
   readonly journal: JournalPort;
   readonly uuid: () => string;
   readonly actor: typeof EventActor.Type;
+  /**
+   * Whether a thread or managed child writing a version is marked with
+   * outside content now. When it is, the version and the Canvas's own record
+   * of that mark commit as one unit, so no moment exists at which the Canvas
+   * holds the writer's text and carries no mark. Absent records nothing.
+   */
+  readonly writerMarked?: (writerId: string) => boolean;
 }
 
 export interface AppendCanvasCreateInput {
@@ -124,10 +144,12 @@ export class CanvasEventStore {
   readonly #journal: JournalPort;
   readonly #uuid: () => string;
   readonly #actor: typeof EventActor.Type;
+  readonly #writerMarked: ((writerId: string) => boolean) | undefined;
 
   constructor(options: CanvasEventStoreOptions) {
     this.#journal = options.journal;
     this.#uuid = options.uuid;
+    this.#writerMarked = options.writerMarked;
     try {
       this.#actor = decodeActor(options.actor);
     } catch {
@@ -158,21 +180,23 @@ export class CanvasEventStore {
 
     let committed;
     try {
-      committed = this.#journal.append({
-        aggregate: { aggregateType: CANVAS_AGGREGATE_TYPE, aggregateId },
-        expectedVersion: 0,
-        events: [
-          {
-            eventId,
-            eventName: CANVAS_CREATED,
-            eventVersion: 1,
-            correlationId,
-            actor: this.#actor,
-            occurredAt: input.occurredAt,
-            payload,
-          },
-        ],
-      });
+      committed = this.#carryingOutsideContent(version, input.occurredAt, () =>
+        this.#journal.append({
+          aggregate: { aggregateType: CANVAS_AGGREGATE_TYPE, aggregateId },
+          expectedVersion: 0,
+          events: [
+            {
+              eventId,
+              eventName: CANVAS_CREATED,
+              eventVersion: 1,
+              correlationId,
+              actor: this.#actor,
+              occurredAt: input.occurredAt,
+              payload,
+            },
+          ],
+        }),
+      );
     } catch (error) {
       throw this.#wrapConcurrency(error);
     }
@@ -218,21 +242,23 @@ export class CanvasEventStore {
 
     let committed;
     try {
-      committed = this.#journal.append({
-        aggregate: { aggregateType: CANVAS_AGGREGATE_TYPE, aggregateId },
-        expectedVersion,
-        events: [
-          {
-            eventId,
-            eventName: CANVAS_VERSION_APPENDED,
-            eventVersion: 1,
-            correlationId,
-            actor: this.#actor,
-            occurredAt: input.occurredAt,
-            payload,
-          },
-        ],
-      });
+      committed = this.#carryingOutsideContent(next, input.occurredAt, () =>
+        this.#journal.append({
+          aggregate: { aggregateType: CANVAS_AGGREGATE_TYPE, aggregateId },
+          expectedVersion,
+          events: [
+            {
+              eventId,
+              eventName: CANVAS_VERSION_APPENDED,
+              eventVersion: 1,
+              correlationId,
+              actor: this.#actor,
+              occurredAt: input.occurredAt,
+              payload,
+            },
+          ],
+        }),
+      );
     } catch (error) {
       throw this.#wrapConcurrency(error);
     }
@@ -318,20 +344,14 @@ export class CanvasEventStore {
 
   replayActionReceipts(): ReadonlyArray<CanvasActionReceipt> {
     const receipts: CanvasActionReceipt[] = [];
-    let afterSequence = 0;
-    while (true) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        if (envelope.eventName !== CANVAS_ACTION_RECEIPT_RECORDED) continue;
-        try {
-          receipts.push(decodeCanvasActionReceiptRecorded(envelope.payload).receipt);
-        } catch {
-          // Ignore malformed cache entries; lifecycle state remains journaled.
-        }
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      CANVAS_ACTION_AGGREGATE_TYPE,
+    ])) {
+      if (envelope.eventName !== CANVAS_ACTION_RECEIPT_RECORDED) continue;
+      try {
+        receipts.push(decodeCanvasActionReceiptRecorded(envelope.payload).receipt);
+      } catch {
+        // Ignore malformed cache entries; lifecycle state remains journaled.
       }
     }
     return receipts;
@@ -339,31 +359,23 @@ export class CanvasEventStore {
 
   replayRefreshReceipts(): ReadonlyArray<CanvasRefreshReceipt> {
     const receipts: CanvasRefreshReceipt[] = [];
-    let afterSequence = 0;
-    while (true) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        if (envelope.eventName !== CANVAS_REFRESH_RECEIPT_RECORDED) continue;
-        try {
+    // A refresh that made no new version records its own receipt; one that did
+    // carries the receipt on the version.
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      CANVAS_REFRESH_AGGREGATE_TYPE,
+      CANVAS_AGGREGATE_TYPE,
+    ])) {
+      try {
+        if (envelope.eventName === CANVAS_REFRESH_RECEIPT_RECORDED) {
           receipts.push(decodeCanvasRefreshReceiptRecorded(envelope.payload).receipt);
-        } catch {
-          // Ignore malformed cache entries; lifecycle state remains journaled.
-        }
-      }
-      for (const envelope of batch) {
-        if (envelope.eventName !== CANVAS_VERSION_APPENDED) continue;
-        try {
+        } else if (envelope.eventName === CANVAS_VERSION_APPENDED) {
           const payload = decodeCanvasVersionAppended(envelope.payload);
           if (payload.refreshReceipt !== undefined) {
             receipts.push(decodeCanvasRefreshReceipt(payload.refreshReceipt));
           }
-        } catch {
-          // Ignore malformed cache entries; lifecycle state remains journaled.
         }
+      } catch {
+        // Ignore malformed cache entries; lifecycle state remains journaled.
       }
     }
     return receipts;
@@ -471,6 +483,120 @@ export class CanvasEventStore {
     }
   }
 
+  /**
+   * Records the synced author of each version this computer took from another
+   * one before such versions carried their own author. Those versions name the
+   * thread they landed in as their writer, so a person's Clear on that thread
+   * would let it read the synced text unmarked. The thread's journaled
+   * ingestion of the version (`replica-artifact:<canvas>:<version>`) survives
+   * a Clear, so it identifies them. Idempotent: a version already named is
+   * skipped, and a version the Canvas does not hold (or a purged Canvas) adds
+   * nothing.
+   */
+  carryAdoptedVersionWriters(input: {
+    readonly versionIdsOf: (canvasId: string) => ReadonlyArray<string> | undefined;
+    readonly occurredAt: UtcTimestamp;
+  }): void {
+    const journal = this.#journal;
+    if (!recordsMarks(journal)) return;
+    let afterSequence = 0;
+    while (true) {
+      const page = journal.replayAggregateType({
+        aggregateType: THREAD_EXTERNAL_CONTENT_AGGREGATE,
+        afterSequence,
+        limit: 1_000,
+        eventName: THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested,
+        payloadPrefix: { path: "contentReference", prefix: "replica-artifact:" },
+      });
+      for (const event of page) {
+        afterSequence = event.globalSequence;
+        const reference = decodeContentIngestedPayload(event.payload).contentReference;
+        const [, canvasId, versionId] = reference.split(":");
+        if (canvasId === undefined || versionId === undefined) continue;
+        if (input.versionIdsOf(canvasId)?.includes(versionId) !== true) continue;
+        const recorded = canvasOutsideContentWriters(journal, canvasId);
+        if (recorded.includes(versionId)) continue;
+        journal.append({
+          aggregate: {
+            aggregateType: CANVAS_OUTSIDE_CONTENT_AGGREGATE_TYPE,
+            aggregateId: decodeAggregateId(canvasId),
+          },
+          expectedVersion: decodeAggregateVersion(recorded.length),
+          events: [
+            {
+              eventId: decodeEventId(this.#uuid()),
+              eventName: CANVAS_OUTSIDE_CONTENT_CARRIED,
+              eventVersion: 1,
+              correlationId: decodeCorrelationId(this.#uuid()),
+              actor: this.#actor,
+              occurredAt: input.occurredAt,
+              payload: decodeCanvasOutsideContentCarried({
+                canvasId,
+                versionId,
+                writerId: versionId,
+              }),
+            },
+          ],
+        });
+      }
+      if (page.length < 1_000) return;
+    }
+  }
+
+  /**
+   * Commits a version, and first, in the same journal unit, the Canvas's
+   * record of each writer that is marked with outside content now and that the
+   * Canvas does not already name. A mark that cannot be read or recorded
+   * refuses the version rather than letting it land unmarked.
+   */
+  #carryingOutsideContent<A>(version: CanvasVersion, occurredAt: UtcTimestamp, commit: () => A): A {
+    const writerMarked = this.#writerMarked;
+    if (writerMarked === undefined) return commit();
+    const journal = this.#journal;
+    const canvasId = String(version.canvasId);
+    let recorded: ReadonlyArray<string>;
+    let marked: ReadonlyArray<string>;
+    try {
+      recorded = recordsMarks(journal) ? canvasOutsideContentWriters(journal, canvasId) : [];
+      marked = canvasVersionWriters(version).filter(
+        (writerId) =>
+          !recorded.includes(writerId) &&
+          // A synced version has no thread of its own to be marked: it is as
+          // marked as the thread it lands in, which took it as outside content.
+          writerMarked(
+            isReplicaWriter(version, writerId)
+              ? String(version.definition.provenance.threadId)
+              : writerId,
+          ),
+      );
+    } catch {
+      throw unreadableMark();
+    }
+    if (marked.length === 0) return commit();
+    if (!recordsMarks(journal)) throw unreadableMark();
+    const aggregateId = decodeAggregateId(canvasId);
+    return journal.transaction(() => {
+      journal.append({
+        aggregate: { aggregateType: CANVAS_OUTSIDE_CONTENT_AGGREGATE_TYPE, aggregateId },
+        expectedVersion: decodeAggregateVersion(recorded.length),
+        events: marked.map((writerId) => ({
+          eventId: decodeEventId(this.#uuid()),
+          eventName: CANVAS_OUTSIDE_CONTENT_CARRIED,
+          eventVersion: 1,
+          correlationId: decodeCorrelationId(this.#uuid()),
+          actor: this.#actor,
+          occurredAt,
+          payload: decodeCanvasOutsideContentCarried({
+            canvasId,
+            versionId: version.versionId,
+            writerId,
+          }),
+        })),
+      });
+      return commit();
+    });
+  }
+
   #wrapConcurrency(error: unknown): CanvasEventStoreError {
     if (error instanceof ConcurrencyConflict) {
       return new CanvasEventStoreError(
@@ -523,4 +649,19 @@ function isCanvasAggregate(envelope: EventEnvelope, canvasId: CanvasId): boolean
  */
 function policyReason(error: unknown, fallback: string): string {
   return error instanceof CanvasPolicyRejected ? error.message : fallback;
+}
+
+/** Whether this journal can read a Canvas's recorded writers and commit a mark with a version. */
+function recordsMarks(
+  journal: JournalPort,
+): journal is JournalPort & Pick<Journal, "transaction" | "replayAggregate"> {
+  return journal.transaction !== undefined && journal.replayAggregate !== undefined;
+}
+
+/** Why nothing was written, and what the person can do: the check can pass on a second try. */
+export const UNREADABLE_MARK_MESSAGE =
+  "The Canvas could not be checked for outside content, so nothing was written. Try again.";
+
+function unreadableMark(): CanvasEventStoreError {
+  return new CanvasEventStoreError("unreadable-mark", UNREADABLE_MARK_MESSAGE);
 }

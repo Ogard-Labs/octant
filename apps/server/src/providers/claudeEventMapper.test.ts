@@ -223,6 +223,61 @@ describe("mapClaudeMessage", () => {
     );
   });
 
+  it("marks the thread when Claude runs its own web fetch or search, and for no other tool", () => {
+    const ctx = context();
+    const start = (
+      index: number,
+      toolUseId: string,
+      toolName: string,
+      input: { readonly [key: string]: string },
+    ) =>
+      mapped(ctx, {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: {
+          kind: "content-start",
+          index,
+          content: { kind: "tool-use", toolUseId, toolName, input },
+        },
+      });
+
+    const read = start(0, "sdk-tool-1", "Read", { file_path: "/repo/README.md" });
+    const fetched = start(1, "sdk-tool-2", "WebFetch", {
+      url: "https://example.invalid/docs?token=sk-ant-private",
+      prompt: "Summarize",
+    });
+    const searched = start(2, "sdk-tool-3", "WebSearch", { query: "octant release notes" });
+
+    expect(eventValues(read).map((next) => next.kind)).toEqual(["tool-start"]);
+    expect(fetched).toMatchObject([
+      { kind: "event", event: { kind: "tool-start", toolCallId: "tool-2", toolName: "WebFetch" } },
+      {
+        kind: "event",
+        event: {
+          kind: "outside-content-read",
+          toolCallId: "tool-2",
+          toolName: "WebFetch",
+          source: "web-fetch",
+        },
+      },
+    ]);
+    const fetchTarget = eventValues(fetched)[1];
+    if (fetchTarget?.kind !== "outside-content-read") throw new Error("Expected a web read");
+    expect(fetchTarget.target).toMatch(/^https:\/\/example\.invalid\/docs/);
+    expect(fetchTarget.target).not.toContain("sk-ant-private");
+    expect(searched).toMatchObject([
+      { kind: "event", event: { kind: "tool-start", toolName: "WebSearch" } },
+      {
+        kind: "event",
+        event: {
+          kind: "outside-content-read",
+          source: "web-search",
+          target: "octant release notes",
+        },
+      },
+    ]);
+  });
+
   it("uses one Unicode-safe bounded tool label across streamed and authoritative tool-use", () => {
     const ctx = context();
     const toolName = `${"T".repeat(255)}😀private-suffix`;
@@ -1487,7 +1542,7 @@ describe("mapClaudeMessage", () => {
           permissionDenials: [],
         }),
       );
-      expect(settled).toMatchObject({ kind: "usage", promptRetention: "compacted" });
+      expect(settled).toMatchObject({ kind: "usage", promptRetention: "kept" });
       if (contextTokens === undefined) expect(settled).not.toHaveProperty("contextTokens");
       else expect(settled).toMatchObject({ contextTokens });
     },

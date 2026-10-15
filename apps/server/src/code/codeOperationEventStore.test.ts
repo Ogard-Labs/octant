@@ -13,8 +13,11 @@ import {
   decodeCodeOperationId,
   decodeCodeThreadId,
   decodeProviderInstanceId,
+  type CodeConversationTurn,
   type CodeOperationEvent,
+  type CodeOperationId,
 } from "@octant/contracts";
+import { foldCodeTurnUsage } from "@octant/domain";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
@@ -25,6 +28,7 @@ import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import {
+  CODE_CONVERSATION_WINDOW_BYTES,
   CODE_OPERATION_EVENT_RECORDED,
   CodeOperationEventStore,
   CodeOperationEventStoreError,
@@ -172,6 +176,76 @@ describe("CodeOperationEventStore", () => {
     expect(store.historyForThread(otherThreadId)).toMatchObject({
       status: "ok",
       frames: [{ threadId: otherThreadId, operationId: otherOperationId, cursor: 1 }],
+    });
+    fixture.connection.close();
+  });
+
+  it("reads a thread's history again only from the rows appended since the last read", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    store.append({ threadId, operationId, expectedCursor: 0, event: stateEvent("running") });
+    store.append({ threadId, operationId, expectedCursor: 1, event: stateEvent("running") });
+    expect(store.historyForThread(threadId)).toMatchObject({ status: "ok", frames: [{}, {}] });
+    const replay = vi.spyOn(fixture.journal, "replayAggregateTypeForThread");
+
+    // The board and the sidebar read every thread's history every few
+    // seconds; an unchanged thread must not be read or decoded again.
+    expect(store.historyForThread(threadId)).toMatchObject({ status: "ok", frames: [{}, {}] });
+    expect(replay).not.toHaveBeenCalled();
+
+    store.append({ threadId, operationId, expectedCursor: 2, event: stateEvent("completed") });
+    expect(store.historyForThread(threadId)).toMatchObject({
+      status: "ok",
+      frames: [{ cursor: 1 }, { cursor: 2 }, { cursor: 3, event: { state: "completed" } }],
+    });
+    expect(replay.mock.calls.map(([cursor]) => cursor.afterSequence)).toEqual([2]);
+    fixture.connection.close();
+  });
+
+  it("keeps one remembered history per journal, however many stores read it", () => {
+    const fixture = openJournal();
+    const board = createStore(fixture.journal);
+    const runtime = createStore(fixture.journal);
+    board.append({ threadId, operationId, expectedCursor: 0, event: stateEvent("running") });
+    expect(board.historyForThread(threadId)).toMatchObject({ status: "ok", frames: [{}] });
+    const replay = vi.spyOn(fixture.journal, "replayAggregateTypeForThread");
+
+    // The host's board and its Code runtime each build a store on the same
+    // journal; a second copy of a thread's history would double the bound.
+    expect(runtime.historyForThread(threadId)).toMatchObject({ status: "ok", frames: [{}] });
+    expect(replay).not.toHaveBeenCalled();
+    fixture.connection.close();
+  });
+
+  it("stops answering with a thread's history once its rows are purged from the journal", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    store.append({ threadId, operationId, expectedCursor: 0, event: stateEvent("running") });
+    store.append({
+      threadId,
+      operationId: otherOperationId,
+      expectedCursor: 0,
+      event: stateEvent("running"),
+    });
+    store.append({ threadId, operationId, expectedCursor: 1, event: stateEvent("completed") });
+    expect(store.historyForThread(threadId)).toMatchObject({
+      status: "ok",
+      frames: [{}, {}, {}],
+    });
+
+    // A purge deletes an operation's rows in place; the newest row survives
+    // here, so only the slice's size says the remembered history is stale.
+    for (const table of ["aggregate_heads", "event_journal"])
+      fixture.connection
+        .prepare(`DELETE FROM ${table} WHERE aggregate_id = ?`)
+        .run(String(otherOperationId));
+
+    expect(store.historyForThread(threadId)).toMatchObject({
+      status: "ok",
+      frames: [
+        { operationId, cursor: 1 },
+        { operationId, cursor: 2 },
+      ],
     });
     fixture.connection.close();
   });
@@ -978,6 +1052,378 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 });
+
+describe("CodeOperationEventStore conversation window", () => {
+  const firstProvider = decodeProviderInstanceId("89000000-0000-4000-8000-000000000040");
+  const secondProvider = decodeProviderInstanceId("89000000-0000-4000-8000-000000000041");
+
+  it("joins its windows into the forward pages' turns and keeps the thread's total at every page", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const seeded = seedHistory(store);
+
+    const forward: Array<CodeConversationTurn> = [];
+    let cursor = 0;
+    for (;;) {
+      const page = store.conversation({
+        threadId,
+        afterCursor: cursor,
+        limit: 4,
+        providerInstanceId: secondProvider,
+      });
+      forward.push(...page.turns);
+      if (!page.hasMore) break;
+      cursor = page.nextCursor;
+    }
+    const whole = store.conversation({
+      threadId,
+      afterCursor: 0,
+      limit: 100,
+      providerInstanceId: secondProvider,
+    });
+    const total = foldCodeTurnUsage(
+      undefined,
+      forward.flatMap((turn) => (turn.usage === undefined ? [] : [turn.usage])),
+    );
+
+    const loaded: Array<CodeConversationTurn> = [];
+    let newest = true;
+    let before: CodeOperationId | undefined;
+    for (;;) {
+      const read = store.conversationWindow({
+        threadId,
+        limit: 4,
+        providerInstanceId: secondProvider,
+        ...(before === undefined ? {} : { before }),
+      });
+      if (read.status !== "ok") throw new Error("window refused");
+      const window = read.window;
+      expect(window.hasLater).toBe(!newest);
+      if (newest) {
+        // Thread state comes on the newest window only, as the whole read has it.
+        expect(window.limits).toEqual(whole.limits);
+        expect(window.restoreUndo).toEqual(whole.restoreUndo);
+      } else {
+        expect(window.limits).toBeUndefined();
+        expect(window.restoreUndo).toBeUndefined();
+      }
+      loaded.unshift(...window.turns);
+      // Whatever has loaded, its seed and its turns are the thread's total.
+      expect(
+        foldCodeTurnUsage(
+          window.earlierUsage,
+          loaded.flatMap((turn) => (turn.usage === undefined ? [] : [turn.usage])),
+        ),
+      ).toEqual(total);
+      newest = false;
+      if (!window.hasEarlier) {
+        expect(window.earlierUsage).toBeUndefined();
+        break;
+      }
+      before = window.turns[0]?.operationId;
+    }
+    expect(loaded).toEqual(forward);
+    expect(seeded.length).toBe(forward.length);
+    fixture.connection.close();
+  });
+
+  it("drops limits an earlier provider reported and keeps the current provider's newest", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    seedHistory(store);
+    const read = store.conversationWindow({
+      threadId,
+      limit: 1,
+      providerInstanceId: secondProvider,
+    });
+    expect(read.status === "ok" ? read.window.limits : undefined).toEqual([
+      { window: "weekly", status: "warning", utilization: 0.8 },
+    ]);
+    const before = store.conversationWindow({
+      threadId,
+      limit: 1,
+      providerInstanceId: firstProvider,
+    });
+    expect(before.status === "ok" ? before.window.limits : undefined).toEqual([
+      { window: "weekly", status: "exhausted" },
+    ]);
+    fixture.connection.close();
+  });
+
+  it("offers the last restore's way back when that restore is older than the loaded turns, past a rejected one", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    seedHistory(store);
+    const read = store.conversationWindow({ threadId, limit: 1 });
+    // The restore that ran sits between the third and fourth turns, and a
+    // rejected one after it; the newest turn is far later.
+    expect(read.status === "ok" ? read.window.restoreUndo : undefined).toEqual(ranRestore);
+    fixture.connection.close();
+  });
+
+  it("finds the newest restore behind many other Git results without reading them", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    seedHistory(store);
+    const git = turnOperation(800);
+    for (let index = 0; index < 70; index += 1) {
+      store.append({
+        threadId,
+        operationId: git,
+        expectedCursor: index,
+        event: decodeCodeOperationEvent({
+          kind: "operation-result",
+          result: {
+            kind: "git-mutation-state",
+            operationId: git,
+            gitOperationId: "89000000-0000-4000-8000-000000000061",
+            mutation: "commit",
+            state: "completed",
+          },
+        }),
+      });
+    }
+    const results = vi.spyOn(fixture.journal, "latestThreadResults");
+    const read = store.conversationWindow({ threadId, limit: 1 });
+    expect(read.status === "ok" ? read.window.restoreUndo : undefined).toEqual(ranRestore);
+    const mutations = results.mock.results.flatMap((result) =>
+      result.type === "return"
+        ? (result.value as ReadonlyArray<{ readonly payload: unknown }>).map(
+            (envelope) =>
+              (
+                envelope.payload as {
+                  readonly event: { readonly result: { readonly mutation: string } };
+                }
+              ).event.result.mutation,
+          )
+        : [],
+    );
+    // The restore that ran and the rejected one after it; none of the commits.
+    expect(mutations).toEqual(["restore-checkpoint", "restore-checkpoint"]);
+    fixture.connection.close();
+  });
+
+  it("folds the turns before a window in the order they started, whatever order their reports landed in", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const [older, newer, newest] = [turnOperation(700), turnOperation(701), turnOperation(702)];
+    for (const turn of [older, newer]) {
+      store.append({
+        threadId,
+        operationId: turn,
+        expectedCursor: 0,
+        event: turnStarted(firstProvider),
+      });
+    }
+    const usage = (contextTokens: number) =>
+      decodeCodeOperationEvent({ kind: "usage", inputTokens: 10, outputTokens: 1, contextTokens });
+    // The newer turn reports first; the older turn's last report lands after it.
+    store.append({ threadId, operationId: newer, expectedCursor: 1, event: usage(200) });
+    store.append({ threadId, operationId: older, expectedCursor: 1, event: usage(100) });
+    store.append({
+      threadId,
+      operationId: newest,
+      expectedCursor: 0,
+      event: turnStarted(firstProvider),
+    });
+
+    const forward = store.conversation({ threadId, afterCursor: 0, limit: 10 });
+    const read = store.conversationWindow({ threadId, limit: 1 });
+    if (read.status !== "ok") throw new Error("window refused");
+    expect(read.window.earlierUsage).toEqual(
+      foldCodeTurnUsage(
+        undefined,
+        forward.turns.flatMap((turn) => (turn.usage === undefined ? [] : [turn.usage])),
+      ),
+    );
+    expect(read.window.earlierUsage?.contextTokens).toBe(200);
+    fixture.connection.close();
+  });
+
+  it("answers the page that ends with a turn, and says the thread goes on after it", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const turns = seedHistory(store);
+    const through = turns[5];
+    if (through === undefined) throw new Error("fixture");
+    const read = store.conversationWindow({ threadId, limit: 3, through });
+    expect(read.status).toBe("ok");
+    if (read.status !== "ok") return;
+    expect(read.window.turns.map((turn) => turn.operationId)).toEqual(turns.slice(3, 6));
+    expect(read.window).toMatchObject({ hasEarlier: true, hasLater: true });
+    const last = turns.at(-1);
+    if (last === undefined) throw new Error("fixture");
+    const end = store.conversationWindow({ threadId, limit: 3, through: last });
+    expect(end.status === "ok" ? end.window.hasLater : undefined).toBe(false);
+    fixture.connection.close();
+  });
+
+  it("refuses an anchor that is not a turn of this thread", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const turns = seedHistory(store);
+    const anchor = turns[2];
+    if (anchor === undefined) throw new Error("fixture");
+    expect(store.conversationWindow({ threadId: otherThreadId, limit: 5, before: anchor })).toEqual(
+      { status: "anchor-not-found" },
+    );
+    expect(
+      store.conversationWindow({
+        threadId,
+        limit: 5,
+        through: decodeCodeOperationId("89000000-0000-4000-9000-0000000fffff"),
+      }),
+    ).toEqual({ status: "anchor-not-found" });
+    fixture.connection.close();
+  });
+
+  it("stops a window short of its limit at the byte budget, never below one turn", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const summary = "s".repeat(2_000);
+    const turnCount = 20;
+    for (let index = 0; index < turnCount; index += 1) {
+      const turn = turnOperation(500 + index);
+      store.append({
+        threadId,
+        operationId: turn,
+        expectedCursor: 0,
+        event: turnStarted(firstProvider),
+      });
+      for (let step = 0; step < MAX_CODE_CONVERSATION_TURN_STEPS; step += 1) {
+        store.append({
+          threadId,
+          operationId: turn,
+          expectedCursor: step + 1,
+          event: decodeCodeOperationEvent({
+            kind: "tool-activity",
+            toolCallId: `call-${String(step)}`,
+            toolName: "Read",
+            state: "completed",
+            summary,
+          }),
+        });
+      }
+    }
+    const read = store.conversationWindow({ threadId, limit: 100 });
+    if (read.status !== "ok") throw new Error("window refused");
+    const bytes = Buffer.byteLength(JSON.stringify(read.window.turns), "utf8");
+    expect(read.window.turns.length).toBeGreaterThan(0);
+    expect(read.window.turns.length).toBeLessThan(turnCount);
+    expect(read.window.hasEarlier).toBe(true);
+    expect(bytes).toBeLessThanOrEqual(CODE_CONVERSATION_WINDOW_BYTES);
+    fixture.connection.close();
+  });
+
+  const ranRestore = { worktree: "a".repeat(40), index: "b".repeat(40) };
+
+  /**
+   * Eleven turns on two providers: the first six on one, the rest on the
+   * other. Usage is reported twice on one turn and not at all on another,
+   * limits come from both providers under one window name, and a restore that
+   * ran is followed by a rejected one. Answers the turns' operations in order.
+   */
+  function seedHistory(store: CodeOperationEventStore): ReadonlyArray<CodeOperationId> {
+    const operations: Array<CodeOperationId> = [];
+    for (let index = 0; index < 11; index += 1) {
+      const turn = turnOperation(index);
+      operations.push(turn);
+      const provider = index < 6 ? firstProvider : secondProvider;
+      let cursor = 0;
+      const append = (event: CodeOperationEvent) =>
+        store.append({ threadId, operationId: turn, expectedCursor: cursor++, event });
+      append(turnStarted(provider));
+      append({ kind: "provider-content", channel: "message", content: evidence(index) });
+      if (index !== 4) {
+        append(
+          decodeCodeOperationEvent({
+            kind: "usage",
+            inputTokens: 100 + index,
+            outputTokens: 10 + index,
+            ...(index % 3 === 0 ? { cacheReadInputTokens: 7 * index } : {}),
+            ...(index % 2 === 0 ? { costUsd: 0.125 } : {}),
+            contextWindow: 200_000,
+            contextTokens: 1_000 * index,
+          }),
+        );
+      }
+      if (index === 7) {
+        // A second report of the same turn is its new total, not an addition.
+        append(decodeCodeOperationEvent({ kind: "usage", inputTokens: 900, outputTokens: 90 }));
+      }
+      if (index === 2) {
+        append(
+          decodeCodeOperationEvent({
+            kind: "provider-limit",
+            window: "weekly",
+            status: "exhausted",
+          }),
+        );
+      }
+      if (index === 9) {
+        append(
+          decodeCodeOperationEvent({
+            kind: "provider-limit",
+            window: "weekly",
+            status: "warning",
+            utilization: 0.8,
+          }),
+        );
+      }
+      append(stateEvent("completed"));
+      if (index === 3) {
+        const restore = turnOperation(100);
+        const result = (state: string, undo?: typeof ranRestore) =>
+          decodeCodeOperationEvent({
+            kind: "operation-result",
+            result: {
+              kind: "git-mutation-state",
+              operationId: restore,
+              gitOperationId: "89000000-0000-4000-8000-000000000060",
+              mutation: "restore-checkpoint",
+              state,
+              ...(undo === undefined ? {} : { undo }),
+            },
+          });
+        store.append({
+          threadId,
+          operationId: restore,
+          expectedCursor: 0,
+          event: result("completed", ranRestore),
+        });
+        store.append({
+          threadId,
+          operationId: restore,
+          expectedCursor: 1,
+          event: result("rejected"),
+        });
+      }
+    }
+    return operations;
+  }
+});
+
+function turnOperation(index: number): CodeOperationId {
+  return decodeCodeOperationId(`89000000-0000-4000-9000-${index.toString().padStart(12, "0")}`);
+}
+
+function evidence(index: number) {
+  return decodeCodeEvidenceReference({
+    contentId: `89000000-0000-4000-a000-${index.toString().padStart(12, "0")}`,
+    digest: "e".repeat(64),
+    byteLength: 8,
+  });
+}
+
+function turnStarted(providerInstanceId: string): CodeOperationEvent {
+  return decodeCodeOperationEvent({
+    kind: "conversation-turn-started",
+    providerInstanceId,
+    modelId: "model-one",
+    sessionId: "89000000-0000-4000-8000-000000000050",
+    prompt: evidence(9_999),
+  });
+}
 
 function createStore(journal: Journal, clock: () => string = () => now): CodeOperationEventStore {
   let uuidCounter = 100;

@@ -15,6 +15,7 @@ import {
   replicaFounderReachedFrom,
   replicaJoinRequestIsFresh,
   replicaMembershipNode,
+  replicaRevocationKeeps,
   REPLICA_JOIN_REQUEST_TTL_MS,
   type ReplicaDerivedMembership,
   type ReplicaHeldRecord,
@@ -74,6 +75,7 @@ const revocation = (
   sequence: number,
   subject: ReplicaInstanceId,
   cut: number,
+  kept?: ReadonlyArray<readonly [number, number]>,
 ) =>
   held({
     format: REPLICA_ENTRY_FORMAT,
@@ -81,6 +83,17 @@ const revocation = (
     origin: origin(by, sequence),
     subject,
     cut,
+    ...(kept === undefined
+      ? {}
+      : { kept: { version: 1, runs: kept.map(([from, to]) => ({ from, to })) } }),
+  });
+
+const left = (by: ReplicaInstanceId, sequence: number, founder: ReplicaInstanceId = ids.founder) =>
+  held({
+    format: REPLICA_ENTRY_FORMAT,
+    kind: "replica-left",
+    origin: origin(by, sequence),
+    founder,
   });
 
 /** The founder approves South at 2 and East at 3; South approves West at 3. */
@@ -106,6 +119,7 @@ function standing(membership: ReplicaDerivedMembership, id: ReplicaInstanceId): 
   const node = replicaMembershipNode(membership, id);
   if (node === undefined) return "absent";
   if (!node.admitted) return "not admitted";
+  if (node.left) return `left@${String(node.cut)}`;
   return node.cut === undefined ? "member" : `cut@${node.cut}`;
 }
 
@@ -300,11 +314,197 @@ describe("replica membership derivation", () => {
     expect(String(replicaMembershipNode(membership, ids.west)?.parent)).toBe(ids.south);
   });
 
+  it("counts what a computer signed before it left and nothing after, and keeps the computers it approved", () => {
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...tree().records,
+      left(ids.south, 4),
+      // Written with South's key after it left: neither counts.
+      revocation(ids.south, 5, ids.west, 0),
+      approval(ids.south, 6, ids.other),
+    ]);
+    expect(standing(membership, ids.south)).toBe("left@3");
+    expect(standing(membership, ids.west)).toBe("member");
+    expect(replicaEntryCounts(membership, ids.south, 3)).toBe(true);
+    expect(replicaEntryCounts(membership, ids.south, 4)).toBe(false);
+    expect(decideReplicaJoinApproval({ membership, local: ids.south, subject: ids.other })).toEqual(
+      { status: "refused", reason: "not-a-member" },
+    );
+    // The founder can still revoke the computer South brought in.
+    expect(decideReplicaRevocation({ membership, local: ids.founder, subject: ids.west })).toEqual({
+      status: "revoked",
+    });
+  });
+
+  it("shows a computer revoked before it left as revoked, and one revoked after it left as left", () => {
+    const { records } = tree();
+    const revokedFirst = deriveReplicaMembership(ids.founder, [
+      ...records,
+      revocation(ids.founder, 4, ids.south, 2),
+      left(ids.south, 4),
+    ]);
+    expect(standing(revokedFirst, ids.south)).toBe("cut@2");
+    // A revoke after reading the left record cuts at that record at the earliest.
+    const leftFirst = deriveReplicaMembership(ids.founder, [
+      ...records,
+      left(ids.south, 4),
+      revocation(ids.founder, 4, ids.south, 4),
+    ]);
+    expect(standing(leftFirst, ids.south)).toBe("left@3");
+  });
+
+  it("ignores a left record that names another founder, and one from a computer that is not a member", () => {
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...tree().records,
+      left(ids.south, 4, ids.other),
+      left(ids.ghost, 2),
+    ]);
+    expect(standing(membership, ids.south)).toBe("member");
+    expect(standing(membership, ids.ghost)).toBe("absent");
+  });
+
+  it("lets the founder leave without taking the computers it approved with it", () => {
+    const membership = deriveReplicaMembership(ids.founder, [
+      ...tree().records,
+      left(ids.founder, 4),
+      revocation(ids.founder, 5, ids.east, 0),
+    ]);
+    expect(standing(membership, ids.founder)).toBe("left@3");
+    expect(standing(membership, ids.south)).toBe("member");
+    expect(standing(membership, ids.east)).toBe("member");
+    expect(standing(membership, ids.west)).toBe("member");
+  });
+
+  describe("a revocation that names the slots its writer read", () => {
+    // The founder revokes South at its sequence 4 with cut 5. It read South's
+    // slots 1-3 and 5 as South's own; slot 4 held another writer's file, so
+    // whatever sits there now was written later with South's key.
+    const keptAround4: ReadonlyArray<readonly [number, number]> = [
+      [1, 3],
+      [5, 5],
+    ];
+    const revokeSouth = (kept: typeof keptAround4 | undefined) =>
+      revocation(ids.founder, 4, ids.south, 5, kept);
+
+    it("refuses an approval written into a slot it did not keep", () => {
+      const filled = approval(ids.south, 4, ids.other);
+      const records = [...tree().records, filled, accept(ids.other, 2, filled)];
+      const committed = deriveReplicaMembership(ids.founder, [
+        ...records,
+        revokeSouth(keptAround4),
+      ]);
+      expect(standing(committed, ids.south)).toBe("cut@5");
+      expect(standing(committed, ids.other)).toBe("not admitted");
+      expect(replicaEntryCounts(committed, ids.south, 3)).toBe(true);
+      expect(replicaEntryCounts(committed, ids.south, 4)).toBe(false);
+      expect(replicaEntryCounts(committed, ids.south, 5)).toBe(true);
+      // Without the slots, the cut alone keeps slot 4, as before.
+      const cutOnly = deriveReplicaMembership(ids.founder, [...records, revokeSouth(undefined)]);
+      expect(standing(cutOnly, ids.other)).toBe("member");
+    });
+
+    it("refuses a revocation written into a slot it did not keep", () => {
+      const records = [...tree().records, revocation(ids.south, 4, ids.west, 0)];
+      expect(
+        standing(
+          deriveReplicaMembership(ids.founder, [...records, revokeSouth(keptAround4)]),
+          ids.west,
+        ),
+      ).toBe("member");
+      expect(
+        standing(
+          deriveReplicaMembership(ids.founder, [...records, revokeSouth(undefined)]),
+          ids.west,
+        ),
+      ).toBe("cut@0");
+    });
+
+    it("refuses a left record written into a slot it did not keep, so the computer stays revoked", () => {
+      const records = [...tree().records, left(ids.south, 4)];
+      expect(
+        standing(
+          deriveReplicaMembership(ids.founder, [...records, revokeSouth(keptAround4)]),
+          ids.south,
+        ),
+      ).toBe("cut@5");
+      expect(
+        standing(
+          deriveReplicaMembership(ids.founder, [...records, revokeSouth(undefined)]),
+          ids.south,
+        ),
+      ).toBe("left@3");
+    });
+
+    it("keeps a gap closed when the cut falls past it", () => {
+      const filled = approval(ids.south, 4, ids.other);
+      const keptLater = approval(ids.south, 7, ids.ghost);
+      const membership = deriveReplicaMembership(ids.founder, [
+        ...tree().records,
+        filled,
+        accept(ids.other, 2, filled),
+        keptLater,
+        accept(ids.ghost, 2, keptLater),
+        revocation(ids.founder, 4, ids.south, 9, [
+          [1, 3],
+          [5, 9],
+        ]),
+      ]);
+      expect(standing(membership, ids.south)).toBe("cut@9");
+      expect(standing(membership, ids.other)).toBe("not admitted");
+      expect(standing(membership, ids.ghost)).toBe("member");
+    });
+
+    it("counts a slot only when every revocation that names slots kept it, in any order", () => {
+      // The founder kept West's 1-2 and 4; South kept 1-3. Only 1-2 count.
+      const all = [
+        ...tree().records,
+        revocation(ids.founder, 4, ids.west, 4, [
+          [1, 2],
+          [4, 4],
+        ]),
+        revocation(ids.south, 4, ids.west, 4, [[1, 3]]),
+      ];
+      const expected = deriveReplicaMembership(ids.founder, all);
+      expect(replicaMembershipNode(expected, ids.west)?.kept).toEqual([{ from: 1, to: 2 }]);
+      for (const sequence of [3, 4]) {
+        expect(replicaEntryCounts(expected, ids.west, sequence)).toBe(false);
+      }
+      expect(deriveReplicaMembership(ids.founder, [...all].reverse())).toEqual(expected);
+    });
+
+    it("ignores the kept slots of a revocation that does not count", () => {
+      // East is not West's ancestor, so its revocation narrows nothing.
+      const membership = deriveReplicaMembership(ids.founder, [
+        ...tree().records,
+        revocation(ids.east, 3, ids.west, 2, [[1, 1]]),
+      ]);
+      expect(standing(membership, ids.west)).toBe("member");
+      expect(replicaMembershipNode(membership, ids.west)?.kept).toBeUndefined();
+    });
+  });
+
+  it("commits a revocation to the slots read at or before its cut, moving the cut earlier only past the run bound", () => {
+    expect(replicaRevocationKeeps([5, 1, 2, 3, 7, 3, 12], 9)).toEqual({
+      cut: 9,
+      runs: [
+        { from: 1, to: 3 },
+        { from: 5, to: 5 },
+        { from: 7, to: 7 },
+      ],
+    });
+    expect(replicaRevocationKeeps([], 0)).toEqual({ cut: 0, runs: [] });
+    // Every other slot up to 2050: 1,025 runs, one more than a record carries.
+    const scattered = Array.from({ length: 1_025 }, (_, index) => index * 2 + 1);
+    const bounded = replicaRevocationKeeps(scattered, 2_050);
+    expect(bounded.runs).toHaveLength(1_024);
+    expect(bounded.cut).toBe(2_047);
+  });
+
   it("derives the same members and cuts for every order and duplicate of the same records", () => {
     const all = [
       ...tree().records,
       revocation(ids.founder, 4, ids.west, 2),
       revocation(ids.west, 3, ids.south, 0),
+      left(ids.east, 3),
     ];
     const expected = deriveReplicaMembership(ids.founder, all);
     for (let shift = 0; shift < all.length; shift += 1) {

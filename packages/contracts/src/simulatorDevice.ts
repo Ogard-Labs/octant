@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { DeviceOrientation } from "./deviceHost";
 
 /**
  * Apple workbench input handed from the server to the desktop, which delivers
@@ -58,6 +59,11 @@ export const SimulatorDeviceInput = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("repair-input"),
     ...destination,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("rotate"),
+    ...destination,
+    orientation: DeviceOrientation,
   }).annotations(strict),
 );
 export type SimulatorDeviceInput = typeof SimulatorDeviceInput.Type;

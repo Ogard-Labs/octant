@@ -34,7 +34,14 @@ export type AppleWorkbenchStatus =
 export type AppleWorkbenchIntent =
   | { readonly kind: "build" | "test" }
   | {
-      readonly kind: "run" | "boot" | "shutdown" | "screenshot" | "open-input";
+      readonly kind:
+        | "run"
+        | "boot"
+        | "shutdown"
+        | "screenshot"
+        | "open-input"
+        | "start-recording"
+        | "stop-recording";
       readonly simulatorId: AppleSimulatorId;
     }
   | {
@@ -60,7 +67,13 @@ export type AppleWorkbenchIntent =
       readonly simulatorId: AppleSimulatorId;
       readonly key: string;
     }
-  | { readonly kind: "repair-input"; readonly simulatorId: AppleSimulatorId };
+  | { readonly kind: "repair-input"; readonly simulatorId: AppleSimulatorId }
+  | { readonly kind: "open-url"; readonly simulatorId: AppleSimulatorId; readonly url: string }
+  | {
+      readonly kind: "rotate";
+      readonly simulatorId: AppleSimulatorId;
+      readonly orientation: "portrait" | "landscape";
+    };
 
 export interface AppleWorkbenchPaneProps {
   readonly status: AppleWorkbenchStatus;

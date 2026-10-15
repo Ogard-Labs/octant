@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { CodeCheckoutId, CodeThreadId } from "./code";
+import { DeviceHostCapabilities, DeviceOpenUrl, DeviceOrientation } from "./deviceHost";
 import { CorrelationId, EventActor, UtcTimestamp } from "./events";
 import { ToolActionApproval, ToolActionAuthority, ToolActionId } from "./toolActions";
 
@@ -98,6 +99,10 @@ export const AppleSimulatorActionKind = Schema.Literal(
   "type-text",
   "key-press",
   "repair-input",
+  "open-url",
+  "start-recording",
+  "stop-recording",
+  "rotate",
 );
 export type AppleSimulatorActionKind = typeof AppleSimulatorActionKind.Type;
 
@@ -118,6 +123,10 @@ export const AppleActionKind = Schema.Literal(
   "type-text",
   "key-press",
   "repair-input",
+  "open-url",
+  "start-recording",
+  "stop-recording",
+  "rotate",
 );
 export type AppleActionKind = typeof AppleActionKind.Type;
 
@@ -186,6 +195,10 @@ export const AppleSimulatorRequest = Schema.Struct({
   text: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096))),
   /** Hardware or named key for `key-press` (for example `return`, `escape`, `home`). */
   key: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64))),
+  /** The address `open-url` opens. Shown whole in its confirmation; evidence keeps the origin. */
+  url: Schema.optional(DeviceOpenUrl),
+  /** The orientation `rotate` sets. */
+  orientation: Schema.optional(DeviceOrientation),
   timeoutMs: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(10 * 60 * 1000)),
   approval: ToolActionApproval,
 })
@@ -225,6 +238,15 @@ export const AppleSimulatorRequest = Schema.Struct({
         return request.requestedBy !== undefined && request.key !== undefined;
       }
       if (request.kind === "repair-input") {
+        return request.requestedBy !== undefined;
+      }
+      if (request.kind === "open-url") {
+        return request.requestedBy !== undefined && request.url !== undefined;
+      }
+      if (request.kind === "rotate") {
+        return request.requestedBy !== undefined && request.orientation !== undefined;
+      }
+      if (request.kind === "start-recording" || request.kind === "stop-recording") {
         return request.requestedBy !== undefined;
       }
       return true;
@@ -286,7 +308,7 @@ export const AppleDiagnostic = Schema.Struct({
 export type AppleDiagnostic = typeof AppleDiagnostic.Type;
 
 export const AppleEvidenceArtifact = Schema.Struct({
-  kind: Schema.Literal("log", "xcresult", "application", "screenshot"),
+  kind: Schema.Literal("log", "xcresult", "application", "screenshot", "recording"),
   reference: opaqueReference,
 }).annotations(strict);
 export type AppleEvidenceArtifact = typeof AppleEvidenceArtifact.Type;
@@ -317,7 +339,11 @@ export const AppleBuildEvidence = Schema.Struct({
         evidence.kind === "swipe" ||
         evidence.kind === "type-text" ||
         evidence.kind === "key-press" ||
-        evidence.kind === "repair-input"
+        evidence.kind === "repair-input" ||
+        evidence.kind === "open-url" ||
+        evidence.kind === "rotate" ||
+        evidence.kind === "start-recording" ||
+        evidence.kind === "stop-recording"
       ) {
         return evidence.requestedBy !== undefined;
       }
@@ -381,6 +407,13 @@ export const AppleRuntimeSnapshot = Schema.Struct({
       projectPath: Schema.optional(AppleProjectPath),
       requestedAt: UtcTimestamp,
     }).annotations(strict),
+  ),
+  capabilities: Schema.optional(DeviceHostCapabilities),
+  /** Simulators this host is recording right now, so the pane offers Stop instead of Record. */
+  recordings: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ simulatorId: AppleSimulatorId, startedAt: UtcTimestamp }).annotations(strict),
+    ).pipe(Schema.maxItems(256)),
   ),
 }).annotations(strict);
 export type AppleRuntimeSnapshot = typeof AppleRuntimeSnapshot.Type;

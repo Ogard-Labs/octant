@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
-import { createInMemoryDeviceKeyStore, createRemoteSessionBridge } from "@octant/client-runtime";
+import {
+  createInMemoryDeviceKeyStore,
+  createRemoteSessionBridge,
+  PLATFORM_LISTENER_TRUST,
+} from "@octant/client-runtime";
 import {
   createFakeRemoteServer,
   fingerprintFromPem,
@@ -48,6 +52,7 @@ async function readyBridge(config: Parameters<typeof createFakeRemoteServer>[0] 
     deviceId: DEVICE_ID,
     credentialGeneration: 1,
     hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+    listenerTrust: PLATFORM_LISTENER_TRUST,
   });
   const bridge = createRemoteSessionBridge({ fetch: server.fetch, deviceKeyStore: pairingStore });
   bridge.connect({
@@ -58,6 +63,7 @@ async function readyBridge(config: Parameters<typeof createFakeRemoteServer>[0] 
     deviceKeyId,
     origin: ORIGIN,
     hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+    listenerTrust: PLATFORM_LISTENER_TRUST,
   });
   const start = Date.now();
   while (bridge.getState().kind !== "ready") {

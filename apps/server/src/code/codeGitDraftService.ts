@@ -56,7 +56,7 @@ export async function draftGitText(
   options: CodeGitDraftServiceOptions,
   request: CodeGitDraftRequest,
 ): Promise<CodeGitDraftResult> {
-  const state: DraftState = { text: "", handled: 0, completed: false };
+  const state: DraftState = { text: "", handled: 0, completed: false, readOutsideContent: false };
   try {
     await Effect.runPromise(
       Effect.scoped(
@@ -71,7 +71,9 @@ export async function draftGitText(
   } catch {
     return { status: "failed" };
   }
-  if (!state.completed) return { status: "failed" };
+  // A draft steered by a page the runtime read is not offered: nothing marks
+  // the thread for it, and the person might commit it unread.
+  if (!state.completed || state.readOutsideContent) return { status: "failed" };
   return splitDraft(state.text);
 }
 
@@ -79,6 +81,8 @@ interface DraftState {
   text: string;
   handled: number;
   completed: boolean;
+  /** The runtime read outside content with its own tools while drafting. */
+  readOutsideContent: boolean;
 }
 
 function runDraft(
@@ -118,6 +122,7 @@ function runDraft(
               if (state.handled > MAX_EVENTS) return;
               if (event.kind === "text-delta") state.text += event.text;
               if (event.kind === "completed") state.completed = true;
+              if (event.kind === "outside-content-read") state.readOutsideContent = true;
             }),
           ),
         ),

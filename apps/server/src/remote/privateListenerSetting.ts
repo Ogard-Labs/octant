@@ -5,24 +5,27 @@
 // headless host has nobody at a desktop to turn it on again, and without it
 // no paired device can reach the host or finish pairing.
 //
-// The setting holds the exact config the host last enabled, including the TLS
-// private key, because the administration routes receive PEMs rather than
-// paths and the server reads no file a caller names. It lives under the local
-// data directory with owner-only permissions — the same boundary that already
-// holds the listener's host identity key — and is never returned by a route.
+// For a pasted certificate the setting holds the exact config the host last
+// enabled, including the TLS private key, because the administration routes
+// receive PEMs rather than paths and the server reads no file a caller names.
+// For a self-made certificate it records only that: the key stays in its own
+// owner-only file, and each start renews the certificate when it is due. The
+// setting lives under the local data directory with owner-only permissions —
+// the same boundary that already holds the listener's host identity key — and
+// is never returned by a route.
 // Only a deliberate disable from the administration channel forgets it; a
 // server shutdown stops the listener without forgetting it.
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { PrivateListenerConfig } from "../privateListener";
+import type { RequestedPrivateListenerConfig } from "./privateListenerLifecycleController";
 
 const SETTING_SUBDIR = "remote";
 const SETTING_FILE = "private-listener-setting.json";
 
 export interface PrivateListenerSettingPort {
-  readonly load: () => PrivateListenerConfig | undefined;
-  readonly save: (config: PrivateListenerConfig) => void;
+  readonly load: () => RequestedPrivateListenerConfig | undefined;
+  readonly save: (config: RequestedPrivateListenerConfig) => void;
   readonly clear: () => void;
 }
 
@@ -44,13 +47,22 @@ export function createPrivateListenerSetting(dataDirectory: string): PrivateList
       const staging = `${path}.${process.pid}.tmp`;
       writeFileSync(
         staging,
-        JSON.stringify({
-          hostname: config.hostname,
-          port: config.port,
-          origin: config.origin,
-          certificatePem: String(config.tls.cert),
-          privateKeyPem: String(config.tls.key),
-        }),
+        JSON.stringify(
+          config.tls === "self-made"
+            ? {
+                hostname: config.hostname,
+                port: config.port,
+                origin: config.origin,
+                certificate: "self-made",
+              }
+            : {
+                hostname: config.hostname,
+                port: config.port,
+                origin: config.origin,
+                certificatePem: String(config.tls.cert),
+                privateKeyPem: String(config.tls.key),
+              },
+        ),
         { mode: 0o600 },
       );
       // writeFileSync applies the mode only when it creates the file, so a
@@ -65,7 +77,7 @@ export function createPrivateListenerSetting(dataDirectory: string): PrivateList
 }
 
 /** A setting that cannot be read back exactly is treated as no setting: the listener stays off. */
-function decodeSetting(text: string): PrivateListenerConfig | undefined {
+function decodeSetting(text: string): RequestedPrivateListenerConfig | undefined {
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -74,8 +86,20 @@ function decodeSetting(text: string): PrivateListenerConfig | undefined {
   }
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
-  const { hostname, port, origin, certificatePem, privateKeyPem } = record;
+  const { hostname, port, origin, certificate, certificatePem, privateKeyPem } = record;
   if (
+    certificate === "self-made" &&
+    certificatePem === undefined &&
+    privateKeyPem === undefined &&
+    typeof hostname === "string" &&
+    typeof port === "number" &&
+    Number.isSafeInteger(port) &&
+    typeof origin === "string"
+  ) {
+    return { hostname, port, origin, tls: "self-made" };
+  }
+  if (
+    certificate !== undefined ||
     typeof hostname !== "string" ||
     typeof port !== "number" ||
     !Number.isSafeInteger(port) ||

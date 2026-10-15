@@ -299,9 +299,17 @@ guidance instead.
   actions, credential/secret access, access outside the selected Project, and privilege expansion
   or sandbox changes (design section 8.4) — require a fresh explicit per-action confirmation.
   Standing session grants and remembered Full access do not silently satisfy these classes on a
-  tainted thread; the confirmation prompt names the ingested sources. Enforcement: the policy
-  engine's step 7 — module `packages/domain/src/toolCallPolicy.ts` with the taint projection in
-  `apps/server`. In the native harness only results that bring in outside content mark the thread
+  tainted thread. Enforcement: the policy engine's thread-elevation step,
+  `resolveThreadElevation` in `packages/domain/src/toolCallPolicy.ts`, fed by the taint projection
+  in `apps/server`. It asks afresh, under every posture that allows the tool at all (Plan refuses
+  most of them outright), for each closed-catalog entry marked `irreversibleUnderTaint`, and a
+  catalog test refuses an entry in any of the four classes without that flag. Today `mcp-tool`
+  (privilege expansion) is the only entry in one of the four classes; the flag also covers
+  `computer-use`, `web-fetch`, and the harness `bash`, `edit`, `write`, and `goal-check`. A Code Git action a person takes from a window (discard, restore, push, create a
+  pull request, bring a run home) is that person's own per-action act, and no agent tool issues
+  one. Residual gaps: the prompt does not yet name the ingested sources or say that the mark is
+  why it asks, and a provider runtime's own tools sit outside this gate (below). In the native
+  harness only results that bring in outside content mark the thread
   (`web-fetch`, `web-search`, a child's collected or delivered reply); local reads, searches, edits, and
   commands do not. On a tainted thread a harness "always" approval stops covering its class, and
   `web-fetch` itself needs the per-action confirmation because a GET can carry data out in its
@@ -312,9 +320,18 @@ guidance instead.
   named reason (`search-query-refused-under-taint: …`) before any request leaves (Henrik decision
   2026-10-10). Residual risk: a short plain-word query can still leak a few words, but only to the
   endpoint the person chose. Revisit if a default hosted third-party search provider ships.
-  A provider runtime's own built-in web search or page fetch does not append
-  `external-content-ingested`. Residual risk: that read leaves the thread unmarked, and the
-  mark's gate does not cover a tool the runtime executes itself.
+  A provider runtime's own built-in web search or page fetch, or a tool its provider hosts, appends
+  `external-content-ingested` (labels `runtime-web-search`, `runtime-web-fetch`,
+  `runtime-hosted-tool`, with an opaque hashed reference) when its adapter first sees the call. The
+  runtime may already hold the result by then, and it can act on it before Octant's next gated call;
+  what the mark changes is that call and every later turn. A Code turn whose approvals the runtime's own
+  reviewer answers is stopped at the mark so the next approval goes to a person, and a mark that cannot be
+  recorded stops the turn and refuses the thread's next turn until it is recorded (Henrik decision
+  2026-10-14: track it). Residual risks: the mark's gate does not cover a tool the runtime executes
+  itself; an owed mark lives in the host process and a restart forgets it; an ACP agent's web search
+  reported under the `search` kind with a path-like input, or with no `query`, leaves the thread
+  unmarked. Which calls each runtime exposes is listed in `docs/architecture.md`, Persistence,
+  Provider runtimes' own web tools.
 - **A person may clear the mark.** The mark keeps its thread lifetime, and a person at a local
   window may clear it after reviewing what the thread read (Henrik decision 2026-10-12). The clear
   is journaled with who and when (`thread.external-content-cleared@1`: the thread, the window, the
@@ -477,7 +494,7 @@ guidance instead.
   active after it. The harness tool egress rules remove the exception for native-harness tool
   processes on `provider-endpoints-only` threads once built; it remains under `unrestricted`,
   where the person accepted open network.
-- **Harness tool egress rules (approved 2026-10-13, not built).** For native-harness tool processes
+- **Harness tool egress rules (approved 2026-10-13; decision and host proxy built, not wired).** For native-harness tool processes
   on a `provider-endpoints-only` thread, a host-owned per-launch forward proxy will replace OS
   `allow` with a third OS level, `proxied`: Seatbelt opens only the proxy's loopback port and
   bubblewrap gives a private network namespace an in-capsule forwarder, so direct egress and DNS
@@ -671,8 +688,9 @@ crosses a server authority or sandbox boundary without additional local compromi
 4. **Seatbelt host-level egress:** two-level OS enforcement (`none` / `allow`) with broker-level
    host allowlists for V1; no local egress proxy in this release.
    _Superseded for native-harness tool processes only by the harness tool egress rules, which the
-   maintainer approved on 2026-10-13 and which are not built yet. It still governs every other
-   process._
+   maintainer approved on 2026-10-13. Their decision, proxy, grants, and learn mode are built, but
+   no command runs through the proxy yet, so this decision still describes what runs. It still
+   governs every other process._
 
 This document is **approved**.
 

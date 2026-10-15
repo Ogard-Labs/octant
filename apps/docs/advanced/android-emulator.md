@@ -47,9 +47,18 @@ emulator's name and state in words, at most one line for an error, the
 approval, or typing, and the emulator on a quiet stage. The name opens a list
 of the other AVDs so you choose which one the pane shows, and when more than
 one is running and nobody has chosen, the pane asks instead of guessing.
-**More** holds **Type text…**, **Switch device…**, **Diagnostics**, **Stop
-live view**, and **Shut down**. When the SDK or an AVD is missing, a short
-checklist says what to install or create.
+**More** holds **Type text…**, **Open URL…**, **Volume up**,
+**Volume down**, **Record screen** (**Stop recording** while it records),
+**Switch device…**, **Diagnostics**, **Stop live view**, and **Shut down**.
+**Open URL…** opens an
+`http` or `https` address on the emulator with Android's view intent, asks
+first on an approval-gated thread with the whole address in the confirmation,
+and records only the address's origin as evidence; other kinds of address are
+refused. **Rotate** turns the emulator between portrait and landscape and
+asks first on an approval-gated thread. **Record screen** records the emulator
+for up to 60 seconds or until you stop it, asks first on an approval-gated
+thread, and saves the video as evidence the way a screenshot is. When the SDK
+or an AVD is missing, a short checklist says what to install or create.
 
 Octant finds the SDK through `ANDROID_HOME` or `ANDROID_SDK_ROOT`. Without
 either, macOS hosts look in `~/Library/Android/sdk` (Android Studio) and then in

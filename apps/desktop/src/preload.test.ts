@@ -883,6 +883,8 @@ describe("desktop preload bridge", () => {
       exposureClass: null,
       certificateFingerprint: null,
       certificateReady: false,
+      certificateSource: null,
+      tlsPin: null,
     };
     const ready = {
       enabled: true,
@@ -893,6 +895,8 @@ describe("desktop preload bridge", () => {
       exposureClass: "lan-private",
       certificateFingerprint: "ab".repeat(32),
       certificateReady: true,
+      certificateSource: "pasted",
+      tlsPin: null,
     };
     const invoke = vi
       .fn()
@@ -933,6 +937,33 @@ describe("desktop preload bridge", () => {
       [IPC_CHANNELS.privateListenerDisable],
     ]);
     expect(JSON.stringify(ready)).not.toMatch(/BEGIN PRIVATE KEY|private-value/i);
+  });
+
+  it("hands Settings a self-made listener's key pin and refuses a malformed one", async () => {
+    const tlsPin = `sha256-${"Q".repeat(42)}A`;
+    const selfMade = {
+      enabled: true,
+      state: "ready",
+      hostname: "100.101.102.103",
+      port: 8443,
+      origin: "https://100.101.102.103:8443",
+      exposureClass: "tailscale",
+      certificateFingerprint: "ab".repeat(32),
+      certificateReady: true,
+      certificateSource: "self-made",
+      tlsPin,
+    };
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce(selfMade)
+      .mockResolvedValueOnce({ ...selfMade, tlsPin: "sha512-abc" });
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+    );
+
+    await expect(bridge.getPrivateListenerStatus()).resolves.toEqual(selfMade);
+    await expect(bridge.getPrivateListenerStatus()).rejects.toThrow();
   });
 
   it("rejects invalid private listener enable requests before IPC and sanitizes failures", async () => {

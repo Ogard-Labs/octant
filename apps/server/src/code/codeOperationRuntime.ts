@@ -27,8 +27,10 @@ import {
   type CodeOperationCommand,
   type CodeOperationFailure,
   type CodeConversationPage,
+  type CodeConversationWindowRequest,
   type CodeForkMergeBackOutcome,
   type ProviderSessionId,
+  type ContextCompactionExecutor,
   type CodeEvidenceBatchRequest,
   type CodeEvidenceBatchResponse,
   type CodeOperationApprovalReceipt,
@@ -73,6 +75,7 @@ import { GitService } from "./gitService";
 import {
   CodeOperationEventStore,
   MAX_CODE_OPERATION_REPLAY_LIMIT,
+  type CodeConversationWindowRead,
 } from "./codeOperationEventStore";
 import { chooseCodeForkPoint, codeThreadTurns } from "./codeForkPoint";
 import {
@@ -128,6 +131,8 @@ import type {
   NativeHarnessTurnScope,
 } from "../harness/nativeHarnessTurnObserver";
 import type { TurnEndSummary } from "../metrics/turnEnd";
+import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
+import type { RuntimeOutsideContentMarking } from "../context/runtimeOutsideContentMark";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { decodeAgentRunAdmittedContext, type ProviderContextBlock } from "@octant/contracts";
 import type {
@@ -359,6 +364,23 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly compactionRunning?: (threadId: CodeThreadId) => boolean;
   /**
+   * The thread's context ledger, for compactions a turn's runtime makes by
+   * itself: each one is journaled there, and any compaction journaled since
+   * the previous turn's usage report leaves Octant's earlier per-turn context
+   * uncounted in the next turn's window breakdown.
+   */
+  readonly sessionCompactions?: {
+    readonly record: (input: {
+      readonly threadId: CodeThreadId;
+      readonly turnKey: string;
+      readonly sighting: AutomaticCompactionSighting;
+      readonly executor: Extract<ContextCompactionExecutor, { readonly kind: "runtime" }>;
+      readonly priorOccupancy?: { readonly tokens: number; readonly observedAt: string };
+    }) => void;
+    /** Whether the ledger records a compaction after this journal position. */
+    readonly compactedAfter: (threadId: CodeThreadId, globalSequence: number) => boolean;
+  };
+  /**
    * Reads the thread's own earlier conversation for a provider-switch handoff,
    * through the bounded selector a child's parent context uses. Absent means
    * this host cannot hand a conversation over, so a turn on a provider other
@@ -475,6 +497,8 @@ export interface CodeOperationRuntimeOptions {
     readonly answerQuestion?: (threadId: string, questionId: string, answer: string) => void;
   };
   readonly recordExternalContentIngestion?: CodeAppManagedToolsOptions["recordExternalContentIngestion"];
+  /** Marks a thread whose runtime read outside content with its own tools. */
+  readonly outsideContentMarks?: RuntimeOutsideContentMarking;
   /**
    * Reads whether a thread has ingested untrusted external content. Used to
    * clamp harness-delegated approvals back to user-answered prompts when taint
@@ -577,6 +601,16 @@ export interface CodeOperationRuntime {
     limit: number,
   ): Promise<CodeConversationPage>;
   /**
+   * One page of the thread's own turns, newest first in reading order, under
+   * the same two checks as the forward read. A refused anchor is a value: the
+   * client starts again from the newest page.
+   */
+  conversationWindow(
+    windowId: WindowId,
+    threadId: CodeThreadId,
+    request: CodeConversationWindowRequest,
+  ): Promise<CodeConversationWindowRead>;
+  /**
    * Merge a fork's conversation back into the thread it was forked from, for
    * that thread's next turn to carry. Refusals are values.
    */
@@ -624,6 +658,12 @@ export interface CodeOperationRuntime {
     readonly prompt: string;
     readonly options: ReadonlyArray<string>;
   }): boolean;
+  /**
+   * Takes a native-harness question off the thread's inline surface once the
+   * harness has settled it some other way (an answer from another surface,
+   * expiry, or cancellation), so it is no longer listed or answerable here.
+   */
+  withdrawHarnessQuestion?(input: { readonly threadId: string; readonly questionId: string }): void;
   /**
    * Every approval and question a running turn is waiting on that this window
    * could answer through `execute`, under the same scope those answers pass.
@@ -677,6 +717,7 @@ export interface CodeOperationRuntime {
 export function createCodeOperationRuntime(
   options: CodeOperationRuntimeOptions,
 ): CodeOperationRuntime {
+  /** Each start's spend reservation, under the start's own operation. */
   const spendReservations = new Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>();
   const events = new CodeOperationEventStore({
     journal: options.persistence.journal,
@@ -1185,6 +1226,8 @@ export function createCodeOperationRuntime(
       // compaction check until it is launched or refused, because it reads the
       // session it resumes while it is prepared.
       let heldStart: string | undefined;
+      /** Whether this call took the operation's spend reservation, and so gives it back. */
+      let ownsReservation = false;
       try {
         const command = decodeCodeOperationCommand(rawCommand);
         if (command.kind === "start-provider-turn") {
@@ -1273,7 +1316,15 @@ export function createCodeOperationRuntime(
               }),
             );
           }
-          if (thread !== undefined && options.spendCeiling !== undefined) {
+          // A retry of an operation that still holds its reservation (its first
+          // call still preparing, or its turn still live) reserves nothing more;
+          // a second reservation under the same operation would replace the
+          // first, which then was never given back.
+          if (
+            thread !== undefined &&
+            options.spendCeiling !== undefined &&
+            !spendReservations.has(String(command.operationId))
+          ) {
             const spendReservationId = decodeSpendCeilingReservationId(options.uuid());
             const spendAdmission = options.spendCeiling.admit({
               reservationId: spendReservationId,
@@ -1290,7 +1341,8 @@ export function createCodeOperationRuntime(
                 }),
               );
             }
-            spendReservations.set(String(thread.id), spendReservationId);
+            spendReservations.set(String(command.operationId), spendReservationId);
+            ownsReservation = true;
           }
           turns.noteStart(command);
         }
@@ -1303,8 +1355,12 @@ export function createCodeOperationRuntime(
           if (command.kind === "start-provider-turn") {
             if (result.kind === "provider-turn-state" && result.state === "running") {
               turns.launch(command.threadId);
-            } else {
-              turns.settleSpendReservation(command.threadId);
+              // A `running` answered from the journal, for a turn that already
+              // ended, leaves no live turn to give back what this call reserved.
+              if (ownsReservation && !turns.runsOperation(command.operationId))
+                turns.settleSpendReservation(command.operationId);
+            } else if (ownsReservation) {
+              turns.settleSpendReservation(command.operationId);
             }
           }
           if (observed !== undefined) {
@@ -1324,8 +1380,8 @@ export function createCodeOperationRuntime(
           // A throw is the service refusing or breaking, not the work finishing.
           // The record closes rather than staying open for a unit that will never
           // report again.
-          if (command.kind === "start-provider-turn") {
-            turns.settleSpendReservation(command.threadId);
+          if (command.kind === "start-provider-turn" && ownsReservation) {
+            turns.settleSpendReservation(command.operationId);
           }
           if (observed !== undefined)
             observeRuntimeWorkOutcome(
@@ -1338,7 +1394,7 @@ export function createCodeOperationRuntime(
             );
           throw error;
         } finally {
-          if (command.kind === "start-provider-turn") turns.clearStart(command.threadId);
+          if (command.kind === "start-provider-turn") turns.clearStart(command);
         }
       } finally {
         if (heldStart !== undefined) releaseStartingTurn(heldStart);
@@ -1349,6 +1405,7 @@ export function createCodeOperationRuntime(
       return { terminalId: input.terminalId, state: snapshot.status };
     },
     raiseHarnessQuestion: (input) => turns.raiseHarnessQuestion(input),
+    withdrawHarnessQuestion: (input) => turns.withdrawHarnessQuestion(input),
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
     admitsTurn: (windowId, thread) => service.admitsTurn(windowId, thread),
     turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
@@ -1412,6 +1469,22 @@ export function createCodeOperationRuntime(
         threadId,
         afterCursor,
         limit,
+        providerInstanceId: thread.providerInstanceId,
+      });
+    },
+    conversationWindow: async (windowId, threadId, request) => {
+      const thread = options.persistence.readCodeThread(threadId);
+      if (thread === undefined || thread.id !== threadId) {
+        throw new CodeOperationServiceError("invalid");
+      }
+      if (!(await options.windowAccess.canAccessProject(windowId, thread.projectId))) {
+        throw new CodeOperationServiceError("unauthorized");
+      }
+      return events.conversationWindow({
+        threadId,
+        limit: request.limit,
+        ...(request.before === undefined ? {} : { before: request.before }),
+        ...(request.through === undefined ? {} : { through: request.through }),
         providerInstanceId: thread.providerInstanceId,
       });
     },
@@ -1643,8 +1716,18 @@ function approvalPrompt(
     const input =
       isAppleSimulatorInputKind(effect.request.kind) ||
       isAppleSimulatorOpenInputKind(effect.request.kind);
-    message = input ? "Allow input to this Simulator?" : `Allow Apple ${effect.request.kind}?`;
+    const url = "url" in effect.request ? effect.request.url : undefined;
+    message = input
+      ? "Allow input to this Simulator?"
+      : url !== undefined
+        ? "Open this URL on the Simulator?"
+        : effect.request.kind === "start-recording"
+          ? "Record this Simulator's screen?"
+          : `Allow Apple ${effect.request.kind}?`;
     effectDetail = [
+      // The whole address, exactly as the device receives it: the approval
+      // binds to it, and the evidence later keeps only its origin.
+      ...(url === undefined ? [] : [`URL: ${url}`]),
       ...(input
         ? [
             "Covers taps, swipes, typing and keys on this Simulator for 15 minutes after each input.",
@@ -1664,8 +1747,16 @@ function approvalPrompt(
     const input =
       isAndroidEmulatorInputKind(effect.request.kind) ||
       isAndroidEmulatorOpenInputKind(effect.request.kind);
-    message = input ? "Allow input to this emulator?" : `Allow Android ${effect.request.kind}?`;
+    const url = effect.request.url;
+    message = input
+      ? "Allow input to this emulator?"
+      : url !== undefined
+        ? "Open this URL on the emulator?"
+        : effect.request.kind === "start-recording"
+          ? "Record this emulator's screen?"
+          : `Allow Android ${effect.request.kind}?`;
     effectDetail = [
+      ...(url === undefined ? [] : [`URL: ${url}`]),
       ...(input
         ? ["Covers taps, swipes, typing and keys on this emulator for 15 minutes after each input."]
         : []),
@@ -1960,6 +2051,11 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   readonly #observeRuntimeWorkOutcome: (outcome: CodeRuntimeWorkRecordOutcome) => void;
   #service: CodeOperationService | undefined;
   readonly #runner = new CodeTurnRunner();
+  /**
+   * Starts noted before the service prepares them, under each start's own
+   * operation. A stopped start can still be preparing when the next one on
+   * its thread is sent, and when it finally settles it clears only its own.
+   */
   readonly #pending = new Map<
     string,
     Extract<CodeOperationCommand, { kind: "start-provider-turn" }>
@@ -1997,15 +2093,27 @@ class RuntimeTurnController implements CodeOperationTurnPort {
 
   /** Whether a turn on the thread was noted, runs, or waits on the person. */
   holdsTurn(threadId: string): boolean {
-    return this.#pending.has(threadId) || this.#active.has(threadId);
+    if (this.#active.has(threadId)) return true;
+    for (const command of this.#pending.values())
+      if (String(command.threadId) === threadId) return true;
+    return false;
   }
 
   noteStart(command: Extract<CodeOperationCommand, { kind: "start-provider-turn" }>): void {
-    this.#pending.set(String(command.threadId), command);
+    this.#pending.set(String(command.operationId), command);
   }
 
-  clearStart(threadId: CodeThreadId): void {
-    this.#pending.delete(String(threadId));
+  clearStart(command: Extract<CodeOperationCommand, { kind: "start-provider-turn" }>): void {
+    // A retry of the same operation noted its own command meanwhile.
+    if (this.#pending.get(String(command.operationId)) === command)
+      this.#pending.delete(String(command.operationId));
+  }
+
+  /** Whether a live turn runs under this operation. */
+  runsOperation(operationId: CodeOperationId): boolean {
+    for (const active of this.#active.values())
+      if (String(active.operationId) === String(operationId)) return true;
+    return false;
   }
 
   launch(threadId: CodeThreadId): void {
@@ -2015,10 +2123,10 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     launch?.();
   }
 
-  settleSpendReservation(threadId: string): void {
-    const reservationId = this.#spendReservations.get(String(threadId));
+  settleSpendReservation(operationId: CodeOperationId): void {
+    const reservationId = this.#spendReservations.get(String(operationId));
     if (reservationId === undefined) return;
-    this.#spendReservations.delete(String(threadId));
+    this.#spendReservations.delete(String(operationId));
     this.#options.spendCeiling?.settle({ reservationId });
   }
 
@@ -2040,16 +2148,17 @@ class RuntimeTurnController implements CodeOperationTurnPort {
      * root that moved, a turn already active).
      */
     const failStart = (reason?: string) => {
-      this.settleSpendReservation(key);
+      this.settleSpendReservation(input.operationId);
       return turnState(
         "failed",
         reason === undefined ? undefined : { category: "failed", message: reason },
       );
     };
-    const command = this.#pending.get(key);
+    const command = this.#pending.get(String(input.operationId));
     const root = this.#roots.get(key);
     if (
       command === undefined ||
+      String(command.threadId) !== key ||
       root === undefined ||
       root === null ||
       root.checkoutRoot !== input.checkoutRoot ||
@@ -2164,7 +2273,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         : undefined;
     let forkSeeded = false;
     const refuseRevokedAdmission = async () => {
-      this.settleSpendReservation(key);
+      this.settleSpendReservation(input.operationId);
       await input.extensionTools?.close?.().catch(() => undefined);
       return {
         state: "failed" as const,
@@ -2313,6 +2422,12 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         forkSeeded,
         priorTurn,
         previousBreakdown: recovered.priorTurnBreakdown,
+        compactedSinceReport:
+          recovered.priorTurnReportSequence !== undefined &&
+          this.#options.sessionCompactions?.compactedAfter(
+            input.thread.id,
+            recovered.priorTurnReportSequence,
+          ) === true,
       }),
       ...(input.sentContext === undefined ? {} : { sentContext: input.sentContext }),
       ...(input.onContextDelivered === undefined
@@ -2662,6 +2777,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     });
     active.cursor = frame.cursor;
     return true;
+  }
+
+  /**
+   * Forgets a native-harness question the harness has already settled. Only
+   * a question this turn raised for the harness is removed; a provider's own
+   * question with the same id is left alone.
+   */
+  withdrawHarnessQuestion(input: { readonly threadId: string; readonly questionId: string }): void {
+    const active = this.#active.get(input.threadId);
+    if (active === undefined || !active.harnessQuestions.has(input.questionId)) return;
+    active.harnessQuestions.delete(input.questionId);
+    active.questions.delete(input.questionId);
   }
 
   /** Whether this thread's running turn has an approval or a question still unanswered. */
@@ -3042,7 +3169,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           .pipe(Effect.catchAll(() => Effect.void)),
       );
     }
-    return turnState("interrupted");
+    return { ...turnState("interrupted"), stoppedOperationId: active.operationId };
   }
 
   async closeAll(): Promise<void> {
@@ -3335,6 +3462,29 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           prompt,
           ...(fullContext.length === 0 ? {} : { context: fullContext }),
           contextAccount,
+          ...(this.#options.sessionCompactions === undefined
+            ? {}
+            : {
+                onAutomaticCompaction: (sighting: AutomaticCompactionSighting) => {
+                  const occupancy = this.#events.latestWindowOccupancy(
+                    active.thread.id,
+                    decodeProviderSessionId(active.sessionId),
+                  );
+                  this.#options.sessionCompactions?.record({
+                    threadId: active.thread.id,
+                    // A Code turn is one operation; its id is the turn's.
+                    turnKey: String(active.operationId),
+                    sighting,
+                    executor: {
+                      kind: "runtime",
+                      driverKind: active.driver.kind,
+                      providerInstanceId: active.thread.providerInstanceId,
+                      modelId: active.thread.modelId,
+                    },
+                    ...(occupancy === undefined ? {} : { priorOccupancy: occupancy }),
+                  });
+                },
+              }),
           onTurnEnded: (ended) => {
             endedTurn = ended;
           },
@@ -3350,7 +3500,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             ? {}
             : {
                 onTurnCompleted: (completed) => {
-                  this.settleSpendReservation(String(active.thread.id));
+                  this.settleSpendReservation(active.operationId);
                   return this.#options.nativeHarness!.turnCompleted({
                     ...harnessScope,
                     ...completed,
@@ -3379,6 +3529,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
               );
             },
           },
+          ...(this.#options.outsideContentMarks === undefined
+            ? {}
+            : { outsideContentMarks: this.#options.outsideContentMarks }),
           sanitizeProviderEvent: ({ event }) =>
             Effect.try({
               try: () => sanitizeProviderEvent(event, active.checkoutRoot, active.secrets),
@@ -3690,7 +3843,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
    * forever.
    */
   #persistRuntimeWork(active: ActiveTurn, state: CodeTurnOutcome): void {
-    this.settleSpendReservation(String(active.thread.id));
+    this.settleSpendReservation(active.operationId);
     this.#observeRuntimeWorkOutcome(
       this.#runtimeWork.settle({
         id: active.operationId,

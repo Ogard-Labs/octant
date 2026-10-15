@@ -25,7 +25,12 @@
  * member write the approval and the joiner accept it.
  */
 
-import type { ReplicaInstanceId, ReplicaMembershipEntry } from "@octant/contracts/replica-entry";
+import {
+  REPLICA_KEPT_SLOTS_MAX_RUNS,
+  type ReplicaInstanceId,
+  type ReplicaMembershipEntry,
+  type ReplicaSequenceRun,
+} from "@octant/contracts/replica-entry";
 
 /** A join request older than this is not offered for approval. */
 export const REPLICA_JOIN_REQUEST_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -107,10 +112,23 @@ export interface ReplicaMembershipNode {
   /** Whether its approval counts all the way up to the founder. */
   readonly admitted: boolean;
   /**
-   * The last of its sequences that counts, when a revocation or a second
-   * record in one of its slots set one. Undefined means every entry counts.
+   * The last of its sequences that counts, when a revocation, leaving, or a
+   * second record in one of its slots set one. Undefined means every entry
+   * counts.
    */
   readonly cut: number | undefined;
+  /**
+   * The slots at or before its cut that still count, when a revocation that
+   * counts named which of its slots its writer read. Undefined means every
+   * slot at or before the cut counts, as under a revocation written before
+   * revocations named their slots.
+   */
+  readonly kept: ReadonlyArray<ReplicaSequenceRun> | undefined;
+  /**
+   * It signed a `replica-left` record while it still counted, so its cut is
+   * its own, just before that record: it left rather than was revoked.
+   */
+  readonly left: boolean;
 }
 
 export interface ReplicaDerivedMembership {
@@ -126,6 +144,7 @@ export interface ReplicaDerivedMembership {
 type JoinAccepted = Extract<ReplicaMembershipEntry, { kind: "join-accepted" }>;
 type Revocation = Extract<ReplicaMembershipEntry, { kind: "revocation" }>;
 type Founded = Extract<ReplicaMembershipEntry, { kind: "replica-founded" }>;
+type Left = Extract<ReplicaMembershipEntry, { kind: "replica-left" }>;
 
 interface HeldFacts {
   /** Per instance, the lowest sequence holding two different records. */
@@ -203,10 +222,14 @@ function heldFacts(records: ReadonlyArray<ReplicaHeldRecord>): HeldFacts {
  * without that computer accepting them and them approving it.
  *
  * Standing is weighed top-down from the founder. A computer is admitted when
- * its parent is admitted and signed the approval at or before the parent's
- * cut. Its cut is the lowest cut named by a revocation that a strict ancestor
- * signed while admitted and at or before its own cut, or just before a slot
- * it signed two different records into. Everything a computer's cut depends
+ * its parent is admitted and the approval counts: at or before the parent's
+ * cut, and in the parent's kept slots when a revocation named them. Its cut
+ * is the lowest cut named by a counting revocation a strict ancestor signed
+ * while admitted, or just before a slot it signed two different records
+ * into, and its kept slots are the slots every such revocation that names
+ * them keeps. A computer that signed a counting `replica-left` record naming
+ * this founder left: its cut is then just before its lowest such record.
+ * Leaving never cuts the computers it approved before it left. Everything a computer's cut depends
  * on is above it in the tree and already decided, so there is no iteration
  * and no tie-break. Records this pass does not use - an approval the joiner
  * never accepted, a descendant's revocation of an ancestor, a ghost's
@@ -228,16 +251,35 @@ export function deriveReplicaMembership(
     children.set(parent, [...(children.get(parent) ?? []), accept]);
   }
   const revocations = new Map<string, Revocation[]>();
+  // Each computer's records leaving this founder's replica. A record naming
+  // another founder is a copy from another replica and means nothing.
+  const leaving = new Map<string, Left[]>();
   for (const entry of facts.live) {
+    if (entry.kind === "replica-left" && String(entry.founder) === founderId) {
+      const id = String(entry.origin.instanceId);
+      leaving.set(id, [...(leaving.get(id) ?? []), entry]);
+    }
     if (entry.kind !== "revocation") continue;
     const subject = String(entry.subject);
     revocations.set(subject, [...(revocations.get(subject) ?? []), entry]);
   }
   const capOf = (id: string) => (facts.equivocation.get(id) ?? Infinity) - 1;
-  const standing = new Map<
-    string,
-    { readonly admitted: boolean; readonly cut: number; readonly ancestors: ReadonlySet<string> }
-  >([[founderId, { admitted: true, cut: capOf(founderId), ancestors: new Set() }]]);
+  // A computer left when it wrote its record while it still counted; a cut
+  // above it, from a revocation or a second record in a slot, came first, and
+  // a record in a slot a revocation did not keep was not written by it then.
+  const leftAt = (id: string, counts: (sequence: number) => boolean): number | undefined => {
+    let lowest: number | undefined;
+    for (const record of leaving.get(id) ?? []) {
+      const sequence = record.origin.sequence;
+      if (counts(sequence) && (lowest === undefined || sequence < lowest)) lowest = sequence;
+    }
+    return lowest;
+  };
+  const founderLeft = leftAt(founderId, (sequence) => sequence <= capOf(founderId));
+  const founderCut = founderLeft === undefined ? capOf(founderId) : founderLeft - 1;
+  const standing = new Map<string, Standing>([
+    [founderId, { admitted: true, cut: founderCut, kept: undefined, ancestors: new Set() }],
+  ]);
   const nodes: ReplicaMembershipNode[] = [
     {
       instanceId: root.origin.instanceId,
@@ -246,7 +288,9 @@ export function deriveReplicaMembership(
       parent: undefined,
       approvalSequence: undefined,
       admitted: true,
-      cut: finite(capOf(founderId)),
+      cut: finite(founderCut),
+      kept: undefined,
+      left: founderLeft !== undefined,
     },
   ];
   for (let index = 0; index < nodes.length; index += 1) {
@@ -264,16 +308,28 @@ export function deriveReplicaMembership(
       const id = String(accept.origin.instanceId);
       if (standing.has(id)) continue;
       const ancestors = new Set([parentId, ...parent.ancestors]);
-      const admitted = parent.admitted && accept.approvalSequence <= parent.cut;
+      const admitted = parent.admitted && counts(parent, accept.approvalSequence);
       let cut = capOf(id);
+      let kept: ReadonlyArray<ReplicaSequenceRun> | undefined;
       for (const revocation of revocations.get(id) ?? []) {
         const revoker = String(revocation.origin.instanceId);
         if (!ancestors.has(revoker)) continue;
         const by = standing.get(revoker);
-        if (by === undefined || !by.admitted || revocation.origin.sequence > by.cut) continue;
+        if (by === undefined || !by.admitted || !counts(by, revocation.origin.sequence)) continue;
         cut = Math.min(cut, revocation.cut);
+        // Every revocation that names its slots narrows what counts, whatever
+        // order they are read in: a slot counts only when each one kept it.
+        if (revocation.kept !== undefined) {
+          kept =
+            kept === undefined
+              ? revocation.kept.runs
+              : intersectReplicaRuns(kept, revocation.kept.runs);
+        }
       }
-      standing.set(id, { admitted, cut, ancestors });
+      const left = admitted ? leftAt(id, (sequence) => counts({ cut, kept }, sequence)) : undefined;
+      if (left !== undefined) cut = left - 1;
+      if (kept !== undefined) kept = clipReplicaRuns(kept, cut);
+      standing.set(id, { admitted, cut, kept, ancestors });
       nodes.push({
         instanceId: accept.origin.instanceId,
         displayName: accept.origin.displayName,
@@ -282,10 +338,90 @@ export function deriveReplicaMembership(
         approvalSequence: accept.approvalSequence,
         admitted,
         cut: finite(cut),
+        kept,
+        left: left !== undefined,
       });
     }
   }
   return { founder, nodes };
+}
+
+interface Standing {
+  readonly admitted: boolean;
+  readonly cut: number;
+  readonly kept: ReadonlyArray<ReplicaSequenceRun> | undefined;
+  readonly ancestors: ReadonlySet<string>;
+}
+
+/** Whether what a computer signed at `sequence` counts under its cut and kept slots. */
+function counts(standing: Pick<Standing, "cut" | "kept">, sequence: number): boolean {
+  return (
+    sequence <= standing.cut &&
+    (standing.kept === undefined || replicaRunsInclude(standing.kept, sequence))
+  );
+}
+
+/** Whether ascending runs include `sequence`. */
+export function replicaRunsInclude(
+  runs: ReadonlyArray<ReplicaSequenceRun>,
+  sequence: number,
+): boolean {
+  return runs.some((run) => run.from <= sequence && sequence <= run.to);
+}
+
+function intersectReplicaRuns(
+  left: ReadonlyArray<ReplicaSequenceRun>,
+  right: ReadonlyArray<ReplicaSequenceRun>,
+): ReadonlyArray<ReplicaSequenceRun> {
+  const runs: ReplicaSequenceRun[] = [];
+  for (const a of left) {
+    for (const b of right) {
+      const from = Math.max(a.from, b.from);
+      const to = Math.min(a.to, b.to);
+      if (from <= to) runs.push({ from, to });
+    }
+  }
+  return runs.sort((one, two) => one.from - two.from);
+}
+
+function clipReplicaRuns(
+  runs: ReadonlyArray<ReplicaSequenceRun>,
+  cut: number,
+): ReadonlyArray<ReplicaSequenceRun> {
+  return runs.flatMap((run) =>
+    run.from > cut ? [] : [{ from: run.from, to: Math.min(run.to, cut) }],
+  );
+}
+
+/**
+ * What a revocation commits to: the cut, and the subject's slots at or
+ * before it that the revoker read as the subject's own valid signed entries,
+ * as runs. A slot the revoker did not read as the subject's - empty, listed
+ * but not downloaded, unreadable, or holding another writer's file - is left
+ * out, so nothing written there later counts. With more runs than one record
+ * carries, the cut moves earlier to the end of the last run that fits; an
+ * earlier cut only ever counts less.
+ */
+export function replicaRevocationKeeps(
+  read: Iterable<number>,
+  cut: number,
+): { readonly cut: number; readonly runs: ReadonlyArray<ReplicaSequenceRun> } {
+  const sequences = [...new Set(read)]
+    .filter((sequence) => Number.isInteger(sequence) && sequence >= 1 && sequence <= cut)
+    .sort((left, right) => left - right);
+  const runs: ReplicaSequenceRun[] = [];
+  for (const sequence of sequences) {
+    const last = runs[runs.length - 1];
+    if (last !== undefined && last.to + 1 === sequence) {
+      runs[runs.length - 1] = { from: last.from, to: sequence };
+      continue;
+    }
+    if (runs.length === REPLICA_KEPT_SLOTS_MAX_RUNS) {
+      return { cut: last?.to ?? 0, runs };
+    }
+    runs.push({ from: sequence, to: sequence });
+  }
+  return { cut, runs };
 }
 
 /**
@@ -357,7 +493,11 @@ export function replicaEntryCounts(
   sequence: number,
 ): boolean {
   const node = replicaMembershipNode(membership, instanceId);
-  return node !== undefined && node.admitted && sequence <= (node.cut ?? Infinity);
+  return (
+    node !== undefined &&
+    node.admitted &&
+    counts({ cut: node.cut ?? Infinity, kept: node.kept }, sequence)
+  );
 }
 
 /** Whether `ancestor` brought `instanceId` in, directly or through others. */

@@ -634,6 +634,14 @@ looking at, and an arriving page keeps the reader's row where it was. A thread
 that never had earlier messages shows no row. Only a new last message is
 announced; earlier messages arriving above are not.
 
+Chat, Work, and Code all open at the end and follow new output while the
+reader is there; a reader who has scrolled up stays on their row while turns
+arrive below. A Code fork's own messages come first; below them the row goes on
+into the messages it was forked from, at the fork point, and up the thread it
+came from, so a fork reads as one conversation. Coming back to a thread puts
+the reader back on the row they left when its loaded messages still start where
+they did, and at the end otherwise.
+
 A jump to a Chat message that is not loaded, such as a search hit, shows the
 run of messages that ends with it in place of the newest ones, with the Load
 earlier row above it. One row below that run holds **Load later messages** and

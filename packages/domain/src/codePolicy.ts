@@ -1,10 +1,4 @@
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
-import type { ThreadExternalContentTaint } from "@octant/contracts";
-import {
-  resolveTaintedApproval,
-  type StandingApprovalGrant,
-  type ToolApprovalClass,
-} from "./untrustedContentPolicy";
 
 export type CodeActor = "local-user" | "agent" | "remote-client";
 export type CodeOperation =
@@ -31,12 +25,6 @@ export type CodePolicyDecisionValue =
   | "host-thread-clamped"
   | "host-thread-credential-clamped";
 
-export interface CodeUntrustedContentContext {
-  readonly taint: ThreadExternalContentTaint;
-  readonly standingGrant: StandingApprovalGrant;
-  readonly freshPerActionConfirmation: boolean;
-}
-
 export interface CodePolicyInput {
   readonly actor: CodeActor;
   readonly posture: ProviderExecutionPolicy;
@@ -50,50 +38,10 @@ export interface CodePolicyInput {
    * read-only for both.
    */
   readonly initiator?: "agent" | "user";
-  /** When present, irreversible classes on tainted threads require fresh confirmation. */
-  readonly untrustedContent?: CodeUntrustedContentContext;
 }
 
 export interface CodePolicyDecision {
   readonly decision: CodePolicyDecisionValue;
-  readonly taintedApprovalPrompt?: string;
-}
-
-/** Map Code operations onto design §8.4 approval classes for taint enforcement. */
-export function approvalClassForCodeOperation(
-  operation: CodeOperation,
-): ToolApprovalClass | undefined {
-  switch (operation) {
-    case "edit":
-    case "stage":
-    // Unstaging only moves paths out of the index; the files keep every
-    // change they had, so it sits with the ordinary writes.
-    case "unstage":
-    case "commit":
-      return "project-file-writes";
-    case "terminal":
-    case "test":
-      return "shell-commands";
-    // Discarding uncommitted work destroys content no commit can restore, so
-    // it sits with push and merge rather than with the writes it undoes.
-    case "discard":
-    // Restoring a checkpoint overwrites current files with older ones. The
-    // host records what it replaced, but the replacement itself is a wholesale
-    // overwrite of the checkout and is gated as one.
-    case "restore-checkpoint":
-    case "push":
-    case "create-pr":
-    // Bringing a run home rewrites the checkout the person works in. The host
-    // records what it replaced first, but the merge itself is a wholesale
-    // change to their tree and is gated like one.
-    case "merge-run":
-      return "destructive-or-irreversible";
-    case "managed-root":
-      return "privilege-expansion-or-sandbox-change";
-    case "read":
-    case "pr-mutation":
-      return undefined;
-  }
 }
 
 /**
@@ -244,42 +192,7 @@ export function inPlaceRestoreRefusalText(title?: string): string {
   return `Another thread is writing in this checkout: "${shown}". Wait for its turn to finish or stop it, then restore.`;
 }
 
-function standingGrantForPosture(posture: ProviderExecutionPolicy): StandingApprovalGrant {
-  if (posture === "full-access") return "remembered-full-access";
-  if (posture === "approval-gated" || posture === "auto-accept-edits") return "session";
-  return "none";
-}
-
 export function authorizeCodeOperation(input: CodePolicyInput): CodePolicyDecision {
-  const base = authorizeCodeOperationBase(input);
-  if (input.untrustedContent === undefined) return base;
-
-  const approvalClass = approvalClassForCodeOperation(input.operation);
-  if (approvalClass === undefined) return base;
-
-  const tainted = resolveTaintedApproval({
-    taint: input.untrustedContent.taint,
-    approvalClass,
-    standingGrant:
-      input.untrustedContent.standingGrant === "none"
-        ? standingGrantForPosture(input.posture)
-        : input.untrustedContent.standingGrant,
-    freshPerActionConfirmation: input.untrustedContent.freshPerActionConfirmation,
-  });
-
-  if (tainted.kind !== "prompt") return base;
-
-  // Standing Full access / session grants must not silently satisfy irreversible classes.
-  if (base.decision === "allow" || base.decision === "prompt") {
-    return {
-      decision: "prompt",
-      taintedApprovalPrompt: tainted.prompt,
-    };
-  }
-  return base;
-}
-
-function authorizeCodeOperationBase(input: CodePolicyInput): CodePolicyDecision {
   if (input.operation === "pr-mutation") return { decision: "deny" };
   if (input.operation === "managed-root") {
     return {

@@ -9,6 +9,7 @@ import {
   CodeThread,
   CodeBootstrap,
   CodeConversationPage,
+  CodeConversationWindow,
   CodeEvidenceBatchResponse,
   CodeEvidenceReference,
   decodeHostAnswer,
@@ -105,36 +106,48 @@ export interface MobileCodeConversationTurn {
 }
 
 /**
- * The most recent page of a Code thread's conversation with the text behind
- * every prompt and reply. The conversation route hands back references; the
- * evidence batch route resolves them, bounded to what one page can carry, so
- * a very long turn shows its first parts and says nothing it did not receive.
+ * How many of a Code thread's newest turns the phone shows. The phone has no
+ * way to load earlier turns, and a live turn re-reads this page on a short
+ * cadence, so the page stays small.
+ */
+export const MOBILE_CODE_CONVERSATION_TURNS = 20;
+
+/** The forward walk's page bound, for a host without the window read. */
+const MAX_MOBILE_FORWARD_PAGES = 100;
+
+export interface MobileCodeConversation {
+  /** The thread's newest turns, oldest first. */
+  readonly turns: ReadonlyArray<MobileCodeConversationTurn>;
+  /** The thread has turns older than the first one here. */
+  readonly hasEarlier: boolean;
+}
+
+/**
+ * A Code thread's newest turns with the text behind every prompt and reply.
+ * The window route hands back references; the evidence batch route resolves
+ * them in one batch. Turns are kept newest first while their references fit
+ * that batch, so the newest turn always shows (a very long one its first
+ * parts) and an older turn is left out rather than shown blank.
  */
 export async function loadMobileCodeConversation(
   transport: MobileRemoteTransport,
   threadId: string,
-): Promise<ReadonlyArray<MobileCodeConversationTurn>> {
-  const page = await decodeJson(
-    await transport.authenticatedFetch({
-      method: "GET",
-      path: `/api/code/threads/${encodeURIComponent(threadId)}/conversation`,
-      query: `?afterCursor=0&limit=${MAX_CODE_CONVERSATION_PAGE_SIZE}`,
-    }),
-    decodeHostAnswer(CodeConversationPage),
-    "Could not load the Code conversation from the host.",
-  );
-  if (String(page.threadId) !== threadId) {
-    throw new MobileInboxFailure("unavailable", "Code conversation identity mismatch.");
-  }
-  const wanted = page.turns
-    .flatMap((turn) => [
-      { operationId: turn.operationId, contentId: turn.prompt.contentId },
+): Promise<MobileCodeConversation> {
+  const read = await readNewestCodeTurns(transport, threadId);
+  const kept: CodeConversationTurn[] = [];
+  const wanted: Array<{ operationId: string; contentId: string }> = [];
+  for (const turn of [...read.turns].reverse()) {
+    const items = [
+      { operationId: String(turn.operationId), contentId: String(turn.prompt.contentId) },
       ...turn.assistant.map((part) => ({
-        operationId: turn.operationId,
-        contentId: part.contentId,
+        operationId: String(turn.operationId),
+        contentId: String(part.contentId),
       })),
-    ])
-    .slice(0, MAX_CODE_EVIDENCE_BATCH_ITEMS);
+    ];
+    if (kept.length > 0 && wanted.length + items.length > MAX_CODE_EVIDENCE_BATCH_ITEMS) break;
+    kept.unshift(turn);
+    wanted.push(...items.slice(0, MAX_CODE_EVIDENCE_BATCH_ITEMS - wanted.length));
+  }
   const text = new Map<string, string>();
   if (wanted.length > 0) {
     const batch = await decodeJson(
@@ -155,15 +168,73 @@ export async function loadMobileCodeConversation(
   }
   const resolve = (operationId: string, contentId: string) =>
     text.get(`${operationId}:${contentId}`) ?? "";
-  return page.turns.map((turn) => ({
-    operationId: String(turn.operationId),
-    status: turn.status,
-    prompt: resolve(String(turn.operationId), String(turn.prompt.contentId)),
-    assistant: turn.assistant
-      .map((part) => resolve(String(turn.operationId), String(part.contentId)))
-      .filter((part) => part.length > 0),
-    updatedAt: turn.updatedAt,
-  }));
+  return {
+    turns: kept.map((turn) => ({
+      operationId: String(turn.operationId),
+      status: turn.status,
+      prompt: resolve(String(turn.operationId), String(turn.prompt.contentId)),
+      assistant: turn.assistant
+        .map((part) => resolve(String(turn.operationId), String(part.contentId)))
+        .filter((part) => part.length > 0),
+      updatedAt: turn.updatedAt,
+    })),
+    hasEarlier: read.hasEarlier || kept.length < read.turns.length,
+  };
+}
+
+/**
+ * The thread's newest page of turns from the window read. A host without that
+ * route answers 404; its forward read lists turns oldest first, so it is
+ * walked to the end and only its tail is kept.
+ */
+async function readNewestCodeTurns(
+  transport: MobileRemoteTransport,
+  threadId: string,
+): Promise<{ readonly turns: ReadonlyArray<CodeConversationTurn>; readonly hasEarlier: boolean }> {
+  const path = `/api/code/threads/${encodeURIComponent(threadId)}/conversation`;
+  const response = await transport.authenticatedFetch({
+    method: "GET",
+    path: `${path}/window`,
+    query: `?limit=${MOBILE_CODE_CONVERSATION_TURNS}`,
+  });
+  if (response.status !== 404) {
+    const window = await decodeJson(
+      response,
+      decodeHostAnswer(CodeConversationWindow),
+      "Could not load the Code conversation from the host.",
+    );
+    if (String(window.threadId) !== threadId) {
+      throw new MobileInboxFailure("unavailable", "Code conversation identity mismatch.");
+    }
+    return { turns: window.turns, hasEarlier: window.hasEarlier };
+  }
+  const turns: CodeConversationTurn[] = [];
+  let listed = 0;
+  let cursor = 0;
+  for (let pages = 1; ; pages += 1) {
+    const page = await decodeJson(
+      await transport.authenticatedFetch({
+        method: "GET",
+        path,
+        query: `?afterCursor=${cursor}&limit=${MAX_CODE_CONVERSATION_PAGE_SIZE}`,
+      }),
+      decodeHostAnswer(CodeConversationPage),
+      "Could not load the Code conversation from the host.",
+    );
+    if (String(page.threadId) !== threadId) {
+      throw new MobileInboxFailure("unavailable", "Code conversation identity mismatch.");
+    }
+    listed += page.turns.length;
+    turns.push(...page.turns);
+    // Only the tail is shown, so nothing older than it is held while walking.
+    turns.splice(0, Math.max(0, turns.length - MOBILE_CODE_CONVERSATION_TURNS));
+    if (!page.hasMore) break;
+    if (page.nextCursor <= cursor || pages >= MAX_MOBILE_FORWARD_PAGES) {
+      throw new MobileInboxFailure("unavailable", "The Code conversation did not advance.");
+    }
+    cursor = page.nextCursor;
+  }
+  return { turns, hasEarlier: listed > turns.length };
 }
 
 /**

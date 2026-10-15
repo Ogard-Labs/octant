@@ -93,12 +93,16 @@ describe("PersistenceLive", () => {
   it("answers readiness gates from one inspection and re-inspects only on request", async () => {
     const directory = temporaryDirectory();
     let integrityChecks = 0;
+    let clockMs = Date.parse(now);
     const counts = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const persistence = yield* Persistence;
           const afterStartup = integrityChecks;
           persistence.status();
+          // A host stays up for hours; the gates must not fall back to a full
+          // inspection once the startup one is a few seconds old.
+          clockMs += 60 * 60 * 1000;
           persistence.status();
           const afterGates = integrityChecks;
           persistence.status({ fresh: true });
@@ -107,7 +111,7 @@ describe("PersistenceLive", () => {
           Effect.provide(
             makePersistenceLive({
               dataDirectory: directory,
-              clock: () => now,
+              clock: () => new Date(clockMs).toISOString(),
               openConnection: (path) => {
                 const connection = openSqlite(path);
                 return new Proxy(connection, {
@@ -184,6 +188,7 @@ describe("PersistenceLive", () => {
         { name: "thread-checkpoint", lastSequence: 1, lag: 0 },
         { name: "product-feedback", lastSequence: 1, lag: 0 },
         { name: "project-terminal", lastSequence: 1, lag: 0 },
+        { name: "remote-server-grant", lastSequence: 1, lag: 0 },
         { name: "thread-retention", lastSequence: 1, lag: 0 },
         { name: "thread-external-content-taint", lastSequence: 1, lag: 0 },
         { name: "usage-resume", lastSequence: 1, lag: 0 },
@@ -240,10 +245,11 @@ describe("PersistenceLive", () => {
       ),
     );
 
-    // The default folder is filled in on read as a host fact; it is not persisted.
+    // The default folder is filled in on read as a host fact; it is not
+    // persisted, so a store that never named one follows the host default.
     expect(result.bootstrap.settings).toEqual({
       ...decodePersistedShellSettings(legacySettings),
-      defaultFolder: "/Users/ada/Documents/Octant",
+      defaultFolder: "/Users/ada/Octant",
     });
     // A store written before row properties shipped keeps showing what each
     // view's rows already carried: nothing disappears on the upgrade.
@@ -475,6 +481,7 @@ describe("PersistenceLive", () => {
         { projection_name: "thread-checkpoint", global_sequence: 1, reason },
         { projection_name: "product-feedback", global_sequence: 1, reason },
         { projection_name: "project-terminal", global_sequence: 1, reason },
+        { projection_name: "remote-server-grant", global_sequence: 1, reason },
         { projection_name: "thread-retention", global_sequence: 1, reason },
         { projection_name: "thread-external-content-taint", global_sequence: 1, reason },
         { projection_name: "usage-resume", global_sequence: 1, reason },

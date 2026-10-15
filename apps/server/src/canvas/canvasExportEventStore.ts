@@ -4,7 +4,6 @@ import {
   CorrelationId,
   EventActor,
   EventId,
-  ReplayCursor,
   decodeCanvasExportRecorded,
   type CanvasExportRecorded as CanvasExportRecord,
   type EventEnvelope,
@@ -13,18 +12,16 @@ import {
 import { Schema } from "effect";
 import type { EventRegistry } from "../persistence/eventRegistry";
 import type { Journal } from "../persistence/journal";
+import { replayAggregateTypesInOrder } from "../persistence/journalHydration";
 import { ConcurrencyConflict, DuplicateEventIdentity } from "../persistence/journalErrors";
 
 export const CANVAS_EXPORT_AGGREGATE_TYPE = "canvas-export";
 export const CANVAS_EXPORT_RECORDED = "canvas.export@1";
 
-const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
-
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
-const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 
 /** Register the Canvas export journal frame so it can be appended and replayed. */
 export function registerCanvasExportEvents(registry: EventRegistry): EventRegistry {
@@ -41,7 +38,7 @@ export class CanvasExportEventStoreError extends Error {
   }
 }
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
 
 export interface CanvasExportEventStoreOptions {
   readonly journal: JournalPort;
@@ -126,23 +123,16 @@ export class CanvasExportEventStore {
    */
   replay(): ReadonlyArray<CanvasExportRecord> {
     const records: CanvasExportRecord[] = [];
-    let afterSequence = 0;
-    while (true) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
-      if (batch.length === 0) break;
-      for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
-        if (envelope.eventName !== CANVAS_EXPORT_RECORDED) continue;
-        try {
-          records.push(decodeCanvasExportRecorded(envelope.payload));
-        } catch {
-          // The journal remains authoritative; a frame that no longer decodes
-          // is not rewritten into a different export.
-        }
+    for (const envelope of replayAggregateTypesInOrder(this.#journal, [
+      CANVAS_EXPORT_AGGREGATE_TYPE,
+    ])) {
+      if (envelope.eventName !== CANVAS_EXPORT_RECORDED) continue;
+      try {
+        records.push(decodeCanvasExportRecorded(envelope.payload));
+      } catch {
+        // The journal remains authoritative; a frame that no longer decodes
+        // is not rewritten into a different export.
       }
-      if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
     return records;
   }

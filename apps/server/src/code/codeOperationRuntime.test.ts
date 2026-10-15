@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -264,6 +264,58 @@ describe("CodeOperationRuntime", () => {
     });
     expect(challenge?.message).toBe("Allow input to this emulator?");
     expect(challenge?.detail).toContain("for 15 minutes after each input");
+    fixture.close();
+  });
+
+  it("shows the whole address in an Open URL confirmation and approves only that address", async () => {
+    const fixture = runtimeFixture({ approvalValidator: false });
+    const url = "https://example.com/reset?token=abc&next=%2Fhome";
+    const request = {
+      actionId: operationId(830) as never,
+      correlationId: operationId(831) as never,
+      authority: {
+        hostId: "90000000-0000-4000-8000-000000000010" as never,
+        mode: "code" as const,
+        projectId: thread().projectId,
+        providerInstanceId: thread().providerInstanceId,
+        extension: { kind: "core" as const },
+      },
+      threadId,
+      checkoutId,
+      kind: "open-url" as const,
+      simulatorId: "90000000-0000-4000-8000-000000000011" as never,
+      requestedBy: { kind: "local-user" as const, actorId: operationId(832) as never },
+      url,
+      timeoutMs: 30_000,
+      approval: { kind: "pending" as const },
+    };
+    const challenge = await fixture.runtime.prepareApproval(windowId, {
+      effect: { kind: "apple-action", request },
+    });
+    expect(challenge?.message).toBe("Open this URL on the Simulator?");
+    expect(challenge?.detail).toContain(`URL: ${url}`);
+    expect(challenge?.detail).not.toContain("15 minutes");
+
+    const receipt = await fixture.runtime.confirmApproval(windowId, {
+      challengeId: challenge!.challengeId,
+    });
+    const validate = (
+      fixture.runtime as unknown as {
+        validateAppleApproval: (windowId: WindowId, request: unknown) => Promise<boolean>;
+      }
+    ).validateAppleApproval;
+    const approval = { kind: "approved" as const, approvalId: receipt!.approvalId };
+    // The approval is for that address; another one under it is refused.
+    await expect(
+      validate.call(fixture.runtime, windowId, {
+        ...request,
+        url: "https://example.com/elsewhere",
+        approval,
+      }),
+    ).resolves.toBe(false);
+    await expect(validate.call(fixture.runtime, windowId, { ...request, approval })).resolves.toBe(
+      true,
+    );
     fixture.close();
   });
 
@@ -655,6 +707,236 @@ describe("CodeOperationRuntime", () => {
       });
       expect(fixture.restoredTrees()).toBe(1);
       fixture.close();
+    });
+  });
+
+  describe("a start stopped while its preparation never returns", () => {
+    const credentialReferences = [{ environmentName: "TOKEN", reference: "token" }];
+
+    /** The first credential read waits until released; every later one answers at once. */
+    function stuckFirstCredentialRead() {
+      const entered = Promise.withResolvers<void>();
+      const stuck = Promise.withResolvers<string | undefined>();
+      const resolve = vi.fn(() => {
+        if (resolve.mock.calls.length > 1) return Promise.resolve("secret");
+        entered.resolve();
+        return stuck.promise;
+      });
+      return {
+        entered: entered.promise,
+        release: (value: string | undefined) => stuck.resolve(value),
+        resolve,
+      };
+    }
+
+    /** A spend ceiling that admits every turn and records what it gave and got back. */
+    function recordingSpendCeiling() {
+      const admit = vi.fn((_input: { readonly reservationId: string }) => ({
+        status: "admitted" as const,
+        reservedTokens: 100,
+        reservations: [
+          { scopeKind: "thread" as const, scopeId: String(threadId), reservedTokens: 100 },
+        ],
+      }));
+      const settle = vi.fn((_input: { readonly reservationId: string }) => undefined);
+      return {
+        spendCeiling: { admit, settle },
+        admitted: () => admit.mock.calls.map(([input]) => String(input.reservationId)),
+        settled: () => settle.mock.calls.map(([input]) => String(input.reservationId)),
+      };
+    }
+
+    const start = (id: number) =>
+      ({
+        kind: "start-provider-turn",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: evidence(40),
+      }) as const;
+    const stop = (id: number) =>
+      ({
+        kind: "cancel-provider-turn",
+        operationId: operationId(id),
+        threadId,
+        checkoutId,
+      }) as const;
+
+    it("reads as stopped in the transcript once Stop returns, and leaves the next turn on the thread alone when it settles", async () => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const credential = stuckFirstCredentialRead();
+      const settle = vi.fn();
+      const admit = vi.fn().mockReturnValue({
+        status: "admitted",
+        reservedTokens: 100,
+        reservations: [{ scopeKind: "thread", scopeId: String(threadId), reservedTokens: 100 }],
+      });
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        credentialReferences,
+        credentialResolver: { resolve: credential.resolve },
+        spendCeiling: { admit, settle },
+      });
+      try {
+        const stopped = fixture.runtime.execute(windowId, start(41));
+        await credential.entered;
+        await expect(fixture.runtime.execute(windowId, stop(42))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
+        // The credential read is still outstanding.
+        expect(
+          fixture.conversation().turns.find((turn) => turn.operationId === operationId(41))?.status,
+        ).toBe("interrupted");
+
+        await expect(fixture.runtime.execute(windowId, start(43))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "running",
+        });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+
+        credential.release("secret");
+        await expect(stopped).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
+        // The late settle gave back the stopped start's reservation, not the
+        // newer turn's, and journaled nothing over what Stop recorded.
+        const [older, newer] = admit.mock.calls.map(([input]) => input.reservationId);
+        expect(settle.mock.calls).toEqual([[{ reservationId: older }]]);
+        expect(
+          fixture.conversation().turns.map((turn) => [String(turn.operationId), turn.status]),
+        ).toEqual([
+          [String(operationId(41)), "interrupted"],
+          [String(operationId(43)), "incomplete"],
+        ]);
+
+        await expect(fixture.runtime.execute(windowId, stop(44))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "interrupted",
+        });
+        expect(settle).toHaveBeenLastCalledWith({ reservationId: newer });
+        expect(connection.start).toHaveBeenCalledOnce();
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it.each([
+      { ending: "is refused at its admission check", read: "secret" },
+      { ending: "then fails on its own", read: undefined },
+    ])(
+      "does not launch a stopped recovered start again when its operation is retried, and its preparation $ending",
+      async ({ read }) => {
+        const stalledQueue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+        const stalled = {
+          ...providerConnection(stalledQueue),
+          send: vi.fn(() => Effect.never),
+        } as ProviderConnection;
+        const fixture = runtimeFixture({ provider: providerDriver(stalled) });
+        const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+        const connection = providerConnection(queue);
+        const credential = stuckFirstCredentialRead();
+        let restarted: ReturnType<typeof runtimeFixture> | undefined;
+        try {
+          // The host stops after the start answered `running` and before the
+          // provider produced anything, so the next host recovers the start.
+          await expect(fixture.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "running",
+          });
+          await vi.waitFor(() => expect(stalled.send).toHaveBeenCalledOnce());
+          const spend = recordingSpendCeiling();
+          restarted = runtimeFixture({
+            provider: providerDriver(connection),
+            credentialReferences,
+            credentialResolver: { resolve: credential.resolve },
+            spendCeiling: spend.spendCeiling,
+            restartOf: { directory: fixture.directory, evidenceValues: fixture.evidenceValues },
+          });
+
+          const recovering = restarted.runtime.execute(windowId, start(51));
+          await credential.entered;
+          await expect(restarted.runtime.execute(windowId, stop(52))).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "interrupted",
+          });
+          expect(
+            restarted.conversation().turns.find((turn) => turn.operationId === operationId(51))
+              ?.status,
+          ).toBe("interrupted");
+
+          // A retry answers from the journal rather than preparing the turn again.
+          await expect(restarted.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "interrupted",
+          });
+          expect(credential.resolve).toHaveBeenCalledOnce();
+
+          // The retry reused the operation's reservation rather than replacing it.
+          expect(spend.admitted()).toHaveLength(1);
+
+          // Whatever the preparation answers once it returns, the start reads as
+          // the stop Stop journaled.
+          credential.release(read);
+          await expect(recovering).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "interrupted",
+          });
+          await expect(restarted.runtime.execute(windowId, start(51))).resolves.toMatchObject({
+            kind: "provider-turn-state",
+            state: "interrupted",
+          });
+          expect(credential.resolve).toHaveBeenCalledOnce();
+          expect(connection.start).not.toHaveBeenCalled();
+          expect(connection.resume).not.toHaveBeenCalled();
+          expect(connection.send).not.toHaveBeenCalled();
+          // Every reservation taken was given back exactly once.
+          expect(spend.admitted()).toHaveLength(2);
+          expect(spend.settled().toSorted()).toEqual(spend.admitted().toSorted());
+        } finally {
+          await restarted?.runtime.close();
+          restarted?.close();
+          await fixture.runtime.close();
+          fixture.close();
+        }
+      },
+    );
+
+    it("gives back the reservation of a retry answered from the journal for a turn that already ended", async () => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const connection = providerConnection(queue);
+      const spend = recordingSpendCeiling();
+      const fixture = runtimeFixture({
+        provider: providerDriver(connection),
+        spendCeiling: spend.spendCeiling,
+      });
+      try {
+        await expect(fixture.runtime.execute(windowId, start(61))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "running",
+        });
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+        await Effect.runPromise(
+          Queue.offer(queue, providerEvent({ kind: "text-delta", text: "Done." })),
+        );
+        await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+        await vi.waitFor(() => expect(spend.settled()).toHaveLength(1));
+
+        await expect(fixture.runtime.execute(windowId, start(61))).resolves.toMatchObject({
+          kind: "provider-turn-state",
+          state: "running",
+        });
+        expect(spend.admitted()).toHaveLength(2);
+        expect(spend.settled().toSorted()).toEqual(spend.admitted().toSorted());
+        expect(connection.send).toHaveBeenCalledOnce();
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
     });
   });
 
@@ -1553,6 +1835,115 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("stops counting earlier turns' instructions once the ledger records a compaction, and records one the runtime made by itself under its turn", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const recorded: Array<unknown> = [];
+    const compactedAfter: Array<number> = [];
+    let ledgerCompacted = false;
+    const fixture = runtimeFixture({
+      provider: { ...providerDriver(connection), kind: "codex" },
+      sessionCompactions: {
+        record: (input) => {
+          recorded.push(input);
+        },
+        compactedAfter: (_, globalSequence) => {
+          compactedAfter.push(globalSequence);
+          return ledgerCompacted;
+        },
+      },
+    });
+    fixture.setThread(
+      decodeCodeThread({
+        ...thread(),
+        profileId: "60000000-0000-4000-8000-000000000001",
+        profileContext: {
+          displayName: "Reviewer",
+          instructions: "Review as a skeptic. ".repeat(40).trim(),
+          approvedSkillIds: [],
+        },
+      }),
+    );
+    const usage = (sequence: number) =>
+      providerEvent({
+        kind: "usage",
+        inputTokens: 10,
+        outputTokens: 2,
+        contextTokens: 9_000,
+        promptRetention: "kept",
+        sequence,
+      });
+    const reports = async (operation: ReturnType<typeof operationId>, count: number) => {
+      let accounting: Array<unknown> = [];
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, operation, 0, 20);
+        accounting = frames.flatMap((frame) =>
+          frame.event.kind === "usage" ? [frame.event.contextBreakdown?.sentContext] : [],
+        );
+        if (accounting.length < count) throw new Error("not every report yet");
+      });
+      return accounting;
+    };
+    const turn = async (operation: number, prompt: string, events: ProviderRuntimeEvent[]) => {
+      const reference = storedEvidence(operation + 100, prompt);
+      fixture.evidenceValues.set(reference.contentId, prompt);
+      const sends = vi.mocked(connection.send).mock.calls.length;
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: operationId(operation),
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: reference,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledTimes(sends + 1));
+      for (const event of events) await Effect.runPromise(Queue.offer(queue, event));
+      await Effect.runPromise(Queue.offer(queue, providerEvent({ kind: "completed" })));
+    };
+    try {
+      await turn(90, "first", [usage(1)]);
+      expect(await reports(operationId(90), 1)).toEqual([{ status: "counted" }]);
+      await vi.waitFor(() => expect(connection.stop).toHaveBeenCalledOnce());
+
+      // A compaction the ledger records after that report, such as one the
+      // person asked for between turns, means the session no longer holds
+      // every copy the first turn sent.
+      ledgerCompacted = true;
+      await turn(91, "second", [
+        usage(1),
+        providerEvent({ kind: "context-compacted", trigger: "automatic", sequence: 2 }),
+        usage(3),
+      ]);
+      expect(await reports(operationId(91), 2)).toEqual([
+        { status: "uncounted", reason: "compacted" },
+        { status: "uncounted", reason: "compacted" },
+      ]);
+      // Asked after the first turn's report, by its place in the journal.
+      expect(compactedAfter).toEqual([expect.any(Number)]);
+      expect(compactedAfter[0]).toBeGreaterThan(0);
+      expect(recorded).toEqual([
+        {
+          threadId,
+          turnKey: String(operationId(91)),
+          sighting: {
+            position: 1,
+            tokensBefore: { kind: "known", tokens: 9_000, accuracy: "provider-reported" },
+          },
+          executor: {
+            kind: "runtime",
+            driverKind: "codex",
+            providerInstanceId: thread().providerInstanceId,
+            modelId: thread().modelId,
+          },
+          priorOccupancy: { tokens: 9_000, observedAt: now },
+        },
+      ]);
+    } finally {
+      await fixture.runtime.close();
+      fixture.close();
+    }
+  });
+
   it.each([true, false])(
     "carries the conversation on after a switch to another model of the same provider only when it can: %s",
     async (canSwitch) => {
@@ -2100,6 +2491,33 @@ describe("CodeOperationRuntime", () => {
     ]);
     // Still owed an answer to the question; the board keeps the thread Waiting.
     expect(fixture.runtime.turnAwaitsPerson?.(String(threadId))).toBe(true);
+
+    // A harness question settled elsewhere (expired, say) leaves this surface.
+    fixture.runtime.raiseHarnessQuestion?.({
+      threadId: String(threadId),
+      questionId: "harness-question-expired",
+      prompt: "Still there?",
+      options: [],
+    });
+    expect(await fixture.runtime.pendingRequests?.(windowId)).toHaveLength(2);
+    fixture.runtime.withdrawHarnessQuestion?.({
+      threadId: String(threadId),
+      questionId: "harness-question-expired",
+    });
+    expect(
+      (await fixture.runtime.pendingRequests?.(windowId))?.map((request) =>
+        request.mode === "code" && request.kind === "question" ? request.answer.requestId : "",
+      ),
+    ).toEqual(["harness-question-listed"]);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-input",
+        operationId: operationId(904),
+        ...question.answer,
+        requestId: "harness-question-expired",
+        response: fixture.response,
+      }),
+    ).resolves.toMatchObject({ state: "failed" });
 
     await fixture.runtime.execute(windowId, {
       kind: "answer-provider-input",
@@ -2776,6 +3194,29 @@ describe("CodeOperationRuntime", () => {
         autoCompactThreshold: 167_000,
         contextBreakdown: usage.contextBreakdown,
       });
+      // The newest window carries the same turns as the forward read, and the
+      // forward read still answers its own version.
+      expect(page.version).toBe(3);
+      const window = await fixture.runtime.conversationWindow(windowId, threadId, { limit: 20 });
+      expect(window.status === "ok" ? window.window.turns : undefined).toEqual(page.turns);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("refuses a conversation window for a Project the window cannot access, before reading it", async () => {
+    const fixture = runtimeFixture({ projectAccess: false });
+    try {
+      await expect(
+        fixture.runtime.conversationWindow(windowId, threadId, { limit: 20 }),
+      ).rejects.toMatchObject({ category: "unauthorized" });
+      await expect(
+        fixture.runtime.conversationWindow(
+          windowId,
+          decodeCodeThreadId("70000000-0000-4000-8000-0000000000ff"),
+          { limit: 20 },
+        ),
+      ).rejects.toMatchObject({ category: "invalid" });
     } finally {
       fixture.close();
     }
@@ -5318,6 +5759,11 @@ function runtimeFixture(options: {
   supportsAppManagedTools?: boolean;
   /** Whether the provider natively serves ACP client capabilities. */
   supportsAcpClientCapabilities?: boolean;
+  /** The checkout root a turn resolves (default a path that does not exist). */
+  checkoutRoot?: string;
+  acpTerminalConfinement?: Parameters<
+    typeof createCodeOperationRuntime
+  >[0]["acpTerminalConfinement"];
   /** Whether the provider can carry a session on to another of its models. */
   supportsModelSwitch?: boolean;
   terminalExit?: { readonly exitCode: number };
@@ -5371,6 +5817,7 @@ function runtimeFixture(options: {
   >[0]["resolveProviderDriver"];
   isProviderModelAllowed?: (thread: CodeThread) => boolean;
   compactionRunning?: (threadId: CodeThreadId) => boolean;
+  sessionCompactions?: Parameters<typeof createCodeOperationRuntime>[0]["sessionCompactions"];
   spendCeiling?: Parameters<typeof createCodeOperationRuntime>[0]["spendCeiling"];
   nativeHarness?: Parameters<typeof createCodeOperationRuntime>[0]["nativeHarness"];
   onPendingRequestWithdrawn?: () => void;
@@ -5583,8 +6030,11 @@ function runtimeFixture(options: {
       standingAuthority: (run) =>
         hostAccess === undefined ? run() : hostAccess.standingAuthority(run),
     },
+    ...(options.acpTerminalConfinement === undefined
+      ? {}
+      : { acpTerminalConfinement: options.acpTerminalConfinement }),
     resolveCheckoutRoot: async () => ({
-      checkoutRoot: "/private/exact",
+      checkoutRoot: options.checkoutRoot ?? "/private/exact",
       shell: "/bin/zsh",
       credentialReferences: options.credentialReferences ?? [],
       environment: {},
@@ -5692,6 +6142,9 @@ function runtimeFixture(options: {
     ...(options.compactionRunning === undefined
       ? {}
       : { compactionRunning: options.compactionRunning }),
+    ...(options.sessionCompactions === undefined
+      ? {}
+      : { sessionCompactions: options.sessionCompactions }),
     ...(options.spendCeiling === undefined ? {} : { spendCeiling: options.spendCeiling }),
     ...(options.nativeHarness === undefined ? {} : { nativeHarness: options.nativeHarness }),
     ...(options.onPendingRequestWithdrawn === undefined
@@ -6452,7 +6905,7 @@ it("offers the agent message tool to a Code turn and withholds it from one in Pl
       supportsAppManagedTools: true,
       agentMessages: ({ thread: sender, readPosture }) =>
         createAgentMessageTools({
-          service: { send: async () => [] },
+          service: { send: async () => [], recordRefusedSend: async () => undefined },
           senderThreadId: String(sender.id),
           toolConstraints: [],
           profileDisplayName: "the bound profile",
@@ -6504,7 +6957,7 @@ describe("sibling-threads tool on Code turns", () => {
         supportsAppManagedTools: true,
         agentMessages: ({ thread: sender, readPosture }) =>
           createAgentMessageTools({
-            service: { send: async () => [] },
+            service: { send: async () => [], recordRefusedSend: async () => undefined },
             senderThreadId: String(sender.id),
             toolConstraints: sender.toolConstraints ?? [],
             profileDisplayName: "the bound profile",
@@ -7334,6 +7787,207 @@ describe("Project access inside a Code turn's tool calls", () => {
       await fixture.runtime.close();
       fixture.close();
     }
+  });
+
+  describe("a turn keeps the checkout it was started on", () => {
+    const acp = {
+      write: (path: string) => ({
+        name: "octant_acp_fs_write_text_file",
+        input: { path, content: "written" },
+      }),
+      read: (path: string) => ({ name: "octant_acp_fs_read_text_file", input: { path } }),
+      run: (command: string) => ({ name: "octant_acp_terminal_create", input: { command } }),
+    };
+    const otherProject = decodeProjectId("90000000-0000-4000-8000-0000000000c1");
+    const scratch: Array<string> = [];
+    afterEach(() => {
+      for (const directory of scratch.splice(0))
+        rmSync(directory, { recursive: true, force: true });
+    });
+
+    /** The turn's checkout, and the root a rebound window would use instead. */
+    function roots() {
+      const checkoutRoot = mkdtempSync(join(tmpdir(), "octant-turn-checkout-"));
+      const reboundRoot = mkdtempSync(join(tmpdir(), "octant-turn-rebound-"));
+      scratch.push(checkoutRoot, reboundRoot);
+      return { checkoutRoot, reboundRoot };
+    }
+
+    const confinement = {
+      environment: { PATH: "/usr/bin:/bin", TMPDIR: tmpdir() },
+      prepare: ({
+        executable,
+        args,
+      }: {
+        readonly executable: string;
+        readonly args: ReadonlyArray<string>;
+      }) => ({ command: executable, args }),
+    };
+
+    async function startTurn(
+      fixture: ReturnType<typeof runtimeFixture>,
+      access: CodeProjectAccess,
+      operation: ReturnType<typeof operationId>,
+    ) {
+      await access.run(localWindow, () =>
+        fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operation,
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        }),
+      );
+    }
+
+    it("keeps a rebound window's running turn on its checkout, and refuses the next turn", async () => {
+      const { checkoutRoot, reboundRoot } = roots();
+      const binding = { current: thread().projectId as CodeThread["projectId"] | undefined };
+      const access = windowBoundTo(binding);
+      // The person moves the window to another Project after the first answer.
+      const endpoint = await functionCallingEndpoint(
+        [
+          acp.write(join(checkoutRoot, "before.txt")),
+          acp.write(join(checkoutRoot, "after.txt")),
+          acp.run("echo ran > terminal.txt"),
+          acp.write(join(reboundRoot, "elsewhere.txt")),
+          read,
+        ],
+        (requestNumber) => {
+          if (requestNumber === 2) binding.current = otherProject;
+        },
+      );
+      const fixture = runtimeFixture({
+        provider: endpoint.driver,
+        supportsAppManagedTools: true,
+        supportsAcpClientCapabilities: true,
+        codeProjectAccess: access,
+        checkoutRoot,
+        acpTerminalConfinement: confinement,
+        terminalExit: { exitCode: 0 },
+      });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+      try {
+        await access.run(localWindow, () =>
+          fixture.runtime.execute(windowId, {
+            kind: "start-terminal",
+            operationId: operationId(1351),
+            threadId,
+            checkoutId,
+            terminalId,
+            columns: 100,
+            rows: 30,
+            credentialRefs: [],
+          }),
+        );
+        await startTurn(fixture, access, operationId(1352));
+        await vi.waitFor(() => expect(endpoint.bodies).toHaveLength(6));
+        expect(endpoint.answers().map(terminalOutcome)).toEqual([
+          "none",
+          "none",
+          "none",
+          "path-outside-checkout",
+          // The window-held terminal follows the binding the window has now.
+          "terminal-unavailable",
+        ]);
+        expect(readFileSync(join(checkoutRoot, "before.txt"), "utf8")).toBe("written");
+        expect(readFileSync(join(checkoutRoot, "after.txt"), "utf8")).toBe("written");
+        await vi.waitFor(() => expect(existsSync(join(checkoutRoot, "terminal.txt"))).toBe(true));
+        expect(existsSync(join(reboundRoot, "elsewhere.txt"))).toBe(false);
+        expect(existsSync(join(reboundRoot, "terminal.txt"))).toBe(false);
+        // The next turn checks the binding again.
+        await expect(startTurn(fixture, access, operationId(1353))).rejects.toMatchObject({
+          failure: { category: "unauthorized" },
+        });
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
+
+    it("keeps a closed window's running turn on its checkout", async () => {
+      const { checkoutRoot } = roots();
+      const presence = { live: true };
+      const access = windowBoundTo({ current: thread().projectId }, presence);
+      const endpoint = await functionCallingEndpoint(
+        [
+          acp.write(join(checkoutRoot, "before.txt")),
+          acp.write(join(checkoutRoot, "after.txt")),
+          acp.run("echo ran > terminal.txt"),
+        ],
+        (requestNumber) => {
+          if (requestNumber === 2) presence.live = false;
+        },
+      );
+      const fixture = runtimeFixture({
+        provider: endpoint.driver,
+        supportsAppManagedTools: false,
+        supportsAcpClientCapabilities: true,
+        codeProjectAccess: access,
+        checkoutRoot,
+        acpTerminalConfinement: confinement,
+      });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+      try {
+        await startTurn(fixture, access, operationId(1361));
+        await vi.waitFor(() => expect(endpoint.bodies).toHaveLength(4));
+        expect(endpoint.answers().map(terminalOutcome)).toEqual(["none", "none", "none"]);
+        expect(readFileSync(join(checkoutRoot, "after.txt"), "utf8")).toBe("written");
+        await vi.waitFor(() => expect(existsSync(join(checkoutRoot, "terminal.txt"))).toBe(true), {
+          timeout: 10_000,
+        });
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    }, 20_000);
+
+    it("keeps a Plan turn read-only on its checkout after the window is rebound", async () => {
+      const { checkoutRoot } = roots();
+      writeFileSync(join(checkoutRoot, "note.txt"), "plan note");
+      const binding = { current: thread().projectId as CodeThread["projectId"] | undefined };
+      const access = windowBoundTo(binding);
+      const endpoint = await functionCallingEndpoint(
+        [
+          acp.read(join(checkoutRoot, "note.txt")),
+          acp.read(join(checkoutRoot, "note.txt")),
+          acp.write(join(checkoutRoot, "blocked.txt")),
+          acp.run("echo ran > blocked-terminal.txt"),
+        ],
+        (requestNumber) => {
+          if (requestNumber === 2) binding.current = otherProject;
+        },
+      );
+      const fixture = runtimeFixture({
+        provider: endpoint.driver,
+        supportsAppManagedTools: false,
+        supportsAcpClientCapabilities: true,
+        codeProjectAccess: access,
+        checkoutRoot,
+        acpTerminalConfinement: confinement,
+      });
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "plan" }));
+      try {
+        await startTurn(fixture, access, operationId(1371));
+        await vi.waitFor(() => expect(endpoint.bodies).toHaveLength(5));
+        const answers = endpoint.answers();
+        expect(answers.slice(0, 2).map((answer) => JSON.parse(answer ?? "{}"))).toEqual([
+          { content: "plan note" },
+          { content: "plan note" },
+        ]);
+        // A Plan turn is offered no write or process tool at all.
+        expect(answers.slice(2).map(terminalOutcome)).toEqual([
+          expect.stringContaining("was offered"),
+          expect.stringContaining("was offered"),
+        ]);
+        expect(existsSync(join(checkoutRoot, "blocked.txt"))).toBe(false);
+        expect(existsSync(join(checkoutRoot, "blocked-terminal.txt"))).toBe(false);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    });
   });
 });
 

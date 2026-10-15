@@ -46,7 +46,7 @@ thread has a current plan artifact, instead of replacing the Work thread. The
 sidebar follows the pane that last received pointer or keyboard input and
 restores that thread's open tools and selected tool when you return to it.
 
-The sidebar **Thread board** is a server-derived view of Work threads as Ready, In progress, Waiting, and Done. Status comes from turn, request, artifact, citation, child-run, recovery, and delivery evidence; a thread is Done only when its confirmed delivery target is objectively satisfied. Each column is a soft well headed by a mark, its name, and a count; the In progress mark turns while a task is running. A card shows its title, a live line while the task is executing, what it waits on, any linked pull request as a small preview, and a footer with the provider and when it last moved. A card that waits on you also shows the question or approval with its answer buttons, so you can clear it without opening the task. Cards are not dragged between columns. Opening a card activates that Work Project and thread. Chat has no board.
+The sidebar **Thread board** is a server-derived view of Work threads as Ready, In progress, Waiting, and Done. Status comes from turn, request, artifact, citation, child-run, recovery, and delivery evidence; a thread is Done when you mark it Done with **Mark done** in its **Task actions** menu. Each column is a soft well headed by a mark, its name, and a count; the In progress mark turns while a task is running. A card shows its title, a live line while the task is executing, what it waits on, any linked pull request as a small preview, and a footer with the provider and when it last moved. A card that waits on you also shows the question or approval with its answer buttons, so you can clear it without opening the task. Cards are not dragged between columns. Opening a card activates that Work Project and thread. Chat has no board.
 
 Work has no shell and no Git. The agent in a Work thread is never given a way to run commands, so it never asks you to approve one; changes to files in the Project still ask first. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
@@ -116,8 +116,8 @@ threads**. Archiving keeps every thread; only a confirmed purge deletes.
 ## Export
 
 **Export thread** downloads a portable JSON cut of this Work thread: the
-transcript, Canvas artifacts it originated, completion evidence when you have
-confirmed delivery, and provenance. The file says when it was cut. Secrets
+transcript, Canvas artifacts it originated, any note recorded when the thread
+was marked Done, and provenance. The file says when it was cut. Secrets
 and filesystem paths never appear.
 
 ## Research workflow
@@ -140,13 +140,13 @@ Type `#` in the composer to mention another thread as read-only context, the sam
 
 Work has a server-authoritative [Thread board](/advanced/work-board) that
 derives Ready, In progress, Waiting, and Done from turn, request, artifact,
-citation, child-run, recovery, and delivery evidence. Done requires your
-confirmed delivery target and objective evidence. Opening a card activates
+citation, child-run, recovery, and delivery evidence. A thread is Done when
+you mark it Done; no evidence text is needed. Opening a card activates
 that Project and thread. Chat has no board.
 
 ## Next steps
 
-- [Work Thread Board](/advanced/work-board) for derived status, grouping, and delivery confirmation
+- [Work Thread Board](/advanced/work-board) for derived status, grouping, and marking a thread Done
 - [Promotions](/guide/promotions) for escalating Work work to a Code thread
 - [Projects](/guide/projects) for managing Work Projects
 - [Code](/guide/code) for repository engineering

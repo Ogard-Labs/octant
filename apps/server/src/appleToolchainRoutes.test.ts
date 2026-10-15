@@ -225,6 +225,327 @@ describe("Apple toolchain routes", () => {
     );
   });
 
+  describe("Volume keys", () => {
+    const volume = {
+      actionId: "60000000-0000-4000-8000-000000000018",
+      correlationId: "60000000-0000-4000-8000-000000000019",
+      authority,
+      ...scope,
+      kind: "key-press",
+      simulatorId: "60000000-0000-4000-8000-00000000000a",
+      key: "volume-up",
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      timeoutMs: 30_000,
+      approval: { kind: "approved", approvalId: "60000000-0000-4000-8000-00000000001b" },
+    };
+    function routes(resolveContext: ReturnType<typeof vi.fn>) {
+      const service = {
+        discover: vi.fn(),
+        execute: vi.fn(async () => ({
+          actionId: volume.actionId,
+          correlationId: volume.correlationId,
+          authority,
+          kind: "key-press",
+          outcome: "succeeded",
+          simulatorId: volume.simulatorId,
+          requestedBy: volume.requestedBy,
+          diagnostics: [],
+          artifacts: [],
+          cleanup: "complete",
+          durationMs: 5,
+          completedAt: "2026-10-14T20:00:01.000Z",
+        })),
+        cancel: vi.fn(),
+        snapshot: vi.fn(),
+        readScreenshotArtifact: vi.fn(),
+      };
+      const handler = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        resolveContext,
+        service,
+        now: () => 2,
+      });
+      return { handler, service };
+    }
+
+    it("hands a volume key to the host with the window's authority", async () => {
+      const { handler, service } = routes(vi.fn(async () => context));
+
+      const response = await handler(request({ kind: "apple-action-request", request: volume }));
+
+      expect(response?.status).toBe(200);
+      expect(service.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "key-press", key: "volume-up" }),
+        context,
+      );
+    });
+
+    it("refuses a volume key for a thread the window has no authority over", async () => {
+      const { handler, service } = routes(vi.fn(async () => undefined));
+
+      const response = await handler(request({ kind: "apple-action-request", request: volume }));
+
+      expect(response?.status).toBe(403);
+      expect(service.execute).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Open URL", () => {
+    const openUrl = {
+      actionId: "60000000-0000-4000-8000-000000000008",
+      correlationId: "60000000-0000-4000-8000-000000000009",
+      authority,
+      ...scope,
+      kind: "open-url",
+      simulatorId: "60000000-0000-4000-8000-00000000000a",
+      url: "https://example.com/welcome",
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      timeoutMs: 30_000,
+      approval: { kind: "approved", approvalId: "60000000-0000-4000-8000-00000000000b" },
+    };
+    const evidence = {
+      actionId: openUrl.actionId,
+      correlationId: openUrl.correlationId,
+      authority,
+      kind: "open-url",
+      outcome: "succeeded",
+      simulatorId: openUrl.simulatorId,
+      requestedBy: openUrl.requestedBy,
+      diagnostics: [{ severity: "note", message: "open-url completed (https://example.com)" }],
+      artifacts: [],
+      cleanup: "complete",
+      durationMs: 5,
+      completedAt: "2026-10-14T20:00:01.000Z",
+    };
+    function routes(resolveContext: ReturnType<typeof vi.fn>) {
+      const service = {
+        discover: vi.fn(),
+        execute: vi.fn(async () => evidence),
+        cancel: vi.fn(),
+        snapshot: vi.fn(),
+        readScreenshotArtifact: vi.fn(),
+      };
+      const handler = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        resolveContext,
+        service,
+        now: () => 2,
+      });
+      return { handler, service };
+    }
+
+    it("hands an address the window may open to the host with that window's authority", async () => {
+      const resolveContext = vi.fn(async () => context);
+      const { handler, service } = routes(resolveContext);
+
+      const response = await handler(request({ kind: "apple-action-request", request: openUrl }));
+
+      expect(response?.status).toBe(200);
+      expect(resolveContext).toHaveBeenCalledWith(
+        windowId,
+        expect.objectContaining(scope),
+        expect.objectContaining({ kind: "apple-action-request" }),
+      );
+      expect(service.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "open-url", url: "https://example.com/welcome" }),
+        context,
+      );
+    });
+
+    it("refuses a script, file, or data address before authority is checked or the host is reached", async () => {
+      for (const url of ["javascript:alert(1)", "file:///etc/hosts", "data:text/plain,hi"]) {
+        const resolveContext = vi.fn(async () => context);
+        const { handler, service } = routes(resolveContext);
+
+        const response = await handler(
+          request({ kind: "apple-action-request", request: { ...openUrl, url } }),
+        );
+
+        expect(response?.status, url).toBe(400);
+        expect(resolveContext).not.toHaveBeenCalled();
+        expect(service.execute).not.toHaveBeenCalled();
+      }
+    });
+
+    it("refuses an Open URL for a thread the window has no authority over", async () => {
+      const { handler, service } = routes(vi.fn(async () => undefined));
+
+      const response = await handler(request({ kind: "apple-action-request", request: openUrl }));
+
+      expect(response?.status).toBe(403);
+      expect(service.execute).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Rotate", () => {
+    const rotate = {
+      actionId: "60000000-0000-4000-8000-000000000008",
+      correlationId: "60000000-0000-4000-8000-000000000009",
+      authority,
+      ...scope,
+      kind: "rotate",
+      simulatorId: "60000000-0000-4000-8000-00000000000a",
+      orientation: "landscape",
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      timeoutMs: 30_000,
+      approval: { kind: "approved", approvalId: "60000000-0000-4000-8000-00000000000b" },
+    };
+    function routes(resolveContext: ReturnType<typeof vi.fn>) {
+      const service = {
+        discover: vi.fn(),
+        execute: vi.fn(async () => ({
+          actionId: rotate.actionId,
+          correlationId: rotate.correlationId,
+          authority,
+          kind: "rotate",
+          outcome: "succeeded",
+          simulatorId: rotate.simulatorId,
+          requestedBy: rotate.requestedBy,
+          diagnostics: [],
+          artifacts: [],
+          cleanup: "complete",
+          durationMs: 5,
+          completedAt: "2026-10-14T20:00:01.000Z",
+        })),
+        cancel: vi.fn(),
+        snapshot: vi.fn(),
+        readScreenshotArtifact: vi.fn(),
+      };
+      const handler = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        resolveContext,
+        service,
+        now: () => 2,
+      });
+      return { handler, service };
+    }
+
+    it("hands a rotation the window may make to the host with that window's authority", async () => {
+      const resolveContext = vi.fn(async () => context);
+      const { handler, service } = routes(resolveContext);
+
+      const response = await handler(request({ kind: "apple-action-request", request: rotate }));
+
+      expect(response?.status).toBe(200);
+      expect(resolveContext).toHaveBeenCalledWith(
+        windowId,
+        expect.objectContaining(scope),
+        expect.objectContaining({ kind: "apple-action-request" }),
+      );
+      expect(service.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "rotate", orientation: "landscape" }),
+        context,
+      );
+    });
+
+    it("refuses a rotation without a known orientation before authority is checked", async () => {
+      for (const orientation of [undefined, "upside-down"]) {
+        const resolveContext = vi.fn(async () => context);
+        const { handler, service } = routes(resolveContext);
+
+        const response = await handler(
+          request({ kind: "apple-action-request", request: { ...rotate, orientation } }),
+        );
+
+        expect(response?.status, String(orientation)).toBe(400);
+        expect(resolveContext).not.toHaveBeenCalled();
+        expect(service.execute).not.toHaveBeenCalled();
+      }
+    });
+
+    it("refuses a rotation for a thread the window has no authority over", async () => {
+      const { handler, service } = routes(vi.fn(async () => undefined));
+
+      const response = await handler(request({ kind: "apple-action-request", request: rotate }));
+
+      expect(response?.status).toBe(403);
+      expect(service.execute).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Screen recording", () => {
+    const recording = {
+      actionId: "60000000-0000-4000-8000-000000000018",
+      correlationId: "60000000-0000-4000-8000-000000000019",
+      authority,
+      ...scope,
+      kind: "start-recording",
+      simulatorId: "60000000-0000-4000-8000-00000000000a",
+      requestedBy: { kind: "local-user", actorId: "60000000-0000-4000-8000-000000000099" },
+      timeoutMs: 30_000,
+      approval: { kind: "approved", approvalId: "60000000-0000-4000-8000-00000000001b" },
+    };
+    function routes(resolveContext: ReturnType<typeof vi.fn>) {
+      const service = {
+        discover: vi.fn(),
+        execute: vi.fn(async () => ({
+          actionId: recording.actionId,
+          correlationId: recording.correlationId,
+          authority,
+          kind: "start-recording",
+          outcome: "succeeded",
+          simulatorId: recording.simulatorId,
+          requestedBy: recording.requestedBy,
+          diagnostics: [],
+          artifacts: [],
+          cleanup: "complete",
+          durationMs: 5,
+          completedAt: "2026-10-14T20:00:01.000Z",
+        })),
+        cancel: vi.fn(),
+        snapshot: vi.fn(),
+        readScreenshotArtifact: vi.fn(),
+      };
+      const handler = createAppleToolchainRouteHandler({
+        windowAuthorityStore: authorityStore(),
+        resolveContext,
+        service,
+        now: () => 2,
+      });
+      return { handler, service };
+    }
+
+    it("hands start and stop to the host with the window's authority", async () => {
+      const { handler, service } = routes(vi.fn(async () => context));
+
+      for (const kind of ["start-recording", "stop-recording"]) {
+        const response = await handler(
+          request({ kind: "apple-action-request", request: { ...recording, kind } }),
+        );
+        expect(response?.status, kind).toBe(200);
+        expect(service.execute).toHaveBeenLastCalledWith(
+          expect.objectContaining({ kind }),
+          context,
+        );
+      }
+    });
+
+    it("refuses a recording nobody asked for before authority is checked or the host is reached", async () => {
+      const resolveContext = vi.fn(async () => context);
+      const { handler, service } = routes(resolveContext);
+
+      const response = await handler(
+        request({
+          kind: "apple-action-request",
+          request: { ...recording, requestedBy: undefined },
+        }),
+      );
+
+      expect(response?.status).toBe(400);
+      expect(resolveContext).not.toHaveBeenCalled();
+      expect(service.execute).not.toHaveBeenCalled();
+    });
+
+    it("refuses a recording for a thread the window has no authority over", async () => {
+      const { handler, service } = routes(vi.fn(async () => undefined));
+
+      const response = await handler(request({ kind: "apple-action-request", request: recording }));
+
+      expect(response?.status).toBe(403);
+      expect(service.execute).not.toHaveBeenCalled();
+    });
+  });
+
   it("fails closed before service access for invalid window authority", async () => {
     const service = {
       discover: vi.fn(),

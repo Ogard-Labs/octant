@@ -92,6 +92,17 @@ const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursorSchema);
 const decodeEventEnvelope = Schema.decodeUnknownSync(EventEnvelopeSchema);
 const decodeEventActor = Schema.decodeUnknownSync(EventActor);
 
+/** The index migration 61 adds; a journal opened on an older schema plans without it. */
+const THREAD_KIND_INDEX = "event_journal_thread_kind_sequence";
+
+function eventJournalHasIndex(connection: SqliteConnection, name: string): boolean {
+  return (
+    connection
+      .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'index' AND name = ?")
+      .get(name) !== undefined
+  );
+}
+
 function eventJournalHasActorJson(connection: SqliteConnection): boolean {
   return (
     connection
@@ -119,10 +130,16 @@ export class Journal {
   readonly #selectHeadSequence: SqliteStatement;
   readonly #replayRows: SqliteStatement;
   readonly #replayAggregateTypeRows: SqliteStatement;
+  readonly #replayNarrowedAggregateTypeRows: SqliteStatement;
+  readonly #aggregateVersionRows: SqliteStatement;
   readonly #replayAggregateTypeThreadRows: SqliteStatement;
+  readonly #aggregateTypeThreadHead: SqliteStatement;
   readonly #replayThreadAnchoredRows: SqliteStatement;
   readonly #replayAggregateRows: SqliteStatement;
   readonly #latestThreadKindRows: SqliteStatement;
+  readonly #latestThreadResultRows: SqliteStatement;
+  readonly #latestThreadKindPerAggregateRows: SqliteStatement;
+  readonly #firstAggregateKindRow: SqliteStatement;
 
   constructor(options: JournalOptions) {
     this.#connection = options.connection;
@@ -177,15 +194,47 @@ export class Journal {
       ORDER BY global_sequence ASC
       LIMIT ?
     `);
+    // `aggregate_version > 0` is always true; it is the condition of the
+    // (type, sequence) index (migration 79), which only a query that repeats
+    // it may use. That index returns the type's rows already in journal order.
     this.#replayAggregateTypeRows = options.connection.prepare(`
       SELECT
         global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
         event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
         actor_id, ${actorJsonSelect}, occurred_at, payload_json
       FROM event_journal
-      WHERE aggregate_type = ? AND global_sequence > ?
+      WHERE aggregate_type = ? AND global_sequence > ? AND aggregate_version > 0
       ORDER BY global_sequence ASC
       LIMIT ?
+    `);
+    // The same read with rows a caller has no use for left out in SQL, so
+    // they are never parsed or decoded: a startup that needs a few kinds of
+    // record from an aggregate type no longer decodes every row of it. Each
+    // narrowing is skipped when its parameter is NULL. A payload that is not
+    // JSON never reaches `json_extract`, which would fail the whole query;
+    // the prefix narrowing keeps such a row instead, so #decodeRow throws
+    // `malformed-json` for it exactly as the unnarrowed read does.
+    this.#replayNarrowedAggregateTypeRows = options.connection.prepare(`
+      SELECT
+        global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
+        actor_id, ${actorJsonSelect}, occurred_at, payload_json
+      FROM event_journal
+      WHERE aggregate_type = ? AND global_sequence > ? AND aggregate_version > 0
+        AND (? IS NULL OR event_name = ?)
+        AND (? IS NULL OR event_name <> ?)
+        AND (? IS NULL OR CASE WHEN json_valid(payload_json)
+          THEN substr(json_extract(payload_json, ?), 1, length(?)) = ? ELSE 1 END)
+      ORDER BY global_sequence ASC
+      LIMIT ?
+    `);
+    // Every aggregate of a type with the version of its newest event, read
+    // from the unique (type, id, version) index without touching a payload.
+    this.#aggregateVersionRows = options.connection.prepare(`
+      SELECT aggregate_id, max(aggregate_version) AS aggregate_version
+      FROM event_journal
+      WHERE aggregate_type = ?
+      GROUP BY aggregate_id
     `);
     // Filters on the payload's `threadId` in SQL so a per-thread read never
     // decodes other threads' rows: a dogfooding host whose journal was 94%
@@ -201,14 +250,90 @@ export class Journal {
       FROM event_journal
       WHERE aggregate_type = ? AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
         AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
+        AND global_sequence < ?
       ORDER BY global_sequence DESC LIMIT ?
     `);
-    // The thread predicate is spelled exactly as the expression in
-    // `event_journal_thread_kind_sequence`, because SQLite only uses an
-    // expression index for a textually identical expression. The bare
-    // `json_extract` form this replaced searched on `aggregate_type` alone and
-    // read every code-operation row's payload, on every batch of every
-    // thread's history read.
+    // The same newest-first thread read keyed on an operation result's kind,
+    // through the result-kind index (migration 63), optionally narrowed to
+    // one mutation so a reader looking for the newest restore does not decode
+    // every commit and push result before it.
+    this.#latestThreadResultRows = options.connection.prepare(`
+      SELECT global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
+        actor_id, ${actorJsonSelect}, occurred_at, payload_json
+      FROM event_journal
+      WHERE aggregate_type = ? AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.result.kind') END = ?
+        AND (? IS NULL OR CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.result.mutation') END = ?)
+        AND global_sequence < ?
+      ORDER BY global_sequence DESC LIMIT ?
+    `);
+    // The last event of one kind of each aggregate that recorded an anchor
+    // event of the thread before a sequence, in the order the anchors were
+    // journaled: a Code turn's own usage figure is its last report, the turns
+    // are the operations that started one, and a fold over them must run in
+    // turn order even when an older turn's report landed after a newer one's.
+    // Membership is by the anchor, not by where the report landed. The anchor
+    // grouping reads the thread's anchors and the report grouping reads every
+    // report of that kind the thread holds, both through the thread-kind
+    // index; only the chosen rows decode. The index is named because the
+    // grouping by aggregate made the planner prefer the aggregate's own index,
+    // which walked every row of the type on the host and parsed each payload:
+    // 176 ms for a 40-turn thread among a million Code rows, 0.07 ms on the
+    // thread-kind index for the same rows. The host never runs ANALYZE, so
+    // the planner has nothing better to go on.
+    const threadKindIndex = eventJournalHasIndex(options.connection, THREAD_KIND_INDEX)
+      ? `INDEXED BY ${THREAD_KIND_INDEX}`
+      : "";
+    this.#latestThreadKindPerAggregateRows = options.connection.prepare(`
+      SELECT anchors.anchor_sequence AS anchor_sequence,
+        event.global_sequence, event.event_id, event.aggregate_type, event.aggregate_id,
+        event.aggregate_version, event.event_name, event.event_version, event.host_id,
+        event.correlation_id, event.causation_id, event.actor_kind, event.actor_id,
+        ${this.#hasActorJson ? "event.actor_json" : "NULL AS actor_json"}, event.occurred_at,
+        event.payload_json
+      FROM (
+        SELECT aggregate_id, min(global_sequence) AS anchor_sequence
+        FROM event_journal ${threadKindIndex}
+        WHERE aggregate_type = ?
+          AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+          AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
+          AND global_sequence < ?
+        GROUP BY aggregate_id
+      ) AS anchors
+      JOIN (
+        SELECT aggregate_id, max(global_sequence) AS last_sequence
+        FROM event_journal ${threadKindIndex}
+        WHERE aggregate_type = ?
+          AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
+          AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
+        GROUP BY aggregate_id
+      ) AS latest ON latest.aggregate_id = anchors.aggregate_id
+      JOIN event_journal AS event ON event.global_sequence = latest.last_sequence
+      WHERE anchors.anchor_sequence > ?
+      ORDER BY anchors.anchor_sequence ASC
+      LIMIT ?
+    `);
+    // One aggregate's first event of a kind, walking its own unique index in
+    // version order so the read stops at the match instead of parsing every
+    // event the aggregate recorded after it.
+    this.#firstAggregateKindRow = options.connection.prepare(`
+      SELECT global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
+        actor_id, ${actorJsonSelect}, occurred_at, payload_json
+      FROM event_journal
+      WHERE aggregate_type = ? AND aggregate_id = ?
+        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.event.kind') END = ?
+      ORDER BY aggregate_version ASC
+      LIMIT 1
+    `);
+    // The thread predicate is spelled exactly as the expression in the thread
+    // indexes, because SQLite only uses an expression index for a textually
+    // identical expression. The bare `json_extract` form this replaced
+    // searched on `aggregate_type` alone and read every code-operation row's
+    // payload, on every batch of every thread's history read. The
+    // (type, thread, sequence) index (migration 80) returns the rows after the
+    // cursor already in order.
     this.#replayAggregateTypeThreadRows = options.connection.prepare(`
       SELECT
         global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
@@ -220,6 +345,14 @@ export class Journal {
         AND global_sequence > ?
       ORDER BY global_sequence ASC
       LIMIT ?
+    `);
+    // The size and newest row of the same thread slice, counted on the index
+    // alone without reading a payload.
+    this.#aggregateTypeThreadHead = options.connection.prepare(`
+      SELECT count(*) AS event_count, coalesce(max(global_sequence), 0) AS last_sequence
+      FROM event_journal
+      WHERE aggregate_type = ?
+        AND CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.threadId') END = ?
     `);
     // The same thread slice, narrowed in SQL to the aggregates that recorded
     // an event of one kind, plus rows whose event carries a result of one
@@ -565,10 +698,21 @@ export class Journal {
     ).map((row) => this.#decodeRow(row));
   }
 
+  /**
+   * An aggregate type's events in journal order. The optional narrowings
+   * leave rows out before they are read: only one event name, every event
+   * name but one, or only rows whose payload value at `path` (dotted keys),
+   * read as text, starts with `prefix`. The prefix test may let through a row
+   * whose value is not a string, so a caller checks what it reads; every row
+   * returned still decodes through the registered schema.
+   */
   replayAggregateType(cursor: {
     readonly aggregateType: string;
     readonly afterSequence: number;
     readonly limit: number;
+    readonly eventName?: string;
+    readonly exceptEventName?: string;
+    readonly payloadPrefix?: { readonly path: string; readonly prefix: string };
   }): ReadonlyArray<EventEnvelope> {
     if (
       cursor.aggregateType.trim().length === 0 ||
@@ -576,17 +720,64 @@ export class Journal {
       cursor.afterSequence < 0 ||
       !Number.isSafeInteger(cursor.limit) ||
       cursor.limit < 1 ||
-      cursor.limit > 1_000
+      cursor.limit > 1_000 ||
+      cursor.eventName?.trim().length === 0 ||
+      cursor.exceptEventName?.trim().length === 0 ||
+      (cursor.payloadPrefix !== undefined &&
+        (!PAYLOAD_PATH_PATTERN.test(cursor.payloadPrefix.path) ||
+          cursor.payloadPrefix.prefix.length === 0))
     ) {
       throw new JournalInputInvalid({ operation: "replay" });
     }
+    if (
+      cursor.eventName === undefined &&
+      cursor.exceptEventName === undefined &&
+      cursor.payloadPrefix === undefined
+    ) {
+      return (
+        this.#replayAggregateTypeRows.all(
+          cursor.aggregateType,
+          cursor.afterSequence,
+          cursor.limit,
+        ) as Array<JournalRow>
+      ).map((row) => this.#decodeRow(row));
+    }
+    const eventName = cursor.eventName ?? null;
+    const exceptEventName = cursor.exceptEventName ?? null;
+    const path = cursor.payloadPrefix === undefined ? null : `$.${cursor.payloadPrefix.path}`;
+    const prefix = cursor.payloadPrefix?.prefix ?? null;
     return (
-      this.#replayAggregateTypeRows.all(
+      this.#replayNarrowedAggregateTypeRows.all(
         cursor.aggregateType,
         cursor.afterSequence,
+        eventName,
+        eventName,
+        exceptEventName,
+        exceptEventName,
+        path,
+        path,
+        prefix,
+        prefix,
         cursor.limit,
       ) as Array<JournalRow>
     ).map((row) => this.#decodeRow(row));
+  }
+
+  /**
+   * Every aggregate of a type and the version of its newest event: what a
+   * replay of every row of the type would leave as each aggregate's version,
+   * without decoding any of them.
+   */
+  aggregateVersions(
+    aggregateType: string,
+  ): ReadonlyArray<{ readonly aggregateId: string; readonly aggregateVersion: number }> {
+    if (aggregateType.trim().length === 0) throw new JournalInputInvalid({ operation: "replay" });
+    return (
+      this.#aggregateVersionRows.all(aggregateType) as Array<{
+        readonly aggregate_id: string;
+        readonly aggregate_version: number;
+      }>
+    ).map((row) => ({ aggregateId: row.aggregate_id, aggregateVersion: row.aggregate_version }));
   }
 
   replayAggregateTypeForThread(cursor: {
@@ -614,6 +805,26 @@ export class Journal {
         cursor.limit,
       ) as Array<JournalRow>
     ).map((row) => this.#decodeRow(row));
+  }
+
+  /**
+   * How many rows `replayAggregateTypeForThread` would return for a thread
+   * from the start, and the newest one's sequence (0 for none). A reader that
+   * keeps a thread's history compares these with what it read to tell whether
+   * rows were appended or removed since, without reading any of them.
+   */
+  aggregateTypeThreadHead(slice: { readonly aggregateType: string; readonly threadId: string }): {
+    readonly eventCount: number;
+    readonly lastSequence: number;
+  } {
+    if (slice.aggregateType.trim().length === 0 || slice.threadId.trim().length === 0) {
+      throw new JournalInputInvalid({ operation: "replay" });
+    }
+    const row = this.#aggregateTypeThreadHead.get(slice.aggregateType, slice.threadId) as {
+      readonly event_count: number;
+      readonly last_sequence: number;
+    };
+    return { eventCount: row.event_count, lastSequence: row.last_sequence };
   }
 
   /**
@@ -660,16 +871,23 @@ export class Journal {
     ).map((row) => this.#decodeRow(row));
   }
 
+  /**
+   * A thread's newest events of one kind, newest first. `beforeSequence`, when
+   * given, is exclusive: a reader that walks back asks below the oldest row it
+   * already holds.
+   */
   latestThreadEvents(input: {
     readonly aggregateType: string;
     readonly threadId: string;
     readonly kind: string;
     readonly limit: number;
+    readonly beforeSequence?: number;
   }): ReadonlyArray<EventEnvelope> {
     if (
       input.aggregateType.trim().length === 0 ||
       input.threadId.trim().length === 0 ||
       input.kind.trim().length === 0 ||
+      !validBound(input.beforeSequence) ||
       !Number.isSafeInteger(input.limit) ||
       input.limit < 1 ||
       input.limit > 1_000
@@ -680,9 +898,109 @@ export class Journal {
         input.aggregateType,
         input.threadId,
         input.kind,
+        input.beforeSequence ?? Number.MAX_SAFE_INTEGER,
         input.limit,
       ) as Array<JournalRow>
     ).map((row) => this.#decodeRow(row));
+  }
+
+  /**
+   * A thread's newest events carrying a result of one kind, and of one
+   * `mutation` when given, newest first, below an exclusive sequence.
+   */
+  latestThreadResults(input: {
+    readonly aggregateType: string;
+    readonly threadId: string;
+    readonly resultKind: string;
+    readonly mutation?: string;
+    readonly limit: number;
+    readonly beforeSequence?: number;
+  }): ReadonlyArray<EventEnvelope> {
+    if (
+      input.aggregateType.trim().length === 0 ||
+      input.threadId.trim().length === 0 ||
+      input.resultKind.trim().length === 0 ||
+      (input.mutation !== undefined && input.mutation.trim().length === 0) ||
+      !validBound(input.beforeSequence) ||
+      !Number.isSafeInteger(input.limit) ||
+      input.limit < 1 ||
+      input.limit > 1_000
+    )
+      throw new JournalInputInvalid({ operation: "replay" });
+    return (
+      this.#latestThreadResultRows.all(
+        input.aggregateType,
+        input.threadId,
+        input.resultKind,
+        input.mutation ?? null,
+        input.mutation ?? null,
+        input.beforeSequence ?? Number.MAX_SAFE_INTEGER,
+        input.limit,
+      ) as Array<JournalRow>
+    ).map((row) => this.#decodeRow(row));
+  }
+
+  /**
+   * The last event of `kind` of every aggregate that recorded an `anchorKind`
+   * event of the thread below `anchorBeforeSequence`, each with the sequence
+   * of that anchor, in anchor order, a batch at a time after
+   * `afterAnchorSequence`. An aggregate with no event of `kind` is left out.
+   */
+  latestThreadEventPerAggregate(input: {
+    readonly aggregateType: string;
+    readonly threadId: string;
+    readonly kind: string;
+    readonly anchorKind: string;
+    readonly anchorBeforeSequence: number;
+    readonly afterAnchorSequence: number;
+    readonly limit: number;
+  }): ReadonlyArray<{ readonly anchorSequence: number; readonly event: EventEnvelope }> {
+    if (
+      input.aggregateType.trim().length === 0 ||
+      input.threadId.trim().length === 0 ||
+      input.kind.trim().length === 0 ||
+      input.anchorKind.trim().length === 0 ||
+      !validBound(input.anchorBeforeSequence) ||
+      !Number.isSafeInteger(input.afterAnchorSequence) ||
+      input.afterAnchorSequence < 0 ||
+      !Number.isSafeInteger(input.limit) ||
+      input.limit < 1 ||
+      input.limit > 1_000
+    )
+      throw new JournalInputInvalid({ operation: "replay" });
+    return (
+      this.#latestThreadKindPerAggregateRows.all(
+        input.aggregateType,
+        input.threadId,
+        input.anchorKind,
+        input.anchorBeforeSequence,
+        input.aggregateType,
+        input.threadId,
+        input.kind,
+        input.afterAnchorSequence,
+        input.limit,
+      ) as Array<JournalRow & { readonly anchor_sequence: number }>
+    ).map((row) => ({ anchorSequence: row.anchor_sequence, event: this.#decodeRow(row) }));
+  }
+
+  /** One aggregate's first event of a kind, or undefined when it recorded none. */
+  firstAggregateEvent(input: {
+    readonly aggregateType: string;
+    readonly aggregateId: string;
+    readonly kind: string;
+  }): EventEnvelope | undefined {
+    if (
+      input.aggregateType.trim().length === 0 ||
+      input.aggregateId.trim().length === 0 ||
+      input.kind.trim().length === 0
+    )
+      throw new JournalInputInvalid({ operation: "replay" });
+    const row = this.#firstAggregateKindRow.get(
+      input.aggregateType,
+      input.aggregateId,
+      input.kind,
+    ) as JournalRow | undefined;
+    return row === undefined ? undefined : this.#decodeRow(row);
   }
 
   replayAggregate(cursor: AggregateReplayCursor): ReadonlyArray<EventEnvelope> {
@@ -860,4 +1178,12 @@ function findDuplicate(values: ReadonlyArray<string>): string | undefined {
     seen.add(value);
   }
   return undefined;
+}
+
+/** Dotted payload keys a narrowed replay may read, so a caller cannot write its own JSON path. */
+const PAYLOAD_PATH_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/;
+
+/** An optional exclusive sequence bound: absent, or a positive safe integer. */
+function validBound(sequence: number | undefined): boolean {
+  return sequence === undefined || (Number.isSafeInteger(sequence) && sequence > 0);
 }

@@ -811,7 +811,9 @@ describe("CodeTerminalPane Browser switch", () => {
       name: "Let this terminal use the Browser?",
     });
     expect(dialog).toHaveTextContent("The terminal restarts, so anything running in it stops.");
-    expect(dialog).toHaveTextContent("the desktop app does not include it yet");
+    expect(dialog).toHaveTextContent(
+      "The Octant app for macOS adds octant to this terminal's PATH",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(client.executeOperation).not.toHaveBeenCalled();

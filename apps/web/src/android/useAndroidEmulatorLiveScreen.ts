@@ -5,6 +5,7 @@ import type {
   AndroidScreenTransport,
 } from "@octant/contracts/android-toolchain-rpc";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { screenFacing } from "../device/deviceModel";
 
 export type AndroidEmulatorLiveScreen =
   | { readonly status: "off" }
@@ -86,6 +87,7 @@ export function useAndroidEmulatorLiveScreen(options: {
         const watch = await client.watchScreen(request, view.signal);
         if (signal.aborted) return;
         let painted = false;
+        let shown: { readonly width: number; readonly height: number } | undefined;
         const startedAt = Date.now();
         if (watch.status === "failed") {
           if (!everLive) {
@@ -125,13 +127,15 @@ export function useAndroidEmulatorLiveScreen(options: {
               latestRef.current?.frame.close();
               latestRef.current = { key, frame };
               if (canvasRef.current !== null) paint(canvasRef.current, frame);
-              if (!painted) {
+              const facing = screenFacing(shown ?? watch.screen, frame);
+              if (!painted || facing !== shown) {
                 painted = true;
                 everLive = true;
+                shown = facing;
                 clearTimeout(noPicture);
                 setState({
                   status: "live",
-                  screen: watch.screen,
+                  screen: facing,
                   ...(watch.transport === undefined ? {} : { transport: watch.transport }),
                 });
               }

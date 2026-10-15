@@ -134,9 +134,17 @@ native receipts; desktop admin routes are loopback-only.
 ### Outside content
 
 When a thread reads content from outside, such as a web page, a tool's result,
-an issue, or a message from another agent, Octant marks it. A search or page
-fetch the provider runtime performs with its own built-in tool does not mark
-the thread. While a thread is
+an issue, or a message from another agent, Octant marks it. That includes a
+web search or page fetch the provider runs with its own built-in tool, such as
+Codex's web search or OpenCode's web fetch, and a tool the model's provider
+runs on its own servers. The thread is marked as soon as the call starts, even
+if it later fails or you deny it, because by then the provider may already
+have the page. An agent that reports a web search the same way as a search of
+your files cannot always be told apart, so that search may not mark the
+thread. If the provider's own reviewer is answering approvals in a Code
+thread, the turn stops at that point and says why, so you answer the next
+approval yourself. If Octant cannot record the mark, the turn stops, and the
+thread's next turn is refused until the mark is recorded. While a thread is
 marked, some actions ask each time and some remembered approvals stop applying.
 A notice above the message box says so, with a **Review** button. Review lists
 where the thread read from, how often, and when. **Clear the mark** tells Octant
@@ -145,7 +153,9 @@ you looked at it, so those actions stop asking because of it.
 Clearing removes nothing from what the model already read, and the next outside
 content marks the thread again. A thread forked, branched, or restored from a
 marked thread starts marked, and so does a thread started from a follow-up or
-side task a marked thread suggested; clearing one never clears the other. A running or queued turn holds the button back
+side task a marked thread suggested. Mentioning a marked thread with `#`, or
+asking a Side Chat about one, marks the thread you ask in, because its model
+reads that thread's conversation. Clearing one never clears the other. A running or queued turn holds the button back
 until the thread is idle. You can clear a mark only at a window on the computer
 that hosts the thread, not from a paired phone or browser.
 

@@ -245,7 +245,10 @@ export type ReplicaCanvasEntry = ReplicaArtifactEntry | ReplicaCommentEntry;
  *   It names the one approval it accepted, by its writer, sequence, and the
  *   SHA-256 of the approval file's bytes, so each computer has one parent.
  * - `revocation` names a computer and the last of its sequences that still
- *   counts; 0 means none.
+ *   counts; 0 means none. It also names which of that computer's slots at or
+ *   before the cut its writer read, and only those keep counting.
+ * - `replica-left` is signed by a member leaving the replica, naming the
+ *   founder it pinned. What it signed before it still counts; nothing after.
  */
 export const ReplicaMembershipEntryKind = Schema.Literal(
   "replica-founded",
@@ -253,6 +256,7 @@ export const ReplicaMembershipEntryKind = Schema.Literal(
   "join-approved",
   "join-accepted",
   "revocation",
+  "replica-left",
 );
 export type ReplicaMembershipEntryKind = typeof ReplicaMembershipEntryKind.Type;
 
@@ -323,6 +327,52 @@ export const ReplicaJoinAcceptedEntry = Schema.Struct({
   );
 export type ReplicaJoinAcceptedEntry = typeof ReplicaJoinAcceptedEntry.Type;
 
+/** Consecutive sequences of one instance, both ends included. */
+export const ReplicaSequenceRun = Schema.Struct({
+  from: PositiveInt,
+  to: PositiveInt,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((run) => run.from <= run.to, {
+      message: () => "A run starts at or before where it ends.",
+    }),
+  );
+export type ReplicaSequenceRun = typeof ReplicaSequenceRun.Type;
+
+/**
+ * The most runs one revocation commits to. A revoker whose view of the
+ * subject has more gaps than this moves the cut earlier, to the end of the
+ * last run that fits, rather than writing a larger record.
+ */
+export const REPLICA_KEPT_SLOTS_MAX_RUNS = 1_024;
+
+/**
+ * The subject's slots at or before a revocation's cut that its writer read as
+ * the subject's own valid signed entries, as ascending runs with a gap
+ * between each two. Every other slot at or before the cut stops counting, so
+ * a file written later into a slot the revoker saw empty, unread, or holding
+ * something else - by someone holding the revoked key and write access to
+ * the store - counts nowhere. One set has one encoding: runs are sorted,
+ * never touch, and never overlap. `version` names this encoding; a reader
+ * that does not know a version fails closed on the whole record.
+ */
+export const ReplicaKeptSlots = Schema.Struct({
+  version: Schema.Literal(1),
+  runs: Schema.Array(ReplicaSequenceRun).pipe(
+    Schema.maxItems(REPLICA_KEPT_SLOTS_MAX_RUNS),
+    Schema.filter(
+      (runs) =>
+        runs.every((run, index) => {
+          const previous = runs[index - 1];
+          return previous === undefined || previous.to + 1 < run.from;
+        }),
+      { message: () => "Kept runs are ascending, apart, and do not overlap." },
+    ),
+  ),
+}).annotations(strict);
+export type ReplicaKeptSlots = typeof ReplicaKeptSlots.Type;
+
 export const ReplicaRevocationEntry = Schema.Struct({
   format: membershipFormat,
   kind: Schema.Literal("revocation"),
@@ -333,8 +383,42 @@ export const ReplicaRevocationEntry = Schema.Struct({
    * does. Every entry it signed after this stops counting on every computer.
    */
   cut: Schema.Int.pipe(Schema.nonNegative()),
-}).annotations(strict);
+  /**
+   * Which of the subject's slots at or before the cut still count. A
+   * revocation without it, as written before this field existed, keeps every
+   * slot at or before the cut.
+   */
+  kept: Schema.optional(ReplicaKeptSlots),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (entry) => entry.kept === undefined || entry.kept.runs.every((run) => run.to <= entry.cut),
+      { message: () => "A revocation keeps no slot after its cut." },
+    ),
+  );
 export type ReplicaRevocationEntry = typeof ReplicaRevocationEntry.Type;
+
+/**
+ * A member leaving its replica, signed by the key it is leaving with. It names
+ * the founder that member pinned, so a copy of it means nothing in another
+ * replica. Readers take it as the writer's own cut just before this slot,
+ * which other computers show as left rather than revoked. A computer's first
+ * record is its founding record or its join request, so leaving is a later one.
+ */
+export const ReplicaLeftEntry = Schema.Struct({
+  format: membershipFormat,
+  kind: Schema.Literal("replica-left"),
+  origin: ReplicaOrigin,
+  founder: ReplicaInstanceId,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((entry) => entry.origin.sequence >= 2, {
+      message: () => "Leaving follows the writer's first record.",
+    }),
+  );
+export type ReplicaLeftEntry = typeof ReplicaLeftEntry.Type;
 
 export const ReplicaMembershipEntry = Schema.Union(
   ReplicaFoundedEntry,
@@ -342,6 +426,7 @@ export const ReplicaMembershipEntry = Schema.Union(
   ReplicaJoinApprovedEntry,
   ReplicaJoinAcceptedEntry,
   ReplicaRevocationEntry,
+  ReplicaLeftEntry,
 );
 export type ReplicaMembershipEntry = typeof ReplicaMembershipEntry.Type;
 
@@ -484,7 +569,22 @@ export function encodeReplicaEntry(entry: ReplicaEntry): string {
       };
       break;
     case "revocation":
-      body = { ...head, subject: entry.subject, cut: entry.cut };
+      body = {
+        ...head,
+        subject: entry.subject,
+        cut: entry.cut,
+        ...(entry.kept === undefined
+          ? {}
+          : {
+              kept: {
+                version: entry.kept.version,
+                runs: entry.kept.runs.map((run) => ({ from: run.from, to: run.to })),
+              },
+            }),
+      };
+      break;
+    case "replica-left":
+      body = { ...head, founder: entry.founder };
       break;
     case "artifact-version":
     case "artifact-tombstone":
@@ -567,6 +667,17 @@ export const ReplicaMembershipCommand = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull"),
+  }).annotations(strict),
+  /**
+   * Leave the replica: a member in good standing first publishes a signed
+   * `replica-left` record, then this computer forgets its identity, removes
+   * its device key, and turns sync off. `withoutStore` leaves without that
+   * record, for a store that cannot be reached any more; the other computers
+   * then keep listing this one until someone revokes it.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("leave"),
+    withoutStore: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
 );
 export type ReplicaMembershipCommand = typeof ReplicaMembershipCommand.Type;
@@ -701,6 +812,17 @@ export const ReplicaMembershipResult = Schema.Union(
     approver: ReplicaInstanceId,
     founder: ReplicaInstanceId,
   }).annotations(strict),
+  /**
+   * This computer left its replica. `toldStore` says whether a signed
+   * `replica-left` record is in the store; `keyRemoved` whether the device key
+   * is gone from the credential store.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("left"),
+    instanceId: ReplicaInstanceId,
+    toldStore: Schema.Boolean,
+    keyRemoved: Schema.Boolean,
+  }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pulled"),
     /** Membership records this pull read and now holds. */
@@ -745,7 +867,8 @@ export const decodeReplicaMembershipResult = Schema.decodeUnknownSync(ReplicaMem
 
 /**
  * A computer that counts in this host's replica, as Settings › Sync lists it.
- * A revoked computer stays listed: what it signed up to its cut still counts.
+ * A revoked computer, and one that left, stays listed: what it signed up to
+ * its cut still counts. `left` and `revoked` never both hold.
  */
 export const ReplicaMemberView = Schema.Struct({
   instanceId: ReplicaInstanceId,
@@ -759,6 +882,8 @@ export const ReplicaMemberView = Schema.Struct({
     }).annotations(strict),
   ),
   revoked: Schema.Boolean,
+  /** It signed a `replica-left` record while it was a member. */
+  left: Schema.Boolean,
   thisComputer: Schema.Boolean,
   /**
    * Whether this computer may revoke it: this one is in good standing and
@@ -796,7 +921,8 @@ export type ReplicaJoinRequestView = typeof ReplicaJoinRequestView.Type;
 
 /**
  * Where this computer stands. `left` is an identity that was revoked or cut
- * out above it: it asks to join again as a new computer.
+ * out above it: it asks to join again as a new computer. A computer that
+ * left its replica on its own has no identity, so it is `none`.
  */
 export const ReplicaThisComputer = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("none") }).annotations(strict),
@@ -949,6 +1075,7 @@ export const ReplicaSyncStatusView = Schema.Struct({
         }).annotations(strict),
       ),
       revoked: Schema.Boolean,
+      left: Schema.Boolean,
       thisComputer: Schema.Boolean,
     }).annotations(strict),
   ),

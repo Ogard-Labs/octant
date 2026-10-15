@@ -35,7 +35,7 @@ export const SYNC_PROVIDER_FACT =
 
 /** Why the store controls are off on a computer that belongs to a replica. */
 export const REPLICA_MEMBER_LOCK =
-  "This computer belongs to a replica in this store. The store can't be changed until leaving a replica is supported.";
+  "This computer belongs to a replica in this store. Leave the replica below to choose another store.";
 
 const STORE_OPTIONS: ReadonlyArray<{ readonly id: StoreKind; readonly label: string }> = [
   { id: "none", label: "None" },

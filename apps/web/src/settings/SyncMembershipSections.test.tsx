@@ -47,6 +47,7 @@ const founderMembers = [
     displayName: "Studio Mac",
     role: { kind: "founder" },
     revoked: false,
+    left: false,
     thisComputer: true,
     revocable: false,
   },
@@ -55,6 +56,7 @@ const founderMembers = [
     displayName: "Laptop",
     role: { kind: "approved", approver: studio, approverName: "Studio Mac" },
     revoked: false,
+    left: false,
     thisComputer: false,
     revocable: true,
   },
@@ -518,6 +520,123 @@ describe("SyncMembershipSections", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("leaves only after a confirmation that says what happens, then says sync is off", async () => {
+    const founder = view({
+      thisComputer: { kind: "founder", instanceId: studio, displayName: "Studio Mac" },
+      members: founderMembers,
+    });
+    const { fake, execute, setView } = client(founder, () => {
+      setView(view());
+      return { kind: "left", instanceId: studio, toldStore: true, keyRemoved: true };
+    });
+    const { onMembershipChange } = renderSections(fake);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Leave…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Leave the replica?" });
+    expect(
+      within(dialog).getByText(/writes a signed record into the store saying it left/),
+    ).toBeVisible();
+    expect(
+      within(dialog).getByText(/Your artifacts and their history stay on this computer/),
+    ).toBeVisible();
+    expect(within(dialog).getByText(/no computer can revoke them after it leaves/)).toBeVisible();
+    expect(execute).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Leave replica" }));
+    expect(execute).toHaveBeenCalledWith({ kind: "leave" });
+    expect(
+      await screen.findByText(
+        "Left the replica. Sync is off; your other computers show it as left.",
+      ),
+    ).toBeVisible();
+    expect(onMembershipChange).toHaveBeenCalled();
+    // This computer has no replica now, so it can set up or join again.
+    expect(screen.getByRole("button", { name: "Set up sync" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Leave…" })).not.toBeInTheDocument();
+  });
+
+  it("offers leaving without telling the other computers only after the store did not take the record", async () => {
+    const member = view({
+      thisComputer: { kind: "member", instanceId: laptop, displayName: "Laptop" },
+      members: founderMembers.map((entry) => ({
+        ...entry,
+        thisComputer: entry.instanceId === laptop,
+        revocable: false,
+      })),
+    });
+    const { fake, execute, setView } = client(member, (command) => {
+      if (!("withoutStore" in command)) {
+        return { kind: "store-failed", message: "The replica store did not take the entry." };
+      }
+      setView(view());
+      return { kind: "left", instanceId: laptop, toldStore: false, keyRemoved: true };
+    });
+    renderSections(fake);
+    const user = userEvent.setup();
+    expect(screen.queryByRole("button", { name: "Leave without telling them…" })).toBeNull();
+
+    await user.click(await screen.findByRole("button", { name: "Leave…" }));
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Leave the replica?" })).getByRole(
+        "button",
+        {
+          name: "Leave replica",
+        },
+      ),
+    );
+    const section = screen.getByRole("region", { name: "Leave replica" });
+    expect(
+      await within(section).findByText("The replica store did not take the entry."),
+    ).toBeVisible();
+
+    await user.click(within(section).getByRole("button", { name: "Leave without telling them…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Leave without telling them?" });
+    expect(
+      within(dialog).getByText(/keep listing this one as a member until one of them revokes it/),
+    ).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Leave replica" }));
+    expect(execute).toHaveBeenLastCalledWith({ kind: "leave", withoutStore: true });
+    expect(await screen.findByText("Left the replica. Sync is off.")).toBeVisible();
+  });
+
+  it("does not promise a revoke for the computer that set up sync when it leaves without the store", async () => {
+    const founder = view({
+      thisComputer: { kind: "founder", instanceId: studio, displayName: "Studio Mac" },
+      members: founderMembers,
+    });
+    const { fake } = client(founder, () => ({
+      kind: "store-failed",
+      message: "The replica store did not take the entry.",
+    }));
+    renderSections(fake);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Leave…" }));
+    await user.click(
+      within(await screen.findByRole("dialog", { name: "Leave the replica?" })).getByRole(
+        "button",
+        { name: "Leave replica" },
+      ),
+    );
+    await user.click(await screen.findByRole("button", { name: "Leave without telling them…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Leave without telling them?" });
+    expect(within(dialog).getByText(/none of them can revoke it/)).toBeVisible();
+    expect(within(dialog).queryByText(/until one of them revokes it/)).toBeNull();
+  });
+
+  it("lists a computer that left as left, not revoked", async () => {
+    const { fake } = client(
+      view({
+        thisComputer: { kind: "founder", instanceId: studio, displayName: "Studio Mac" },
+        members: [founderMembers[0], { ...founderMembers[1], left: true, revocable: false }],
+      }),
+    );
+    renderSections(fake);
+    const computers = await screen.findByRole("region", { name: "Computers" });
+    expect(within(computers).getByText("Left")).toBeVisible();
+    expect(within(computers).queryByText("Revoked")).toBeNull();
+  });
+
   it("says which status lines are not available yet and states the last store error", async () => {
     const { fake } = client(
       view({
@@ -604,12 +723,14 @@ describe("Settings › Sync off the host", () => {
               displayName: "Studio Mac",
               role: { kind: "founder" },
               revoked: false,
+              left: false,
               thisComputer: true,
             },
             {
               displayName: "Laptop",
               role: { kind: "approved", approverName: "Studio Mac" },
               revoked: true,
+              left: false,
               thisComputer: false,
             },
           ],

@@ -30,6 +30,7 @@ export const TOOL_EGRESS_EVENT_NAMES = {
   decisionsRecorded: "thread.egress-decisions-recorded@1",
   launchSummarized: "thread.egress-launch-summarized@1",
   launchIncomplete: "thread.egress-launch-incomplete@1",
+  learnModeSet: "thread.egress-learn-mode-set@1",
 } as const;
 
 export const DEFAULT_TOOL_EGRESS_PORT = 443;
@@ -304,6 +305,12 @@ export const ThreadEgressLaunchSummarizedPayload = Schema.Struct({
   endedAt: UtcTimestamp,
   bytesSent: byteCount,
   bytesReceived: byteCount,
+  /**
+   * Request heads the proxy refused as unreadable or too large before any
+   * decision. They name no destination, so they are counted here and nowhere
+   * else.
+   */
+  malformedRequests: byteCount,
   entries: Schema.Array(ToolEgressDecisionEntry).pipe(
     Schema.maxItems(MAX_TOOL_EGRESS_SUMMARY_ENTRIES),
   ),
@@ -328,6 +335,155 @@ export const ThreadEgressLaunchIncompletePayload = Schema.Struct({
   threadTainted: Schema.Boolean,
 }).annotations(strict);
 export type ThreadEgressLaunchIncompletePayload = typeof ThreadEgressLaunchIncompletePayload.Type;
+
+/**
+ * Learn mode on or off for one thread. It is on until a person turns it off;
+ * off, a refusal reaches the command's output and nothing is proposed.
+ */
+export const ThreadEgressLearnModeSetPayload = Schema.Struct({
+  threadId: AggregateId,
+  enabled: Schema.Boolean,
+  principal: ToolEgressPersonPrincipal,
+}).annotations(strict);
+export type ThreadEgressLearnModeSetPayload = typeof ThreadEgressLearnModeSetPayload.Type;
+
+/** How long a thread rule lives. A `call` rule ends with its launch instead. */
+export const ToolEgressThreadRuleLifetime = Schema.Literal("1h", "8h", "7d");
+export type ToolEgressThreadRuleLifetime = typeof ToolEgressThreadRuleLifetime.Type;
+export const DEFAULT_TOOL_EGRESS_THREAD_RULE_LIFETIME: ToolEgressThreadRuleLifetime = "8h";
+export const ToolEgressProjectRuleLifetime = Schema.Literal("7d", "30d");
+export type ToolEgressProjectRuleLifetime = typeof ToolEgressProjectRuleLifetime.Type;
+export const DEFAULT_TOOL_EGRESS_PROJECT_RULE_LIFETIME: ToolEgressProjectRuleLifetime = "7d";
+
+/** A live rule as the thread's and the Project's rules lists show it. */
+export const ToolEgressRuleView = Schema.Struct({
+  ruleId: ToolEgressRuleId,
+  host: ToolEgressRuleHost,
+  port: ToolEgressPort,
+  scope: Schema.Literal("call", "thread", "project"),
+  expiresAt: UtcTimestamp,
+  grantedAt: UtcTimestamp,
+  grantedBy: Schema.Literal("local-window", "remote-device", "reviewer"),
+}).annotations(strict);
+export type ToolEgressRuleView = typeof ToolEgressRuleView.Type;
+
+/** An open learn-mode proposal. A child's names the child thread that asked. */
+export const ToolEgressProposalView = Schema.Struct({
+  proposalId: ToolEgressProposalId,
+  host: ToolEgressProposalHost,
+  port: ToolEgressPort,
+  reason: Schema.Literal("no-rule", "expired"),
+  attempts: requestCount,
+  raisedAt: UtcTimestamp,
+  threadTainted: Schema.Boolean,
+  childThreadId: Schema.optional(AggregateId),
+}).annotations(strict);
+export type ToolEgressProposalView = typeof ToolEgressProposalView.Type;
+
+/**
+ * One Code thread's egress rules, its Project's, and its open proposals, as
+ * the host answers the caller asking. `projectGrant` says whether this caller
+ * may grant a Project rule here, and why not.
+ */
+export const ToolEgressThreadView = Schema.Struct({
+  threadId: AggregateId,
+  projectId: AggregateId,
+  /** Whether this thread's harness commands reach the network only through these rules. */
+  enforced: Schema.Boolean,
+  learnMode: Schema.Boolean,
+  threadTainted: Schema.Boolean,
+  projectGrant: Schema.Literal("allowed", "needs-local-window", "thread-tainted"),
+  threadRules: Schema.Array(ToolEgressRuleView).pipe(Schema.maxItems(MAX_LIVE_TOOL_EGRESS_RULES)),
+  projectRules: Schema.Array(ToolEgressRuleView).pipe(Schema.maxItems(MAX_LIVE_TOOL_EGRESS_RULES)),
+  proposals: Schema.Array(ToolEgressProposalView).pipe(
+    Schema.maxItems(MAX_OPEN_TOOL_EGRESS_PROPOSALS),
+  ),
+}).annotations(strict);
+export type ToolEgressThreadView = typeof ToolEgressThreadView.Type;
+
+/** What a person chose for one host: a thread rule or a Project rule, each with its lifetime. */
+export const ToolEgressGrantChoice = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("thread"),
+    lifetime: ToolEgressThreadRuleLifetime,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project"),
+    lifetime: ToolEgressProjectRuleLifetime,
+  }).annotations(strict),
+);
+export type ToolEgressGrantChoice = typeof ToolEgressGrantChoice.Type;
+
+/**
+ * The host as a person typed it. The host puts it in canonical form and
+ * refuses what no rule may name, so a client never decides that.
+ */
+const typedRuleHost = Schema.String.pipe(
+  Schema.minLength(1),
+  Schema.maxLength(MAX_TOOL_EGRESS_HOST_LENGTH + 2),
+);
+
+/**
+ * A person's answer on a thread's `network-access` surface: grant hosts
+ * (from proposals or typed into the rules list), turn proposals down, take a
+ * rule away, or switch learn mode.
+ */
+export const ToolEgressCommand = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("grant-rules"),
+    grants: Schema.Array(
+      Schema.Struct({
+        host: typedRuleHost,
+        port: ToolEgressPort,
+        choice: ToolEgressGrantChoice,
+      }).annotations(strict),
+    ).pipe(Schema.minItems(1), Schema.maxItems(MAX_LIVE_TOOL_EGRESS_RULES)),
+    declineProposalIds: Schema.Array(ToolEgressProposalId).pipe(
+      Schema.maxItems(MAX_OPEN_TOOL_EGRESS_PROPOSALS),
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("decline-proposals"),
+    proposalIds: Schema.Array(ToolEgressProposalId).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_OPEN_TOOL_EGRESS_PROPOSALS),
+    ),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("revoke-rule"),
+    ruleId: ToolEgressRuleId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("set-learn-mode"),
+    enabled: Schema.Boolean,
+  }).annotations(strict),
+);
+export type ToolEgressCommand = typeof ToolEgressCommand.Type;
+
+export const ToolEgressCommandRefusalReason = Schema.Literal(
+  "not-a-code-thread",
+  "thread-tainted",
+  "needs-local-window",
+  "invalid-host",
+  "limit",
+  "rule-not-found",
+  "proposal-not-found",
+  "unavailable",
+);
+export type ToolEgressCommandRefusalReason = typeof ToolEgressCommandRefusalReason.Type;
+
+export const ToolEgressCommandResult = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("tool-egress-updated"),
+    view: ToolEgressThreadView,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("tool-egress-refused"),
+    reason: ToolEgressCommandRefusalReason,
+    message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  }).annotations(strict),
+);
+export type ToolEgressCommandResult = typeof ToolEgressCommandResult.Type;
 
 export const decodeToolEgressRuleHost = Schema.decodeUnknownSync(ToolEgressRuleHost);
 export const decodeThreadEgressRuleGrantedPayload = Schema.decodeUnknownSync(
@@ -360,3 +516,8 @@ export const decodeThreadEgressLaunchSummarizedPayload = Schema.decodeUnknownSyn
 export const decodeThreadEgressLaunchIncompletePayload = Schema.decodeUnknownSync(
   ThreadEgressLaunchIncompletePayload,
 );
+export const decodeThreadEgressLearnModeSetPayload = Schema.decodeUnknownSync(
+  ThreadEgressLearnModeSetPayload,
+);
+export const decodeToolEgressCommand = Schema.decodeUnknownSync(ToolEgressCommand);
+export const decodeToolEgressThreadView = Schema.decodeUnknownSync(ToolEgressThreadView);

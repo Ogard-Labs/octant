@@ -227,6 +227,36 @@ describe("ClientHostRegistry (Post-preview B1)", () => {
     });
   });
 
+  it("keeps a host's listener pin across instances and refuses to read a damaged one", async () => {
+    const storage = createInMemoryClientHostRegistryStorage();
+    const listenerTrust = {
+      current: { kind: "pinned", pin: `sha256-${"A".repeat(43)}` },
+    } as const;
+    await createClientHostRegistry(storage).upsertRemote(
+      remoteHost({
+        hostId: HOST_A as ClientHostRegistration["hostId"],
+        displayName: "Studio",
+        origin: "https://100.101.102.103:8443",
+        credential: {
+          keyId: "key-a",
+          credentialGeneration: 1,
+          hostKeyFingerprint: "a".repeat(64),
+          listenerTrust,
+        },
+      }),
+    );
+
+    const reread = await createClientHostRegistry(storage).get(HOST_A);
+    expect(reread?.credential?.listenerTrust).toEqual(listenerTrust);
+
+    const stored = await storage.getItem("octant.client.host-registry.v1");
+    await storage.setItem(
+      "octant.client.host-registry.v1",
+      (stored ?? "").replace('"kind":"pinned"', '"kind":"pinned-or-platform"'),
+    );
+    await expect(createClientHostRegistry(storage).list()).rejects.toThrow(/listener trust/);
+  });
+
   it("forgets one host credential via RemoteDeviceKeyStore without touching another", async () => {
     const keyStore = createInMemoryDeviceKeyStore();
     // Seed two independent keys the way pairing would.

@@ -1,5 +1,14 @@
-import { randomBytes, randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { createPrivateKey, randomBytes, randomUUID } from "node:crypto";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -23,6 +32,7 @@ import {
   PRIVATE_LISTENER_TEST_CERT,
   PRIVATE_LISTENER_TEST_KEY,
 } from "./privateListener.test-certs";
+import { listenerTlsPin } from "./remote/selfMadeListenerCertificate";
 import {
   admittedParentChatContext,
   fatalStartupOutput,
@@ -1123,6 +1133,16 @@ describe("startOctantServer", () => {
         nextCursor: 0,
         hasMore: false,
       })),
+      conversationWindow: vi.fn(async (_windowId, threadId) => ({
+        status: "ok" as const,
+        window: {
+          version: 1 as const,
+          threadId,
+          turns: [],
+          hasEarlier: false,
+          hasLater: false,
+        },
+      })),
       readEvidence: vi.fn(),
       readEvidenceBatch: vi.fn(async (_windowId, input) => ({
         threadId: input.threadId,
@@ -1962,6 +1982,8 @@ describe("startOctantServer", () => {
               exposureClass: null,
               certificateFingerprint: null,
               certificateReady: false,
+              certificateSource: null,
+              tlsPin: null,
             },
           });
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
@@ -2065,6 +2087,152 @@ describe("startOctantServer", () => {
       expect(bound).toBe(false);
       expect(await statusOf(handle)).toBe("disabled");
     });
+  });
+
+  it("serves its own listener certificate with a pin that survives a restart and never reveals the key", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-private-listener-self-made-"));
+    directories.push(directory);
+    const capability = "A".repeat(43);
+    const local = (path: string, init: RequestInit = {}) =>
+      new Request(`http://127.0.0.1:13773${path}`, {
+        ...init,
+        headers: {
+          "x-octant-desktop-secret": "desktop-secret",
+          "x-octant-window-capability": capability,
+          ...init.headers,
+        },
+      });
+    const servedCertificates: string[] = [];
+    const responses: string[] = [];
+    const diagnostics: string[] = [];
+    const logged: string[] = [];
+    const capture =
+      (target: { write: (...args: never[]) => boolean }) =>
+      (chunk: unknown, ...rest: unknown[]) => {
+        logged.push(String(chunk));
+        return (target.write as (...args: unknown[]) => boolean)(chunk, ...rest);
+      };
+    const spies = [
+      vi.spyOn(process.stdout, "write").mockImplementation(capture(process.stdout) as never),
+      vi.spyOn(process.stderr, "write").mockImplementation(capture(process.stderr) as never),
+      ...(["log", "info", "warn", "error", "debug"] as const).map((method) =>
+        vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+          logged.push(args.map(String).join(" "));
+        }),
+      ),
+    ];
+
+    const lifetime = (act: (handle: (request: Request) => Promise<Response>) => Promise<void>) =>
+      Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
+            const server = yield* startOctantServer({
+              hostname: "127.0.0.1",
+              port: 0,
+              desktopBridgeSecret: "desktop-secret",
+              remoteServe: (serveOptions) => {
+                servedCertificates.push(String(serveOptions.tls?.cert));
+                return { url: new URL("https://100.64.0.7:8443"), stop: async () => undefined };
+              },
+              serve: (serveOptions) => {
+                routeHandler = serveOptions.fetch;
+                return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
+              },
+            });
+            const handle = async (request: Request) => {
+              const response = await Promise.resolve(routeHandler?.(request)).then(assertResponse);
+              responses.push(await response.clone().text());
+              return response;
+            };
+            yield* Effect.promise(() =>
+              handle(
+                new Request("http://127.0.0.1:13773/api/desktop/window-authorities", {
+                  method: "POST",
+                  headers: { "x-octant-desktop-secret": "desktop-secret" },
+                  body: JSON.stringify({
+                    windowId: "00000000-0000-4000-8000-000000000663",
+                    capability,
+                  }),
+                }),
+              ),
+            );
+            yield* Effect.promise(() => act(handle));
+            diagnostics.push(JSON.stringify(server.diagnostics?.()));
+            yield* Effect.promise(() => Promise.resolve(server.stop()));
+          }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+        ),
+      );
+    const pinOf = async (response: Response) =>
+      ((await response.json()) as { status: { tlsPin: string | null } }).status;
+
+    let firstPin: string | null = null;
+    try {
+      await lifetime(async (handle) => {
+        const enabled = await handle(
+          local("/api/desktop/private-listener/enable", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              hostname: "100.64.0.7",
+              port: 8443,
+              origin: "https://100.64.0.7:8443",
+            }),
+          }),
+        );
+        expect(enabled.status).toBe(200);
+        const status = await pinOf(enabled);
+        expect(status).toMatchObject({ state: "ready", certificateSource: "self-made" });
+        firstPin = status.tlsPin;
+        expect(firstPin).toMatch(/^sha256-[A-Za-z0-9_-]{43}$/);
+      });
+      await lifetime(async (handle) => {
+        const status = await pinOf(await handle(local("/api/desktop/private-listener/status")));
+        expect(status).toMatchObject({ state: "ready", certificateSource: "self-made" });
+        expect(status.tlsPin).toBe(firstPin);
+      });
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+
+    // The listener served the certificate the pin names, in both lifetimes.
+    expect(servedCertificates).toHaveLength(2);
+    expect(servedCertificates[1]).toBe(servedCertificates[0]);
+    expect(listenerTlsPin(servedCertificates[0] ?? "")).toBe(firstPin);
+
+    // The key leaves no trace in any response, log line, diagnostics read, or
+    // any other file under the data directory, the journal and setting included.
+    const keyPath = join(directory, "remote", "private-listener-tls-key.pem");
+    const keyPem = readFileSync(keyPath, "utf8");
+    const key = createPrivateKey(keyPem);
+    const keyDer = key.export({ format: "der", type: "pkcs8" });
+    const scalar = Buffer.from(String(key.export({ format: "jwk" }).d), "base64url");
+    // A 27-byte run of the scalar, aligned so its base64 is the same wherever
+    // the key's DER is base64-encoded (a PEM's whitespace removed).
+    const scalarAt = keyDer.indexOf(scalar);
+    expect(scalarAt).toBeGreaterThan(0);
+    const aligned = Math.ceil(scalarAt / 3) * 3;
+    const traces = [
+      keyDer.subarray(aligned, aligned + 27).toString("base64"),
+      scalar.toString("base64url"),
+      scalar.toString("base64"),
+      scalar.toString("hex"),
+    ];
+    for (const text of [...responses, ...diagnostics, ...logged]) {
+      expect(text).not.toContain("PRIVATE KEY");
+      for (const trace of traces) expect(text.replace(/\s+/g, "")).not.toContain(trace);
+    }
+    const files = (readdirSync(directory, { recursive: true }) as string[])
+      .map((entry) => join(directory, entry))
+      .filter((path) => path !== keyPath && statSync(path).isFile());
+    expect(files.some((path) => path.endsWith("octant.sqlite3"))).toBe(true);
+    for (const path of files) {
+      const bytes = readFileSync(path);
+      expect(bytes.includes(keyDer)).toBe(false);
+      expect(bytes.includes(scalar)).toBe(false);
+      const text = bytes.toString("latin1").replace(/\s+/g, "");
+      for (const trace of traces) expect(text).not.toContain(trace);
+    }
   });
 
   it("F3: propagates remote stop failure while still attempting local stop", async () => {

@@ -34,6 +34,7 @@ import {
   createRemoteRoutePolicy,
   REMOTE_CANVAS_DESIGN_PAGE_ROUTE_ID,
   REMOTE_PROTOCOL_ROUTE_IDS,
+  REMOTE_SERVER_PROXY_RELAY_MAX_BODY_BYTES,
   type RemoteRouteDefinition,
   type RemoteRouteFacts,
 } from "../remoteRoutePolicy";
@@ -62,8 +63,14 @@ import {
   type RemoteCredentialSelfServicePort,
   type RemoteHttpAuthentication,
   type RemoteRequestRegistryPort,
+  type RemoteServerProxyGrantPort,
 } from "./remoteHttpAuthentication";
 import { createPushNotificationTokenStore } from "./pushNotificationTokenStore";
+import type { RemoteServerGrantCloseReason } from "@octant/contracts";
+import {
+  proxySessionEndReasonForCredentialChange,
+  RemoteServerProxySessions,
+} from "./remoteServerProxySessions";
 import { createRemoteRequestRegistry } from "./remoteRequestRegistry";
 import { executeFinalizationSequence } from "./remoteGatewayFinalization";
 import { MonotonicRemoteClock } from "./monotonicRemoteClock";
@@ -81,7 +88,19 @@ const TRUST_ISSUING_PRE_AUTH_ROUTE_IDS: ReadonlySet<string> = new Set([
   REMOTE_PROTOCOL_ROUTE_IDS.negotiate,
   REMOTE_AUTH_ROUTE_IDS.challenge,
   REMOTE_AUTH_ROUTE_IDS.session,
+  REMOTE_AUTH_ROUTE_IDS.serverProxySession,
 ]);
+
+/** How often a ready gateway ends proxy sessions past their expiry, closing their grants. */
+const SERVER_PROXY_SWEEP_INTERVAL_MS = 60_000;
+
+/**
+ * The host's grant service as the gateway reaches it: the proxy route opens
+ * grants through it, and an ending proxy session closes the grants bound to it.
+ */
+export interface RemoteServerGrantGatewayPort extends RemoteServerProxyGrantPort {
+  readonly closeSession: (sessionIdDigest: string, reason: RemoteServerGrantCloseReason) => void;
+}
 
 /**
  * The injected authenticated-product seam. When undefined, authenticated
@@ -126,6 +145,11 @@ export interface RemoteGatewayServices {
    * creates an isolated in-memory store for this generation.
    */
   readonly pushTokenStore?: import("./pushNotificationTokenStore").PushNotificationTokenStore;
+  /**
+   * Opening dev servers from a paired device. Absent, the proxy session route
+   * and every proxy route answer unavailable.
+   */
+  readonly remoteServerGrants?: RemoteServerGrantGatewayPort;
 }
 
 export interface RemoteGatewayConfig {
@@ -226,6 +250,8 @@ interface GatewayServices {
    * source if this write is skipped.
    */
   readonly persistClockGuard: () => void;
+  /** End proxy sessions past their expiry, so the grants bound to them close. */
+  readonly sweepServerProxySessions: () => void;
 }
 
 interface RemoteCredentialInvalidationResult {
@@ -249,6 +275,7 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
   // cannot mismatch across restart.
   let generation = buildGeneration(options, options.config, admissionRef, shutdownCommandIdRef);
   let listener: PrivateListener | undefined;
+  let proxySweep: ReturnType<typeof setInterval> | undefined;
   let state: RemoteGatewayState = "disabled";
   let errorCode: PrivateListenerFailureCode | undefined;
   let finalizationFailure: RemoteGatewayFinalizationFailure | undefined;
@@ -273,6 +300,9 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
         config: generation.config.listener,
         fetch: generation.services.gatewayFetch,
         serve: options.serve,
+        // The largest body any route takes is a relayed dev-server upload; every
+        // other route keeps its own smaller budget in the route policy.
+        maxRequestBodySize: REMOTE_SERVER_PROXY_RELAY_MAX_BODY_BYTES,
         ...(generation.config.listener.admissionLimits === undefined
           ? {}
           : { admissionLimits: generation.config.listener.admissionLimits }),
@@ -284,6 +314,12 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
       // invalidated, not skipped as "already-applied".
       shutdownCommandIdRef.value = options.uuid?.() ?? defaultRandomUUID();
       state = "ready";
+      const sweeping = generation.services;
+      proxySweep = setInterval(
+        () => sweeping.sweepServerProxySessions(),
+        SERVER_PROXY_SWEEP_INTERVAL_MS,
+      );
+      proxySweep.unref?.();
       // Persist the monotonic high-water mark now that the listener
       // is bound. Best-effort — a failure must not destabilize the ready
       // listener, and the durable observed timestamps remain the recovery
@@ -311,6 +347,10 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
     //    with admission closed and the listener still bound so a retry can
     //    complete finalization.
     admissionRef.closed = true;
+    if (proxySweep !== undefined) {
+      clearInterval(proxySweep);
+      proxySweep = undefined;
+    }
     const outcome = executeFinalizationSequence(generation.services);
     if (outcome.failure !== undefined) {
       state = "failed";
@@ -455,6 +495,20 @@ function assembleServices(
   // Request registry — process-scoped active request tracking.
   const registry = createRemoteRequestRegistry();
 
+  // Proxy sessions — held in memory for this generation only, with their own
+  // nonce store and budgets. Every session that ends closes its grants.
+  const remoteServerGrants = options.remoteServerGrants;
+  const proxySessions =
+    remoteServerGrants === undefined
+      ? undefined
+      : new RemoteServerProxySessions({
+          proofs: proof,
+          now,
+          uuid,
+          onSessionEnded: (ended) =>
+            remoteServerGrants.closeSession(ended.sessionIdDigest, ended.reason),
+        });
+
   // Credential lifecycle service — sign-out/rotate/revoke with session
   // invalidation. The onSessionsInvalidated callback cancels matching
   // in-flight work via the registry.
@@ -467,6 +521,16 @@ function assembleServices(
     onSessionsInvalidated: (input) => {
       let canceled = 0;
       let cancelHookFailures = 0;
+      // A device that loses its standing, rotates, or signs out loses its proxy
+      // sessions too, and with them its grants, before this hook returns.
+      const proxyEnd = proxySessionEndReasonForCredentialChange(input.reasonCode);
+      for (const deviceId of input.deviceIds) {
+        try {
+          proxySessions?.endDevice(deviceId, proxyEnd);
+        } catch {
+          cancelHookFailures += 1;
+        }
+      }
       for (const deviceId of input.deviceIds) {
         const result = registry.cancelByDevice({ hostId: input.hostId, deviceId });
         canceled += result.canceled;
@@ -563,6 +627,9 @@ function assembleServices(
     requestRegistry: registry as RemoteRequestRegistryPort,
     sessionRevalidation,
     ...(options.productDispatch === undefined ? {} : { productDispatch: options.productDispatch }),
+    ...(proxySessions === undefined || remoteServerGrants === undefined
+      ? {}
+      : { serverProxy: { sessions: proxySessions, grants: remoteServerGrants } }),
   });
 
   // Route policy — exact origin from the listener config so policy identity
@@ -587,6 +654,15 @@ function assembleServices(
         : handlePreAuthRoute(request, route, facts, protocol, auth, clockPosture),
     authenticatedProduct: async (request, route, facts) =>
       handleAuthenticatedRoute(request, route, facts, auth),
+    hasServerProxySession: (request) => auth.hasServerProxySession(request),
+    serverProxy: async (request, route, facts) =>
+      facts === undefined
+        ? protocolReject(403)
+        : auth.handleServerProxy(
+            request,
+            { listenerTrust: "remote", sourceClass: facts.sourceClass, sourceKey: facts.sourceKey },
+            route,
+          ),
   });
 
   // Gateway fetch — the only fetch the listener ever calls. It checks the
@@ -641,6 +717,9 @@ function assembleServices(
       protocol.clearEphemeralState();
     },
     invalidateSessions: () => {
+      // Proxy sessions end first: a listener that stops serving ends every
+      // grant whether or not a product session was open.
+      proxySessions?.endAll("listener-disabled");
       const receipt = credentialLifecycle.invalidateAllSessions({
         commandId: shutdownCommandIdRef.value,
         hostId: identity.hostId,
@@ -652,6 +731,7 @@ function assembleServices(
     },
     cancelWork: () => registry.cancelAll(),
     persistClockGuard: () => monotonicClock.persist(),
+    sweepServerProxySessions: () => proxySessions?.sweepExpired(),
   };
 }
 
@@ -787,6 +867,7 @@ function isPrivateListenerFailureCodeString(value: string): boolean {
     value === "invalid-bind" ||
     value === "invalid-origin" ||
     value === "invalid-tls" ||
+    value === "tls-key-exposed" ||
     value === "occupied-port" ||
     value === "interface-unavailable" ||
     value === "cancelled" ||

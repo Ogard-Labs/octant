@@ -128,7 +128,8 @@ export interface ManagedSimulatorHelpersOptions {
 interface StreamSession {
   readonly udid: string;
   readonly endpoint: ManagedDeviceEndpoint;
-  readonly screen: { readonly width: number; readonly height: number };
+  /** Turned with the device: a rotation swaps its width and height. */
+  screen: { readonly width: number; readonly height: number };
   readonly child: ChildProcess;
   readonly viewers: Set<DeviceViewer>;
   latest: Uint8Array | undefined;
@@ -482,6 +483,44 @@ export function createManagedSimulatorHelpers(
     return { status: "delivered" };
   }
 
+  /**
+   * serve-sim rotates a Simulator by sending the orientation over its running
+   * stream, so the stream has to be up first. Simulator.app is never scripted.
+   */
+  async function rotate(
+    udid: string,
+    orientation: "portrait" | "landscape",
+    timeoutMs: number,
+    cancelled: AbortSignal | undefined,
+  ): Promise<DeviceHelperReply> {
+    const startedAt = Date.now();
+    const session = await sessionFor(udid);
+    if (session === undefined || session.closed) {
+      return { status: "unavailable", message: "Rotate needs the managed serve-sim stream." };
+    }
+    const outcome = await runControl(
+      ["rotate", orientation === "landscape" ? "landscape_left" : "portrait", "-d", udid],
+      Math.max(1, timeoutMs - (Date.now() - startedAt)),
+      cancelled,
+    );
+    if (outcome === "missing") {
+      return {
+        status: "refused",
+        code: "rotate-unavailable",
+        message: "Rotate needs the managed serve-sim tool, and it is not installed.",
+      };
+    }
+    if (outcome !== "ok") {
+      return { status: "unavailable", message: "The Simulator did not rotate." };
+    }
+    const { width, height } = session.screen;
+    const long = Math.max(width, height);
+    const short = Math.min(width, height);
+    session.screen =
+      orientation === "landscape" ? { width: long, height: short } : { width: short, height: long };
+    return { status: "delivered" };
+  }
+
   async function ensureFrames(session: StreamSession): Promise<void> {
     if (session.reading || session.closed) return;
     session.reading = true;
@@ -557,6 +596,9 @@ export function createManagedSimulatorHelpers(
       if (request.op === "key") return native.send(simulatorId, request, timeoutMs, cancelled);
       if (request.op === "text") return typeText(simulatorId, request.text, timeoutMs, cancelled);
       if (request.op === "repair-input") return repairInput(simulatorId, timeoutMs, cancelled);
+      if (request.op === "rotate") {
+        return rotate(simulatorId, request.orientation, timeoutMs, cancelled);
+      }
       const session = await sessionFor(simulatorId);
       if (actionWasCancelled(cancelled)) {
         return { status: "unavailable", message: "The action was cancelled." };

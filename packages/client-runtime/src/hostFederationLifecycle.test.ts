@@ -23,6 +23,7 @@ import {
   type FederatedHostLifecycleState,
   type HostFederationLifecycle,
 } from "./hostFederationLifecycle";
+import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const HOST_A = "11111111-1111-4111-8111-111111111111";
 const HOST_B = "22222222-2222-4222-8222-222222222222";
@@ -130,6 +131,7 @@ async function seedDeviceKey(
     deviceId: input.deviceId,
     credentialGeneration: 1,
     hostKeyFingerprint: input.hostId === HOST_A ? "a".repeat(64) : "b".repeat(64),
+    listenerTrust: PLATFORM_LISTENER_TRUST,
   });
   return keyId;
 }

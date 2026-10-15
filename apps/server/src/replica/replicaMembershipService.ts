@@ -38,6 +38,7 @@ import {
   type ReplicaReadRefusal,
   type ReplicaRestoreProgress,
   type ReplicaRevocationEntry,
+  type ReplicaSequenceRun,
 } from "@octant/contracts";
 import {
   buildReplicaJoinMatchingPreimage,
@@ -51,6 +52,7 @@ import {
   replicaInGoodStanding,
   replicaJoinRequestIsFresh,
   replicaMembershipNode,
+  replicaRevocationKeeps,
   type ReplicaJoinRequestFacts,
 } from "@octant/domain/replica-membership-policy";
 import type { ReplicaStore } from "@octant/plugin-api/replica-store";
@@ -125,6 +127,8 @@ export interface ReplicaMembershipPorts {
     /** A new device key, stored under the instance id it certifies. */
     readonly create: () => Promise<{ readonly instanceId: string; readonly publicKey: string }>;
     readonly sign: (instanceId: string, payload: Uint8Array) => Promise<ReplicaDeviceSignOutcome>;
+    /** Delete an instance's device key once this computer left with it. */
+    readonly remove: (instanceId: string) => Promise<void>;
   };
   readonly journal: ReplicaMembershipJournal;
   /** Reconciles pulled artifact entries. Without it a pull reads membership records only. */
@@ -138,6 +142,11 @@ export interface ReplicaMembershipPorts {
    * every command that would read the store is refused before any store call.
    */
   readonly restoreStopped?: () => boolean;
+  /**
+   * Turns Settings › Sync's switch off once this computer left its replica.
+   * It rejects when the switch did not change, so the step is tried again.
+   */
+  readonly syncOff: () => Promise<void>;
 }
 
 export type ReplicaMembershipOutcome = ReplicaMembershipResult;
@@ -312,7 +321,54 @@ export class ReplicaMembershipService {
   }
 
   execute(command: ReplicaMembershipCommand): Promise<ReplicaMembershipOutcome> {
-    return this.#serially(() => this.#run(command));
+    return this.#serially(async () => {
+      // A leave finishes its own; finishing it first would refuse it as
+      // "not in a replica" when its record already landed.
+      if (command.kind !== "leave") await this.#finishLeaving();
+      return this.#run(command);
+    });
+  }
+
+  /**
+   * Finish the cleanup of every identity this computer left: turn sync off
+   * and delete the device key, journaling each step once it happened. The
+   * host calls it on start; every command calls it first, so a key a locked
+   * credential store kept is deleted on a later try.
+   */
+  finishLeaving(): Promise<void> {
+    return this.#serially(() => this.#finishLeaving());
+  }
+
+  async #finishLeaving(): Promise<void> {
+    const state = this.#ports.state();
+    // The left record landed and is held, but the host stopped before it
+    // journaled the leave: the other computers already count this one as
+    // gone, so this identity is over here too.
+    if (state.local !== undefined && holdsOwnLeft(state)) {
+      this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.left, {
+        instanceId: state.local.instanceId,
+        toldStore: true,
+      });
+    }
+    for (const leave of this.#ports.state().unfinishedLeaves) {
+      // Only the step outside the journal may fail quietly; it is tried again
+      // on the next start or command. A journal that refuses is not quiet.
+      if (!leave.syncOff && (await succeeds(() => this.#ports.syncOff()))) {
+        this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.leftCleanup, {
+          instanceId: leave.instanceId,
+          step: "sync-off",
+        });
+      }
+      if (
+        !leave.keyRemoved &&
+        (await succeeds(() => this.#ports.credentials.remove(leave.instanceId)))
+      ) {
+        this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.leftCleanup, {
+          instanceId: leave.instanceId,
+          step: "key-removed",
+        });
+      }
+    }
   }
 
   /**
@@ -372,6 +428,8 @@ export class ReplicaMembershipService {
   }
 
   async #run(command: ReplicaMembershipCommand): Promise<ReplicaMembershipOutcome> {
+    // Leaving without the store needs none; leaving through it asks for one.
+    if (command.kind === "leave") return this.#leave(command.withoutStore === true);
     const selection = this.#ports.store();
     if (selection.status === "not-configured") {
       return this.#refuse(
@@ -416,6 +474,80 @@ export class ReplicaMembershipService {
       case "pull":
         return this.#pull(store);
     }
+  }
+
+  /**
+   * Leave this computer's replica. A member in good standing first publishes
+   * a signed `replica-left` record naming the founder it pinned, so the other
+   * computers show it as left rather than going quiet; what it published
+   * before stays in the store and keeps counting. Then the identity is
+   * journaled as left - the projection forgets it, its founder, its held
+   * records, and its queue - and sync turns off and its device key is
+   * deleted, each step journaled and retried until it happened.
+   * Joining again, here or in another store, is a new identity with a new key.
+   *
+   * A record that cannot be published refuses the leave and changes nothing:
+   * a record kept to publish later would need the old store's location and
+   * credentials after the person chose another store, and would write into a
+   * store they may have left because they stopped trusting it.
+   * `withoutStore` is the way out for a store that is gone for good; the
+   * other computers then keep listing this one until someone revokes it.
+   */
+  async #leave(withoutStore: boolean): Promise<ReplicaMembershipOutcome> {
+    const state = this.#ports.state();
+    const local = state.local;
+    if (local === undefined) {
+      return this.#refuse("leave", "not-a-member", "This computer is not in a replica.");
+    }
+    const founder = state.founder;
+    // A record that landed before the host stopped is already the leave.
+    const recorded = holdsOwnLeft(state);
+    // Only a member in good standing writes the record: a joining, revoked,
+    // or cut-out identity's record would count for nothing on any computer.
+    const writes =
+      !recorded &&
+      !withoutStore &&
+      founder !== undefined &&
+      replicaInGoodStanding(state.membership, local.instanceId);
+    if (writes) {
+      const selection = this.#ports.store();
+      if (selection.status === "not-configured") {
+        return this.#refuse(
+          "leave",
+          "not-configured",
+          "Sync is off, so this computer cannot tell your other computers it is leaving. Turn sync on, or leave without telling them.",
+        );
+      }
+      const finished = await this.#finishPending(selection.store, "leave");
+      if (finished !== undefined) return finished;
+      // A stopped publish of this same record is the one just finished; it
+      // is not written twice.
+      if (!holdsOwnLeft(this.#ports.state())) {
+        const publish = await this.#publishLocal(selection.store, "leave", local, (origin) =>
+          decodeReplicaMembershipEntry({
+            format: REPLICA_ENTRY_FORMAT,
+            kind: "replica-left",
+            origin,
+            founder: founder.instanceId,
+          }),
+        );
+        if (publish.status === "stopped") return publish.outcome;
+      }
+    }
+    const toldStore = recorded || writes;
+    this.#journal(REPLICA_MEMBERSHIP_EVENT_NAMES.left, {
+      instanceId: local.instanceId,
+      toldStore,
+    });
+    // The journal now says this identity left, and remembers the cleanup
+    // still to do, so a stop here finishes it on the next start.
+    await this.#finishLeaving();
+    const keyRemoved = !this.#ports
+      .state()
+      .unfinishedLeaves.some(
+        (leave) => same(leave.instanceId, local.instanceId) && !leave.keyRemoved,
+      );
+    return { kind: "left", instanceId: local.instanceId, toldStore, keyRemoved };
   }
 
   async #createReplica(
@@ -866,7 +998,7 @@ export class ReplicaMembershipService {
     return {
       kind: "revoke-preview",
       subject,
-      cut: checked.highestSigned(subject),
+      cut: checked.unbrokenRun(subject),
       broughtIn: broughtIn(state, subject),
       subjectRevocations: state.records
         .flatMap(({ entry }) =>
@@ -899,12 +1031,12 @@ export class ReplicaMembershipService {
     if (checked.status === "refused") return checked.outcome;
     const state = this.#ports.state();
     const local = checked.local;
-    const highest = checked.highestSigned(subject);
+    const highest = checked.unbrokenRun(subject);
     if (requestedCut !== undefined && requestedCut > highest) {
       return this.#refuse(
         "revoke",
         "invalid-cut",
-        "A cut can only fall at or before the last signed entry of that computer this one read.",
+        "A cut can only fall at or before the end of that computer's unbroken run of entries this one read.",
         subject,
       );
     }
@@ -932,8 +1064,8 @@ export class ReplicaMembershipService {
       }
     }
     const targets = [
-      { subject, cut: requestedCut ?? highest },
-      ...alsoRevoke.map((other) => ({ subject: other, cut: checked.highestSigned(other) })),
+      checked.keeps(subject, requestedCut ?? highest),
+      ...alsoRevoke.map((other) => checked.keeps(other, checked.unbrokenRun(other))),
     ];
     const entries: ReplicaRevocationEntry[] = [];
     for (const [index, target] of targets.entries()) {
@@ -944,6 +1076,7 @@ export class ReplicaMembershipService {
           origin,
           subject: target.subject,
           cut: target.cut,
+          kept: { version: 1, runs: target.runs },
         }),
       );
       if (publish.status === "stopped") {
@@ -982,11 +1115,25 @@ export class ReplicaMembershipService {
         readonly local: ReplicaLocalIdentity;
         readonly readStore: boolean;
         /**
-         * The highest sequence of an instance's valid signed entries this
-         * host holds or just read, artifact entries included: the default
-         * cut, and the latest a requested cut may fall.
+         * The end of an instance's unbroken run of slots from its first: the
+         * store listed each one, or this host holds or settled it. It is the
+         * default cut, and the latest a requested cut may fall.
          */
-        readonly highestSigned: (instanceId: ReplicaInstanceId) => number;
+        readonly unbrokenRun: (instanceId: ReplicaInstanceId) => number;
+        /**
+         * The revocation of an instance at a cut: the slots at or before it
+         * this host read as that instance's own valid signed entries, and
+         * the cut, moved earlier only when those slots need more runs than
+         * one record carries.
+         */
+        readonly keeps: (
+          instanceId: ReplicaInstanceId,
+          cut: number,
+        ) => {
+          readonly subject: ReplicaInstanceId;
+          readonly cut: number;
+          readonly runs: ReadonlyArray<ReplicaSequenceRun>;
+        };
       }
   > {
     const local = this.#ports.state().local;
@@ -1019,17 +1166,38 @@ export class ReplicaMembershipService {
         outcome: this.#refuse(command, decision.reason, messages[decision.reason], subject),
       };
     }
-    const artifacts = pulled.status === "read" ? pulled.artifacts : [];
+    // A cut at the highest slot read would leave the slots below it that
+    // nothing fills yet open: a stolen key could write into them after the
+    // revocation and every member would take what it wrote. Stopping at the
+    // first slot missing from the run keeps the cut below every hole.
+    const known = [...(pulled.status === "read" ? pulled.listed : []), ...state.settledSlots];
     return {
       status: "ready",
       local,
       readStore: pulled.status === "read",
-      highestSigned: (instanceId) =>
-        artifacts.reduce(
-          (highest, slot) =>
-            same(slot.instanceId, instanceId) ? Math.max(highest, slot.sequence) : highest,
-          state.heldSequence(instanceId),
-        ),
+      unbrokenRun: (instanceId) => {
+        const sequences = new Set(
+          known.flatMap((slot) => (same(slot.instanceId, instanceId) ? [slot.sequence] : [])),
+        );
+        let run = 0;
+        while (sequences.has(run + 1)) run += 1;
+        return run;
+      },
+      // Only a slot whose file this host verified under the instance's own
+      // key is kept: a membership record held, an artifact entry published
+      // or settled, or a valid entry about a Canvas this read met that waits
+      // on something. A listed slot it did not read as the instance's - not
+      // downloaded yet, unreadable, or another writer's file - is left out,
+      // so a file put there later with a stolen key counts on no computer.
+      keeps: (instanceId, cut) => {
+        const read = (pulled.status === "read" ? pulled.artifacts : []).flatMap((artifact) =>
+          same(artifact.instanceId, instanceId) ? [artifact.sequence] : [],
+        );
+        for (let sequence = 1; sequence <= cut; sequence += 1) {
+          if (state.holds(instanceId, sequence)) read.push(sequence);
+        }
+        return { subject: instanceId, ...replicaRevocationKeeps(read, cut) };
+      },
     };
   }
 
@@ -1324,7 +1492,7 @@ export class ReplicaMembershipService {
    */
   async #publishLocal(
     store: ReplicaStore,
-    command: "approve-join" | "confirm-join" | "revoke",
+    command: "approve-join" | "confirm-join" | "revoke" | "leave",
     local: ReplicaLocalIdentity,
     build: (origin: ReplicaMembershipEntry["origin"]) => ReplicaMembershipEntry,
   ): Promise<LocalPublish<ReplicaMembershipEntry>> {
@@ -1541,7 +1709,7 @@ export class ReplicaMembershipService {
 }
 
 /** A command that publishes under this host's established identity. */
-type LocalCommand = "approve-join" | "confirm-join" | "revoke" | "publish-artifact";
+type LocalCommand = "approve-join" | "confirm-join" | "revoke" | "leave" | "publish-artifact";
 
 const SQUATTED_SLOTS_MESSAGE =
   "The replica store holds files this computer did not write in its next slots. Remove them with the storage provider's tools, rotate the store credentials, or move to a new store.";
@@ -1596,6 +1764,27 @@ function broughtIn(
 
 function same(left: ReplicaInstanceId, right: ReplicaInstanceId): boolean {
   return String(left) === String(right);
+}
+
+/** Whether this host holds a `replica-left` record its current identity signed. */
+function holdsOwnLeft(state: ReplicaMembershipState): boolean {
+  const local = state.local;
+  return (
+    local !== undefined &&
+    state.records.some(
+      ({ entry }) =>
+        entry.kind === "replica-left" && same(entry.origin.instanceId, local.instanceId),
+    )
+  );
+}
+
+async function succeeds(step: () => Promise<void>): Promise<boolean> {
+  try {
+    await step();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function sha256Hex(bytes: Uint8Array): string {

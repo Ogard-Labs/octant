@@ -9,12 +9,13 @@
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { isLoopbackHostname } from "../shellRoutes";
-import type { PrivateListenerConfig, PrivateListenerFailureCode } from "../privateListener";
+import type { PrivateListenerFailureCode } from "../privateListener";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import {
   PrivateListenerLifecycleError,
   type PrivateListenerHostStatus,
   type PrivateListenerLifecycleController,
+  type RequestedPrivateListenerConfig,
 } from "./privateListenerLifecycleController";
 import type { PrivateListenerSettingPort } from "./privateListenerSetting";
 
@@ -145,7 +146,7 @@ export function createPrivateListenerAdministrationRouteHandler(
  */
 function rememberListener(
   setting: PrivateListenerAdministrationRouteOptions["setting"],
-  config: PrivateListenerConfig,
+  config: RequestedPrivateListenerConfig,
 ): boolean {
   if (setting === undefined) return true;
   try {
@@ -175,11 +176,40 @@ function projectStatus(status: PrivateListenerHostStatus): PrivateListenerHostSt
     exposureClass: status.exposureClass,
     certificateFingerprint: status.certificateFingerprint,
     certificateReady: status.certificateReady,
+    certificateSource: status.certificateSource,
+    tlsPin: status.tlsPin,
     ...(status.errorCode === undefined ? {} : { errorCode: status.errorCode }),
   });
 }
 
-function decodeListenerConfig(value: unknown): PrivateListenerConfig {
+/**
+ * Both PEMs serve the person's own certificate exactly as given; neither asks
+ * the host for its self-made one. One without the other is refused.
+ */
+function decodeListenerConfig(value: unknown): RequestedPrivateListenerConfig {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    !("certificatePem" in value) &&
+    !("privateKeyPem" in value)
+  ) {
+    requireExactKeys(value, ["hostname", "origin", "port"]);
+    const { hostname, origin, port } = value;
+    if (
+      typeof hostname !== "string" ||
+      hostname.trim().length === 0 ||
+      hostname.trim() !== hostname ||
+      typeof origin !== "string" ||
+      origin.length === 0 ||
+      typeof port !== "number" ||
+      !Number.isSafeInteger(port) ||
+      port < 1 ||
+      port > 65_535
+    ) {
+      throw new Error("invalid");
+    }
+    return { hostname, port, origin, tls: "self-made" };
+  }
   requireExactKeys(value, ["certificatePem", "hostname", "origin", "port", "privateKeyPem"]);
   const hostname = value.hostname;
   const origin = value.origin;
@@ -277,7 +307,10 @@ function listenerFailure(code: PrivateListenerFailureCode): Response {
     {
       category: status === 400 ? "invalid" : "unavailable",
       errorCode: code,
-      message: `Octant private listener ${code.replaceAll("-", " ")}.`,
+      message:
+        code === "tls-key-exposed"
+          ? "The listener's certificate key can be read by other users on this computer, so Octant won't use it."
+          : `Octant private listener ${code.replaceAll("-", " ")}.`,
     },
     { status },
   );

@@ -8,7 +8,7 @@
  * guards, managed-home layout, Seatbelt strategy, ACP mode mapping, and
  * capability quirks. Everything else is shared behavior.
  */
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ProviderModel, ProviderDriverKind, ProviderExecutionPolicy } from "@octant/contracts";
@@ -153,6 +153,13 @@ export interface AcpProviderProfile {
    * auto-reviewing `code` mode.
    */
   readonly refuses?: (mode: AcpSessionMode, policy: ProviderExecutionPolicy) => string | undefined;
+  /**
+   * The sentence a Project root earns a refusal with, before a session process
+   * starts, when it holds files the agent loads by itself and that start tools
+   * (MCP servers, hooks, extensions). Used where the entry cannot be denied
+   * because the agent fails to start without being able to read it.
+   */
+  readonly refusesProject?: (root: string) => string | undefined;
   /** Overrides the default `session/set_config_option` call for setting the model. */
   readonly setModelCall?: (
     sessionId: string,
@@ -258,6 +265,11 @@ const opencodeProfile: AcpProviderProfile = {
       OPENCODE_DISABLE_EXTERNAL_SKILLS: "1",
       OPENCODE_DISABLE_CLAUDE_CODE_SKILLS: "1",
       OPENCODE_DISABLE_LSP_DOWNLOAD: "1",
+      // OPENCODE_PURE does not cover the Project: `opencode acp` 2.0.27 still
+      // started an `mcp` server from <project>/opencode.json and imported a
+      // plugin from <project>/.opencode/plugin. With this switch it did
+      // neither, and the session's own MCP servers still connected.
+      OPENCODE_DISABLE_PROJECT_CONFIG: "1",
       OPENCODE_DISABLE_TERMINAL_TITLE: "1",
       OPENCODE_PURE: "1",
     },
@@ -352,6 +364,10 @@ const kiloProfile: AcpProviderProfile = {
       loginHint: "Run kilo auth login, then retry.",
       environment: (path) => ({ KILO_CONFIG_DIR: path }),
     },
+    // KILO_DISABLE_PROJECT_CONFIG does not reach Kilo's import of its older
+    // MCP files: its source on `main` reads <project>/.kilocode/mcp.json and
+    // .kilo/mcp.json on every start and skips one it cannot read.
+    forbiddenRootEntries: [".kilo/mcp.json", ".kilocode/mcp.json"],
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
@@ -467,7 +483,24 @@ const devinProfile: AcpProviderProfile = {
     // `read_config_from` source turns them off: `devin skills list` on
     // 3000.10.27 and 3000.11.3 listed packages from all three with every
     // source false, and none with the folders unreadable.
-    forbiddenRootEntries: [".agents/skills", ".cognition/skills", ".devin/skills"],
+    // The `.devin` files are its Project config. With the managed config
+    // above, `devin acp` 3000.11.3 started the MCP servers in config.json and
+    // both mcp_config files and ran the hooks in config.json and hooks.json;
+    // the empty `mcpServers` and `hooks` here do not override them and no
+    // workspace-trust setting stops them. With these files unreadable the
+    // session opened, started none of them, and still reached its own MCP
+    // servers.
+    forbiddenRootEntries: [
+      ".agents/skills",
+      ".cognition/skills",
+      ".devin/config.json",
+      ".devin/config.local.json",
+      ".devin/hooks.json",
+      ".devin/hooks.v1.json",
+      ".devin/mcp_config.json",
+      ".devin/mcp_config.local.json",
+      ".devin/skills",
+    ],
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
@@ -552,6 +585,20 @@ const vibeProfile: AcpProviderProfile = {
         "Mistral Vibe is not authenticated. Octant cannot read the key Vibe keeps in the macOS Keychain; switch this provider to API key authentication in Settings → Providers and enter a Mistral API key.",
       environment: (path) => ({ VIBE_HOME: path }),
     },
+    // In a folder the person trusted in Vibe's own profile, `vibe-acp` 2.26.0
+    // started an MCP server from <project>/.vibe/config.toml and imported a
+    // Python tool from .vibe/tools despite VIBE_MCP_SERVERS and
+    // VIBE_TOOL_PATHS above. The trust list cannot be hidden instead: Vibe
+    // rewrites it when it cannot read it and exits when that fails. With
+    // these entries unreadable the session opened, loaded none of them, and
+    // still reached its own MCP servers.
+    forbiddenRootEntries: [
+      ".vibe/agents",
+      ".vibe/config.toml",
+      ".vibe/hooks.toml",
+      ".vibe/plugins",
+      ".vibe/tools",
+    ],
     confinement: { kind: "deny-default-seatbelt" },
   },
 };
@@ -642,6 +689,14 @@ const grokProfile: AcpProviderProfile = {
       GROK_SUBAGENTS: "0",
       GROK_WORKFLOWS: "0",
       GROK_SANDBOX: "off",
+      // Folder trust is what keeps a Project's hooks, MCP and the rest out
+      // (see hostDeniedEntries below), and `[folder_trust] enabled = false` in
+      // the person's config.toml, or GROK_FOLDER_TRUST=0, switches it off:
+      // grok 1.0.50 then trusted the probe folder with its trust list
+      // unreadable. "1" here, as a guard, outranks both; the GROK_CONFIG
+      // overlay cannot set it. It also keeps an agent that edits the
+      // writable config.toml from opening the next session up.
+      GROK_FOLDER_TRUST: "1",
       NO_COLOR: "1",
     },
     // GROK_HOME is the native profile via hostAuthentication. A managed
@@ -650,23 +705,22 @@ const grokProfile: AcpProviderProfile = {
       GROK_CONFIG: JSON.stringify(GROK_FEATURE_OVERLAY),
       ...(apiKey === undefined ? {} : { XAI_API_KEY: apiKey }),
     }),
-    args: () => ["agent", "stdio"],
+    // `[cli] use_leader` in config.toml makes `grok agent stdio` hand the
+    // session to a shared leader process it starts outside this sandbox
+    // (grok 1.0.50 started `grok agent leader` with it set). --no-leader is an
+    // option of `agent`, so it goes before `stdio`.
+    args: () => ["agent", "--no-leader", "stdio"],
     managedFiles: () => [],
-    // In a trusted folder Grok loads all of these as Project skills by itself;
-    // `grok inspect --json` on 1.0.50 lists a package or command file from
-    // each. Its switches are not relied on: with GROK_CLAUDE_SKILLS_ENABLED and
-    // GROK_CURSOR_SKILLS_ENABLED false it still listed those folders'
-    // packages, and nothing turns off .agents or .grok. With these
-    // folders unreadable it listed the rest and carried on.
-    forbiddenRootEntries: [
-      ".agents/commands",
-      ".agents/skills",
-      ".claude/commands",
-      ".claude/skills",
-      ".cursor/skills",
-      ".grok/commands",
-      ".grok/skills",
-    ],
+    // Grok loads a Project's hooks, repo-local MCP and LSP servers, plugins
+    // (.grok/plugins, .claude/plugins), skills, commands and instructions
+    // only in a folder its own trust list marks trusted, at the Project root
+    // and every folder up to the repository root. With that list unreadable
+    // grok 1.0.50 treats every folder as untrusted: `grok inspect --json`
+    // listed none of them and showed the plugins disabled, `grok mcp doctor`
+    // reported the repo-local servers "not started for an untrusted folder",
+    // and the ACP server still answered. The person's own trust decisions
+    // stay in place for their interactive Grok.
+    hostDeniedEntries: ["trusted_folders.toml"],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".grok"),
@@ -716,8 +770,11 @@ const gooseProfile: AcpProviderProfile = {
     managedFiles: () => [],
     // Goose's documentation lists <project>/.agents/skills, .goose/skills and
     // .claude/skills as folders it loads skills from at session start, with no
-    // setting that turns that off.
-    forbiddenRootEntries: [".agents/skills", ".claude/skills", ".goose/skills"],
+    // setting that turns that off. Its plugin discovery (1.48.0 and 1.54.0
+    // source) enables every plugin in <project>/.agents/plugins with no trust
+    // step and starts the hooks and `.mcp.json` servers each one carries; an
+    // unreadable folder lists no plugins.
+    forbiddenRootEntries: [".agents/plugins", ".agents/skills", ".claude/skills", ".goose/skills"],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".config/goose"),
@@ -787,10 +844,55 @@ const glmProfile: AcpProviderProfile = {
   },
 };
 
+/**
+ * Whether a Project root holds `entry`: a file or link of any kind, or a folder
+ * with something in it. An entry that cannot be inspected counts as present,
+ * because the refusal fails closed.
+ */
+const projectHoldsEntry = (root: string, entry: string): boolean => {
+  const path = join(root, entry);
+  try {
+    return lstatSync(path).isDirectory() ? readdirSync(path).length > 0 : true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code !== "ENOENT" && code !== "ENOTDIR";
+  }
+};
+
+/**
+ * Gemini CLI and Qwen Code read their settings from the session folder only
+ * (no walk to a parent or the repository root) and start the tools those files
+ * declare with their folder trust off by default. Denying the files fails their
+ * settings loader at start-up, so the Project is refused instead. A Project
+ * that is the person's home folder is exempt: both runtimes skip workspace
+ * settings there, and the files are the person's own profile.
+ */
+const refusesProjectEntries =
+  (displayName: string, entries: ReadonlyArray<string>) =>
+  (root: string): string | undefined => {
+    const safeReal = (path: string) => {
+      try {
+        return realpathSync(path);
+      } catch {
+        return path;
+      }
+    };
+    if (safeReal(root) === safeReal(homedir())) return undefined;
+    const found = entries.filter((entry) => projectHoldsEntry(root, entry));
+    if (found.length === 0) return undefined;
+    const names = found.map((entry) => `\`${entry}\``).join(", ");
+    return `${displayName} starts the MCP servers, hooks, and extensions that ${names} in this Project declare, without Octant's approval, so it does not start here. Remove or rename ${found.length === 1 ? "it" : "them"}, or use another provider in this Project.`;
+  };
+
 const geminiProfile: AcpProviderProfile = {
   kind: "gemini",
   displayName: "Gemini CLI",
   reasoningOptionId: "thinking",
+  refusesProject: refusesProjectEntries("Gemini CLI", [
+    ".gemini/settings.json",
+    ".gemini/agents",
+    ".gemini/extensions",
+  ]),
   // `autoEdit` auto-approves edits inside the agent and would bypass Octant's
   // approval bridge, so it is never selected.
   sessionMode: (mode, policy) => {
@@ -871,7 +973,35 @@ const copilotProfile: AcpProviderProfile = {
     // folders on its own; `copilot skill list` on 1.0.90 lists a package from
     // each. No flag or variable turns that discovery off in ACP. With them
     // unreadable it lists the rest and carries on.
-    forbiddenRootEntries: [".agents/skills", ".claude/skills", ".github/skills"],
+    // The other entries run code. In a folder the person trusted in their own
+    // Copilot profile, `copilot --acp` 1.0.90 started the stdio MCP server in
+    // <project>/.mcp.json at session/new (`.github/mcp.json` when there is no
+    // `.mcp.json`). Its help names hooks (.github/hooks and the hooks in the
+    // repository settings files, which can also enable plugins) and the
+    // bundle reads project extensions, `mcp-servers` in custom agent files,
+    // and language servers from .github/lsp.json, which `copilot lsp list`
+    // lists even in an untrusted folder. With all of them unreadable the
+    // session opened, started no Project server, and still reached its own
+    // MCP servers.
+    // Copilot also reads .claude/settings.json and .claude/settings.local.json
+    // as repository settings: in a trusted folder `copilot plugin marketplace
+    // list` (1.0.90) showed a marketplace declared in either, and with both
+    // unreadable it warned and went on.
+    forbiddenRootEntries: [
+      ".agents/skills",
+      ".claude/settings.json",
+      ".claude/settings.local.json",
+      ".claude/skills",
+      ".github/agents",
+      ".github/copilot/settings.json",
+      ".github/copilot/settings.local.json",
+      ".github/extensions",
+      ".github/hooks",
+      ".github/lsp.json",
+      ".github/mcp.json",
+      ".github/skills",
+      ".mcp.json",
+    ],
     hostAuthentication: {
       kind: "directory",
       defaultPath: join(homedir(), ".copilot"),
@@ -906,7 +1036,16 @@ const clineProfile: AcpProviderProfile = {
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
     minimumVersion: [3, 0, 61],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
-    guards: { NO_COLOR: "1" },
+    guards: {
+      NO_COLOR: "1",
+      // Left on "auto", Cline hands the ACP session to a compatible Cline hub
+      // daemon that is already running, outside this process's sandbox and
+      // its Project denies, and otherwise starts one in the background.
+      // "local" keeps the session in this confined process
+      // (`resolveConfiguredBackendMode` in its source, 3.0.61 and 3.0.71;
+      // its ACP agent sets no mode of its own).
+      CLINE_SESSION_BACKEND_MODE: "local",
+    },
     environment: ({ managedHome, apiKey }) => ({
       HOME: managedHome,
       XDG_CONFIG_HOME: join(managedHome, ".config"),
@@ -916,11 +1055,17 @@ const clineProfile: AcpProviderProfile = {
     managedFiles: () => [],
     // Cline's workspace skill folders, enabled when found, with only a
     // per-skill toggle to turn one off (its documentation, and the skill
-    // search paths in its source).
+    // search paths in its source). Its source on `main` (3.0.71) also imports
+    // every JS or TS plugin module in .cline/plugins and runs the hook scripts
+    // in .cline/hooks and .clinerules/hooks, with no trust step and no switch
+    // an ACP launch can set; an unreadable folder is skipped.
     forbiddenRootEntries: [
       ".agents/skills",
       ".claude/skills",
+      ".cline/hooks",
+      ".cline/plugins",
       ".cline/skills",
+      ".clinerules/hooks",
       ".clinerules/skills",
     ],
     hostAuthentication: {
@@ -937,6 +1082,12 @@ const qwenProfile: AcpProviderProfile = {
   kind: "qwen",
   displayName: "Qwen Code",
   reasoningOptionId: "thinking",
+  refusesProject: refusesProjectEntries("Qwen Code", [
+    ".qwen/settings.json",
+    ".qwen/agents",
+    ".qwen/extensions",
+    ".mcp.json",
+  ]),
   // `auto-edit` and `auto` auto-approve edits inside the agent and would bypass
   // Octant's approval bridge, so they are never selected.
   sessionMode: (mode, policy) => {
@@ -1120,7 +1271,11 @@ const kimiProfile: AcpProviderProfile = {
     hostDeniedEntries: ["AGENTS.md", "mcp.json", "skills", "plugins", "hooks"],
     // Kimi loads Project skills from .agents/skills and .kimi-code/skills
     // only; it never reads .claude/skills on its own, so that stays readable.
-    forbiddenRootEntries: [".kimi-code", ".agents"],
+    // In a workspace the person trusted in Kimi, `kimi acp` 0.38.0 started the
+    // stdio MCP server in <project>/.mcp.json at session/new. With that file
+    // unreadable the session opened, started nothing from it, and still
+    // reached its own MCP servers.
+    forbiddenRootEntries: [".kimi-code", ".agents", ".mcp.json"],
     // Authentication lives in the provider-owned Kimi data root. The process
     // still runs inside Octant's project/managed-home Seatbelt boundary and
     // the reviewed command inventory remains the authority for ACP commands.

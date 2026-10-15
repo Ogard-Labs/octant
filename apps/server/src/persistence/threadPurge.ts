@@ -1,4 +1,6 @@
 import {
+  TOOL_EGRESS_PROJECT_AGGREGATE,
+  TOOL_EGRESS_THREAD_AGGREGATE,
   TURN_METRICS_AGGREGATE_TYPE,
   decodeChatThread,
   decodeContextSubjectRef,
@@ -194,6 +196,11 @@ const THREAD_OWNERSHIP_PATHS = [
   "$.record.provenance.threadId",
   "$.record.document.provenance.threadId",
   "$.originThreadId",
+  // An agent message is its own aggregate and names both its threads, so a
+  // purge of either end takes the message and its refusal with it. Without
+  // these a restart replays the message and the purged thread's id back.
+  "$.senderThreadId",
+  "$.recipientThreadId",
 ] as const;
 
 const CANVAS_LINK_PATHS = [
@@ -207,7 +214,14 @@ const CANVAS_LINK_PATHS = [
 const RUN_LINK_PATHS = ["$.parentRunId", "$.run.parentRunId"] as const;
 
 /** Aggregates a purge must not take, even when a payload names the thread. */
-const RETAINED_AGGREGATE_TYPES = new Set<string>([THREAD_RETENTION_AGGREGATE, "context-ledger"]);
+// A Project's egress rules name the thread they were granted from, but they
+// are the Project's: purging that thread must not take them away. A Project
+// erase removes them.
+const RETAINED_AGGREGATE_TYPES = new Set<string>([
+  THREAD_RETENTION_AGGREGATE,
+  "context-ledger",
+  TOOL_EGRESS_PROJECT_AGGREGATE,
+]);
 
 const USAGE_EVENT_NAME = "context.usage-reconciled@1";
 
@@ -235,8 +249,8 @@ export function listThreadFileAnchors(
 
 /**
  * Aggregate types that belong to a Canvas and nothing else: the Canvas, its
- * comments, share and access history, refresh and action receipts, and
- * artifact-mirror receipts.
+ * comments, share and access history, refresh and action receipts,
+ * artifact-mirror receipts, and its record of outside content.
  */
 const CANVAS_FAMILY_AGGREGATE_TYPES = new Set<string>([
   "canvas",
@@ -246,6 +260,7 @@ const CANVAS_FAMILY_AGGREGATE_TYPES = new Set<string>([
   "canvas-refresh",
   "canvas-action",
   "artifact-mirror",
+  "canvas-outside-content",
 ]);
 
 /**
@@ -268,6 +283,7 @@ export function collectCanvasFamilyAggregates(
   followLinkedAggregates(connection, keys, add, "canvas", CANVAS_LINK_PATHS);
   add("canvas-comments", canvasId);
   add("artifact-mirror", canvasId);
+  add("canvas-outside-content", canvasId);
   return [...keys.values()];
 }
 
@@ -315,6 +331,10 @@ export function erasePurgedProjectData(input: {
       .get(memoryAggregate.aggregateType, memoryAggregate.aggregateId) !== undefined;
   const aggregates = new Map<string, AggregateKey>([
     [`project-memory:${projectId}`, memoryAggregate],
+    [
+      `${TOOL_EGRESS_PROJECT_AGGREGATE}:${projectId}`,
+      { aggregateType: TOOL_EGRESS_PROJECT_AGGREGATE, aggregateId: projectId },
+    ],
   ]);
   for (const canvasId of input.canvasIds) {
     for (const aggregate of collectCanvasFamilyAggregates(connection, canvasId)) {
@@ -345,6 +365,9 @@ function collectOwnedAggregates(
   };
   add(THREAD_AGGREGATE_TYPE_BY_MODE[mode], threadId);
   add("native-harness-session", threadId);
+  // Launch records name the thread only inside their launch, so the egress
+  // aggregate is taken by its id rather than by a payload path.
+  add(TOOL_EGRESS_THREAD_AGGREGATE, threadId);
   add(TURN_METRICS_AGGREGATE_TYPE, threadId);
   for (const match of aggregatesMatching(connection, THREAD_OWNERSHIP_PATHS, threadId)) {
     add(match.aggregateType, match.aggregateId);
@@ -353,6 +376,7 @@ function collectOwnedAggregates(
   for (const canvasId of idsOf(keys, "canvas")) {
     add("canvas-comments", canvasId);
     add("artifact-mirror", canvasId);
+    add("canvas-outside-content", canvasId);
   }
   followLinkedAggregates(connection, keys, add, "agent-run", RUN_LINK_PATHS);
   for (const sessionId of harnessSessionIds(connection, threadId)) {

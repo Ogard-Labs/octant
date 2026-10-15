@@ -28,6 +28,7 @@ import {
   type FederatedHostTransportSlot,
   type HostFederationTransportFactory,
 } from "./hostFederationTransports";
+import { PLATFORM_LISTENER_TRUST } from "./remoteListenerTrust";
 
 const HOST_A = "11111111-1111-4111-8111-111111111111";
 const HOST_B = "22222222-2222-4222-8222-222222222222";
@@ -498,6 +499,7 @@ describe("HostFederationTransports (Post-preview B2)", () => {
       deviceId,
       credentialGeneration: 1,
       hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     });
     const registry = createClientHostRegistry(createInMemoryClientHostRegistryStorage());
     await registry.upsertRemote(

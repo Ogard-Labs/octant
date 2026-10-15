@@ -82,7 +82,9 @@ export function replicaMembershipView(input: {
           parent === undefined
             ? { kind: "founder" }
             : { kind: "approved", approver: parent.instanceId, approverName: parent.displayName },
-        revoked: node.cut !== undefined,
+        // Leaving sets a cut too; the person sees which one it was.
+        revoked: node.cut !== undefined && !node.left,
+        left: node.left,
         thisComputer: local !== undefined && same(node.instanceId, local.instanceId),
         revocable:
           localStanding &&
@@ -132,6 +134,7 @@ export function replicaSyncStatusView(view: ReplicaMembershipView): ReplicaSyncS
           ? { kind: "founder" }
           : { kind: "approved", approverName: member.role.approverName },
       revoked: member.revoked,
+      left: member.left,
       thisComputer: member.thisComputer,
     })),
     status: view.status,

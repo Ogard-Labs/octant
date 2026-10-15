@@ -128,7 +128,8 @@ function memoryStore(): MemoryStore {
 
 /** One simulated computer: its own journal, keychain, and identity, sharing a store. */
 function computer(options: {
-  readonly store: ReplicaStoreSelection;
+  /** A function when the test changes the selection, as Settings › Sync would. */
+  readonly store: ReplicaStoreSelection | (() => ReplicaStoreSelection);
   readonly now?: () => number;
   /** The host stops (every later journal append throws) right after this event. */
   readonly stopAfter?: string;
@@ -146,11 +147,15 @@ function computer(options: {
   const credentials = memoryCredentialStore();
   let uuid = 0;
   const power = { stopAfter: options.stopAfter, stopped: false };
+  /** Settings › Sync's switch as leaving sees it: each refusal fails one try. */
+  const syncSwitch = { calls: 0, refusals: 0 };
+  const selection = options.store;
   const service = new ReplicaMembershipService({
-    store: () => options.store,
+    store: typeof selection === "function" ? selection : () => selection,
     credentials: {
       create: () => createReplicaDeviceKey(credentials),
       sign: (instanceId, payload) => makeReplicaDeviceSigner(credentials, instanceId).sign(payload),
+      remove: (instanceId) => credentials.delete(instanceId),
     },
     journal: stoppable(
       createReplicaMembershipJournal({
@@ -167,6 +172,13 @@ function computer(options: {
     state: () => projection.state(),
     localHostId: LOCAL_HOST_ID,
     clock: options.now ?? (() => NOW),
+    syncOff: async () => {
+      syncSwitch.calls += 1;
+      if (syncSwitch.refusals > 0) {
+        syncSwitch.refusals -= 1;
+        throw new Error("Sync could not be turned off: stale-version.");
+      }
+    },
   });
   const events = () =>
     journal
@@ -182,7 +194,17 @@ function computer(options: {
     power.stopAfter = undefined;
     power.stopped = false;
   };
-  return { service, projection, journal, connection, credentials, events, id, restart };
+  return {
+    service,
+    projection,
+    journal,
+    connection,
+    credentials,
+    events,
+    id,
+    restart,
+    syncSwitch,
+  };
 }
 
 /** A journal that refuses every append after the named event, as a host that stopped would. */
@@ -600,6 +622,86 @@ describe("replica membership service", () => {
       "revoked",
     );
     expect(revoked.entry.cut).toBe(3);
+  });
+
+  it("cuts by default at the end of the revoked computer's unbroken run, below a slot it left empty", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    // South leaves its sequence 3 empty and writes at 4.
+    await writeRecord(store, south.credentials, artifactEntry(south, 4));
+    const preview = expectKind(
+      await north.service.execute({ kind: "revoke-preview", subject: south.id() }),
+      "revoke-preview",
+    );
+    expect(preview.cut).toBe(2);
+    expect(
+      await north.service.execute({ kind: "revoke", subject: south.id(), cut: 3 }),
+    ).toMatchObject({ kind: "refused", reason: "invalid-cut" });
+    expect(
+      expectKind(await north.service.execute({ kind: "revoke", subject: south.id() }), "revoked")
+        .entry.cut,
+    ).toBe(2);
+  });
+
+  it("commits a revocation to the slots it read, so an approval a stolen key writes into another one counts on no member", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const east = computer({ store: selected(store) });
+    await joinThrough(east, north, "Studio");
+    // South's slot 3 holds a file that is not South's record, and South
+    // writes on at 4. The listing shows 3, so the cut runs past it.
+    store.files.set(`${south.id()}/3.json`, new TextEncoder().encode("{}\n"));
+    await writeRecord(store, south.credentials, artifactEntry(south, 4));
+    const revoked = expectKind(
+      await north.service.execute({ kind: "revoke", subject: south.id() }),
+      "revoked",
+    );
+    expect(revoked.entry.cut).toBe(4);
+    expect(revoked.entry.kept).toEqual({
+      version: 1,
+      runs: [
+        { from: 1, to: 2 },
+        { from: 4, to: 4 },
+      ],
+    });
+    // Someone holding South's key and write access to the store replaces
+    // slot 3 with an approval of their own computer, which accepts it.
+    const intruder = computer({ store: selected(store) });
+    expectKind(
+      await intruder.service.execute({ kind: "write-join-request", displayName: "Intruder" }),
+      "join-requested",
+    );
+    store.files.delete(`${south.id()}/3.json`);
+    const approvalHash = await writeRecord(
+      store,
+      south.credentials,
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-approved",
+        origin: originOf(south, 3),
+        subject: intruder.id(),
+        subjectKey: intruder.projection.state().local?.publicKey ?? "",
+        subjectName: "Intruder",
+      }),
+    );
+    await writeRecord(
+      store,
+      intruder.credentials,
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "join-accepted",
+        origin: originOf(intruder, 2),
+        approver: south.id(),
+        approvalSequence: 3,
+        approvalHash,
+        founder: north.id(),
+      }),
+    );
+    for (const member of [north, east]) {
+      expectKind(await member.service.execute({ kind: "pull" }), "pulled");
+      expect(memberIds(member)).not.toContain(String(intruder.id()));
+      expect(cutOf(member, south.id())).toBe(4);
+    }
   });
 
   it("shows the revocations a computer already wrote, so its cut can move before them", async () => {
@@ -1052,6 +1154,7 @@ describe("replica membership service", () => {
       credentials: {
         create: () => Promise.reject(new Error("unused")),
         sign: () => Promise.reject(new Error("unused")),
+        remove: () => Promise.reject(new Error("unused")),
       },
       journal: createReplicaMembershipJournal({
         journal: north.journal,
@@ -1062,6 +1165,7 @@ describe("replica membership service", () => {
       state: () => north.projection.state(),
       localHostId: LOCAL_HOST_ID,
       clock: () => NOW,
+      syncOff: async () => undefined,
     });
     const outcome = await reader.execute({ kind: "pull" });
     expect(outcome).toMatchObject({ kind: "refused", reason: "store-unavailable" });
@@ -1378,6 +1482,7 @@ describe("membership as Settings › Sync shows it", () => {
         displayName: "MacBook",
         role: { kind: "founder" },
         revoked: false,
+        left: false,
         thisComputer: true,
         revocable: false,
       },
@@ -1386,6 +1491,7 @@ describe("membership as Settings › Sync shows it", () => {
         displayName: "Mac mini",
         role: { kind: "approved", approver: north.id(), approverName: "MacBook" },
         revoked: false,
+        left: false,
         thisComputer: false,
         revocable: true,
       },
@@ -1430,5 +1536,366 @@ describe("membership as Settings › Sync shows it", () => {
       phase: "list",
       reason: "not-connected",
     });
+  });
+});
+
+describe("leaving a replica", () => {
+  const viewOf = (host: Computer) =>
+    replicaMembershipView({ state: host.projection.state(), now: NOW, computerName: "Desk" });
+  const leftRecords = (store: MemoryStore, id: ReplicaInstanceId) =>
+    [...store.files.entries()].filter(
+      ([key, bytes]) =>
+        key.startsWith(`${String(id)}/`) &&
+        key.endsWith(".json") &&
+        new TextDecoder().decode(bytes).includes('"kind": "replica-left"'),
+    );
+
+  it("writes a signed left record the other computers show as left, and keeps what it wrote before counting", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const southId = south.id();
+    const before = nextSequence(store, southId);
+    await writeRecord(store, south.credentials, artifactEntry(south, before));
+    expectKind(await south.service.execute({ kind: "pull" }), "pulled");
+
+    const southKey = originOf(south, 1).publicKey;
+    const left = expectKind(await south.service.execute({ kind: "leave" }), "left");
+    expect(left).toEqual({ kind: "left", instanceId: southId, toldStore: true, keyRemoved: true });
+    // The left record is signed by the key the computer leaves with, then that key is gone.
+    expect(verifiesAt(store, `${String(southId)}/${before + 1}`, southKey)).toBe(true);
+    expect(leftRecords(store, southId)).toHaveLength(1);
+    expect(await south.credentials.has(String(southId))).toBe(false);
+    expect(
+      south.events().filter((e) => e.eventName === REPLICA_MEMBERSHIP_EVENT_NAMES.left),
+    ).toEqual([
+      {
+        eventName: REPLICA_MEMBERSHIP_EVENT_NAMES.left,
+        payload: { instanceId: southId, toldStore: true },
+      },
+    ]);
+    // This computer forgot the replica.
+    expect(south.projection.state().local).toBeUndefined();
+    expect(viewOf(south)).toMatchObject({
+      thisComputer: { kind: "none" },
+      members: [],
+      joinRequests: [],
+    });
+
+    expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    expect(viewOf(north).members.find((member) => member.displayName === "Mac mini")).toMatchObject(
+      {
+        left: true,
+        revoked: false,
+        revocable: false,
+      },
+    );
+    const membership = north.projection.state().membership;
+    const node = membership.nodes.find((entry) => String(entry.instanceId) === String(southId));
+    expect(node).toMatchObject({ left: true, cut: before });
+  });
+
+  it("makes no store call once it left: no pull, no publish, and no membership read", async () => {
+    const store = memoryStore();
+    const { south } = await joinedPair(store);
+    expectKind(await south.service.execute({ kind: "leave" }), "left");
+    const calls = store.calls;
+    expect(await south.service.execute({ kind: "pull" })).toMatchObject({
+      kind: "refused",
+      reason: "not-a-member",
+    });
+    expect(
+      await south.service.execute({
+        kind: "revoke",
+        subject: "11111111-1111-8111-8111-111111111111" as ReplicaInstanceId,
+      }),
+    ).toMatchObject({ kind: "refused", reason: "not-a-member" });
+    expect(
+      await south.service.publishArtifact({
+        queueId: "q-1",
+        build: () => {
+          throw new Error("A computer that left builds no entry.");
+        },
+      }),
+    ).toEqual({ status: "failed", reason: "not-a-member" });
+    expect(await south.service.restoreListing()).toEqual({ status: "not-configured" });
+    expect(await south.service.execute({ kind: "leave" })).toMatchObject({
+      kind: "refused",
+      reason: "not-a-member",
+    });
+    expect(store.calls).toBe(calls);
+  });
+
+  it("joins again with a new key, as a new identity", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const old = south.id();
+    expectKind(await south.service.execute({ kind: "leave" }), "left");
+    await joinThrough(south, north, "Mac mini");
+    expect(String(south.id())).not.toBe(String(old));
+    expect(await south.credentials.has(String(south.id()))).toBe(true);
+    expect(await south.credentials.has(String(old))).toBe(false);
+    expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    expect(viewOf(north).members.map((member) => [member.displayName, member.left])).toEqual([
+      ["MacBook", false],
+      ["Mac mini", true],
+      ["Mac mini", false],
+    ]);
+  });
+
+  it("refuses a forged left record and one copied into another slot", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const southOrigin = originOf(south, nextSequence(store, south.id()));
+    const founder = north.id();
+    // Someone without South's key signs a left record in South's name.
+    const forger = memoryCredentialStore();
+    const forgerKey = await createReplicaDeviceKey(forger);
+    const forged = decodeReplicaMembershipEntry({
+      format: REPLICA_ENTRY_FORMAT,
+      kind: "replica-left",
+      origin: southOrigin,
+      founder,
+    });
+    const bytes = new TextEncoder().encode(encodeReplicaEntry(forged));
+    const signature = signedText(
+      await makeReplicaDeviceSigner(forger, forgerKey.instanceId).sign(bytes),
+    );
+    const path = `${String(south.id())}/${southOrigin.sequence}`;
+    store.files.set(`${path}.json`, bytes);
+    store.files.set(`${path}.sig`, new TextEncoder().encode(signature));
+    const pulled = expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    expect(pulled.refused).toEqual([
+      { instanceId: south.id(), sequence: southOrigin.sequence, reason: "bad-signature" },
+    ]);
+    expect(viewOf(north).members.find((member) => member.displayName === "Mac mini")).toMatchObject(
+      {
+        left: false,
+        revoked: false,
+      },
+    );
+
+    // South's real left record, copied into a later slot, is filed under a path it does not name.
+    const real = memoryStore();
+    const pair = await joinedPair(real);
+    const leaver = pair.south.id();
+    expectKind(await pair.south.service.execute({ kind: "leave" }), "left");
+    const [[key, leftBytes] = []] = leftRecords(real, leaver);
+    if (key === undefined || leftBytes === undefined) throw new Error("no left record");
+    const sequence = Number(/\/(\d+)\.json$/.exec(key)?.[1]);
+    const copied = `${String(leaver)}/${sequence + 5}`;
+    real.files.set(`${copied}.json`, leftBytes);
+    const sig = real.files.get(key.replace(/\.json$/, ".sig"));
+    if (sig !== undefined) real.files.set(`${copied}.sig`, sig);
+    const again = expectKind(await pair.north.service.execute({ kind: "pull" }), "pulled");
+    expect(again.refused).toEqual([
+      { instanceId: leaver, sequence: sequence + 5, reason: "path-mismatch" },
+    ]);
+  });
+
+  it("refuses to leave through a store it cannot reach, changing nothing, and finishes the same record when it can", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const southId = south.id();
+    store.failNextPut = ".json";
+    expect(await south.service.execute({ kind: "leave" })).toMatchObject({ kind: "store-failed" });
+    expect(south.projection.state().local?.instanceId).toBe(southId);
+    expect(await south.credentials.has(String(southId))).toBe(true);
+    expect(south.events().some((e) => e.eventName === REPLICA_MEMBERSHIP_EVENT_NAMES.left)).toBe(
+      false,
+    );
+
+    expect(expectKind(await south.service.execute({ kind: "leave" }), "left").toldStore).toBe(true);
+    // The record that stopped part-way was finished, not written a second time.
+    expect(leftRecords(store, southId)).toHaveLength(1);
+    expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    expect(viewOf(north).members.find((member) => member.displayName === "Mac mini")?.left).toBe(
+      true,
+    );
+  });
+
+  it("leaves without the store only when asked, and the other computers then still list it", async () => {
+    const store = memoryStore();
+    let selection: ReplicaStoreSelection = selected(store);
+    const north = computer({ store: selected(store) });
+    const south = computer({ store: () => selection });
+    expectKind(
+      await north.service.execute({ kind: "create-replica", displayName: "MacBook" }),
+      "replica-created",
+    );
+    await joinThrough(south, north, "Mac mini");
+    const southId = south.id();
+    selection = { status: "not-configured" };
+    const calls = store.calls;
+    expect(await south.service.execute({ kind: "leave" })).toMatchObject({
+      kind: "refused",
+      reason: "not-configured",
+    });
+    expect(south.projection.state().local?.instanceId).toBe(southId);
+
+    expect(await south.service.execute({ kind: "leave", withoutStore: true })).toEqual({
+      kind: "left",
+      instanceId: southId,
+      toldStore: false,
+      keyRemoved: true,
+    });
+    expect(store.calls).toBe(calls);
+    expect(south.projection.state().local).toBeUndefined();
+    expectKind(await north.service.execute({ kind: "pull" }), "pulled");
+    expect(viewOf(north).members.find((member) => member.displayName === "Mac mini")).toMatchObject(
+      {
+        left: false,
+        revoked: false,
+        revocable: true,
+      },
+    );
+  });
+
+  it("withdraws a join request without writing anything to the store", async () => {
+    const store = memoryStore();
+    const north = computer({ store: selected(store) });
+    const south = computer({ store: selected(store) });
+    await north.service.execute({ kind: "create-replica", displayName: "MacBook" });
+    await south.service.execute({ kind: "write-join-request", displayName: "Mac mini" });
+    const files = store.files.size;
+    expect(expectKind(await south.service.execute({ kind: "leave" }), "left").toldStore).toBe(
+      false,
+    );
+    expect(store.files.size).toBe(files);
+    expect(viewOf(south).thisComputer.kind).toBe("none");
+  });
+
+  it("finishes a leave the host stopped in the middle of on its next start", async () => {
+    const store = memoryStore();
+    const north = computer({ store: selected(store) });
+    const south = computer({
+      store: selected(store),
+      stopAfter: REPLICA_MEMBERSHIP_EVENT_NAMES.left,
+    });
+    expectKind(
+      await north.service.execute({ kind: "create-replica", displayName: "MacBook" }),
+      "replica-created",
+    );
+    await joinThrough(south, north, "Mac mini");
+    const southId = south.id();
+    await expect(south.service.execute({ kind: "leave" })).rejects.toThrow("The host stopped.");
+    // The identity is gone, but its key is still here and the cleanup is remembered.
+    expect(south.projection.state().local).toBeUndefined();
+    expect(await south.credentials.has(String(southId))).toBe(true);
+    expect(south.projection.state().unfinishedLeaves).toEqual([
+      { instanceId: southId, syncOff: false, keyRemoved: false },
+    ]);
+
+    south.restart();
+    await south.service.finishLeaving();
+    expect(await south.credentials.has(String(southId))).toBe(false);
+    expect(south.projection.state().unfinishedLeaves).toEqual([]);
+  });
+
+  it("deletes a key the credential store kept on the next command", async () => {
+    const store = memoryStore();
+    const { south } = await joinedPair(store);
+    const southId = south.id();
+    const remove = south.credentials.delete;
+    const locked = south.credentials as { delete: CredentialStore["delete"] };
+    locked.delete = async () => {
+      throw new Error("The credential store is locked.");
+    };
+    expect(expectKind(await south.service.execute({ kind: "leave" }), "left").keyRemoved).toBe(
+      false,
+    );
+    expect(await south.credentials.has(String(southId))).toBe(true);
+
+    locked.delete = remove;
+    await south.service.execute({ kind: "pull" });
+    expect(await south.credentials.has(String(southId))).toBe(false);
+    expect(south.projection.state().unfinishedLeaves).toEqual([]);
+  });
+
+  it("reports a leave whose record landed before the host stopped as told, without a second record", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const southId = south.id();
+    await writeRecord(
+      store,
+      south.credentials,
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "replica-left",
+        origin: originOf(south, nextSequence(store, southId)),
+        founder: north.id(),
+      }),
+    );
+    // The host holds its own record but never journaled the leave.
+    expectKind(await south.service.execute({ kind: "pull" }), "pulled");
+    expect(south.projection.state().local?.instanceId).toBe(southId);
+
+    expect(await south.service.execute({ kind: "leave" })).toEqual({
+      kind: "left",
+      instanceId: southId,
+      toldStore: true,
+      keyRemoved: true,
+    });
+    expect(leftRecords(store, southId)).toHaveLength(1);
+  });
+
+  it("completes a leave whose record it holds when the host starts", async () => {
+    const store = memoryStore();
+    const { north, south } = await joinedPair(store);
+    const southId = south.id();
+    await writeRecord(
+      store,
+      south.credentials,
+      decodeReplicaMembershipEntry({
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "replica-left",
+        origin: originOf(south, nextSequence(store, southId)),
+        founder: north.id(),
+      }),
+    );
+    expectKind(await south.service.execute({ kind: "pull" }), "pulled");
+
+    await south.service.finishLeaving();
+    expect(south.projection.state().local).toBeUndefined();
+    expect(
+      south.events().filter((e) => e.eventName === REPLICA_MEMBERSHIP_EVENT_NAMES.left),
+    ).toEqual([
+      {
+        eventName: REPLICA_MEMBERSHIP_EVENT_NAMES.left,
+        payload: { instanceId: southId, toldStore: true },
+      },
+    ]);
+    expect(await south.credentials.has(String(southId))).toBe(false);
+    expect(south.projection.state().unfinishedLeaves).toEqual([]);
+  });
+
+  it("turns sync off again on the next command when the switch refused the first time", async () => {
+    const store = memoryStore();
+    const { south } = await joinedPair(store);
+    const southId = south.id();
+    south.syncSwitch.refusals = 1;
+    expectKind(await south.service.execute({ kind: "leave" }), "left");
+    expect(south.projection.state().unfinishedLeaves).toEqual([
+      { instanceId: southId, syncOff: false, keyRemoved: true },
+    ]);
+
+    await south.service.execute({ kind: "pull" });
+    expect(south.syncSwitch.calls).toBe(2);
+    expect(south.projection.state().unfinishedLeaves).toEqual([]);
+  });
+
+  it("rebuilds a computer that left with no identity when the journal is replayed", async () => {
+    const store = memoryStore();
+    const { south } = await joinedPair(store);
+    expectKind(await south.service.execute({ kind: "leave" }), "left");
+    const replayed = new ReplicaMembershipProjection();
+    catchUpProjection({
+      connection: south.connection,
+      journal: south.journal,
+      projection: replayed,
+      clock: () => NOW_ISO,
+    });
+    expect(replayed.state().local).toBeUndefined();
+    expect(replayed.state().founder).toBeUndefined();
+    expect(replayed.state().records).toEqual([]);
   });
 });

@@ -38,7 +38,7 @@ type Feedback = {
   readonly message: string;
 };
 
-type Member = Pick<ReplicaMemberView, "displayName" | "revoked" | "thisComputer"> & {
+type Member = Pick<ReplicaMemberView, "displayName" | "revoked" | "left" | "thisComputer"> & {
   readonly role: { readonly kind: "founder" } | { readonly kind: "approved"; approverName: string };
 };
 
@@ -52,7 +52,8 @@ export interface SyncMembershipSectionsProps {
 
 /**
  * Settings › Sync on the host: set up a replica or join one, approve another
- * computer after comparing codes, see who is in it, and revoke a computer.
+ * computer after comparing codes, see who is in it, revoke a computer, and
+ * leave the replica.
  *
  * Every decision is the host's. The page shows the codes the host derived and
  * sends back only what the person chose; the host checks the code again, and
@@ -70,9 +71,12 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
   const [feedback, setFeedback] = useState<Feedback>();
   // A restore's outcome is said in its own section.
   const [restoreFeedback, setRestoreFeedback] = useState<Feedback>();
-  // A revoke's outcome is said beside the computers it changed, not in the
-  // section above that the person did not act in.
-  const [feedbackNearComputers, setFeedbackNearComputers] = useState(false);
+  // A revoke's outcome is said beside the computers it changed, and a leave's
+  // beside Leave, not in the section above that the person did not act in.
+  const [feedbackAt, setFeedbackAt] = useState<FeedbackPlace>("section");
+  const [leaving, setLeaving] = useState<"through-store" | "without-store">();
+  // The store did not take the left record, so leaving without it is offered.
+  const [leaveStuck, setLeaveStuck] = useState(false);
   const [approving, setApproving] = useState<ReplicaJoinRequestView>();
   const [revoking, setRevoking] = useState<{
     readonly member: ReplicaMemberView;
@@ -147,7 +151,13 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
     async (command: ReplicaMembershipCommand): Promise<ReplicaMembershipResult | undefined> => {
       setBusy(true);
       setFeedback(undefined);
-      setFeedbackNearComputers(command.kind === "revoke-preview");
+      setFeedbackAt(
+        command.kind === "revoke-preview"
+          ? "computers"
+          : command.kind === "leave"
+            ? "leave"
+            : "section",
+      );
       try {
         const result = await client.execute(command);
         // A stopped join read says so in its own progress row.
@@ -187,9 +197,9 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
   const nameOf = (instanceId: string) =>
     view.members.find((entry) => String(entry.instanceId) === instanceId)?.displayName ??
     "another computer";
-  const feedbackSlot = (near: boolean) => (
+  const feedbackSlot = (place: FeedbackPlace) => (
     <div aria-live="polite" className="settings-feedback-slot">
-      {feedback === undefined || near !== feedbackNearComputers ? null : (
+      {feedback === undefined || place !== feedbackAt ? null : (
         <SettingsState kind={feedback.kind}>{feedback.message}</SettingsState>
       )}
     </div>
@@ -221,7 +231,7 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
         <StartSection
           busy={busy}
           computerName={here.kind === "left" ? here.displayName : view.computerName}
-          feedback={feedbackSlot(false)}
+          feedback={feedbackSlot("section")}
           left={here.kind === "left"}
           onCreate={async (displayName) => {
             const result = await run({ kind: "create-replica", displayName });
@@ -333,7 +343,7 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
               </SettingRow>
             )}
           </div>
-          {feedbackSlot(false)}
+          {feedbackSlot("section")}
         </SettingsSection>
       ) : null}
 
@@ -389,7 +399,7 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
               ))
             )}
           </div>
-          {feedbackSlot(false)}
+          {feedbackSlot("section")}
         </SettingsSection>
       ) : null}
 
@@ -433,7 +443,7 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
                     aria-label={`Revoke ${entry.displayName}`}
                     disabled={busy || restoreStopped}
                     onClick={() => {
-                      setFeedbackNearComputers(true);
+                      setFeedbackAt("computers");
                       setFeedback({
                         kind: "loading",
                         message: `Reading the store before revoking ${entry.displayName}…`,
@@ -459,8 +469,114 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
               </SettingRow>
             ))}
           </div>
-          {feedbackSlot(true)}
+          {feedbackSlot("computers")}
         </SettingsSection>
+      )}
+
+      {here.kind === "none" ? null : (
+        <SettingsSection
+          description={
+            member
+              ? "Stop syncing with these computers. Your artifacts and their history stay on this computer."
+              : here.kind === "joining"
+                ? "Withdraw this computer's request and forget this replica. Your artifacts stay on this computer."
+                : "Forget this replica, so this computer can sync through another store. Your artifacts stay on this computer."
+          }
+          title="Leave replica"
+          tone="danger"
+        >
+          <div className="setgroup">
+            <SettingRow
+              description={
+                member
+                  ? "Your other computers show this one as left. Afterwards you can choose another store."
+                  : "Nothing is written to the store. Afterwards you can choose another store."
+              }
+              label={member ? "Stop syncing here" : "Forget this replica"}
+              scope="host"
+              settingId="sync-leave-replica"
+            >
+              <OctantButton
+                aria-haspopup="dialog"
+                disabled={busy}
+                onClick={() => setLeaving("through-store")}
+                size="sm"
+                type="button"
+                variant="destructive"
+              >
+                Leave…
+              </OctantButton>
+            </SettingRow>
+            {leaveStuck && member ? (
+              <SettingRow
+                description={
+                  here.kind === "founder"
+                    ? "For a store that is gone for good. Your other computers keep listing this one, and none of them can revoke it."
+                    : "For a store that is gone for good. Your other computers keep listing this one until one of them revokes it."
+                }
+                label="Leave without telling them"
+                scope="host"
+                settingId="sync-leave-without-store"
+              >
+                <OctantButton
+                  aria-haspopup="dialog"
+                  disabled={busy}
+                  onClick={() => setLeaving("without-store")}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Leave without telling them…
+                </OctantButton>
+              </SettingRow>
+            ) : null}
+          </div>
+          {feedbackSlot("leave")}
+        </SettingsSection>
+      )}
+
+      {leaving === undefined || here.kind === "none" ? null : (
+        <OctantConfirmDialog
+          confirmLabel="Leave replica"
+          destructive
+          onCancel={() => setLeaving(undefined)}
+          onConfirm={() => {
+            const withoutStore = leaving === "without-store";
+            setLeaving(undefined);
+            void run(withoutStore ? { kind: "leave", withoutStore: true } : { kind: "leave" }).then(
+              (result) => {
+                if (result === undefined) return;
+                if (result.kind !== "left") {
+                  // Sync off, an unreachable store, and a key that cannot sign
+                  // all leave the record unwritten.
+                  setLeaveStuck(result.kind === "store-failed" || result.kind === "refused");
+                  return;
+                }
+                setLeaveStuck(false);
+                setFeedbackAt("section");
+                // The slot holds one line, so each outcome says one thing.
+                setFeedback(
+                  !result.keyRemoved
+                    ? {
+                        kind: "error",
+                        message: "Left the replica, but its signing key stayed on this computer.",
+                      }
+                    : {
+                        kind: "success",
+                        message: result.toldStore
+                          ? "Left the replica. Sync is off; your other computers show it as left."
+                          : "Left the replica. Sync is off.",
+                      },
+                );
+                onMembershipChange();
+              },
+            );
+          }}
+          pending={busy}
+          title={leaving === "without-store" ? "Leave without telling them?" : "Leave the replica?"}
+        >
+          {leaveSentence(here.kind, leaving)}
+        </OctantConfirmDialog>
       )}
 
       {approving === undefined ? null : (
@@ -506,6 +622,33 @@ export function SyncMembershipSections(props: SyncMembershipSectionsProps) {
       )}
     </>
   );
+}
+
+/** Where a command's outcome is said: beside what the person acted on. */
+type FeedbackPlace = "section" | "computers" | "leave";
+
+/** What leaving does, in the confirmation, for where this computer stands. */
+function leaveSentence(
+  standing: Exclude<ReplicaMembershipView["thisComputer"]["kind"], "none">,
+  how: "through-store" | "without-store",
+): string {
+  const after =
+    "It then stops syncing: it makes no more calls to the store, removes its signing key, and turns sync off. Your artifacts and their history stay on this computer. To sync again, set up sync or ask to join, in this store or another, as a new computer.";
+  if (standing === "joining" || standing === "left") {
+    return `Nothing is written to the store. ${after}`;
+  }
+  const approved =
+    standing === "founder"
+      ? "Computers this one approved stay in the replica, and no computer can revoke them after it leaves."
+      : "Computers this one approved stay in the replica; only the computers that brought this one in can revoke them.";
+  // Nobody can revoke the computer that set up sync, so it stays listed.
+  const listed =
+    standing === "founder"
+      ? "your other computers keep listing this one as a member, and none of them can revoke it"
+      : "your other computers keep listing this one as a member until one of them revokes it";
+  return how === "without-store"
+    ? `Nothing is written to the store, so ${listed}. ${after}`
+    : `This computer writes a signed record into the store saying it left, so your other computers show it as left. What it already published stays there. ${approved} ${after}`;
 }
 
 /** Set up a replica here, or ask to join one, under a name the person can change. */
@@ -1061,6 +1204,7 @@ function memberDescription(entry: Member): string {
     roleText(entry),
     entry.thisComputer ? "this computer" : undefined,
     entry.revoked ? "revoked" : undefined,
+    entry.left ? "left" : undefined,
   ]
     .filter((part) => part !== undefined)
     .join(" · ");
@@ -1068,6 +1212,7 @@ function memberDescription(entry: Member): string {
 
 function memberStanding(entry: ReplicaMemberView): string {
   if (entry.revoked) return "Revoked";
+  if (entry.left) return "Left";
   if (entry.thisComputer) return "This computer";
   return entry.role.kind === "founder"
     ? "Cannot be revoked"

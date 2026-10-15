@@ -495,7 +495,7 @@ describe("mapCodexMessage", () => {
     expect(JSON.stringify(results)).not.toMatch(/raw command|raw output|provider-command/);
   });
 
-  it("maps a web search item as a visible tool step and completes it with the query", () => {
+  it("maps a web search item as a visible tool step that marks the thread, and completes it with the query", () => {
     const ctx = context();
     const started = map(
       ctx,
@@ -511,8 +511,19 @@ describe("mapCodexMessage", () => {
         kind: "event",
         event: { kind: "tool-start", toolCallId: "tool-1", toolName: "Web search" },
       },
+      // Codex hands the model what it found, so the start already marks the thread.
+      {
+        kind: "event",
+        event: {
+          kind: "outside-content-read",
+          toolCallId: "tool-1",
+          toolName: "webSearch",
+          source: "web-search",
+        },
+      },
       { kind: "event", event: { kind: "tool-progress", toolCallId: "tool-1" } },
     ]);
+    expect(started[1]).not.toHaveProperty("event.target");
 
     const completed = map(
       ctx,
@@ -1112,7 +1123,7 @@ describe("mapCodexMessage", () => {
     ]);
   });
 
-  it("says each turn's prompt stays in the thread until Codex compacts it", () => {
+  it("says each turn's prompt stays in the thread, and reports Codex's own compaction as an event", () => {
     const session = context();
     const usage = () =>
       map(
@@ -1141,16 +1152,20 @@ describe("mapCodexMessage", () => {
       );
 
     expect(usage()).toMatchObject([{ event: { kind: "usage", promptRetention: "kept" } }]);
-    map(
-      session,
-      notification("item/completed", {
-        threadId: "thread-1",
-        turnId: "turn-1",
-        item: { type: "contextCompaction", id: "provider-compaction" },
-        completedAtMs: 20,
-      }),
-    );
-    expect(usage()).toMatchObject([{ event: { kind: "usage", promptRetention: "compacted" } }]);
+    expect(
+      map(
+        session,
+        notification("item/completed", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: { type: "contextCompaction", id: "provider-compaction" },
+          completedAtMs: 20,
+        }),
+      ),
+    ).toMatchObject([{ event: { kind: "context-compacted", trigger: "automatic" } }]);
+    // The turn runner follows the compaction event; the report itself still
+    // says only what Codex does with each prompt.
+    expect(usage()).toMatchObject([{ event: { kind: "usage", promptRetention: "kept" } }]);
   });
 
   it("ignores delayed usage from an earlier turn without poisoning the active turn totals", () => {

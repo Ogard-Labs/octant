@@ -137,6 +137,128 @@ reconnects it. It rides the same Allow input grant as a tap, never runs
 automatically, and is refused unless a person (`local-user` or
 `remote-device`) requested it; `octant_apple` does not offer it.
 
+## Open URL
+
+The device pane's More menu offers **Open URL…** only when the host's runtime
+snapshot lists `capabilities.openUrl`; a host that predates the flag omits it
+and the item is left out, never shown disabled. Unknown capability flags are
+ignored rather than refused, so a host can report the next item without
+breaking an older pane. Both the Simulator and emulator hosts report it.
+
+The address is a credential-free `http` or `https` URL of at most 2,048
+characters, in exactly the form the URL parser writes it back
+(`DeviceOpenUrl`). The pane reads a bare host as `https://` and sends the
+parsed form. `javascript:`, `file:`, `data:`, `content:`, `intent:`, and app
+deep-link schemes are refused at the contract, before authority is resolved.
+Requiring the parsed form means the address the confirmation shows is the
+address the device receives, byte for byte. Custom app schemes are
+deliberately out until a rule says which ones may be opened; universal links
+over `https` still reach an app that claims them.
+
+On the Simulator the host runs `xcrun simctl openurl <udid> <url>` with the
+address as one argv entry. On the emulator it runs `adb shell am start -a
+android.intent.action.VIEW -d <url>`; `adb` joins its argv into one line the
+device shell parses again, so the address is passed single-quoted, as typed
+text is. `am start` can exit 0 after printing `Error: Activity not started`,
+so such a line makes the action `failed`.
+
+Open URL is an effect, not input. Only a person (`local-user` or
+`remote-device` in `requestedBy`) may ask for it; an agent or the host is
+refused, as with Repair input.
+Plan refuses it; Full access sends it unasked; on an approval-gated thread
+every address raises its own confirmation, which names the whole address and
+is bound to it, and Allow input never covers it. Evidence and its log keep only
+`open-url completed (<origin>; path and query not recorded)`: the tool's own
+output can quote the address, so none of it is kept, for the same reason typed
+text is redacted. The agent tools do not offer Open URL.
+
+## Volume
+
+The More menu offers **Volume up** and **Volume down** (after Lock) only when
+the host's runtime snapshot lists `capabilities.volume`; a host that predates
+the flag omits it and the items are left out, never shown disabled. Like Lock,
+they appear only while input is allowed. The Simulator host reports it only
+when the desktop's native device helper is wired in, because every Simulator
+hardware key rides that helper; the emulator host always reports it.
+
+Volume is not a new action kind: it is a `key-press` with the key
+`volume-up` or `volume-down`, so it is input in every respect. It needs a
+person's or agent's input authority exactly as Home and Lock do, Allow input
+covers it, Plan refuses it, and evidence keeps the key name like any other
+key. On the Simulator the desktop sends it as a hardware button (consumer-page
+usages `0xE9` and `0xEA`, the same codes the managed `serve-sim` stream uses)
+through the native helper, or through the stream while the legacy input
+services still receive. On the emulator it is `serve-avd`'s `volume-up` and
+`volume-down` buttons, or `adb shell input keyevent KEYCODE_VOLUME_UP` and
+`KEYCODE_VOLUME_DOWN`.
+
+## Rotate
+
+The device pane's More menu offers **Rotate** only when the host's runtime
+snapshot lists `capabilities.rotate`; a host that predates the flag omits it
+and the item is left out, never shown disabled. Both the Simulator and
+emulator hosts report it.
+
+The request names the orientation to set, `portrait` or `landscape`
+(`DeviceOrientation`), not a turn, so a repeated request is idempotent. The
+pane names the one the device is not showing: it reads the streamed picture,
+and with no picture it asks for `landscape`. There is no upside-down or
+reverse-landscape choice.
+
+On the Simulator, `simctl` has no rotate command and Octant does not script
+Simulator.app, so the host hands the request to the desktop's device broker
+like input, and the desktop runs `serve-sim rotate` against the managed
+stream, starting it when needed (`landscape` is `landscape_left`). Without the
+desktop app or the managed `serve-sim` tool the action is `unavailable`. On
+the emulator the host turns auto-rotate off and sets the rotation through adb
+(`settings put system accelerometer_rotation 0`, then `user_rotation` to `0`
+for portrait or `1` for landscape), so the sensor cannot undo it.
+
+Rotate is an effect, not input. Only a person (`local-user` or
+`remote-device` in `requestedBy`) may ask for it; an agent or the host is
+refused. Plan refuses it; Full access sends it unasked; on an approval-gated
+thread each Rotate raises its own confirmation, and Allow input never covers
+it. Evidence and its log record `rotate to <orientation> completed` and
+nothing from the device. The agent tools do not offer Rotate.
+
+## Record screen
+
+The More menu offers **Record screen** only when the host's runtime snapshot
+lists `capabilities.recordScreen`; a host that predates the flag omits it and
+the item is left out, never shown disabled. While the snapshot's `recordings`
+lists this device the same item reads **Stop recording**. Both the Simulator
+and emulator hosts report it; the Simulator host does not wait on the desktop's
+device helper, because `simctl` alone records.
+
+Recording is two actions, `start-recording` and `stop-recording`. Starting
+launches the recorder and returns once it is running; the recorder outlives
+the action, and the host holds it until a stop, the time limit
+(`DEVICE_RECORDING_LIMIT_SECONDS`, 60 seconds), the device shutting down, or
+the host closing. On the Simulator the recorder is `xcrun simctl io <udid>
+recordVideo --codec=h264 --force <file>`, writing into the same host-private
+`0700` capture directory a screenshot uses, with that directory granted to
+this launch alone. On the emulator it is `adb shell screenrecord` with a time
+limit and a 1.5 Mbit/s bit rate, so a full-length recording stays under the
+artifact store's 16 MiB bound; stopping sends it SIGINT (`pkill -2`) so the
+device finishes the file, then reads it with `exec-out cat` and deletes the
+device copy. A recorder that ends within the first moments never started and
+reports `failed`.
+
+Stopping stores the video as a `recording` evidence artifact beside the log,
+under the same rules as a screenshot: the same artifact store and size bound,
+a file that is not an ordinary single-link media file, empty, or too large is
+refused as `failed` with a reason, and the raw file is removed whatever the
+outcome. A recording left by a host that stopped is swept with stale captures.
+
+Authority follows Open URL: only a person (`local-user` or `remote-device`)
+may ask for either action, an agent or the host is refused, `octant_apple`
+does not offer them, and the contract requires `requestedBy`. Starting is an
+effect: Plan refuses it, Full access starts it unasked, and an approval-gated
+thread confirms it ("Record this Simulator's screen?"); Allow input never
+covers it. Stopping ends what a person already approved, so it never asks
+again. Serving a saved recording back to the pane is not specified yet; the
+pane reports a stopped recording as saved evidence only.
+
 ## Managed device tools
 
 The iOS Simulator and Android emulator panes ride

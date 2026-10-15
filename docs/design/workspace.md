@@ -166,7 +166,10 @@ References are cleared when the pane or its authority context changes; reload
 restores only the authoritative visible surface. Closing image creation stops
 observation, while only Cancel job cancels generation on the host. Editor drafts
 remain in the thread draft store; approval requests keep their explicit controls.
-Thread titles appear once in the title row. A thread pane's title row is its
+Thread titles appear once in the title row, and the row shows the thread's
+current title: a pane stores the title the thread had when it opened, so the
+shell reads the title from the navigation rows instead, and a rename made in
+any window reaches every open pane. A thread pane's title row is its
 drag handle: an environment mark (a small neutral tile holding a laptop glyph
 when the thread runs on this computer, a cloud glyph and the host's name when
 it runs on another host), the title, a quiet chip naming the Project, and for
@@ -321,8 +324,9 @@ shows a **Running** label and **Stop** while it runs, and **Run again** with
 the reason once it stops (stopped responding, loaded another page, kept
 taking the keyboard back, or, on desktop, could not be started in its contained
 surface). In the thread it starts only when the person
-presses **Run**; the sidebar runs it when it is shown, and the prototype takes no
-focus until the person presses Run or clicks into it. On desktop,
+presses **Run**; the sidebar runs it when it is shown. Octant never moves focus into a running
+prototype, however it started; it is in the tab order, so the person reaches it
+with Tab or a click. On desktop,
 Command-Escape (Control-Escape elsewhere) moves focus from a running prototype
 to its Stop. In a browser the Run control says the prototype is not
 network-contained. An
@@ -437,8 +441,10 @@ ordinary Review views.
 
 Work and Code have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
-Chat has no board. Not built yet: a person may mark a Work thread Done; a Code
-thread reaches Done only by its objectively satisfied delivery target
+Chat has no board. A person marks a Work thread Done with **Mark done** in the
+task's Task actions menu, after a confirmation, and the card moves to Done and
+stays there; a Code thread reaches Done only by its objectively satisfied
+delivery target
 ([Architecture: modes](../architecture.md#modes-chat-work-and-code)). Code also has a Project-scoped Pull requests workspace that
 lists active open and draft pull requests from authorized connected Code
 Projects. The same cached read backs the right dock's Pull requests tool and

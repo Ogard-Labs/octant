@@ -81,6 +81,7 @@ describe("unsigned developer-package smoke", () => {
     expect(evidence).toContain(`package commit: asserted ${commit}`);
     expect(evidence).toMatch(/launch: asserted/);
     expect(evidence).toMatch(/clean shutdown: asserted/);
+    expect(evidence).toMatch(/restart with existing Code Projects and a thread: asserted/);
     expect(evidence).toMatch(/first-run: maintainer/);
     expect(evidence).toMatch(/provider setup: maintainer/);
     expect(evidence).toMatch(/thread creation: maintainer/);

@@ -1,6 +1,15 @@
 import { createHash, X509Certificate } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PrivateListenerConfig } from "../privateListener";
+import type { RemoteGatewayConfig } from "./remoteGateway";
+import {
+  createSelfMadeListenerCertificateStore,
+  listenerTlsPin,
+  SELF_MADE_LISTENER_KEY_FILE,
+} from "./selfMadeListenerCertificate";
 import {
   createPrivateListenerLifecycleController,
   privateListenerCertificateFingerprint,
@@ -91,6 +100,8 @@ describe("private listener lifecycle controller", () => {
       exposureClass: null,
       certificateFingerprint: null,
       certificateReady: false,
+      certificateSource: null,
+      tlsPin: null,
     });
     expect(JSON.stringify(status)).not.toContain("PRIVATE KEY");
     expect(JSON.stringify(status)).not.toContain("BEGIN CERTIFICATE");
@@ -113,6 +124,8 @@ describe("private listener lifecycle controller", () => {
       exposureClass: "lan-private",
       certificateFingerprint: CERT_KEY_FINGERPRINT,
       certificateReady: true,
+      certificateSource: "pasted",
+      tlsPin: null,
     });
     expect(JSON.stringify(status)).not.toContain("PRIVATE KEY");
     expect(JSON.stringify(status)).not.toContain(KEY);
@@ -336,6 +349,8 @@ describe("private listener lifecycle controller", () => {
       exposureClass: null,
       certificateFingerprint: null,
       certificateReady: false,
+      certificateSource: null,
+      tlsPin: null,
     });
   });
 
@@ -396,5 +411,130 @@ describe("private listener lifecycle controller", () => {
         "-----BEGIN CERTIFICATE-----\nABC\n-----END CERTIFICATE-----",
       ),
     ).toThrow(PrivateListenerLifecycleError);
+  });
+});
+
+describe("private listener lifecycle controller with a self-made certificate", () => {
+  const directories: string[] = [];
+  afterEach(() => {
+    for (const directory of directories.splice(0)) {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  function setup() {
+    const directory = mkdtempSync(join(tmpdir(), "octant-listener-self-made-"));
+    directories.push(directory);
+    const served: RemoteGatewayConfig[] = [];
+    const { gateway } = fakeGateway({
+      facts: () => ({ state: "ready", origin: "https://100.64.0.7:8443" }),
+      restart: vi.fn(async (config: RemoteGatewayConfig) => {
+        served.push(config);
+      }),
+    });
+    const controller = createPrivateListenerLifecycleController({
+      createGateway: (config) => {
+        served.push(config);
+        return gateway;
+      },
+      selfMadeCertificate: createSelfMadeListenerCertificateStore({ dataDirectory: directory }),
+    });
+    return { directory, served, controller, gateway };
+  }
+
+  const SELF_MADE = {
+    hostname: "100.64.0.7",
+    port: 8443,
+    origin: "https://100.64.0.7:8443",
+    tls: "self-made",
+  } as const;
+
+  it("serves the key the status pins and keeps that pin across a restart", async () => {
+    const { served, controller } = setup();
+    const status = await controller.enable(SELF_MADE);
+    const first = served[0]?.listener.tls;
+    if (first === undefined) throw new Error("the gateway was not given a certificate");
+    expect(status).toMatchObject({
+      state: "ready",
+      certificateSource: "self-made",
+      tlsPin: listenerTlsPin(String(first.cert)),
+    });
+    expect(status.tlsPin).toMatch(/^sha256-[A-Za-z0-9_-]{43}$/);
+    expect(JSON.stringify(status)).not.toContain(String(first.key));
+
+    const restarted = await controller.restart(SELF_MADE);
+    expect(restarted.tlsPin).toBe(status.tlsPin);
+    expect(served[1]?.listener.tls).toEqual(first);
+  });
+
+  it("serves a pasted certificate exactly as given and leaves the self-made key unused", async () => {
+    const { directory, served, controller } = setup();
+    await controller.enable(SELF_MADE);
+    const selfMadeKey = String(served[0]?.listener.tls.key);
+    const status = await controller.restart(lanConfig());
+    expect(served[1]).toEqual({ listener: lanConfig() });
+    expect(status).toMatchObject({ certificateSource: "pasted", tlsPin: null });
+    expect(existsSync(join(directory, "remote", SELF_MADE_LISTENER_KEY_FILE))).toBe(true);
+
+    // Back to self-made: the key kept on disk brings the same pin back.
+    await controller.restart(SELF_MADE);
+    expect(String(served[2]?.listener.tls.key)).toBe(selfMadeKey);
+  });
+
+  it("never makes a key for a pasted certificate", async () => {
+    const { directory, controller } = setup();
+    await controller.enable(lanConfig());
+    expect(existsSync(join(directory, "remote"))).toBe(false);
+  });
+
+  it("serves nothing and reports why when the key is refused", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-listener-self-made-"));
+    directories.push(directory);
+    const { gateway, calls } = fakeGateway();
+    const createGateway = vi.fn(() => gateway);
+    const refusing = {
+      ensure: () => ({ status: "refused", code: "tls-key-exposed" }) as const,
+    };
+    const controller = createPrivateListenerLifecycleController({
+      createGateway,
+      selfMadeCertificate: refusing,
+    });
+    await expect(controller.enable(SELF_MADE)).rejects.toMatchObject({ code: "tls-key-exposed" });
+    expect(createGateway).not.toHaveBeenCalled();
+    expect(controller.status()).toMatchObject({
+      state: "failed",
+      errorCode: "tls-key-exposed",
+      tlsPin: null,
+    });
+
+    // A running listener asked to move onto a refused key is stopped, not left serving.
+    const running = createPrivateListenerLifecycleController({
+      createGateway: () => gateway,
+      selfMadeCertificate: refusing,
+    });
+    await running.enable(lanConfig());
+    await expect(running.restart(SELF_MADE)).rejects.toMatchObject({ code: "tls-key-exposed" });
+    expect(calls).toEqual(["start", "stop"]);
+    expect(running.status()).toMatchObject({ state: "failed", errorCode: "tls-key-exposed" });
+  });
+
+  it("refuses a public, unspecified, or malformed address before any key or certificate is made", async () => {
+    const { directory, controller } = setup();
+    for (const hostname of ["8.8.8.8", "0.0.0.0", "fe80::1%en0", "a\u0000b"]) {
+      await expect(
+        controller.enable({ ...SELF_MADE, hostname, origin: `https://${hostname}:8443` }),
+      ).rejects.toMatchObject({ code: "invalid-bind" });
+    }
+    await expect(
+      controller.enable({ ...SELF_MADE, origin: "https://100.64.0.8:8443" }),
+    ).rejects.toMatchObject({ code: "invalid-origin" });
+    expect(existsSync(join(directory, "remote"))).toBe(false);
+  });
+
+  it("refuses a self-made listener when the host has no certificate store", async () => {
+    const controller = createPrivateListenerLifecycleController({
+      createGateway: () => fakeGateway().gateway,
+    });
+    await expect(controller.enable(SELF_MADE)).rejects.toMatchObject({ code: "invalid-tls" });
   });
 });

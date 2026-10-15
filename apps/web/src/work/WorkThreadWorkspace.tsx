@@ -68,6 +68,7 @@ import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueu
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
@@ -610,7 +611,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const [providerChanging, setProviderChanging] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [completionFormOpen, setCompletionFormOpen] = useState(false);
-  const [completionEvidence, setCompletionEvidence] = useState("");
   const changeDriven = props.changeRevision !== undefined;
   const transcriptGeneration = useRef(0);
   const initialThread = useRef(props.initialThread);
@@ -1520,13 +1520,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   ]);
 
   const confirmCompletion = useCallback(async () => {
-    const evidence = completionEvidence.trim();
     if (
       thread === undefined ||
       completing ||
       thread.lifecycle !== "active" ||
-      thread.completionConfirmed === true ||
-      evidence.length === 0
+      thread.completionConfirmed === true
     ) {
       return;
     }
@@ -1539,23 +1537,21 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         threadId: thread.id,
         expectedVersion: thread.version,
         deliveryTarget: thread.title,
-        satisfactionEvidence: evidence,
       });
       if (!("kind" in result) || result.kind !== "thread-completion-confirmed") {
-        setErrorMessage("This task could not be marked complete.");
+        setErrorMessage("This task could not be marked Done.");
         return;
       }
       setThread(result.thread);
       props.onThreadUpdated?.(result.thread);
-      setCompletionFormOpen(false);
-      setCompletionEvidence("");
-      setStatus("Delivery marked complete.");
+      setStatus("Marked Done.");
     } catch {
-      setErrorMessage("This task could not be marked complete. Try again.");
+      setErrorMessage("This task could not be marked Done. Try again.");
     } finally {
       setCompleting(false);
+      setCompletionFormOpen(false);
     }
-  }, [completing, completionEvidence, props.threadClient, thread]);
+  }, [completing, props.threadClient, thread]);
 
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
@@ -1645,30 +1641,16 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       <h1 className="sr-only">{props.title}</h1>
 
       {completionFormOpen && thread?.lifecycle === "active" && !completionLocked ? (
-        <section aria-label="Mark this task complete" className="work-thread-workspace__completion">
-          <p>
-            Say what <strong>{thread.title}</strong> delivered. Octant records your words as the
-            evidence that this task is done.
-          </p>
-          <OctantTextarea
-            aria-label="What this task delivered"
-            disabled={completing}
-            onChange={(event) => setCompletionEvidence(event.target.value)}
-            placeholder="Describe what was delivered…"
-            rows={3}
-            value={completionEvidence}
-          />
-          <OctantButton
-            aria-label="Confirm this task is complete"
-            disabled={completing || completionEvidence.trim().length === 0}
-            onClick={() => void confirmCompletion()}
-            size="sm"
-            type="button"
-            variant="default"
-          >
-            {completing ? "Confirming completion" : "Confirm completion"}
-          </OctantButton>
-        </section>
+        <OctantConfirmDialog
+          confirmLabel="Mark done"
+          onCancel={() => setCompletionFormOpen(false)}
+          onConfirm={() => void confirmCompletion()}
+          pending={completing}
+          title="Mark this task Done?"
+        >
+          {thread.title} moves to Done on the board. Its composer and provider lock until you
+          archive and reactivate it.
+        </OctantConfirmDialog>
       ) : null}
 
       <TranscriptWindow
@@ -2160,7 +2142,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   items={[
                     {
                       value: "complete",
-                      label: "Mark complete",
+                      label: "Mark done",
                       icon: <Check aria-hidden="true" size={14} />,
                       disabled: completing || providerChanging || creating,
                     },

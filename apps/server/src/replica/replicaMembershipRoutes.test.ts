@@ -38,6 +38,7 @@ const memberView: ReplicaMembershipView = {
       displayName: "Studio Mac",
       role: { kind: "founder" },
       revoked: false,
+      left: false,
       thisComputer: true,
       revocable: false,
     },
@@ -142,6 +143,27 @@ describe("replica membership routes", () => {
     const response = await handler(request);
     expect(response?.status).toBe(403);
     expect(calls.length).toBe(0);
+  });
+
+  it("refuses a leave from a paired remote device before the service runs", async () => {
+    const { bindPrincipalRouteContext } = await import("../principalRouteContext");
+    const { instance, calls } = service([]);
+    const handler = createReplicaMembershipRouteHandler({
+      service: instance as never,
+      view: () => memberView,
+      windowAuthorityStore: windowStore(),
+    });
+    for (const body of [{ kind: "leave" }, { kind: "leave", withoutStore: true }]) {
+      const request = makeRequest(body);
+      bindPrincipalRouteContext(request, {
+        principal: remoteDevice(thisHost),
+        scopeId: decodeWindowId("00000000-0000-4000-8000-00000000c001"),
+      });
+      const response = await handler(request);
+      expect(response?.status).toBe(403);
+      expect(await response?.json()).toEqual({ message: "Replica membership is host-only." });
+    }
+    expect(calls).toEqual([]);
   });
 
   it("refuses a malformed command before the service runs", async () => {
@@ -272,11 +294,15 @@ describe("replica membership routes", () => {
           sign: async () => {
             throw new Error("no store, no key");
           },
+          remove: async () => {
+            throw new Error("no store, no key");
+          },
         },
         journal: { append: (event) => journaled.push(event) },
         state: () => projection.state(),
         localHostId: LOCAL_HOST_ID,
         clock: () => 0,
+        syncOff: async () => undefined,
       }),
       view: () => emptyView,
       windowAuthorityStore: windowStore(),
@@ -373,6 +399,7 @@ describe("replica sync status route", () => {
           displayName: "Studio Mac",
           role: { kind: "founder" },
           revoked: false,
+          left: false,
           thisComputer: true,
         },
       ],

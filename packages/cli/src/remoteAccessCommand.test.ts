@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readPairingCode } from "@octant/domain";
 import type { LocalControlRequest, LocalControlResponse } from "./localControl";
 import {
   resolveAuthCliCommand,
@@ -6,6 +7,7 @@ import {
   resolvePairCliCommand,
   runRemoteAccessCliCommand,
 } from "./remoteAccessCommand";
+import { renderTerminalQr } from "./terminalQr";
 
 const TICKET = "77777777-7777-4777-8777-777777777777";
 const PENDING = {
@@ -29,6 +31,22 @@ const READY_STATUS = {
   exposureClass: "tailscale",
   certificateFingerprint: "d".repeat(64),
   certificateReady: true,
+};
+const TLS_PIN = `sha256-${"Q".repeat(42)}A`;
+const TICKET_PROOF = `${"p".repeat(42)}A`;
+const SELF_MADE_STATUS = {
+  ...READY_STATUS,
+  certificateFingerprint: "e".repeat(64),
+  certificateSource: "self-made",
+  tlsPin: TLS_PIN,
+};
+const MINTED = {
+  ticket: {
+    ticketId: TICKET,
+    ticketProof: TICKET_PROOF,
+    expiresAt: 1_767_225_600_000,
+    sourceClass: "tailscale",
+  },
 };
 
 function fixture(
@@ -66,8 +84,8 @@ function fixture(
 }
 
 describe("resolvePairCliCommand", () => {
-  it("mints a loopback token unless another network class is named", () => {
-    expect(resolvePairCliCommand([], {})).toEqual({ action: "pair", sourceClass: "loopback" });
+  it("leaves the network class to the listener unless one is named", () => {
+    expect(resolvePairCliCommand([], {})).toEqual({ action: "pair" });
     expect(resolvePairCliCommand([], { source: "tailscale" })).toEqual({
       action: "pair",
       sourceClass: "tailscale",
@@ -115,10 +133,22 @@ describe("resolveListenerCliCommand", () => {
       action: "listener-enable",
       hostname: "station.example.ts.net",
       port: 8455,
-      certificatePath: "/etc/octant/station.crt",
-      privateKeyPath: "/etc/octant/station.key",
+      pasted: {
+        certificatePath: "/etc/octant/station.crt",
+        privateKeyPath: "/etc/octant/station.key",
+      },
     });
     expect(resolveListenerCliCommand(["disable"], {})).toEqual({ action: "listener-disable" });
+  });
+
+  it("asks the host for its own certificate when neither a certificate nor a key is named", () => {
+    expect(resolveListenerCliCommand(["enable"], { hostname: "100.64.0.7", port: "8455" })).toEqual(
+      {
+        action: "listener-enable",
+        hostname: "100.64.0.7",
+        port: 8455,
+      },
+    );
   });
 
   it("refuses an enable missing its address, port, certificate, or key", () => {
@@ -156,24 +186,110 @@ describe("resolveAuthCliCommand", () => {
 
 describe("runRemoteAccessCliCommand", () => {
   it("prints the pairing token a device claims and the host approves", async () => {
-    const test = fixture(() => ({
-      status: 201,
-      body: {
-        ticket: {
-          ticketId: "77777777-7777-4777-8777-777777777777",
-          ticketProof: "proof",
-          expiresAt: 1_767_225_600_000,
-          sourceClass: "lan-private",
-        },
-      },
-    }));
+    const test = fixture((request) =>
+      request.path === "/api/desktop/private-listener/status"
+        ? { status: 200, body: { status: { ...READY_STATUS, certificateSource: "pasted" } } }
+        : {
+            status: 201,
+            body: {
+              ticket: {
+                ticketId: "77777777-7777-4777-8777-777777777777",
+                ticketProof: "proof",
+                expiresAt: 1_767_225_600_000,
+                sourceClass: "lan-private",
+              },
+            },
+          },
+    );
     expect(await test.run({ action: "pair", sourceClass: "lan-private" })).toBe(0);
-    expect(test.sent[0]).toMatchObject({
+    expect(test.sent[1]).toMatchObject({
       path: "/api/desktop/remote/pairing-tickets",
       body: { sourceClass: "lan-private" },
     });
     expect(test.out.join("")).toContain("77777777-7777-4777-8777-777777777777");
     expect(test.out.join("")).toContain("proof");
+    expect(test.out.join("")).not.toContain("octant-pair-");
+  });
+
+  it("prints a pairing code and its QR for a listener serving its own certificate", async () => {
+    const test = fixture((request) =>
+      request.path === "/api/desktop/private-listener/status"
+        ? { status: 200, body: { status: SELF_MADE_STATUS } }
+        : { status: 201, body: MINTED },
+    );
+    expect(await test.run({ action: "pair" })).toBe(0);
+    // The device claims over the listener itself, so the ticket names its network.
+    expect(test.sent[1]).toEqual({
+      path: "/api/desktop/remote/pairing-tickets",
+      method: "POST",
+      body: { sourceClass: "tailscale" },
+    });
+    const out = test.out.join("");
+    const code = /^Pairing code (\S+)$/m.exec(out)?.[1] ?? "";
+    expect(readPairingCode(code)).toEqual({
+      status: "read",
+      contents: {
+        origin: "https://station.example.ts.net:8455",
+        ticketId: TICKET,
+        ticketProof: TICKET_PROOF,
+        pin: TLS_PIN,
+      },
+    });
+    // Piped output carries no colour codes; the QR above the code encodes it.
+    expect(out.startsWith(renderTerminalQr(code, { color: false }))).toBe(true);
+    expect(out).not.toContain("\u001b[");
+    expect(out).toContain(`Ticket ${TICKET}`);
+    expect(out).toContain("no browser link");
+    expect(out).toContain("can't read pairing codes yet");
+    expect(out).not.toMatch(/PRIVATE KEY|BEGIN/);
+  });
+
+  it("colours the QR itself on a terminal so a dark theme does not invert it", async () => {
+    const out: string[] = [];
+    const exit = await runRemoteAccessCliCommand({
+      command: { action: "pair" },
+      session: {
+        kind: "opened",
+        windowId: "11111111-1111-4111-8111-111111111111",
+        send: async (request) =>
+          request.path === "/api/desktop/private-listener/status"
+            ? { status: 200, body: { status: SELF_MADE_STATUS } }
+            : { status: 201, body: MINTED },
+        close: async () => undefined,
+      },
+      stdout: { write: (chunk) => out.push(chunk), isTTY: true },
+      stderr: { write: () => undefined },
+    });
+    expect(exit).toBe(0);
+    const code = /^Pairing code (\S+)$/m.exec(out.join(""))?.[1] ?? "";
+    expect(out.join("").startsWith(renderTerminalQr(code, { color: true }))).toBe(true);
+  });
+
+  it("refuses a pairing code for another network than the listener's and mints nothing", async () => {
+    const test = fixture(() => ({ status: 200, body: { status: SELF_MADE_STATUS } }));
+    expect(await test.run({ action: "pair", sourceClass: "lan-private" })).toBe(1);
+    expect(test.sent).toHaveLength(1);
+    expect(test.err.join("")).toContain("listener's own network (tailscale)");
+  });
+
+  it("mints no ticket for a listener a pairing code cannot name", async () => {
+    const test = fixture(() => ({
+      status: 200,
+      body: { status: { ...SELF_MADE_STATUS, tlsPin: `sha512-${"Q".repeat(86)}` } },
+    }));
+    expect(await test.run({ action: "pair" })).toBe(1);
+    expect(test.sent).toHaveLength(1);
+    expect(test.err.join("")).toContain("needs a newer version of Octant");
+  });
+
+  it("mints nothing when the listener status cannot be read", async () => {
+    const test = fixture(() => ({
+      status: 503,
+      body: { message: "Local device administration is unavailable." },
+    }));
+    expect(await test.run({ action: "pair" })).toBe(1);
+    expect(test.sent).toHaveLength(1);
+    expect(test.out).toEqual([]);
   });
 
   it("says so when no device is paired with the host", async () => {
@@ -218,8 +334,10 @@ describe("runRemoteAccessCliCommand", () => {
         action: "listener-enable",
         hostname: "station.example.ts.net",
         port: 8455,
-        certificatePath: "/etc/octant/station.crt",
-        privateKeyPath: "/etc/octant/station.key",
+        pasted: {
+          certificatePath: "/etc/octant/station.crt",
+          privateKeyPath: "/etc/octant/station.key",
+        },
       }),
     ).toBe(0);
     expect(test.sent[0]).toEqual({
@@ -239,6 +357,30 @@ describe("runRemoteAccessCliCommand", () => {
     expect(printed).not.toContain("PRIVATE KEY");
   });
 
+  it("sends no certificate or key for a self-made listener and prints its key pin", async () => {
+    const test = fixture(() => ({
+      status: 200,
+      body: {
+        status: {
+          ...READY_STATUS,
+          certificateSource: "self-made",
+          tlsPin: "sha256-47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
+        },
+      },
+    }));
+    expect(await test.run({ action: "listener-enable", hostname: "100.64.0.7", port: 8455 })).toBe(
+      0,
+    );
+    expect(test.sent[0]).toEqual({
+      path: "/api/desktop/private-listener/enable",
+      method: "POST",
+      body: { hostname: "100.64.0.7", port: 8455, origin: "https://100.64.0.7:8455" },
+    });
+    const printed = test.out.join("");
+    expect(printed).toContain("Certificate source self-made");
+    expect(printed).toContain("Key pin sha256-47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU");
+  });
+
   it("drops the default HTTPS port from the origin as Settings does", async () => {
     const test = fixture(() => ({ status: 200, body: { status: READY_STATUS } }), {
       "/c.pem": "cert",
@@ -248,8 +390,7 @@ describe("runRemoteAccessCliCommand", () => {
       action: "listener-enable",
       hostname: "192.168.1.20",
       port: 443,
-      certificatePath: "/c.pem",
-      privateKeyPath: "/k.pem",
+      pasted: { certificatePath: "/c.pem", privateKeyPath: "/k.pem" },
     });
     expect(test.sent[0]?.body).toMatchObject({ origin: "https://192.168.1.20" });
   });
@@ -263,8 +404,7 @@ describe("runRemoteAccessCliCommand", () => {
       action: "listener-enable",
       hostname: "fd7a:115c:a1e0::7033:4105",
       port: 8455,
-      certificatePath: "/c.pem",
-      privateKeyPath: "/k.pem",
+      pasted: { certificatePath: "/c.pem", privateKeyPath: "/k.pem" },
     });
     expect(test.sent[0]?.body).toMatchObject({
       hostname: "fd7a:115c:a1e0::7033:4105",
@@ -281,8 +421,7 @@ describe("runRemoteAccessCliCommand", () => {
         action: "listener-enable",
         hostname: "192.168.1.20",
         port: 8455,
-        certificatePath: "/c.pem",
-        privateKeyPath: "/missing.pem",
+        pasted: { certificatePath: "/c.pem", privateKeyPath: "/missing.pem" },
       }),
     ).toBe(1);
     expect(test.sent).toHaveLength(0);
@@ -306,8 +445,7 @@ describe("runRemoteAccessCliCommand", () => {
         action: "listener-enable",
         hostname: "192.168.1.20",
         port: 8455,
-        certificatePath: "/c.pem",
-        privateKeyPath: "/k.pem",
+        pasted: { certificatePath: "/c.pem", privateKeyPath: "/k.pem" },
       }),
     ).toBe(1);
     expect(test.err.join("")).toContain("occupied port");

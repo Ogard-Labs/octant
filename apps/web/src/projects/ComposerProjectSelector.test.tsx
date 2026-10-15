@@ -30,21 +30,18 @@ describe("ComposerProjectSelector", () => {
     const onSelect = vi.fn();
     render(
       <ComposerProjectSelector
-        entries={[
-          ...entries,
-          { kind: "default-folder", rootPath: "/Users/ada/Documents/Octant/Work" },
-        ]}
+        entries={[...entries, { kind: "default-folder", rootPath: "/Users/ada/Octant/Work" }]}
         onSelect={onSelect}
         onAddFolder={() => {}}
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     const row = screen.getByRole("option", { name: /^No project/ });
-    expect(row).toHaveTextContent("/Users/ada/Documents/Octant/Work");
+    expect(row).toHaveTextContent("/Users/ada/Octant/Work");
     await userEvent.click(row);
     expect(onSelect).toHaveBeenCalledWith({
       kind: "default-folder",
-      rootPath: "/Users/ada/Documents/Octant/Work",
+      rootPath: "/Users/ada/Octant/Work",
     });
   });
 
@@ -56,9 +53,9 @@ describe("ComposerProjectSelector", () => {
         entries={[
           {
             kind: "default-folder",
-            rootPath: "/Users/example/Documents/Octant/Code",
+            rootPath: "/Users/example/Octant/Code",
             disabled: true,
-            disabledReason: "Enable Threads without a Project in Code settings",
+            disabledReason: "Code needs a Git repository. Change it in Code settings",
           },
           { kind: "add-folder" },
         ]}
@@ -72,8 +69,8 @@ describe("ComposerProjectSelector", () => {
     // discovery; aria-disabled keeps the inline reason reachable without hover.
     expect(row).toHaveAttribute("aria-disabled", "true");
     expect(row).not.toBeDisabled();
-    expect(row).toHaveAccessibleName(/Enable Threads without a Project in Code settings/);
-    expect(row).toHaveAttribute("title", "Enable Threads without a Project in Code settings");
+    expect(row).toHaveAccessibleName(/Code needs a Git repository. Change it in Code settings/);
+    expect(row).toHaveAttribute("title", "Code needs a Git repository. Change it in Code settings");
     await user.keyboard("{ArrowDown}");
     expect(row).toHaveClass("composer-folder-selector__option--active");
     await user.keyboard("{Enter}");

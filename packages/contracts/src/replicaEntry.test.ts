@@ -172,6 +172,30 @@ describe("artifact bundle contract", () => {
     );
   });
 
+  it("holds leaving to a record after the writer's first, naming the founder it leaves", () => {
+    const left = { format: REPLICA_ENTRY_FORMAT, kind: "replica-left", founder: ids.otherVersion };
+    expect(() => decodeReplicaMembershipEntry({ ...left, origin: origin(1) })).toThrow();
+    expect(() =>
+      decodeReplicaMembershipEntry({ kind: "replica-left", origin: origin(2) }),
+    ).toThrow();
+    const decoded = decodeReplicaMembershipEntry({ ...left, origin: origin(2) });
+    expect(isReplicaMembershipEntry(decoded)).toBe(true);
+    expect(decodeReplicaMembershipCommand({ kind: "leave" })).toEqual({ kind: "leave" });
+    expect(decodeReplicaMembershipCommand({ kind: "leave", withoutStore: true })).toEqual({
+      kind: "leave",
+      withoutStore: true,
+    });
+    expect(() => decodeReplicaMembershipCommand({ kind: "leave", withoutStore: false })).toThrow();
+    expect(
+      decodeReplicaMembershipResult({
+        kind: "left",
+        instanceId: ids.instance,
+        toldStore: true,
+        keyRemoved: true,
+      }),
+    ).toMatchObject({ kind: "left", toldStore: true });
+  });
+
   it("refuses a join request that does not say when it was written", () => {
     expect(() =>
       decodeReplicaMembershipEntry({
@@ -230,6 +254,54 @@ describe("artifact bundle contract", () => {
     const encoded = JSON.parse(encodeReplicaEntry(revocation)) as Record<string, unknown>;
     expect(encoded.cut).toBe(4);
     expect(Object.keys(encoded)).toEqual(["format", "kind", "origin", "subject", "cut"]);
+  });
+
+  it("encodes the slots a revocation keeps in one canonical form, and refuses any other", () => {
+    const fields = {
+      format: REPLICA_ENTRY_FORMAT,
+      kind: "revocation",
+      origin: origin(3),
+      subject: ids.otherVersion,
+      cut: 6,
+    } as const;
+    const runs = [
+      { from: 1, to: 3 },
+      { from: 5, to: 6 },
+    ];
+    const revocation = decodeReplicaMembershipEntry({ ...fields, kept: { version: 1, runs } });
+    const text = encodeReplicaEntry(revocation);
+    expect(encodeReplicaEntry(decodeReplicaEntryText(text))).toBe(text);
+    expect(JSON.parse(text)).toMatchObject({ cut: 6, kept: { version: 1, runs } });
+    for (const kept of [
+      // A run past the cut, runs that touch or overlap, out of order, or
+      // backwards, and an encoding version this host does not know.
+      { version: 1, runs: [{ from: 1, to: 7 }] },
+      {
+        version: 1,
+        runs: [
+          { from: 1, to: 3 },
+          { from: 4, to: 6 },
+        ],
+      },
+      {
+        version: 1,
+        runs: [
+          { from: 1, to: 3 },
+          { from: 3, to: 6 },
+        ],
+      },
+      {
+        version: 1,
+        runs: [
+          { from: 5, to: 6 },
+          { from: 1, to: 3 },
+        ],
+      },
+      { version: 1, runs: [{ from: 3, to: 1 }] },
+      { version: 2, runs },
+    ]) {
+      expect(() => decodeReplicaMembershipEntry({ ...fields, kept })).toThrow();
+    }
   });
 });
 
@@ -339,6 +411,12 @@ describe("replica entry contract", () => {
         approver: ids.otherVersion,
         approvalSequence: 3,
         approvalHash: hash,
+        founder: ids.otherVersion,
+      },
+      {
+        format: REPLICA_ENTRY_FORMAT,
+        kind: "replica-left",
+        origin: origin(3),
         founder: ids.otherVersion,
       },
     ];

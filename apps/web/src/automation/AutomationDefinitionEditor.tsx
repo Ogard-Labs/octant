@@ -687,7 +687,9 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           value={targetSummary}
         />
         <p className="automation-editor__note">
-          Every run creates a new thread with this exact user-confirmed Done boundary.
+          {mode === "work"
+            ? "Every run starts a new thread with this delivery target. It is Done when you mark it Done."
+            : "Every run starts a new thread with this delivery target. It is Done when the target is met."}
         </p>
       </div>
 

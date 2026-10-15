@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -369,16 +370,22 @@ describe("removeAllLocalData", () => {
     expect(existsSync(databasePath)).toBe(false);
   });
 
-  it("stages and removes only the private-listener host identity with the selected store", async () => {
+  it("stages and removes only the private-listener host identity, TLS key, and remembered setting with the selected store", async () => {
     const { directory, databasePath } = temporaryStore();
     migratedConnection(databasePath).close();
     const remoteDirectory = join(directory, "remote");
     mkdirSync(remoteDirectory);
     const hostId = join(remoteDirectory, "private-listener-host-id");
     const hostKey = join(remoteDirectory, "private-listener-host-key.pem");
+    const tlsKey = join(remoteDirectory, "private-listener-tls-key.pem");
+    const tlsCertificate = join(remoteDirectory, "private-listener-tls-cert.pem");
+    const setting = join(remoteDirectory, "private-listener-setting.json");
     const unrelatedRemoteState = join(remoteDirectory, "keep-me.txt");
     writeFileSync(hostId, "55555555-5555-4555-8555-555555555555\n");
     writeFileSync(hostKey, "private-key");
+    writeFileSync(tlsKey, "tls-private-key");
+    writeFileSync(tlsCertificate, "tls-certificate");
+    writeFileSync(setting, '{"certificate":"self-made"}');
     writeFileSync(unrelatedRemoteState, "must remain");
 
     const report = await removeAllLocalDataWithCredentialPurge({
@@ -393,11 +400,53 @@ describe("removeAllLocalData", () => {
       "octant.sqlite3",
       join("remote", "private-listener-host-id"),
       join("remote", "private-listener-host-key.pem"),
+      join("remote", "private-listener-setting.json"),
+      join("remote", "private-listener-tls-cert.pem"),
+      join("remote", "private-listener-tls-key.pem"),
     ]);
     expect(existsSync(databasePath)).toBe(false);
     expect(existsSync(hostId)).toBe(false);
     expect(existsSync(hostKey)).toBe(false);
+    expect(existsSync(tlsKey)).toBe(false);
+    expect(existsSync(tlsCertificate)).toBe(false);
+    expect(existsSync(setting)).toBe(false);
     expect(existsSync(unrelatedRemoteState)).toBe(true);
+  });
+
+  it("removes listener staging leftovers and a linked key as the link itself", async () => {
+    const { directory, databasePath } = temporaryStore();
+    migratedConnection(databasePath).close();
+    const remoteDirectory = join(directory, "remote");
+    mkdirSync(remoteDirectory);
+    const outside = join(directory, "outside-key.pem");
+    writeFileSync(outside, "not Octant's to remove");
+    symlinkSync(outside, join(remoteDirectory, "private-listener-tls-key.pem"));
+    const leftovers = [
+      "private-listener-tls-key.pem.4242.tmp",
+      "private-listener-tls-cert.pem.4242.tmp",
+      "private-listener-setting.json.4242.tmp",
+    ];
+    for (const leftover of leftovers) writeFileSync(join(remoteDirectory, leftover), "staged");
+    const unrelated = ["private-listener-tls-key.pem.tmp", "private-listener-other.pem.4242.tmp"];
+    for (const entry of unrelated) writeFileSync(join(remoteDirectory, entry), "must remain");
+
+    const report = await removeAllLocalDataWithCredentialPurge({
+      dataDirectory: directory,
+      databasePath,
+      platform: "darwin",
+      credentialPurge: async ({ dryRun }) =>
+        dryRun ? { kind: "dry-run", matchedCount: 0 } : { kind: "completed", deletedCount: 0 },
+    });
+
+    expect(report.removedArtifacts).toEqual(
+      [
+        "octant.sqlite3",
+        join("remote", "private-listener-tls-key.pem"),
+        ...leftovers.map((leftover) => join("remote", leftover)),
+      ].sort(),
+    );
+    expect(readdirSync(remoteDirectory).sort()).toEqual([...unrelated].sort());
+    expect(readFileSync(outside, "utf8")).toBe("not Octant's to remove");
   });
 
   it("keeps the private-listener host identity staged when Keychain reconciliation is indeterminate", async () => {

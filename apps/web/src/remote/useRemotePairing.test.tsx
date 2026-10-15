@@ -9,6 +9,7 @@ import {
   createRemoteSessionBridge,
   type RemotePairingClient,
   type RemoteSessionBridge,
+  PLATFORM_LISTENER_TRUST,
 } from "@octant/client-runtime";
 import {
   createFakeRemoteServer,
@@ -67,6 +68,7 @@ async function seedApprovedDevice(
     deviceId,
     credentialGeneration: 1,
     hostKeyFingerprint: HOST_KEY_FINGERPRINT,
+    listenerTrust: PLATFORM_LISTENER_TRUST,
   });
 }
 
@@ -281,6 +283,7 @@ describe("useRemotePairing resume", () => {
       deviceKeyId: claim.deviceKeyId,
       origin: ORIGIN,
       hostKeyFingerprint: claim.hostKeyFingerprint,
+      listenerTrust: PLATFORM_LISTENER_TRUST,
     };
     const client: RemotePairingClient = {
       requestHostHello: vi.fn(async () => hostHello),

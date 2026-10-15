@@ -12,7 +12,10 @@ import { link, mkdir, mkdtemp, stat, symlink, utimes, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { SimulatorDeviceInput } from "@octant/contracts/simulator-device";
+import type {
+  SimulatorDeviceInput,
+  SimulatorDeviceInputResult,
+} from "@octant/contracts/simulator-device";
 import { simulatorInputThroughDesktop } from "./simulatorInputThroughDesktop";
 
 const artifactFixture = mkdtempSync(join(tmpdir(), "octant-apple-build-"));
@@ -1854,11 +1857,470 @@ describe("AppleToolchainService lifecycle", () => {
   });
 });
 
+describe("AppleToolchainService Open URL", () => {
+  const actor = {
+    kind: "local-user" as const,
+    actorId: "30000000-0000-4000-8000-000000000099" as never,
+  };
+  const url = "https://example.com/reset?token=do-not-keep-this";
+
+  function openUrlService(openurl: { readonly stderr?: string; readonly exitCode?: number }) {
+    const discovery = discoveryExecutor();
+    const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) =>
+      input.argv[2] === "openurl"
+        ? processResult("", openurl)
+        : await discovery(input as Parameters<typeof discovery>[0]),
+    );
+    const artifacts = new Map<string, Uint8Array>();
+    const service = new AppleToolchainService({
+      execute,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-10-14T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    const openedWith = () => execute.mock.calls.filter(([input]) => input.argv[2] === "openurl");
+    return { service, artifacts, openedWith };
+  }
+
+  function openUrlRequest(overrides: Partial<AppleSimulatorRequest> = {}) {
+    return simulatorRequest({
+      kind: "open-url",
+      bundleIdentifier: undefined,
+      requestedBy: actor,
+      url: url as never,
+      approval: { kind: "approved", approvalId: ids.approval as never },
+      ...overrides,
+    });
+  }
+
+  it("opens the approved address on the Simulator as one argument and records only its origin", async () => {
+    const { service, artifacts, openedWith } = openUrlService({});
+    const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: true };
+    await service.discover(discoveryRequest, gated);
+
+    const evidence = await service.execute(openUrlRequest(), gated);
+
+    expect(evidence.outcome).toBe("succeeded");
+    expect(evidence.requestedBy).toEqual(actor);
+    expect(openedWith().map(([input]) => input.argv)).toEqual([
+      ["xcrun", "simctl", "openurl", ids.simulator, url],
+    ]);
+    expect(evidence.diagnostics[0]?.message).toContain("https://example.com");
+    expect(JSON.stringify(evidence)).not.toContain("do-not-keep-this");
+    for (const bytes of artifacts.values()) {
+      expect(new TextDecoder().decode(bytes)).not.toContain("do-not-keep-this");
+    }
+  });
+
+  it("keeps the address out of a failure even when simctl quotes it back", async () => {
+    const { service, artifacts } = openUrlService({
+      exitCode: 1,
+      stderr: `An error was encountered processing the command: ${url}\n`,
+    });
+    await service.discover(discoveryRequest, context);
+
+    const evidence = await service.execute(openUrlRequest(), context);
+
+    expect(evidence.outcome).toBe("failed");
+    expect(JSON.stringify(evidence)).not.toContain("do-not-keep-this");
+    for (const bytes of artifacts.values()) {
+      expect(new TextDecoder().decode(bytes)).not.toContain("do-not-keep-this");
+    }
+  });
+
+  it("asks before every Open URL: no approval, Plan, or an input grant never sends it", async () => {
+    const { service, openedWith } = openUrlService({});
+    const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: false };
+    await service.discover(discoveryRequest, gated);
+
+    const unapproved = await service.execute(
+      openUrlRequest({ approval: { kind: "not-required" } }),
+      gated,
+    );
+    expect(unapproved.outcome).toBe("unauthorized");
+
+    // Allow input covers taps and typing, not opening an address.
+    const underGrant = await service.execute(
+      openUrlRequest({
+        actionId: "30000000-0000-4000-8000-000000000013" as never,
+        approval: { kind: "not-required" },
+      }),
+      { ...gated, approvalValid: true, inputGranted: true },
+    );
+    expect(underGrant.outcome).toBe("unauthorized");
+
+    const planned = await service.execute(
+      openUrlRequest({ actionId: "30000000-0000-4000-8000-000000000014" as never }),
+      { ...context, executionPolicy: "plan" as const },
+    );
+    expect(planned.outcome).toBe("unauthorized");
+
+    // Only a person asks for an address, never the host, even under Full access.
+    const byHost = await service.execute(
+      openUrlRequest({
+        actionId: "30000000-0000-4000-8000-000000000015" as never,
+        requestedBy: { kind: "system", actorId: actor.actorId },
+      }),
+      context,
+    );
+    expect(byHost.outcome).toBe("unauthorized");
+    expect(openedWith()).toEqual([]);
+  });
+
+  it("tells the pane this host can open an address and record the screen", async () => {
+    const { service } = openUrlService({});
+    expect(service.snapshot(context).capabilities).toEqual({ openUrl: true, recordScreen: true });
+  });
+});
+
+describe("AppleToolchainService screen recording", () => {
+  const actor = {
+    kind: "local-user" as const,
+    actorId: "30000000-0000-4000-8000-000000000099" as never,
+  };
+  const startId = "30000000-0000-4000-8000-0000000000a1" as never;
+  const stopId = "30000000-0000-4000-8000-0000000000a2" as never;
+
+  async function recordingService(
+    options: { readonly endsAtOnce?: boolean; readonly shutdownExitCode?: number } = {},
+  ) {
+    const discovery = discoveryExecutor();
+    const captureDirectory = await mkdtemp(join(tmpdir(), "octant-apple-recording-test-"));
+    const artifacts = new Map<string, Uint8Array>();
+    let recordedPath: string | undefined;
+    const execute = vi.fn(
+      async (input: { readonly argv: ReadonlyArray<string> }, signal?: AbortSignal) => {
+        if (input.argv[2] === "shutdown") {
+          return processResult("", { exitCode: options.shutdownExitCode ?? 0 });
+        }
+        if (input.argv[3] !== "io" && input.argv[2] !== "io") {
+          return await discovery(input as Parameters<typeof discovery>[0]);
+        }
+        recordedPath = input.argv.at(-1);
+        if (options.endsAtOnce === true) return processResult("", { exitCode: 1 });
+        // simctl keeps recording until it is told to stop, then closes the file.
+        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve()));
+        await writeFile(
+          recordedPath!,
+          Uint8Array.from([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 1, 2, 3, 4, 5, 6, 7, 8]),
+        );
+        return processResult("", { termination: "cancelled", exitCode: null });
+      },
+    );
+    const service = new AppleToolchainService({
+      execute: execute as never,
+      captureDirectory,
+      writeArtifact: async (reference: string, bytes: Uint8Array) => {
+        artifacts.set(reference, bytes);
+      },
+      realpath: async (path: string) => path,
+      now: () => "2026-10-14T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    return { service, artifacts, execute, recordedPath: () => recordedPath };
+  }
+
+  function recording(kind: "start-recording" | "stop-recording", actionId: never, extra = {}) {
+    return simulatorRequest({
+      kind,
+      actionId,
+      bundleIdentifier: undefined,
+      requestedBy: actor,
+      approval: { kind: "approved", approvalId: ids.approval as never },
+      ...extra,
+    });
+  }
+
+  it("records until stopped, then keeps the video as evidence like a screenshot", async () => {
+    const { service, artifacts, execute } = await recordingService();
+    const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: true };
+    await service.discover(discoveryRequest, gated);
+
+    const started = await service.execute(recording("start-recording", startId), gated);
+    expect(started.outcome).toBe("succeeded");
+    expect(service.snapshot(gated).recordings).toEqual([
+      { simulatorId: ids.simulator, startedAt: "2026-10-14T20:00:00.000Z" },
+    ]);
+    const command = execute.mock.calls.find(([input]) => input.argv.includes("recordVideo"))?.[0];
+    expect(command?.argv.slice(0, 5)).toEqual([
+      "xcrun",
+      "simctl",
+      "io",
+      ids.simulator,
+      "recordVideo",
+    ]);
+
+    const stopped = await service.execute(recording("stop-recording", stopId), gated);
+
+    expect(stopped.outcome).toBe("succeeded");
+    expect(stopped.artifacts).toContainEqual({
+      kind: "recording",
+      reference: `apple-recording-${stopId}`,
+    });
+    expect(artifacts.get(`apple-recording-${stopId}`)?.byteLength).toBe(16);
+    expect(service.snapshot(gated).recordings).toEqual([]);
+  });
+
+  it("launches one recorder when two starts arrive together", async () => {
+    const { service, execute } = await recordingService();
+    await service.discover(discoveryRequest, context);
+    const second = "30000000-0000-4000-8000-0000000000a3" as never;
+
+    const [one, two] = await Promise.all([
+      service.execute(recording("start-recording", startId), context),
+      service.execute(recording("start-recording", second), context),
+    ]);
+
+    expect([one.outcome, two.outcome].sort()).toEqual(["failed", "succeeded"]);
+    expect(execute.mock.calls.filter(([input]) => input.argv.includes("recordVideo"))).toHaveLength(
+      1,
+    );
+    await service.close();
+  });
+
+  it("keeps a recording when the Simulator fails to shut down, and drops it when it does", async () => {
+    const shutdown = (actionId: never) =>
+      recording("stop-recording", actionId, { kind: "shutdown", requestedBy: undefined });
+    const failing = await recordingService({ shutdownExitCode: 1 });
+    await failing.service.discover(discoveryRequest, context);
+    await failing.service.execute(recording("start-recording", startId), context);
+    await failing.service.execute(
+      shutdown("30000000-0000-4000-8000-0000000000a4" as never),
+      context,
+    );
+    expect(failing.service.snapshot(context).recordings).toHaveLength(1);
+    await failing.service.close();
+
+    const working = await recordingService();
+    await working.service.discover(discoveryRequest, context);
+    await working.service.execute(recording("start-recording", startId), context);
+    await working.service.execute(
+      shutdown("30000000-0000-4000-8000-0000000000a4" as never),
+      context,
+    );
+    expect(working.service.snapshot(context).recordings).toEqual([]);
+  });
+
+  it("reports a recording that never started and a stop with nothing to stop", async () => {
+    const { service } = await recordingService({ endsAtOnce: true });
+    await service.discover(discoveryRequest, context);
+
+    const started = await service.execute(recording("start-recording", startId), context);
+    expect(started.outcome).toBe("failed");
+    expect(service.snapshot(context).recordings).toEqual([]);
+
+    const stopped = await service.execute(recording("stop-recording", stopId), context);
+    expect(stopped.outcome).toBe("failed");
+    expect(
+      stopped.artifacts.some((artifact: { kind: string }) => artifact.kind === "recording"),
+    ).toBe(false);
+  });
+
+  it("asks before starting, refuses Plan and anyone but a person, and never asks again to stop", async () => {
+    const { service, execute } = await recordingService();
+    const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: false };
+    await service.discover(discoveryRequest, gated);
+
+    const unapproved = await service.execute(
+      recording("start-recording", startId, { approval: { kind: "not-required" } }),
+      gated,
+    );
+    expect(unapproved.outcome).toBe("unauthorized");
+
+    const planned = await service.execute(recording("start-recording", startId), {
+      ...context,
+      executionPolicy: "plan" as const,
+    });
+    expect(planned.outcome).toBe("unauthorized");
+
+    const byAgent = await service.execute(
+      recording("start-recording", startId, {
+        requestedBy: { kind: "system", actorId: actor.actorId },
+      }),
+      context,
+    );
+    expect(byAgent.outcome).toBe("unauthorized");
+    expect(execute.mock.calls.some(([input]) => input.argv.includes("recordVideo"))).toBe(false);
+
+    // Stopping ends what a person already approved starting.
+    const stop = await service.execute(
+      recording("stop-recording", stopId, { approval: { kind: "not-required" } }),
+      gated,
+    );
+    expect(stop.outcome).not.toBe("unauthorized");
+  });
+});
+
+describe("AppleToolchainService Rotate", () => {
+  const actor = {
+    kind: "local-user" as const,
+    actorId: "30000000-0000-4000-8000-000000000099" as never,
+  };
+
+  function rotateService(reply: SimulatorDeviceInputResult = { kind: "delivered" }) {
+    const deliver = vi.fn(async (_input: SimulatorDeviceInput, _signal?: AbortSignal) => reply);
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput: simulatorInputThroughDesktop({ deliver }),
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-10-14T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    return { service, deliver };
+  }
+
+  function rotateRequest(overrides: Partial<AppleSimulatorRequest> = {}) {
+    return simulatorRequest({
+      kind: "rotate",
+      bundleIdentifier: undefined,
+      requestedBy: actor,
+      orientation: "landscape",
+      approval: { kind: "approved", approvalId: ids.approval as never },
+      ...overrides,
+    });
+  }
+
+  it("hands the approved orientation to the desktop helper for that Simulator", async () => {
+    const { service, deliver } = rotateService();
+    const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: true };
+    await service.discover(discoveryRequest, gated);
+
+    const evidence = await service.execute(rotateRequest(), gated);
+
+    expect(evidence.outcome).toBe("succeeded");
+    expect(evidence.requestedBy).toEqual(actor);
+    expect(deliver.mock.calls.map(([input]) => input)).toEqual([
+      expect.objectContaining({
+        kind: "rotate",
+        udid: ids.simulator,
+        orientation: "landscape",
+      }),
+    ]);
+  });
+
+  it("reports a rotation the helper refused as failed and says why", async () => {
+    const { service } = rotateService({
+      kind: "refused",
+      reason: "rotate-unavailable",
+      message: "Rotate needs the managed serve-sim tool, and it is not installed.",
+    });
+    await service.discover(discoveryRequest, context);
+
+    const evidence = await service.execute(rotateRequest(), context);
+
+    expect(evidence.outcome).toBe("failed");
+    expect(evidence.diagnostics[0]?.message).toContain("rotate-unavailable");
+  });
+
+  it("asks before every Rotate: no approval, Plan, or an input grant never sends it", async () => {
+    const { service, deliver } = rotateService();
+    const gated = { ...context, executionPolicy: "approval-gated" as const, approvalValid: false };
+    await service.discover(discoveryRequest, gated);
+
+    const unapproved = await service.execute(
+      rotateRequest({ approval: { kind: "not-required" } }),
+      gated,
+    );
+    expect(unapproved.outcome).toBe("unauthorized");
+
+    // Allow input covers taps and typing, not turning the device.
+    const underGrant = await service.execute(
+      rotateRequest({
+        actionId: "30000000-0000-4000-8000-000000000013" as never,
+        approval: { kind: "not-required" },
+      }),
+      { ...gated, approvalValid: true, inputGranted: true },
+    );
+    expect(underGrant.outcome).toBe("unauthorized");
+
+    const planned = await service.execute(
+      rotateRequest({ actionId: "30000000-0000-4000-8000-000000000014" as never }),
+      { ...context, executionPolicy: "plan" as const },
+    );
+    expect(planned.outcome).toBe("unauthorized");
+
+    // Only a person rotates the device, never the host, even under Full access.
+    const byHost = await service.execute(
+      rotateRequest({
+        actionId: "30000000-0000-4000-8000-000000000015" as never,
+        requestedBy: { kind: "system", actorId: actor.actorId },
+      }),
+      context,
+    );
+    expect(byHost.outcome).toBe("unauthorized");
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("tells the pane this host can rotate", async () => {
+    const { service } = rotateService();
+    expect(service.snapshot(context).capabilities).toEqual({
+      openUrl: true,
+      recordScreen: true,
+      volume: true,
+      rotate: true,
+    });
+  });
+});
+
 describe("AppleToolchainService Simulator input", () => {
   const actor = {
     kind: "local-user" as const,
     actorId: "30000000-0000-4000-8000-000000000099" as never,
   };
+
+  it("reports Volume only when the desktop's device helper can deliver the key", async () => {
+    const make = (injectSimulatorInput?: () => Promise<ReturnType<typeof processResult>>) =>
+      new AppleToolchainService({
+        execute: discoveryExecutor(),
+        ...(injectSimulatorInput === undefined ? {} : { injectSimulatorInput }),
+        writeArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-10-14T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+    // Recording is `simctl` alone, so it does not wait on the helper.
+    expect(make().snapshot(context).capabilities).toEqual({ openUrl: true, recordScreen: true });
+    expect(make(async () => processResult("ok\n")).snapshot(context).capabilities).toEqual({
+      openUrl: true,
+      recordScreen: true,
+      volume: true,
+      rotate: true,
+    });
+  });
+
+  it("hands a volume key to the device helper as the key the person pressed", async () => {
+    const injectSimulatorInput = vi.fn(async () => processResult("ok\n"));
+    const service = new AppleToolchainService({
+      execute: discoveryExecutor(),
+      injectSimulatorInput,
+      writeArtifact: async () => undefined,
+      realpath: async (path: string) => path,
+      now: () => "2026-10-14T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const evidence = await service.execute(
+      simulatorRequest({
+        kind: "key-press",
+        bundleIdentifier: undefined,
+        key: "volume-up",
+        requestedBy: actor,
+        approval: { kind: "approved", approvalId: ids.approval as never },
+      }),
+      context,
+    );
+    expect(evidence.outcome).toBe("succeeded");
+    expect(injectSimulatorInput).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "key-press", key: "volume-up" }),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
 
   it("injects tap through the workbench channel and never re-runs a finished actionId", async () => {
     const execute = discoveryExecutor();
@@ -2224,7 +2686,7 @@ describe("AppleToolchainService Simulator input", () => {
       expect.objectContaining({ kind: "repair-input", udid: ids.simulator }),
     ]);
 
-    const byAgent = await service.execute(
+    const byHost = await service.execute(
       simulatorRequest({
         kind: "repair-input",
         actionId: "30000000-0000-4000-8000-000000000031" as never,
@@ -2239,7 +2701,7 @@ describe("AppleToolchainService Simulator input", () => {
       }),
       gated,
     );
-    expect(byAgent.outcome).toBe("unauthorized");
+    expect(byHost.outcome).toBe("unauthorized");
     expect(deliver).toHaveBeenCalledTimes(1);
   });
 

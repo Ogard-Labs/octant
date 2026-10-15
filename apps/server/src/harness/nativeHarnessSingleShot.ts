@@ -36,6 +36,9 @@ export async function completeOnce(input: {
     });
     let text = "";
     let completed = false;
+    // An answer steered by a page the runtime read would reach a thread with
+    // no mark to say so, and nothing here can mark one, so it is not used.
+    let readOutsideContent = false;
     const collected = yield* subscribeThenSend({
       connection,
       consume: (events) =>
@@ -51,6 +54,7 @@ export async function completeOnce(input: {
                 text += event.text;
               }
               if (event.kind === "completed") completed = true;
+              if (event.kind === "outside-content-read") readOutsideContent = true;
             }),
           ),
         ),
@@ -66,7 +70,7 @@ export async function completeOnce(input: {
       }),
     });
     yield* Fiber.join(collected);
-    return completed ? text : undefined;
+    return completed && !readOutsideContent ? text : undefined;
   });
   try {
     return await Effect.runPromise(

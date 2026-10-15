@@ -141,6 +141,116 @@ describe("ACP event normalization", () => {
     ]);
   });
 
+  it("marks the thread once for a fetch-kind tool or a query-only search, whenever the agent names the kind", () => {
+    const update = (value: Record<string, unknown>) =>
+      mapAcpNotification(ctx, {
+        kind: "notification",
+        method: "session/update",
+        params: { sessionId: "acp-session-1", update: value },
+      }).map((result) => {
+        if (result.kind !== "event") throw new Error("Expected events");
+        return decodeProviderRuntimeEvent(result.event);
+      });
+    const ctx = context();
+
+    // A local read, and searches that name where to look, mark nothing.
+    expect(
+      update({ sessionUpdate: "tool_call", toolCallId: "p-1", title: "Read file", kind: "read" }),
+    ).toHaveLength(1);
+    expect(
+      update({ sessionUpdate: "tool_call", toolCallId: "p-2", title: "Grep", kind: "search" }),
+    ).toHaveLength(1);
+    for (const [id, rawInput] of [
+      ["p-grep", { query: "TODO", path: "src" }],
+      ["p-glob", { query: "*.ts", glob: "**/*.ts" }],
+      ["p-pattern", { pattern: "fetchUser", query: "fetchUser" }],
+      ["p-noquery", { text: "release notes" }],
+    ] as const) {
+      expect(
+        update({
+          sessionUpdate: "tool_call",
+          toolCallId: id,
+          title: "Search",
+          kind: "search",
+          rawInput,
+        }),
+      ).toHaveLength(1);
+    }
+    // A search that names only a query has nowhere local to look.
+    expect(
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "p-web",
+        title: "Searching the web",
+        kind: "search",
+        rawInput: { query: "release notes" },
+      }),
+    ).toMatchObject([
+      { kind: "tool-start" },
+      { kind: "outside-content-read", source: "web-search", target: "release notes" },
+    ]);
+
+    expect(
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "p-3",
+        title: "Fetch page",
+        kind: "fetch",
+        rawInput: { url: "https://example.invalid/page" },
+      }),
+    ).toMatchObject([
+      { kind: "tool-start", toolCallId: "tool-8" },
+      {
+        kind: "outside-content-read",
+        toolCallId: "tool-8",
+        toolName: "Fetch page",
+        source: "web-fetch",
+        target: "https://example.invalid/page",
+      },
+    ]);
+    expect(
+      update({ sessionUpdate: "tool_call_update", toolCallId: "p-3", status: "completed" }),
+    ).toMatchObject([{ kind: "tool-success", toolCallId: "tool-8" }]);
+
+    // An agent that names the kind only once the call runs still marks, once.
+    expect(
+      update({ sessionUpdate: "tool_call", toolCallId: "p-4", title: "web_fetch" }),
+    ).toMatchObject([{ kind: "tool-start", toolCallId: "tool-9" }]);
+    expect(
+      update({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "p-4",
+        kind: "fetch",
+        status: "in_progress",
+      }),
+    ).toMatchObject([
+      { kind: "outside-content-read", toolCallId: "tool-9", target: "web_fetch" },
+      { kind: "tool-progress", toolCallId: "tool-9" },
+    ]);
+    expect(
+      update({ sessionUpdate: "tool_call_update", toolCallId: "p-4", status: "failed" }),
+    ).toMatchObject([{ kind: "tool-failure", toolCallId: "tool-9" }]);
+
+    // A title first given on an update is bounded for a summary; the event
+    // still names the tool within its label bound, without the credential.
+    const [late] = update({
+      sessionUpdate: "tool_call",
+      toolCallId: "p-5",
+      title: "Fetch",
+    });
+    expect(late).toMatchObject({ kind: "tool-start" });
+    const [read] = update({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "p-5",
+      kind: "fetch",
+      title: `Fetch https://user:hunter2@example.invalid/${"x".repeat(900)}`,
+      status: "in_progress",
+    });
+    if (read?.kind !== "outside-content-read") throw new Error("Expected a web read");
+    expect(Array.from(read.toolName).length).toBeLessThanOrEqual(256);
+    expect(read.toolName).not.toContain("hunter2");
+  });
+
   it("shows the provider's reason when a tool call fails", () => {
     const ctx = context();
     event(

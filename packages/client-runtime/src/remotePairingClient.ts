@@ -6,6 +6,12 @@ import {
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 import { verifyHostHello } from "./hostHelloVerification";
+import {
+  decodeListenerOriginTrust,
+  PLATFORM_LISTENER_TRUST,
+  type ListenerOriginTrust,
+  type ListenerTrust,
+} from "./remoteListenerTrust";
 
 const CLIENT_SUPPORTED_PROTOCOL_RANGE = { min: 1, max: 1 } as const;
 const CLIENT_BROWSER_CAPABILITIES = ["webcrypto"] as const;
@@ -47,6 +53,8 @@ export interface RemoteDeviceKeyStore {
       readonly deviceId: string;
       readonly credentialGeneration: number;
       readonly hostKeyFingerprint: string;
+      /** How this origin's listener certificate is trusted; every connection to the origin is held to it. */
+      readonly listenerTrust: ListenerOriginTrust;
     },
   ) => Promise<void>;
   /** Remove previously approved registrations for this origin after a new
@@ -65,6 +73,7 @@ export interface RemoteDeviceKeyMetadata {
   readonly deviceId: string;
   readonly credentialGeneration: number;
   readonly hostKeyFingerprint: string;
+  readonly listenerTrust: ListenerOriginTrust;
 }
 
 interface StoredDeviceKeyRecord {
@@ -74,6 +83,8 @@ interface StoredDeviceKeyRecord {
   readonly deviceId?: string;
   readonly credentialGeneration?: number;
   readonly hostKeyFingerprint?: string;
+  /** Absent on a record approved before listener pins existed, which relied on platform trust. */
+  readonly listenerTrust?: unknown;
   readonly createdAt: string;
   readonly keyPair: RemoteDeviceKeyPair;
 }
@@ -109,6 +120,7 @@ export interface RemotePairingApproval {
   readonly origin: string;
   /** The host identity key fingerprint proven by the hello this device paired through. */
   readonly hostKeyFingerprint: string;
+  readonly listenerTrust: ListenerOriginTrust;
 }
 
 export type RemotePairingStatus =
@@ -145,6 +157,13 @@ export interface RemotePairingClientOptions {
   readonly webBuildVersion: string;
   readonly deviceKeyStore?: RemoteDeviceKeyStore;
   readonly now?: () => number;
+  /**
+   * The pin a pairing code carried for this origin, recorded with the approved
+   * device. Absent for a listener serving a certificate the person pasted,
+   * which platform trust verifies. The caller's `fetch` must hold every
+   * request to the same trust; recording it here grants nothing.
+   */
+  readonly listenerTrust?: ListenerTrust;
 }
 
 export interface RemotePairingClient {
@@ -170,6 +189,10 @@ export function createRemotePairingClient(
   const webBuildVersion = options.webBuildVersion;
   const deviceKeyStore = options.deviceKeyStore ?? createDefaultDeviceKeyStore();
   const now = options.now ?? (() => Date.now());
+  const listenerTrust: ListenerOriginTrust =
+    options.listenerTrust === undefined
+      ? PLATFORM_LISTENER_TRUST
+      : { current: options.listenerTrust };
 
   const requestHostHello = async (): Promise<HostHelloV1> => {
     const url = new URL("/api/remote/hello", baseUrl);
@@ -371,6 +394,7 @@ export function createRemotePairingClient(
           deviceId: result.deviceId,
           credentialGeneration: result.credentialGeneration,
           hostKeyFingerprint: input.claim.hostKeyFingerprint,
+          listenerTrust,
         });
         await deviceKeyStore.removeOtherApprovedForOrigin(origin, input.claim.deviceKeyId);
       } catch {
@@ -390,6 +414,7 @@ export function createRemotePairingClient(
           deviceKeyId: input.claim.deviceKeyId,
           origin,
           hostKeyFingerprint: input.claim.hostKeyFingerprint,
+          listenerTrust,
         },
       };
     }
@@ -694,6 +719,13 @@ function metadataFromRecord(record: StoredDeviceKeyRecord): RemoteDeviceKeyMetad
   ) {
     return undefined;
   }
+  // A trust that cannot be read leaves the record unusable, so the device
+  // pairs again rather than falling back to a weaker trust.
+  const listenerTrust =
+    record.listenerTrust === undefined
+      ? PLATFORM_LISTENER_TRUST
+      : decodeListenerOriginTrust(record.listenerTrust);
+  if (listenerTrust === undefined) return undefined;
   return {
     keyId: record.keyId,
     origin: record.origin,
@@ -701,6 +733,7 @@ function metadataFromRecord(record: StoredDeviceKeyRecord): RemoteDeviceKeyMetad
     deviceId: record.deviceId,
     credentialGeneration: record.credentialGeneration,
     hostKeyFingerprint: record.hostKeyFingerprint,
+    listenerTrust,
   };
 }
 

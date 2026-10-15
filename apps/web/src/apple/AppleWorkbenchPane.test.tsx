@@ -451,6 +451,122 @@ describe("AppleWorkbenchPane", () => {
     expect(screen.getByRole("button", { name: "Check again" })).toBeVisible();
   });
 
+  it("offers Record screen only when the host reports it, and stops the recording it reports", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const { vi } = await import("vitest");
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    const simulatorId = discovery.simulators[0]!.simulatorId;
+    const pane = (runtime: AppleRuntimeSnapshot) => (
+      <AppleWorkbenchPane
+        discovery={discovery}
+        liveFrame={liveFrame()}
+        onRun={onRun}
+        runtime={runtime}
+        status="ready"
+        variant="device"
+      />
+    );
+    const { rerender } = render(pane(runtimeSnapshot()));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Record screen|Stop recording/ })).toBeNull();
+    await user.keyboard("{Escape}");
+
+    rerender(pane({ ...runtimeSnapshot(), capabilities: { recordScreen: true } }));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Record screen" }));
+    expect(onRun).toHaveBeenLastCalledWith({ kind: "start-recording", simulatorId });
+
+    rerender(
+      pane({
+        ...runtimeSnapshot(),
+        capabilities: { recordScreen: true },
+        recordings: [{ simulatorId, startedAt: "2026-10-14T20:00:00.000Z" as never }],
+      }),
+    );
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Stop recording" }));
+    expect(onRun).toHaveBeenLastCalledWith({ kind: "stop-recording", simulatorId });
+  });
+
+  it("offers Open URL only when the host reports it, and asks the surface to open that Simulator", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const { vi } = await import("vitest");
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    const pane = (runtime: AppleRuntimeSnapshot) => (
+      <AppleWorkbenchPane
+        discovery={discovery}
+        liveFrame={liveFrame()}
+        onRun={onRun}
+        runtime={runtime}
+        status="ready"
+        variant="device"
+      />
+    );
+    const { rerender } = render(pane(runtimeSnapshot()));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: /Open URL/ })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    rerender(pane({ ...runtimeSnapshot(), capabilities: { openUrl: true } }));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Open URL…" }));
+    await user.type(
+      await screen.findByRole("textbox", { name: "Address to open on iPhone 16" }),
+      "https://example.com/",
+    );
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    expect(onRun).toHaveBeenCalledExactlyOnceWith({
+      kind: "open-url",
+      simulatorId: discovery.simulators[0]!.simulatorId,
+      url: "https://example.com/",
+    });
+  });
+
+  it("offers Rotate only when the host reports it, and asks the surface to rotate that Simulator", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const { vi } = await import("vitest");
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+    const pane = (runtime: AppleRuntimeSnapshot) => (
+      <AppleWorkbenchPane
+        discovery={discovery}
+        liveFrame={liveFrame()}
+        onRun={onRun}
+        runtime={runtime}
+        status="ready"
+        variant="device"
+      />
+    );
+    const { rerender } = render(pane(runtimeSnapshot()));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await screen.findAllByRole("menuitem");
+    expect(screen.queryByRole("menuitem", { name: "Rotate" })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    rerender(pane({ ...runtimeSnapshot(), capabilities: { rotate: true } }));
+    screen.getByRole("button", { name: "More" }).focus();
+    await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Rotate" }));
+    expect(onRun).toHaveBeenCalledExactlyOnceWith({
+      kind: "rotate",
+      simulatorId: discovery.simulators[0]!.simulatorId,
+      orientation: "landscape",
+    });
+  });
+
   it("offers Repair input only for a disconnected-input refusal, and sends it only on a press", async () => {
     const { fireEvent, render, screen } = await import("@testing-library/react");
     const { vi } = await import("vitest");

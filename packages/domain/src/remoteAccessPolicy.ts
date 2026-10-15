@@ -363,9 +363,15 @@ export function evaluateSession(input: {
   };
 }
 
+// A decimal octet without leading zeros. A URL parser and the system resolver
+// read `010` as octal 8, so a zero-padded address names a different host there
+// than here; it is refused rather than judged by its decimal reading.
+const CANONICAL_IPV4_OCTET = /^(?:0|[1-9][0-9]{0,2})$/;
+
 function isPrivateIpv4(value: string): boolean {
   const octets = value.split(".");
-  if (octets.length !== 4 || octets.some((octet) => !/^\d{1,3}$/.test(octet))) return false;
+  if (octets.length !== 4 || octets.some((octet) => !CANONICAL_IPV4_OCTET.test(octet)))
+    return false;
   const parts = octets.map(Number);
   const [first, second] = parts;
   if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
@@ -380,7 +386,8 @@ function isPrivateIpv4(value: string): boolean {
 
 function isTailscaleIpv4(value: string): boolean {
   const octets = value.split(".");
-  if (octets.length !== 4 || octets.some((octet) => !/^\d{1,3}$/.test(octet))) return false;
+  if (octets.length !== 4 || octets.some((octet) => !CANONICAL_IPV4_OCTET.test(octet)))
+    return false;
   const parts = octets.map(Number);
   const [first, second] = parts;
   return (
@@ -393,24 +400,36 @@ function isTailscaleIpv4(value: string): boolean {
 }
 
 function isPrivateIpv6(value: string): boolean {
-  if (!isIpv6Literal(value)) return false;
-  return value.startsWith("fc") || value.startsWith("fd") || /^fe[89ab]/.test(value);
+  const first = ipv6Groups(value)?.[0];
+  if (first === undefined) return false;
+  // Unique local fc00::/7 and link-local fe80::/10, judged on the expanded
+  // first group: a text prefix would let `fd::1` (00fd::1) or `fe8::1` pass.
+  return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
 }
 
 function isTailscaleIpv6(value: string): boolean {
-  return isIpv6Literal(value) && value.startsWith("fd7a:115c:a1e0:");
+  const groups = ipv6Groups(value);
+  return (
+    groups !== undefined && groups[0] === 0xfd7a && groups[1] === 0x115c && groups[2] === 0xa1e0
+  );
 }
 
-function isIpv6Literal(value: string): boolean {
+/** The eight 16-bit groups of an IPv6 literal, or nothing when it is not one. */
+function ipv6Groups(value: string): ReadonlyArray<number> | undefined {
   const compressionIndex = value.indexOf("::");
-  if (compressionIndex !== -1 && value.indexOf("::", compressionIndex + 2) !== -1) return false;
+  if (compressionIndex !== -1 && value.indexOf("::", compressionIndex + 2) !== -1) return undefined;
   const halves = compressionIndex === -1 ? [value, ""] : value.split("::");
   const left = halves[0] ?? "";
   const right = halves[1] ?? "";
-  const groups = [
-    ...(left === "" ? [] : left.split(":")),
-    ...(right === "" ? [] : right.split(":")),
+  const leftGroups = left === "" ? [] : left.split(":");
+  const rightGroups = right === "" ? [] : right.split(":");
+  const written = [...leftGroups, ...rightGroups];
+  if (written.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return undefined;
+  if (compressionIndex === -1 ? written.length !== 8 : written.length >= 8) return undefined;
+  const parse = (group: string) => Number.parseInt(group, 16);
+  return [
+    ...leftGroups.map(parse),
+    ...Array.from({ length: 8 - written.length }, () => 0),
+    ...rightGroups.map(parse),
   ];
-  if (groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return false;
-  return compressionIndex === -1 ? groups.length === 8 : groups.length < 8;
 }

@@ -12,8 +12,14 @@ import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { registerNativeHarnessEvents } from "./nativeHarnessEvents";
 import { NativeHarnessRoutingStore } from "./nativeHarnessRoutingStore";
-import { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
-import { NativeHarnessQuestionStore } from "./nativeHarnessQuestions";
+import {
+  MAX_WAITING_NATIVE_HARNESS_APPROVALS,
+  NativeHarnessApprovalStore,
+} from "./nativeHarnessApprovals";
+import {
+  MAX_WAITING_NATIVE_HARNESS_QUESTIONS,
+  NativeHarnessQuestionStore,
+} from "./nativeHarnessQuestions";
 import { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
 const directories: string[] = [];
@@ -390,6 +396,120 @@ describe("native harness session store", () => {
     expect(sessions.read(threadId)?.questions[0]?.status).toBe("cancelled");
   });
 
+  it("expires a question the clock has passed, though its timer has not fired yet", async () => {
+    // A timer fires late behind a busy event loop or across a machine's
+    // sleep, so the clock, not the timer, decides when a question's time is up.
+    const threadId = "00000000-0000-4000-8000-000000000030";
+    const uuid = uuidFactory();
+    let at = Date.parse(now);
+    const clock = () => new Date(at).toISOString();
+    const journal = journalFor(openConnection());
+    const sessions = new NativeHarnessSessionStore({ journal, uuid, actor, clock });
+    // Code's inline copy of a question is withdrawn through this.
+    const settledIds: string[] = [];
+    const questions = new NativeHarnessQuestionStore({
+      sessions,
+      uuid,
+      clock,
+      timeoutMs: 1_000,
+      onSettled: ({ questionId }) => settledIds.push(questionId),
+    });
+    const ask = () =>
+      questions.ask({
+        threadId,
+        mode: "code",
+        lead: candidate("big") as never,
+        prompt: "Which database?",
+        options: ["sqlite", "postgres"],
+      });
+    const idAt = (index: number) => String(sessions.read(threadId)?.questions[index]?.id);
+
+    const stale = ask();
+    at += 1_000;
+    expect(questions.waiting()).toEqual([]);
+    await expect(stale).resolves.toMatchObject({ status: "expired" });
+    expect(settledIds).toEqual([idAt(0)]);
+    expect(questions.answer(threadId, idAt(0), "sqlite")).toBe("already-settled");
+
+    const answeredLate = ask();
+    at += 1_000;
+    expect(questions.answer(threadId, idAt(1), "sqlite")).toBe("already-settled");
+    await expect(answeredLate).resolves.toMatchObject({ status: "expired" });
+
+    const shownLate = ask();
+    at += 1_000;
+    questions.expireOverdue();
+    expect(sessions.read(threadId)?.questions[2]?.status).toBe("expired");
+    await expect(shownLate).resolves.toMatchObject({ status: "expired" });
+    // Each expiry is journaled as a timer expiry is, so replay agrees.
+    const replayed = new NativeHarnessSessionStore({ journal, uuid, actor, clock });
+    expect(replayed.read(threadId)?.questions.map((question) => question.status)).toEqual([
+      "expired",
+      "expired",
+      "expired",
+    ]);
+
+    const held = Array.from({ length: MAX_WAITING_NATIVE_HARNESS_QUESTIONS }, () => ask());
+    at += 1_000;
+    const afterSleep = ask();
+    expect(questions.waiting()).toHaveLength(1);
+    const settled = await Promise.all(held);
+    expect(settled.map((outcome) => outcome.status)).toEqual(
+      Array(MAX_WAITING_NATIVE_HARNESS_QUESTIONS).fill("expired"),
+    );
+    const last = sessions.read(threadId)?.questions.at(-1);
+    expect(last?.status).toBe("pending");
+    expect(questions.answer(threadId, String(last?.id), "postgres")).toBe("answered");
+    await expect(afterSleep).resolves.toMatchObject({ status: "answered", answer: "postgres" });
+  });
+
+  it("refuses a question past the host-wide waiting cap at once and journals nothing for it", async () => {
+    vi.useFakeTimers();
+    const uuid = uuidFactory();
+    const sessions = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    const questions = new NativeHarnessQuestionStore({ sessions, uuid, clock: () => now });
+    // The cap is shared by every thread, so the waiting questions are spread
+    // over two threads and the refused one comes from a third.
+    const ask = (threadId: string) =>
+      questions.ask({
+        threadId,
+        mode: "code",
+        lead: candidate("big") as never,
+        prompt: "Continue?",
+        options: [],
+      });
+    const first = "00000000-0000-4000-8000-000000000031";
+    const second = "00000000-0000-4000-8000-000000000032";
+    const third = "00000000-0000-4000-8000-000000000033";
+    const held = Array.from({ length: MAX_WAITING_NATIVE_HARNESS_QUESTIONS }, (_, index) =>
+      ask(index % 2 === 0 ? first : second),
+    );
+
+    await expect(ask(third)).resolves.toEqual({ status: "too-many-waiting" });
+    expect(sessions.read(third)).toBeUndefined();
+    expect(questions.waiting()).toHaveLength(MAX_WAITING_NATIVE_HARNESS_QUESTIONS);
+
+    const answered = questions.waiting()[0];
+    expect(questions.answer(String(answered?.threadId), String(answered?.questionId), "yes")).toBe(
+      "answered",
+    );
+    const freed = ask(third);
+    expect(sessions.read(third)?.questions[0]?.status).toBe("pending");
+
+    vi.advanceTimersByTime(10 * 60_000);
+    const settled = await Promise.all([...held, freed]);
+    expect(settled.map((outcome) => outcome.status)).toEqual([
+      "answered",
+      ...Array(MAX_WAITING_NATIVE_HARNESS_QUESTIONS).fill("expired"),
+    ]);
+    vi.useRealTimers();
+  });
+
   it("shows the running turn's calls live and hands them to the record exactly once", () => {
     const threadId = "00000000-0000-4000-8000-000000000023";
     const store = new NativeHarnessSessionStore({
@@ -452,6 +572,111 @@ describe("native harness session store", () => {
     // The class is remembered: no third approval is journaled.
     await expect(ask()).resolves.toBe("approved");
     expect(sessions.read(threadId)?.approvals).toHaveLength(2);
+  });
+
+  it("expires an approval the clock has passed, though its timer has not fired yet", async () => {
+    // A timer fires late behind a busy event loop or across a machine's
+    // sleep, so the clock, not the timer, decides when an approval's time is up.
+    const threadId = "00000000-0000-4000-8000-000000000026";
+    const uuid = uuidFactory();
+    let at = Date.parse(now);
+    const clock = () => new Date(at).toISOString();
+    const journal = journalFor(openConnection());
+    const sessions = new NativeHarnessSessionStore({ journal, uuid, actor, clock });
+    const approvals = new NativeHarnessApprovalStore({ sessions, uuid, clock, timeoutMs: 1_000 });
+    const ask = () =>
+      approvals.ask({
+        threadId,
+        mode: "code",
+        lead: candidate("big") as never,
+        toolName: "bash",
+        summary: "bash: bun test",
+        approvalClass: "shell-commands",
+      });
+    const idAt = (index: number) => String(sessions.read(threadId)?.approvals?.[index]?.id);
+
+    const stale = ask();
+    at += 1_000;
+    expect(approvals.waiting()).toEqual([]);
+    await expect(stale).resolves.toBe("expired");
+    expect(approvals.decide(threadId, idAt(0), "approve")).toBe("already-settled");
+
+    const answeredLate = ask();
+    at += 1_000;
+    expect(approvals.decide(threadId, idAt(1), "approve-always")).toBe("already-settled");
+    await expect(answeredLate).resolves.toBe("expired");
+
+    const shownLate = ask();
+    at += 1_000;
+    approvals.expireOverdue();
+    expect(sessions.read(threadId)?.approvals?.[2]?.status).toBe("expired");
+    await expect(shownLate).resolves.toBe("expired");
+    // Each expiry is journaled as a timer expiry is, so replay agrees.
+    const replayed = new NativeHarnessSessionStore({ journal, uuid, actor, clock });
+    expect(replayed.read(threadId)?.approvals?.map((approval) => approval.status)).toEqual([
+      "expired",
+      "expired",
+      "expired",
+    ]);
+
+    const held = Array.from({ length: MAX_WAITING_NATIVE_HARNESS_APPROVALS }, () => ask());
+    at += 1_000;
+    const afterSleep = ask();
+    expect(approvals.waiting()).toHaveLength(1);
+    await expect(Promise.all(held)).resolves.toEqual(
+      Array(MAX_WAITING_NATIVE_HARNESS_APPROVALS).fill("expired"),
+    );
+    const last = sessions.read(threadId)?.approvals?.at(-1);
+    expect(last?.status).toBe("pending");
+    expect(approvals.decide(threadId, String(last?.id), "deny")).toBe("decided");
+    await expect(afterSleep).resolves.toBe("denied");
+  });
+
+  it("refuses an approval past the host-wide waiting cap at once and journals nothing for it", async () => {
+    vi.useFakeTimers();
+    const uuid = uuidFactory();
+    const sessions = new NativeHarnessSessionStore({
+      journal: journalFor(openConnection()),
+      uuid,
+      actor,
+      clock: () => now,
+    });
+    const approvals = new NativeHarnessApprovalStore({ sessions, uuid, clock: () => now });
+    // The cap is shared by every thread, so the waiting approvals are spread
+    // over two threads and the refused one comes from a third.
+    const ask = (threadId: string) =>
+      approvals.ask({
+        threadId,
+        mode: "code",
+        lead: candidate("big") as never,
+        toolName: "bash",
+        summary: "bash: bun test",
+        approvalClass: "shell-commands",
+      });
+    const first = "00000000-0000-4000-8000-000000000027";
+    const second = "00000000-0000-4000-8000-000000000028";
+    const third = "00000000-0000-4000-8000-000000000029";
+    const held = Array.from({ length: MAX_WAITING_NATIVE_HARNESS_APPROVALS }, (_, index) =>
+      ask(index % 2 === 0 ? first : second),
+    );
+
+    await expect(ask(third)).resolves.toBe("too-many-waiting");
+    expect(sessions.read(third)).toBeUndefined();
+    expect(approvals.waiting()).toHaveLength(MAX_WAITING_NATIVE_HARNESS_APPROVALS);
+
+    const answered = approvals.waiting()[0];
+    expect(approvals.decide(String(answered?.threadId), String(answered?.approvalId), "deny")).toBe(
+      "decided",
+    );
+    const freed = ask(third);
+    expect(sessions.read(third)?.approvals?.[0]?.status).toBe("pending");
+
+    vi.advanceTimersByTime(10 * 60_000);
+    await expect(Promise.all([...held, freed])).resolves.toEqual([
+      "denied",
+      ...Array(MAX_WAITING_NATIVE_HARNESS_APPROVALS).fill("expired"),
+    ]);
+    vi.useRealTimers();
   });
 
   it("keeps a child's approval local to one request and expires unanswered child interactions on restart", async () => {

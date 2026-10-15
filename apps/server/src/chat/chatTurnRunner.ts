@@ -34,9 +34,19 @@ import { answerChatTurnQuestion, transitionChatAttempt } from "@octant/domain/ch
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Cause, Deferred, Effect, Fiber, Option, Schema, Scope, Stream } from "effect";
 import type { ContextHarnessService } from "../context/contextHarnessService";
+import { TurnCompactions } from "../context/automaticCompaction";
+import {
+  NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
+  RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+  type RuntimeOutsideContentMarking,
+} from "../context/runtimeOutsideContentMark";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
-import type { ProviderCapacityScheduler } from "../context/providerCapacityScheduler";
+import {
+  capacityWaitSentence,
+  type CapacityTerminalSignal,
+  type ProviderCapacityScheduler,
+} from "../context/providerCapacityScheduler";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -111,6 +121,23 @@ function mapProviderFailure(failure: ProviderFailure): ChatFailure {
     message: failure.message,
     ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
   });
+}
+
+/**
+ * Whether a failure says the provider is out of capacity rather than that the
+ * request was wrong: a rate limit, or an overloaded endpoint that named how
+ * long to wait. A refused request (400), a rejected credential, or an endpoint
+ * that is simply down says nothing about capacity, and backing off on one
+ * would hide the real error behind a capacity refusal on the next turn. A
+ * spent or billing usage limit is not one either: the attempt parks on it and
+ * its own resume or the person's retry decides when to try again.
+ */
+function isCapacitySignal(failure: ProviderFailure): boolean {
+  if (failure.usageLimit !== undefined && failure.usageLimit.kind !== "temporary") return false;
+  return (
+    failure.category === "rate-limited" ||
+    (failure.category === "unavailable" && failure.retryAfterMs !== undefined)
+  );
 }
 
 function isChatFailure(error: unknown): error is ChatFailure {
@@ -253,6 +280,12 @@ export interface ChatTurnRunnerInput {
   readonly onHarnessRetryCleared?: () => void;
   /** Tells the navigation read what the running turn is doing, from its start to its end. */
   readonly liveTurn?: LiveTurnTracker;
+  /**
+   * Records that the runtime's own web search, page fetch, or hosted tool put
+   * outside content in front of the model. Without it such a call stops the
+   * turn.
+   */
+  readonly outsideContentMarks?: RuntimeOutsideContentMarking;
 }
 
 export type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -326,6 +359,10 @@ export class ChatTurnRunner {
       let promptSent = false;
       let sawVisibleResponse = false;
       let terminalOutcome: ChatAttemptOutcome | undefined;
+      // Set when the provider itself ended the turn (a reply, a refusal, a
+      // stop of its own), as opposed to the runner abandoning a request that
+      // may still be executing: a cancel, a timeout, a budget, a lost stream.
+      let providerEndedTurn = false;
       let outputLimited = false;
       const turnStartedAt = clock();
       // Re-based when the prompt is sent, so the wait for a first token never
@@ -384,6 +421,21 @@ export class ChatTurnRunner {
           return yield* Effect.fail(error);
         });
 
+      const outsideContentMarks = input.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS;
+      const unmarked = () =>
+        failTurn(
+          {
+            code: decodeDiagnosticFailureCode("outside-content-unmarked"),
+            message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+          },
+          decodeChatFailure({ category: "failed", message: RUNTIME_OUTSIDE_CONTENT_REFUSAL }),
+        );
+      // An earlier attempt's read that could not be marked is still in the
+      // session this attempt would resume.
+      if (outsideContentMarks.settleOwed(String(input.thread.id)).status === "refused") {
+        return yield* unmarked();
+      }
+
       capacityScheduler.updateProviderFacts({
         limits: input.serviceLimits,
         enforcement: { kind: "observable-api", maxObservableConcurrency: 2 },
@@ -398,20 +450,21 @@ export class ChatTurnRunner {
         origin: "thread",
       });
       if (submission.status === "queued") {
+        const message = capacityWaitSentence({
+          reason: submission.reason,
+          ...(submission.notBeforeMs === undefined ? {} : { notBeforeMs: submission.notBeforeMs }),
+          nowMs: Date.parse(clock()),
+        });
         yield* persistOutcome("interrupted", {
           code: decodeDiagnosticFailureCode("capacity-unavailable"),
+          message,
         });
         terminalOutcome = "interrupted";
         capacityScheduler.recordTerminal({
           reservationId: input.reservationId,
           outcome: "timeout",
         });
-        return yield* Effect.fail(
-          decodeChatFailure({
-            category: "interrupted",
-            message: "Provider capacity is unavailable; retry this turn.",
-          }),
-        );
+        return yield* Effect.fail(decodeChatFailure({ category: "interrupted", message }));
       }
       capacityScheduler.markRunning(input.reservationId);
       const spendReservationId = decodeSpendCeilingReservationId(String(input.reservationId));
@@ -449,6 +502,12 @@ export class ChatTurnRunner {
           return Effect.fail(error as ChatFailure);
         }
         const failure = mapProviderFailure(error);
+        if (isCapacitySignal(error)) {
+          capacityScheduler.recordCapacitySignal({
+            providerInstanceId: input.providerInstanceId,
+            ...(error.retryAfterMs === undefined ? {} : { retryAfterMs: error.retryAfterMs }),
+          });
+        }
         const outcome =
           failure.category === "waiting"
             ? "waiting"
@@ -482,6 +541,7 @@ export class ChatTurnRunner {
             }
           }
           terminalOutcome = outcome;
+          providerEndedTurn = true;
           return yield* Effect.fail(failure);
         });
       };
@@ -636,9 +696,18 @@ export class ChatTurnRunner {
           const unanswered = openQuestions.get(String(input.attempt.id));
           openQuestions.delete(String(input.attempt.id));
           unanswered?.abandon("Chat turn ended before the answer was delivered.");
-          yield* connection
-            .stop(input.attempt.providerSessionId)
-            .pipe(Effect.catchAll(() => Effect.void));
+          const stopped = yield* connection.stop(input.attempt.providerSessionId).pipe(
+            Effect.as(true),
+            Effect.catchAll(() => Effect.succeed(false)),
+          );
+          // Telling the scheduler the turn ended frees its provider slot. That
+          // is only true when the provider ended the turn or confirmed the
+          // stop; a request the runner abandoned and could not stop may still
+          // be executing, so it keeps its slot until the host restarts.
+          const recordCapacityEnd = (signal: Omit<CapacityTerminalSignal, "reservationId">) => {
+            if (!stopped && !providerEndedTurn) return;
+            capacityScheduler.recordTerminal({ reservationId: input.reservationId, ...signal });
+          };
           // Every turn that reached the provider leaves one ledger row. A turn
           // that failed or was cancelled used to leave none, so a money ceiling
           // counted it as free; one that reported nothing is recorded as
@@ -674,8 +743,7 @@ export class ChatTurnRunner {
                 reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
                 observedTokens: actualInputTokens + actualOutputTokens,
               });
-              capacityScheduler.recordTerminal({
-                reservationId: input.reservationId,
+              recordCapacityEnd({
                 outcome: "completed",
                 actualTokens: actualInputTokens + actualOutputTokens,
               });
@@ -683,8 +751,7 @@ export class ChatTurnRunner {
               spendCeiling?.settle({
                 reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
               });
-              capacityScheduler.recordTerminal({
-                reservationId: input.reservationId,
+              recordCapacityEnd({
                 outcome: "completed",
               });
             }
@@ -694,8 +761,7 @@ export class ChatTurnRunner {
             spendCeiling?.settle({
               reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
             });
-            capacityScheduler.recordTerminal({
-              reservationId: input.reservationId,
+            recordCapacityEnd({
               outcome:
                 terminalOutcome === "cancelled"
                   ? "cancelled"
@@ -708,8 +774,7 @@ export class ChatTurnRunner {
             spendCeiling?.settle({
               reservationId: decodeSpendCeilingReservationId(String(input.reservationId)),
             });
-            capacityScheduler.recordTerminal({
-              reservationId: input.reservationId,
+            recordCapacityEnd({
               outcome: "interrupted",
             });
           }
@@ -776,6 +841,7 @@ export class ChatTurnRunner {
         // session is reattached and verified, but no generation is continued.
         yield* persistOutcome("waiting");
         terminalOutcome = "waiting";
+        providerEndedTurn = true;
         return yield* Effect.fail(
           decodeChatFailure({
             category: "waiting",
@@ -826,6 +892,7 @@ export class ChatTurnRunner {
         ),
       );
 
+      const compactions = new TurnCompactions();
       const collected = yield* subscribeThenSend({
         connection,
         consume: (runtimeEvents) =>
@@ -844,6 +911,30 @@ export class ChatTurnRunner {
                 yield* idle.touch;
                 timing = observeTurnMetrics(timing, event);
                 input.liveTurn?.observe(event);
+                const sighting = compactions.observe(event);
+                if (sighting !== undefined) {
+                  // The receipt is accounting; failing to write it never
+                  // fails the turn whose session it describes.
+                  yield* Effect.try(() =>
+                    contextHarness.recordAutomaticCompaction({
+                      subject: input.contextSubject,
+                      // Each attempt is its own provider turn: a retry's
+                      // compactions are not the first attempt's.
+                      turnKey: String(input.attempt.id),
+                      sighting,
+                      executor: {
+                        kind: "runtime",
+                        driverKind: input.driver.kind,
+                        providerInstanceId: input.providerInstanceId,
+                        modelId: input.attempt.modelId,
+                      },
+                    }),
+                  ).pipe(
+                    Effect.catchAll(() =>
+                      Effect.logWarning("An automatic compaction could not be journaled."),
+                    ),
+                  );
+                }
                 if (event.kind === "retrying") {
                   const notice = decodeHarnessRetryNotice({
                     attempt: event.attempt,
@@ -869,6 +960,19 @@ export class ChatTurnRunner {
                   input.onHarnessRetryCleared?.();
                 }
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
+                if (event.kind === "outside-content-read") {
+                  // Marked before the budget or a cancel is looked at: what
+                  // the runtime read reached its model either way.
+                  if (
+                    outsideContentMarks.mark(String(input.thread.id), event).status === "refused"
+                  ) {
+                    yield* connection
+                      .interrupt(input.attempt.providerSessionId)
+                      .pipe(Effect.catchAll(() => Effect.void));
+                    return yield* unmarked();
+                  }
+                  if (input.signal?.aborted !== true && handledEvents <= maxEvents) return;
+                }
                 if (handledEvents > maxEvents) {
                   yield* persistOutcome("interrupted", {
                     code: decodeDiagnosticFailureCode("event-budget-exceeded"),
@@ -1272,6 +1376,7 @@ export class ChatTurnRunner {
                 if (event.kind === "waiting") {
                   yield* persistOutcome("waiting");
                   terminalOutcome = "waiting";
+                  providerEndedTurn = true;
                   return;
                 }
                 if (event.kind === "user-input-request") {
@@ -1346,6 +1451,7 @@ export class ChatTurnRunner {
                   yield* input.persistAttempt(currentAttempt);
                   if (event.stopReason === "max-tokens") outputLimited = true;
                   terminalOutcome = "completed";
+                  providerEndedTurn = true;
                   yield* observeCompleted();
                   return;
                 }
@@ -1378,12 +1484,14 @@ export class ChatTurnRunner {
                     };
                     yield* input.persistAttempt(currentAttempt);
                     terminalOutcome = "completed";
+                    providerEndedTurn = true;
                     return;
                   }
                   yield* persistOutcome("interrupted", {
                     code: decodeDiagnosticFailureCode("interrupted"),
                   });
                   terminalOutcome = "interrupted";
+                  providerEndedTurn = true;
                   return yield* Effect.fail(
                     decodeChatFailure({ category: "interrupted", message: event.message }),
                   );

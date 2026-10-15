@@ -107,9 +107,26 @@ them in.
   time it was written), `join-approved` (subject, key, and name),
   `join-accepted` (signed by the joiner, naming the one approval it
   accepted by writer, sequence, and SHA-256 of the approval file's bytes,
-  and the founder it pinned), and `revocation` (subject and cut, the last of
-  the subject's sequences that still counts; 0 means none). Version 1
+  and the founder it pinned), `revocation` (subject and cut, the last of
+  the subject's sequences that still counts, 0 meaning none, and `kept`,
+  described below), and `replica-left` (signed by a member leaving, at a
+  sequence after its first, naming the founder it pinned). Version 1
   entries fail closed.
+- **Kept slots.** A revocation names, as `kept`, which of the subject's
+  slots at or before its cut its writer read as the subject's own valid
+  signed entries: membership records it held, and artifact and comment
+  entries it published, settled, or read in the revoke's own read. `kept`
+  is an encoding version (1) and ascending runs of sequences that never
+  touch or overlap, all at or before the cut, at most 1,024 of them. A slot
+  the revoker did not read as the subject's (empty, listed but not
+  downloaded, a file that is not a valid record, or another writer's file)
+  is not kept, and an entry the subject's key signed there does not count
+  on any computer, whatever its kind; an artifact entry after it does not
+  wait on it, nor does a comment entry whose `after` names it. A revoker whose view needs more runs moves the cut earlier,
+  to the end of the last run that fits. A reader that does not know the
+  encoding version fails closed on the whole record. A revocation without
+  `kept`, as written before it existed, keeps every slot at or before its
+  cut, as it always did.
 - **Derivation.** Two different records in one slot can only both be signed
   by the key holder, so a second one is evidence the key was stolen: that
   computer is capped just before the slot, and records at or after it do
@@ -117,13 +134,23 @@ them in.
   `join-accepted`, and only when the approval it names is held, approves
   that computer, and is not past such a cap. The parents form a tree from
   the founder; nothing reaches a computer that is not in it. Standing is
-  then weighed top-down in one pass: a computer is admitted when its parent
-  is admitted and signed the approval at or before the parent's cut, and
-  its cut is the lowest cut named by a revocation that a strict ancestor
-  signed while admitted and at or before its own cut. An entry counts when
-  its writer is admitted and it sits at or before the writer's cut, so a
-  computer approved after its approver's cut is not admitted, and nothing
-  below it is either. Records the pass does not use - an approval nobody
+  then weighed top-down in one pass. A record of a computer counts when it
+  sits at or before that computer's cut and, when a counting revocation
+  named kept slots, in every such revocation's kept slots. A computer is
+  admitted when its parent is admitted and the approval counts as the
+  parent's, and its cut is the lowest cut named by a revocation that a
+  strict ancestor signed while admitted and that counts as that ancestor's.
+  Its kept slots are the slots every such revocation that names them keeps,
+  so two revocations narrow each other in any order. An admitted computer
+  whose lowest counting `replica-left` record names the pinned founder
+  left: its cut is then just before that record, and it shows as left
+  rather than revoked. A revocation that cut it before the
+  record came first, so it stays revoked; a left record naming another
+  founder is a copy from another replica and is inert. An entry counts when
+  its writer is admitted and the entry counts as its writer's, so a
+  computer approved after its approver's cut, or in a slot its approver's
+  revocation did not keep, is not admitted, and nothing below it is either. Leaving cuts nobody below: computers a leaver approved
+  before it left stay admitted, and only its ancestors can revoke them. Records the pass does not use - an approval nobody
   accepted, a descendant's revocation of an ancestor, a ghost's records -
   are inert. The founder cannot be revoked; losing its key means moving to
   a new store.
@@ -149,11 +176,11 @@ them in.
   every start. Earlier `replica.*@1` membership names decode to nothing, so a journal
   that holds them starts with no replica identity.
 - **Commands.** The host serves create a replica, write a join request,
-  approve a join, confirm a join, preview a revoke, revoke, and pull on the
-  host-only `/api/replica-membership/commands` route. Creating a replica or
-  asking to join creates a new device key, and the id comes from it, so
-  asking again - after a request went stale, a revocation, or a cut that
-  removed this computer's approval - is always a new identity. Approving
+  approve a join, confirm a join, preview a revoke, revoke, pull, and leave
+  on the host-only `/api/replica-membership/commands` route. Creating a
+  replica or asking to join creates a new device key, and the id comes from
+  it, so asking again - after a request went stale, a revocation, a cut that
+  removed this computer's approval, or leaving - is always a new identity. Approving
   needs a member in good standing - admitted with no cut - and only the
   store's own signed copy of a fresh request from a computer that is not
   in the tree can be approved. Confirming reads the store, finds the
@@ -183,11 +210,18 @@ them in.
   the join reads them again. Revoking needs good standing and a
   subject this computer brought in, directly or through others; a sibling
   or cousin is revoked from a shared ancestor, the founder at worst.
-  Revoke reads the store first, then cuts at the highest sequence of the
-  subject's valid signed entries this computer holds or just read,
-  artifact entries included, so what the subject already signed keeps
-  counting; a store that cannot be read leaves that cut at the membership
-  records this computer already holds, and the result says so. A revoke
+  Revoke reads the store first, then cuts at the end of the subject's
+  unbroken run of slots from its first: each slot the store listed, or
+  this computer holds or settled, artifact entries included, so what the
+  subject already signed keeps counting. A slot missing from the run ends
+  it, so a stolen key cannot fill a hole below the cut after the
+  revocation; a slot the store does not list yet (a lagging sync client)
+  moves the cut earlier, never later. Every revocation it writes carries the
+  kept slots for its subject at its cut, so a slot the run counted because
+  the store listed it, though this computer did not read it as the
+  subject's, stays closed too. A store that cannot be read leaves
+  that cut and those slots at what this computer already holds or settled,
+  and the result says so. A revoke
   preview returns that cut, the computers the subject brought in that are
   not revoked yet, each with its parent and the parent's sequence of its
   approval, and the revocations the subject itself already wrote, each at
@@ -206,7 +240,50 @@ them in.
   status view without codes, requests, ids, or revocability
   (`/api/replica-sync/status`) is on the shared product dispatch, so a
   paired device of this host can read it under `project.overview.read`;
-  the paired-browser shell shows it read-only.
+  the paired-browser shell shows it read-only. Each listed computer says
+  whether it was revoked or left; never both.
+- **Leaving.** A host person leaves from Settings › Sync after a
+  confirmation that says what follows. A member in good standing first
+  finishes a stopped publish, then publishes a `replica-left` record at its
+  next slot through the ordinary write path; a record that already landed
+  is not written again. Only then is `replica.left@2` journaled (the
+  identity, and whether the record is in the store). The projection drops
+  the identity, its pinned founder, the membership records it held, its
+  stopped publish, and its last store failure; artifact sync drops its
+  queue, so nothing queued under the identity that left publishes, there or
+  under a later identity in another store. Versions, tombstones, comments,
+  and settled slots stay, so the library and every Canvas's history are
+  unchanged. Then Settings › Sync's switch turns off and the device key is
+  deleted from the credential store; each step is journaled once it
+  happened (`replica.left-cleanup@2`), and a step not journaled yet is
+  retried on host start and before every membership command, so a host
+  that stops right after leaving, or a locked credential store, does not
+  leave the key or the switch behind. With no identity, pull, publish,
+  restore, and every membership command but create and join answer before
+  any store call. Joining again, in this store or another, is a new
+  identity with a new key. What the computer published before it left stays
+  in the store and keeps counting, as a revoked computer's entries up to
+  its cut do. A joining computer, a revoked one, or one cut out above it
+  writes nothing when it leaves: no record of it would count. The founder
+  may leave too (maintainer decision, 2026-10-14). The cost: the computers
+  it approved directly can never be revoked afterwards, since only a strict
+  ancestor revokes and the founder was their only one, and no computer can
+  take over as founder; the replica keeps working for everyone else, the
+  same as when the founder is lost. Refusing it would instead leave the
+  founder unable ever to change its store.
+- **Leaving with the store out of reach.** When the record cannot be
+  published - sync is off (`not-configured`), the store does not take it,
+  or the key cannot sign - leaving is refused and nothing changes: the
+  identity, key, queue, and switch stay as they were, and leaving again
+  finishes the same signed record. It is not kept to publish later: that
+  would need the old store's location and credentials after the person
+  chose another store, a store call this computer promised to stop making,
+  and a write into a store the person may be leaving because they no
+  longer trust it. For a store that is gone for good, the person can
+  leave `withoutStore` after a second confirmation; nothing is written, and
+  the other computers keep listing this one until an ancestor revokes it;
+  a founder that leaves this way stays listed for good.
+  Its key is deleted either way, so nothing new can be signed with it here.
 - **Writing.** A command that publishes journals the signed entry before
   either file is written, writes the signature and then the entry, and
   journals the record as held once both landed. If a publish stops
@@ -231,7 +308,28 @@ them in.
   listing does not end inside its bound is refused rather than read in
   part. Approvals a stolen key made before the revoker read the store
   still count under the default cut, which is why the revoke preview lists
-  them.
+  them. Kept slots close every slot below the cut the revoker did not read
+  as the subject's, but only on computers that hold the revocation: until a
+  computer reads it, it counts what it reads in the gap, as the lag limit
+  above says. Once it arrives, a membership record taken in from the gap
+  stops counting, since membership is derived again on every read; an
+  artifact or comment entry already imported from it stays. A slot the
+  revoker did read keeps the file it read; someone holding the subject's
+  key and write access to the store who swaps that file for another is the
+  slot rewrite above, seen only by a computer that holds both. A revocation
+  written before kept slots existed keeps every slot at or before its cut,
+  so its gaps stay open to the subject's key: an ancestor cannot revoke a
+  computer that already has a cut, so nothing closes them short of moving
+  to a new store. A computer running a build
+  from before kept slots fails closed on a revocation that carries them, as
+  on any record it cannot read, so the revocation does not count there
+  until it updates. Kept slots do not cover the subject's own
+  `join-accepted`: a computer's parent is fixed from its lowest accept
+  before any revocation is weighed, so a stolen key that writes an earlier
+  accept into a gap, naming a second approval of the same key by another
+  member, would move it under that member. A member approves only a fresh
+  request from a computer that is not in the tree, so this takes a second
+  member acting against the person.
 - **Keys.** Device signing keys live per instance in their own namespace of
   the host credential store - a separate macOS Keychain service,
   `app.octant.replica-device-keys.v1`, or a separate Secret Service
@@ -240,13 +338,12 @@ them in.
   different namespace, so a provider instance created with the same UUID
   cannot read, replace, or delete a device key. The private half never
   leaves the host.
-- **Not wired yet.** The membership service asks Settings › Sync's store
-  selection for its store on every command; with sync off or no store
-  chosen, every command answers a typed `not-configured` refusal and makes
-  no store call. Settings › Sync sets up a replica, joins, approves, and
-  revokes through these commands. Leaving a replica is not supported yet,
-  so a computer with a membership identity cannot change its store; leaving
-  a replica, and changing the store after it, are a follow-up.
+- **Store.** The membership service asks Settings › Sync's store selection
+  for its store on every command; with sync off or no store chosen, every
+  command that needs the store answers a typed `not-configured` refusal and
+  makes no store call. Settings › Sync sets up a replica, joins, approves,
+  revokes, and leaves through these commands. A computer changes its store
+  by leaving its replica first.
 
 ## Artifact sync: publish and pull
 
@@ -431,7 +528,8 @@ them in.
   service takes `ahead` versions into bound Canvases on the next interval.
   No product surface deletes an artifact today; a local erase or purge
   stays local and publishes nothing. Versions committed before this host
-  had a replica identity are not published.
+  had a replica identity are not published, and neither is the library a
+  computer kept when it left one replica and joined another.
 
 ## Store selection
 
@@ -485,9 +583,10 @@ While this computer belongs to a replica — it has a founder or joiner
 identity in the membership projection — every command that would change the
 store's kind or location (choosing a folder, a bucket's endpoint, bucket,
 addressing, or prefix, or no store) is refused on the server as
-`member-of-replica` before any side effect, and Settings › Sync says so and
-disables those controls. Turning sync on or off, and a new key pair for the
-same bucket, stay allowed.
+`member-of-replica` before any side effect, and Settings › Sync says so,
+points at leaving, and disables those controls. Turning sync on or off, and
+a new key pair for the same bucket, stay allowed. Leaving the replica turns
+sync off and lifts the lock, so the person can choose another store.
 
 ## Verification
 

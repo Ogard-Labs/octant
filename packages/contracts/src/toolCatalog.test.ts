@@ -3,6 +3,7 @@ import {
   decodeToolActionCapability,
   listClosedToolCatalog,
   lookupClosedToolCatalogEntry,
+  type ToolApprovalClass,
 } from "./index";
 
 describe("closed tool catalog", () => {
@@ -62,6 +63,23 @@ describe("closed tool catalog", () => {
         extra: true,
       }),
     ).toThrow();
+  });
+
+  it("asks afresh on a marked thread for every tool in an irreversible or authority-bearing class", () => {
+    // The thread-elevation step forces a fresh confirmation per catalog entry,
+    // not per class, so an entry added to one of these classes without the
+    // flag would let Full access cover it on a marked thread.
+    const authorityBearing = new Set<ToolApprovalClass>([
+      "destructive-irreversible",
+      "credential-secret-access",
+      "access-outside-project",
+      "privilege-expansion",
+    ]);
+    const escaping = listClosedToolCatalog()
+      .filter((entry) => authorityBearing.has(entry.approvalClass))
+      .filter((entry) => !entry.irreversibleUnderTaint)
+      .map((entry) => entry.name);
+    expect(escaping).toEqual([]);
   });
 });
 

@@ -1,13 +1,25 @@
 import { readFile } from "node:fs/promises";
-import { remoteListenerOrigin } from "@octant/domain";
+import {
+  buildPairingCode,
+  PAIRING_CODE_REFUSAL_COPY,
+  refusePairingCodeListener,
+  remoteListenerOrigin,
+} from "@octant/domain";
 import {
   failureMessage,
   type LocalControlResponse,
   type OpenedLocalControlSession,
 } from "./localControl";
+import { renderTerminalQr } from "./terminalQr";
+
+type PairingSourceClass = "loopback" | "lan-private" | "tailscale";
 
 export type RemoteAccessCliCommand =
-  | { readonly action: "pair"; readonly sourceClass: "loopback" | "lan-private" | "tailscale" }
+  | {
+      readonly action: "pair";
+      /** Absent: the listener's own network for a pairing code, else loopback. */
+      readonly sourceClass?: PairingSourceClass;
+    }
   | { readonly action: "list-pairing-requests" }
   | { readonly action: "approve-pairing"; readonly ticketId: string }
   | { readonly action: "deny-pairing"; readonly ticketId: string }
@@ -19,8 +31,8 @@ export type RemoteAccessCliCommand =
       readonly action: "listener-enable";
       readonly hostname: string;
       readonly port: number;
-      readonly certificatePath: string;
-      readonly privateKeyPath: string;
+      /** Absent: the host serves the certificate it makes itself. */
+      readonly pasted?: { readonly certificatePath: string; readonly privateKeyPath: string };
     }
   | { readonly action: "listener-disable" };
 
@@ -45,7 +57,8 @@ export function resolvePairCliCommand(
   }
   if (positional.length !== 0) return undefined;
   if (Object.keys(flags).some((flag) => flag !== "source")) return undefined;
-  const source = flags.source ?? "loopback";
+  const source = flags.source;
+  if (source === undefined) return { action: "pair" };
   if (source !== "loopback" && source !== "lan-private" && source !== "tailscale") return undefined;
   return { action: "pair", sourceClass: source };
 }
@@ -83,30 +96,30 @@ export function resolveListenerCliCommand(
   const allowed = new Set(["hostname", "port", "cert", "key"]);
   if (Object.keys(flags).some((flag) => !allowed.has(flag))) return undefined;
   const { hostname, port, cert, key } = flags;
-  if (
-    typeof hostname !== "string" ||
-    typeof port !== "string" ||
-    typeof cert !== "string" ||
-    typeof key !== "string" ||
-    !/^\d{1,5}$/.test(port)
-  ) {
+  if (typeof hostname !== "string" || typeof port !== "string" || !/^\d{1,5}$/.test(port)) {
     return undefined;
   }
   const portNumber = Number(port);
   if (portNumber < 1 || portNumber > 65_535) return undefined;
+  // Both files name the person's own certificate; neither asks the host to
+  // make one. One without the other is a usage error, never a fallback.
+  if (cert === undefined && key === undefined) {
+    return { action: "listener-enable", hostname, port: portNumber };
+  }
+  if (typeof cert !== "string" || typeof key !== "string") return undefined;
   return {
     action: "listener-enable",
     hostname,
     port: portNumber,
-    certificatePath: cert,
-    privateKeyPath: key,
+    pasted: { certificatePath: cert, privateKeyPath: key },
   };
 }
 
 export interface RunRemoteAccessCliCommandInput {
   readonly command: RemoteAccessCliCommand;
   readonly session: OpenedLocalControlSession;
-  readonly stdout: { readonly write: (chunk: string) => unknown };
+  /** `isTTY` decides whether the QR code sets its own colours. */
+  readonly stdout: { readonly write: (chunk: string) => unknown; readonly isTTY?: boolean };
   readonly stderr: { readonly write: (chunk: string) => unknown };
   /** Reads the certificate and key files the person named; defaults to the filesystem. */
   readonly readTextFile?: (path: string) => Promise<string>;
@@ -142,10 +155,29 @@ async function runDeviceCommand(
 ): Promise<number> {
   const { session } = input;
   if (command.action === "pair") {
+    const listened = await session.send({
+      path: "/api/desktop/private-listener/status",
+      method: "GET",
+    });
+    if (listened.status !== 200) {
+      input.stderr.write(
+        `${failureMessage(listened, "Octant refused to read the remote listener.")}\n`,
+      );
+      return 1;
+    }
+    const listener = listenerStatusOf(listened.body);
+    if (listener === undefined) {
+      input.stderr.write("Octant returned an unusable remote listener status.\n");
+      return 1;
+    }
+    if (listener.state === "ready" && listener.certificateSource === "self-made") {
+      return await printPairingCode(input, command, listener);
+    }
+    const sourceClass = command.sourceClass ?? "loopback";
     const response = await session.send({
       path: "/api/desktop/remote/pairing-tickets",
       method: "POST",
-      body: { sourceClass: command.sourceClass },
+      body: { sourceClass },
     });
     if (response.status !== 201) {
       input.stderr.write(
@@ -162,7 +194,7 @@ async function runDeviceCommand(
     input.stdout.write(`Proof ${ticket.ticketProof}\n`);
     input.stdout.write(`Expires ${new Date(ticket.expiresAt).toISOString()}\n`);
     input.stdout.write(
-      `The device must claim it over ${command.sourceClass}, and you approve the request on this host.\n`,
+      `The device must claim it over ${sourceClass}, and you approve the request on this host.\n`,
     );
     return 0;
   }
@@ -205,6 +237,79 @@ async function runDeviceCommand(
   return 0;
 }
 
+/**
+ * A listener serving its own certificate gets an app pairing code instead of a
+ * bare ticket: no browser can check that certificate, and the code carries the
+ * key pin an Octant app checks it against.
+ */
+async function printPairingCode(
+  input: RunRemoteAccessCliCommandInput,
+  command: Extract<RemoteAccessCliCommand, { readonly action: "pair" }>,
+  listener: ListenerStatusOutput,
+): Promise<number> {
+  const { origin, tlsPin, exposureClass } = listener;
+  if (
+    origin === null ||
+    tlsPin === null ||
+    (exposureClass !== "lan-private" && exposureClass !== "tailscale")
+  ) {
+    input.stderr.write("Octant returned an unusable remote listener status.\n");
+    return 1;
+  }
+  // The device claims the ticket over the listener itself, so a ticket for any
+  // other network could never be claimed.
+  if (command.sourceClass !== undefined && command.sourceClass !== exposureClass) {
+    input.stderr.write(
+      `A pairing code is claimed over the listener's own network (${exposureClass}). Leave out --source.\n`,
+    );
+    return 1;
+  }
+  // A listener no code can name is refused before a ticket exists, so a
+  // refusal never leaves a live, unprinted ticket on the host.
+  const refusal = refusePairingCodeListener({ origin, pin: tlsPin });
+  if (refusal !== undefined) {
+    input.stderr.write(`${PAIRING_CODE_REFUSAL_COPY[refusal]}\n`);
+    return 1;
+  }
+  const response = await input.session.send({
+    path: "/api/desktop/remote/pairing-tickets",
+    method: "POST",
+    body: { sourceClass: exposureClass },
+  });
+  if (response.status !== 201) {
+    input.stderr.write(`${failureMessage(response, "Octant refused to mint a pairing code.")}\n`);
+    return 1;
+  }
+  const ticket = pairingTicketOf(response.body);
+  if (ticket === undefined) {
+    input.stderr.write("Octant returned an unusable pairing token.\n");
+    return 1;
+  }
+  const built = buildPairingCode({
+    origin,
+    ticketId: ticket.ticketId,
+    ticketProof: ticket.ticketProof,
+    pin: tlsPin,
+  });
+  if (built.status === "refused") {
+    input.stderr.write(`${PAIRING_CODE_REFUSAL_COPY[built.reason]}\n`);
+    return 1;
+  }
+  input.stdout.write(renderTerminalQr(built.code, { color: input.stdout.isTTY === true }));
+  input.stdout.write(`Pairing code ${built.code}\n`);
+  input.stdout.write(`Ticket ${ticket.ticketId}\n`);
+  input.stdout.write(`Expires ${new Date(ticket.expiresAt).toISOString()}\n`);
+  input.stdout.write(
+    [
+      "The code is single-use. Approve the device's request on this host with `octant pair approve <ticket-id>`.",
+      "A browser can't check this computer's own certificate, so there is no browser link.",
+      "Octant's phone and desktop apps can't read pairing codes yet.",
+      "",
+    ].join("\n"),
+  );
+  return 0;
+}
+
 async function runListenerCommand(
   input: RunRemoteAccessCliCommandInput,
   command: Extract<
@@ -215,19 +320,25 @@ async function runListenerCommand(
   let response: LocalControlResponse;
   if (command.action === "listener-enable") {
     const read = input.readTextFile ?? ((path: string) => readFile(path, "utf8"));
-    let certificatePem: string;
-    let privateKeyPem: string;
-    try {
-      certificatePem = await read(command.certificatePath);
-    } catch {
-      input.stderr.write(`Could not read the certificate at ${command.certificatePath}.\n`);
-      return 1;
-    }
-    try {
-      privateKeyPem = await read(command.privateKeyPath);
-    } catch {
-      input.stderr.write(`Could not read the private key at ${command.privateKeyPath}.\n`);
-      return 1;
+    let pems: { certificatePem: string; privateKeyPem: string } | undefined;
+    if (command.pasted !== undefined) {
+      let certificatePem: string;
+      let privateKeyPem: string;
+      try {
+        certificatePem = await read(command.pasted.certificatePath);
+      } catch {
+        input.stderr.write(
+          `Could not read the certificate at ${command.pasted.certificatePath}.\n`,
+        );
+        return 1;
+      }
+      try {
+        privateKeyPem = await read(command.pasted.privateKeyPath);
+      } catch {
+        input.stderr.write(`Could not read the private key at ${command.pasted.privateKeyPath}.\n`);
+        return 1;
+      }
+      pems = { certificatePem, privateKeyPem };
     }
     response = await input.session.send({
       path: "/api/desktop/private-listener/enable",
@@ -239,8 +350,7 @@ async function runListenerCommand(
         // the host refuses unless they match the bind; an IPv6 address must be
         // bracketed to be a valid URL authority.
         origin: remoteListenerOrigin(command.hostname, command.port),
-        certificatePem,
-        privateKeyPem,
+        ...pems,
       },
     });
   } else if (command.action === "listener-disable") {
@@ -271,6 +381,10 @@ async function runListenerCommand(
   if (status.certificateFingerprint !== null) {
     input.stdout.write(`Certificate ${status.certificateFingerprint}\n`);
   }
+  if (status.certificateSource !== null) {
+    input.stdout.write(`Certificate source ${status.certificateSource}\n`);
+  }
+  if (status.tlsPin !== null) input.stdout.write(`Key pin ${status.tlsPin}\n`);
   if (status.errorCode !== undefined) input.stdout.write(`Error ${status.errorCode}\n`);
   return 0;
 }
@@ -359,6 +473,8 @@ interface ListenerStatusOutput {
   readonly origin: string | null;
   readonly exposureClass: string | null;
   readonly certificateFingerprint: string | null;
+  readonly certificateSource: string | null;
+  readonly tlsPin: string | null;
   readonly errorCode?: string;
 }
 
@@ -368,12 +484,17 @@ function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
   const origin = fieldOf(status, "origin");
   const exposureClass = fieldOf(status, "exposureClass");
   const certificateFingerprint = fieldOf(status, "certificateFingerprint");
+  // A host from before self-made certificates sends neither field.
+  const certificateSource = fieldOf(status, "certificateSource") ?? null;
+  const tlsPin = fieldOf(status, "tlsPin") ?? null;
   const errorCode = fieldOf(status, "errorCode");
   if (
     typeof state !== "string" ||
     !nullableString(origin) ||
     !nullableString(exposureClass) ||
-    !nullableString(certificateFingerprint)
+    !nullableString(certificateFingerprint) ||
+    !nullableString(certificateSource) ||
+    !nullableString(tlsPin)
   ) {
     return undefined;
   }
@@ -382,6 +503,8 @@ function listenerStatusOf(body: unknown): ListenerStatusOutput | undefined {
     origin,
     exposureClass,
     certificateFingerprint,
+    certificateSource,
+    tlsPin,
     ...(typeof errorCode === "string" ? { errorCode } : {}),
   };
 }

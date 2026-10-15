@@ -226,10 +226,11 @@ describe("Pi provider driver", () => {
   );
 
   it.each([
-    ["kept", []],
-    ["kept", [{ type: "compaction_end", reason: "threshold", aborted: true }]],
+    ["no compaction", 0, []],
+    ["no compaction", 0, [{ type: "compaction_end", reason: "threshold", aborted: true }]],
     [
-      "compacted",
+      "one compaction",
+      1,
       [
         {
           type: "compaction_end",
@@ -239,8 +240,8 @@ describe("Pi provider driver", () => {
       ],
     ],
   ] as const)(
-    "says the prompt stays in the session as %s until Pi completes a compaction",
-    async (retention, compaction) => {
+    "reports %s when Pi ends a compaction, and leaves the usage report saying prompts are kept",
+    async (_, compactions, compaction) => {
       const { driver, client } = fixture();
       const scope = Effect.runSync(Scope.make());
       const connection = await Effect.runPromise(
@@ -259,8 +260,16 @@ describe("Pi provider driver", () => {
       });
       for (const event of compaction) client.emit(event);
       client.emit({ type: "agent_settled" });
-      const usage = (await collected).find((event) => event.kind === "usage");
-      expect(usage).toMatchObject({ kind: "usage", promptRetention: retention });
+      const events = await collected;
+      expect(events.find((event) => event.kind === "usage")).toMatchObject({
+        kind: "usage",
+        promptRetention: "kept",
+      });
+      expect(
+        events.filter(
+          (event) => event.kind === "context-compacted" && event.trigger === "automatic",
+        ),
+      ).toHaveLength(compactions);
       await Effect.runPromise(connection.stop(sessionId));
       await Effect.runPromise(Scope.close(scope, Exit.void));
     },

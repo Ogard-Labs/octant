@@ -42,11 +42,13 @@ import {
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
   decodeCodeEvidenceContentId,
+  decodeCodeFailure,
   decodeCodeFileId,
   decodeCodeRelativePath,
   decodeCodeRepositoryId,
   decodeCodeThreadId,
   decodeWorkThreadId,
+  THREAD_EXTERNAL_CONTENT_AGGREGATE,
   THREAD_RETENTION_EVENT_NAMES,
   ThreadCreationRootId,
   decodeThreadWorkingDirectory,
@@ -235,6 +237,7 @@ import { resolveConnectedGitHubRepository } from "./code/connectedRepository";
 import { RepositoryTestDiscoveryService } from "./code/repositoryTestDiscoveryService";
 import {
   CodeService,
+  CodeServiceError,
   type CodeCheckoutObservationPort,
   type CodeFileRootAuthorityPort,
   type CodeWorktreeRefsPort,
@@ -248,6 +251,7 @@ import {
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
 import { LiveTurnRegistry } from "./liveTurn/liveTurnRegistry";
 import { CodePlannerService } from "./code/codePlannerService";
+import { INHERITED_MARK_REFUSAL } from "./context/inheritedExternalContentMark";
 import {
   createCodeProfileSkillResolver,
   createStoredCodeProfileSkillTextLoader,
@@ -280,6 +284,7 @@ import { CodeProjectPullRequestSnapshotStore } from "./code/codeProjectPullReque
 import { createGhCommandPort, GhPullRequestPort } from "./code/ghPullRequestPort";
 import { RepositoryTestProcessPort } from "./code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "./code/terminalProcessPort";
+import type { TerminalLauncher } from "./code/terminalService";
 import { defaultTerminalShell } from "./code/terminalShell";
 import { CodeOperationApprovalStore } from "./code/codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "./code/codeSessionAuthorityStore";
@@ -472,6 +477,7 @@ import { createAutomationNotificationRouteHandler } from "./automation/automatio
 import { createUnavailablePushDeliveryTransport } from "./automation/pushDeliveryTransport";
 import { createPushNotificationTokenStore } from "./remote/pushNotificationTokenStore";
 import { CanvasEventStore } from "./canvas/canvasEventStore";
+import { markCanvasReader } from "./canvas/canvasOutsideContentMark";
 import { CanvasService, type CanvasServiceDependencies } from "./canvas/canvasService";
 import { CanvasCommentService } from "./canvas/canvasCommentService";
 import { CanvasShareEventStore } from "./canvas/canvasShareEventStore";
@@ -597,6 +603,7 @@ import {
   createCodeThreadMentionDirectory,
   createWorkThreadMentionDirectory,
   createChatSideChatThreadFactory,
+  threadMentionContextResolver,
 } from "./chat/threadMentionService";
 import { ThreadDialogueService } from "./chat/threadDialogueService";
 import {
@@ -613,7 +620,12 @@ import { createFileMentionRouteHandler } from "./fileMentionRoutes";
 import { pinFileMentionRoot } from "./fileMentionIo";
 import { FileMentionService, fileMentionContextBlocks } from "./fileMentionService";
 import { createLocalServerRouteHandler } from "./localServerRoutes";
-import { createLiveLocalListenerPort } from "./localServers/localListenerPort";
+import { createRemoteServerGrantLocalRouteHandler } from "./remoteServerGrantLocalRoutes";
+import { RemoteServerGrantService } from "./remote/remoteServerGrantService";
+import {
+  createLiveLocalListenerHoldingProbe,
+  createLiveLocalListenerPort,
+} from "./localServers/localListenerPort";
 import {
   createLiveLocalServerHealthProbe,
   createLiveLocalServerStopPort,
@@ -715,7 +727,11 @@ import { BrowserToolApprovalService } from "./browser/browserToolApprovalService
 import { ExternalContentClearStore } from "./context/externalContentClearStore";
 import { BrowserCaptureService } from "./browser/browserCaptureService";
 import { BrowserCaptureStore } from "./browser/browserCaptureStore";
-import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
+import {
+  ExternalContentIngestionStore,
+  type RecordExternalContentIngestionInput,
+} from "./context/externalContentIngestionStore";
+import { RuntimeOutsideContentMarks } from "./context/runtimeOutsideContentMark";
 import {
   AgentMessageProjection,
   hydrateAgentMessageProjectionFromJournal,
@@ -770,6 +786,11 @@ import { NativeHarnessQuestionStore } from "./harness/nativeHarnessQuestions";
 import { createAgentRunInteractions } from "./agentRun/agentRunInteractions";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
 import { createNativeHarnessSessionRouteHandler } from "./harness/nativeHarnessSessionRoutes";
+import { createNativeHarnessEgressRouteHandler } from "./harness/nativeHarnessEgressRoutes";
+import {
+  ToolEgressRules,
+  toolEgressLaunchTaintReference,
+} from "./harness/nativeHarnessEgressRules";
 import { NativeHarnessTurnObserver } from "./harness/nativeHarnessTurnObserver";
 import { fetchPublicUrl, PublicFetchRefused } from "./harness/nativeHarnessWebFetch";
 import { searxngHarnessWebSearch } from "./harness/nativeHarnessWebSearch";
@@ -827,15 +848,14 @@ import {
   type CodeProjectPullRequestRow,
   type CodeWorktreeRemoteFacts,
   type ImageGenerationSaveResult,
-  type MentionableThreadId,
   type MultiModelPoolCandidate,
   type ProviderContextBlock,
   type ProviderProbeResult,
-  type ThreadMentionCommandResult,
 } from "@octant/contracts";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import {
   decodeCanvasDefinition,
+  decodeCanvasId,
   decodeProjectId,
   type ProjectId,
   type UtcTimestamp,
@@ -854,7 +874,6 @@ import {
   defaultShellSettings,
   effectiveClaudeAccountConfigDirectory,
   enabledModes,
-  formatThreadMentionContext,
   isAgentRunActiveStatus,
   claudePlanUsageStateDirectory,
   isImageProfileDriverKind,
@@ -899,7 +918,9 @@ import {
   createRemoteGateway,
   type RemoteGateway,
   type RemoteGatewayServices,
+  type RemoteServerGrantGatewayPort,
 } from "./remote/remoteGateway";
+import { resolvePrincipalRouteContext } from "./principalRouteContext";
 import { createLocalDeviceAdministrationRouteHandler } from "./remote/localDeviceAdministrationRoutes";
 import {
   createHostControlRouteHandler,
@@ -926,7 +947,11 @@ import {
 import { createSyncedArtifactRouteHandler } from "./replica/syncedArtifactRoutes";
 import { decideReplicaArtifactBinding } from "@octant/domain/replica-entry-policy";
 import { createReplicaMembershipJournal } from "./replica/replicaMembershipProjection";
-import { createReplicaDeviceKey, makeReplicaDeviceSigner } from "./replica/replicaDeviceKeyService";
+import {
+  createReplicaDeviceKey,
+  makeReplicaDeviceSigner,
+  removeReplicaDeviceKey,
+} from "./replica/replicaDeviceKeyService";
 import { createHostResourceRouteHandler } from "./hostResourceRoutes";
 import { desktopCredentialStore } from "./hostDataMap";
 import { ThreadRetentionService } from "./threadRetentionService";
@@ -936,6 +961,7 @@ import { createPrivateListenerLifecycleController } from "./remote/privateListen
 import { resolvePrivateListenerHostIdentity } from "./remote/privateListenerHostIdentity";
 import { createPrivateListenerAdministrationRouteHandler } from "./remote/privateListenerAdministrationRoutes";
 import { createPrivateListenerSetting } from "./remote/privateListenerSetting";
+import { createSelfMadeListenerCertificateStore } from "./remote/selfMadeListenerCertificate";
 import {
   boundHostRuntimeDiagnostics,
   type HostRuntimeDiagnostics,
@@ -1220,6 +1246,8 @@ export interface StartOctantServerOptions {
   readonly githubAuthenticationPort?: GhAuthenticationPort;
   readonly ghExecutable?: string;
   readonly codeFileHelperPath?: string;
+  /** The packaged desktop's `octant` for a terminal with a Browser grant. */
+  readonly terminalLauncher?: TerminalLauncher;
   readonly createCodeFileHelperTransport?: (path: string) => FileHelperProcessTransport;
   readonly codeRepositoryPort?: ManagedWorktreeRepositoryPort;
   readonly webAssetsPath?: string;
@@ -1594,70 +1622,6 @@ function observedCheckoutHeadMatches(
     : !observed.detached && observed.branch === `refs/heads/${expected.name}`;
 }
 
-/**
- * Read the `#thread` mentions a turn names, on the window the turn was sent
- * from.
- *
- * A chip names a thread; it never carries one. The renderer sends ids, and
- * this resolves them through the same mention resolution an Open would take —
- * so the sender's Open authority over every named thread is re-derived at send
- * time, and the transcript window stays the host's decision. The framing is
- * applied here, on the authoritative side, for the same reason. Chat and Code
- * share one resolver because a chip means the same thing in both, and neither
- * mode may read a thread on authority the other proved.
- *
- * The service is reached lazily so a mode wired before it exists can still
- * hold this: nothing is read until a turn actually runs.
- */
-function threadMentionContextResolver(threadMentions: () => ThreadMentionService) {
-  return async ({
-    threadMentionIds,
-    windowId,
-    dialogueEnabled,
-  }: {
-    readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
-    readonly windowId?: WindowId;
-    readonly dialogueEnabled?: boolean;
-  }): Promise<
-    ReadonlyArray<
-      | { readonly kind: "resolved"; readonly threadId: MentionableThreadId; readonly text: string }
-      | { readonly kind: "unreadable"; readonly threadId: MentionableThreadId }
-    >
-  > => {
-    const unreadable = () =>
-      threadMentionIds.map((threadId) => ({ kind: "unreadable" as const, threadId }));
-    // Without an authenticated window there is no principal to re-derive Open
-    // authority from, so nothing resolves rather than resolving on authority
-    // nobody proved.
-    if (windowId === undefined) return unreadable();
-    let resolved: ThreadMentionCommandResult;
-    try {
-      resolved = await threadMentions().execute(
-        { kind: "resolve-mentions", requestId: randomUUID(), threadIds: threadMentionIds },
-        { windowId },
-      );
-    } catch {
-      return unreadable();
-    }
-    if (resolved.kind !== "mentions-resolved") return unreadable();
-    const byThreadId = new Map(
-      resolved.mentions.map((mention) => [String(mention.threadId), mention]),
-    );
-    return threadMentionIds.map((threadId) => {
-      const mention = byThreadId.get(String(threadId));
-      return mention === undefined
-        ? { kind: "unreadable" as const, threadId }
-        : {
-            kind: "resolved" as const,
-            threadId,
-            text: formatThreadMentionContext([mention], {
-              dialogueEnabled: dialogueEnabled === true,
-            }),
-          };
-    });
-  };
-}
-
 function stableCodeFileId(threadId: string, checkoutId: string, relativePath: string) {
   const digest = createHash("sha256")
     .update("octant.code-file.v1\0")
@@ -1692,6 +1656,8 @@ function withCodeOperationRuntime(
     },
     conversation: (windowId, threadId, afterCursor, limit) =>
       runtime.conversation(windowId, threadId, afterCursor, limit),
+    conversationWindow: (windowId, threadId, request) =>
+      runtime.conversationWindow(windowId, threadId, request),
     readContent: (windowId, contentId) => service.readContent(windowId, contentId),
     readOperationContent: (windowId, threadId, operationId, contentId) =>
       runtime.readEvidence(windowId, threadId, operationId, decodeCodeEvidenceContentId(contentId)),
@@ -1816,6 +1782,9 @@ function withCodeBoard(
     ...(service.conversation === undefined
       ? {}
       : { conversation: service.conversation.bind(service) }),
+    ...(service.conversationWindow === undefined
+      ? {}
+      : { conversationWindow: service.conversationWindow.bind(service) }),
     ...(service.readOperationContent === undefined
       ? {}
       : { readOperationContent: service.readOperationContent.bind(service) }),
@@ -2179,12 +2148,23 @@ export function startOctantServer(
     const agentRunLiveConversations = new AgentRunLiveConversationStore({
       persistence: agentRunSessionStore.conversations,
     });
+    const externalContentIngestionStore = new ExternalContentIngestionStore({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const runtimeOutsideContentMarks = new RuntimeOutsideContentMarks((input) =>
+      externalContentIngestionStore.record(input),
+    );
     // Managed subagent execution. A managed child runs as an in-process
     // provider session, not a spawned process, so authority is re-derived from
     // the run rather than inherited from the parent thread at execution time.
     const agentRunSessionSupervisor = new AgentRunSessionSupervisor({
       port: createAgentRunSessionRuntime({
         reviewCapture: createAgentRunReviewCapture(),
+        outsideContentMarks: runtimeOutsideContentMarks,
         canCaptureReview: (run) => {
           const thread = persistence.readCodeThread(decodeCodeThreadId(String(run.parentThreadId)));
           return thread?.lifecycle === "active" && thread.executionPolicy !== "plan";
@@ -2839,13 +2819,61 @@ export function startOctantServer(
       snapshot: (signal) => githubCapabilityService.snapshot(signal),
       cacheStats,
     });
-    const externalContentIngestionStore = new ExternalContentIngestionStore({
+    // Harness tool egress rules, proposals, and launch records. Recovery runs
+    // here, before any route admits a turn: a launch the last run never
+    // summarized is marked incomplete, and every launch whose bytes taint its
+    // thread marks it now. No launch runs on the proxy yet; confinement routes
+    // commands there in a later change.
+    const toolEgressRules = new ToolEgressRules({
       journal: persistence.journal,
-      connection: persistence.connection,
+      readCodeThread: (threadId) => {
+        try {
+          const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+          return thread === undefined ? undefined : { projectId: String(thread.projectId) };
+        } catch {
+          return undefined;
+        }
+      },
+      readThreadTaint: (threadId) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+      recordLaunchTaint: ({ threadId, launchId }) => {
+        const marked = externalContentIngestionStore.record({
+          threadId,
+          provenance: { origin: "external-content", sourceLabel: "tool-egress" },
+          contentReference: toolEgressLaunchTaintReference(launchId),
+          correlationId: launchId,
+          authorized: true,
+        });
+        return marked.kind === "recorded" || marked.kind === "already-recorded"
+          ? "recorded"
+          : "unavailable";
+      },
+      hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
-      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
+    toolEgressRules.recover();
+    const unsubscribeToolEgressRules = persistence.journal.subscribeCommitted((append) => {
+      for (const event of append.events) {
+        if (event.aggregateType === THREAD_EXTERNAL_CONTENT_AGGREGATE) {
+          // A thread tainted mid-launch stops its standing rules at once.
+          toolEgressRules.recheck();
+        } else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
+          const purged = event.payload as { readonly threadId?: unknown };
+          if (typeof purged.threadId === "string") toolEgressRules.forgetThread(purged.threadId);
+        }
+      }
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeToolEgressRules));
+    // Where a mention or a Side Chat reads its source's mark and marks the
+    // thread reading that source's transcript.
+    const threadOutsideContentMarks = {
+      record: (input: RecordExternalContentIngestionInput) =>
+        externalContentIngestionStore.record(input),
+      isMarked: (threadId: string) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    };
     // Agent-to-agent messaging (decision 0063): the host owns admission,
     // clamping, journaling, and delivery. The endpoint resolver is composed
     // lazily from the thread authorities declared later in this startup; a
@@ -3464,6 +3492,7 @@ export function startOctantServer(
     const agentMessageRoutes = createAgentMessageRouteHandler({
       windowAuthorityStore,
       projection: agentMessageProjection,
+      windowCanOpenThread: (windowId, threadId) => windowCanOpenThreadById(windowId, threadId),
     });
     const projectBindingRoutes = createProjectBindingRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
@@ -4953,6 +4982,7 @@ export function startOctantServer(
           },
           approvals: requireBrowserToolApprovalService(),
         },
+        ...(options.terminalLauncher === undefined ? {} : { launcher: options.terminalLauncher }),
         journal: persistence.journal,
         personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
         hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
@@ -5124,6 +5154,22 @@ export function startOctantServer(
           contextHarness.compactionRunning(
             decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
           ),
+        sessionCompactions: {
+          record: ({ threadId, ...input }) => {
+            contextHarness.recordAutomaticCompaction({
+              subject: decodeContextSubjectRef({
+                aggregateType: "code-thread",
+                aggregateId: threadId,
+              }),
+              ...input,
+            });
+          },
+          compactedAfter: (threadId, globalSequence) =>
+            contextHarness.sessionCompactedAfter(
+              decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+              globalSequence,
+            ),
+        },
         providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom }) =>
           selectCodeConversation(thread.id, {
             purpose: "provider-switch",
@@ -5327,7 +5373,10 @@ export function startOctantServer(
             }),
         },
         credentialResolver: { resolve: async () => undefined },
-        resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
+        resolveThreadMentionContext: threadMentionContextResolver(
+          () => threadMentionService,
+          threadOutsideContentMarks,
+        ),
         resolveFileMentionContext: async ({ fileMentionPaths, windowId, threadId, checkoutId }) =>
           fileMentionContextBlocks(fileMentionService, {
             windowId,
@@ -5452,6 +5501,7 @@ export function startOctantServer(
                 port: canvasAgentToolPort,
               }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        outsideContentMarks: runtimeOutsideContentMarks,
         readThreadExternalContentTaint: (threadId) =>
           readThreadExternalContentTaint(persistence.connection, String(threadId)),
         resolveProviderCapabilities: (thread) =>
@@ -5577,14 +5627,29 @@ export function startOctantServer(
     // The Project planner: one designated Code thread per Code Project that
     // may read the Project's board and propose work. A confirmed proposal
     // creates its thread through the ordinary creation command path below;
-    // the planner has no creation authority of its own.
+    // the planner has no creation authority of its own. Only the host's own
+    // CodeService takes the host-only mark a thread confirmed from a marked
+    // planner starts with; a route service a host was given instead has no
+    // such input, so a confirm that needs the mark is refused there rather
+    // than creating the thread unmarked.
     const codePlannerService = new CodePlannerService({
       persistence,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       canAccessProject: canAccessCodeProject,
-      createThread: async (windowId, creation, signal) =>
-        baseRouteCodeService.execute(windowId, creation, signal),
+      createThread: async (windowId, creation, signal, executionContext) => {
+        if (codeService instanceof CodeService) {
+          return codeService.execute(windowId, creation, signal, executionContext);
+        }
+        if (executionContext.inheritedMark !== undefined) {
+          throw new CodeServiceError(
+            decodeCodeFailure({ category: "unavailable", message: INHERITED_MARK_REFUSAL }),
+          );
+        }
+        return codeService.execute(windowId, creation, signal);
+      },
+      isMarkedWithOutsideContent: (threadId) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
     });
     // A linked pull request's checks turning red is a user obligation, not an
     // agent event: every snapshot refresh feeds the durable follow-up marker on
@@ -6070,53 +6135,100 @@ export function startOctantServer(
     // process, so it is bound to the same authoritative thread, checkout, and
     // root resolution the Code workspace already uses. The live observer verifies
     // terminal roots and their descendants; unknown processes remain leftovers.
-    const localServerRoutes = createLocalServerRouteHandler({
-      service: new LocalServerService({
-        listeners: createLiveLocalListenerPort({
-          ownedProcessRoots: async () =>
-            (await terminalProcessPort?.ownedProcessRoots()) ?? new Set<number>(),
-        }),
-        health: createLiveLocalServerHealthProbe(),
-        stopPort: createLiveLocalServerStopPort(),
-        scopes: createCodeThreadLocalServerScopeResolver({
-          projects: projectService,
-          source: {
-            readThread: (threadId) => persistence.readCodeThread(threadId),
-            readCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
-            resolveCheckoutRoot: async (windowId, thread, checkout) =>
-              (await roots.resolve(windowId, thread, checkout, codeWorkingDirectoryProbePath))
-                ?.rootPath,
-            ownedPids: () => new Set<number>(),
-          },
-        }),
-        hostScopes: createRunningServiceScopeResolver({
-          projects: projectService,
-          source: {
-            readThreads: persistence.readCodeThreads,
-            readCheckout: persistence.readCodeCheckout,
-            // Only the ownership receipt the host wrote for this thread's own
-            // worktree vouches for the folder; the same fields the Code file
-            // root authority demands, without its Git observation, because this
-            // only names where a listener came from and authorizes nothing.
-            managedWorktreeRoot: async (thread, checkout, repositoryRoot) => {
-              const receipt = await managedWorktreeReceipts.load(checkout.ownershipReceiptId);
-              return receipt !== undefined &&
-                receipt.state === "ready" &&
-                receipt.receiptId === checkout.ownershipReceiptId &&
-                receipt.threadId === thread.id &&
-                receipt.checkoutId === checkout.id &&
-                receipt.repositoryId === thread.repositoryId &&
-                receipt.repositoryId === checkout.repositoryId &&
-                receipt.canonicalRepositoryPath === repositoryRoot
-                ? receipt.canonicalWorktreePath
-                : undefined;
-            },
-            ownedPids: () => new Set<number>(),
-          },
-        }),
+    const ownedTerminalProcessRoots = async () =>
+      (await terminalProcessPort?.ownedProcessRoots()) ?? new Set<number>();
+    const localServerService = new LocalServerService({
+      listeners: createLiveLocalListenerPort({ ownedProcessRoots: ownedTerminalProcessRoots }),
+      health: createLiveLocalServerHealthProbe(),
+      stopPort: createLiveLocalServerStopPort(),
+      scopes: createCodeThreadLocalServerScopeResolver({
+        projects: projectService,
+        source: {
+          readThread: (threadId) => persistence.readCodeThread(threadId),
+          readCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
+          resolveCheckoutRoot: async (windowId, thread, checkout) =>
+            (await roots.resolve(windowId, thread, checkout, codeWorkingDirectoryProbePath))
+              ?.rootPath,
+          ownedPids: () => new Set<number>(),
+        },
       }),
+      hostScopes: createRunningServiceScopeResolver({
+        projects: projectService,
+        source: {
+          readThreads: persistence.readCodeThreads,
+          readCheckout: persistence.readCodeCheckout,
+          // Only the ownership receipt the host wrote for this thread's own
+          // worktree vouches for the folder; the same fields the Code file
+          // root authority demands, without its Git observation, because this
+          // only names where a listener came from and authorizes nothing.
+          managedWorktreeRoot: async (thread, checkout, repositoryRoot) => {
+            const receipt = await managedWorktreeReceipts.load(checkout.ownershipReceiptId);
+            return receipt !== undefined &&
+              receipt.state === "ready" &&
+              receipt.receiptId === checkout.ownershipReceiptId &&
+              receipt.threadId === thread.id &&
+              receipt.checkoutId === checkout.id &&
+              receipt.repositoryId === thread.repositoryId &&
+              receipt.repositoryId === checkout.repositoryId &&
+              receipt.canonicalRepositoryPath === repositoryRoot
+              ? receipt.canonicalWorktreePath
+              : undefined;
+          },
+          ownedPids: () => new Set<number>(),
+        },
+      }),
+      // A server Octant stopped ends every grant to it at once; a grant
+      // never forwards to whatever takes the port next.
+      onStopped: (stopped) => remoteServerGrants.closeServer(stopped),
+    });
+    const localServerRoutes = createLocalServerRouteHandler({
+      service: localServerService,
       persistence,
       projects: projectService,
+      windowAuthorityStore,
+    });
+    // Grants to open an Octant-owned dev server from a paired device. They live
+    // in this host's memory, bound to a proxy session; the journal records each
+    // opening and closing, and a starting host closes what a past run left open.
+    const remoteServerGrants = new RemoteServerGrantService({
+      observeTarget: (scopeId, source, signal) =>
+        localServerService.observeGrantTarget(scopeId, source, {
+          actor: "remote-client",
+          ...(signal === undefined ? {} : { signal }),
+        }),
+      canOpenThread: async (scopeId, threadId) =>
+        (await routeCodeService.read(scopeId, threadId)) !== undefined,
+      readThread: persistence.readCodeThread,
+      readOpenGrants: persistence.readOpenRemoteServerGrants,
+      confirmEndpoint: createLiveLocalListenerHoldingProbe({
+        ownedProcessRoots: ownedTerminalProcessRoots,
+      }),
+      isCodeEnabled: () =>
+        enabledModes(persistence.readShellSettings()?.settings ?? defaultShellSettings()).includes(
+          "code",
+        ),
+      journal: persistence.journal,
+      hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    try {
+      remoteServerGrants.reconcile();
+    } catch {
+      console.error("[remote-server-grants] Grants a past run left open could not be closed.");
+    }
+    const unsubscribeRemoteServerGrants = persistence.journal.subscribeCommitted((append) =>
+      remoteServerGrants.observeCommitted(append),
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        unsubscribeRemoteServerGrants();
+        // Proxy sessions do not outlive this process, so neither does a grant.
+        remoteServerGrants.closeAll("proxy-session-ended");
+      }),
+    );
+    const remoteServerGrantLocalRoutes = createRemoteServerGrantLocalRouteHandler({
+      grants: remoteServerGrants,
       windowAuthorityStore,
     });
     const codeOperationApprovalRoutes = createCodeOperationApprovalRouteHandler({
@@ -6263,6 +6375,9 @@ export function startOctantServer(
           options: question.options,
         });
       },
+      // Settled anywhere (another surface, expiry, cancellation): the inline
+      // copy goes too, so Code never lists or accepts an answer to it.
+      onSettled: (input) => codeOperationRuntime?.withdrawHarnessQuestion?.(input),
     });
     const nativeHarnessQuestionsLive = nativeHarnessQuestions;
     const nativeHarnessApprovals = new NativeHarnessApprovalStore({
@@ -6353,10 +6468,17 @@ export function startOctantServer(
       sendFirstMessage: (input) => sideTaskFirstMessage.current?.(input) ?? Promise.resolve(false),
       clock: () => new Date().toISOString(),
     });
+    const nativeHarnessEgressRoutes = createNativeHarnessEgressRouteHandler({
+      windowAuthorityStore,
+      rules: toolEgressRules,
+      authorizeThread: authorizeFollowUpThread,
+    });
     const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
       windowAuthorityStore,
       store: {
         read: (threadId) => {
+          nativeHarnessApprovals.expireOverdue();
+          nativeHarnessQuestionsLive.expireOverdue();
           const view = nativeHarnessSessionsLive.read(threadId);
           const suggestions = threadFollowUpSuggestions.read(threadId);
           return view === undefined || suggestions === undefined
@@ -6689,6 +6811,7 @@ export function startOctantServer(
     const chatService = new ChatService({
       liveTurns,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+      outsideContentMarks: runtimeOutsideContentMarks,
       attachmentStore: chatAttachmentStore,
       beforeAttachmentPurge: async (threadId) => {
         if (purgeQueuedChatMessages === undefined)
@@ -6752,6 +6875,8 @@ export function startOctantServer(
             resolveSource: (sourceWindowId, sourceThreadId) =>
               threadMentionService.resolveSideChatSource(sourceWindowId, sourceThreadId),
             readState: sideChatSourceState,
+            marks: threadOutsideContentMarks,
+            uuid: randomUUID,
           },
           {
             sidecarThreadId: String(sidecarThreadId),
@@ -6759,7 +6884,10 @@ export function startOctantServer(
             readToolNames: readToolNames ?? [],
           },
         ),
-      resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
+      resolveThreadMentionContext: threadMentionContextResolver(
+        () => threadMentionService,
+        threadOutsideContentMarks,
+      ),
       dataDirectory: chatDataDirectory,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
@@ -6793,13 +6921,6 @@ export function startOctantServer(
                 targetThreadIds: threadMentionIds ?? [],
                 ...(coordinationDepth === undefined ? {} : { coordinationDepth }),
               }),
-              canvasAgentToolPort === undefined
-                ? undefined
-                : createCanvasAgentTools({
-                    windowId,
-                    thread,
-                    port: canvasAgentToolPort,
-                  }),
               createImageAgentTools({
                 threadKind: "chat-thread",
                 scopeId: decodeImageGenerationScopeId(String(thread.id)),
@@ -6826,6 +6947,17 @@ export function startOctantServer(
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
           }),
+          // Outside the taint wrapper: a Canvas marks its reader only when a
+          // read or preview returns content from a Canvas that carries a mark,
+          // the rule Work and Code follow, so describe and a clean read leave
+          // the thread unmarked.
+          canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId,
+                thread,
+                port: canvasAgentToolPort,
+              }),
           // Host-internal: its results are Octant's own answers, not external
           // content, and `delegate` itself refuses while the thread is tainted.
           agentsManagedToolsFor({
@@ -7184,6 +7316,7 @@ export function startOctantServer(
     let workRequestService: WorkRequestService | undefined;
     const workTurnService = new WorkTurnService({
       liveTurns,
+      outsideContentMarks: runtimeOutsideContentMarks,
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
       contextHarness,
@@ -7326,9 +7459,13 @@ export function startOctantServer(
             String(model.id) === String(thread.modelId) && model.inputModalities.includes("image"),
         );
       },
-      resolveThreadMentionContext: async ({ threadMentionIds, windowId }) => {
-        const resolved = await threadMentionContextResolver(() => threadMentionService)({
+      resolveThreadMentionContext: async ({ threadMentionIds, readerThreadId, windowId }) => {
+        const resolved = await threadMentionContextResolver(
+          () => threadMentionService,
+          threadOutsideContentMarks,
+        )({
           threadMentionIds,
+          readerThreadId,
           windowId,
         });
         return resolved.map((mention) => ({
@@ -8295,6 +8432,28 @@ export function startOctantServer(
         return false;
       }
     };
+    // The same rule for a caller that holds only a thread id (a capture, an
+    // agent message). The projections say which kind of thread it is, so one
+    // check runs instead of all three on every read.
+    const windowCanOpenThreadById = async (
+      windowId: WindowId,
+      threadId: string,
+    ): Promise<boolean> => {
+      const id = String(threadId);
+      let threadKind: "chat-thread" | "work-thread" | "code-thread" | undefined;
+      try {
+        if (persistence.readChatThread(decodeChatThreadId(id)) !== undefined) {
+          threadKind = "chat-thread";
+        } else if (persistence.readCodeThread(decodeCodeThreadId(id)) !== undefined) {
+          threadKind = "code-thread";
+        } else if (workThreadProjection.read(decodeWorkThreadId(id)) !== undefined) {
+          threadKind = "work-thread";
+        }
+      } catch {
+        return false;
+      }
+      return threadKind !== undefined && (await windowCanOpenThread(windowId, threadKind, id));
+    };
     // Which Projects a window can open, by the rule its threads are opened by.
     const windowCanOpenProjectById = async (
       windowId: WindowId,
@@ -8633,24 +8792,7 @@ export function startOctantServer(
     const browserAutomationRoutes = createBrowserAutomationRouteHandler({
       service: browserAutomationService,
       captures: browserCaptures,
-      windowCanOpenThread: async (windowId, threadId) => {
-        const id = String(threadId);
-        // A capture names only its thread. The projections say which kind of
-        // thread it is, so one check runs instead of all three on every read.
-        let threadKind: "chat-thread" | "work-thread" | "code-thread" | undefined;
-        try {
-          if (persistence.readChatThread(decodeChatThreadId(id)) !== undefined) {
-            threadKind = "chat-thread";
-          } else if (persistence.readCodeThread(decodeCodeThreadId(id)) !== undefined) {
-            threadKind = "code-thread";
-          } else if (workThreadProjection.read(decodeWorkThreadId(id)) !== undefined) {
-            threadKind = "work-thread";
-          }
-        } catch {
-          return false;
-        }
-        return threadKind !== undefined && (await windowCanOpenThread(windowId, threadKind, id));
-      },
+      windowCanOpenThread: windowCanOpenThreadById,
       projectBrowsers: liveProjectBrowsers,
       authority: browserAuthority,
       approvals: requireBrowserToolApprovalService(),
@@ -8988,11 +9130,28 @@ export function startOctantServer(
         });
       },
     });
+    // A version written while its thread, or the child writing it, is marked
+    // with outside content makes the Canvas carry that mark, whoever reads it
+    // later and whatever a person clears on the writer afterwards.
     const canvasEventStore = new CanvasEventStore({
       journal: persistence.journal,
       uuid: randomUUID,
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      writerMarked: threadOutsideContentMarks.isMarked,
     });
+    // Versions taken from another computer before they recorded their own
+    // author still name the thread they landed in, which a Clear exempts.
+    try {
+      canvasEventStore.carryAdoptedVersionWriters({
+        versionIdsOf: (canvasId) =>
+          persistence.canvasProjection
+            .getById(decodeCanvasId(canvasId))
+            ?.versions.map((version) => String(version.versionId)),
+        occurredAt: new Date().toISOString() as UtcTimestamp,
+      });
+    } catch {
+      // The next start tries again; a read refuses when the mark is unreadable.
+    }
     // One server-owned Canvas authority, shared by every Canvas mutation
     // including sharing, so a share can never be admitted under weaker checks
     // than a revise or a refresh.
@@ -9608,6 +9767,18 @@ export function startOctantServer(
           : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
       },
       canvas: canvasService,
+      markReader: ({ readerId, canvasId }) => {
+        const entry = persistence.canvasProjection.getById(canvasId);
+        if (entry === undefined) return { status: "refused" };
+        return markCanvasReader({
+          journal: persistence.journal,
+          marks: threadOutsideContentMarks,
+          readerId,
+          canvasId: String(canvasId),
+          canvasThreadId: String(entry.currentVersion.definition.provenance.threadId),
+          correlationId: randomUUID,
+        });
+      },
       preview: createCanvasPreviewService({
         canvas: canvasService,
         resolveDesignAssets,
@@ -9917,12 +10088,16 @@ export function startOctantServer(
     });
     // The Automation projection is in-memory; rebuild it from the
     // authoritative journal on every startup. Hydration fails closed: a
-    // hostile or undecodable frame leaves the projection empty instead of
-    // trusting a partially valid stream.
-    hydrateAutomationProjection({
-      store: automationEventStore,
-      projection: persistence.automationProjection,
-    });
+    // hostile or undecodable frame, or history past the scan cap, leaves the
+    // projection empty instead of trusting a partial stream. The host still
+    // starts; the Automation list reports the degraded state and the
+    // scheduler never starts, so nothing fires against history it never read.
+    // A live rehydration that fails later revokes the same state.
+    let automationHistoryAvailable =
+      hydrateAutomationProjection({
+        store: automationEventStore,
+        projection: persistence.automationProjection,
+      }) === "ok";
     // A6: shared device destinations, opt-in preferences, durable delivery
     // receipts. Credentialed APNs/FCM remains a named validation residual —
     // the default transport reports unavailable honestly.
@@ -10149,8 +10324,12 @@ export function startOctantServer(
       projection: persistence.automationProjection,
       dispatch: automationDispatch,
       now: () => new Date().toISOString() as UtcTimestamp,
+      onHistoryUnavailable: () => {
+        automationHistoryAvailable = false;
+        void automationScheduler.stop();
+      },
     });
-    automationScheduler.start();
+    if (automationHistoryAvailable) automationScheduler.start();
     // The host's own timer for completed threads, fed by every mode's service
     // that can archive on the host's behalf (decision 0088).
     const completedThreadArchiveSweep = new CompletedThreadArchiveSweep({
@@ -10187,6 +10366,7 @@ export function startOctantServer(
       windowAuthorityStore,
       projects: projectService,
       hostId: String(LOCAL_HOST_ID),
+      historyAvailable: () => automationHistoryAvailable,
     });
     const workPromotionProjection = new WorkPromotionProjection();
     const workPromotionEventStore = new WorkPromotionEventStore({
@@ -10578,6 +10758,7 @@ export function startOctantServer(
       (await agentRunSettingsRoutes(request)) ??
       (await nativeHarnessRoutingRoutes(request)) ??
       (await nativeHarnessSessionRoutes(request)) ??
+      (await nativeHarnessEgressRoutes(request)) ??
       (await followUpSuggestionRoutes(request)) ??
       (await sideTaskRoutes(request)) ??
       (await githubRoutes(request)) ??
@@ -10626,6 +10807,7 @@ export function startOctantServer(
       (await zenRoutes(request)) ??
       (await navigatorAssistantRoutes(request)) ??
       (await localServerRoutes(request)) ??
+      (await remoteServerGrantLocalRoutes(request)) ??
       (await threadMentionRoutes(request)) ??
       (await fileMentionRoutes(request)) ??
       (await spendCeilingRoutes(request)) ??
@@ -10681,6 +10863,58 @@ export function startOctantServer(
       dispatch: (request, context) =>
         codeProjectAccess.run(context, () => dispatchMeasuredProductRoutes(request)),
     });
+    // The proxy route's grant requests run under the paired device's own scope,
+    // the same remote read rule product requests are judged by.
+    const remoteServerGrantGatewayPort: RemoteServerGrantGatewayPort = {
+      open: (input) => {
+        const context = resolvePrincipalRouteContext({
+          request: input.request,
+          principal: input.principal,
+          abortSignal: input.signal,
+        });
+        return codeProjectAccess.run(context, () =>
+          remoteServerGrants.open({
+            principal: {
+              kind: "remote-device",
+              deviceId: String(input.principal.deviceId),
+              credentialGeneration: input.principal.credentialGeneration,
+              sessionIdDigest: input.sessionIdDigest,
+            },
+            scopeId: context.scopeId,
+            request: input.grantRequest,
+            stillAuthorized: input.stillAuthorized,
+            signal: input.signal,
+          }),
+        );
+      },
+      relay: (input) => {
+        const context = resolvePrincipalRouteContext({
+          request: input.request,
+          principal: input.principal,
+          abortSignal: input.signal,
+        });
+        return codeProjectAccess.run(context, () =>
+          remoteServerGrants.relay({
+            principal: {
+              deviceId: String(input.principal.deviceId),
+              credentialGeneration: input.principal.credentialGeneration,
+              sessionIdDigest: input.sessionIdDigest,
+              origin: input.principal.origin,
+            },
+            scopeId: context.scopeId,
+            grantId: input.grantId,
+            method: input.method,
+            pathQuery: input.pathQuery,
+            headers: input.headers,
+            body: input.body,
+            stillAuthorized: input.stillAuthorized,
+            signal: input.signal,
+          }),
+        );
+      },
+      closeSession: (sessionIdDigest, reason) =>
+        remoteServerGrants.closeSession(sessionIdDigest, reason),
+    };
     let remoteListener: PrivateListener | undefined;
     let remoteListenerError: PrivateListenerFailureCode | undefined;
     // Retained so shutdown can settle warming before the runtime registry
@@ -10732,6 +10966,7 @@ export function startOctantServer(
           );
         },
         pushTokenStore: pushNotificationTokenStore,
+        remoteServerGrants: remoteServerGrantGatewayPort,
       };
     };
     const privateListenerController = createPrivateListenerLifecycleController({
@@ -10740,12 +10975,16 @@ export function startOctantServer(
         const gateway = createRemoteGateway({
           ...services,
           productDispatch: services.productDispatch ?? authenticatedProductDispatch,
+          remoteServerGrants: services.remoteServerGrants ?? remoteServerGrantGatewayPort,
           serve: options.remoteServe ?? serve,
           config,
         });
         currentRemoteGateway = gateway;
         return gateway;
       },
+      selfMadeCertificate: createSelfMadeListenerCertificateStore({
+        dataDirectory: providerDataDirectory,
+      }),
     });
     const localDeviceAdministrationRoutes = createLocalDeviceAdministrationRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
@@ -10821,6 +11060,7 @@ export function startOctantServer(
         persistence.replicaArtifactProjection.evict(canvasIds);
       },
       purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
+      forgetProjectData: (projectId) => toolEgressRules.forgetProject(projectId),
       purgeThreadArtifacts: async ({ mode, threadId }) => {
         const released = await threadMessageQueue.purgeThread(
           decodeThreadMessageQueueScope({ mode, threadId }),
@@ -11032,6 +11272,10 @@ export function startOctantServer(
           if (replicaDeviceKeys === undefined) return { status: "refused", reason: "unavailable" };
           return makeReplicaDeviceSigner(replicaDeviceKeys, instanceId).sign(payload);
         },
+        remove: async (instanceId) => {
+          if (replicaDeviceKeys === undefined) throw new Error("credential store unavailable");
+          await removeReplicaDeviceKey(replicaDeviceKeys, instanceId);
+        },
       },
       journal: replicaJournal,
       // A pull reconciles each valid artifact entry and journals what it did.
@@ -11056,6 +11300,8 @@ export function startOctantServer(
       localHostId: LOCAL_HOST_ID,
       clock: () => Date.now(),
       restoreStopped: () => replicaArtifactSync.service?.restoreProgress()?.state === "stopped",
+      // A computer that left its replica says so on the switch too.
+      syncOff: () => replicaStoreSettingsService.turnSyncOff(),
     });
     // Publish and pull for artifacts. With sync off, or no identity in a
     // replica, nothing is queued and no store is called; a Code thread under
@@ -11386,6 +11632,9 @@ export function startOctantServer(
           // only once the host is serving; with sync off each pass returns
           // before any store call.
           stopArtifactSync = artifactSyncService.start();
+          // A leave the host stopped in the middle of finishes its cleanup:
+          // sync off and the device key deleted.
+          void replicaMembershipService.finishLeaving().catch(() => undefined);
           return {
             url: localServer.url,
             ...(remoteListener === undefined ? {} : { remoteListener }),

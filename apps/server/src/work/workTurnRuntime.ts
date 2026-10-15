@@ -25,6 +25,12 @@ import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
+import { TurnCompactions, type AutomaticCompactionSighting } from "../context/automaticCompaction";
+import {
+  NO_RUNTIME_OUTSIDE_CONTENT_MARKS,
+  RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+  type RuntimeOutsideContentMarking,
+} from "../context/runtimeOutsideContentMark";
 import { normalizedProviderCallbackId } from "./workRequestRuntime";
 import {
   countsTowardTurnEventBudget,
@@ -67,7 +73,18 @@ export interface WorkTurnRuntimePort {
     /** The thread's access; absent reads as ask-first, which Work always was. */
     readonly access?: WorkAccess;
     readonly appManagedTools?: AppManagedToolSet;
+    /**
+     * Records that the runtime's own web search, page fetch, or hosted tool
+     * put outside content in front of the model. Without it such a call stops
+     * the turn.
+     */
+    readonly outsideContentMarks?: RuntimeOutsideContentMarking;
     readonly onUsage?: (usage: Extract<ProviderRuntimeEvent, { readonly kind: "usage" }>) => void;
+    /**
+     * Told of each compaction the runtime made by itself during this turn, so
+     * the thread's context ledger can record it.
+     */
+    readonly onAutomaticCompaction?: (sighting: AutomaticCompactionSighting) => void;
     /** The prompt is about to go to the provider, so the turn may now be charged. */
     readonly onPromptSent?: () => void;
     readonly onDelta?: (response: string) => void;
@@ -201,6 +218,15 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
       );
       let reachedTerminalEvent = false;
+      const outsideContentMarks = input.outsideContentMarks ?? NO_RUNTIME_OUTSIDE_CONTENT_MARKS;
+      // An earlier turn's read that could not be marked is still in the
+      // session this turn would resume.
+      if (outsideContentMarks.settleOwed(String(input.command.threadId)).status === "refused") {
+        return yield* Effect.fail<ProviderFailure>({
+          category: "provider-failed",
+          message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+        });
+      }
       const connection = yield* input.driver.acquire({
         instanceId: input.command.authority.providerInstanceId,
         projectRoot: input.projectRoot,
@@ -271,6 +297,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         void Effect.runPromise(Deferred.succeed(hold, undefined));
       };
       const answeredToolRequestIds = new Set<string>();
+      const compactions = new TurnCompactions();
       const events = yield* subscribeThenSend({
         connection,
         consume: (runtimeEvents) =>
@@ -286,8 +313,31 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
+                // Marked before the budget is looked at: what the runtime
+                // read reached its model either way.
+                if (event.kind === "outside-content-read") {
+                  const marked = outsideContentMarks.mark(String(input.command.threadId), event);
+                  if (marked.status === "marked") return;
+                  // The scope's finalizer interrupts the session, as for any
+                  // turn that ends before its terminal event.
+                  return yield* Effect.fail<ProviderFailure>({
+                    category: "provider-failed",
+                    message: RUNTIME_OUTSIDE_CONTENT_REFUSAL,
+                  });
+                }
                 if (handledEvents > MAX_EVENTS) return;
                 if (event.kind === "usage") input.onUsage?.(event);
+                const sighting = compactions.observe(event);
+                if (sighting !== undefined && input.onAutomaticCompaction !== undefined) {
+                  const record = input.onAutomaticCompaction;
+                  // The receipt is accounting; failing to write it never
+                  // fails the turn whose session it describes.
+                  yield* Effect.try(() => record(sighting)).pipe(
+                    Effect.catchAll(() =>
+                      Effect.logWarning("An automatic compaction could not be journaled."),
+                    ),
+                  );
+                }
                 if (event.kind === "child-agent-activity") input.onChildActivity?.(event);
                 if (event.kind === "text-delta") {
                   response = appendBoundedResponse(response, event.text);
