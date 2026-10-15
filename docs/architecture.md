@@ -3369,8 +3369,11 @@ model and the turn records it on the session. Claude resumes only a session
 whose identity (provider instance, Octant session, SDK session, Project root,
 authentication) this host recorded; the identity is journaled
 (`claude-resume-identity`), so a host restart keeps an existing thread
-resumable and compactable, and a removed identity, or a provider reconfigured
-or removed, stays refused as `stale-resume` after a restart. Codex restates the model and its
+resumable and compactable. A removed identity or a removed provider stays
+refused as `stale-resume` after a restart. A reconfigured provider keeps its
+identities, as it did within one host lifetime; the resume checks (instance,
+authentication, Project root, account directory history) still decide. A
+thread purge erases the identity of the session the thread recorded. Codex restates the model and its
 reasoning effort on each turn, and Claude resumes the SDK session under the new
 model. Another model on any other driver still fails closed. In Code, a
 change of provider instance starts a new session with a provider-switch
