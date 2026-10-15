@@ -10946,8 +10946,32 @@ export function startOctantServer(
           }),
         );
       },
+      relayUpgrade: (input) => {
+        const context = resolvePrincipalRouteContext({
+          request: input.request,
+          principal: input.principal,
+          abortSignal: input.signal,
+        });
+        return codeProjectAccess.run(context, () =>
+          remoteServerGrants.relayUpgrade({
+            principal: {
+              deviceId: String(input.principal.deviceId),
+              credentialGeneration: input.principal.credentialGeneration,
+              sessionIdDigest: input.sessionIdDigest,
+              origin: input.principal.origin,
+            },
+            scopeId: context.scopeId,
+            grantId: input.grantId,
+            pathQuery: input.pathQuery,
+            headers: input.headers,
+            stillAuthorized: input.stillAuthorized,
+            signal: input.signal,
+          }),
+        );
+      },
       closeSession: (sessionIdDigest, reason) =>
         remoteServerGrants.closeSession(sessionIdDigest, reason),
+      holdsOpenSockets: (sessionIdDigest) => remoteServerGrants.holdsOpenSockets(sessionIdDigest),
     };
     let remoteListener: PrivateListener | undefined;
     let remoteListenerError: PrivateListenerFailureCode | undefined;

@@ -6341,9 +6341,33 @@ mechanisms are:
     request is registered under its grant before connecting, and holds its
     place in the device's proxy budget until its response ends; closing the
     grant closes the upstream socket and cuts the response before the call
-    that closed it returns. An upgrade request is refused `upgrade-refused`,
-    and `OPTIONS` is not relayed. The listener admits bodies up to the relay's
-    8 MiB; every other route keeps its own budget.
+    that closed it returns. `OPTIONS` is not relayed. The listener admits
+    bodies up to the relay's 8 MiB; every other route keeps its own budget.
+  - **WebSockets.** The relay route is the only one that switches a
+    connection: a signed `GET` asking to upgrade to `websocket` takes the same
+    checks as any relayed request, then the host opens a WebSocket to the
+    grant's endpoint with the same header rules, its own handshake key, the
+    page's subprotocol list, and no extension, within the connect bound. Only
+    when the dev server answers 101 with the right accept value, no extension,
+    and no subprotocol or one the page offered does the page's connection
+    switch, answering that subprotocol; a dev server that declines, and any
+    upgrade to another protocol, is refused `upgrade-refused` (501). Every
+    other route on either listener answers an upgrade request as an ordinary
+    one and never switches. After the switch, messages carry no proof of their
+    own: each socket is registered under its grant before the host connects,
+    and closing the grant for any reason above closes the page's end with 1008
+    and the dev server's with 1001 before the call that closed it returns. A
+    grant holds at most four sockets and a device sixteen, answered 503 with a
+    one-second `Retry-After` past either; a socket does not hold a proxy-budget
+    slot once switched. A message is at most 16 MiB in either direction, and a
+    larger one closes the socket with 1009 before the host buffers it; writes
+    one end does not read close the socket with 1008 past twice that. The host
+    answers pings itself and relays whole messages, text or binary, and close
+    codes. An open socket counts as use of its proxy session, so the session
+    does not idle out under it; its absolute expiry still ends the session,
+    the grant, and the socket. The listener's transport (Node or Bun) switches
+    a connection only when the route's answer carries an accepted upgrade, so
+    an answer that does not is written as plain HTTP and the connection closed.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and
