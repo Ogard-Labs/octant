@@ -20,8 +20,9 @@ import {
   createInMemoryDeviceKeyStore,
   createRemoteSessionBridge,
   openAppPairingCode,
-  type PinnedListenerExchangeOutcome,
+  type PinnedListenerExchangeOpening,
   type PinnedListenerExchangePort,
+  type PinnedListenerExchangeRead,
   type PinnedListenerExchangeRequest,
   type PinnedListenerTransportPort,
 } from "@octant/client-runtime";
@@ -325,21 +326,44 @@ describe("pairing from an app pairing code with a host that made its own certifi
 
 // The phone's transport: the shared exchange fetch over a native exchange
 // that dials the judged address, refuses a key outside the pins during the
-// handshake, and only then writes the request. Two exchanges keep that
-// contract here: one in Node, and the phone's own iOS exchange source built
-// for this Mac with swiftc, which runs only where swiftc exists.
+// handshake, writes the request only after that, and hands the reply back
+// chunk by chunk. Two exchanges keep that contract here: one in Node, and
+// the phone's own iOS exchange source built for this Mac with swiftc, which
+// runs only where swiftc exists.
 
 const PHONE_MODULE = resolve(
   fileURLToPath(new URL(".", import.meta.url)),
   "../../../mobile/modules/octant-pinned-tls",
 );
 
-type Exchange = PinnedListenerExchangePort["exchange"];
+type Exchange = PinnedListenerExchangePort["open"];
+
+/** Reads arrive in order; a read waits until the next one exists. */
+function readQueue() {
+  const ready: PinnedListenerExchangeRead[] = [];
+  const waiting: Array<(read: PinnedListenerExchangeRead) => void> = [];
+  let finished = false;
+  return {
+    push(read: PinnedListenerExchangeRead): void {
+      if (finished) return;
+      if (read.status !== "data") finished = true;
+      const next = waiting.shift();
+      if (next === undefined) ready.push(read);
+      else next(read);
+    },
+    read(): Promise<PinnedListenerExchangeRead> {
+      const next = ready.shift();
+      if (next !== undefined) return Promise.resolve(next);
+      if (finished) return Promise.resolve({ status: "end" });
+      return new Promise((resolveRead) => waiting.push(resolveRead));
+    },
+  };
+}
 
 /** The native contract kept in Node: the pin decides inside the handshake, before any write. */
 function nodeExchange(listenerPort: number): Exchange {
   return (request) =>
-    new Promise<PinnedListenerExchangeOutcome>((resolveOutcome) => {
+    new Promise<PinnedListenerExchangeOpening>((resolveOpening) => {
       expect(request.address).toBe(ADDRESS);
       const socket = connectTls({
         host: "127.0.0.1",
@@ -347,63 +371,81 @@ function nodeExchange(listenerPort: number): Exchange {
         minVersion: "TLSv1.3",
         rejectUnauthorized: false,
       });
-      const chunks: Buffer[] = [];
-      let servedPin: string | undefined;
+      const reads = readQueue();
       socket.once("secureConnect", () => {
         const spki = socket
           .getPeerX509Certificate()
           ?.publicKey.export({ type: "spki", format: "der" });
-        servedPin =
+        const servedPin =
           spki === undefined
             ? undefined
             : `sha256-${createHash("sha256").update(spki).digest("base64url")}`;
         if (servedPin === undefined || !request.pins.includes(servedPin)) {
           socket.destroy();
-          resolveOutcome({ status: "refused", servedPin });
+          resolveOpening({ status: "refused", servedPin });
           return;
         }
-        socket.on("data", (chunk: Buffer) => chunks.push(chunk));
-        socket.once("end", () => {
-          resolveOutcome({
-            status: "responded",
-            servedPin: servedPin ?? "",
-            response: new Uint8Array(Buffer.concat(chunks)),
+        socket.on("data", (chunk: Buffer) =>
+          reads.push({ status: "data", chunk: new Uint8Array(chunk) }),
+        );
+        socket.once("end", () => reads.push({ status: "end" }));
+        socket.once("close", () => reads.push({ status: "end" }));
+        socket.write(request.request, () => {
+          resolveOpening({
+            status: "opened",
+            servedPin,
+            read: reads.read,
+            close: () => socket.destroy(),
           });
         });
-        socket.write(request.request);
       });
-      socket.once("error", () => resolveOutcome({ status: "failed", reason: "connection-failed" }));
+      socket.once("error", () => {
+        reads.push({ status: "failed" });
+        resolveOpening({ status: "failed", reason: "connection-failed" });
+      });
     });
 }
 
 /** The phone's iOS exchange, run as a command built from the app's own Swift source. */
 function swiftExchange(binary: string, listenerPort: number): Exchange {
   return (request: PinnedListenerExchangeRequest) =>
-    new Promise<PinnedListenerExchangeOutcome>((resolveOutcome, reject) => {
+    new Promise<PinnedListenerExchangeOpening>((resolveOpening, reject) => {
       expect(request.address).toBe(ADDRESS);
       const child = spawn(binary, [], { stdio: ["pipe", "pipe", "inherit"] });
-      const output: Buffer[] = [];
-      child.stdout.on("data", (chunk: Buffer) => output.push(chunk));
-      child.once("error", reject);
-      child.once("close", () => {
-        const answer = JSON.parse(Buffer.concat(output).toString("utf8")) as {
-          readonly status: string;
-          readonly servedPin?: string;
-          readonly response?: string;
-          readonly reason?: string;
-        };
-        if (answer.status === "responded" && answer.servedPin !== undefined) {
-          resolveOutcome({
-            status: "responded",
-            servedPin: answer.servedPin,
-            response: new Uint8Array(Buffer.from(answer.response ?? "", "base64")),
-          });
-        } else if (answer.status === "refused") {
-          resolveOutcome({ status: "refused", servedPin: answer.servedPin });
-        } else {
-          resolveOutcome({ status: "failed", reason: "connection-failed" });
+      const reads = readQueue();
+      let opened = false;
+      let pending = "";
+      child.stdout.on("data", (chunk: Buffer) => {
+        pending += chunk.toString("utf8");
+        for (let newline = pending.indexOf("\n"); newline >= 0; newline = pending.indexOf("\n")) {
+          const line = JSON.parse(pending.slice(0, newline)) as Record<string, string | undefined>;
+          pending = pending.slice(newline + 1);
+          if (!opened) {
+            opened = true;
+            if (line.status === "opened" && line.servedPin !== undefined) {
+              resolveOpening({
+                status: "opened",
+                servedPin: line.servedPin,
+                read: reads.read,
+                close: () => child.kill(),
+              });
+            } else if (line.status === "refused") {
+              resolveOpening({ status: "refused", servedPin: line.servedPin });
+            } else {
+              resolveOpening({ status: "failed", reason: "connection-failed" });
+            }
+          } else if (line.status === "data") {
+            reads.push({
+              status: "data",
+              chunk: new Uint8Array(Buffer.from(line.chunk ?? "", "base64")),
+            });
+          } else {
+            reads.push(line.status === "end" ? { status: "end" } : { status: "failed" });
+          }
         }
       });
+      child.once("error", reject);
+      child.once("close", () => reads.push({ status: "end" }));
       child.stdin.end(
         JSON.stringify({
           // The listener's Tailscale address is dialled on loopback, as above.
@@ -423,9 +465,41 @@ function phoneTransport(exchange: Exchange): PinnedListenerTransportPort {
     fetch: createExchangeListenerFetch({
       origin,
       trust,
-      port: { resolve: async () => [ADDRESS], exchange },
+      port: { resolve: async () => [ADDRESS], open: exchange },
     }),
   });
+}
+
+/**
+ * A listener serving the host-made certificate that streams an event reply:
+ * one line, then a second only after the test says the first arrived.
+ */
+async function startStreamingListener() {
+  const directory = mkdtempSync(join(tmpdir(), "octant-pinned-stream-"));
+  cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
+  const certificate = createSelfMadeListenerCertificateStore({ dataDirectory: directory }).ensure(
+    ADDRESS,
+  );
+  if (certificate.status !== "ready") throw new Error(certificate.code);
+  let sendSecond: () => void = () => undefined;
+  const secondAllowed = new Promise<void>((resolveSecond) => (sendSecond = resolveSecond));
+  const listener = createHttpsServer(certificate.tls, (_incoming, outgoing) => {
+    outgoing.writeHead(200, { "content-type": "application/x-ndjson" });
+    outgoing.write('{"sequence":1}\n');
+    void secondAllowed.then(() => outgoing.end('{"sequence":2}\n'));
+  });
+  await new Promise<void>((resolveListen) => listener.listen(0, "127.0.0.1", resolveListen));
+  const address = listener.address();
+  if (address === null || typeof address === "string") throw new Error("No listener port.");
+  cleanups.push(
+    () =>
+      new Promise<void>((resolveClose) => {
+        sendSecond();
+        listener.closeAllConnections();
+        listener.close(() => resolveClose());
+      }),
+  );
+  return { port: address.port, pin: certificate.tlsPin, sendSecond };
 }
 
 function hasSwiftc(): boolean {
@@ -512,6 +586,39 @@ describe.each(phoneExchanges)("pairing a phone from a code over $name", ({ excha
       bridge.connect(status.approval);
       await vi.waitFor(() => expect(bridge.getState().kind).toBe("ready"), { timeout: 15_000 });
       bridge.disconnect();
+    },
+    30_000,
+  );
+
+  it.runIf(runs())(
+    "streams an event reply's lines as the listener sends them, before it ends the reply",
+    async () => {
+      const listener = await startStreamingListener();
+      const transport = phoneTransport(exchange(listener.port))({
+        origin: ORIGIN,
+        trust: { current: { kind: "pinned", pin: listener.pin } },
+      });
+      if (transport.status !== "available") throw new Error("No pinned transport.");
+
+      const response = await transport.fetch(`${ORIGIN}/api/chat/threads/thread/events`);
+      const reader = response.body?.getReader();
+      if (reader === undefined) throw new Error("No body.");
+      const decoder = new TextDecoder();
+      let text = "";
+      while (!text.includes("\n")) {
+        const next = await reader.read();
+        if (next.done) throw new Error("The reply ended before its first line.");
+        text += decoder.decode(next.value, { stream: true });
+      }
+
+      expect(text).toBe('{"sequence":1}\n');
+      listener.sendSecond();
+      for (;;) {
+        const next = await reader.read();
+        if (next.done) break;
+        text += decoder.decode(next.value, { stream: true });
+      }
+      expect(text).toBe('{"sequence":1}\n{"sequence":2}\n');
     },
     30_000,
   );

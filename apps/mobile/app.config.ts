@@ -31,6 +31,11 @@ const config: ExpoConfig = {
     infoPlist: {
       NSFaceIDUsageDescription:
         "Octant uses Face ID or your device passcode to unlock the app and confirm high-risk actions.",
+      // A paired computer on a private LAN address is a local-network
+      // destination: iOS asks before the app may reach it and shows this
+      // reason. No Bonjour service is declared, since Octant browses none.
+      NSLocalNetworkUsageDescription:
+        "Octant connects to computers you pair with on your local network.",
     },
   },
   android: {

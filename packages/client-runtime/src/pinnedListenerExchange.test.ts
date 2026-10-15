@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createExchangeListenerFetch,
-  type PinnedListenerExchangeOutcome,
+  type PinnedListenerExchangeOpening,
   type PinnedListenerExchangePort,
   type PinnedListenerExchangeRequest,
 } from "./pinnedListenerExchange";
@@ -16,32 +16,45 @@ function reply(text: string): Uint8Array {
   return new Uint8Array(Buffer.from(text, "latin1"));
 }
 
-/** An exchange that answers as a listener serving `served` would, recording what was written. */
+/**
+ * An exchange that answers as a listener serving `served` would, recording
+ * what was written. The reply arrives three bytes at a time, so framing that
+ * assumed one read would fail.
+ */
 function listener(input: {
   readonly served: string;
   readonly response?: Uint8Array;
   readonly addresses?: ReadonlyArray<string>;
 }) {
   const sent: PinnedListenerExchangeRequest[] = [];
+  const closed = vi.fn();
   const port: PinnedListenerExchangePort = {
     resolve: vi.fn(async () => input.addresses ?? []),
-    exchange: vi.fn(async (request): Promise<PinnedListenerExchangeOutcome> => {
+    open: vi.fn(async (request): Promise<PinnedListenerExchangeOpening> => {
       if (!request.pins.includes(input.served)) {
         return { status: "refused", servedPin: input.served };
       }
       sent.push(request);
+      const bytes =
+        input.response ??
+        reply(
+          'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\n{"ok":true}',
+        );
+      let offset = 0;
       return {
-        status: "responded",
+        status: "opened",
         servedPin: input.served,
-        response:
-          input.response ??
-          reply(
-            'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\n{"ok":true}',
-          ),
+        read: async () => {
+          if (offset >= bytes.byteLength) return { status: "end" };
+          const chunk = bytes.subarray(offset, offset + 3);
+          offset += chunk.byteLength;
+          return { status: "data", chunk };
+        },
+        close: closed,
       };
     }),
   };
-  return { port, sent };
+  return { port, sent, closed };
 }
 
 async function refusalOf(promise: Promise<unknown>): Promise<string | undefined> {
@@ -109,7 +122,7 @@ describe("a listener fetch over the phone's pinned exchange", () => {
     await expect(refusalOf(fetch(`${ORIGIN}/api/remote/hello`))).resolves.toBe(
       "platform-untrusted",
     );
-    expect(host.port.exchange).not.toHaveBeenCalled();
+    expect(host.port.open).not.toHaveBeenCalled();
     expect(platformFetch).not.toHaveBeenCalled();
     platformFetch.mockRestore();
   });
@@ -123,7 +136,7 @@ describe("a listener fetch over the phone's pinned exchange", () => {
     });
 
     await expect(refusalOf(fetch(`${ORIGIN}/`))).resolves.toBe("newer-version");
-    expect(host.port.exchange).not.toHaveBeenCalled();
+    expect(host.port.open).not.toHaveBeenCalled();
   });
 
   it("refuses a name that resolves to any public address before dialling", async () => {
@@ -137,7 +150,7 @@ describe("a listener fetch over the phone's pinned exchange", () => {
     await expect(refusalOf(fetch("https://studio.tail1234.ts.net:8443/"))).resolves.toBe(
       "not-private-address",
     );
-    expect(host.port.exchange).not.toHaveBeenCalled();
+    expect(host.port.open).not.toHaveBeenCalled();
   });
 
   it("dials the resolved private address for a named origin and sends the name for the handshake", async () => {
@@ -190,7 +203,7 @@ describe("a listener fetch over the phone's pinned exchange", () => {
 
     await expect(fetch("https://100.101.102.103:8444/")).rejects.toBeInstanceOf(TypeError);
     await expect(fetch(`${ORIGIN}.evil.example/`)).rejects.toBeInstanceOf(TypeError);
-    expect(host.port.exchange).not.toHaveBeenCalled();
+    expect(host.port.open).not.toHaveBeenCalled();
   });
 
   it("reads a chunked reply and hands a redirect back without following it", async () => {
@@ -220,7 +233,7 @@ describe("a listener fetch over the phone's pinned exchange", () => {
 
     expect(text).toBe("Wikipedia");
     expect(moved.status).toBe(302);
-    expect(redirect.port.exchange).toHaveBeenCalledTimes(1);
+    expect(redirect.port.open).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a reply cut short rather than reading part of it as the whole", async () => {
@@ -234,12 +247,62 @@ describe("a listener fetch over the phone's pinned exchange", () => {
     });
 
     for (const host of [short, brokenChunks]) {
-      await expect(
-        createExchangeListenerFetch({ origin: ORIGIN, trust: PINNED, port: host.port })(
-          `${ORIGIN}/`,
-        ),
-      ).rejects.toThrow("The listener sent a reply Octant cannot read.");
+      const response = await createExchangeListenerFetch({
+        origin: ORIGIN,
+        trust: PINNED,
+        port: host.port,
+      })(`${ORIGIN}/`);
+      await expect(response.text()).rejects.toThrow(
+        "The listener sent a reply Octant cannot read.",
+      );
     }
+  });
+
+  it("delivers a streamed reply's lines as they arrive, before the listener ends it, and closes on abort", async () => {
+    const controller = new AbortController();
+    const pending: Array<
+      (read: { status: "data"; chunk: Uint8Array } | { status: "end" }) => void
+    > = [];
+    const queued: Array<{ status: "data"; chunk: Uint8Array } | { status: "end" }> = [
+      {
+        status: "data",
+        chunk: reply(
+          "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\n\r\n",
+        ),
+      },
+      { status: "data", chunk: reply('a\r\n{"seq":1}\n\r\n') },
+    ];
+    const close = vi.fn(() => {
+      for (const resolve of pending.splice(0)) resolve({ status: "end" });
+    });
+    const port: PinnedListenerExchangePort = {
+      resolve: vi.fn(async () => []),
+      open: async () => ({
+        status: "opened",
+        servedPin: PIN,
+        read: () =>
+          new Promise((resolve) => {
+            const next = queued.shift();
+            if (next === undefined) pending.push(resolve);
+            else resolve(next);
+          }),
+        close,
+      }),
+    };
+
+    const response = await createExchangeListenerFetch({ origin: ORIGIN, trust: PINNED, port })(
+      `${ORIGIN}/api/chat/threads/t/events`,
+      { signal: controller.signal },
+    );
+    const reader = response.body?.getReader();
+    const first = await reader?.read();
+
+    expect(Buffer.from(first?.value ?? new Uint8Array()).toString("utf8")).toBe('{"seq":1}\n');
+    expect(close).not.toHaveBeenCalled();
+    const second = reader?.read();
+    controller.abort();
+    await expect(second).rejects.toBeDefined();
+    expect(close).toHaveBeenCalled();
   });
 
   it("stops before connecting when the request was already aborted", async () => {
@@ -255,6 +318,6 @@ describe("a listener fetch over the phone's pinned exchange", () => {
         },
       ),
     ).rejects.toBeDefined();
-    expect(host.port.exchange).not.toHaveBeenCalled();
+    expect(host.port.open).not.toHaveBeenCalled();
   });
 });

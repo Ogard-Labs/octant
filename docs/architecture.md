@@ -6180,11 +6180,21 @@ mechanisms are:
       Network.framework's verify block, which the platform's transport
       security rules do not govern, so the app needs no arbitrary-loads
       exception; on Android in its own trust manager after checking the
-      connected peer is the dialled address), and writes the request only
-      after the handshake passed. A reply is read whole when the listener
-      closes the connection, up to 16 MiB, so a long-lived stream from a
-      pinned host delivers nothing until it ends. A truncated or
-      inconsistent reply is refused whole.
+      connected peer is the dialled address), writes the request only after
+      the handshake passed, and then hands the reply back one read at a time.
+      The reply's body is a stream that delivers bytes as they arrive, so the
+      phone's Chat event subscription, an NDJSON stream, streams over a
+      pinned connection as it does over the platform `fetch`; aborting the
+      request closes the connection. The phone uses
+      no WebSocket or other upgraded connection. A head over 64 KiB, or a
+      length or chunking that does not add up, fails the response or its
+      stream, so a truncated reply never reads as complete. The phone loads
+      no image from a paired computer by URL (a browser screenshot arrives as
+      a data URL inside a response), so no native image loader reaches a
+      pinned host. iOS asks once before the app reaches a private LAN
+      address, with the reason "Octant connects to computers you pair with on
+      your local network."; no Bonjour service is declared. Android needs no
+      permission beyond network access for a private address.
 - **Adding a computer in one step.** Partly built: the host certificate,
   pairing code, client trust rule, desktop and phone pinning above, and the
   one-line start. Key rotation is planned in

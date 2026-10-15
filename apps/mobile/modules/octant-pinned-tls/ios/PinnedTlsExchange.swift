@@ -3,7 +3,8 @@
 // trust decision is only whether the served leaf's SubjectPublicKeyInfo
 // hashes to one of the given pins, and writes the request only after that
 // handshake passed. It parses nothing the listener sends: the reply's bytes
-// go back whole to the shared client runtime, which frames HTTP.
+// go back to the shared client runtime as they arrive, one read at a time,
+// and the runtime frames HTTP, so an event stream streams.
 //
 // Network.framework rather than URLSession: URLSession cannot dial an
 // address while sending a name, and the platform's transport security rules
@@ -16,25 +17,34 @@ import Foundation
 import Network
 import Security
 
-public enum PinnedTlsOutcome {
-  case responded(servedPin: String, response: Data)
+public enum PinnedTlsOpening {
+  /// The handshake passed the pin and the request was written.
+  case opened(servedPin: String)
   /// The handshake refused the served key; nothing was written.
   case refused(servedPin: String?)
   case failed(reason: String)
 }
 
+public enum PinnedTlsRead {
+  case data(Data)
+  /// The listener closed the connection.
+  case end
+  case failed
+}
+
 public final class PinnedTlsExchange {
   /// A listener has this long to finish the handshake, as on the desktop.
   public static let handshakeTimeout: TimeInterval = 10
-  /// The most a reply may hold; a larger one is refused rather than buffered.
-  public static let maxResponseBytes = 16 * 1024 * 1024
+  /// The most one read hands back.
+  public static let maxReadBytes = 64 * 1024
 
   private let queue = DispatchQueue(label: "sh.octant.pinned-tls")
   private let connection: NWConnection
   private let pinCheck: PinCheck
   private let request: Data
-  private var completion: ((PinnedTlsOutcome) -> Void)?
-  private var response = Data()
+  private var opened: ((PinnedTlsOpening) -> Void)?
+  private var isOpen = false
+  private var closed = false
   private var handshakeTimer: DispatchWorkItem?
 
   /// The handshake's one trust decision and what it saw, read again before the first write.
@@ -77,10 +87,10 @@ public final class PinnedTlsExchange {
       using: parameters)
   }
 
-  public func start(completion: @escaping (PinnedTlsOutcome) -> Void) {
+  public func start(opened: @escaping (PinnedTlsOpening) -> Void) {
     queue.async { [self] in
-      self.completion = completion
-      let timer = DispatchWorkItem { [weak self] in self?.finish(.failed(reason: "handshake-failed")) }
+      self.opened = opened
+      let timer = DispatchWorkItem { [weak self] in self?.settle(.failed(reason: "handshake-failed")) }
       self.handshakeTimer = timer
       self.queue.asyncAfter(deadline: .now() + PinnedTlsExchange.handshakeTimeout, execute: timer)
       self.connection.stateUpdateHandler = { [weak self] state in self?.changed(to: state) }
@@ -88,8 +98,26 @@ public final class PinnedTlsExchange {
     }
   }
 
+  /// The next bytes the listener sent, waiting for at least one.
+  public func read(completion: @escaping (PinnedTlsRead) -> Void) {
+    queue.async { [self] in
+      guard isOpen, !closed else { return completion(closed ? .end : .failed) }
+      connection.receive(minimumIncompleteLength: 1, maximumLength: PinnedTlsExchange.maxReadBytes) {
+        [weak self] data, _, isComplete, error in
+        if let data, !data.isEmpty { return completion(.data(data)) }
+        if isComplete || self?.closed != false { return completion(.end) }
+        completion(error == nil ? .end : .failed)
+      }
+    }
+  }
+
   public func cancel() {
-    queue.async { [self] in finish(.failed(reason: "connection-failed")) }
+    queue.async { [self] in
+      settle(.failed(reason: "connection-failed"))
+      closed = true
+      connection.stateUpdateHandler = nil
+      connection.cancel()
+    }
   }
 
   private func changed(to state: NWConnection.State) {
@@ -98,51 +126,43 @@ public final class PinnedTlsExchange {
       handshakeTimer?.cancel()
       // The verify block is the only way to reach ready; this is the same
       // decision read again before the first byte.
-      guard pinCheck.accepted else { return finish(.refused(servedPin: pinCheck.servedPin)) }
+      guard pinCheck.accepted, let servedPin = pinCheck.servedPin else {
+        return settle(.refused(servedPin: pinCheck.servedPin))
+      }
       connection.send(
         content: request,
         completion: .contentProcessed { [weak self] error in
           guard let self else { return }
-          if error != nil { return self.finish(.failed(reason: "connection-failed")) }
-          self.receive()
+          if error != nil { return self.settle(.failed(reason: "connection-failed")) }
+          self.isOpen = true
+          self.settle(.opened(servedPin: servedPin))
         })
     case .failed, .waiting:
       if let servedPin = pinCheck.servedPin, !pinCheck.accepted {
-        finish(.refused(servedPin: servedPin))
+        settle(.refused(servedPin: servedPin))
       } else if pinCheck.servedPin == nil {
-        finish(.failed(reason: "unreachable"))
+        settle(.failed(reason: "unreachable"))
       } else {
-        finish(.failed(reason: "connection-failed"))
+        settle(.failed(reason: "connection-failed"))
       }
     default:
       break
     }
   }
 
-  private func receive() {
-    connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) {
-      [weak self] data, _, isComplete, error in
-      guard let self else { return }
-      if let data { self.response.append(data) }
-      if self.response.count > PinnedTlsExchange.maxResponseBytes {
-        return self.finish(.failed(reason: "too-large"))
-      }
-      if isComplete {
-        return self.finish(
-          .responded(servedPin: self.pinCheck.servedPin ?? "", response: self.response))
-      }
-      if error != nil { return self.finish(.failed(reason: "connection-failed")) }
-      self.receive()
-    }
-  }
-
-  private func finish(_ outcome: PinnedTlsOutcome) {
-    guard let completion else { return }
-    self.completion = nil
+  /// Reports how opening went, once; anything but opened also closes the connection.
+  private func settle(_ opening: PinnedTlsOpening) {
+    guard let opened else { return }
+    self.opened = nil
     handshakeTimer?.cancel()
+    if case .opened = opening {
+      opened(opening)
+      return
+    }
+    closed = true
     connection.stateUpdateHandler = nil
     connection.cancel()
-    completion(outcome)
+    opened(opening)
   }
 
   /// `sha256-` and the unpadded base64url SHA-256 of the leaf's DER SubjectPublicKeyInfo.

@@ -1,7 +1,8 @@
 // Runs one PinnedTlsExchange from the command line, so a test on a Mac can
 // drive the phone's iOS exchange against a real listener. Reads one JSON
-// object on stdin and writes the outcome as one JSON object on stdout. It
-// is built only by that test; the app's pod includes only `ios/`.
+// object on stdin, then writes one JSON line for the opening and one per
+// read until the reply ends. It is built only by that test; the app's pod
+// includes only `ios/`.
 
 import Foundation
 
@@ -11,6 +12,12 @@ struct Input: Decodable {
   let serverName: String?
   let pins: [String]
   let request: String
+}
+
+func emit(_ line: [String: String]) {
+  var data = try! JSONSerialization.data(withJSONObject: line)
+  data.append(0x0A)
+  FileHandle.standardOutput.write(data)
 }
 
 let data = FileHandle.standardInput.readDataToEndOfFile()
@@ -23,21 +30,36 @@ else {
 let exchange = PinnedTlsExchange(
   address: input.address, port: input.port, serverName: input.serverName, pins: input.pins,
   request: request)
-let done = DispatchSemaphore(value: 0)
-var output: [String: String] = [:]
-exchange.start { outcome in
-  switch outcome {
-  case .responded(let servedPin, let response):
-    output = [
-      "status": "responded", "servedPin": servedPin, "response": response.base64EncodedString(),
-    ]
-  case .refused(let servedPin):
-    output = ["status": "refused"]
-    if let servedPin { output["servedPin"] = servedPin }
-  case .failed(let reason):
-    output = ["status": "failed", "reason": reason]
+
+func readNext() {
+  exchange.read { next in
+    switch next {
+    case .data(let chunk):
+      emit(["status": "data", "chunk": chunk.base64EncodedString()])
+      readNext()
+    case .end:
+      emit(["status": "end"])
+      exit(0)
+    case .failed:
+      emit(["status": "failed"])
+      exit(0)
+    }
   }
-  done.signal()
 }
-done.wait()
-FileHandle.standardOutput.write(try! JSONSerialization.data(withJSONObject: output))
+
+exchange.start { opening in
+  switch opening {
+  case .opened(let servedPin):
+    emit(["status": "opened", "servedPin": servedPin])
+    readNext()
+  case .refused(let servedPin):
+    var line = ["status": "refused"]
+    if let servedPin { line["servedPin"] = servedPin }
+    emit(line)
+    exit(0)
+  case .failed(let reason):
+    emit(["status": "failed", "reason": reason])
+    exit(0)
+  }
+}
+dispatchMain()

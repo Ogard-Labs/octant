@@ -3,14 +3,14 @@
 // address, runs a TLS 1.3 handshake whose trust decision is only whether the
 // served leaf's SubjectPublicKeyInfo hashes to one of the given pins, and
 // writes the request only after that handshake passed. It parses nothing the
-// listener sends: the reply's bytes go back whole to the shared client
-// runtime, which frames HTTP. Nothing here reads the platform's trust store,
+// listener sends: the reply's bytes go back to the shared client runtime as
+// they arrive, one read at a time, and the runtime frames HTTP, so an event
+// stream streams. Nothing here reads the platform's trust store,
 // and nothing here turns off a check without the pin in its place.
 
 package sh.octant.pinnedtls
 
 import android.util.Base64
-import java.io.ByteArrayOutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -22,13 +22,23 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.X509TrustManager
 
-sealed class PinnedTlsOutcome {
-  data class Responded(val servedPin: String, val response: ByteArray) : PinnedTlsOutcome()
+sealed class PinnedTlsOpening {
+  /** The handshake passed the pin and the request was written. */
+  data class Opened(val servedPin: String) : PinnedTlsOpening()
 
   /** The handshake refused the served key; nothing was written. */
-  data class Refused(val servedPin: String?) : PinnedTlsOutcome()
+  data class Refused(val servedPin: String?) : PinnedTlsOpening()
 
-  data class Failed(val reason: String) : PinnedTlsOutcome()
+  data class Failed(val reason: String) : PinnedTlsOpening()
+}
+
+sealed class PinnedTlsRead {
+  class Data(val chunk: ByteArray) : PinnedTlsRead()
+
+  /** The listener closed the connection. */
+  object End : PinnedTlsRead()
+
+  object Failed : PinnedTlsRead()
 }
 
 class PinnedTlsExchange(
@@ -48,8 +58,8 @@ class PinnedTlsExchange(
     /** A listener has this long to connect and finish the handshake, as on the desktop. */
     const val HANDSHAKE_TIMEOUT_MS = 10_000
 
-    /** The most a reply may hold; a larger one is refused rather than buffered. */
-    const val MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+    /** The most one read hands back. */
+    const val MAX_READ_BYTES = 64 * 1024
 
     /** `sha256-` and the unpadded base64url SHA-256 of a DER SubjectPublicKeyInfo. */
     fun pinOf(subjectPublicKeyInfo: ByteArray): String {
@@ -60,15 +70,17 @@ class PinnedTlsExchange(
     }
   }
 
-  /** Runs the exchange on the calling thread, which must not be the main thread. */
-  fun run(): PinnedTlsOutcome {
+  @Volatile private var open: SSLSocket? = null
+
+  /** Connects and writes the request, on the calling thread, which must not be the main thread. */
+  fun open(): PinnedTlsOpening {
     // A literal parses without a lookup; a name here would be a caller bug.
-    if (!isLiteral(address)) return PinnedTlsOutcome.Failed("unreachable")
+    if (!isLiteral(address)) return PinnedTlsOpening.Failed("unreachable")
     val target =
       try {
         InetAddress.getByName(address)
       } catch (error: Exception) {
-        return PinnedTlsOutcome.Failed("unreachable")
+        return PinnedTlsOpening.Failed("unreachable")
       }
     val raw = Socket()
     socket = raw
@@ -76,11 +88,11 @@ class PinnedTlsExchange(
       raw.connect(InetSocketAddress(target, port), HANDSHAKE_TIMEOUT_MS)
     } catch (error: Exception) {
       raw.close()
-      return PinnedTlsOutcome.Failed(if (cancelled) "connection-failed" else "unreachable")
+      return PinnedTlsOpening.Failed(if (cancelled) "connection-failed" else "unreachable")
     }
     if (raw.inetAddress != target) {
       raw.close()
-      return PinnedTlsOutcome.Failed("unreachable")
+      return PinnedTlsOpening.Failed("unreachable")
     }
     val tls: SSLSocket
     try {
@@ -99,37 +111,43 @@ class PinnedTlsExchange(
     } catch (error: Exception) {
       raw.close()
       val pin = servedPin
-      return if (pin != null && !accepted) PinnedTlsOutcome.Refused(pin)
-      else PinnedTlsOutcome.Failed("handshake-failed")
+      return if (pin != null && !accepted) PinnedTlsOpening.Refused(pin)
+      else PinnedTlsOpening.Failed("handshake-failed")
     }
     // The trust manager is the only way through the handshake; this is the
     // same decision read again before the first byte.
     val pin = servedPin
     if (!accepted || pin == null) {
       tls.close()
-      return PinnedTlsOutcome.Refused(pin)
+      return PinnedTlsOpening.Refused(pin)
     }
     try {
       tls.soTimeout = 0
       tls.outputStream.write(request)
       tls.outputStream.flush()
-      val reply = ByteArrayOutputStream()
-      val buffer = ByteArray(64 * 1024)
-      val input = tls.inputStream
-      while (true) {
-        val read = input.read(buffer)
-        if (read < 0) break
-        reply.write(buffer, 0, read)
-        if (reply.size() > MAX_RESPONSE_BYTES) {
-          tls.close()
-          return PinnedTlsOutcome.Failed("too-large")
-        }
-      }
-      tls.close()
-      return PinnedTlsOutcome.Responded(pin, reply.toByteArray())
     } catch (error: Exception) {
       tls.close()
-      return PinnedTlsOutcome.Failed("connection-failed")
+      return PinnedTlsOpening.Failed("connection-failed")
+    }
+    open = tls
+    return PinnedTlsOpening.Opened(pin)
+  }
+
+  /** The next bytes the listener sent, waiting for at least one, on a thread that may block. */
+  fun read(): PinnedTlsRead {
+    val tls = open ?: return if (cancelled) PinnedTlsRead.End else PinnedTlsRead.Failed
+    return try {
+      val buffer = ByteArray(MAX_READ_BYTES)
+      val read = tls.inputStream.read(buffer)
+      if (read < 0) {
+        tls.close()
+        PinnedTlsRead.End
+      } else {
+        PinnedTlsRead.Data(buffer.copyOf(read))
+      }
+    } catch (error: Exception) {
+      tls.close()
+      if (cancelled) PinnedTlsRead.End else PinnedTlsRead.Failed
     }
   }
 

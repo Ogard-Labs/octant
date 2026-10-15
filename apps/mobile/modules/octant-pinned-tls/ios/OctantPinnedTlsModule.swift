@@ -1,5 +1,6 @@
 // The phone's pinned listener transport, as the Expo module the client
-// runtime's exchange port calls. Bytes cross as base64 strings.
+// runtime's exchange port calls: open an exchange, then read its reply one
+// chunk at a time. Bytes cross as base64 strings.
 
 import ExpoModulesCore
 import Foundation
@@ -17,7 +18,7 @@ public class OctantPinnedTlsModule: Module {
       }
     }
 
-    AsyncFunction("exchange") {
+    AsyncFunction("open") {
       (id: String, address: String, port: Int, serverName: String?, pins: [String], request: String,
         promise: Promise) in
       guard let bytes = Data(base64Encoded: request), let port = UInt16(exactly: port) else {
@@ -27,27 +28,48 @@ public class OctantPinnedTlsModule: Module {
       let exchange = PinnedTlsExchange(
         address: address, port: port, serverName: serverName, pins: pins, request: bytes)
       self.lock.withLock { self.running[id] = exchange }
-      exchange.start { outcome in
-        self.lock.withLock { _ = self.running.removeValue(forKey: id) }
-        switch outcome {
-        case .responded(let servedPin, let response):
-          promise.resolve([
-            "status": "responded", "servedPin": servedPin,
-            "response": response.base64EncodedString(),
-          ])
+      exchange.start { opening in
+        switch opening {
+        case .opened(let servedPin):
+          promise.resolve(["status": "opened", "servedPin": servedPin])
         case .refused(let servedPin):
+          self.forget(id)
           var refused: [String: Any] = ["status": "refused"]
           if let servedPin { refused["servedPin"] = servedPin }
           promise.resolve(refused)
         case .failed(let reason):
+          self.forget(id)
           promise.resolve(["status": "failed", "reason": reason])
         }
       }
     }
 
-    Function("cancel") { (id: String) in
-      self.lock.withLock { self.running[id] }?.cancel()
+    AsyncFunction("read") { (id: String, promise: Promise) in
+      guard let exchange = self.lock.withLock({ self.running[id] }) else {
+        promise.resolve(["status": "end"])
+        return
+      }
+      exchange.read { next in
+        switch next {
+        case .data(let chunk):
+          promise.resolve(["status": "data", "chunk": chunk.base64EncodedString()])
+        case .end:
+          self.forget(id)
+          promise.resolve(["status": "end"])
+        case .failed:
+          self.forget(id)
+          promise.resolve(["status": "failed"])
+        }
+      }
     }
+
+    Function("cancel") { (id: String) in
+      self.lock.withLock { self.running.removeValue(forKey: id) }?.cancel()
+    }
+  }
+
+  private func forget(_ id: String) {
+    lock.withLock { _ = running.removeValue(forKey: id) }
   }
 
   /// Every address the system resolver gives for the name, as IP literals.

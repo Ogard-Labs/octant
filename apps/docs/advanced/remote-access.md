@@ -217,7 +217,10 @@ The phone app pairs from the same app pairing code.
 2. In the Octant phone app, open the pairing screen and choose **Scan QR
    code**, then point the camera at the QR code. The first time, the app asks
    for the camera; it uses it only to scan this code. You can paste the code
-   into **Pairing code** and choose **Start pairing** instead.
+   into **Pairing code** and choose **Start pairing** instead. When the
+   computer is on your local network rather than Tailscale, iPhone also asks
+   once whether Octant may connect to devices on your local network; allow
+   it, and start pairing again if the first try could not reach the computer.
 3. Octant checks the code, checks that the address is on your private network
    or Tailscale, and compares the computer's certificate key with the pin
    during the connection, before it sends anything. It then checks the
