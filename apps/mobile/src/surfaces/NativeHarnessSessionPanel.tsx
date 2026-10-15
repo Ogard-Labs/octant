@@ -17,10 +17,7 @@ import {
   previewMobileNativeHarnessFollowUp,
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
-import type {
-  NativeHarnessFollowUpPreview,
-  NativeHarnessSessionView,
-} from "@octant/contracts";
+import type { NativeHarnessFollowUpPreview, NativeHarnessSessionView } from "@octant/contracts";
 import { GlassChip, useTheme } from "../../design-system";
 import { OutsideContentNote } from "./OutsideContentNote";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
