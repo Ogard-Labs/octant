@@ -500,7 +500,7 @@ describe("automation scheduler reconciliation pass", () => {
       },
       appendRunCreated: (input) => session.store.appendRunCreated(input),
       appendRunStatusChanged: (input) => session.store.appendRunStatusChanged(input),
-      replayAll: () => session.store.replayAll(),
+      replayEach: (apply) => session.store.replayEach(apply),
     };
     let wallNow = "2026-08-10T16:30:00.000Z";
     const crashing = new AutomationSchedulerService({

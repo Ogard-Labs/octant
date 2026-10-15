@@ -87,7 +87,7 @@ function activeProject(id: string, name: string) {
   };
 }
 
-function createHarness(): Harness {
+function createHarness(options: { readonly historyAvailable?: () => boolean } = {}): Harness {
   const connection = openConnection();
   const registry = registerAutomationEvents(new EventRegistry());
   const projection = new AutomationProjection();
@@ -122,6 +122,9 @@ function createHarness(): Harness {
       }),
     },
     hostId: "local",
+    ...(options.historyAvailable === undefined
+      ? {}
+      : { historyAvailable: options.historyAvailable }),
     now: () => 1,
   });
   return { handler, service, projection };
@@ -257,6 +260,27 @@ describe("automation routes", () => {
     expect(raw).not.toContain("Summarize the Project's open work.");
     expect(raw).not.toContain("binding");
     expect(raw).not.toContain("authorityProfile");
+  });
+
+  it("marks the list as unloaded and refuses commands when start-up could not read the history", async () => {
+    const harness = createHarness({ historyAvailable: () => false });
+    seedAutomation(harness, automationId("aa01"));
+
+    const list = decodeAutomationQueryResponse(
+      await json(await harness.handler(getRequest("/api/automations/list?mode=all"))),
+    );
+    expect(list).toEqual({ kind: "automation-list", items: [], historyUnavailable: true });
+
+    const refused = await json(
+      await harness.handler(
+        postCommand({
+          kind: "run-now-automation",
+          automationId: automationId("aa01"),
+          expectedVersion: 1,
+        }),
+      ),
+    );
+    expect(refused).toMatchObject({ kind: "automation-command-failed", reason: "unsupported" });
   });
 
   it("filters lists by mode and requested Project, failing closed on foreign Projects", async () => {

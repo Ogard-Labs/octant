@@ -87,7 +87,7 @@ export interface AutomationSchedulerPassSummary {
 export interface AutomationSchedulerServiceOptions {
   readonly store: Pick<
     AutomationEventStore,
-    "appendOccurrenceLedger" | "appendRunCreated" | "appendRunStatusChanged" | "replayAll"
+    "appendOccurrenceLedger" | "appendRunCreated" | "appendRunStatusChanged" | "replayEach"
   >;
   readonly projection: AutomationProjection;
   readonly dispatch: AutomationDispatchPort;

@@ -132,7 +132,7 @@ describe("automation scheduler restart recovery", () => {
       },
       appendRunCreated: (input) => first.store.appendRunCreated(input),
       appendRunStatusChanged: (input) => first.store.appendRunStatusChanged(input),
-      replayAll: () => first.store.replayAll(),
+      replayEach: (apply) => first.store.replayEach(apply),
     };
     const crashing = new AutomationSchedulerService({
       store: crashingStore,
@@ -327,5 +327,92 @@ describe("automation scheduler restart recovery", () => {
     expect(summary.recoveredRunIds).toHaveLength(0);
     expect(journalEventCount(second.connection)).toBe(before);
     second.connection.close();
+  });
+
+  /**
+   * Fill the journal with copies of one real run frame under other run ids,
+   * the shape of a long-lived host whose recurring automations ran for years.
+   */
+  function seedRunHistory(connection: SqliteConnection, rows: number): void {
+    connection
+      .prepare(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+         INSERT INTO event_journal (
+           event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+           event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+         )
+         SELECT printf('ee000000-0000-4000-8000-%012d', n.i), source.aggregate_type,
+           printf('ef000000-0000-4000-8000-%012d', n.i), 1, source.event_name,
+           1, source.correlation_id, source.actor_kind, source.actor_id, source.occurred_at,
+           json_set(
+             source.payload_json,
+             '$.run.id', printf('ef000000-0000-4000-8000-%012d', n.i),
+             '$.run.lifecycle', 'cancelled'
+           )
+         FROM n, (
+           SELECT * FROM event_journal WHERE aggregate_type = ? AND event_name = 'automation-run-created@1' LIMIT 1
+         ) AS source`,
+      )
+      .run(rows, AUTOMATION_RUN_AGGREGATE_TYPE);
+  }
+
+  function journalWithRunHistory(prefix: string, rows: number): string {
+    const path = storePath(prefix);
+    const first = openSession(path);
+    first.store.appendDefinitionCreated({ automation: intervalDefinition() });
+    const claimed = first.scheduler(() => "2026-08-10T13:00:10.000Z").runPass();
+    expect(claimed.claimedRunIds).toHaveLength(1);
+    first.store.appendRunStatusChanged({
+      automationId: intervalDefinition().id,
+      runId: claimed.claimedRunIds[0] as never,
+      previousLifecycle: "queued",
+      lifecycle: "cancelled",
+      version: 2,
+      expectedVersion: 1,
+      updatedAt: "2026-08-10T13:00:20.000Z" as UtcTimestamp,
+    });
+    seedRunHistory(first.connection, rows);
+    first.connection.close();
+    return path;
+  }
+
+  it("starts, lists, and schedules automations whose run history passes the old scan cap", () => {
+    const path = journalWithRunHistory("octant-scheduler-long-history-", 120_000);
+
+    const session = openSession(path);
+
+    expect(session.projection.getDefinition(intervalDefinition().id)).toBeDefined();
+    const summary = session.scheduler(() => "2026-08-10T14:00:10.000Z").runPass();
+    expect(summary.errors).toHaveLength(0);
+    expect(summary.claimedRunIds).toHaveLength(1);
+    session.connection.close();
+  }, 300_000);
+
+  it("reports history that passes the scan cap as unloaded and fires nothing", () => {
+    const path = journalWithRunHistory("octant-scheduler-capped-history-", 50);
+    const connection = openSqlite(path);
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => "2026-08-10T12:00:00.000Z",
+    });
+    const store = new AutomationEventStore({ journal, uuid: nextUuid, actor, maxScan: 40 });
+
+    expect(hydrateAutomationProjection({ store, projection: runtime.automationProjection })).toBe(
+      "snapshot-required",
+    );
+    expect(runtime.automationProjection.getDefinition(intervalDefinition().id)).toBeUndefined();
+    const offers: Array<AutomationDispatchOffer> = [];
+    const scheduler = new AutomationSchedulerService({
+      store,
+      projection: runtime.automationProjection,
+      dispatch: { offer: (offer) => offers.push(offer) },
+      now: () => "2026-08-10T14:00:10.000Z" as UtcTimestamp,
+    });
+    expect(scheduler.runPass().claimedRunIds).toHaveLength(0);
+    expect(offers).toHaveLength(0);
+    connection.close();
   });
 });

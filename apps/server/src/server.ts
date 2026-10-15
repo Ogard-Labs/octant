@@ -10061,12 +10061,15 @@ export function startOctantServer(
     });
     // The Automation projection is in-memory; rebuild it from the
     // authoritative journal on every startup. Hydration fails closed: a
-    // hostile or undecodable frame leaves the projection empty instead of
-    // trusting a partially valid stream.
-    hydrateAutomationProjection({
-      store: automationEventStore,
-      projection: persistence.automationProjection,
-    });
+    // hostile or undecodable frame, or history past the scan cap, leaves the
+    // projection empty instead of trusting a partial stream. The host still
+    // starts; the Automation list reports the degraded state and the
+    // scheduler never starts, so nothing fires against history it never read.
+    const automationHistoryAvailable =
+      hydrateAutomationProjection({
+        store: automationEventStore,
+        projection: persistence.automationProjection,
+      }) === "ok";
     // A6: shared device destinations, opt-in preferences, durable delivery
     // receipts. Credentialed APNs/FCM remains a named validation residual —
     // the default transport reports unavailable honestly.
@@ -10294,7 +10297,7 @@ export function startOctantServer(
       dispatch: automationDispatch,
       now: () => new Date().toISOString() as UtcTimestamp,
     });
-    automationScheduler.start();
+    if (automationHistoryAvailable) automationScheduler.start();
     // The host's own timer for completed threads, fed by every mode's service
     // that can archive on the host's behalf (decision 0088).
     const completedThreadArchiveSweep = new CompletedThreadArchiveSweep({
@@ -10331,6 +10334,7 @@ export function startOctantServer(
       windowAuthorityStore,
       projects: projectService,
       hostId: String(LOCAL_HOST_ID),
+      historyAvailable: () => automationHistoryAvailable,
     });
     const workPromotionProjection = new WorkPromotionProjection();
     const workPromotionEventStore = new WorkPromotionEventStore({
