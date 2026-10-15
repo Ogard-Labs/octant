@@ -4530,7 +4530,10 @@ where it was or narrows it:
 - _The terminal._ `octant agent` shows the list with the host's preselection
   ticked. Line mode takes `y` (the ticked hosts), `y 1,3` (exactly those), or
   `y none`, and a number the list lacks refuses the call; the full-screen panel
-  toggles a host by its number and sends the ticked ones on `y`. Both send
+  toggles a host by its number and sends the ticked ones on `y`. The panel
+  cannot scroll, so it shows eight hosts a page (`>` and `<` turn it) with the
+  ticked count and the numbers of ticked hosts on other pages, and its answer
+  line stays on screen. Both send
   hosts only with an approval of a command that listed them.
 - _What is not wired._ A child admitted with Full access whose parent has
   since narrowed to a posture that clamps it to `proxied` runs its commands

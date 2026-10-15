@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { approvalDecisionBody, chosenCommandHosts, preselectedCommandHosts } from "./agentHost";
 import {
   approvalPanelOutsideContent,
+  approvalPanelHosts,
+  APPROVAL_PANEL_HOST_ROWS,
   paletteFor,
   readTuiApprovalAnswer,
   retryFooterText,
@@ -297,6 +299,59 @@ describe("the approval panel's host list", () => {
     expect(typeLines("2", "n")).toEqual({
       approvalId: (approval as { id: string }).id,
       decision: "deny",
+    });
+  });
+});
+
+describe("the approval panel's long host list", () => {
+  const hosts = Array.from({ length: 192 }, (_entry, index) => ({
+    host: `host${String(index + 1)}.example.com`,
+    port: 443,
+    from: index < 128 ? "thread-rule" : "proposal",
+    preselected: index < 128,
+  }));
+  const approval = { id: "00000000-0000-4000-8000-000000000082", commandHosts: hosts } as never;
+
+  it("shows one bounded page and names every ticked host it leaves off", () => {
+    const ticked = preselectedCommandHosts(approval);
+    const first = approvalPanelHosts(approval, ticked, 0);
+    expect(first.rows).toHaveLength(APPROVAL_PANEL_HOST_ROWS);
+    expect(first.rows[0]).toBe("[x] 1. host1.example.com:443  thread rule");
+    expect(first.summary).toBe(
+      "hosts 1–8 of 192 · 128 ticked, also 9–128 · > next page · < previous",
+    );
+    const last = approvalPanelHosts(approval, new Set([0, 2, 4, 6, 8, 10, 12, 14, 191]), 99);
+    expect(last.page).toBe(23);
+    expect(last.rows).toHaveLength(APPROVAL_PANEL_HOST_ROWS);
+    expect(last.rows.at(-1)).toBe("[x] 192. host192.example.com:443  proposal");
+    expect(last.summary).toContain("9 ticked, also 1, 3, 5, 7, 9, 11 and 2 more runs");
+  });
+
+  it("pages with > and <, keeps numbers working across pages, and sends only the ticked hosts", () => {
+    let ticked = new Set<number>([0]);
+    let page = 0;
+    for (const line of [">", ">", "20", "<", "1", "<", "<"]) {
+      const answer = readTuiApprovalAnswer(line, approval, ticked, false);
+      if (answer.kind === "page")
+        page = approvalPanelHosts(approval, ticked, page + answer.step).page;
+      if (answer.kind === "tick") ticked = new Set(answer.ticked);
+    }
+    expect(page).toBe(0);
+    expect(approvalPanelHosts(approval, ticked, page).summary).toContain("1 ticked, also 20");
+    expect(chosenCommandHosts(approval, ticked)).toEqual([
+      { host: "host20.example.com", port: 443 },
+    ]);
+  });
+
+  it("shows a short list whole, with no summary", () => {
+    const short = { commandHosts: hosts.slice(0, 3) } as never;
+    expect(approvalPanelHosts(short, new Set([0]), 4)).toEqual({
+      rows: [
+        "[x] 1. host1.example.com:443  thread rule",
+        "[ ] 2. host2.example.com:443  thread rule",
+        "[ ] 3. host3.example.com:443  thread rule",
+      ],
+      page: 0,
     });
   });
 });

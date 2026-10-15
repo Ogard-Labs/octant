@@ -81,7 +81,9 @@ In `octant agent`, the approval prints the list with `[x]` beside each ticked
 host. Line mode takes `y` for the ticked hosts, `y 1,3` for exactly those, and
 `y none` for none; a number the list does not have refuses the command. In the
 terminal UI, type a host's number and press Enter to tick or untick it, then
-`y` to allow with the hosts ticked.
+`y` to allow with the hosts ticked. A list longer than eight hosts shows a page
+at a time with the numbers of the ticked hosts on other pages; `>` and `<` turn
+the page.
 
 ## Verifying a model's tools
 

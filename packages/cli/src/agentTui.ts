@@ -23,7 +23,6 @@ import {
   approvalDecisionBody,
   approvalMayBeRemembered,
   chosenCommandHosts,
-  commandHostLines,
   decideAgentApproval,
   preselectedCommandHosts,
   listAgentModels,
@@ -55,6 +54,7 @@ import { notifyDesktop } from "./agentNotify";
 import {
   defaultCheckpointLabel,
   describeAgentGoal,
+  approvalPanelHosts,
   paletteFor,
   readTuiApprovalAnswer,
   retryFooterText,
@@ -149,7 +149,9 @@ class AgentScreen {
   /** A Browser call waiting on a site; not a harness approval, so read on its own. */
   #siteApproval: AgentSiteApproval | undefined;
   /** The hosts ticked on the waiting command approval that lists them. */
-  #hostTicks: { readonly approvalId: string; readonly ticked: ReadonlySet<number> } | undefined;
+  #hostTicks:
+    | { readonly approvalId: string; readonly ticked: ReadonlySet<number>; readonly page: number }
+    | undefined;
   #note = "";
   #drawn = "";
   #ticks = 0;
@@ -565,6 +567,13 @@ class AgentScreen {
       : preselectedCommandHosts(approval);
   }
 
+  /** The page of the approval's host list on screen. */
+  #hostPage(approval: NativeHarnessApproval): number {
+    return this.#hostTicks !== undefined && this.#hostTicks.approvalId === String(approval.id)
+      ? this.#hostTicks.page
+      : 0;
+  }
+
   #draw(): void {
     const { t, fg, bold, dim } = this.#tui;
     const p = this.#palette;
@@ -678,7 +687,8 @@ class AgentScreen {
           ? ""
           : approvalPanelOutsideContent(approval.outsideContent);
       const outsideBlock = outside === "" ? "" : `${outside}\n`;
-      const hosts = commandHostLines(approval, this.#ticked(approval));
+      const listed = approvalPanelHosts(approval, this.#ticked(approval), this.#hostPage(approval));
+      const hosts = listed.summary === undefined ? listed.rows : [...listed.rows, listed.summary];
       // A child's ask and a single-use ask (the thread took in outside content)
       // have no session-wide choice: the host would take it as a single approval.
       this.#panelText.content =
@@ -1128,7 +1138,20 @@ class AgentScreen {
         approvalMayBeRemembered(approval),
       );
       if (answer.kind === "tick") {
-        this.#hostTicks = { approvalId: String(approval.id), ticked: answer.ticked };
+        this.#hostTicks = {
+          approvalId: String(approval.id),
+          ticked: answer.ticked,
+          page: this.#hostPage(approval),
+        };
+        this.#draw();
+        return;
+      }
+      if (answer.kind === "page") {
+        this.#hostTicks = {
+          approvalId: String(approval.id),
+          ticked,
+          page: approvalPanelHosts(approval, ticked, this.#hostPage(approval) + answer.step).page,
+        };
         this.#draw();
         return;
       }

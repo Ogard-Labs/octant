@@ -4,7 +4,7 @@ import type {
   NativeHarnessSessionView,
   ThreadGoal,
 } from "@octant/contracts";
-import { readCommandHostNumbers } from "./agentHost";
+import { commandHostLines, readCommandHostNumbers } from "./agentHost";
 import type { AgentThreadSnapshot } from "./agentThread";
 import { BUILT_IN_THEME_PRESET_IDS, resolveThemePresetTokens } from "@octant/theme";
 import {
@@ -299,6 +299,76 @@ export function approvalPanelOutsideContent(outsideContent: ApprovalOutsideConte
     .join("\n");
 }
 
+/**
+ * How many hosts the approval panel shows at once. The panel cannot scroll and
+ * a taller one is clipped, which would hide hosts `y` still sends and the
+ * line that says how to answer; a host list can hold 192 entries.
+ */
+export const APPROVAL_PANEL_HOST_ROWS = 8;
+
+/** The page of a command's host list the approval panel shows, and what it leaves out. */
+export interface ApprovalPanelHosts {
+  /** One line per host on this page, numbered as in the whole list. */
+  readonly rows: ReadonlyArray<string>;
+  /** The page shown, clamped to the pages the list has. */
+  readonly page: number;
+  /**
+   * For a list longer than one page: which hosts show, how many are ticked,
+   * and the numbers of ticked hosts on other pages, so `y` never sends a host
+   * the panel does not name.
+   */
+  readonly summary?: string;
+}
+
+/** Numbers as runs, `1–4, 9`, at most six runs before a count of the rest. */
+function numberRuns(numbers: ReadonlyArray<number>): string {
+  const runs: Array<[number, number]> = [];
+  for (const number of numbers) {
+    const last = runs.at(-1);
+    if (last !== undefined && last[1] === number - 1) last[1] = number;
+    else runs.push([number, number]);
+  }
+  const shown = runs
+    .slice(0, 6)
+    .map(([from, to]) => (from === to ? String(from) : `${String(from)}–${String(to)}`));
+  return runs.length > 6
+    ? `${shown.join(", ")} and ${String(runs.length - 6)} more runs`
+    : shown.join(", ");
+}
+
+/**
+ * The approval panel's view of a marked thread's command hosts: at most
+ * `APPROVAL_PANEL_HOST_ROWS` rows, and for a longer list a summary of the
+ * page, the ticked count, and the ticked hosts on other pages.
+ */
+export function approvalPanelHosts(
+  approval: Pick<NativeHarnessApproval, "commandHosts">,
+  ticked: ReadonlySet<number>,
+  page: number,
+): ApprovalPanelHosts {
+  const hosts = approval.commandHosts ?? [];
+  const pages = Math.max(1, Math.ceil(hosts.length / APPROVAL_PANEL_HOST_ROWS));
+  const shown = Math.min(Math.max(0, page), pages - 1);
+  const from = shown * APPROVAL_PANEL_HOST_ROWS;
+  const to = Math.min(hosts.length, from + APPROVAL_PANEL_HOST_ROWS);
+  const rows = commandHostLines(approval, ticked).slice(from, to);
+  if (pages === 1) return { rows, page: shown };
+  const elsewhere = [...ticked]
+    .filter((index) => index < hosts.length && (index < from || index >= to))
+    .sort((a, b) => a - b)
+    .map((index) => index + 1);
+  const tickedCount = [...ticked].filter((index) => index < hosts.length).length;
+  return {
+    rows,
+    page: shown,
+    summary: [
+      `hosts ${String(from + 1)}–${String(to)} of ${String(hosts.length)}`,
+      `${String(tickedCount)} ticked${elsewhere.length === 0 ? "" : `, also ${numberRuns(elsewhere)}`}`,
+      "> next page · < previous",
+    ].join(" · "),
+  };
+}
+
 /** What a line typed while an approval waits does. */
 export type TuiApprovalAnswer =
   | {
@@ -307,13 +377,15 @@ export type TuiApprovalAnswer =
     }
   /** Hosts of a marked thread's command, ticked anew. */
   | { readonly kind: "tick"; readonly ticked: ReadonlySet<number> }
+  /** Another page of a host list too long to show at once. */
+  | { readonly kind: "page"; readonly step: 1 | -1 }
   | { readonly kind: "unknown" };
 
 /**
  * Reads a line typed at the approval panel. `y`, `a` (only when offered), and
- * `n` decide. When the command lists hosts, numbers toggle those hosts and
- * `none` clears every tick, so the person sees what `y` will send before
- * sending it.
+ * `n` decide. When the command lists hosts, numbers toggle those hosts,
+ * `none` clears every tick, and `>` and `<` page through a long list, so the
+ * person sees what `y` will send before sending it.
  */
 export function readTuiApprovalAnswer(
   text: string,
@@ -329,6 +401,8 @@ export function readTuiApprovalAnswer(
   if (lowered === "n" || lowered === "no") return { kind: "decide", decision: "deny" };
   const hosts = approval.commandHosts ?? [];
   if (hosts.length === 0) return { kind: "unknown" };
+  if (lowered === ">") return { kind: "page", step: 1 };
+  if (lowered === "<") return { kind: "page", step: -1 };
   const named = readCommandHostNumbers(lowered, hosts.length);
   if (named === undefined) return { kind: "unknown" };
   if (named.size === 0) return { kind: "tick", ticked: new Set() };
