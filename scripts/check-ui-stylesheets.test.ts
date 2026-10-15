@@ -353,7 +353,7 @@ describe("UI stylesheet check", () => {
     ]);
   });
 
-  it("keeps reading the tag after a greater-than inside a braced prop", () => {
+  it("does not credit a later element's class to a primitive whose braced prop holds a greater-than", () => {
     const primitives = collectPrimitiveClasses({
       "apps/web/src/palette/CommandPalette.tsx": [
         "<OctantInput",
