@@ -5853,7 +5853,9 @@ mechanisms are:
   Membership is derived from the valid records a host holds and the founder it
   pinned; an entry counts only when its writer is admitted through a chain of
   signed approvals and acceptances from that founder and the entry sits at or
-  before any cut on it. A new computer joins by writing a join request into
+  before any cut on it and, when a revocation names the slots its writer read
+  as the subject's own (`kept`), in every such revocation's kept slots, so a
+  slot the revoker did not read as the subject's stays closed to its key. A new computer joins by writing a join request into
   the store, signed over the time it was written; a request older than a day
   is not offered for approval. A member in good standing approves it by name,
   and only the store's own copy of the request can be approved, not a copy a
@@ -5879,8 +5881,8 @@ mechanisms are:
   (`apps/docs/guide/sync-artifacts.md`) say so before sync is turned on.
   Opt-in encryption of replicas is not this rule. A replica import appends
   versions to this journal and adopts nothing else. Membership accepts an
-  entry signed by an admitted instance's device signing key, within its cut,
-  as authentic. It does not delegate host authority between hosts.
+  entry signed by an admitted instance's device signing key, within its cut
+  and its kept slots, as authentic. It does not delegate host authority between hosts.
 - **Replica store endpoints.** A bucket endpoint must be `https` with no path,
   query, or user info, and must not be link-local — IPv4 `169.254.0.0/16` or
   IPv6 `fe80::/10`, literal or IPv4-mapped — where cloud instance metadata

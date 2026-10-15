@@ -626,6 +626,32 @@ describe("reconciling a comment entry", () => {
     expect(reconcileReplicaEntry(seen, reply)).toEqual({ outcome: "append-comment" });
   });
 
+  it("does not wait on a comment entry its writer had seen in a slot a revocation did not keep", () => {
+    // South saw Revoked's slot 4, but the revocation kept only 1-3 and 5, so
+    // nothing in slot 4 can ever apply here.
+    const reply = commentEntry({
+      instanceId: ids.south,
+      sequence: 1,
+      after: [slot(ids.revoked, 4)],
+    });
+    const revokedAround4 = state({
+      instances: [
+        { instanceId: ids.local, status: "member" },
+        { instanceId: ids.south, status: "member" },
+        {
+          instanceId: ids.revoked,
+          status: "revoked",
+          lastAcceptedSequence: 5,
+          kept: [
+            { from: 1, to: 3 },
+            { from: 5, to: 5 },
+          ],
+        },
+      ],
+    });
+    expect(reconcileReplicaEntry(revokedAround4, reply)).toEqual({ outcome: "append-comment" });
+  });
+
   it("changes nothing when the same comment entry is pulled again, and refuses another body in its slot", () => {
     const comment = commentEntry({ sequence: 3 });
     const applied = state({

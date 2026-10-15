@@ -122,7 +122,7 @@ them in.
   downloaded, a file that is not a valid record, or another writer's file)
   is not kept, and an entry the subject's key signed there does not count
   on any computer, whatever its kind; an artifact entry after it does not
-  wait on it. A revoker whose view needs more runs moves the cut earlier,
+  wait on it, nor does a comment entry whose `after` names it. A revoker whose view needs more runs moves the cut earlier,
   to the end of the last run that fits. A reader that does not know the
   encoding version fails closed on the whole record. A revocation without
   `kept`, as written before it existed, keeps every slot at or before its

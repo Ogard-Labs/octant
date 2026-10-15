@@ -328,8 +328,14 @@ function commentOutcome(
   for (const slot of [...state.applied, ...state.settledSlots]) {
     reached.add(`${String(slot.instanceId)}/${String(slot.sequence)}`);
   }
+  // A slot its writer's revocation refuses never applies here, so a comment
+  // that saw it does not wait on it, as a writer's own earlier slots do not.
   if (
-    entry.after.some((slot) => !reached.has(`${String(slot.instanceId)}/${String(slot.sequence)}`))
+    entry.after.some(
+      (slot) =>
+        !reached.has(`${String(slot.instanceId)}/${String(slot.sequence)}`) &&
+        membership(state, slot.instanceId, slot.sequence) !== "revoked",
+    )
   ) {
     return refuse("sequence-gap");
   }
