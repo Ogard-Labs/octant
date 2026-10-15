@@ -1,3 +1,4 @@
+import { threadCompactionSubject } from "../context/CompactionDivider";
 import type {
   ChatAttempt,
   ChatAttemptOutcome,
@@ -367,6 +368,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
       className="chat-transcript transcript-scroll"
       estimateSize={160}
       gap={20}
+      compactionSubject={threadCompactionSubject("chat-thread", String(props.view.thread.id))}
       itemAt={turnEndedAt}
       itemKey={(turn) => String(turn.id)}
       items={turns}

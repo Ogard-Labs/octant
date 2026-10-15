@@ -1,3 +1,4 @@
+import type { ContextSubjectRef } from "@octant/contracts/context";
 import {
   defaultRangeExtractor,
   useVirtualizer,
@@ -46,6 +47,8 @@ export interface TranscriptWindowProps<T> {
    * thread's session was compacted, from the host's journaled receipts.
    */
   readonly itemAt?: (item: T) => string | undefined;
+  /** The thread whose compactions the dividers show; with `itemAt`, it turns them on. */
+  readonly compactionSubject?: ContextSubjectRef;
   /** Identifies the thread so leaving and returning restores this scroll offset. */
   readonly restoreKey: string;
   readonly estimateSize?: number;
@@ -128,8 +131,20 @@ export function TranscriptWindow<T>(props: TranscriptWindowProps<T>) {
   const follows = align === "end" && props.followOutput !== false;
   const ListTag = props.listTag ?? "div";
   const ItemTag = props.itemTag ?? "div";
-  const compactionReceipts = useCompactionReceipts();
   const { itemAt } = props;
+  // A turn already listed keeps its place while it moves on (a later attempt, a
+  // status change), so the count alone would miss a compaction journaled in it.
+  const rowsRevision = useMemo(() => {
+    let latest = "";
+    if (itemAt !== undefined) {
+      for (const item of props.items) {
+        const at = itemAt(item);
+        if (at !== undefined && at > latest) latest = at;
+      }
+    }
+    return `${props.items.length}:${latest}`;
+  }, [itemAt, props.items]);
+  const compactionReceipts = useCompactionReceipts(props.compactionSubject, rowsRevision);
   const compactionPlacement = useMemo(
     () =>
       itemAt === undefined || compactionReceipts.length === 0
