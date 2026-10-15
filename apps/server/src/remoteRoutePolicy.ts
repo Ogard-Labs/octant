@@ -1,5 +1,7 @@
 import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
+import { REMOTE_SERVER_PROXY_RELAYED, REMOTE_SERVER_PROXY_RELAYED_HEADER } from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
+import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
 
 const DEFAULT_BODY_BYTES = 1_048_576;
 const DEFAULT_RESPONSE_BYTES = 8 * 1_024 * 1_024;
@@ -11,6 +13,21 @@ const DEFAULT_CONCURRENT_REQUESTS = 32;
  */
 const DEFAULT_CONCURRENT_SERVER_PROXY_REQUESTS = 64;
 const SERVER_PROXY_PREFIX = "/api/server-proxy/";
+/**
+ * A request a paired device relays to its dev server may carry an upload this
+ * large. The forwarder hashes the body for the request's proof before sending
+ * it, so it is bounded rather than streamed.
+ */
+export const REMOTE_SERVER_PROXY_RELAY_MAX_BODY_BYTES = 8 * 1_024 * 1_024;
+/**
+ * A proxy request whose cookie names no live proxy session can only be
+ * refused, so the listener reads no more of its body than the grants route
+ * takes, and holds only a few such requests from one source at once. Without
+ * this, unauthenticated uploads could hold the proxy surface's every slot with
+ * 8 MiB each before any proof was checked.
+ */
+const UNAUTHENTICATED_SERVER_PROXY_BODY_BYTES = 4_096;
+const UNAUTHENTICATED_SERVER_PROXY_PER_SOURCE = 4;
 
 const REMOTE_REQUEST_HEADERS = [
   "accept",
@@ -179,6 +196,18 @@ const DEFAULT_SERVER_PROXY_ROUTES: readonly RemoteRouteDefinition[] = [
     allowedContentTypes: ["application/json"],
     maxBodyBytes: 4_096,
     maxResponseBytes: 4_096,
+  },
+  {
+    // `/api/server-proxy/<grant id>/<the dev server's path>`. Matched after the
+    // grants route, so that exact path never reaches a dev server.
+    id: "server-proxy-relay",
+    match: { kind: "prefix", path: SERVER_PROXY_PREFIX },
+    surface: "server-proxy",
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"],
+    allowQuery: true,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    maxBodyBytes: REMOTE_SERVER_PROXY_RELAY_MAX_BODY_BYTES,
+    relaysDevServer: true,
   },
 ];
 
@@ -392,6 +421,16 @@ export interface RemoteRouteDefinition {
   readonly maxResponseBytes?: number;
   /** The Content-Security-Policy this route's responses carry instead of the default. */
   readonly responsePolicy?: string;
+  /**
+   * Set only on the proxy route that relays a paired device's request to its
+   * dev server. The route's body budget is its own, above the listener's
+   * default; any media type passes, since the dev server decides what it
+   * accepts; and a response the relay marks as the dev server's own passes
+   * with its headers unchanged and no size cap (the relay bounds it by idle
+   * time). The host's own answers on the route keep the listener's headers
+   * and budget.
+   */
+  readonly relaysDevServer?: true;
 }
 
 export type RemoteRouteResponse = Response | undefined;
@@ -463,6 +502,11 @@ export interface RemoteRouteHandlerOptions {
     route: RemoteRouteDefinition,
     facts?: RemoteRouteFacts,
   ) => RemoteRouteResponse | Promise<RemoteRouteResponse>;
+  /**
+   * Whether a proxy request's cookie names a live proxy session whose device
+   * still stands, asked before its body is read. Absent, none does.
+   */
+  readonly hasServerProxySession?: (request: Request) => boolean;
 }
 
 /**
@@ -540,19 +584,59 @@ export function createRemoteRoutePolicy(options: RemoteRoutePolicyOptions): Remo
 export function createRemoteRouteHandler(
   options: RemoteRouteHandlerOptions,
 ): (request: Request, facts?: RemoteRouteFacts) => Promise<Response> {
+  const unauthenticatedProxyBySource = new Map<string, number>();
   return async (request, facts) => {
     const decision = options.policy.inspect(request);
     if (decision.kind === "reject") return decision.response;
     if (decision.kind === "preflight")
       return new Response(null, { status: 204, headers: decision.headers });
 
+    let maxBodyBytes = decision.maxBodyBytes;
+    let releaseUnauthenticated: (() => void) | undefined;
+    if (decision.surface === "server-proxy" && options.hasServerProxySession?.(request) !== true) {
+      maxBodyBytes = Math.min(maxBodyBytes, UNAUTHENTICATED_SERVER_PROXY_BODY_BYTES);
+      if (declaredBodyBytes(request) > maxBodyBytes) {
+        await request.body?.cancel().catch(() => undefined);
+        return rejectionResponse(413, decision.headers);
+      }
+      const source = facts?.sourceKey ?? "";
+      const held = unauthenticatedProxyBySource.get(source) ?? 0;
+      if (held >= UNAUTHENTICATED_SERVER_PROXY_PER_SOURCE) {
+        await request.body?.cancel().catch(() => undefined);
+        return rejectionResponse(429, decision.headers);
+      }
+      unauthenticatedProxyBySource.set(source, held + 1);
+      let released = false;
+      releaseUnauthenticated = () => {
+        if (released) return;
+        released = true;
+        const next = (unauthenticatedProxyBySource.get(source) ?? 1) - 1;
+        if (next <= 0) unauthenticatedProxyBySource.delete(source);
+        else unauthenticatedProxyBySource.set(source, next);
+      };
+    }
+    try {
+      return await routeAdmitted(request, facts, decision, maxBodyBytes);
+    } finally {
+      // An unauthenticated request's answer is the host's own small refusal,
+      // so its source slot ends with the handler rather than a body stream.
+      releaseUnauthenticated?.();
+    }
+  };
+
+  async function routeAdmitted(
+    request: Request,
+    facts: RemoteRouteFacts | undefined,
+    decision: Extract<RemoteRouteDecision, { readonly kind: "allow" }>,
+    maxBodyBytes: number,
+  ): Promise<Response> {
     const release = options.policy.acquire(decision.surface);
     if (release === undefined) {
       return rejectionResponse(429, decision.headers);
     }
     let prepared: PreparedRequestResult;
     try {
-      prepared = await prepareRequestBody(request, decision.maxBodyBytes);
+      prepared = await prepareRequestBody(request, maxBodyBytes);
     } catch {
       release();
       return rejectionResponse(400, decision.headers);
@@ -592,8 +676,16 @@ export function createRemoteRouteHandler(
       release();
       return rejectionResponse(404, decision.headers);
     }
+    if (
+      decision.route?.relaysDevServer === true &&
+      response.headers.get(REMOTE_SERVER_PROXY_RELAYED_HEADER) === REMOTE_SERVER_PROXY_RELAYED
+    ) {
+      // The dev server's own response: its headers stand and its body streams
+      // uncapped, holding this request's slot until it ends.
+      return withAdmissionRelease(response, release);
+    }
     return limitResponse(response, decision.headers, decision.maxResponseBytes, release);
-  };
+  }
 }
 
 function inspectRequest(
@@ -660,14 +752,19 @@ function inspectRequest(
   const route = routes.find((candidate) => matches(candidate.match, url.pathname));
   if (route === undefined || !routeAllowsQuery(route, url)) return reject(404, facts);
   if (!route.methods.includes(method as RemoteHttpMethod)) return reject(405, facts);
-  const bodyLimit = Math.min(route.maxBodyBytes ?? defaultMaxBodyBytes, defaultMaxBodyBytes);
+  const bodyLimit =
+    route.relaysDevServer === true && route.maxBodyBytes !== undefined
+      ? route.maxBodyBytes
+      : Math.min(route.maxBodyBytes ?? defaultMaxBodyBytes, defaultMaxBodyBytes);
   if (
     declaredBodyBytes(request) > bodyLimit ||
     (hasBody(request) && (method === "GET" || method === "HEAD"))
   ) {
     return reject(413, facts);
   }
-  if (hasBody(request) && !contentTypeAllowed(request, route)) return reject(415, facts);
+  if (route.relaysDevServer !== true && hasBody(request) && !contentTypeAllowed(request, route)) {
+    return reject(415, facts);
+  }
   const headers = remoteHeaders(
     headerOrigin === null ? undefined : headerOrigin,
     route.allowedRequestHeaders ?? REMOTE_REQUEST_HEADERS,
@@ -745,6 +842,8 @@ function validateRoutes(
       !validRouteBudget(route.maxResponseBytes) ||
       (surface === "authenticated-product" && !route.match.path.startsWith("/api/")) ||
       (surface === "server-proxy") !== pathMatchesPrefix(route.match.path, SERVER_PROXY_PREFIX) ||
+      (route.relaysDevServer === true &&
+        (surface !== "server-proxy" || route.maxBodyBytes === undefined)) ||
       isLocalOnlyMatch(route.match)
     ) {
       throw new Error("Remote route definition is invalid or local-only.");

@@ -6042,6 +6042,58 @@ mechanisms are:
     purged, and when Octant stops its server. A thread purge erases the grant's
     records with the thread's. Nothing erases a device's records, so a revoked
     device's grant history stays with its revoke.
+  - **Relay.** `/api/server-proxy/<grant id>/<path>` relays one request to the
+    grant's dev server. Each carries the proxy session's signed envelope, with
+    its body (at most 8 MiB, any media type, 413 above) hashed into the proof.
+    The proof signs the canonical query (sorted and normalized) while the dev
+    server gets the query as the page wrote it; the two differ only in order
+    and percent-encoding, which a request carried over TLS with a single-use
+    nonce gives no one else a chance to choose. A proxy request whose cookie
+    names no live proxy session, or one whose device no longer stands, has at
+    most 4 KiB of its body read, 413 above, and one source holds at most four
+    such requests at once (429). Before every request, which gets its
+    own upstream connection, the host checks again: the grant is open and bound
+    to this device, credential generation, and proxy session; Code is on; the
+    thread is active and this device can still read it; and the process the
+    grant was minted for (pid, untruncated name, and port, from one `lsof`
+    narrowed to the port) still holds the port under an Octant terminal, and
+    no other process listens where it could answer the loopback address the
+    host connects to (a wildcard counts for both families, and an IPv4-mapped
+    bind for the IPv4 loopback). The check and the connection are two steps:
+    a server that exits and whose port another process binds in that gap
+    (milliseconds) receives that one request, and the next request's check
+    closes the grant; for an HTTPS dev server the pin refuses it first. The
+    host does not confirm the accepting process per connection, since that is
+    a host query per request and a socket still waiting to be accepted is not
+    yet visible to it. A
+    request never relies on a check that began before it arrived; a burst
+    shares the running check's successor. A lost check closes the grant
+    (`server-stopped`, `server-changed-hands`, `thread-archived`,
+    `thread-unreadable`, `code-disabled`) and the request is refused
+    `grant-closed`, the same answer as a grant that never existed or belongs
+    to another device; a check the host could not make answers 503 and keeps
+    the grant. The host connects only to the grant's `127.0.0.1` or `[::1]`
+    endpoint, within five seconds or `server-unreachable`, follows no redirect,
+    and sends the request's path and query with `Host: localhost:<port>`, an
+    `Origin` (admitted only as the listener's own) as the dev server's origin, a
+    `Referer` under the grant's path as that path on the dev server (any other
+    is dropped), and `Connection: close`. Hop-by-hop headers, `x-octant-`
+    headers, fetch metadata, forwarding claims, and cookies named `octant-`
+    (after any `__Secure-` or `__Host-` prefix) never cross; the page's other
+    cookies and `Authorization` do. The response comes back with hop-by-hop
+    headers, `Content-Length`, `x-octant-` headers, `Clear-Site-Data`,
+    `Alt-Svc`, and `Set-Cookie` for an `octant-` cookie removed, marked `x-octant-server-proxy: relayed` so the
+    device can tell it from the host's own answers, without the listener's
+    security headers or response budget, streamed with no size cap and closed
+    after five minutes without a byte. An HTTPS dev server's certificate is not
+    checked against a trust store; the first one under a grant is pinned for
+    its life, and another closes the grant as `server-changed-hands`. Each
+    request is registered under its grant before connecting, and holds its
+    place in the device's proxy budget until its response ends; closing the
+    grant closes the upstream socket and cuts the response before the call
+    that closed it returns. An upgrade request is refused `upgrade-refused`,
+    and `OPTIONS` is not relayed. The listener admits bodies up to the relay's
+    8 MiB; every other route keeps its own budget.
 - **Host-driven provider sign-in.** A local principal may start a descriptor-driven
   PKCE or device-code sign-in. The host, not a provider child and not the
   renderer, owns the loopback redirect, the device poll, and refresh. State and
