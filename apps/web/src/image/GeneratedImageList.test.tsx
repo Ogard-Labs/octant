@@ -242,6 +242,42 @@ describe("GeneratedImageList polling", () => {
   });
 });
 
+describe("generated image preview read", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("stops reading an image when its card goes away instead of finishing unobserved", async () => {
+    const readers: FileReader[] = [];
+    const readAsDataURL = FileReader.prototype.readAsDataURL;
+    vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function (
+      this: FileReader,
+      blob: Blob,
+    ) {
+      readers.push(this);
+      readAsDataURL.call(this, blob);
+    });
+    const client = {
+      list: vi.fn(async () => ({ jobs: [completedJob()] })),
+      artifact: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+    } as unknown as ImageGenerationClient;
+    const view = render(
+      <GeneratedImageList
+        client={client}
+        profiles={[profile()]}
+        scopeId={scopeId}
+        threadKind="chat-thread"
+      />,
+    );
+    await waitFor(() => expect(readers).toHaveLength(1));
+
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // A read left running would have produced the data URL by now, and would
+    // still be running when the test file's environment is torn down.
+    expect(readers[0]?.result).toBeNull();
+  });
+});
+
 describe("generated image arrival", () => {
   it("shows an image the moment the host reports its job finished, without waiting for the idle read", async () => {
     const list = vi
