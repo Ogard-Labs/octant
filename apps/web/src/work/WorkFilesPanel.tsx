@@ -300,7 +300,7 @@ function FileRow(props: {
         onClick={() => props.onOpen?.(props.entry)}
         title={`Open ${props.entry.path}`}
         type="button"
-        variant="ghost"
+        variant="bare"
       >
         <FileName className="oct-row-label" name={pathBasename(props.entry.path)} />
         <span className="oct-row-detail">{fileDetail(props.entry, props.detail)}</span>
