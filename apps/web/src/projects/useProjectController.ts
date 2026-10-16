@@ -168,8 +168,16 @@ export function useProjectController(options: ProjectControllerOptions) {
     setMemoryStatus("idle");
   }, []);
 
-  const allProjects = [...state.active, ...state.archived];
-  const projectById = new Map(allProjects.map((project) => [project.id, project]));
+  // Memoized on the lists they are read from: the shell's surfaces compare these by
+  // identity, and a fresh array on every render re-rendered all of them.
+  const allProjects = useMemo(
+    () => [...state.active, ...state.archived],
+    [state.active, state.archived],
+  );
+  const projectById = useMemo(
+    () => new Map(allProjects.map((project) => [project.id, project])),
+    [allProjects],
+  );
 
   async function execute(
     command: Parameters<ProjectClient["executeProject"]>[0],
@@ -604,12 +612,19 @@ export function useProjectController(options: ProjectControllerOptions) {
     );
   }
 
-  const projects = state.active.filter((project) => project.type === options.activeMode);
-  const archivedProjects = state.archived.filter((project) => project.type === options.activeMode);
+  const projects = useMemo(
+    () => state.active.filter((project) => project.type === options.activeMode),
+    [options.activeMode, state.active],
+  );
+  const archivedProjects = useMemo(
+    () => state.archived.filter((project) => project.type === options.activeMode),
+    [options.activeMode, state.archived],
+  );
   const activeProject =
     options.activeProjectId === undefined ? undefined : projectById.get(options.activeProjectId);
-  const availabilityByProject = new Map(
-    state.availability.map((availability) => [availability.projectId, availability]),
+  const availabilityByProject = useMemo(
+    () => new Map(state.availability.map((availability) => [availability.projectId, availability])),
+    [state.availability],
   );
 
   return {
