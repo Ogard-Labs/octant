@@ -214,12 +214,12 @@ describe("a pending harness approval across a host restart", () => {
 describe("the rows a window lists for a waiting harness approval", () => {
   function rowSources(
     stores: ReturnType<typeof fixture> | ReturnType<typeof openStores>,
-    overrides: Partial<Pick<LeadApprovalRowSources, "threadTitle" | "authorizeThread">> = {},
+    overrides: Partial<Pick<LeadApprovalRowSources, "threadFacts" | "authorizeThread">> = {},
   ): LeadApprovalRowSources {
     return {
       approvals: stores.approvals,
       sessions: stores.sessions,
-      threadTitle: () => "Quarterly report",
+      threadFacts: () => ({ title: "Quarterly report", projectId: projectId as never }),
       authorizeThread: ({ windowId: asked }) => {
         expect(asked).toBe(windowId);
         return true;
@@ -252,6 +252,29 @@ describe("the rows a window lists for a waiting harness approval", () => {
     expect(await listLeadApprovalRequests(rowSources(stores), windowId)).toEqual([]);
   });
 
+  it("names the Project the thread is in now, not the one its session started under", async () => {
+    const stores = fixture();
+    void stores.ask({ mode: "chat" });
+    const moved = "00000000-0000-4000-8000-000000000902";
+    const [request] = await listLeadApprovalRequests(
+      rowSources(stores, {
+        threadFacts: () => ({ title: "Quarterly report", projectId: moved as never }),
+        authorizeThread: ({ projectId: asked }) => {
+          expect(asked).toBe(moved);
+          return true;
+        },
+      }),
+      windowId,
+    );
+    expect(request).toMatchObject({ mode: "chat", projectId: moved });
+
+    const [unfiled] = await listLeadApprovalRequests(
+      rowSources(stores, { threadFacts: () => ({ title: "Quarterly report" }) }),
+      windowId,
+    );
+    expect(unfiled).not.toHaveProperty("projectId");
+  });
+
   it("lists nothing for a window that may not open the thread", async () => {
     const stores = fixture();
     void stores.ask();
@@ -268,7 +291,7 @@ describe("the rows a window lists for a waiting harness approval", () => {
     void stores.ask();
     expect(
       await listLeadApprovalRequests(
-        rowSources(stores, { threadTitle: () => undefined }),
+        rowSources(stores, { threadFacts: () => undefined }),
         windowId,
       ),
     ).toEqual([]);

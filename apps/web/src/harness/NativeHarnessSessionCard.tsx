@@ -14,7 +14,7 @@ import {
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
-import { HarnessApprovalPanel } from "./HarnessApprovalPanel";
+import { HarnessApprovalLostPanel, HarnessApprovalPanel } from "./HarnessApprovalPanel";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import "./native-harness.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -204,7 +204,22 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
           {refusal}
         </OctantAlert>
       )}
-      {pendingApproval === undefined ? null : (
+      {pendingApproval === undefined ? null : pendingApproval.source === undefined &&
+        view.session.status === "recovery-required" ? (
+        // A restart took the call this approval guarded; deciding it cannot make
+        // it run, so only the resume that settles it is offered.
+        <HarnessApprovalLostPanel approval={pendingApproval}>
+          <OctantButton
+            disabled={busy}
+            onClick={() => void pauseOrResume()}
+            size="sm"
+            type="button"
+            variant="default"
+          >
+            Resume
+          </OctantButton>
+        </HarnessApprovalLostPanel>
+      ) : (
         <HarnessApprovalPanel
           approval={pendingApproval}
           busy={busy}

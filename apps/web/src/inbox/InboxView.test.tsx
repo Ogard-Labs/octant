@@ -227,6 +227,31 @@ describe("InboxView waiting agent approvals", () => {
     expect(screen.queryByText("Waiting for your approval.")).not.toBeInTheDocument();
   });
 
+  it("does not list a thread's unread finished turn beside the approval it now waits on", async () => {
+    render(
+      <InboxView
+        attentionItems={[
+          {
+            signal: {
+              threadId: pendingIds.workThread,
+              reason: "turn-finished",
+              title: "Quarterly report",
+              source: "work",
+            },
+          },
+        ]}
+        decisions={decisionSource(decisionClients(), [workLeadApproval()])}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("group", { name: "Quarterly report needs your approval" }),
+    ).toBeVisible();
+    expect(screen.queryByText("Finished a turn")).not.toBeInTheDocument();
+  });
+
   it("keeps the thread's attention row when this window cannot read the list", () => {
     render(
       <InboxView

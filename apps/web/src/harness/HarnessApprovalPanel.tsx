@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { NativeHarnessApproval } from "@octant/contracts";
 import { ApprovalOutsideContentNote } from "../composer/ApprovalOutsideContentNote";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -152,6 +152,31 @@ export function HarnessApprovalPanel(props: HarnessApprovalPanelProps) {
           Deny
         </OctantButton>
       </div>
+    </section>
+  );
+}
+
+/**
+ * An approval the journal still holds as pending although the turn that asked
+ * it died with a host restart. Nothing can run for it, so the panel offers no
+ * Allow or Deny, only what resumes the session (`children`); resuming settles
+ * the approval, and the agent asks again if it still needs the call.
+ */
+export function HarnessApprovalLostPanel(props: {
+  readonly approval: NativeHarnessApproval;
+  readonly children: ReactNode;
+}) {
+  const { approval } = props;
+  return (
+    <section aria-label="Approval was waiting at restart" className="native-harness-question">
+      <p className="native-harness-question__prompt">
+        <strong>{approval.toolName}</strong> {approval.summary.replace(/^[a-z-]+: /, "")}
+      </p>
+      <p className="native-harness-card__detail">
+        Octant restarted while this was waiting, so it did not run. Resume to continue; the agent
+        asks again if it still needs it.
+      </p>
+      <div className="native-harness-chips">{props.children}</div>
     </section>
   );
 }

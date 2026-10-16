@@ -4,7 +4,7 @@ import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
-import { HarnessApprovalPanel } from "./HarnessApprovalPanel";
+import { HarnessApprovalLostPanel, HarnessApprovalPanel } from "./HarnessApprovalPanel";
 import "./native-harness.css";
 
 export interface ThreadHarnessApprovalProps {
@@ -126,26 +126,17 @@ export function ThreadHarnessApproval(props: ThreadHarnessApprovalProps) {
   return (
     <div className="thread-harness-approval">
       {lostInRestart ? (
-        <section aria-label="Approval was waiting at restart" className="native-harness-question">
-          <p className="native-harness-question__prompt">
-            <strong>{approval.toolName}</strong> {approval.summary.replace(/^[a-z-]+: /, "")}
-          </p>
-          <p className="native-harness-card__detail">
-            Octant restarted while this was waiting, so it did not run. Resume to continue; the
-            agent asks again if it still needs it.
-          </p>
-          <div className="native-harness-chips">
-            <OctantButton
-              disabled={busy}
-              onClick={() => void resume()}
-              size="sm"
-              type="button"
-              variant="default"
-            >
-              Resume
-            </OctantButton>
-          </div>
-        </section>
+        <HarnessApprovalLostPanel approval={approval}>
+          <OctantButton
+            disabled={busy}
+            onClick={() => void resume()}
+            size="sm"
+            type="button"
+            variant="default"
+          >
+            Resume
+          </OctantButton>
+        </HarnessApprovalLostPanel>
       ) : (
         <HarnessApprovalPanel
           approval={approval}

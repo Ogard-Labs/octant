@@ -93,11 +93,15 @@ function describe(
 }
 
 export interface LeadApprovalRowSources extends LeadApprovalSources {
-  /** The thread's title in its own mode, or nothing for a thread that is gone. */
-  readonly threadTitle: (input: {
+  /**
+   * The thread's title and Project as its own record holds them now, or
+   * nothing for a thread that is gone. The session keeps the Project it was
+   * started under, which a moved Chat thread has left.
+   */
+  readonly threadFacts: (input: {
     readonly threadId: string;
     readonly mode: OctantMode;
-  }) => string | undefined;
+  }) => { readonly title: string; readonly projectId?: ProjectId | undefined } | undefined;
   /**
    * Whether this window may open the thread. That is the project binding, not
    * the harness session route: the session route also requires the thread to
@@ -118,9 +122,10 @@ export interface LeadApprovalRowSources extends LeadApprovalSources {
  * route, which checks the window and the principal before anything is decided,
  * so this read adds no way to approve.
  *
- * Text keeps each mode's own bounds and sanitization. A thread that cannot be
- * titled, authorized, or described to the contract is left out, never guessed
- * at.
+ * Text keeps each mode's own bounds and sanitization, and the thread's title
+ * and Project are read from its own record, not the session's snapshot. A thread
+ * that cannot be titled, authorized, or described to the contract is left out,
+ * never guessed at.
  */
 export async function listLeadApprovalRequests(
   sources: LeadApprovalRowSources,
@@ -128,12 +133,13 @@ export async function listLeadApprovalRequests(
 ): Promise<ReadonlyArray<PendingRequest>> {
   const requests: PendingRequest[] = [];
   for (const lead of leadApprovals(sources)) {
-    const title = sources.threadTitle({ threadId: lead.threadId, mode: lead.mode })?.trim();
-    if (title === undefined || title.length === 0) continue;
+    const facts = sources.threadFacts({ threadId: lead.threadId, mode: lead.mode });
+    const title = facts?.title.trim();
+    if (facts === undefined || title === undefined || title.length === 0) continue;
     const mayOpen = await sources.authorizeThread({
       threadId: lead.threadId,
       mode: lead.mode,
-      projectId: lead.projectId,
+      projectId: facts.projectId,
       windowId,
     });
     if (!mayOpen) continue;
@@ -144,7 +150,7 @@ export async function listLeadApprovalRequests(
         decodePendingRequest({
           mode: lead.mode,
           kind: "lead-approval",
-          ...(lead.projectId === undefined ? {} : { projectId: lead.projectId }),
+          ...(facts.projectId === undefined ? {} : { projectId: facts.projectId }),
           threadId: lead.threadId,
           threadTitle: title,
           text,

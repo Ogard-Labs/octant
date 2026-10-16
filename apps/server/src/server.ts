@@ -10784,13 +10784,8 @@ export function startOctantServer(
         {
           approvals: nativeHarnessApprovals,
           sessions: nativeHarnessSessionsLive,
-          threadTitle: ({ threadId, mode }) =>
-            resolveAgentRunParentThreadTitle({
-              persistence,
-              workThreadProjection,
-              parentThreadId: decodeAgentRunParentThreadId(threadId),
-              mode,
-            }),
+          threadFacts: ({ threadId, mode }) =>
+            resolveHarnessThreadFacts({ persistence, workThreadProjection, threadId, mode }),
           authorizeThread: ({ threadId, mode, windowId: asking }) =>
             mode === "chat"
               ? chatService.listsActiveThread(threadId)
@@ -12296,6 +12291,35 @@ function resolveAgentRunCenterContext(input: {
     parentThreadTitle: title ?? "Thread",
     ...(childThreadId === undefined ? {} : { childThreadId }),
   };
+}
+
+/**
+ * A thread's title and Project as its own record holds them now. A harness
+ * session keeps the Project it started under, which a moved Chat thread has
+ * left, so anything that names the thread's Project reads it here.
+ */
+function resolveHarnessThreadFacts(input: {
+  readonly persistence: PersistenceService;
+  readonly workThreadProjection: WorkThreadProjection;
+  readonly threadId: string;
+  readonly mode: OctantMode;
+}): { readonly title: string; readonly projectId?: ProjectId } | undefined {
+  try {
+    const thread =
+      input.mode === "chat"
+        ? input.persistence.readChatThread(decodeChatThreadId(input.threadId))
+        : input.mode === "work"
+          ? input.workThreadProjection.read(input.threadId as never)
+          : input.persistence.readCodeThread(decodeCodeThreadId(input.threadId));
+    if (thread === undefined) return undefined;
+    return {
+      title: thread.title,
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+    };
+  } catch {
+    // Not a thread id of this mode.
+    return undefined;
+  }
 }
 
 function resolveAgentRunParentThreadTitle(input: {
