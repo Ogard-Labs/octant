@@ -943,6 +943,25 @@ describe("App", () => {
     expect(inbox).not.toHaveAttribute("aria-current", "page");
   });
 
+  it("offers no Board from an empty Chat Inbox, because Chat has none", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /^Inbox/ }));
+
+    expect(await screen.findByText("No thread is waiting on you.")).toBeVisible();
+    // Opening one used to hide the workspace and render no page in its place.
+    expect(screen.queryByRole("button", { name: "Open the Board" })).toBeNull();
+  });
+
   it("shows the Chat add-project control while ready before any threads exist", async () => {
     render(
       <App
