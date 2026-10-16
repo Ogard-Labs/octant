@@ -127,10 +127,10 @@ export function SettingsNavigation({ sections, activeSection, onSelect }: Settin
                   <li key={section.id}>
                     <OctantButton
                       aria-current={isActive ? "page" : undefined}
-                      className="setnav-item window-no-drag justify-start"
+                      className="setnav-item window-no-drag justify-start rounded-lg"
                       onClick={() => onSelect(section.id)}
                       type="button"
-                      variant="ghost"
+                      variant="bare"
                     >
                       <Icon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
                       <span>{section.label}</span>

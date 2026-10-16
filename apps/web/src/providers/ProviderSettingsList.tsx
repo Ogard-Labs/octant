@@ -787,23 +787,23 @@ function ProviderRow(props: ProviderRowProps) {
         <span className="prov-grip-slot">
           <OctantButton
             aria-label={`Move ${name} up`}
-            className="prov-grip window-no-drag"
+            className="prov-grip window-no-drag rounded-lg"
             disabled={props.busy || props.index === 0}
             onClick={() => props.onMove(props.index, -1)}
             size="icon"
             type="button"
-            variant="ghost"
+            variant="bare"
           >
             <ChevronUp aria-hidden="true" size={14} />
           </OctantButton>
           <OctantButton
             aria-label={`Move ${name} down`}
-            className="prov-grip window-no-drag"
+            className="prov-grip window-no-drag rounded-lg"
             disabled={props.busy || props.index === props.count - 1}
             onClick={() => props.onMove(props.index, 1)}
             size="icon"
             type="button"
-            variant="ghost"
+            variant="bare"
           >
             <ChevronDown aria-hidden="true" size={14} />
           </OctantButton>
