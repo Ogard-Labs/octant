@@ -180,6 +180,12 @@ import { createMenuBarFleetReader } from "./menuBarFleetRead";
 import { createHostTrayImage, shouldPresentHostTray } from "./menuBarIcon";
 import { buildQuitConfirmation, evaluateQuitRequest } from "./quitGuard";
 import {
+  WINDOW_CLOSE_GRACE_MS,
+  armQuitDeadline,
+  saveWindowStateWithoutBlocking,
+  shutDownForQuit,
+} from "./quitShutdown";
+import {
   attentionBadgeLabel,
   attentionNotificationPresentation,
   decodeAttentionBadgeCount,
@@ -2360,14 +2366,12 @@ async function createWindow(): Promise<void> {
       window.on("close", (event) => {
         if (quitPrepared) return;
         event.preventDefault();
-        void flushWindowState()
-          .catch(() => {
-            dialog.showErrorBox(
-              "Octant could not save window state",
-              "The window will use safe default bounds the next time it opens.",
-            );
-          })
-          .finally(() => window.destroy());
+        void saveWindowStateWithoutBlocking({
+          flushWindowState,
+          log: logQuitProblem,
+        }).finally(() => {
+          if (!window.isDestroyed()) window.destroy();
+        });
       });
       window.once("closed", () => {
         codeOperationApprovalViews?.closeWindow(state.windowId);
@@ -4100,66 +4104,98 @@ async function confirmQuitWithActiveWork(
   return result.response === 1;
 }
 
+function logQuitProblem(message: string): void {
+  try {
+    process.stderr.write(`${message}\n`);
+  } catch {
+    // Nothing is left to report to when stderr is closed.
+  }
+}
+
+// Ends the app when graceful shutdown stalls. It first kills the managed server
+// the quit started with, because stopping the host clears the module reference
+// to it and an exit would otherwise orphan a child that holds the data directory.
+function forceExitAfterStalledQuit(serverAtQuit: ChildProcess | undefined): () => void {
+  let exiting = false;
+  return () => {
+    if (exiting) return;
+    exiting = true;
+    logQuitProblem("Octant quit did not finish in time; ending the application.");
+    try {
+      serverAtQuit?.kill("SIGKILL");
+    } catch {
+      // The server already exited or cannot be signalled; the exit proceeds.
+    }
+    app.exit(0);
+  };
+}
+
+async function stopHostForQuit(): Promise<void> {
+  await shutdownSecondaryProjectWindows();
+  await projectWindowLifecycle.shutdown(async () => {
+    const result = await hostLifecycle.prepareQuit(() => true);
+    if (result === "cancelled") throw new Error("Octant quit was cancelled.");
+  });
+}
+
+function finishQuit(): void {
+  try {
+    destroyHostTray();
+  } catch (error) {
+    logQuitProblem(`Octant could not remove its menu bar item at quit: ${String(error)}`);
+  }
+  quitPrepared = true;
+  preparingQuit = false;
+  armQuitDeadline({
+    forceExit: forceExitAfterStalledQuit(undefined),
+    boundMs: WINDOW_CLOSE_GRACE_MS,
+  });
+  app.quit();
+}
+
 async function prepareToQuit(): Promise<void> {
   const interactive = quitCanPrompt;
   quitCanPrompt = false;
-  const accepted =
-    !interactive ||
-    (await evaluateQuitRequest({
-      refreshActivity: refreshHostActivity,
-      snapshot: hostLifecycle.snapshot,
-      confirm: confirmQuitWithActiveWork,
-    }));
+  let accepted = true;
+  if (interactive) {
+    try {
+      accepted = await evaluateQuitRequest({
+        refreshActivity: refreshHostActivity,
+        snapshot: hostLifecycle.snapshot,
+        confirm: confirmQuitWithActiveWork,
+      });
+    } catch (error) {
+      // Quit stays cancelled when the question could not be asked: the
+      // confirmation protects running work, and the person can ask again.
+      logQuitProblem(`Octant could not confirm the quit: ${String(error)}`);
+      accepted = false;
+    }
+  }
   if (!accepted) {
     preparingQuit = false;
     return;
   }
-  try {
-    await flushWindowState();
-  } catch {
-    dialog.showErrorBox(
-      "Octant could not save window state",
-      "The window will use safe default bounds the next time it opens.",
-    );
-  }
-  try {
-    await shutdownSecondaryProjectWindows();
-    await projectWindowLifecycle.shutdown(async () => {
-      const result = await hostLifecycle.prepareQuit(() => true);
-      if (result === "cancelled") throw new Error("Octant quit was cancelled.");
-    });
-  } catch {
-    dialog.showErrorBox(
-      "Octant could not stop its local server",
-      "The managed server did not confirm shutdown before the application exited.",
-    );
-  } finally {
-    destroyHostTray();
-    quitPrepared = true;
-    preparingQuit = false;
-    app.quit();
-  }
+  // Armed only once the quit is accepted, so the time a person spends on the
+  // confirmation does not count against it.
+  armQuitDeadline({ forceExit: forceExitAfterStalledQuit(server) });
+  await shutDownForQuit({
+    flushWindowState,
+    stopHost: stopHostForQuit,
+    log: logQuitProblem,
+  });
+  finishQuit();
 }
 
 async function handleFatalStartup(error: unknown): Promise<void> {
   preparingQuit = true;
   dialog.showErrorBox("Octant could not start", formatDesktopStartupFailure(error));
-  try {
-    await shutdownSecondaryProjectWindows();
-    await projectWindowLifecycle.shutdown(async () => {
-      const result = await hostLifecycle.prepareQuit(() => true);
-      if (result === "cancelled") throw new Error("Octant quit was cancelled.");
-    });
-  } catch {
-    dialog.showErrorBox(
-      "Octant could not stop its local server",
-      "The managed server did not confirm shutdown before the application exited.",
-    );
-  } finally {
-    destroyHostTray();
-    quitPrepared = true;
-    app.quit();
-  }
+  armQuitDeadline({ forceExit: forceExitAfterStalledQuit(server) });
+  await shutDownForQuit({
+    flushWindowState: async () => undefined,
+    stopHost: stopHostForQuit,
+    log: logQuitProblem,
+  });
+  finishQuit();
 }
 
 const requestWindow = createSingleFlight(createWindow);
