@@ -22,13 +22,11 @@ vi.mock("../browser/BrowserWorkspace", () => ({
 }));
 
 const threadId = "10000000-0000-4000-8000-000000000001";
-const codeController = {
-  activeView: {
-    thread: { id: threadId },
-    checkout: { id: "20000000-0000-4000-8000-000000000002" },
-  },
-  client: {},
+const codeThreadView = {
+  thread: { id: threadId },
+  checkout: { id: "20000000-0000-4000-8000-000000000002" },
 } as never;
+const codeController = { activeView: codeThreadView, client: {} } as never;
 
 function props() {
   return {
@@ -36,7 +34,9 @@ function props() {
     appleToolchainClient: {} as never,
     chatClient: {} as never,
     chatReadCursorStore: { read: vi.fn(), write: vi.fn() } as never,
+    codeClient: {} as never,
     codeController,
+    codeThreadView,
     onOpenFile: vi.fn(),
     onSidecarOpened: vi.fn(),
     subject: { mode: "code" as const, threadId },
