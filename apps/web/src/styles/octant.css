@@ -463,6 +463,7 @@ svg :focus-visible {
 .model-picker__listbox:focus-visible,
 .settings-search-results:focus-visible,
 .right-utility-dock__tool:focus-visible,
+.environment-git-group__state:focus-visible,
 .zen-surface:focus-visible {
   outline: none;
 }

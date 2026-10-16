@@ -1,5 +1,5 @@
 import { decodeThreadWorkingDirectory, type ThreadWorkingDirectory } from "@octant/contracts";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
@@ -12,19 +12,24 @@ export function ChangeWorkingFolder(props: {
   readonly value: ThreadWorkingDirectory | ".";
   readonly disabled?: boolean;
   readonly onApply: (workingDirectory: ThreadWorkingDirectory) => Promise<void>;
+  /** The Working folder row, where an applied folder is read back. */
+  readonly row?: RefObject<HTMLButtonElement | null>;
 }) {
   const [editing, setEditing] = useState(false);
   const opener = useRef<HTMLButtonElement>(null);
-  const returnFocus = useRef(false);
-  // Applying or cancelling unmounts the field the person was in. Hand focus
-  // back to the control that opened it rather than letting it fall to the page.
+  const returnFocus = useRef<"opener" | "row" | undefined>(undefined);
+  // Applying or cancelling unmounts the field the person was in. Cancel hands
+  // focus back to the control that opened it; Apply to the row that now shows
+  // the new folder. Neither lets it fall to the page.
   useEffect(() => {
-    if (editing || !returnFocus.current) return;
-    returnFocus.current = false;
-    opener.current?.focus();
-  }, [editing]);
-  const finishEditing = () => {
-    returnFocus.current = true;
+    if (editing || returnFocus.current === undefined) return;
+    const target =
+      returnFocus.current === "row" ? (props.row?.current ?? opener.current) : opener.current;
+    returnFocus.current = undefined;
+    target?.focus();
+  }, [editing, props.row]);
+  const finishEditing = (target: "opener" | "row") => {
+    returnFocus.current = target;
     setEditing(false);
   };
   if (!editing) {
@@ -46,11 +51,11 @@ export function ChangeWorkingFolder(props: {
         {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
         onApply={async (workingDirectory) => {
           await props.onApply(workingDirectory);
-          finishEditing();
+          finishEditing("row");
         }}
         value={props.value}
       />
-      <OctantButton onClick={finishEditing} type="button" variant="ghost">
+      <OctantButton onClick={() => finishEditing("opener")} type="button" variant="ghost">
         Cancel
       </OctantButton>
     </div>

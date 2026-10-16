@@ -192,9 +192,16 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   // and takes the keyboard.
   const workingFolderRow = useRef<HTMLButtonElement>(null);
   const returnToWorkingFolder = useRef(false);
+  const failure = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!returnToWorkingFolder.current) return;
-    if (controller.status === "error") returnToWorkingFolder.current = false;
+    if (controller.status === "error") {
+      // The re-read failed, so the row never comes back: the failure that
+      // replaced it is what the keyboard needs next.
+      returnToWorkingFolder.current = false;
+      failure.current?.focus();
+      return;
+    }
     if (workingDirectory === undefined) return;
     returnToWorkingFolder.current = false;
     workingFolderRow.current?.focus();
@@ -222,6 +229,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 ? {}
                 : { observation: controller.observation })}
               {...(props.onOpenChanges === undefined ? {} : { onOpenChanges: props.onOpenChanges })}
+              failureRef={failure}
               status={controller.status}
             />
             {props.onOpenGit === undefined && props.onCreatePullRequest === undefined ? null : (
@@ -372,6 +380,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 title="Working folder"
               >
                 <ChangeWorkingFolder
+                  row={workingFolderRow}
                   value={workingDirectory}
                   onApply={async (nextWorkingDirectory) => {
                     const result = await props.onExecute?.({

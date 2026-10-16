@@ -2,7 +2,7 @@ import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { WorkThread, ProjectSummary, WorkspaceTab } from "@octant/contracts";
 import { deriveWorkEnvironmentProjection } from "@octant/domain/shell-policy";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { FolderOpen, Repeat } from "lucide-react";
 import { EnvironmentCard, EnvironmentGroup } from "./EnvironmentGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
@@ -45,6 +45,7 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
   const environmentOpen = props.environmentOpen === true;
   const [project, setProject] = useState<WorkProject | undefined>(undefined);
   const [thread, setThread] = useState<WorkThread | undefined>(undefined);
+  const workingFolderRow = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const initialThread = props.initialThread;
@@ -139,11 +140,13 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
           )}
           {thread === undefined ? null : (
             <EnvironmentGroup
+              headerRef={workingFolderRow}
               icon={FolderOpen}
               summary={workingFolderLabel(thread.workingDirectory ?? ".")}
               title="Working folder"
             >
               <ChangeWorkingFolder
+                row={workingFolderRow}
                 value={thread.workingDirectory ?? "."}
                 onApply={async (workingDirectory) => {
                   const result = await props.threadClient.execute({

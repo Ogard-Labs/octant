@@ -1728,8 +1728,8 @@ request from the person.
 - A control that opens a panel moves focus into it, and a control that is
   replaced by what it did hands focus to the next logical control instead of
   letting it fall to the page: a Tools tile focuses the tool it opened, applying
-  a working folder returns to its Working folder row and cancelling returns to
-  Change working folder, and Check and add focuses the result's heading as every
+  a working folder returns to its Working folder row (to the failure, when
+  the re-read fails) and cancelling returns to Change working folder, and Check and add focuses the result's heading as every
   other Add endpoint step does.
 - A menu opened from the keyboard starts on its current choice, not its first
   item; ArrowUp still opens on the last item. A group of radios is one set of
