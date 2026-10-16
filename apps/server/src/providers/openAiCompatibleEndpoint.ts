@@ -13,6 +13,7 @@ import {
   readReportedInputModalities,
   resolveModelInputModalities,
 } from "@octant/domain/model-context-window";
+import { trimTrailingSlashes } from "@octant/domain/trim-trailing";
 
 const MAX_RETRY_AFTER_MS = 3_600_000;
 const DEFAULT_LIMITS: CompatibleHttpLimits = {
@@ -99,7 +100,7 @@ export interface CompatibleGenerationRejection {
 export function makeOpenAiCompatibleEndpoint(
   options: OpenAiCompatibleEndpointOptions,
 ): OpenAiCompatibleEndpoint {
-  const baseUrl = options.configuration.baseUrl.replace(/\/+$/, "");
+  const baseUrl = trimTrailingSlashes(options.configuration.baseUrl);
   const limits = Object.freeze({ ...DEFAULT_LIMITS, ...options.limits });
   assertPositiveLimit(limits.connectionTimeoutMs);
   assertPositiveLimit(limits.requestBodyBytes);

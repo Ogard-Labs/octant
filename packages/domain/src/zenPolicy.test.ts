@@ -927,6 +927,20 @@ describe("validateWidgetRecipe", () => {
     };
     expect(() => validateWidgetRecipe(recipe)).toThrow(ZenPolicyRejected);
   });
+
+  it("rejects an event handler attribute even after a long run of lookalikes", () => {
+    const draft = (name: string): ZenWidgetRecipeDraft => ({
+      recipeId: makeId("77777777"),
+      name,
+      primitives: ["notes"],
+      fields: [],
+    });
+    expect(() => validateWidgetRecipe(draft(`${"on".repeat(5000)} onclick = x`))).toThrow(
+      ZenPolicyRejected,
+    );
+    expect(() => validateWidgetRecipe(draft(`x${"on".repeat(5000)}`))).not.toThrow();
+    expect(() => validateWidgetRecipe(draft("on = 1"))).not.toThrow();
+  });
 });
 
 describe("validateLocalHostSource", () => {

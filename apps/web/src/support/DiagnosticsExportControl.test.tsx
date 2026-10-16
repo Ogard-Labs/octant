@@ -9,7 +9,7 @@ import { DiagnosticsExportControl } from "./DiagnosticsExportControl";
 function makeClient(
   exportEvidence: DiagnosticsExportClient["exportEvidence"],
 ): DiagnosticsExportClient {
-  return { exportEvidence };
+  return { exportEvidence, readJournalGrowth: vi.fn() };
 }
 
 describe("DiagnosticsExportControl", () => {

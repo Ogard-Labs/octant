@@ -1,10 +1,17 @@
-import { decodeDiagnosticsExportRequest, type DiagnosticsExportOutcome } from "@octant/contracts";
+import {
+  decodeDiagnosticsExportRequest,
+  type DiagnosticHostHealth,
+  type DiagnosticsExportOutcome,
+} from "@octant/contracts";
 import { authorizeDiagnosticsExportActor } from "@octant/domain";
 import { resolveReportedHostVersion } from "@octant/host-runtime";
 import { isLoopbackHostname } from "./shellRoutes";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import { exportDiagnosticsEvidence } from "./diagnosticsExportService";
+import { readEventLoopLagCounters } from "./eventLoopLag";
+import { slowStatementTally } from "./persistence/slowStatementLog";
+import { readJournalGrowth } from "./persistence/journalGrowth";
 import type { Journal } from "./persistence/journal";
 import type { SqliteConnection } from "./persistence/sqlitePort";
 
@@ -18,7 +25,7 @@ import type { SqliteConnection } from "./persistence/sqlitePort";
  * policy) is ever reached.
  */
 
-const METHODS = "POST, OPTIONS";
+const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
 const BODY_LIMIT = 8_192;
 
@@ -41,6 +48,17 @@ function failureResponse(message: string, status: number, origin: string | null)
   return jsonResponse({ error: message }, status, origin);
 }
 
+function readHostHealth(): DiagnosticHostHealth {
+  const statements = slowStatementTally.read();
+  const lag = readEventLoopLagCounters();
+  return {
+    slowStatementCount: statements.count,
+    slowStatementWorstMs: statements.worstMs,
+    eventLoopLagCount: lag.count,
+    eventLoopLagWorstMs: lag.worstMs,
+  };
+}
+
 export interface DiagnosticsExportRouteDependencies {
   readonly connection: SqliteConnection;
   readonly journal: Pick<Journal, "append">;
@@ -58,7 +76,8 @@ export function createDiagnosticsExportRouteHandler(
 
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (url.pathname !== "/api/diagnostics/export") return undefined;
+    const isGrowthRead = url.pathname === "/api/diagnostics/journal-growth";
+    if (url.pathname !== "/api/diagnostics/export" && !isGrowthRead) return undefined;
 
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname)) {
@@ -71,8 +90,12 @@ export function createDiagnosticsExportRouteHandler(
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
-    if (request.method !== "POST") {
-      return failureResponse("Diagnostics export requires POST.", 405, origin);
+    if (request.method !== (isGrowthRead ? "GET" : "POST")) {
+      return failureResponse(
+        isGrowthRead ? "Journal growth requires GET." : "Diagnostics export requires POST.",
+        405,
+        origin,
+      );
     }
 
     let actorKind: "local-window" | "remote-device";
@@ -98,6 +121,19 @@ export function createDiagnosticsExportRouteHandler(
       return failureResponse("Diagnostics export is unauthorized.", 403, origin);
     }
 
+    if (isGrowthRead) {
+      // Read on demand when diagnostics open, never on a timer.
+      try {
+        return jsonResponse(
+          readJournalGrowth(dependencies.connection, new Date(now())),
+          200,
+          origin,
+        );
+      } catch {
+        return failureResponse("Journal growth could not be read.", 500, origin);
+      }
+    }
+
     const decoded = await readJson(request, BODY_LIMIT);
     if (decoded.kind === "too-large") {
       return failureResponse("Request body is too large.", 413, origin);
@@ -117,6 +153,7 @@ export function createDiagnosticsExportRouteHandler(
       connection: dependencies.connection,
       journal: dependencies.journal,
       octantVersion: dependencies.octantVersion ?? resolveReportedHostVersion(process.env),
+      hostHealth: readHostHealth,
       clock,
     });
 

@@ -29,7 +29,7 @@ export function OctantNumberStepper(props: OctantNumberStepperProps) {
     <span className="octant-number-stepper window-no-drag">
       <OctantButton
         aria-label={`Decrease ${props.label}`}
-        className="octant-number-stepper__button"
+        className="octant-number-stepper__button rounded-none"
         disabled={props.value <= props.min}
         onClick={() => commit(props.value - step)}
         size="icon"
@@ -41,6 +41,7 @@ export function OctantNumberStepper(props: OctantNumberStepperProps) {
       <OctantInput
         aria-label={props.label}
         className="octant-number-stepper__input"
+        unstyled
         max={props.max}
         min={props.min}
         onChange={(event) => {
@@ -64,7 +65,7 @@ export function OctantNumberStepper(props: OctantNumberStepperProps) {
       )}
       <OctantButton
         aria-label={`Increase ${props.label}`}
-        className="octant-number-stepper__button"
+        className="octant-number-stepper__button rounded-none"
         disabled={props.value >= props.max}
         onClick={() => commit(props.value + step)}
         size="icon"

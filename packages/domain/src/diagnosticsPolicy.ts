@@ -6,12 +6,15 @@ import type {
   DiagnosticRecoveryFact,
   DiagnosticRedactionTag,
   DiagnosticsExportFailure,
+  JournalGrowth,
 } from "@octant/contracts";
 import {
   MAX_DIAGNOSTIC_CORRELATIONS,
   MAX_DIAGNOSTIC_RECOVERY_FACTS,
   MAX_DIAGNOSTIC_VERSIONS,
+  type DiagnosticHostHealth,
   DIAGNOSTICS_PACKET_VERSION,
+  DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
   decodeDiagnosticEvidencePacket,
   decodeDiagnosticSafeText,
 } from "@octant/contracts";
@@ -162,7 +165,9 @@ export function serializeDiagnosticsEvidencePacket(packet: DiagnosticEvidencePac
     recovery: packet.recovery,
     redactions: packet.redactions,
     redacted: packet.redacted,
+    ...(packet.hostHealth === undefined ? {} : { hostHealth: packet.hostHealth }),
     generatedAt: packet.generatedAt,
+    ...(packet.journalGrowth === undefined ? {} : { journalGrowth: packet.journalGrowth }),
   });
 }
 
@@ -215,6 +220,9 @@ export interface RawDiagnosticInput {
   }>;
   readonly recovery: ReadonlyArray<{ readonly action: string; readonly automated: boolean }>;
   readonly generatedAt: string;
+  readonly hostHealth?: DiagnosticHostHealth;
+  /** Kinds and counts only; the contract schema admits nothing else. */
+  readonly journalGrowth?: JournalGrowth;
   /** When the underlying operation actually succeeded, no failure packet exists. */
   readonly succeeded?: boolean;
 }
@@ -357,7 +365,10 @@ export function buildDiagnosticsPacket(input: RawDiagnosticInput): DiagnosticsPa
   })) as ReadonlyArray<DiagnosticRecoveryFact>;
 
   const candidate = {
-    packetVersion: DIAGNOSTICS_PACKET_VERSION,
+    packetVersion:
+      input.journalGrowth === undefined && input.hostHealth === undefined
+        ? DIAGNOSTICS_PACKET_VERSION
+        : DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
     packetId: input.packetId,
     domain: input.domain,
     failureCode: input.failureCode,
@@ -372,7 +383,9 @@ export function buildDiagnosticsPacket(input: RawDiagnosticInput): DiagnosticsPa
     recovery,
     redactions: collectedTags,
     redacted: true as const,
+    ...(input.hostHealth === undefined ? {} : { hostHealth: input.hostHealth }),
     generatedAt: input.generatedAt,
+    ...(input.journalGrowth === undefined ? {} : { journalGrowth: input.journalGrowth }),
   };
 
   try {

@@ -219,13 +219,6 @@
   font-size: var(--oct-text-xs);
 }
 
-/* The shadcn badge recipe already gives the secondary variant a
-   transparent 1px border, matching the dashed one-time variant's box. */
-.automation-row__cadence[data-cadence="one-time"] {
-  border-color: var(--oct-border);
-  border-style: dashed;
-}
-
 .routine-composer {
   display: flex;
   flex-direction: column;
@@ -253,19 +246,7 @@
 }
 
 .routine-composer__chip {
-  padding: 0.2rem 0.55rem;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
-  background: transparent;
-  color: var(--oct-muted);
-  font: inherit;
   font-size: var(--oct-text-xs);
-  cursor: pointer;
-  transition: color var(--oct-motion-fast) var(--oct-ease-standard);
-}
-
-.routine-composer__chip:hover {
-  color: var(--oct-fg);
 }
 
 .routine-composer__draft {

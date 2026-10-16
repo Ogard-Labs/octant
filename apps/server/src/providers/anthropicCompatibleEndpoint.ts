@@ -8,6 +8,7 @@ import {
 import type { ProviderCredentialLease, ProviderCredentialResolver } from "./credentialBrokerClient";
 import { CONTEXT_OVERFLOW_FAILURE_MESSAGE } from "./endpointRetry";
 import { acquireProviderCredential, reportKeyRejection } from "./providerApiKeyPool";
+import { trimTrailingSlashes } from "@octant/domain/trim-trailing";
 import { resolveModelInputModalities } from "@octant/domain/model-context-window";
 
 const MAX_RETRY_AFTER_MS = 3_600_000;
@@ -69,7 +70,7 @@ export interface AnthropicGenerationRejection {
 export function makeAnthropicCompatibleEndpoint(
   options: AnthropicCompatibleEndpointOptions,
 ): AnthropicCompatibleEndpoint {
-  const baseUrl = options.configuration.baseUrl.replace(/\/+$/, "");
+  const baseUrl = trimTrailingSlashes(options.configuration.baseUrl);
   const limits = Object.freeze({ ...DEFAULT_LIMITS, ...options.limits });
   assertPositiveLimit(limits.connectionTimeoutMs);
   assertPositiveLimit(limits.requestBodyBytes);

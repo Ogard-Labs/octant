@@ -1,3 +1,4 @@
+import { trimTrailingUrlPunctuation } from "./trimTrailing";
 import {
   CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
   CANVAS_SHARE_SCHEMA_VERSION,
@@ -73,7 +74,7 @@ function extractCandidateUrls(value: string): string[] {
   if (trimmed) candidates.add(trimmed);
   const embedded = value.match(/[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'`<>]+/g) ?? [];
   for (const match of embedded) {
-    candidates.add(match.replace(/[),.;]+$/g, ""));
+    candidates.add(trimTrailingUrlPunctuation(match));
   }
   return [...candidates];
 }

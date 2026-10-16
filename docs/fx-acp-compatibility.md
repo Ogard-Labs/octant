@@ -137,6 +137,12 @@ These need a brokered AI Gateway key, which this probe did not have.
   rather than a platform home API. The probes prove it for `v0.0.10` and
   `v0.0.13`; any other release that changes that resolution is a new probe,
   not an assumption.
+- The selectable profile admits `v0.0.13` and newer (`minimumVersion` in
+  `acpProfiles.ts`, maintainer decision 2026-10-16). `v0.0.10` relocates its
+  home correctly but predates the probed `set_config_option` reply that lists
+  `mode`, and `v0.0.11` and `v0.0.12` were never probed, so all three are
+  refused as too old. A newer release that drops `mode` from that reply is
+  refused per session by the mode guard, not by the version gate.
 - `FX_PERMISSION_MODE=ask` and the ACP session mode are both set. `permission_mode`
   is a profile-owned key that a project `.fx.json` cannot raise, so the two
   cannot disagree in fx's favour.

@@ -238,7 +238,6 @@ export function validateWidgetRecipe(recipe: ZenWidgetRecipeDraft): void {
   const suspiciousPatterns = [
     /<script\b/i,
     /javascript:/i,
-    /on\w+\s*=/i, // HTML event handlers
     /<iframe\b/i,
     /<object\b/i,
     /<embed\b/i,
@@ -256,6 +255,9 @@ export function validateWidgetRecipe(recipe: ZenWidgetRecipeDraft): void {
   ]
     .filter(Boolean)
     .join(" ");
+  if (hasEventHandlerAttribute(textToCheck)) {
+    reject("executable-content", "Recipe contains executable content");
+  }
   for (const pattern of suspiciousPatterns) {
     if (pattern.test(textToCheck)) {
       reject("executable-content", "Recipe contains executable content");
@@ -1269,4 +1271,16 @@ function overlapsVisibleRegion(geometry: ZenGeometry, region: ZenVisibleRegion):
     geometry.y < region.y + region.height &&
     geometry.y + geometry.height > region.y
   );
+}
+
+/**
+ * True when a word containing `on` plus another word character is followed by
+ * `=` (an HTML event handler such as `onclick=`). Anchoring at word starts keeps
+ * the scan linear; `/on\w+\s*=/` rescans every `on` in a long run of them.
+ */
+function hasEventHandlerAttribute(text: string): boolean {
+  for (const match of text.matchAll(/\b(\w+)\s*=/g)) {
+    if (/on\w/i.test(match[1] ?? "")) return true;
+  }
+  return false;
 }

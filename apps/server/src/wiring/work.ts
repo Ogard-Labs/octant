@@ -25,6 +25,7 @@ import { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueSer
 import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueuePorts";
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
 import { createThreadMessageQueueRouteHandler } from "../messageQueue/threadMessageQueueRoutes";
+import { startEventLoopLagDetector } from "../eventLoopLag";
 import { WorkTurnFileObserver } from "../work/workTurnFileObserver";
 import { WorkArtifactProjection } from "../work/workArtifactProjection";
 import { WorkThreadService } from "../work/workThreadService";
@@ -976,8 +977,10 @@ export function wireWork(deps: WorkDependencies) {
         .catch(() => console.error("The message queue could not process a thread change."));
     });
     const messageQueueTimer = setInterval(advanceMessageQueue, 1000);
+    const stopEventLoopLagDetector = startEventLoopLagDetector();
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
+        stopEventLoopLagDetector();
         clearInterval(messageQueueTimer);
         unsubscribeMessageQueue();
         threadMessageQueue.dispose();

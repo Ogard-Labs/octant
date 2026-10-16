@@ -9,6 +9,7 @@ import {
   type CorrelationId,
   type DiagnosticsExportOutcome,
   type DiagnosticsExportRequest,
+  type DiagnosticHostHealth,
 } from "@octant/contracts";
 import {
   buildDiagnosticsExportReceipt,
@@ -24,6 +25,7 @@ import {
   readDiagnosticsExportReceipt,
 } from "./persistence/diagnosticsExportProjection";
 import type { Journal } from "./persistence/journal";
+import { readJournalGrowth } from "./persistence/journalGrowth";
 import type { SqliteConnection } from "./persistence/sqlitePort";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 
@@ -45,6 +47,8 @@ export interface DiagnosticsExportServiceDeps {
   readonly journal: Pick<Journal, "append">;
   /** The concrete Octant server build currently serving this request. */
   readonly octantVersion: string;
+  /** Process counters to include in the packet; omitted by callers outside the host process. */
+  readonly hostHealth?: () => DiagnosticHostHealth;
   /** ISO-8601 UTC clock; defaults to the real wall clock. */
   readonly clock?: () => string;
   /** UUID generator for the packet id; defaults to `randomUUID`. */
@@ -122,6 +126,14 @@ export function createDiagnosticsFailureIncidentEvent(
   };
 }
 
+function readJournalGrowthOrUndefined(connection: SqliteConnection, generatedAt: string) {
+  try {
+    return readJournalGrowth(connection, new Date(generatedAt));
+  } catch {
+    return undefined;
+  }
+}
+
 export function exportDiagnosticsEvidence(
   request: DiagnosticsExportRequest,
   deps: DiagnosticsExportServiceDeps,
@@ -165,6 +177,10 @@ export function exportDiagnosticsEvidence(
   const packetId = idGenerator();
   const hostVersions = hostComponentVersions(deps.octantVersion);
 
+  // Growth is context for a reviewer, not part of proving the failure, so an
+  // unreadable journal leaves the section out rather than failing the export.
+  const journalGrowth = readJournalGrowthOrUndefined(deps.connection, generatedAt);
+
   const built = buildDiagnosticsPacket({
     packetId,
     domain: request.domain,
@@ -174,7 +190,9 @@ export function exportDiagnosticsEvidence(
     candidateVersions: hostVersions,
     correlations: [{ correlationId: request.correlationId, observedAt: incident.observedAt }],
     recovery: [{ action: defaultDiagnosticsRecoveryAction(request.domain), automated: false }],
+    ...(deps.hostHealth === undefined ? {} : { hostHealth: deps.hostHealth() }),
     generatedAt,
+    ...(journalGrowth === undefined ? {} : { journalGrowth }),
   });
 
   if (built.kind === "failed") {

@@ -1923,6 +1923,13 @@ flowchart LR
   takes: that thread's export, or the host-wide data export that embeds it. A capture adds no Project filesystem authority and no
   second taint mechanism: the observation that produced it already taints the
   thread. Detail is in [Browser captures](design/browser-captures.md).
+- **Journal growth.** A diagnostics export carries journal events per aggregate
+  kind per day for the last 14 days, the journal head sequence, and the database
+  size, as kind names and counts only: no payload, identifier, or thread or
+  Project name. A packet carrying this section or the `hostHealth` counters
+  (see the development loop) is version 2; a version 1 packet carries neither. One grouped query over the `event_journal_occurred_at` index
+  reads it when diagnostics are exported or Settings opens, never on a timer,
+  and Settings shows the same table.
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window
@@ -4113,6 +4120,35 @@ native harness in `apps/server/src/harness`:
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
+
+- **Parity checklist.** The 2026-10-16 parity run found Harness leads that
+  could not record task progress, were offered `second-opinion` and
+  `context-remaining` in only some modes, raised no attention for a pending
+  approval, and trapped terminal keyboard focus, none of which the Claude and
+  Codex paths did. A Harness lead counts as at parity with those first-class
+  runtimes only while every item below holds in Chat, Work, and Code. Each
+  release's acceptance runs this checklist, and a release does not claim
+  Harness parity while any item is open.
+  1. **Offered tools.** Always offered: `todo-write`, `context-remaining`,
+     and `second-opinion` in every mode; `read`, `grep`, `glob`, `edit`, and
+     `write` in Work and Code; `bash` and `goal-check` in Code only. Offered
+     when the host supplies the port: `delegate`, `ask-user`, and `goal`
+     (every mode), and `web-fetch` and `web-search` (Work and Code; Chat only
+     while its research is on, and `web-search` only with a search
+     endpoint). `nativeHarnessComposition.test.ts` pins the full set per
+     mode with every port supplied, the reduced set without them, and that
+     the composition call site still supplies each port.
+  2. **Approval attention.** A pending approval raises the same attention as
+     a pending question: the thread's state, the Inbox, and the sidebar mark,
+     and it shows inline in the thread. Not yet pinned by a test.
+  3. **Task list.** `todo-write` records pending, in-progress, and done
+     without a plan approval. Not yet pinned at the offered-set level beyond
+     item 1; the progress states are covered by `nativeHarnessTodo.test.ts`.
+  4. **One session everywhere.** The same session state is visible in web,
+     terminal, and phone.
+  5. **Terminal focus escape.** A keyboard user can leave the terminal pane
+     with a documented chord, and the pane says so. Not yet pinned; pinned
+     when the terminal focus escape lands, in the existing xterm tests.
 
 Follow-up suggestions are every provider's, not the harness's
 (`apps/server/src/followUps`). Every Chat, Work, and Code turn, on any
@@ -6812,12 +6848,22 @@ so signing, notarization, and update ship as one deliverable.
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local
 server on every OS. The sequence is the Linux desktop shell, then the Linux
-AppImage with its signed feed, then Windows. Windows packaging, installers,
-feeds, and packaging CI wait for an explicit maintainer decision after Linux
-parity. Windows Work and Code stay unavailable until an approved Windows
-confinement design is documented: the confinement port supports only macOS
-and Linux and refuses every other platform, so Work and Code fail closed
-there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
+AppImage with its signed feed, then Windows. Windows comes after the macOS
+technical preview has shipped and a Linux self-update from the signed feed
+has been seen on a real image; until both exist, no Windows packaging,
+installer, feed, packaging CI, or confinement work starts (maintainer
+decision, 2026-10-16). The reason is sequencing, not a technical
+dependency: the one maintainer is also the only acceptance tester, the
+macOS preview has waited on acceptance since September, and a third
+platform's packaging and confinement questions would compete for the same
+sittings. The Linux self-update gate exists because the signed-feed update
+path is the shared trust root for every non-macOS platform and has never
+been exercised on a real image, so Windows should not build on it until it
+has. Windows Work and Code stay unavailable until an
+approved Windows confinement design is documented: the confinement port
+supports only macOS and Linux and refuses every other platform, so Work and
+Code fail closed there. Simulator, the Apple workbench, and vibrancy stay
+macOS-only.
 
 **Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,
 `packages/domain` `appUpdatePolicy`):
@@ -6894,6 +6940,14 @@ bun run dev        # Vite renderer + Electron with hot reload; server spawned fr
 bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint, typecheck, test, build
 ```
 
+- Two stalls are logged once per occurrence so the next one is visible: a
+  SQLite statement slower than `OCTANT_SLOW_STATEMENT_MS` (default 20) logs
+  its SQL shape and duration, never bound values, and an event-loop lag over
+  `OCTANT_EVENT_LOOP_LAG_MS` (default 100) logs the lag. Both log lines are off
+  under tests unless the variable is set. The diagnostics export carries
+  `hostHealth` counters (a version 2 packet) since process start: slow statement count and worst
+  duration, lag event count and worst lag, in milliseconds, with no SQL text or
+  route names.
 - `bun run dev` starts Vite for `apps/web` and launches Electron against it.
   Renderer edits hot-reload; server edits apply on the next relaunch. On
   startup the dev script rebuilds `apps/desktop/dist/main.mjs` whenever

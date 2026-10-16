@@ -104,6 +104,7 @@ describe("Xterm runtime", () => {
       throw new Error("WebGL is unavailable.");
     });
 
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const session = mount(document.createElement("div"), {
       interactive: false,
       onData: vi.fn(),
@@ -112,8 +113,26 @@ describe("Xterm runtime", () => {
     });
 
     expect(mocks.write).toHaveBeenCalledWith("ready\n");
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
     expect(() => session.dispose()).not.toThrow();
     expect(mocks.terminalDispose).toHaveBeenCalledOnce();
+  });
+
+  it("says so once when the GPU context is lost and the terminal falls back to DOM", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mount(document.createElement("div"), {
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "",
+    });
+    const onLoss = mocks.webglOnContextLoss.mock.calls[0]?.[0] as (() => void) | undefined;
+    onLoss?.();
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(mocks.webglDispose).toHaveBeenCalledOnce();
+    warn.mockRestore();
   });
 
   it("appends replay deltas and resets only when retained history diverges", () => {

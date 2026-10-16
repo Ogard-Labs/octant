@@ -233,15 +233,6 @@
   font-size: var(--oct-text-xs);
 }
 
-.github-issue-browser__state[data-state="open"] {
-  color: var(--octant-success-text);
-  border-color: color-mix(in srgb, var(--octant-success-text) 45%, transparent);
-}
-
-.github-issue-browser__state[data-state="closed"] {
-  color: var(--oct-meta);
-}
-
 .github-issue-browser__more {
   align-self: flex-start;
   margin: var(--oct-space-2) var(--oct-space-3);
