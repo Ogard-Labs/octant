@@ -6817,12 +6817,22 @@ so signing, notarization, and update ship as one deliverable.
 Desktop is one product on macOS, Linux, and Windows; platform differences are
 fail-closed posture, never a second app. The desktop process owns its local
 server on every OS. The sequence is the Linux desktop shell, then the Linux
-AppImage with its signed feed, then Windows. Windows packaging, installers,
-feeds, and packaging CI wait for an explicit maintainer decision after Linux
-parity. Windows Work and Code stay unavailable until an approved Windows
-confinement design is documented: the confinement port supports only macOS
-and Linux and refuses every other platform, so Work and Code fail closed
-there. Simulator, the Apple workbench, and vibrancy stay macOS-only.
+AppImage with its signed feed, then Windows. Windows comes after the macOS
+technical preview has shipped and a Linux self-update from the signed feed
+has been seen on a real image; until both exist, no Windows packaging,
+installer, feed, packaging CI, or confinement work starts (maintainer
+decision, 2026-10-16). The reason is sequencing, not a technical
+dependency: the one maintainer is also the only acceptance tester, the
+macOS preview has waited on acceptance since September, and a third
+platform's packaging and confinement questions would compete for the same
+sittings. The Linux self-update gate exists because the signed-feed update
+path is the shared trust root for every non-macOS platform and has never
+been exercised on a real image, so Windows should not build on it until it
+has. Windows Work and Code stay unavailable until an
+approved Windows confinement design is documented: the confinement port
+supports only macOS and Linux and refuses every other platform, so Work and
+Code fail closed there. Simulator, the Apple workbench, and vibrancy stay
+macOS-only.
 
 **Updates** (`apps/desktop/src/appUpdateService.ts`, `appUpdateFeed.ts`,
 `packages/domain` `appUpdatePolicy`):
