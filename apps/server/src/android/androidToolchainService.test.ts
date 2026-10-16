@@ -329,6 +329,7 @@ describe("AndroidToolchainService", () => {
       writeArtifact: async () => undefined,
       now: () => "2026-09-18T10:00:00.000Z",
       newId: () => ids.action,
+      shutdownSettle: { absentMs: 0, pollMs: 1 },
     });
     try {
       await service.discover(discoveryRequest, context);
@@ -353,25 +354,31 @@ describe("AndroidToolchainService", () => {
   describe("shutting an emulator down", () => {
     /**
      * Adb keeps listing the emulator after the power-off is accepted, as a real one does:
-     * first as a device, then as `offline` while it saves its state, then not at all.
+     * as a device, then not at all for a moment as the transport restarts, then `offline`
+     * while the emulator saves its state, and finally not at all.
      */
     function slowExitingEmulator(listedAfterPowerOff: number) {
       let poweredOff = false;
       let listings = 0;
-      return vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+      const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
         const argv = input.argv.join(" ");
         if (argv.includes("-list-avds")) return processResult("Pixel_8_API_34\n");
         if (argv.includes("devices")) {
-          if (poweredOff && ++listings > listedAfterPowerOff) {
+          if (!poweredOff) {
+            return processResult("List of devices attached\nemulator-5554          device\n");
+          }
+          listings += 1;
+          if (listings > listedAfterPowerOff || (listings > 1 && listings <= 3)) {
             return processResult("List of devices attached\n");
           }
-          const state = poweredOff && listings > 1 ? "offline" : "device";
+          const state = listings === 1 ? "device" : "offline";
           return processResult(`List of devices attached\nemulator-5554          ${state}\n`);
         }
         if (argv.includes("ro.boot.qemu.avd_name")) return processResult("Pixel_8_API_34\n");
         if (argv.includes("reboot")) poweredOff = true;
         return processResult("");
       });
+      return Object.assign(execute, { listings: () => listings });
     }
 
     function serviceFor(
@@ -387,7 +394,7 @@ describe("AndroidToolchainService", () => {
         writeArtifact: async () => undefined,
         now: () => "2026-10-16T10:00:00.000Z",
         newId: () => ids.action,
-        shutdownSettle: { timeoutMs: 2_000, pollMs: 5 },
+        shutdownSettle: { timeoutMs: 5_000, pollMs: 5, absentMs: 150 },
         observeEmulators: (emulators: ReadonlyArray<{ state: string }>) =>
           states.push(emulators[0]?.state),
         ...extra,
@@ -395,8 +402,9 @@ describe("AndroidToolchainService", () => {
       return { service, states };
     }
 
-    it("keeps the emulator shutting down until adb no longer lists it, even across a discovery", async () => {
-      const { service, states } = serviceFor(slowExitingEmulator(40));
+    it("keeps the emulator shutting down until adb has stayed without it, through a discovery and a brief gap", async () => {
+      const execute = slowExitingEmulator(40);
+      const { service, states } = serviceFor(execute);
       try {
         await service.discover(discoveryRequest, context);
         states.length = 0;
@@ -404,11 +412,13 @@ describe("AndroidToolchainService", () => {
         await vi.waitFor(() =>
           expect(service.snapshot(context).emulators[0]).toMatchObject({ state: "shutting-down" }),
         );
-        // The pane re-reads discovery while the emulator is still on adb; that must not
-        // bring it back as running.
+        // The pane re-reads discovery while the emulator is still running; that must not
+        // bring it back as running, nor call it shut down when adb has dropped it for a moment.
         const meanwhile = await service.discover(discoveryRequest, context);
         expect(meanwhile.emulators[0]).toMatchObject({ state: "shutting-down" });
         expect((await shutdown).outcome).toBe("succeeded");
+        // It was reported stopped only after the last listing, not at the first gap.
+        expect(execute.listings()).toBeGreaterThan(40);
         expect(service.snapshot(context).emulators[0]).toMatchObject({ state: "shutdown" });
         expect(service.snapshot(context).emulators[0].serial).toBeUndefined();
         expect(states).toEqual(["shutting-down", "shutting-down", "shutdown"]);
@@ -419,7 +429,7 @@ describe("AndroidToolchainService", () => {
 
     it("says the emulator is still running when it does not stop in time", async () => {
       const { service } = serviceFor(slowExitingEmulator(Number.POSITIVE_INFINITY), {
-        shutdownSettle: { timeoutMs: 60, pollMs: 5 },
+        shutdownSettle: { timeoutMs: 100, pollMs: 5, absentMs: 150 },
       });
       try {
         await service.discover(discoveryRequest, context);
@@ -869,6 +879,7 @@ describe("AndroidToolchainService", () => {
         realpath: async (path: string) => path,
         now: () => "2026-10-14T20:00:00.000Z",
         newId: () => "30000000-0000-4000-8000-000000000012",
+        shutdownSettle: { absentMs: 0, pollMs: 1 },
       });
       return { service, artifacts, execute };
     }
