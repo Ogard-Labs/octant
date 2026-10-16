@@ -1,4 +1,4 @@
-import { execFile as execFileCallback } from "node:child_process";
+import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -115,6 +115,32 @@ describe("managed tool service", () => {
         );
       }
     } finally {
+      await service.close();
+    }
+  });
+
+  it("kills a tool process that is still launching when the app has to end", async () => {
+    const descriptor = platformTools[0];
+    if (descriptor === undefined) throw new Error("expected a platform tool");
+    const service = makeService();
+    // A launch that has not yet printed its endpoint, as a serve-avd start waiting out its readiness window.
+    const launching = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
+    });
+    const finished = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+    try {
+      service.trackProcess(descriptor.tool, launching);
+      service.trackProcess(descriptor.tool, finished);
+      await new Promise((resolve) => finished.once("exit", resolve));
+      const exited = new Promise<NodeJS.Signals | null>((resolve) =>
+        launching.once("exit", (_code, signal) => resolve(signal)),
+      );
+
+      service.terminateTrackedProcesses();
+
+      await expect(exited).resolves.toBe("SIGKILL");
+    } finally {
+      launching.kill("SIGKILL");
       await service.close();
     }
   });
