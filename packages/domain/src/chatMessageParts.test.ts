@@ -134,6 +134,27 @@ describe("withoutFollowUpBlocks for a surface that prints text", () => {
     expect(shown).toBe("Done.\n\n");
   });
 
+  it.each([1, 2, 3])(
+    "holds back a partly arrived opener indented by %i space(s) while streaming",
+    (indent) => {
+      const margin = " ".repeat(indent);
+      const reply = `Done.\n${margin}${block.replaceAll("\n", `\n${margin}`)}`;
+      let shown = "";
+      for (let length = 0; length <= reply.length; length += 1) {
+        const next = withoutFollowUpBlocks(reply.slice(0, length), { streaming: true });
+        expect(next.startsWith(shown)).toBe(true);
+        expect(next).not.toContain("octant");
+        shown = next;
+      }
+    },
+  );
+
+  it("does not hold back a line indented by four spaces, which is a code block", () => {
+    expect(withoutFollowUpBlocks("Run:\n    ```octant-fol", { streaming: true })).toBe(
+      "Run:\n    ```octant-fol",
+    );
+  });
+
   it("keeps a reply that ends in a bare fence once it is no longer streaming", () => {
     expect(withoutFollowUpBlocks("Run it:\n```", { streaming: false })).toBe("Run it:\n```");
     expect(withoutFollowUpBlocks("Run it:\n```", { streaming: true })).toBe("Run it:\n");

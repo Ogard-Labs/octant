@@ -245,8 +245,15 @@ export function withoutFollowUpBlocks(body: string, options: { streaming: boolea
   }
   if (!options.streaming) return visible;
   const lineStart = visible.lastIndexOf("\n") + 1;
-  const tail = visible.slice(lineStart);
-  return tail.length >= 1 && opener.startsWith(tail) ? visible.slice(0, lineStart) : visible;
+  // A fence may be indented by up to three spaces and still be a fence; four
+  // is an indented code block, which is never the block. The indentation stays
+  // shown, so only the fragment of the opener is held back.
+  const line = /^( {0,3})(?! )(.*)$/.exec(visible.slice(lineStart));
+  const indent = line?.[1] ?? "";
+  const fragment = line?.[2] ?? "";
+  return fragment.length > 0 && opener.startsWith(fragment)
+    ? visible.slice(0, lineStart + indent.length)
+    : visible;
 }
 
 /** A reply cut at a follow-up or decision block whose closing fence has not streamed in yet. */
