@@ -392,19 +392,21 @@ sends the power-off through `adb` and the server records evidence for it,
 including `timed-out` or `failed` when the emulator does not power off. No
 native dialog is involved.
 
-`reboot -p` returns once the power-off is accepted, and the emulator process
-exits 10 to 40 s later (measured), so accepting is not stopping. From the
-moment the action starts the host reports the emulator as `shutting-down` and
-the pane says "Shutting down" instead of "No device running" or a live view; the
-pane applies that at once for a shutdown it started rather than waiting for the
-next poll. The action ends only when adb no longer lists the serial (a wait of up
-to 90 s, polled every second), and only then records `succeeded` and reports the
-emulator as shut down. An emulator that is still listed after the wait returns
-to running with a `timed-out` outcome. Discovery keeps a listed `shutting-down`
-emulator as `shutting-down`, so a refresh during the wait cannot bring it back
-as running. A `shutting-down` emulator is not streamed: the host refuses a screen
-watch for it and the pane does not attach or reconnect the live view, so "Live
-view lost" does not appear between "Shutting down" and "No device running".
+`reboot -p` returns once the power-off is accepted, and the emulator keeps
+running while it saves its state: 10 s to about 80 s after, measured, during
+which adb lists it first as a device and then as `offline`. Accepting is not
+stopping. From the moment the action starts the host reports the emulator as
+`shutting-down` and the pane says "Shutting down" instead of "No device running"
+or a live view; the pane applies that at once for a shutdown it started rather
+than waiting for the next poll. The action ends only when adb no longer lists the
+serial in any state (a wait of up to 180 s, polled every second), and only then
+records `succeeded` and reports the emulator as shut down. An emulator that is
+still listed after the wait returns to running with a `timed-out` outcome.
+Discovery keeps a listed `shutting-down` emulator as `shutting-down`, `offline`
+included, so a refresh during the wait cannot bring it back as running or call
+it shut down. A `shutting-down` emulator is not streamed: the host refuses a
+screen watch for it and the pane does not attach or reconnect the live view, so
+"Live view lost" does not appear between "Shutting down" and "No device running".
 
 `serve-avd` is keyed by serial and does not exit when its emulator does. When the
 host records an emulator as stopped, by a shutdown or because discovery no longer

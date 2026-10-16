@@ -351,7 +351,10 @@ describe("AndroidToolchainService", () => {
   });
 
   describe("shutting an emulator down", () => {
-    /** Adb keeps listing the emulator for a few polls after the power-off is accepted, as a real one does. */
+    /**
+     * Adb keeps listing the emulator after the power-off is accepted, as a real one does:
+     * first as a device, then as `offline` while it saves its state, then not at all.
+     */
     function slowExitingEmulator(listedAfterPowerOff: number) {
       let poweredOff = false;
       let listings = 0;
@@ -362,7 +365,8 @@ describe("AndroidToolchainService", () => {
           if (poweredOff && ++listings > listedAfterPowerOff) {
             return processResult("List of devices attached\n");
           }
-          return processResult("List of devices attached\nemulator-5554          device\n");
+          const state = poweredOff && listings > 1 ? "offline" : "device";
+          return processResult(`List of devices attached\nemulator-5554          ${state}\n`);
         }
         if (argv.includes("ro.boot.qemu.avd_name")) return processResult("Pixel_8_API_34\n");
         if (argv.includes("reboot")) poweredOff = true;

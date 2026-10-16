@@ -114,10 +114,11 @@ export interface AndroidToolchainServiceOptions {
 
 /**
  * How long a shutdown waits, after adb accepted the power-off, for the emulator
- * to leave adb. The emulator process exited 10 to 40 s after the power-off was
- * accepted when measured, so the wait sits above that.
+ * to leave adb. Saving the emulator's state kept it running for 10 s to about
+ * 80 s after the power-off was accepted when measured, so the wait sits well
+ * above that.
  */
-const SHUTDOWN_SETTLE_MS = 90_000;
+const SHUTDOWN_SETTLE_MS = 180_000;
 const SHUTDOWN_POLL_MS = 1_000;
 const MAX_RECENT = 64;
 const MAX_DIAGNOSTICS = 16;
@@ -249,6 +250,7 @@ export class AndroidToolchainService {
       : [];
     const devices = await this.#command([sdk.adbPath, "devices", "-l"], context, 15_000);
     const serials = succeeded(devices) ? parseAdbDevices(text(devices.stdout)) : [];
+    const onAdb = succeeded(devices) ? parseAdbListedSerials(text(devices.stdout)) : [];
     const emulators: AndroidEmulatorRecord[] = [];
     for (const name of names) {
       let emulatorId: AndroidEmulatorRecord["emulatorId"];
@@ -261,13 +263,20 @@ export class AndroidToolchainService {
       // An emulator that is powering off is still on adb for a while; reading
       // it as running would bring the pane's live view back for a device that
       // is about to disappear.
-      const stopping = beforeDiscovery.get(emulatorId)?.state === "shutting-down";
+      const before = beforeDiscovery.get(emulatorId);
+      const stoppingSerial =
+        before?.state === "shutting-down" && before.serial !== undefined
+          ? before.serial
+          : undefined;
+      // It may already be `offline`, which adb lists but discovery does not count as booted.
+      const stillListed = stoppingSerial !== undefined && onAdb.includes(stoppingSerial);
+      const found = serial ?? (stillListed ? stoppingSerial : undefined);
       emulators.push(
         decodeAndroidEmulatorRecord({
           emulatorId,
           name,
-          state: serial === undefined ? "shutdown" : stopping ? "shutting-down" : "booted",
-          ...(serial === undefined ? {} : { serial }),
+          state: found === undefined ? "shutdown" : stillListed ? "shutting-down" : "booted",
+          ...(found === undefined ? {} : { serial: found }),
         }),
       );
     }
@@ -1115,7 +1124,7 @@ export class AndroidToolchainService {
     for (;;) {
       const devices = await this.#command([adb, "devices"], context, 10_000, signal);
       // A listing that fails says nothing about the emulator, so it is not "gone".
-      if (succeeded(devices) && !parseAdbDevices(text(devices.stdout)).includes(serial)) {
+      if (succeeded(devices) && !parseAdbListedSerials(text(devices.stdout)).includes(serial)) {
         return true;
       }
       if (Date.now() >= deadline || signal.aborted) return false;
@@ -1622,6 +1631,20 @@ function defaultSdkHomes(): ReadonlyArray<string> {
     "/opt/homebrew/share/android-commandlinetools",
     "/usr/local/share/android-commandlinetools",
   ];
+}
+
+/**
+ * Every emulator serial adb lists, whatever its state. A powering-off emulator
+ * is listed as `offline` for as long as it takes to save its state, which was
+ * over a minute when measured, and it is running until adb drops it.
+ */
+function parseAdbListedSerials(output: string): ReadonlyArray<string> {
+  const serials: string[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const match = /^(emulator-[0-9]+)\s+\S+/.exec(line.trim());
+    if (match?.[1] !== undefined) serials.push(match[1]);
+  }
+  return serials;
 }
 
 function parseAdbDevices(output: string): ReadonlyArray<string> {
