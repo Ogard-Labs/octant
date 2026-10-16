@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatThread, CodeThread, ToolActionAuthority, WorkThread } from "@octant/contracts";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
@@ -377,7 +378,7 @@ describe("native harness composition", () => {
       modelId: "harness-model",
     } as unknown as CodeThread;
 
-    const harness = (tainted = false) => {
+    const harness = (tainted = false, extraPorts: Record<string, unknown> = {}) => {
       const asked: Array<{ readonly threadId: string; readonly mode: string }> = [];
       const inspected: Array<unknown> = [];
       const composition = createNativeHarnessComposition({
@@ -397,6 +398,7 @@ describe("native harness composition", () => {
         },
         isHarnessProvider: () => true,
         tasks: { replaceTasks: (async () => undefined) as never },
+        ...(extraPorts as object),
         shell: { run: async () => ({ status: "unavailable", output: "", truncated: false }) },
         contextHarness: {
           inspect: (subject) => {
@@ -465,6 +467,68 @@ describe("native harness composition", () => {
         "context-remaining",
         "second-opinion",
       ]);
+    });
+
+    // Ports server.ts also supplies; each one gates a tool the user guide promises.
+    const productionPorts = {
+      goals: { read: async () => undefined, execute: async () => undefined } as never,
+      questions: { ask: async () => undefined } as never,
+      delegate: () => ({}) as never,
+      webFetch: (async () => undefined) as never,
+      resolveWebSearch: () => (async () => undefined) as never,
+    };
+
+    it("offers the full conditional matrix per mode when every production port is supplied", () => {
+      const { composition } = harness(false, productionPorts);
+      const chat = names(composition.forChat({ thread: chatThread, windowId: "window-1" })!);
+      const work = names(
+        composition.forWork({
+          thread: workThread,
+          projectRoot: "/nonexistent",
+          windowId: "window-1",
+        })!,
+      );
+      const code = names(
+        composition.forCode({
+          thread: codeThread,
+          checkoutRoot: "/nonexistent",
+          windowId: "window-1",
+        })!,
+      );
+      // Chat's web tools wait on its research grant, so they are absent here by design.
+      const lead = [
+        "todo-write",
+        "context-remaining",
+        "second-opinion",
+        "delegate",
+        "ask-user",
+        "goal",
+      ];
+      const web = ["web-fetch", "web-search"];
+      expect({ chat, work, code }).toEqual({
+        chat: lead,
+        work: ["read", "grep", "glob", "edit", "write", ...web, ...lead],
+        code: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...lead, "goal-check"],
+      });
+    });
+
+    it("keeps server.ts supplying every port the offered set depends on", () => {
+      const source = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+      const start = source.indexOf("createNativeHarnessComposition({");
+      const block = source.slice(start, start + 9000);
+      for (const port of [
+        "tasks:",
+        "goals:",
+        "questions:",
+        "secondOpinion:",
+        "delegate:",
+        "shell:",
+        "resolveWebSearch:",
+        "webFetch:",
+        "contextHarness",
+      ]) {
+        expect(block, port).toContain(port);
+      }
     });
 
     it.each([
