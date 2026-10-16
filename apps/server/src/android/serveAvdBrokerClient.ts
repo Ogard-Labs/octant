@@ -30,6 +30,12 @@ export interface ServeAvdPort {
     serial: string,
     options?: { readonly sdkRoot?: string; readonly signal?: AbortSignal },
   ): Promise<ServeAvdOpening>;
+  /**
+   * Stops the tool attached to `serial`. Called when the emulator has stopped:
+   * the tool is keyed by serial and does not exit with its emulator, so one left
+   * running would answer for the next emulator that takes the serial.
+   */
+  release(serial: string): Promise<void>;
 }
 
 /**
@@ -63,6 +69,20 @@ export function serveAvdFromEnvironment(
     return undefined;
   }
   return {
+    release: async (serial) => {
+      if (!SERIAL.test(serial)) return;
+      try {
+        await fetchImpl(endpoint, {
+          method: "POST",
+          redirect: "error",
+          credentials: "omit",
+          headers: { "content-type": "application/json", [HEADER]: token },
+          body: JSON.stringify({ serial, release: true }),
+        });
+      } catch {
+        // The desktop is gone, and its tools went with it.
+      }
+    },
     open: async (serial, options = {}) => {
       if (!SERIAL.test(serial)) return { status: "unavailable", reason: "not-emulator" };
       const { sdkRoot, signal } = options;

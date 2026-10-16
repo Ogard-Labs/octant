@@ -97,6 +97,23 @@ describe("serve-avd broker", () => {
     expect(managed.launches[0]).toContain("--no-preview");
   });
 
+  it("stops the tool of a serial whose emulator stopped, so the next emulator gets a fresh one", async () => {
+    const managed = tools();
+    const broker = await startServeAvdBroker(managed);
+    openBrokers.push(broker);
+    expect((await post(broker, { serial: "emulator-5554" })).status).toBe(200);
+    const child = managed.trackProcess.mock
+      .calls[0]?.[1] as import("node:child_process").ChildProcess;
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    const released = await post(broker, { serial: "emulator-5554", release: true });
+    expect(released.status).toBe(200);
+    await exited;
+    // Releasing a serial nothing is attached to is harmless.
+    expect((await post(broker, { serial: "emulator-5556", release: true })).status).toBe(200);
+    expect((await post(broker, { serial: "emulator-5554" })).status).toBe(200);
+    expect(managed.launches).toHaveLength(2);
+  });
+
   it("refuses a name that would boot an AVD, a missing token, and a missing tool", async () => {
     const broker = await startServeAvdBroker({
       launchSpec: async () => undefined,

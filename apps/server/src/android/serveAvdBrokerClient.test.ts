@@ -72,6 +72,32 @@ describe("serve-avd broker client", () => {
     });
   });
 
+  it("asks the desktop to stop the tool of a serial whose emulator stopped", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ released: true }));
+    const port = serveAvdFromEnvironment(
+      { OCTANT_SERVE_AVD_BROKER_URL: endpoint, OCTANT_SERVE_AVD_BROKER_TOKEN: token },
+      fetchImpl,
+    );
+    await port?.release("emulator-5554");
+    expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(
+      endpoint,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ serial: "emulator-5554", release: true }),
+      }),
+    );
+    // A name that is not an emulator serial is never sent, and an unreachable desktop is not an error.
+    await port?.release("Pixel_9");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const unreachable = serveAvdFromEnvironment(
+      { OCTANT_SERVE_AVD_BROKER_URL: endpoint, OCTANT_SERVE_AVD_BROKER_TOKEN: token },
+      async () => {
+        throw new Error("connection refused");
+      },
+    );
+    await expect(unreachable?.release("emulator-5554")).resolves.toBeUndefined();
+  });
+
   it("passes on why the desktop could not attach serve-avd", async () => {
     const answering = (status: number, body: unknown) =>
       serveAvdFromEnvironment(

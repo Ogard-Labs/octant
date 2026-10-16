@@ -128,6 +128,10 @@ export function AndroidEmulatorPane(props: {
   const [chosenEmulatorId, setChosenEmulatorId] = useState<AndroidEmulatorId>();
   const paneOpenRequestId = controller.runtime?.paneOpenRequest?.requestId;
   useEffect(() => setChosenEmulatorId(undefined), [paneOpenRequestId]);
+  // The emulator the person just shut down. The host reports it as shutting down
+  // too, but only on the next poll; until then its dying stream must not read as
+  // a lost live view.
+  const [shuttingDownId, setShuttingDownId] = useState<string>();
   const [liveViewStopped, setLiveViewStopped] = useState(false);
   const [liveViewAttempt, setLiveViewAttempt] = useState(0);
   const approvalGated = decidesCodeEffectsByApproval(props.thread.executionPolicy);
@@ -148,7 +152,12 @@ export function AndroidEmulatorPane(props: {
     };
   }, [props.hostBridge]);
 
-  const emulators = controller.discovery?.emulators ?? controller.runtime?.emulators ?? [];
+  const emulators = (controller.discovery?.emulators ?? controller.runtime?.emulators ?? []).map(
+    (emulator): AndroidEmulatorRecord =>
+      String(emulator.emulatorId) === shuttingDownId && emulator.state === "booted"
+        ? { ...emulator, state: "shutting-down" }
+        : emulator,
+  );
   const preferred = chosenEmulatorId ?? controller.runtime?.paneOpenRequest?.emulatorId;
   // More than one emulator is running and nobody has said which to show: ask
   // rather than guess, since another task may own one of them, and
@@ -267,6 +276,7 @@ export function AndroidEmulatorPane(props: {
             setRememberedGrantEpoch(Date.now());
           }
         }
+        if (intent.kind === "shutdown") setShuttingDownId(emulatorId);
         const evidence = await controller.execute(request);
         if (evidence.outcome === "succeeded" && isAndroidEmulatorOpenInputKind(intent.kind)) {
           rememberedInputGrants.current.set(emulatorId, Date.now() + ANDROID_INPUT_GRANT_MS);
@@ -282,6 +292,7 @@ export function AndroidEmulatorPane(props: {
       } catch {
         setActionFailure({ kind: "no-answer", intent });
       } finally {
+        setShuttingDownId(undefined);
         setBusy(false);
         release();
       }

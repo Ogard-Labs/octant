@@ -77,6 +77,19 @@ export async function startServeAvdBroker(
     return created;
   }
 
+  /**
+   * Stops the tool attached to a serial whose emulator has stopped. serve-avd
+   * does not exit with its emulator, and a session left in the map would be
+   * handed to the next emulator that takes the serial.
+   */
+  async function release(serial: string): Promise<void> {
+    const pending = sessions.get(serial);
+    if (pending === undefined) return;
+    sessions.delete(serial);
+    const launched = await pending;
+    if (launched.kind === "attached") launched.session.child.kill("SIGTERM");
+  }
+
   async function launch(
     serial: string,
     sdkRoot: string | undefined,
@@ -121,7 +134,7 @@ export async function startServeAvdBroker(
   }
 
   const server = createServer((incoming, outgoing) => {
-    void handle(incoming, outgoing, token, open).catch(() => {
+    void handle(incoming, outgoing, token, open, release).catch(() => {
       if (!outgoing.headersSent) outgoing.writeHead(503);
       outgoing.end();
     });
@@ -162,6 +175,7 @@ async function handle(
   outgoing: ServerResponse,
   token: string,
   open: (serial: string, sdkRoot: string | undefined) => Promise<AvdLaunch>,
+  release: (serial: string) => Promise<void>,
 ): Promise<void> {
   const headers = new Headers();
   for (const [name, value] of Object.entries(incoming.headers)) {
@@ -179,6 +193,11 @@ async function handle(
   const serial = isRecord(body) && typeof body.serial === "string" ? body.serial : undefined;
   if (serial === undefined || !SERIAL.test(serial)) {
     writeJson(outgoing, 400, { error: "managed-device-broker-refused" });
+    return;
+  }
+  if (isRecord(body) && body.release === true) {
+    await release(serial);
+    writeJson(outgoing, 200, { released: true });
     return;
   }
   const requested = isRecord(body) ? body.sdkRoot : undefined;

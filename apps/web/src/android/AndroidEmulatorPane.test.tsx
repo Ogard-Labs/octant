@@ -637,6 +637,79 @@ describe("AndroidEmulatorPane", () => {
       );
     });
 
+    it("says Shutting down until the emulator has stopped, with no lost live view in between", async () => {
+      vi.stubGlobal(
+        "createImageBitmap",
+        vi.fn(async () => ({ width: 1080, height: 2400, close: () => undefined })),
+      );
+      const userEvent = (await import("@testing-library/user-event")).default;
+      const user = userEvent.setup();
+      let stopped = false;
+      let finish: (evidence: unknown) => void = () => undefined;
+      const execute = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const state = () => ({ ...discovery.emulators[0], state: stopped ? "shutdown" : "booted" });
+      try {
+        render(
+          <AndroidEmulatorPane
+            checkoutId={ids.checkout as never}
+            client={
+              client({
+                execute,
+                discover: vi.fn(async () => ({ ...discovery, emulators: [state()] })),
+                snapshot: vi.fn(async () => ({
+                  sequence: 1,
+                  snapshotAt: "2026-10-16T20:00:03.000Z",
+                  sdk: discovery.sdk,
+                  emulators: [state()],
+                  active: [],
+                  recentEvidence: [],
+                })),
+                watchScreen: vi.fn(async () => ({
+                  status: "watching",
+                  screen: { width: 1080, height: 2400 },
+                  frames: (async function* () {
+                    yield Uint8Array.of(0xff, 0xd8, 0xff, 0xd9);
+                    await new Promise(() => undefined);
+                  })(),
+                  transport: { kind: "stream" },
+                })),
+              }) as never
+            }
+            createUuid={uuidFactory()}
+            hostBridge={
+              {
+                getHostCapabilities: () => ({
+                  sidebarVibrancySupported: false,
+                  liveAndroidFrameSupported: true,
+                }),
+              } as never
+            }
+            requestApproval={async () => ids.approval}
+            thread={thread as never}
+          />,
+        );
+        expect(await screen.findByText("Live stream")).toBeVisible();
+        screen.getByRole("button", { name: "More" }).focus();
+        await user.keyboard("{Enter}");
+        await user.click(await screen.findByRole("menuitem", { name: "Shut down Pixel 8" }));
+        // The host has accepted the power-off, but the emulator is still running.
+        expect(await screen.findByText(/Shutting down Pixel 8/)).toBeVisible();
+        expect(screen.queryByText("Live view lost")).toBeNull();
+        expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
+        stopped = true;
+        finish({ outcome: "succeeded" });
+        expect(await screen.findByText("No device running")).toBeVisible();
+        expect(screen.queryByText("Live view lost")).toBeNull();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
     it("runs nothing and says so when the person declines or the approval lapses", async () => {
       const { execute, requestApproval } = await shutDown({
         requestApproval: async () => undefined,
