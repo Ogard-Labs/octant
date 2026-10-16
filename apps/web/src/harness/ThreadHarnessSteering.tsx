@@ -40,9 +40,11 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
   const [notice, setNotice] = useState<string>();
   const generation = useRef(0);
   const inFlight = useRef(false);
-  // A retried send keeps its id, so the host lands the note once however many
-  // times the request had to be repeated.
-  const pendingNoteId = useRef<string | undefined>(undefined);
+  // A retried send of the same text keeps its id, so the host lands the note
+  // once however many times the request had to be repeated. An edited draft is
+  // a different note and gets a new id; reusing the old one would be taken as
+  // already accepted and queue none of the edit.
+  const pendingNote = useRef<{ readonly id: string; readonly text: string } | undefined>(undefined);
 
   const load = useCallback(async () => {
     if (inFlight.current) return undefined;
@@ -71,30 +73,39 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
   useEffect(() => {
     setDraft("");
     setNotice(undefined);
-    pendingNoteId.current = undefined;
+    pendingNote.current = undefined;
   }, [threadId]);
 
   const view = read?.threadId === threadId ? read.view : undefined;
   const hasSession = view !== null;
+  // The thread list leaves out a turn parked on an approval or a question, but
+  // the session is still running then; keep reading while it says so, or a turn
+  // that settles between list refreshes would leave the input showing.
+  const live = running || view?.session.status === "running";
   // One read when the thread opens and when a turn starts or ends, so notes
   // the lead never reached show up at the turn's end.
   useEffect(() => {
     void load();
   }, [load, running]);
   useEffect(() => {
-    if (!running || !hasSession) return;
+    if (!live || !hasSession) return;
     return scheduleVisibleInterval(() => void load(), props.refreshIntervalMs ?? 2_000);
-  }, [load, running, hasSession, props.refreshIntervalMs]);
+  }, [load, live, hasSession, props.refreshIntervalMs]);
 
   const send = useCallback(
     async (text: string) => {
       if (busy) return;
       setBusy(true);
-      pendingNoteId.current ??= globalThis.crypto.randomUUID();
+      const noteId =
+        pendingNote.current?.text === text
+          ? pendingNote.current.id
+          : globalThis.crypto.randomUUID();
+      pendingNote.current = { id: noteId, text };
       try {
-        await client.steer(threadId, { kind: "queue", text, noteId: pendingNoteId.current });
-        pendingNoteId.current = undefined;
-        setDraft("");
+        await client.steer(threadId, { kind: "queue", text, noteId });
+        pendingNote.current = undefined;
+        // Text typed while the request was out is the next note, not this one.
+        setDraft((current) => (current.trim() === text ? "" : current));
         setNotice(undefined);
       } catch (failure) {
         // The draft stays, with its id, so the person can send it again.

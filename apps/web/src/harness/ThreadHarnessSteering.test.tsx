@@ -69,6 +69,67 @@ describe("ThreadHarnessSteering", () => {
     await waitFor(() => expect(input).toHaveValue(""));
   });
 
+  it("keeps text typed while a note is being sent and queues it as the next note", async () => {
+    let release: (value: null) => void = () => undefined;
+    const steer = vi.fn(
+      () =>
+        new Promise<null>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const client = { session: vi.fn(async () => view()), steer };
+    render(<ThreadHarnessSteering client={client} running threadId={threadId} />);
+    const input = await screen.findByRole("textbox", { name: "Note for the lead" });
+    await userEvent.type(input, "First note");
+    await userEvent.click(screen.getByRole("button", { name: "Send note" }));
+    await waitFor(() => expect(steer).toHaveBeenCalledTimes(1));
+    await userEvent.type(input, "Second");
+    release(null);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send note" })).toBeEnabled());
+    expect(input).toHaveValue("First noteSecond");
+  });
+
+  it("gives an edited draft a new note id after a send whose answer was lost", async () => {
+    const steer = vi.fn().mockRejectedValueOnce(new Error("network")).mockResolvedValue(null);
+    const client = { session: vi.fn(async () => view()), steer };
+    render(<ThreadHarnessSteering client={client} running threadId={threadId} />);
+    const input = await screen.findByRole("textbox", { name: "Note for the lead" });
+    await userEvent.type(input, "Use sqlite");
+    await userEvent.click(screen.getByRole("button", { name: "Send note" }));
+    expect(await screen.findByText("The note was not queued. Try again.")).toBeVisible();
+    await userEvent.type(input, " instead");
+    await userEvent.click(screen.getByRole("button", { name: "Send note" }));
+    await waitFor(() => expect(steer).toHaveBeenCalledTimes(2));
+    expect(steer.mock.calls[1]?.[1]).toMatchObject({ text: "Use sqlite instead" });
+    expect(steer.mock.calls[1]?.[1].noteId).not.toEqual(steer.mock.calls[0]?.[1].noteId);
+  });
+
+  it("keeps reading while the session runs even when the thread list says the turn is parked", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let status: "running" | "idle" = "running";
+      const client = { session: vi.fn(async () => view(status)), steer: vi.fn() };
+      render(
+        <ThreadHarnessSteering
+          client={client}
+          refreshIntervalMs={50}
+          running={false}
+          threadId={threadId}
+        />,
+      );
+      expect(await screen.findByRole("textbox", { name: "Note for the lead" })).toBeVisible();
+      await vi.advanceTimersByTimeAsync(200);
+      expect(client.session.mock.calls.length).toBeGreaterThan(1);
+      status = "idle";
+      await vi.advanceTimersByTimeAsync(200);
+      await waitFor(() =>
+        expect(screen.queryByRole("textbox", { name: "Note for the lead" })).toBeNull(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows a queued note as queued and a delivered one as delivered while the turn runs", async () => {
     const delivered = {
       ...queued,
