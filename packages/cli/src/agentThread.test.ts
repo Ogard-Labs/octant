@@ -1,3 +1,4 @@
+import { WORK_TURN_CAPABILITIES, decodeCancelWorkTurnCommand } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
   CODE_THREAD_TURNS,
@@ -441,5 +442,72 @@ describe("reading a long Code thread in the terminal", () => {
     const next = await port.read();
     expect(next?.turns.map((entry) => entry.prompt)).toEqual(expectedPrompts(10_050));
     expect(next?.hasEarlier).toBe(true);
+  });
+});
+
+describe("stopping a Work turn from the terminal", () => {
+  const workThread = "c0000000-0000-4000-8000-000000000001";
+  const request = "a0000000-0000-4000-8000-000000000001";
+  const turn = "b0000000-0000-4000-8000-000000000001";
+
+  it("sends the turn id the host requires, and the host stops the running turn", async () => {
+    const cancelled: unknown[] = [];
+    const session: OpenedLocalControlSession = {
+      kind: "opened",
+      windowId: "11111111-1111-4111-8111-111111111111",
+      send: async (call) => {
+        if (call.path === `/api/work/turns/transcript/${workThread}`) {
+          return {
+            status: 200,
+            body: {
+              threadId: workThread,
+              turns: [
+                {
+                  requestId: request,
+                  threadId: workThread,
+                  turnId: turn,
+                  projectId: ids.project,
+                  authority: {
+                    hostId: "local",
+                    projectId: ids.project,
+                    bindingRevisionId: ids.binding,
+                    workingDirectory: ".",
+                    confinementPosture: "project-root-confined",
+                    providerInstanceId: ids.provider,
+                    modelId: "loopback-model",
+                  },
+                  status: "running",
+                  prompt: "Open the fixture",
+                  transcript: [{ role: "user", text: "Open the fixture" }],
+                  capabilities: WORK_TURN_CAPABILITIES,
+                  version: 1,
+                  acceptedAt: now,
+                  updatedAt: now,
+                },
+              ],
+            },
+          };
+        }
+        if (call.path === "/api/work/turns/cancel") {
+          // The host decodes the command strictly; a command it cannot decode
+          // is refused as an unavailable service.
+          try {
+            cancelled.push(decodeCancelWorkTurnCommand(call.body));
+          } catch {
+            return { status: 503, body: { message: "Octant Work turn service is unavailable." } };
+          }
+          return { status: 200, body: { kind: "turn-cancelled" } };
+        }
+        return { status: 404, body: { message: `Unexpected ${call.path}` } };
+      },
+      close: async () => undefined,
+    };
+
+    const outcome = await agentThreadPort(session, "work", workThread).interrupt();
+
+    expect(outcome).toEqual({ kind: "interrupted" });
+    expect(cancelled).toEqual([
+      { kind: "cancel-work-turn", requestId: request, threadId: workThread, turnId: turn },
+    ]);
   });
 });

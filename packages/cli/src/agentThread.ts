@@ -272,7 +272,12 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
       const response = await session.send({
         path: "/api/work/turns/cancel",
         method: "POST",
-        body: { kind: "cancel-work-turn", requestId: String(running.requestId), threadId },
+        body: {
+          kind: "cancel-work-turn",
+          requestId: String(running.requestId),
+          threadId,
+          turnId: String(running.turnId),
+        },
       });
       if (response.status !== 200) {
         return {
