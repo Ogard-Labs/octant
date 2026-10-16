@@ -9,7 +9,13 @@ import type { ManagedSimulatorTools } from "./managedSimulatorHelpers";
 const PATH = "/v1/managed-device/serve-avd";
 const HEADER = "x-octant-managed-device-token";
 const SERIAL = /^emulator-[0-9]+$/;
-const READY_MS = 8_000;
+/**
+ * Bundled serve-avd took 5 to 17 s to print its ready state on a Mac under
+ * heavy load, so the wait must clear that with room to spare. A launch that
+ * is still starting when the server's request ends keeps going and is shared
+ * by the next request, so a retry does not restart it.
+ */
+export const SERVE_AVD_READY_MS = 30_000;
 const MAX_BODY_BYTES = 8 * 1024;
 const MAX_SDK_ROOT_LENGTH = 4_096;
 /** Longest quiet-mode state serve-avd prints before Octant stops reading for it. */
@@ -51,7 +57,7 @@ export async function startServeAvdBroker(
   options: ServeAvdBrokerOptions = {},
 ) {
   const spawn = options.spawn ?? spawnProcess;
-  const readyMs = options.readyMs ?? READY_MS;
+  const readyMs = options.readyMs ?? SERVE_AVD_READY_MS;
   const token = randomBytes(32).toString("base64url");
   const sessions = new Map<string, Promise<AvdLaunch>>();
   let closed = false;

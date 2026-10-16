@@ -34,6 +34,12 @@ export interface DevicePaneProps {
   /** Approval-gated and no grant yet: ask before any input is sent. */
   readonly needsApproval: boolean;
   readonly problem?: DeviceProblem;
+  /**
+   * The surface above has put an approval in front of the person and nothing
+   * runs until they answer. Said in one line so a pane that is only waiting
+   * never looks stuck.
+   */
+  readonly waitingForApproval?: string;
   readonly diagnostics: DeviceDiagnostics;
   /**
    * The host reported that it can open an address on this device. Without it
@@ -120,6 +126,7 @@ export function DevicePane(props: DevicePaneProps) {
         ? props.problem
         : undefined,
     onDismiss: () => setDismissed(props.problem?.message),
+    waiting: props.waitingForApproval,
     approval:
       approvalWanted && !approvalDeferred
         ? {
@@ -521,6 +528,7 @@ function lineFor(input: {
   readonly view: DeviceView;
   readonly problem: DeviceProblem | undefined;
   readonly onDismiss: () => void;
+  readonly waiting: string | undefined;
   readonly approval: DeviceLineContent | undefined;
   readonly typing: DeviceLineContent | undefined;
   readonly openUrl: DeviceLineContent | undefined;
@@ -534,6 +542,7 @@ function lineFor(input: {
   if (input.problem !== undefined) {
     return { kind: "error", problem: input.problem, onDismiss: input.onDismiss };
   }
+  if (input.waiting !== undefined) return { kind: "notice", problem: { message: input.waiting } };
   const reconnect = (label: string) =>
     input.canAct ? { fix: { label, run: () => input.act({ kind: "reconnect" }) } } : {};
   const { view } = input;

@@ -116,6 +116,7 @@ export function AndroidEmulatorPane(props: {
     snapshotRequest,
   });
   const [busy, setBusy] = useState(false);
+  const [awaitingApproval, setAwaitingApproval] = useState<string>();
   // A failure is kept with the emulator its request named, so one that
   // arrives after the pane moved to another emulator is never shown there.
   const [failed, setFailed] = useState<{
@@ -249,7 +250,13 @@ export function AndroidEmulatorPane(props: {
             setActionFailure({ kind: "cannot-confirm" });
             return;
           }
-          const approvalId = await props.requestApproval(base);
+          setAwaitingApproval(approvalWaitSentence(intent));
+          let approvalId: string | undefined;
+          try {
+            approvalId = await props.requestApproval(base);
+          } finally {
+            setAwaitingApproval(undefined);
+          }
           if (approvalId === undefined) {
             setActionFailure({ kind: "not-approved", intent });
             return;
@@ -398,6 +405,7 @@ export function AndroidEmulatorPane(props: {
           })}
       platform="android"
       {...(problem === undefined ? {} : { problem })}
+      {...(awaitingApproval === undefined ? {} : { waitingForApproval: awaitingApproval })}
       view={view}
     />
   );
@@ -647,6 +655,17 @@ function androidActionRequest(input: {
         orientation: intent.orientation,
         timeoutMs: 30_000,
       };
+  }
+}
+
+function approvalWaitSentence(intent: AndroidEmulatorIntent): string {
+  switch (intent.kind) {
+    case "shutdown":
+      return "Waiting for your approval to shut down the emulator.";
+    case "boot":
+      return "Waiting for your approval to start the emulator.";
+    default:
+      return "Waiting for your approval.";
   }
 }
 
