@@ -746,6 +746,24 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("The provider refused the turn.");
   });
 
+  it("shows a refused send's warning once when the host's failure sets both messages", () => {
+    const refusal = "The provider refused the turn.";
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "failed",
+          errorMessage: refusal,
+          turnError: refusal,
+          turnErrorInTranscript: false,
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getAllByText(refusal)).toHaveLength(1);
+  });
+
   it("carries a refused start's warning in a status mark and tint, not a coloured edge stripe", () => {
     const { container } = render(
       <CodeThreadWorkspace

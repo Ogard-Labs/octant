@@ -6649,6 +6649,47 @@ it("settles an answer to an approval a host exit left waiting as interrupted", a
   }
 });
 
+it("settles a turn a host restart cut off as interrupted when the harness gives up on it", async () => {
+  const fixture = runtimeFixture({});
+  try {
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(98),
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: thread().providerInstanceId,
+        modelId: thread().modelId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    });
+    fixture.operationEvents.append({
+      threadId,
+      operationId: operationId(98),
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({ kind: "operation-state", state: "waiting" }),
+    });
+    expect(
+      fixture.conversation().turns.find((turn) => turn.operationId === operationId(98)),
+    ).toMatchObject({ status: "waiting" });
+
+    fixture.runtime.settleCutOffTurns?.(String(threadId));
+
+    expect(
+      fixture.conversation().turns.find((turn) => turn.operationId === operationId(98)),
+    ).toMatchObject({
+      status: "interrupted",
+      failure: {
+        message:
+          "Octant restarted while this turn was running, so it did not finish. Send a new message to continue.",
+      },
+    });
+  } finally {
+    fixture.close();
+  }
+});
+
 it("settles an answer to a provider question a host exit left waiting as interrupted", async () => {
   const fixture = runtimeFixture({});
   try {

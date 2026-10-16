@@ -3,6 +3,7 @@ import {
   createContext,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -150,27 +151,33 @@ export function useWorkspaceSurfaceDrag(options: {
     };
   }, [cancel]);
 
-  return {
-    active,
-    consumeSuppressedClick: (dragKey) =>
-      controller.current?.consumeClickSuppression(dragKey) ?? false,
-    onPointerDown(event, source) {
-      if (event.button !== 0) return;
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-      captured.current = { element: event.currentTarget, pointerId: event.pointerId };
-      controller.current?.start(event.pointerId, source, { x: event.clientX, y: event.clientY });
-    },
-    onPointerMove(event) {
-      controller.current?.move(event.pointerId, { x: event.clientX, y: event.clientY });
-    },
-    onPointerUp(event) {
-      controller.current?.drop(event.pointerId);
-      releaseCapture(captured.current);
-      captured.current = null;
-    },
-    onPointerCancel: cancel,
-    rootRef,
-  };
+  // One handle per drag state: every handler reads the controller through a
+  // ref, so the sidebar rows and panes holding the handle keep it across
+  // renders instead of re-rendering for a new object each time.
+  return useMemo<WorkspaceSurfaceDragHandle>(
+    () => ({
+      active,
+      consumeSuppressedClick: (dragKey) =>
+        controller.current?.consumeClickSuppression(dragKey) ?? false,
+      onPointerDown(event, source) {
+        if (event.button !== 0) return;
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        captured.current = { element: event.currentTarget, pointerId: event.pointerId };
+        controller.current?.start(event.pointerId, source, { x: event.clientX, y: event.clientY });
+      },
+      onPointerMove(event) {
+        controller.current?.move(event.pointerId, { x: event.clientX, y: event.clientY });
+      },
+      onPointerUp(event) {
+        controller.current?.drop(event.pointerId);
+        releaseCapture(captured.current);
+        captured.current = null;
+      },
+      onPointerCancel: cancel,
+      rootRef,
+    }),
+    [active, cancel],
+  );
 }
 
 function activeSnapshot(snapshot: WorkspaceSurfaceDragSnapshot): WorkspaceSurfaceDragState | null {

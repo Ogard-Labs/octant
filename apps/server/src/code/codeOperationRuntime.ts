@@ -679,6 +679,14 @@ export interface CodeOperationRuntime {
    */
   turnAwaitsPerson?(threadId: string): boolean;
   /**
+   * Settles as interrupted every provider turn of the thread that a host
+   * restart left reading running or waiting, when nothing is running it now.
+   * The harness session lifts its recovery by settling the same cut-off turn
+   * on its side; this is the transcript's half, so the turn shows how it ended
+   * instead of waiting for a person who can no longer answer it.
+   */
+  settleCutOffTurns?(threadId: string): void;
+  /**
    * The thread as its running turn may use it: a turn keeps the posture it
    * started under, so a later wider grant does not reach its tool calls.
    */
@@ -1416,6 +1424,7 @@ export function createCodeOperationRuntime(
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
     admitsTurn: (windowId, thread) => service.admitsTurn(windowId, thread),
     turnAwaitsPerson: (threadId) => turns.awaitsPerson(threadId),
+    settleCutOffTurns: (threadId) => turns.settleCutOffTurns(threadId),
     threadWithActiveTurnPosture: (thread) => turns.threadWithActiveTurnPosture(thread),
     turnInProgress: (threadId) => startingTurns.has(threadId) || turns.holdsTurn(threadId),
     compactionSessions: {
@@ -3142,25 +3151,78 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       message:
         "The provider session that asked ended when Octant stopped. Send a new message to continue.",
     } as const;
+    return this.#interruptOwner(thread.id, owner, failure)
+      ? turnState("interrupted", failure)
+      : turnState("failed");
+  }
+
+  /**
+   * A host restart ends the turn it cut off, but the journal keeps reading it
+   * running or waiting: only a provider turn can outlive the process as a
+   * wait, and nothing can resume this one. Once the harness has given up on
+   * it, the transcript says so too. A turn that is live now is never touched.
+   */
+  settleCutOffTurns(threadIdInput: string): void {
+    const threadId = decodeCodeThreadId(threadIdInput);
+    const history = this.#events.historyForThread(threadId);
+    if (history.status !== "ok") return;
+    const liveOperationId = this.#active.get(threadIdInput)?.operationId;
+    const turns = new Map<
+      string,
+      { operationId: CodeOperationId; cursor: number; unsettled: boolean }
+    >();
+    for (const frame of history.frames) {
+      const key = String(frame.operationId);
+      if (key === String(liveOperationId)) continue;
+      const event = frame.event;
+      if (event.kind === "conversation-turn-started") {
+        turns.set(key, { operationId: frame.operationId, cursor: frame.cursor, unsettled: true });
+        continue;
+      }
+      const turn = turns.get(key);
+      if (turn === undefined) continue;
+      turn.cursor = frame.cursor;
+      if (event.kind === "operation-state") {
+        turn.unsettled = event.state === "running" || event.state === "waiting";
+      } else if (event.kind === "operation-result" && event.result.kind === "provider-turn-state") {
+        turn.unsettled = event.result.state === "running" || event.result.state === "waiting";
+      }
+    }
+    for (const turn of turns.values()) {
+      if (!turn.unsettled) continue;
+      this.#interruptOwner(threadId, turn, {
+        category: "failed",
+        message:
+          "Octant restarted while this turn was running, so it did not finish. Send a new message to continue.",
+      });
+    }
+  }
+
+  /** Journals the turn interrupted with the reason and closes its runtime work record. */
+  #interruptOwner(
+    threadId: CodeThreadId,
+    owner: { readonly operationId: CodeOperationId; readonly cursor: number },
+    failure: { readonly category: "failed"; readonly message: string },
+  ): boolean {
     try {
       this.#events.append({
-        threadId: thread.id,
+        threadId,
         operationId: owner.operationId,
         expectedCursor: owner.cursor,
         event: { kind: "operation-state", state: "interrupted", failure },
       });
     } catch {
-      return turnState("failed");
+      return false;
     }
     this.#observeRuntimeWorkOutcome(
       this.#runtimeWork.settleOrphaned({
         id: owner.operationId,
-        threadId: thread.id,
+        threadId,
         kind: "provider-turn",
         state: "interrupted",
       }),
     );
-    return turnState("interrupted", failure);
+    return true;
   }
 
   async cancel(input: Parameters<CodeOperationTurnPort["cancel"]>[0]) {
