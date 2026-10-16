@@ -166,3 +166,44 @@ describe("native harness session totals", () => {
     expect(read?.metrics).toBeUndefined();
   });
 });
+
+describe("native harness task list", () => {
+  const items = [
+    { title: "Read the spec", status: "done" },
+    { title: "Write the fix", status: "in-progress" },
+    { title: "Run the checks", status: "pending" },
+  ] as const;
+
+  it("keeps in-progress and done items across a restart", () => {
+    const connection = openConnection();
+    const live = storeOn(connection);
+    live.ensure({ threadId, mode: "code", leadSlotId: "default" as never, lead });
+    expect(live.replaceTasks(threadId, items)).toBe("recorded");
+    expect(live.read(threadId)?.tasks).toEqual(items);
+
+    const restarted = storeOn(connection);
+    expect(restarted.read(threadId)?.tasks).toEqual(items);
+    restarted.replaceTasks(threadId, [{ title: "Ship it", status: "pending" }]);
+    expect(storeOn(connection).read(threadId)?.tasks).toEqual([
+      { title: "Ship it", status: "pending" },
+    ]);
+  });
+
+  it("adds no frame when the list is written again unchanged", () => {
+    const connection = openConnection();
+    const live = storeOn(connection);
+    live.ensure({ threadId, mode: "code", leadSlotId: "default" as never, lead });
+    live.replaceTasks(threadId, items);
+    live.replaceTasks(threadId, items);
+    const row = connection
+      .prepare(
+        "SELECT COUNT(*) AS n FROM event_journal WHERE event_name = 'native-harness-tasks-replaced@1'",
+      )
+      .get() as { n: number };
+    expect(row.n).toBe(1);
+  });
+
+  it("refuses a thread that has no harness session", () => {
+    expect(storeOn(openConnection()).replaceTasks(threadId, items)).toBe("no-session");
+  });
+});

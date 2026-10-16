@@ -1,4 +1,4 @@
-import type { NativeHarnessSessionStatus } from "@octant/contracts";
+import type { NativeHarnessSessionStatus, NativeHarnessTodoItem } from "@octant/contracts";
 
 /**
  * A harness session's status as every surface names it. One table, so the
@@ -23,4 +23,15 @@ export function nativeHarnessStatusLabel(status: NativeHarnessSessionStatus): st
 /** Whether the session holds new work until a person resumes it. */
 export function nativeHarnessSessionHeld(status: NativeHarnessSessionStatus): boolean {
   return status !== "running" && status !== "idle";
+}
+
+const TASK_LABELS: Readonly<Record<NativeHarnessTodoItem["status"], string>> = {
+  pending: "To do",
+  "in-progress": "In progress",
+  done: "Done",
+};
+
+/** A lead task's status as every surface names it. */
+export function nativeHarnessTaskLabel(status: NativeHarnessTodoItem["status"]): string {
+  return TASK_LABELS[status];
 }

@@ -622,7 +622,7 @@ class AgentScreen {
       for (const entry of entries) this.#transcript.add(this.#entryBox(entry, spinner));
     }
 
-    const tasks = tasksFrom(this.#thread);
+    const tasks = tasksFrom(this.#thread, session);
     if (tasks.total > 0) {
       this.#tasks.title = ` Tasks ${tasks.done}/${tasks.total} `;
       this.#tasksText.content = this.#tasksLines(tasks);
@@ -745,10 +745,10 @@ class AgentScreen {
     const p = this.#palette;
     const shown = tasks.items.slice(0, SHOWN_TASKS);
     const chunks: import("@opentui/core").TextChunk[] = [];
-    if (tasks.done > 0) chunks.push(fg(p.success)(`+${tasks.done} done\n`));
-    if (shown.length === 0) chunks.push(fg(p.muted)("All done."));
+    if (tasks.finished > 0) chunks.push(fg(p.success)(`+${tasks.finished} done\n`));
+    if (shown.length === 0 && tasks.lead.length === 0) chunks.push(fg(p.muted)("All done."));
     shown.forEach((task, index) => {
-      const suffix = index < shown.length - 1 ? "\n" : "";
+      const suffix = index < shown.length - 1 || tasks.lead.length > 0 ? "\n" : "";
       chunks.push(
         task.status === "in-progress"
           ? fg(p.text)(bold(`◐ ${task.title}${suffix}`))
@@ -759,6 +759,18 @@ class AgentScreen {
     });
     const more = tasks.items.length - shown.length;
     if (more > 0) chunks.push(dim(fg(p.muted)(`\n+${more} more`)));
+    tasks.lead.slice(0, SHOWN_TASKS).forEach((task, index, listed) => {
+      const suffix = index < listed.length - 1 ? "\n" : "";
+      chunks.push(
+        task.status === "in-progress"
+          ? fg(p.text)(bold(`◐ ${task.title}${suffix}`))
+          : task.status === "done"
+            ? fg(p.success)(`✓ ${task.title}${suffix}`)
+            : fg(p.textSecondary)(`○ ${task.title}${suffix}`),
+      );
+    });
+    const moreLead = tasks.lead.length - SHOWN_TASKS;
+    if (moreLead > 0) chunks.push(dim(fg(p.muted)(`\n+${moreLead} more`)));
     return new StyledText(chunks);
   }
 

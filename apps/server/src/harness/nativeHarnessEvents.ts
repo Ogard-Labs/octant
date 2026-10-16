@@ -1,7 +1,9 @@
 import {
   NATIVE_HARNESS_ROUTING_EVENT_NAMES,
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
+  MAX_NATIVE_HARNESS_TODO_ITEMS,
   NativeHarnessSteeringCleared,
+  NativeHarnessTodoItem,
   NativeHarnessSteeringDelivered,
   NativeHarnessSteeringQueued,
   NATIVE_HARNESS_TRANSCRIPT_EVENT_NAMES,
@@ -61,6 +63,11 @@ export const NativeHarnessFollowUpActivated = Schema.Struct({
   sessionId: NativeHarnessSessionId,
   suggestionId: NativeHarnessFollowUpId,
   created: NativeHarnessFollowUpCreation,
+}).annotations(strict);
+
+export const NativeHarnessTasksReplaced = Schema.Struct({
+  sessionId: NativeHarnessSessionId,
+  items: Schema.Array(NativeHarnessTodoItem).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_TODO_ITEMS)),
 }).annotations(strict);
 
 export const NativeHarnessQuestionSettled = Schema.Struct({
@@ -143,6 +150,7 @@ export function registerNativeHarnessEvents(registry: EventRegistry): EventRegis
       1,
       NativeHarnessFollowUpActivated,
     )
+    .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.tasksReplaced, 1, NativeHarnessTasksReplaced)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.questionAsked, 1, NativeHarnessQuestion)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.questionSettled, 1, NativeHarnessQuestionSettled)
     .register(NATIVE_HARNESS_SESSION_EVENT_NAMES.approvalAsked, 1, NativeHarnessApproval)
