@@ -1734,6 +1734,20 @@ request from the person.
   edge. Feature CSS never suppresses,
   recolours, or adds a second ring, and the `--octant-focus-ring` theme role is
   never painted as the indicator.
+- A surface that takes Tab and Escape for its own use is never a keyboard trap.
+  The terminal sends every key to its shell, so it has one documented way out:
+  `Mod+Escape` moves focus to the next control and `Mod+Shift+Escape` to the
+  previous one (Command on Apple hardware, Control elsewhere), sending nothing
+  to the shell, and both are remappable under Settings › Keyboard shortcuts.
+  Chosen because a shell reads a bare Escape and Control letters but nothing
+  distinctive from a modified Escape, Command chords never reach a shell on
+  Apple hardware, and no application-menu accelerator claims it; Windows and
+  KDE take Control+Escape and Control+Shift+Escape for the OS, which is why the
+  chord can be rebound. The terminal draws the chord in a muted line under its
+  output only while it holds the keyboard (the row keeps its height, so
+  focusing never moves the output) and always lists it in the terminal's
+  accessible description. Tab, Shift+Tab, a bare Escape and function keys still
+  reach the shell.
 - Every app-owned form declares `noValidate`; Octant owns validation copy,
   field association, focus, and recovery instead of browser-specific bubbles.
 - Loading, unavailable, stale, denied, empty, and error states keep stable

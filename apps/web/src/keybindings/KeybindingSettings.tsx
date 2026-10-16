@@ -1,6 +1,7 @@
 import {
   OCTANT_KEYBINDING_ACTIONS,
   chordFromEvent,
+  chordRulesFor,
   describeChord,
   formatChord,
   parseChord,
@@ -64,16 +65,25 @@ export function KeybindingSettings(props: KeybindingSettingsProps) {
     // reaches the window-level listeners, so pressing a chord that is already
     // assigned runs its action — Zen mode hiding Settings mid-recording, say.
     event.stopPropagation();
-    if (event.key === "Escape") {
+    // Only a bare Escape cancels: a modified one is a chord the terminal's way
+    // out may legitimately be recorded as.
+    if (
+      event.key === "Escape" &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.shiftKey
+    ) {
       setRecording(undefined);
       setRecordError(undefined);
       return;
     }
     const candidate = formatChord(chordFromEvent(event, apple));
-    // A page's own commands may be a bare key; every other chord must hold Mod
-    // or Alt, which parseChord enforces.
-    const page = OCTANT_KEYBINDING_ACTIONS.find((action) => action.id === actionId)?.page;
-    const parsed = parseChord(candidate, { page: page !== undefined });
+    // A page's own commands may be a bare key and a terminal's may be a
+    // modified Escape; every other chord must hold Mod or Alt, which
+    // parseChord enforces.
+    const action = OCTANT_KEYBINDING_ACTIONS.find((entry) => entry.id === actionId);
+    const parsed = parseChord(candidate, action === undefined ? {} : chordRulesFor(action));
     if (parsed.status !== "ok") {
       setRecordError(parsed.reason);
       return;

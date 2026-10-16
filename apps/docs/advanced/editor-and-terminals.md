@@ -74,6 +74,12 @@ concurrently.
   restart restores the transcript, exit state, and an explicit rerun action —
   it never restarts a command silently
 
+A terminal sends Tab, Shift+Tab, Escape and function keys to its shell, so
+those keys cannot leave it. Press **⌘/Ctrl+Escape** to move focus to the next
+control and **⌘/Ctrl+Shift+Escape** to the previous one; nothing is sent to the
+shell. The terminal shows the chord under its output while it has focus. See
+[Keyboard shortcuts](./keyboard-workflows#keyboard-shortcuts) to rebind it.
+
 Terminal settings are independent of editor typography: font family, size,
 line height, ligatures, cursor style, scrollback, shell, and theme-derived
 colors. The default terminal font stack falls back to installed Nerd Fonts

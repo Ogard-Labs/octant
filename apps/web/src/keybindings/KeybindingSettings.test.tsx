@@ -125,6 +125,28 @@ describe("KeybindingSettings", () => {
     }
   });
 
+  it("lists the terminal's way out and records it as a modified Escape", async () => {
+    const user = userEvent.setup();
+    const { hook } = renderSettings(memoryStore());
+
+    const heading = screen.getByRole("heading", { level: 3, name: "Terminal" });
+    const group = heading.parentElement;
+    if (group === null) throw new Error("Missing Terminal group");
+    const next = within(group).getByRole("button", {
+      name: "Change the chord for Move focus out of the terminal to the next control",
+    });
+    await user.click(next);
+    // A bare Escape cancels recording; one held with a modifier is the chord.
+    fireEvent.keyDown(next, { key: "Escape" });
+    expect(next).not.toHaveTextContent("Press a chord…");
+    await user.click(next);
+    fireEvent.keyDown(next, { key: "Escape", altKey: true });
+
+    expect(JSON.parse(hook.result.current.document)).toEqual({
+      "terminal-focus-next": "Alt+Escape",
+    });
+  });
+
   it("refuses a chord that would swallow ordinary typing and changes nothing", async () => {
     const user = userEvent.setup();
     const store = memoryStore();
