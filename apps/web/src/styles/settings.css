@@ -719,6 +719,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="user-profile"],
 .setrow[data-setting-id="keybindings"],
 .setrow[data-setting-id="export-diagnostics"],
+.setrow[data-setting-id="journal-growth"],
 .setrow[data-setting-id="chat-personality"],
 .setrow[data-setting-id="code-editor-arguments"],
 .setrow[data-setting-id="execution-context"],
@@ -733,6 +734,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .setrow[data-setting-id="user-profile"] > .setrow-control,
 .setrow[data-setting-id="keybindings"] > .setrow-control,
 .setrow[data-setting-id="export-diagnostics"] > .setrow-control,
+.setrow[data-setting-id="journal-growth"] > .setrow-control,
 .setrow[data-setting-id="chat-personality"] > .setrow-control,
 .setrow[data-setting-id="code-editor-arguments"] > .setrow-control,
 .setrow[data-setting-id="execution-context"] > .setrow-control,
@@ -3533,4 +3535,45 @@ html[data-octant-increased-contrast="true"]
 .settings-view .provider-limits > .surface-section__head {
   padding-bottom: var(--oct-space-3);
   border-bottom: 0;
+}
+
+/* Journal growth: kind rows with a 14-day sparkline and a total. */
+.journal-growth {
+  display: grid;
+  gap: var(--oct-space-2);
+  width: 100%;
+}
+
+.journal-growth__summary,
+.journal-growth__note,
+.journal-growth__caption {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+  text-align: start;
+}
+
+.journal-growth__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--oct-text-sm);
+}
+
+.journal-growth__table th,
+.journal-growth__table td {
+  padding: var(--oct-space-1) 0;
+  text-align: start;
+  font-weight: inherit;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.journal-growth__table thead th {
+  color: var(--oct-meta);
+  border-top: 0;
+}
+
+.journal-growth__table td:last-child,
+.journal-growth__table th:last-child {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
 }

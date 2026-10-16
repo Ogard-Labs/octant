@@ -53,6 +53,7 @@ describe("octantSettingsRegistry", () => {
       "reset-layout",
       "reset-window-bounds",
       "export-diagnostics",
+      "journal-growth",
     ]);
     expect(host?.keywords).toMatch(/lifecycle/);
     expect(host?.keywords).toMatch(/diagnostics/);

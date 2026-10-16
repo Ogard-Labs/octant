@@ -25,6 +25,7 @@ import {
   readDiagnosticsExportReceipt,
 } from "./persistence/diagnosticsExportProjection";
 import type { Journal } from "./persistence/journal";
+import { readJournalGrowth } from "./persistence/journalGrowth";
 import type { SqliteConnection } from "./persistence/sqlitePort";
 import { OCTANT_LOCAL_ACTOR_ID } from "./shellService";
 
@@ -125,6 +126,14 @@ export function createDiagnosticsFailureIncidentEvent(
   };
 }
 
+function readJournalGrowthOrUndefined(connection: SqliteConnection, generatedAt: string) {
+  try {
+    return readJournalGrowth(connection, new Date(generatedAt));
+  } catch {
+    return undefined;
+  }
+}
+
 export function exportDiagnosticsEvidence(
   request: DiagnosticsExportRequest,
   deps: DiagnosticsExportServiceDeps,
@@ -168,6 +177,10 @@ export function exportDiagnosticsEvidence(
   const packetId = idGenerator();
   const hostVersions = hostComponentVersions(deps.octantVersion);
 
+  // Growth is context for a reviewer, not part of proving the failure, so an
+  // unreadable journal leaves the section out rather than failing the export.
+  const journalGrowth = readJournalGrowthOrUndefined(deps.connection, generatedAt);
+
   const built = buildDiagnosticsPacket({
     packetId,
     domain: request.domain,
@@ -179,6 +192,7 @@ export function exportDiagnosticsEvidence(
     recovery: [{ action: defaultDiagnosticsRecoveryAction(request.domain), automated: false }],
     ...(deps.hostHealth === undefined ? {} : { hostHealth: deps.hostHealth() }),
     generatedAt,
+    ...(journalGrowth === undefined ? {} : { journalGrowth }),
   });
 
   if (built.kind === "failed") {

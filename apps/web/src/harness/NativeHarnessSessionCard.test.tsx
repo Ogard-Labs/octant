@@ -274,6 +274,47 @@ describe("NativeHarnessSessionCard", () => {
     );
   });
 
+  it("offers only Resume for the lead's approval a restart left behind, never Allow or Deny", async () => {
+    const approval = {
+      id: "00000000-0000-4000-8000-000000000067",
+      toolName: "bash",
+      summary: "bash: bun run test",
+      approvalClass: "shell-commands",
+      status: "pending",
+      askedAt: "2026-09-05T12:06:00.000Z",
+    };
+    const recovering = {
+      ...view(),
+      session: {
+        ...view().session,
+        status: "recovery-required",
+        detail: "Octant restarted while the lead was waiting for an answer.",
+      },
+      approvals: [approval],
+    };
+    const client = {
+      session: vi.fn(async () => recovering),
+      command: vi.fn(async () => ({
+        kind: "native-harness-session",
+        session: recovering.session,
+      })),
+      answerQuestion: vi.fn(),
+      decideApproval: vi.fn(),
+    };
+    render(<NativeHarnessSessionCard client={client as never} threadId={threadId} />);
+    const lost = await screen.findByRole("region", { name: "Approval was waiting at restart" });
+    expect(within(lost).queryByRole("button", { name: "Allow" })).toBeNull();
+    expect(within(lost).queryByRole("button", { name: "Deny" })).toBeNull();
+    await userEvent.click(within(lost).getByRole("button", { name: "Resume" }));
+    await waitFor(() =>
+      expect(client.command).toHaveBeenCalledWith(
+        threadId,
+        expect.objectContaining({ kind: "resume-native-harness-session" }),
+      ),
+    );
+    expect(client.decideApproval).not.toHaveBeenCalled();
+  });
+
   it("offers no session-wide choice for a call on a thread that took in outside content", async () => {
     const approval = {
       id: "00000000-0000-4000-8000-000000000064",

@@ -133,6 +133,31 @@ describe("pending request route", () => {
     expect(sources.children).toHaveBeenCalledWith(windowId);
   });
 
+  it("lists the agent's own approval beside the requests it works under, without a way to answer it, and not for a mode that is switched off", async () => {
+    const leadApproval = decodePendingRequest({
+      mode: "work",
+      kind: "lead-approval",
+      projectId,
+      threadId: "00000000-0000-4000-8000-000000000902",
+      threadTitle: "Quarterly report",
+      text: "edit: summary.md",
+      requestedAt: "2026-10-06T08:00:00.000Z",
+    });
+    const { route } = fixture({ children: [leadApproval] });
+    const body = await (await route(request()))?.json();
+    expect(body.requests[0]).toEqual(leadApproval);
+    expect(body.requests[0]).not.toHaveProperty("answer");
+
+    const off = fixture({
+      settings: { ...defaultShellSettings(), workEnabled: false },
+      children: [leadApproval],
+    });
+    const hidden = await (await off.route(request()))?.json();
+    expect(hidden.requests.map((entry: { kind: string }) => entry.kind)).not.toContain(
+      "lead-approval",
+    );
+  });
+
   it("lists no subagent row for a mode that is switched off", async () => {
     const { route } = fixture({
       settings: { ...defaultShellSettings(), workEnabled: false },

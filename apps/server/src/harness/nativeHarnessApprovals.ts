@@ -262,7 +262,7 @@ export class NativeHarnessApprovalStore {
     approvalId: string,
     decision: "approve" | "approve-always" | "deny",
     answer?: NativeHarnessApprovalAnswer,
-  ): "decided" | "approval-not-found" | "already-settled" | "host-not-offered" {
+  ): "decided" | "approval-not-found" | "already-settled" | "host-not-offered" | "lost-in-restart" {
     this.#expire();
     const waiter = this.#waiters.get(approvalId);
     let confirmed: ToolEgressCallConfirmation | undefined;
@@ -284,15 +284,15 @@ export class NativeHarnessApprovalStore {
       }
     }
     if (waiter === undefined || waiter.threadId !== threadId) {
-      return this.#options.sessions.settleApproval(
+      // No turn waits on it: a restart took the call this approval guarded. An
+      // answer cannot make it run, so it is settled cancelled, never approved,
+      // and the journal does not claim a call went ahead that did not.
+      const settled = this.#options.sessions.settleApproval(
         threadId,
         approvalId as NativeHarnessApprovalId,
-        {
-          status: decision === "deny" ? "denied" : "approved",
-        },
-      ) === "approval-not-found"
-        ? "approval-not-found"
-        : "already-settled";
+        { status: "cancelled" },
+      );
+      return typeof settled === "object" ? "lost-in-restart" : settled;
     }
     const remember = decision === "approve-always" && waiter.allowRemember;
     if (remember) {

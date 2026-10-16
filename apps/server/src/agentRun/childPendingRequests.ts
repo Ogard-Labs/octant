@@ -217,7 +217,7 @@ function pendingItem(
  * paths and URLs exactly as a Work request does, and Code keeps the byte bound
  * of a Code approval summary or question prompt.
  */
-function modeText(
+export function modeText(
   mode: "work" | "code",
   kind: "approval" | "question",
   value: string,

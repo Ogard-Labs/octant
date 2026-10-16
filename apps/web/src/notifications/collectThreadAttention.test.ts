@@ -135,6 +135,43 @@ describe("collecting thread attention", () => {
     ]);
   });
 
+  it("reports a Chat or Code thread whose agent waits on its own approval as waiting for approval", () => {
+    const code = {
+      executionPolicy: "approval-gated" as const,
+      lifecycle: "active" as const,
+      providerInstanceId: "provider-one" as never,
+      projectId: "project-1" as CodeThread["projectId"],
+      threadId: "code-a" as CodeThreadId,
+      title: "Fix the parser",
+      awaitingInput: true,
+    };
+    expect(
+      collectThreadAttentionSignals({
+        chatThreads: [
+          { threadId: "chat-a", title: "Plan", activity: "attention", awaitingKind: "approval" },
+        ],
+        workThreads: [],
+        codeThreads: [code],
+      }),
+    ).toEqual([
+      {
+        threadId: "chat-a",
+        reason: "approval-required",
+        title: "Plan",
+        detail: "Waiting for your approval.",
+        source: "chat",
+      },
+      {
+        threadId: "code-a",
+        reason: "approval-required",
+        title: "Fix the parser",
+        detail: "Waiting for your approval.",
+        source: "code",
+        projectId: "project-1",
+      },
+    ]);
+  });
+
   it("reports a pending Work question as a question", () => {
     expect(
       collectThreadAttentionSignals({

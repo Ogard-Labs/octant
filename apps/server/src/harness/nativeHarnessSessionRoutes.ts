@@ -55,7 +55,12 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly decision: "approve" | "approve-always" | "deny";
     /** Who decided, from the authenticated request, and the hosts they ticked. */
     readonly answer: NativeHarnessApprovalAnswer;
-  }) => "decided" | "approval-not-found" | "already-settled" | "host-not-offered";
+  }) =>
+    | "decided"
+    | "approval-not-found"
+    | "already-settled"
+    | "host-not-offered"
+    | "lost-in-restart";
   readonly steer?: (input: {
     readonly threadId: string;
     readonly command: SteerNativeHarnessSession;
@@ -233,7 +238,9 @@ export function createNativeHarnessSessionRouteHandler(
               kind: "approval-refused",
               approvalId: decision.approvalId,
               reason:
-                outcome === "already-settled" || outcome === "host-not-offered"
+                outcome === "already-settled" ||
+                outcome === "host-not-offered" ||
+                outcome === "lost-in-restart"
                   ? outcome
                   : "approval-not-found",
               message:
@@ -241,7 +248,9 @@ export function createNativeHarnessSessionRouteHandler(
                   ? "That approval was already decided."
                   : outcome === "host-not-offered"
                     ? "This command can reach only hosts its approval lists. Nothing was decided."
-                    : "No pending approval has that id on this thread.",
+                    : outcome === "lost-in-restart"
+                      ? "Octant restarted while this was waiting, so the call did not run. Resume the session; the agent asks again if it still needs it."
+                      : "No pending approval has that id on this thread.",
             };
       return json(result, result.kind === "approval-decided" ? 200 : 409, origin);
     }
