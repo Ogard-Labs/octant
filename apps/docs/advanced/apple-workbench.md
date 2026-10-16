@@ -178,11 +178,14 @@ Simulator. Each Simulator destination offers only what its reported state
 can do: a shut-down Simulator offers **Boot**; a booted one offers **Run**,
 **Capture screen**, and **Shut down**. A live attachable frame is driven
 directly: click to tap, drag to swipe — the swipe is sent when you let go and
-replays your drag as a straight line taking as long as your drag did; on the
-managed stream a drag up from the bottom edge goes Home or unlocks — and, once
-you have clicked the screen, type on your keyboard. Typing is sent when you
-pause, Return, Delete, Escape and the arrow keys go to the device, and Command
-and Control shortcuts stay with Octant. **Home**, **Lock**, and **Type text…**
+replays your drag as a straight line over the drag's duration, never shorter
+than 80 ms or longer than 2 seconds; on the managed stream a drag up from the
+bottom edge goes Home or unlocks — and, once you have clicked the screen, type
+on your keyboard. Letters, digits, spaces, and new lines go to the device as
+keys on a supported QWERTY layout, and typing is sent when you pause. Other
+text, such as punctuation or non-Latin letters, goes through the Simulator's
+pasteboard instead, as described above. Return, Delete, Escape and the arrow
+keys go to the device, and Command and Control shortcuts stay with Octant. **Home**, **Lock**, and **Type text…**
 are in the device pane's toolbar and wait in the same queue as taps and
 typing, so what you do while an action is still running is kept and sent in
 order. Holding the mouse button down without moving is a tap; long press and
