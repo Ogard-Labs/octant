@@ -225,6 +225,15 @@ export interface CodeThreadUsage {
 const EMPTY_THREAD_USAGE: CodeThreadUsage = { limits: [] };
 
 /**
+ * The usage object already held while a re-read changed none of its figures,
+ * so the shell surfaces reading it (the dock overview, the context meter) can
+ * bail out instead of redrawing on every event of a streaming turn.
+ */
+function retainThreadUsage(current: CodeThreadUsage, next: CodeThreadUsage): CodeThreadUsage {
+  return samePollingData(current, next) ? current : next;
+}
+
+/**
  * Clients whose host answered 404 for the conversation window: an older host
  * that only has the forward read. Asked once per client, then the thread is
  * read whole as before and shown as fully loaded.
@@ -936,7 +945,12 @@ export function useCodeController(options: CodeControllerOptions) {
         if (page.limits !== undefined) pageLimits = page.limits;
         pageRestoreUndo = page.restoreUndo;
         nextCursor = page.nextCursor;
-        setThreadUsage({ ...totalTurnUsage(usageByOperation.current), limits: pageLimits });
+        setThreadUsage((current) =>
+          retainThreadUsage(current, {
+            ...totalTurnUsage(usageByOperation.current),
+            limits: pageLimits,
+          }),
+        );
         setRestoreUndo(pageRestoreUndo);
         showConversation(threadId, [...inheritedConversation.current, ...messages]);
         if (projected.activity.size > 0) {
@@ -1032,10 +1046,12 @@ export function useCodeController(options: CodeControllerOptions) {
         window.turns,
         sameThread ? usageByOperation.current : new Map(),
       );
-      setThreadUsage({
-        ...totalTurnUsage(usageByOperation.current, earlierUsage.current),
-        limits: window.limits ?? [],
-      });
+      setThreadUsage((current) =>
+        retainThreadUsage(current, {
+          ...totalTurnUsage(usageByOperation.current, earlierUsage.current),
+          limits: window.limits ?? [],
+        }),
+      );
       setRestoreUndo(window.restoreUndo);
       showConversation(threadId, joined.messages);
       if (projected.activity.size > 0) {
