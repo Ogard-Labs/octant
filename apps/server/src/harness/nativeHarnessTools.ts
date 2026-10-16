@@ -178,10 +178,14 @@ export interface NativeHarnessToolPorts {
     readonly replace: (items: ReadonlyArray<NativeHarnessTodoItem>) => Promise<void>;
   };
   readonly contextRemaining?: () => NativeHarnessContextRemaining | undefined;
+  /**
+   * The advisor's answer, nothing when no advisor model answered, or a refusal
+   * with the reason the lead sees.
+   */
   readonly secondOpinion?: (input: {
     readonly question: string;
     readonly signal?: AbortSignal;
-  }) => Promise<string | undefined>;
+  }) => Promise<string | { readonly refused: string; readonly message?: string } | undefined>;
   readonly delegate?: NativeHarnessDelegatePort;
   /**
    * Asks the person to allow a call the policy would only allow with their
@@ -554,7 +558,8 @@ async function execute(
         question: input.question,
         ...(signal === undefined ? {} : { signal }),
       });
-      return answer === undefined ? refused("advisor-unavailable") : ok({ answer });
+      if (answer === undefined) return refused("advisor-unavailable");
+      return typeof answer === "string" ? ok({ answer }) : refused(answer.refused, answer.message);
     }
     case "delegate": {
       const input = args as NativeHarnessDelegateArguments;

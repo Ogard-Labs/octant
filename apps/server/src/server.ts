@@ -770,6 +770,7 @@ import {
   type HarnessEgressScope,
   type NativeHarnessComposition,
 } from "./harness/nativeHarnessComposition";
+import { createNativeHarnessSecondOpinionPort } from "./harness/nativeHarnessSecondOpinion";
 import { createNativeHarnessShell } from "./harness/nativeHarnessShell";
 import {
   materializeHarnessToolNetwork,
@@ -6759,6 +6760,25 @@ export function startOctantServer(
       childInteractions: (run) => agentRunInteractions?.toolsFor(run) ?? {},
       isChildAuthorityCurrent: (run) => agentRunInteractions?.isCurrent(run) === true,
       activity: nativeHarnessSessionsLive,
+      secondOpinion: (scope) =>
+        createNativeHarnessSecondOpinionPort(
+          {
+            router: nativeHarnessRouterLive,
+            sessions: nativeHarnessSessionsLive,
+            resolveDriver: (providerInstanceId) => {
+              const instance = persistence.readProviderInstance(providerInstanceId);
+              if (instance === undefined || !instance.enabled) return undefined;
+              try {
+                return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+              } catch {
+                return undefined;
+              }
+            },
+            scratchRoot: harnessWorkDirectory,
+            uuid: randomUUID,
+          },
+          scope,
+        ),
       delegate: (scope) =>
         createNativeHarnessDelegatePort(
           {
