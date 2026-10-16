@@ -626,7 +626,9 @@ function AutomationListBody(props: {
                   <OctantBadge
                     className="automation-row__cadence"
                     data-cadence={routineCadence(summary.trigger)}
-                    variant="secondary"
+                    variant={
+                      routineCadence(summary.trigger) === "one-time" ? "dashed" : "secondary"
+                    }
                   >
                     {routineCadenceLabel(routineCadence(summary.trigger))}
                   </OctantBadge>

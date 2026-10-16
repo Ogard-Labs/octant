@@ -191,7 +191,6 @@
   width: 100%;
   margin: 0;
   padding-inline: 8px;
-  color: var(--octant-text-secondary);
   font-size: var(--octant-ui-font-size);
 }
 
@@ -405,7 +404,6 @@
 
 .settings-view__field--search .settings-view__text-input {
   min-height: 34px;
-  background: var(--octant-control);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   padding-right: 34px;
@@ -456,7 +454,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-view__mobile-sections {
   min-height: 32px;
   padding-inline: var(--oct-space-2);
-  color: var(--octant-text-secondary);
 }
 
 .settings-view__mobile-title {
@@ -1488,6 +1485,7 @@ textarea.settings-view__text-input {
   min-height: 28px;
   padding: 0;
   border: 1px solid color-mix(in oklab, var(--oct-fg) 26%, transparent);
+  border-radius: var(--oct-radius-sm);
 }
 
 .settings-view__selection-mark {
@@ -1572,6 +1570,16 @@ textarea.settings-view__text-input {
   border-radius: var(--oct-radius-md);
   cursor: pointer;
   transition: background-color var(--oct-motion-fast) var(--oct-ease-standard);
+}
+
+/* A card-shaped button: the bare variant draws nothing, so the card takes the
+   ghost hover fill and the secondary selected fill itself. */
+.settings-scheme__card:hover {
+  background: var(--muted);
+}
+
+.settings-scheme__card[aria-checked="true"] {
+  background: var(--secondary);
 }
 
 .settings-scheme__card[aria-checked="true"] .settings-scheme__label::before {
@@ -1889,24 +1897,18 @@ textarea.settings-view__text-input {
   height: calc(var(--oct-settings-control-height, 28px) - 2px);
   min-height: calc(var(--oct-settings-control-height, 28px) - 2px);
   padding: 0;
-  border-radius: 0;
 }
 
 .octant-number-stepper__input {
   width: 100%;
   height: calc(var(--oct-settings-control-height, 28px) - 2px);
   padding: 0 2px;
+  min-width: 0;
   appearance: textfield;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
+  background: transparent;
+  color: var(--foreground);
   font-size: var(--oct-text-sm);
   text-align: center;
-}
-
-.octant-number-stepper__input:focus-visible {
-  border: 0;
-  box-shadow: none;
 }
 
 .octant-number-stepper__input::-webkit-inner-spin-button,

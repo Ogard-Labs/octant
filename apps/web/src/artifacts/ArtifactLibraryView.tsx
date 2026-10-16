@@ -125,6 +125,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
             onChange={(event) => change({ query: event.target.value })}
             placeholder="Search artifacts"
             type="search"
+            unstyled
             value={filters.query}
           />
         </div>

@@ -51,7 +51,7 @@ export function ZenSpaceSwitcher(props: ZenSpaceSwitcherProps) {
             <OctantInput
               aria-label={`Rename ${space.name}`}
               autoFocus
-              className="zen-spaces__rename"
+              className="zen-spaces__rename rounded-full"
               defaultValue={space.name}
               key={String(space.spaceId)}
               onBlur={() => setRenaming(null)}
@@ -74,21 +74,21 @@ export function ZenSpaceSwitcher(props: ZenSpaceSwitcherProps) {
           <div className="zen-spaces__space" key={String(space.spaceId)}>
             <OctantButton
               aria-selected={showing}
-              className={`zen-spaces__tab${showing ? " zen-spaces__tab--showing" : ""}`}
+              className={`zen-spaces__tab${showing ? " zen-spaces__tab--showing" : ""} rounded-full`}
               onClick={() => props.onShowSpace?.(space.spaceId)}
               onDoubleClick={() => setRenaming(String(space.spaceId))}
               role="tab"
               size="sm"
               tabIndex={showing ? 0 : -1}
               type="button"
-              variant="ghost"
+              variant={showing ? "secondary" : "ghost"}
             >
               {space.name}
             </OctantButton>
             {ordered.length > 1 && props.onRemoveSpace !== undefined ? (
               <OctantButton
                 aria-label={`Remove ${space.name}`}
-                className="zen-spaces__remove"
+                className="zen-spaces__remove rounded-full"
                 disabled={props.busy === true}
                 onClick={() => props.onRemoveSpace?.(space.spaceId)}
                 size="sm"
@@ -103,7 +103,7 @@ export function ZenSpaceSwitcher(props: ZenSpaceSwitcherProps) {
       })}
       <OctantButton
         aria-label="Add a space"
-        className="zen-spaces__add"
+        className="zen-spaces__add rounded-full"
         disabled={props.busy === true || full || props.onAddSpace === undefined}
         onClick={() => props.onAddSpace?.(`Space ${String(ordered.length + 1)}`)}
         size="sm"

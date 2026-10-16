@@ -536,19 +536,16 @@
 }
 
 .zen-spaces__tab {
-  border-radius: var(--oct-radius-pill);
   white-space: nowrap;
   opacity: 0.7;
 }
 
 .zen-spaces__tab--showing {
   opacity: 1;
-  background: var(--oct-fg-soft);
 }
 
 .zen-spaces__remove,
 .zen-spaces__add {
-  border-radius: var(--oct-radius-pill);
   opacity: 0.6;
 }
 
@@ -559,7 +556,6 @@
 
 .zen-spaces__rename {
   width: 120px;
-  border-radius: var(--oct-radius-pill);
 }
 
 /* ─── orbit bar ──────────────────────────────────────────────────────── */

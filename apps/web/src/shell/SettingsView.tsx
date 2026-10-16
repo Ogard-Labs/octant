@@ -2416,7 +2416,7 @@ function SidebarBackgroundSettings({
                   role="radio"
                   style={{ background: preset.cssBackground }}
                   type="button"
-                  variant="ghost"
+                  variant="bare"
                 >
                   {selected ? (
                     <span aria-hidden="true" className="settings-view__selection-mark">
