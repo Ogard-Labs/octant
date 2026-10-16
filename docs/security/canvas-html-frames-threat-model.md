@@ -95,9 +95,15 @@ client's `frame-src` to that path on its own origin.
   and the frames the host sent drew the page's own colours at those points.
   The renderer's canvas, outside the app, painted a host frame scaled to half
   size and turned a click on it into the page's own coordinates (a click 30,
-  40 into the half-size canvas reached the page at 60, 80). The previous
-  in-process surface was also run in the unpackaged desktop app; the prototype
-  host has not been. Not measured: the prototype host in the running app,
+  40 into the half-size canvas reached the page at 60, 80). In an unsigned
+  packaged app (2026-10-16), the window's own bridge prepared the surface: the
+  app started the host from its own executable with the host switch, the
+  host's network process carried the not-found resolver rule, and the host
+  read back its closed network before it said it was ready. Reloading that
+  window stopped the host, and quitting the app left no host process. The
+  containment probe also passed with that packaged app's host
+  (`OCTANT_PROBE_PACKAGED_APP`): no UDP, TCP, HTTP, host route, or name lookup.
+  Not measured: a prototype opened and driven from a Canvas in the running app,
   unpackaged or packaged and signed; the in-thread placement of a prototype;
   real operating-system keyboard and pointer input.
 - A running frame in a remote browser is also not contained against a

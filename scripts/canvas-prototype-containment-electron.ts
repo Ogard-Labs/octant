@@ -31,6 +31,7 @@ import {
   type CanvasPrototypeOwner,
   type CanvasPrototypeSurfaceEvent,
 } from "../apps/desktop/src/canvasPrototypeSurface";
+import { CANVAS_PROTOTYPE_HOST_SWITCH } from "../apps/desktop/src/canvasPrototypeHost";
 
 const mode = process.env.OCTANT_PROBE_MODE ?? "";
 const contained = mode === "contained" || mode === "contained-pointer";
@@ -38,6 +39,7 @@ const issueUrl = process.env.OCTANT_PROBE_ISSUE_URL ?? "";
 const serverUrl = process.env.OCTANT_PROBE_SERVER_URL ?? "";
 const beaconUrl = process.env.OCTANT_PROBE_BEACON_URL ?? "";
 const hostEntry = process.env.OCTANT_PROBE_HOST ?? "";
+const packagedApp = process.env.OCTANT_PROBE_PACKAGED_APP ?? "";
 const watchMs = Number(process.env.OCTANT_PROBE_WATCH_MS ?? "9000");
 
 app.setPath("userData", mkdtempSync(join(tmpdir(), "octant-prototype-probe-")));
@@ -152,11 +154,18 @@ function recordingOwner() {
 
 function surfaceFor() {
   return createCanvasPrototypeSurface({
-    launchHost: () =>
-      spawnCanvasPrototypeHost({
-        executable: process.execPath,
-        args: [hostEntry, `--log-net-log=${hostLogPath}`, "--net-log-capture-mode=Everything"],
-      }),
+    launchHost: () => {
+      const log = [`--log-net-log=${hostLogPath}`, "--net-log-capture-mode=Everything"];
+      // A packaged app always runs its own entry, as the app starts its host.
+      return spawnCanvasPrototypeHost(
+        packagedApp === ""
+          ? { executable: process.execPath, args: [hostEntry, ...log] }
+          : {
+              executable: join(packagedApp, "Contents/MacOS/Octant"),
+              args: [CANVAS_PROTOTYPE_HOST_SWITCH, ...log],
+            },
+      );
+    },
     serverUrl: () => serverUrl,
     fetch: globalThis.fetch,
     platform: process.platform,

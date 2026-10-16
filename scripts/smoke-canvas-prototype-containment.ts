@@ -35,6 +35,8 @@
 //
 // Run, from the repository root:
 //   bun scripts/smoke-canvas-prototype-containment.ts
+// Set `OCTANT_PROBE_PACKAGED_APP` to a built `Octant.app` to run the contained
+// runs in that app's own prototype host instead of one built from source.
 // It needs the Electron binary: `bun install` fetches it, or set
 // `ELECTRON_OVERRIDE_DIST_PATH` to a directory holding `Electron.app`. It
 // starts one hidden Electron at a time with a throwaway user data directory,
@@ -543,6 +545,7 @@ console.log(
     {
       status: failures.length === 0 ? "passed" : "failed",
       failures,
+      prototypeHost: process.env.OCTANT_PROBE_PACKAGED_APP ?? "built from source",
       pointer: pointerRun?.pointer,
       runs: rows.map((row) => ({
         run: row.run,
