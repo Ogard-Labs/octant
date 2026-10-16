@@ -98,6 +98,7 @@ export interface NativeHarnessCompositionOptions {
     readonly threadId: string;
     readonly mode: OctantMode;
     readonly projectId?: ProjectId | undefined;
+    readonly lead: NativeHarnessSlotCandidate;
   }) => NonNullable<NativeHarnessToolPorts["secondOpinion"]>;
   /** Delegation for a lead thread; absent on a host that cannot admit children. */
   readonly delegate?: (scope: {
@@ -232,6 +233,7 @@ export function createNativeHarnessComposition(
     readonly threadId: string;
     readonly mode: OctantMode;
     readonly projectId?: ProjectId | undefined;
+    readonly lead: NativeHarnessSlotCandidate;
   }): Pick<NativeHarnessToolPorts, "secondOpinion"> => {
     const advisor = options.secondOpinion?.(scope);
     return advisor === undefined
@@ -463,7 +465,12 @@ export function createNativeHarnessComposition(
           // whether by fetching a page or by searching.
           ...(thread.researchEnabled ? webPorts() : {}),
           ...contextRemainingFor("chat-thread", threadId),
-          ...secondOpinion({ threadId, mode: "chat", projectId: thread.projectId }),
+          ...secondOpinion({
+            threadId,
+            mode: "chat",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
         },
       });
     },
@@ -491,7 +498,12 @@ export function createNativeHarnessComposition(
           filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
           ...webPorts(),
           ...contextRemainingFor("work-thread", threadId),
-          ...secondOpinion({ threadId, mode: "work", projectId: thread.projectId }),
+          ...secondOpinion({
+            threadId,
+            mode: "work",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
         },
       });
     },
@@ -522,7 +534,12 @@ export function createNativeHarnessComposition(
           ...(shell === undefined ? {} : { shell }),
           ...webPorts(),
           ...contextRemainingFor("code-thread", threadId),
-          ...secondOpinion({ threadId, mode: "code", projectId: thread.projectId }),
+          ...secondOpinion({
+            threadId,
+            mode: "code",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
         },
       });
     },

@@ -6764,6 +6764,7 @@ export function startOctantServer(
         createNativeHarnessSecondOpinionPort(
           {
             router: nativeHarnessRouterLive,
+            sessions: nativeHarnessSessionsLive,
             resolveDriver: (providerInstanceId) => {
               const instance = persistence.readProviderInstance(providerInstanceId);
               if (instance === undefined || !instance.enabled) return undefined;

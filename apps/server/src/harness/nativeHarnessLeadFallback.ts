@@ -164,7 +164,7 @@ export class NativeHarnessLeadFallbackService implements NativeHarnessLeadFallba
 }
 
 /** Why the router should keep a failed model out of the chain for a while. */
-function routeFailureReason(failure: ProviderFailure): NativeHarnessRouteFailureReason {
+export function routeFailureReason(failure: ProviderFailure): NativeHarnessRouteFailureReason {
   switch (failure.category) {
     case "rate-limited":
       return "rate-limited";
