@@ -459,15 +459,22 @@ the arrow keys are hardware keys, and Space types a space. Command and Control
 shortcuts, and Tab, stay with the app. Home, Lock, and (where the host reports
 them) Volume up and down are buttons.
 
-**Characters.** The helper types ASCII letters A to Z, digits 0 to 9, a space,
-and a new line, and only on a QWERTY software keyboard with an Automatic
-hardware layout in the languages listed under
-[Native device helper and typed text](#native-device-helper-and-typed-text).
-Any other character, including punctuation and letters such as æ, ø, å, or é,
-refuses the whole text with `unsupported-character`, so nothing is typed. Every
-single character typed on the focused screen goes to the helper, so a character
-it does not name costs one refusal rather than a wrong character. The pane has
-no sentence of its own for that reason and shows its generic refusal.
+**Typed text takes one of two routes on the Simulator.** Text made only of ASCII
+letters A to Z, digits 0 to 9, spaces, and new lines is typed as key positions
+by the native helper. That route needs a QWERTY software keyboard with an
+Automatic hardware layout in the languages listed under
+[Native device helper and typed text](#native-device-helper-and-typed-text), and
+a keyboard it cannot read or does not accept is refused
+(`keyboard-layout-unknown`, `keyboard-layout-unsupported`) rather than typed
+wrong. Any other text, including punctuation, letters such as æ, ø, å, or é,
+and other scripts, is copied to the Simulator's pasteboard with
+`xcrun simctl pbcopy` and pasted with Command-V. The paste route does not check
+the keyboard layout. If the copy fails, the action is refused as unavailable
+and no key is pressed. Whether the paste lands in every field, and how the paste
+key behaves on a non-QWERTY layout, are not verified on a device; the desktop
+tests mock the copy and the keystroke. Characters typed on the focused screen
+go to the device as typed text, so an Option-modified key arrives as the
+character it produces; only Command and Control shortcuts are kept by the app.
 
 **Pinch and multi-touch are non-goals.** The helper's touch operation takes one
 point per call, and there is no second-finger operation, so the channel cannot
@@ -478,9 +485,11 @@ screen. Neither pinch nor a second finger reaches the device
 lists pinch and other multi-touch as non-goals).
 
 **Long press is not sent.** A press that stays within 10 px is a tap on release,
-however long it was held: the duration is not part of a tap. The native helper
-holds that tap for 60 ms. The Android path sends `input tap` for the same press
-with no hold. How long the managed `serve-sim` stream holds its own tap is not
+however long it was held: the duration is not part of a tap. On the managed
+stream the tap is `serve-sim`'s `tap` command, and how long that holds is not
+verified. When input goes to the native helper instead (no stream, or after
+Device Hub took input), the helper holds the tap for 60 ms. The Android path
+sends `input tap` with no hold, and how long `serve-avd` holds its tap is not
 verified. A long press therefore reaches the device as a tap, not as a hold.
 
 **Follow-the-finger drag is not sent.** Nothing reaches the device while the
