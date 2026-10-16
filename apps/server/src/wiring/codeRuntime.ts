@@ -4,7 +4,6 @@ import { join } from "node:path";
 import {
   type AndroidRpcEnvelope,
   type AppleRpcEnvelope,
-  type CodeProjectPullRequestRow,
   decodeCodeEvidenceContentId,
   decodeCodeFailure,
   decodeCodeRelativePath,
@@ -214,9 +213,6 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "canvasAgentToolPort"
     | "codeOperationRuntime"
     | "nativeHarnessComposition"
-    | "observeRefreshedPullRequestRows"
-    | "terminalBrowserGrants"
-    | "terminalProcessPort"
     | "workRequestRuntime"
   >;
 } & Pick<
@@ -227,8 +223,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeSessionAuthority"
     | "liveTurns"
     | "machineChangeFeed"
-    | "requireBrowserAutomationService"
-    | "requireBrowserToolApprovalService"
+    | "onWindowRevoked"
     | "simulatorInputGrants"
   > &
   Pick<
@@ -263,6 +258,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeService"
     | "codeTestDiscovery"
     | "isCodeProviderModelAllowed"
+    | "onPullRequestSnapshotRefreshed"
     | "projectPullRequestCadence"
     | "projectPullRequestService"
     | "roots"
@@ -280,7 +276,13 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "providerRuntimeRegistry"
     | "resolveSelectedExtensions"
   > &
-  Pick<BrowserWiring, "browserAuthority" | "productFeedbackService"> & {
+  Pick<
+    BrowserWiring,
+    | "browserAuthority"
+    | "browserAutomationService"
+    | "browserToolApprovalService"
+    | "productFeedbackService"
+  > & {
     /** Wired by wireDevices; read only after startup. */
     readonly androidToolchainService: () => AndroidToolchainService;
     /** Wired by wireDevices; read only after startup. */
@@ -329,6 +331,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     androidToolchainService,
     appleToolchainService,
     browserAuthority,
+    browserAutomationService,
+    browserToolApprovalService,
     canAccessCodeProject,
     codeApprovalStore,
     codeAttachments,
@@ -356,6 +360,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     liveTurns,
     machineChangeFeed,
     nativeHarnessHooks,
+    onPullRequestSnapshotRefreshed,
+    onWindowRevoked,
     nativeHarnessTranscripts,
     options,
     peekCreateFromIssueFramed,
@@ -368,8 +374,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     providerDataDirectory,
     providerRuntimeRegistry,
     recordAppleEvidence,
-    requireBrowserAutomationService,
-    requireBrowserToolApprovalService,
     resolveAndroidContext,
     resolveAppleContext,
     resolveSelectedExtensions,
@@ -384,8 +388,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     threadOutsideContentMarks,
   } = deps;
   return Effect.gen(function* () {
+    let terminalProcessPort: TerminalProcessPort | undefined;
     if (late.codeOperationRuntime.current === undefined && options.codeService === undefined) {
-      late.terminalProcessPort.current = new TerminalProcessPort({
+      terminalProcessPort = new TerminalProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "terminal-receipts"),
         shellStateDirectory: join(providerDataDirectory, "code", "terminal-shell"),
       });
@@ -440,13 +445,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
           automation: {
             inspectThread: (windowId, threadId) =>
-              requireBrowserAutomationService().inspectThread(windowId, threadId),
-            create: (input) => requireBrowserAutomationService().create(input),
-            act: (input) => requireBrowserAutomationService().act(input),
+              browserAutomationService.inspectThread(windowId, threadId),
+            create: (input) => browserAutomationService.create(input),
+            act: (input) => browserAutomationService.act(input),
             releaseThread: (windowId, threadId) =>
-              requireBrowserAutomationService().releaseThread(windowId, threadId),
+              browserAutomationService.releaseThread(windowId, threadId),
           },
-          approvals: requireBrowserToolApprovalService(),
+          approvals: browserToolApprovalService,
         },
         ...(options.terminalLauncher === undefined ? {} : { launcher: options.terminalLauncher }),
         journal: persistence.journal,
@@ -455,7 +460,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         uuid: randomUUID,
         clock: () => new Date().toISOString(),
       });
-      late.terminalBrowserGrants.current = grants;
+      onWindowRevoked((windowId) => grants.revokeWindow(windowId));
       const unsubscribeTerminalBrowserGrants = persistence.journal.subscribeCommitted((append) => {
         for (const event of append.events) {
           if (
@@ -518,7 +523,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             }),
           ),
         spendCeiling,
-        terminalProcessPort: late.terminalProcessPort.current,
+        terminalProcessPort,
         repositoryTestProcessPort,
         scaffoldProcess: {
           execute: (input, signal) => scaffoldProcessPort.execute(input, signal),
@@ -667,14 +672,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         browserAutomation: {
           resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
           inspectThread: (windowId, threadId) =>
-            requireBrowserAutomationService().inspectThread(windowId, threadId),
-          create: (input) => requireBrowserAutomationService().create(input),
-          act: (input) => requireBrowserAutomationService().act(input),
+            browserAutomationService.inspectThread(windowId, threadId),
+          create: (input) => browserAutomationService.create(input),
+          act: (input) => browserAutomationService.act(input),
           releaseThread: (windowId, threadId) =>
-            requireBrowserAutomationService().releaseThread(windowId, threadId),
+            browserAutomationService.releaseThread(windowId, threadId),
         },
-        isBrowserOriginRemembered: (origin) =>
-          requireBrowserToolApprovalService().isRemembered(origin),
+        isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
         // The agent's Apple capability resolves its execution context through
         // exactly the resolver the workbench route uses, so a tool call and a
         // click are the same request to the same policy.
@@ -1132,12 +1136,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
-    const observeRefreshedPullRequestRows:
-      | ((rows: ReadonlyArray<CodeProjectPullRequestRow>) => void)
-      | undefined = (rows) => {
+    onPullRequestSnapshotRefreshed((rows) => {
       void failingChecksFollowUps.observe(rows);
-    };
-    late.observeRefreshedPullRequestRows.current = observeRefreshedPullRequestRows;
+    });
     const boardRouteCodeService: CodeRouteService = withCodeBoard(
       baseRouteCodeService,
       async (windowId, query) => {
@@ -1239,7 +1240,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeOperationRuntime: late.codeOperationRuntime.current,
       codeTurnDecisions,
       routeCodeService,
-      terminalProcessPort: late.terminalProcessPort.current,
+      terminalProcessPort,
     };
   });
 }

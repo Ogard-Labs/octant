@@ -10,6 +10,7 @@ import { join } from "node:path";
 import {
   type CodeCheckoutId,
   type CodeCheckoutIdentity,
+  type CodeProjectPullRequestRow,
   type CodeRepositoryId,
   type CodeThreadId,
   type CodeWorktreeRemoteFacts,
@@ -487,15 +488,12 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
   readonly late: Pick<
     LateBindings,
-    | "activeCodeService"
     | "codeOperationRuntime"
     | "managedCodeThreadCreation"
     | "managedWorktreeRefsList"
     | "managedWorktreeSourcePreview"
-    | "observeRefreshedPullRequestRows"
     | "probeProviderForThreads"
     | "refreshStandaloneSkills"
-    | "revokeProjectPullRequests"
   >;
 } & Pick<
     AuthorityWiring,
@@ -504,6 +502,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> & {
     | "codeSessionAuthority"
     | "liveTurns"
     | "machineChangeFeed"
+    | "onWindowRevoked"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -512,7 +511,10 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   > &
   Pick<
     IntegrationsWiring,
-    "cacheStats" | "githubIssueContextService" | "linearIssueContextService"
+    | "cacheStats"
+    | "githubIssueContextService"
+    | "linearIssueContextService"
+    | "onGithubPullRequestsUnreadable"
   > &
   Pick<
     WorkspaceWiring,
@@ -535,6 +537,8 @@ export function wireCode(deps: CodeDependencies) {
     liveTurns,
     machineChangeFeed,
     managedWorktreeReceipts,
+    onGithubPullRequestsUnreadable,
+    onWindowRevoked,
     options,
     persistence,
     projectRootPort,
@@ -779,8 +783,7 @@ export function wireCode(deps: CodeDependencies) {
         },
       });
     // Revocation is wired at construction, before any window can hold a watch.
-    const activeCodeService = codeService;
-    late.activeCodeService.current = activeCodeService;
+    onWindowRevoked((windowId) => codeService.revokeWindow?.(windowId));
     // What the Code service lends the host's completed-thread timer. Only the
     // in-process service can archive on the host's behalf; an injected route
     // service is a test double and lends nothing.
@@ -861,6 +864,15 @@ export function wireCode(deps: CodeDependencies) {
       }
       return facts;
     };
+    // The Code runtime is composed after this service and subscribes here.
+    const pullRequestSnapshotListeners: Array<
+      (rows: ReadonlyArray<CodeProjectPullRequestRow>) => void
+    > = [];
+    const onPullRequestSnapshotRefreshed = (
+      listener: (rows: ReadonlyArray<CodeProjectPullRequestRow>) => void,
+    ): void => {
+      pullRequestSnapshotListeners.push(listener);
+    };
     const projectPullRequestService = new CodeProjectPullRequestService({
       projects: projectService,
       // Only the remotes: the full observation also diffs the working tree
@@ -879,14 +891,14 @@ export function wireCode(deps: CodeDependencies) {
       snapshotStore: new CodeProjectPullRequestSnapshotStore(
         join(persistence.dataDirectory, "code", "pull-request-snapshot.json"),
       ),
-      onSnapshotRefreshed: (rows) => late.observeRefreshedPullRequestRows.current?.(rows),
+      onSnapshotRefreshed: (rows) => {
+        for (const listener of pullRequestSnapshotListeners) listener(rows);
+      },
       threads: {
         list: () => listProjectPullRequestThreadFacts(),
       },
     });
-    const revokeProjectPullRequests: (() => void) | undefined = () =>
-      projectPullRequestService.revokeGithub();
-    late.revokeProjectPullRequests.current = revokeProjectPullRequests;
+    onGithubPullRequestsUnreadable(() => projectPullRequestService.revokeGithub());
     // The cadence acts as the host, not as any renderer window. The window
     // identity below exists only to satisfy window-shaped observe signatures;
     // on this host `projectService.bootstrap` and Code Project access checks
@@ -938,6 +950,7 @@ export function wireCode(deps: CodeDependencies) {
       folderBrowseService,
       isCodeProviderModelAllowed,
       isProjectPolicyTargetAllowed,
+      onPullRequestSnapshotRefreshed,
       projectPullRequestCadence,
       projectPullRequestService,
       projectRoutes,

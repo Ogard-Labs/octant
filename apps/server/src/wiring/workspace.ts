@@ -41,15 +41,12 @@ import { OCTANT_LOCAL_ACTOR_ID, ShellService } from "../shellService";
 import { notMeasuredProvider, SpendCeilingService } from "../spendCeilingService";
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 
-export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "revokeShellWindow">;
-} & Pick<AuthorityWiring, "bindingReceiptStore" | "windowAuthorityStore"> &
+export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<AuthorityWiring, "bindingReceiptStore" | "onWindowRevoked" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "spendCeilingHolder"> &
   Pick<
     IntegrationsWiring,
@@ -66,11 +63,11 @@ export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence">
 
 export function wireWorkspace(deps: WorkspaceDependencies) {
   const {
-    late,
     agentMessageProjection,
     bindingReceiptStore,
     githubCapabilityService,
     githubIntegrationIsEffective,
+    onWindowRevoked,
     options,
     persistence,
     providerRuntimeRegistry,
@@ -176,9 +173,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
-    const revokeShellWindow: ((windowId: WindowId) => void) | undefined = (windowId) =>
-      shellService.revokeWindow(windowId);
-    late.revokeShellWindow.current = revokeShellWindow;
+    onWindowRevoked((windowId) => shellService.revokeWindow(windowId));
     const allowedRendererHttpOrigin = options.allowedRendererHttpOrigin;
     const shellRoutes = createShellRouteHandler(shellService, {
       windowAuthorityStore,

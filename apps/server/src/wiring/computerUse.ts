@@ -27,7 +27,6 @@ import { withToolFamilyHelp } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import { COMPUTER_USE_TOOL_HELP } from "../plugins/computerUse/computerUsePlugin";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { UsageWiring } from "./usage";
@@ -39,10 +38,11 @@ export function resolveWebAssetsPath(): string {
   return resolve(serverRoot, "..", "..", "web", "dist");
 }
 
-export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "activeComputerUseRuntime" | "activeComputerUseTools">;
-} & Pick<AuthorityWiring, "machineChangeFeed" | "processAuthorityNow" | "windowAuthorityStore"> &
+export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<
+    AuthorityWiring,
+    "machineChangeFeed" | "onWindowRevoked" | "processAuthorityNow" | "windowAuthorityStore"
+  > &
   Pick<AgentRunsWiring, "externalContentIngestionStore"> &
   Pick<UsageWiring, "validationEventStore"> & {
     /** Wired by wireBrowser; read only after startup. */
@@ -55,10 +55,10 @@ export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence
 
 export function wireComputerUse(deps: ComputerUseDependencies) {
   const {
-    late,
     browserAuthority,
     externalContentIngestionStore,
     machineChangeFeed,
+    onWindowRevoked,
     options,
     persistence,
     processAuthorityNow,
@@ -134,8 +134,9 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
             };
           })(),
         });
-  const activeComputerUseTools = computerUseTools;
-  late.activeComputerUseTools.current = activeComputerUseTools;
+  onWindowRevoked((windowId) => {
+    void computerUseTools?.revokeWindow(windowId);
+  });
   const computerToolsFor = (owner: ComputerUseOwner, selection: unknown) => {
     const model = providerRuntimeRegistry()
       .observedState(owner.providerInstanceId)
@@ -196,8 +197,9 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
-  const activeComputerUseRuntime = computerUseRuntime;
-  late.activeComputerUseRuntime.current = activeComputerUseRuntime;
+  onWindowRevoked((windowId) => {
+    void computerUseRuntime.revokeWindow(windowId);
+  });
   const computerUseRoutes = createComputerUseRouteHandler({
     runtime: computerUseRuntime,
     windowAuthorityStore,

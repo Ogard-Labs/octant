@@ -183,16 +183,7 @@ export function startOctantServer(
     const version = options.version ?? "0.0.0-dev";
     const startedAt = Date.now();
     const late: LateBindings = {
-      browserToolApprovalService: { current: undefined },
-      terminalBrowserGrants: { current: undefined },
-      activeCodeService: { current: undefined },
-      browserAutomationService: { current: undefined },
-      projectBrowserService: { current: undefined },
-      activeComputerUseRuntime: { current: undefined },
-      activeComputerUseTools: { current: undefined },
       workRequestRuntime: { current: undefined },
-      revokeShellWindow: { current: undefined },
-      revokeQueuedMessages: { current: undefined },
       nativeHarnessComposition: { current: undefined },
       nativeHarnessSessions: { current: undefined },
       nativeHarnessObserver: { current: undefined },
@@ -206,7 +197,6 @@ export function startOctantServer(
           message: "Canvas is unavailable on this host.",
         }),
       },
-      revokeProjectPullRequests: { current: undefined },
       refreshStandaloneSkills: { current: async (): Promise<void> => undefined },
       managedWorktreeSourcePreview: {
         current: async () => ({
@@ -227,17 +217,13 @@ export function startOctantServer(
           throw new Error("Provider probing is unavailable during server startup.");
         },
       },
-      observeRefreshedPullRequestRows: { current: undefined },
       codeOperationRuntime: { current: options.codeOperationRuntime },
-      terminalProcessPort: { current: undefined },
       runningWorkTurnAccess: { current: undefined },
       zenAssistantTools: { current: undefined },
       canvasAgentToolPort: { current: undefined },
       purgeQueuedChatMessages: { current: undefined },
       observeWorkThreadRuntime: { current: undefined },
       workRequestService: { current: undefined },
-      remoteListener: { current: undefined },
-      currentRemoteGateway: { current: undefined },
     };
 
     const {
@@ -255,14 +241,12 @@ export function startOctantServer(
       liveTurns,
       machineChangeFeed,
       onAgentRunExecutionAccepted,
+      onWindowRevoked,
       processAuthorityNow,
-      requireBrowserAutomationService,
-      requireBrowserToolApprovalService,
       simulatorInputGrants,
       unsubscribeMachineChanges,
       windowAuthorityStore,
     } = wireAuthority({
-      late,
       browserAuthority: (): ServerBrowserAuthorityResolver => browserAuthority,
       persistence,
     });
@@ -336,12 +320,12 @@ export function startOctantServer(
       githubRoutes,
       integrationRoutes,
       linearIssueContextService,
+      onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
       siblingThreadsService,
       threadOutsideContentMarks,
       toolEgressRules,
     } = yield* wireIntegrations({
-      late,
       externalContentIngestionStore,
       options,
       persistence,
@@ -376,7 +360,7 @@ export function startOctantServer(
       stopComputerSettingsWatch,
       webAssets,
     } = wireComputerUse({
-      late,
+      onWindowRevoked,
       browserAuthority: (): ServerBrowserAuthorityResolver => browserAuthority,
       externalContentIngestionStore,
       machineChangeFeed,
@@ -414,7 +398,7 @@ export function startOctantServer(
       workProjectStatusReader,
       workThreadProjection,
     } = yield* wireWorkspace({
-      late,
+      onWindowRevoked,
       agentMessageProjection,
       bindingReceiptStore,
       githubCapabilityService,
@@ -443,6 +427,7 @@ export function startOctantServer(
       folderBrowseService,
       isCodeProviderModelAllowed,
       isProjectPolicyTargetAllowed,
+      onPullRequestSnapshotRefreshed,
       projectPullRequestCadence,
       projectPullRequestService,
       projectRoutes,
@@ -450,6 +435,8 @@ export function startOctantServer(
       selectCodeConversation,
       workAttachments,
     } = yield* wireCode({
+      onGithubPullRequestsUnreadable,
+      onWindowRevoked,
       threadAwaitsHarnessApproval,
       late,
       bindingReceiptStore,
@@ -528,7 +515,7 @@ export function startOctantServer(
       projectBrowserService,
       windowHoldsProject,
     } = yield* wireBrowser({
-      late,
+      onWindowRevoked,
       browserCaptures,
       codeEvidence,
       externalContentIngestionStore,
@@ -547,6 +534,8 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      onPullRequestSnapshotRefreshed,
+      onWindowRevoked,
       threadAwaitsHarnessApproval,
       late,
       agentMessageService,
@@ -599,8 +588,8 @@ export function startOctantServer(
         evidence: import("@octant/contracts").AppleBuildEvidence,
         startedAt: string,
       ) => void) => recordAppleEvidence,
-      requireBrowserAutomationService,
-      requireBrowserToolApprovalService,
+      browserAutomationService,
+      browserToolApprovalService,
       resolveAndroidContext: (): ((
         windowId: WindowId,
         scope: {
@@ -786,6 +775,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      onWindowRevoked,
       late,
       agentRunPersistence,
       agentsManagedToolsFor,
@@ -821,8 +811,8 @@ export function startOctantServer(
       projectService,
       providerRuntimeRegistry,
       refreshStandaloneSkills,
-      requireBrowserAutomationService,
-      requireBrowserToolApprovalService,
+      browserAutomationService,
+      browserToolApprovalService,
       resolveSelectedExtensions,
       roots,
       routeCodeService,
@@ -886,7 +876,7 @@ export function startOctantServer(
         persistence,
         projectService,
         providerRuntimeRegistry,
-        requireBrowserToolApprovalService,
+        browserToolApprovalService,
         routeCodeService,
         spendCeilingService,
         windowAuthorityStore,
@@ -1104,13 +1094,13 @@ export function startOctantServer(
       privateListenerController,
       privateListenerSetting,
       providerCredentialRoutes,
+      remoteHost,
       replicaMembershipRoutes,
       replicaMembershipService,
       replicaStoreSettingsRoutes,
       replicaSyncStatusRoutes,
       syncedArtifactRoutes,
     } = wireRemote({
-      late,
       agentMessageService,
       artifactLibraryService,
       authenticatedProductDispatch,
@@ -1228,7 +1218,7 @@ export function startOctantServer(
           if (startupListenerConfig !== undefined) {
             try {
               await privateListenerController.enable(startupListenerConfig);
-              late.remoteListener.current = late.currentRemoteGateway.current?.listener();
+              remoteHost.recordStartupListener();
             } catch (error) {
               remoteListenerError =
                 error instanceof Error &&
@@ -1249,11 +1239,10 @@ export function startOctantServer(
           // A leave the host stopped in the middle of finishes its cleanup:
           // sync off and the device key deleted.
           void replicaMembershipService.finishLeaving().catch(() => undefined);
+          const remoteListener = remoteHost.listener();
           return {
             url: localServer.url,
-            ...(late.remoteListener.current === undefined
-              ? {}
-              : { remoteListener: late.remoteListener.current }),
+            ...(remoteListener === undefined ? {} : { remoteListener }),
             ...(remoteListenerError === undefined ? {} : { remoteListenerError }),
             diagnostics: composeHostDiagnostics,
             backup: (label = "manual") => persistence.createVerifiedBackup(label),
@@ -1263,7 +1252,7 @@ export function startOctantServer(
               // Promise.resolve().then() so synchronous throws become
               // rejections that are captured and settled together. The first
               // deterministic failure (remote before local) is propagated.
-              if (late.currentRemoteGateway.current === undefined) {
+              if (remoteHost.gateway() === undefined) {
                 return Promise.resolve(localServer.stop(closeActiveConnections));
               }
               const remoteStop = Promise.resolve().then(() => privateListenerController.disable());

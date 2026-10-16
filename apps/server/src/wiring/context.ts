@@ -26,10 +26,7 @@ import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 
 export type ContextDependencies = Pick<ServerStart, "persistence"> &
-  Pick<
-    AuthorityWiring,
-    "browserCaptures" | "requireBrowserToolApprovalService" | "windowAuthorityStore"
-  > &
+  Pick<AuthorityWiring, "browserCaptures" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "capacityScheduler" | "nativeHarnessHooks"> &
   Pick<
     WorkspaceWiring,
@@ -37,7 +34,13 @@ export type ContextDependencies = Pick<ServerStart, "persistence"> &
   > &
   Pick<CodeWiring, "canAccessCodeProject"> &
   Pick<ProvidersWiring, "configuredDriverOptions" | "providerRuntimeRegistry"> &
-  Pick<BrowserWiring, "browserAuthority" | "browserAutomationService" | "liveProjectBrowsers"> &
+  Pick<
+    BrowserWiring,
+    | "browserAuthority"
+    | "browserAutomationService"
+    | "browserToolApprovalService"
+    | "liveProjectBrowsers"
+  > &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
   Pick<ChatWiring, "chatService"> &
   Pick<WorkWiring, "workThreadService" | "workTurnProjection" | "workTurnService">;
@@ -47,6 +50,7 @@ export function wireContext(deps: ContextDependencies) {
     browserAuthority,
     browserAutomationService,
     browserCaptures,
+    browserToolApprovalService,
     canAccessCodeProject,
     capacityScheduler,
     chatService,
@@ -58,7 +62,6 @@ export function wireContext(deps: ContextDependencies) {
     persistence,
     projectService,
     providerRuntimeRegistry,
-    requireBrowserToolApprovalService,
     routeCodeService,
     spendCeilingService,
     windowAuthorityStore,
@@ -455,7 +458,7 @@ export function wireContext(deps: ContextDependencies) {
     windowCanOpenThread: windowCanOpenThreadById,
     projectBrowsers: liveProjectBrowsers,
     authority: browserAuthority,
-    approvals: requireBrowserToolApprovalService(),
+    approvals: browserToolApprovalService,
     windowAuthorityStore,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });

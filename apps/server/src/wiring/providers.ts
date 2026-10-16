@@ -340,7 +340,6 @@ export type ProvidersDependencies = Pick<
   /** Cells settled by a later wiring call; read per use, never at construction. */
   readonly late: Pick<
     LateBindings,
-    | "codeOperationRuntime"
     | "managedCodeThreadCreation"
     | "managedWorktreeRefsList"
     | "managedWorktreeSourcePreview"
@@ -515,7 +514,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       try: async () => {
         await extensionPackageStore.initialize();
         await providerRuntimeRegistry.reconcile();
-        await late.codeOperationRuntime.current?.reconcile?.();
+        await options.codeOperationRuntime?.reconcile?.();
         await computerUseProcess.reconcile?.();
         await agentRunProcessSupervisor.reconcile?.();
         await extensionSupervisor.reconcile?.();

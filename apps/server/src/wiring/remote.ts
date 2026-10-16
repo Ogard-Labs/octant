@@ -31,9 +31,11 @@ import { defaultShellSettings } from "@octant/domain";
 import { localHostDisplayName } from "../localHostDisplayName";
 import {
   createRemoteGateway,
+  type RemoteGateway,
   type RemoteGatewayServices,
   type RemoteServerGrantGatewayPort,
 } from "../remote/remoteGateway";
+import type { PrivateListener } from "../privateListener";
 import { resolvePrincipalRouteContext } from "../principalRouteContext";
 import { createLocalDeviceAdministrationRouteHandler } from "../remote/localDeviceAdministrationRoutes";
 import { createHostControlRouteHandler } from "../hostControlRoutes";
@@ -69,7 +71,6 @@ import { createPrivateListenerSetting } from "../remote/privateListenerSetting";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
 import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
@@ -87,10 +88,8 @@ import type { RoutesWiring } from "./routes";
 export type RemoteDependencies = Pick<
   ServerStart,
   "options" | "persistence" | "serve" | "startedAt" | "version"
-> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "currentRemoteGateway" | "remoteListener">;
-} & Pick<AuthorityWiring, "browserCaptureStore" | "windowAuthorityStore"> &
+> &
+  Pick<AuthorityWiring, "browserCaptureStore" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "externalContentIngestionStore"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
@@ -125,7 +124,6 @@ export type RemoteDependencies = Pick<
 
 export function wireRemote(deps: RemoteDependencies) {
   const {
-    late,
     agentMessageService,
     artifactLibraryService,
     authenticatedProductDispatch,
@@ -278,6 +276,19 @@ export function wireRemote(deps: RemoteDependencies) {
       remoteServerGrants: remoteServerGrantGatewayPort,
     };
   };
+  // The private gateway is rebuilt on every enable, so the newest generation
+  // is held here for the local device administration routes and the returned
+  // server shape. Callers read it through the accessors below.
+  let currentRemoteGateway: RemoteGateway | undefined;
+  let startupRemoteListener: PrivateListener | undefined;
+  const remoteHost = {
+    gateway: (): RemoteGateway | undefined => currentRemoteGateway,
+    listener: (): PrivateListener | undefined => startupRemoteListener,
+    /** Called once the startup enable has bound: the listener the host reports. */
+    recordStartupListener: (): void => {
+      startupRemoteListener = currentRemoteGateway?.listener();
+    },
+  };
   const privateListenerController = createPrivateListenerLifecycleController({
     createGateway: (config) => {
       const services = resolveRemoteGatewayServices();
@@ -288,7 +299,7 @@ export function wireRemote(deps: RemoteDependencies) {
         serve: options.remoteServe ?? serve,
         config,
       });
-      late.currentRemoteGateway.current = gateway;
+      currentRemoteGateway = gateway;
       return gateway;
     },
     selfMadeCertificate: createSelfMadeListenerCertificateStore({
@@ -298,7 +309,7 @@ export function wireRemote(deps: RemoteDependencies) {
   const localDeviceAdministrationRoutes = createLocalDeviceAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
-    control: () => late.currentRemoteGateway.current?.localDeviceAdministration(),
+    control: () => currentRemoteGateway?.localDeviceAdministration(),
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   const providerKeyChangeJournal = providerKeyJournal({
@@ -365,7 +376,7 @@ export function wireRemote(deps: RemoteDependencies) {
         .readProviderInstances()
         .filter((provider) => provider.enabled)
         .map((provider) => `provider:${provider.driverKind}`),
-      ...(late.remoteListener.current === undefined ? [] : ["private-listener"]),
+      ...(startupRemoteListener === undefined ? [] : ["private-listener"]),
       ...(options.platformCapabilities ?? []),
     ];
     return boundHostRuntimeDiagnostics({
@@ -902,6 +913,7 @@ export function wireRemote(deps: RemoteDependencies) {
     privateListenerController,
     privateListenerSetting,
     providerCredentialRoutes,
+    remoteHost,
     replicaMembershipRoutes,
     replicaMembershipService,
     replicaStoreSettingsRoutes,

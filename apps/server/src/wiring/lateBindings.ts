@@ -45,16 +45,7 @@ import type { RemoteGateway } from "../remote/remoteGateway";
  * dereferences it per call, as the captured `let` was read before.
  */
 export interface LateBindings {
-  readonly browserToolApprovalService: { current: BrowserToolApprovalService | undefined };
-  readonly terminalBrowserGrants: { current: TerminalBrowserGrantService | undefined };
-  readonly activeCodeService: { current: CodeRouteService | undefined };
-  readonly browserAutomationService: { current: BrowserAutomationService | undefined };
-  readonly projectBrowserService: { current: ProjectBrowserService | undefined };
-  readonly activeComputerUseRuntime: { current: ComputerUseRuntime | undefined };
-  readonly activeComputerUseTools: { current: ComputerUseToolService | undefined };
   readonly workRequestRuntime: { current: WorkRequestRuntime | undefined };
-  readonly revokeShellWindow: { current: ((windowId: WindowId) => void) | undefined };
-  readonly revokeQueuedMessages: { current: ((windowId: WindowId) => Promise<void>) | undefined };
   // The native harness is composed once the research router and plan
   // service exist; every consumer here reads these per turn or per request,
   // long after boot, never at construction.
@@ -70,7 +61,6 @@ export interface LateBindings {
   readonly snapshotCanvasImpl: {
     current: NonNullable<AgentRunRouteDependencies["snapshotCanvas"]>;
   };
-  readonly revokeProjectPullRequests: { current: (() => void) | undefined };
   readonly refreshStandaloneSkills: { current: () => Promise<void> };
   readonly managedWorktreeSourcePreview: { current: CodeWorktreeSourcePreviewPort["preview"] };
   readonly managedWorktreeRefsList: { current: CodeWorktreeRefsPort["list"] };
@@ -78,14 +68,7 @@ export interface LateBindings {
   readonly probeProviderForThreads: {
     current: (providerInstanceId: ProviderInstance["id"]) => Promise<ProviderProbeResult>;
   };
-  // Late-bound because the follow-up service that consumes refreshed
-  // snapshots is constructed further down, alongside the other Code thread
-  // services (same pattern as recordExtensionRuntimeEvidence).
-  readonly observeRefreshedPullRequestRows: {
-    current: ((rows: ReadonlyArray<CodeProjectPullRequestRow>) => void) | undefined;
-  };
   readonly codeOperationRuntime: { current: CodeOperationRuntime | undefined };
-  readonly terminalProcessPort: { current: TerminalProcessPort | undefined };
   // The Chat, Work, and Code services a follow-up creates through are
   // composed after these routes; the creator is bound once they exist.
   // The Work turn service is built further down; the harness asks it for a
@@ -105,13 +88,4 @@ export interface LateBindings {
     current: ((threadId: WorkThreadId) => WorkBoardRuntimeActivity) | undefined;
   };
   readonly workRequestService: { current: WorkRequestService | undefined };
-  readonly remoteListener: { current: PrivateListener | undefined };
-  // The private listener lifecycle is owned by a server-side controller so
-  // the packaged host controls (over the loopback bridge) drive the real
-  // dual-listener gateway, not a stub. `currentRemoteGateway` tracks the most
-  // recent gateway generation the controller constructed so the local device
-  // administration routes and the returned server shape can observe it. The
-  // controller only ever binds the private gateway; the loopback listener is
-  // never touched by an enable/disable/restart failure.
-  readonly currentRemoteGateway: { current: RemoteGateway | undefined };
 }

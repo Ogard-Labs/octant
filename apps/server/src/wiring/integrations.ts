@@ -51,14 +51,11 @@ import {
 } from "../harness/nativeHarnessEgressRules";
 import { isNativeHarnessDriverKind } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 
-export type IntegrationsDependencies = Pick<ServerStart, "options" | "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "revokeProjectPullRequests">;
-} & Pick<AuthorityWiring, "windowAuthorityStore"> &
+export type IntegrationsDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<AuthorityWiring, "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "externalContentIngestionStore"> & {
     /** Wired by wireWorkspace; read only after startup. */
     readonly workThreadProjection: () => WorkThreadProjection;
@@ -66,7 +63,6 @@ export type IntegrationsDependencies = Pick<ServerStart, "options" | "persistenc
 
 export function wireIntegrations(deps: IntegrationsDependencies) {
   const {
-    late,
     externalContentIngestionStore,
     options,
     persistence,
@@ -86,6 +82,13 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
     // export lists or prepares destinations, never at startup; see
     // `GistConnection`.
     const gistConnection = new GistConnection((signal) => githubCapabilityService.snapshot(signal));
+    // Areas that hold GitHub pull-request data register here, so a sign-in that
+    // can no longer read pull requests reaches them without this area holding
+    // them.
+    const pullRequestsUnreadableListeners: Array<() => void> = [];
+    const onGithubPullRequestsUnreadable = (listener: () => void): void => {
+      pullRequestsUnreadableListeners.push(listener);
+    };
     const githubCapabilityService = new GithubCapabilityService(githubAuthenticationPort, {
       probes: githubCataloguePort,
       onAuthenticationChanged: (snapshot) => {
@@ -93,7 +96,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
         const readable = snapshot.capabilities.some(
           (capability) => capability.kind === "pull-requests-read" && capability.available,
         );
-        if (!readable) late.revokeProjectPullRequests.current?.();
+        if (!readable) for (const listener of pullRequestsUnreadableListeners) listener();
       },
     });
     // One reading for every cache this host keeps, so the usage dashboard can
@@ -331,6 +334,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
       githubRoutes,
       integrationRoutes,
       linearIssueContextService,
+      onGithubPullRequestsUnreadable,
       peekCreateFromIssueFramed,
       siblingThreadsService,
       threadOutsideContentMarks,

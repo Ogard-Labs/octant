@@ -16,7 +16,6 @@ import {
   LOCAL_HOST_ID,
   type ProjectId,
   ReplayCursor,
-  type WindowId,
   type WorkAccess,
   type WorkStatusDatedItem,
 } from "@octant/contracts";
@@ -86,7 +85,6 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "canvasAgentToolPort"
     | "observeWorkThreadRuntime"
     | "purgeQueuedChatMessages"
-    | "revokeQueuedMessages"
     | "runningWorkTurnAccess"
     | "workRequestRuntime"
     | "workRequestService"
@@ -98,8 +96,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "browserModelBindings"
     | "codeSessionAuthority"
     | "liveTurns"
-    | "requireBrowserAutomationService"
-    | "requireBrowserToolApprovalService"
+    | "onWindowRevoked"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -149,7 +146,13 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "refreshStandaloneSkills"
     | "resolveSelectedExtensions"
   > &
-  Pick<BrowserWiring, "browserAuthority" | "windowHoldsProject"> &
+  Pick<
+    BrowserWiring,
+    | "browserAuthority"
+    | "browserAutomationService"
+    | "browserToolApprovalService"
+    | "windowHoldsProject"
+  > &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<HarnessWiring, "followUpCreation" | "nativeHarnessComposition" | "sideTaskFirstMessage"> &
   Pick<ChatWiring, "chatService" | "imageJobService" | "threadMentionService">;
@@ -161,8 +164,10 @@ export function wireWork(deps: WorkDependencies) {
     agentsManagedToolsFor,
     authorizeWorkThreadForWindow,
     browserAuthority,
+    browserAutomationService,
     browserCaptures,
     browserModelBindings,
+    browserToolApprovalService,
     canAccessCodeProject,
     chatAttachmentStore,
     chatService,
@@ -185,14 +190,13 @@ export function wireWork(deps: WorkDependencies) {
     managedWorktreeReceipts,
     nativeHarnessComposition,
     nativeHarnessHooks,
+    onWindowRevoked,
     peekCreateFromIssueFramed,
     persistence,
     probeProviderForThreads,
     projectService,
     providerRuntimeRegistry,
     refreshStandaloneSkills,
-    requireBrowserAutomationService,
-    requireBrowserToolApprovalService,
     resolveSelectedExtensions,
     roots,
     routeCodeService,
@@ -326,13 +330,13 @@ export function wireWork(deps: WorkDependencies) {
               resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
               browser: {
                 inspectThread: (ownerWindowId, threadId) =>
-                  requireBrowserAutomationService().inspectThread(ownerWindowId, threadId),
-                create: (command) => requireBrowserAutomationService().create(command),
-                act: (command) => requireBrowserAutomationService().act(command),
+                  browserAutomationService.inspectThread(ownerWindowId, threadId),
+                create: (command) => browserAutomationService.create(command),
+                act: (command) => browserAutomationService.act(command),
                 releaseThread: (ownerWindowId, threadId) =>
-                  requireBrowserAutomationService().releaseThread(ownerWindowId, threadId),
+                  browserAutomationService.releaseThread(ownerWindowId, threadId),
               },
-              approvals: requireBrowserToolApprovalService(),
+              approvals: browserToolApprovalService,
               uuid: randomUUID,
             });
         const sideTaskTools = !browserSupported
@@ -947,9 +951,11 @@ export function wireWork(deps: WorkDependencies) {
       }),
     });
     yield* Effect.promise(() => threadMessageQueue.recover());
-    const revokeQueuedMessages: ((windowId: WindowId) => Promise<void>) | undefined = (windowId) =>
-      threadMessageQueue.revokeWindow(windowId);
-    late.revokeQueuedMessages.current = revokeQueuedMessages;
+    onWindowRevoked((windowId) => {
+      void threadMessageQueue
+        .revokeWindow(windowId)
+        .catch(() => console.error("Queued message authority could not be revoked."));
+    });
     const purgeQueuedChatMessages: ((threadId: ChatThreadId) => Promise<void>) | undefined = async (
       threadId,
     ) => {

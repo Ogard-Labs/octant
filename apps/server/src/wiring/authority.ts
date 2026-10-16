@@ -26,37 +26,20 @@ import {
   chatThreadStandsInProject,
   isDeviceRegistrationCurrent,
 } from "../extensions/pairedDeviceApprovalAuthority";
-import { BrowserAutomationService } from "../browser/browserAutomationService";
 import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
-import { BrowserToolApprovalService } from "../browser/browserToolApprovalService";
 import { BrowserCaptureService } from "../browser/browserCaptureService";
 import { BrowserCaptureStore } from "../browser/browserCaptureStore";
 import { ServerBrowserAuthorityResolver } from "../browser/browserAuthorityResolver";
 import { SimulatorInputGrants } from "../apple/simulatorInputGrants";
 import type { ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 
 export type AuthorityDependencies = Pick<ServerStart, "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<
-    LateBindings,
-    | "activeCodeService"
-    | "activeComputerUseRuntime"
-    | "activeComputerUseTools"
-    | "browserAutomationService"
-    | "browserToolApprovalService"
-    | "projectBrowserService"
-    | "revokeQueuedMessages"
-    | "revokeShellWindow"
-    | "terminalBrowserGrants"
-  >;
-} & {
   /** Wired by wireBrowser; read only after startup. */
   readonly browserAuthority: () => ServerBrowserAuthorityResolver;
 };
 
 export function wireAuthority(deps: AuthorityDependencies) {
-  const { late, browserAuthority, persistence } = deps;
+  const { browserAuthority, persistence } = deps;
 
   const bindingReceiptStore = new DurableBindingReceiptStore(persistence.connection);
   const processAuthorityClock = new ProcessAuthorityClock();
@@ -174,42 +157,26 @@ export function wireAuthority(deps: AuthorityDependencies) {
     clock: () => new Date().toISOString(),
   });
   const browserModelBindings = new Map<string, BrowserModelBinding>();
-  const requireBrowserAutomationService = (): BrowserAutomationService => {
-    const service = late.browserAutomationService.current;
-    if (service === undefined) {
-      throw new Error("Browser automation service is unavailable during server composition.");
-    }
-    return service;
-  };
-  const requireBrowserToolApprovalService = (): BrowserToolApprovalService => {
-    const service = late.browserToolApprovalService.current;
-    if (service === undefined) {
-      throw new Error("Browser approval service is unavailable during server composition.");
-    }
-    return service;
+  // Each area that holds per-window state registers its revocation here when
+  // it builds the service, so the window store never holds a later area's
+  // service. A revocation that arrives before an area registers finds nothing
+  // to revoke, as before.
+  const windowRevocations: Array<(windowId: WindowId) => void> = [];
+  const onWindowRevoked = (revoke: (windowId: WindowId) => void): void => {
+    windowRevocations.push(revoke);
   };
   const windowAuthorityStore = new WindowAuthorityStore(
     (windowId) => {
-      late.revokeShellWindow.current?.(windowId);
-      void late.revokeQueuedMessages
-        .current?.(windowId)
-        .catch(() => console.error("Queued message authority could not be revoked."));
       codeApprovalStore.revokeWindow(windowId);
       simulatorInputGrants.revokeWindow(String(windowId));
       androidInputGrants.revokeWindow(String(windowId));
       extensionToolApprovalService.revokeWindow(windowId);
-      late.browserToolApprovalService.current?.revokeWindow(windowId);
-      late.terminalBrowserGrants.current?.revokeWindow(windowId);
       codeSessionAuthority.revokeWindow(windowId);
       for (const [requestId, binding] of agentRunExecutionWindows) {
         if (String(binding.windowId) === String(windowId))
           agentRunExecutionWindows.delete(requestId);
       }
-      late.activeCodeService.current?.revokeWindow?.(windowId);
-      void late.browserAutomationService.current?.revokeWindow(windowId);
-      void late.projectBrowserService.current?.revokeWindow(windowId);
-      void late.activeComputerUseRuntime.current?.revokeWindow(windowId);
-      void late.activeComputerUseTools.current?.revokeWindow(windowId);
+      for (const revoke of windowRevocations) revoke(windowId);
     },
     {
       clampNow: processAuthorityNow,
@@ -244,8 +211,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     machineChangeFeed,
     onAgentRunExecutionAccepted,
     processAuthorityNow,
-    requireBrowserAutomationService,
-    requireBrowserToolApprovalService,
+    onWindowRevoked,
     simulatorInputGrants,
     unsubscribeMachineChanges,
     windowAuthorityStore,
