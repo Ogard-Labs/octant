@@ -1094,11 +1094,13 @@ h6 {
 
 /* The account row is the sidebar's 40px foot. Its avatar is two pixels
    short of the icon boxes above it, so it sits two pixels further in and
-   its centre lands on the icon column. */
+   its centre lands on the icon column: 10px keeps the 20px avatar centred on
+   the 20px column of the 16px navigation icons at the 12px inset, which is
+   why these two values stay off the 4px scale. */
 .sidebar-profile .sidebar-item {
   min-height: var(--oct-nav-head-h);
-  padding-inline: var(--oct-space-3);
-  gap: var(--oct-space-1);
+  padding-inline: 10px;
+  gap: 6px;
 }
 
 .sidebar-profile__chevron {

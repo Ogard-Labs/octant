@@ -22,6 +22,7 @@
     "apps/web/src/styles/shell.css": 47
   },
   "spacing-scale": {
+    "apps/web/src/styles.css": 2,
     "apps/web/src/styles/octant.css": 1
   }
 }
