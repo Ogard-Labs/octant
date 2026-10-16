@@ -1566,6 +1566,90 @@ describe("WorkspaceView subagent tray", () => {
   });
 });
 
+describe("WorkspaceView agent approval card", () => {
+  const approval = {
+    id: "00000000-0000-4000-8000-000000000061",
+    toolName: "bash",
+    summary: "bash: bun run test",
+    approvalClass: "shell-commands",
+    status: "pending",
+    askedAt: "2026-10-16T12:06:00.000Z",
+  };
+  function harnessClient(approvals: ReadonlyArray<unknown>) {
+    return {
+      session: vi.fn(async () => ({
+        session: {
+          id: "00000000-0000-4000-8000-000000000010",
+          threadId: ids.thread,
+          mode: "code",
+          leadSlotId: "default",
+          lead: {
+            hostId: "00000000-0000-4000-8000-0000000000aa",
+            providerInstanceId: "00000000-0000-4000-8000-000000000001",
+            modelId: "frontier-large",
+          },
+          status: "running",
+          turnsRun: 1,
+          cutovers: 0,
+          startedAt: "2026-10-16T12:00:00.000Z",
+          updatedAt: "2026-10-16T12:05:00.000Z",
+          version: 4,
+        },
+        routes: [],
+        turns: [],
+        reductions: [],
+        interventions: [],
+        activatedFollowUpIds: [],
+        questions: [],
+        approvals,
+      })),
+      command: vi.fn(),
+      answerQuestion: vi.fn(),
+      decideApproval: vi.fn(async () => ({
+        kind: "approval-decided",
+        approval: { ...approval, status: "approved", settledAt: "2026-10-16T12:06:05.000Z" },
+      })),
+    } as never;
+  }
+
+  it("shows a Code thread's own pending approval in its composer and decides it there", async () => {
+    const client = harnessClient([approval]);
+    render(
+      <WorkspaceView
+        {...propsFor(codeTab("code-overview", "Overview"))}
+        nativeHarnessClient={client}
+      />,
+    );
+    const card = await screen.findByRole(
+      "region",
+      { name: "Approval requested" },
+      { timeout: 5_000 },
+    );
+    expect(card.closest(".composer")).not.toBeNull();
+    await userEvent.click(within(card).getByRole("button", { name: "Allow" }));
+    await waitFor(() =>
+      expect((client as { decideApproval: unknown }).decideApproval).toHaveBeenCalledWith(
+        codeIds.thread,
+        { approvalId: approval.id, decision: "approve" },
+      ),
+    );
+  });
+
+  it("shows no card for a thread with no approval waiting", async () => {
+    const client = harnessClient([]);
+    render(
+      <WorkspaceView
+        {...propsFor(codeTab("code-overview", "Overview"))}
+        nativeHarnessClient={client}
+      />,
+    );
+    await waitFor(() => expect((client as { session: unknown }).session).toHaveBeenCalled(), {
+      timeout: 5_000,
+    });
+    expect(screen.queryByRole("region", { name: "Approval requested" })).not.toBeInTheDocument();
+  });
+});
+
 describe("WorkspaceView cross-context banner", () => {
   it("renders the cross-context notice inside an existing thread composer with a dismiss control", async () => {
     const base = propsFor(codeTab("code-overview", "Overview"));

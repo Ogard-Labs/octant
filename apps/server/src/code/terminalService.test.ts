@@ -231,6 +231,39 @@ describe("TerminalService", () => {
     }
   });
 
+  it("emits at most once per 50 ms window from a flooding terminal", async () => {
+    vi.useFakeTimers();
+    try {
+      const process = fakeProcess();
+      const service = new TerminalService({
+        port: { start: () => process },
+        inheritedEnvironment: {},
+        credentials: { resolve: async () => "private-token" },
+      });
+      await service.launch({
+        terminalId: "terminal-1",
+        shell: "/bin/zsh",
+        cwd: "/repo",
+        stateScope: "repo_test",
+        columns: 80,
+        rows: 24,
+        credentialReferences: [],
+      });
+      const observer = vi.fn();
+      service.observe("terminal-1", observer);
+
+      // One leading-edge publish, then one per 50 ms window: 21 in a second.
+      for (let ms = 0; ms < 1000; ms += 1) {
+        process.emitData("x");
+        await vi.advanceTimersByTimeAsync(1);
+      }
+
+      expect(observer.mock.calls.length).toBeLessThanOrEqual(21);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("publishes debounced redacted snapshots to terminal output observers", async () => {
     vi.useFakeTimers();
     try {

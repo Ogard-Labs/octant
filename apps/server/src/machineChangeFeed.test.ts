@@ -81,30 +81,20 @@ describe("MachineChangeFeed", () => {
     await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 
-  it("invalidates the Work and Code navigation reads only for a subagent's approval or question, asked and settled", async () => {
+  it("invalidates the navigation reads for every harness approval, asked and settled, but only for a subagent's question", async () => {
     const feed = new MachineChangeFeed();
     const controller = new AbortController();
     const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
     const harness = "native-harness-session";
     const source = { runId: "00000000-0000-4000-8000-000000000090" };
 
-    // A lead's own request, a turn event, and a settle nobody listed publish nothing.
+    // The lead's own question, a turn event, and a question settle nobody listed publish nothing.
     feed.publishCommitted({
       events: [
         {
           aggregateType: harness,
-          eventName: "native-harness-approval-asked@1",
-          payload: { id: "lead-approval" },
-        },
-        {
-          aggregateType: harness,
           eventName: "native-harness-question-asked@1",
           payload: { id: "lead-question" },
-        },
-        {
-          aggregateType: harness,
-          eventName: "native-harness-approval-settled@1",
-          payload: { approvalId: "lead-approval" },
         },
         {
           aggregateType: harness,
@@ -116,15 +106,45 @@ describe("MachineChangeFeed", () => {
     });
     expect(feed.head()).toBe(0);
 
+    // The lead's own approval, and its settle, move every mode's sidebar and board.
     feed.publishCommitted({
       events: [
         {
           aggregateType: harness,
           eventName: "native-harness-approval-asked@1",
-          payload: { id: "child-approval", source },
+          payload: { id: "lead-approval" },
         },
       ],
     });
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: harness,
+          eventName: "native-harness-approval-settled@1",
+          payload: { approvalId: "lead-approval" },
+        },
+      ],
+    });
+    // An approval a restart left behind is settled by a resume that never saw the ask.
+    feed.publishCommitted({
+      events: [
+        {
+          aggregateType: harness,
+          eventName: "native-harness-approval-settled@1",
+          payload: { approvalId: "left-by-restart" },
+        },
+      ],
+    });
+    for (const sequence of [1, 2, 3]) {
+      await expect(stream.next()).resolves.toMatchObject({
+        value: {
+          sequence,
+          topics: ["chat-navigation", "work-navigation", "code-navigation"],
+        },
+      });
+    }
+
+    // A subagent's question is a Needs you row on its parent in Work or Code.
     feed.publishCommitted({
       events: [
         {
@@ -138,11 +158,6 @@ describe("MachineChangeFeed", () => {
       events: [
         {
           aggregateType: harness,
-          eventName: "native-harness-approval-settled@1",
-          payload: { approvalId: "child-approval" },
-        },
-        {
-          aggregateType: harness,
           eventName: "native-harness-question-settled@1",
           payload: { questionId: "child-question" },
         },
@@ -153,20 +168,19 @@ describe("MachineChangeFeed", () => {
       events: [
         {
           aggregateType: harness,
-          eventName: "native-harness-approval-settled@1",
-          payload: { approvalId: "child-approval" },
+          eventName: "native-harness-question-settled@1",
+          payload: { questionId: "child-question" },
         },
       ],
     });
-
-    for (const sequence of [1, 2, 3]) {
+    for (const sequence of [4, 5]) {
       await expect(stream.next()).resolves.toMatchObject({
         value: { sequence, topics: ["work-navigation", "code-navigation"] },
       });
     }
     controller.abort();
     await expect(stream.next()).resolves.toMatchObject({ done: true });
-    expect(feed.head()).toBe(3);
+    expect(feed.head()).toBe(5);
   });
 
   it("requires a snapshot when the requested cursor fell outside replay", async () => {

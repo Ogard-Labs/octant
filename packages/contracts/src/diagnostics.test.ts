@@ -11,6 +11,7 @@ import {
   decodeDiagnosticsExportOutcome,
   decodeDiagnosticsExportReceipt,
   decodeDiagnosticsExportRequest,
+  decodeJournalGrowth,
 } from "./diagnostics";
 
 const baseCorrelationId = "00000000-0000-4000-8000-000000000001";
@@ -347,5 +348,56 @@ describe("DiagnosticsExportOutcome", () => {
         packet: validPacket,
       }),
     ).toThrow();
+  });
+});
+
+describe("JournalGrowth", () => {
+  const days = Array.from(
+    { length: 14 },
+    (_, index) => `2026-10-${String(3 + index).padStart(2, "0")}`,
+  );
+  const growth = {
+    generatedAt: "2026-10-16T09:30:00.000Z",
+    days,
+    kinds: [{ kind: "chat-thread", counts: [1, ...Array.from({ length: 13 }, () => 0)], total: 1 }],
+    journalHead: 1,
+    databaseBytes: 4096,
+  };
+
+  it("decodes a report of counts per kind per day and rides on a packet", () => {
+    expect(decodeJournalGrowth(growth).kinds[0]?.total).toBe(1);
+    expect(
+      decodeDiagnosticEvidencePacket({ ...validPacket, packetVersion: 2, journalGrowth: growth })
+        .journalGrowth?.journalHead,
+    ).toBe(1);
+    expect(decodeDiagnosticEvidencePacket(validPacket).journalGrowth).toBeUndefined();
+  });
+
+  it("refuses payload fields, a short window, and a kind that is not a plain name", () => {
+    expect(() => decodeJournalGrowth({ ...growth, payload: "x" })).toThrow();
+    expect(() => decodeJournalGrowth({ ...growth, days: days.slice(1) })).toThrow();
+    expect(() =>
+      decodeJournalGrowth({
+        ...growth,
+        kinds: [{ kind: "/Users/me/secret thread", counts: growth.kinds[0]?.counts, total: 1 }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeJournalGrowth({
+        ...growth,
+        kinds: [{ ...growth.kinds[0], threadTitle: "Private" }],
+      }),
+    ).toThrow();
+  });
+
+  it("accepts both packet versions but only version 2 may carry the section", () => {
+    expect(decodeDiagnosticEvidencePacket(validPacket).packetVersion).toBe(1);
+    expect(decodeDiagnosticEvidencePacket({ ...validPacket, packetVersion: 2 }).packetVersion).toBe(
+      2,
+    );
+    expect(() =>
+      decodeDiagnosticEvidencePacket({ ...validPacket, journalGrowth: growth }),
+    ).toThrow();
+    expect(() => decodeDiagnosticEvidencePacket({ ...validPacket, packetVersion: 3 })).toThrow();
   });
 });

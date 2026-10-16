@@ -45,6 +45,8 @@ const MAX_TEXT_CHARACTERS = 64;
  * thread instead. A decision's options are short words the agent offered for
  * its next turn, and its row says the ask. A waiting subagent gets one Review
  * request command, which opens its request; it has no Approve or Deny here.
+ * The agent's own approval is decided in its thread, so it is only the thread's
+ * row, which opens the thread.
  * Nothing is listed when nothing waits, so the group never shows empty.
  */
 export function buildNeedsYouCommands(sources: NeedsYouSources): ReadonlyArray<OctantCommand> {
@@ -150,7 +152,9 @@ function waitingOn(requests: ReadonlyArray<PendingRequest>): string {
   const direct = requests.filter((request) => !isChildPendingRequest(request));
   const subagent = direct.length < requests.length;
   if (direct.length === 0) return "waiting on a subagent";
-  const approval = direct.some((request) => request.kind === "approval");
+  const approval = direct.some(
+    (request) => request.kind === "approval" || request.kind === "lead-approval",
+  );
   const question = direct.some((request) => request.kind === "question");
   const text =
     approval && question

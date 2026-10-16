@@ -1418,6 +1418,7 @@ describe("SettingsView", () => {
 
   it("exports diagnostics from the Host page when a client is provided", async () => {
     const diagnosticsExportClient = {
+      readJournalGrowth: vi.fn(async () => new Promise<never>(() => undefined)),
       exportEvidence: vi.fn(async () => ({
         kind: "exported" as const,
         packet: {

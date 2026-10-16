@@ -2,6 +2,10 @@ import type { AndroidToolchainClient } from "@octant/client-runtime/android-tool
 import type { AndroidSnapshotRequest } from "@octant/contracts/android-toolchain-rpc";
 import type { AndroidRuntimeSnapshot } from "@octant/contracts/android-toolchain";
 import { useEffect, useRef, useState } from "react";
+import { scheduleVisibleInterval, waitUntilDocumentVisible } from "../polling/documentVisibility";
+
+/** State and offer reads are not frames, so a few seconds of lag is invisible. */
+const POLL_INTERVAL_MS = 3_000;
 
 type PaneOpenRequest = AndroidRuntimeSnapshot["paneOpenRequest"];
 
@@ -40,12 +44,20 @@ export function useAndroidEmulatorPaneOffer(options: {
         if (!controller.signal.aborted) setHeld({ key: requestKey, request: undefined });
       }
     };
-    void pull();
-    if (!watch) return () => controller.abort();
-    const interval = setInterval(() => void pull(), 750);
+    if (!watch) {
+      // A hidden window defers this one read until it is shown again.
+      void waitUntilDocumentVisible(controller.signal).then(() => {
+        if (!controller.signal.aborted) void pull();
+      });
+      return () => controller.abort();
+    }
+    // Visible-only: a hidden window does not poll, and showing it again pulls once.
+    const stop = scheduleVisibleInterval(() => void pull(), POLL_INTERVAL_MS, {
+      runImmediately: true,
+    });
     return () => {
       controller.abort();
-      clearInterval(interval);
+      stop();
     };
   }, [activityKey, client, enabled, requestKey, watch]);
 

@@ -2189,6 +2189,14 @@ ALTER TABLE code_runtime_projection
       global_sequence
     );`,
   },
+  {
+    version: 81,
+    name: "index_event_journal_occurred_at",
+    // The diagnostics export and Settings count the last 14 days of events per
+    // aggregate kind. Without a time index that is a scan of every journal row;
+    // this covering index answers it from the newest entries alone.
+    sql: `CREATE INDEX event_journal_occurred_at ON event_journal (occurred_at, aggregate_type);`,
+  },
 ];
 
 interface AppliedMigrationRow {

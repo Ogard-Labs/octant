@@ -1,5 +1,6 @@
 import {
   DiagnosticsExportOutcome,
+  JournalGrowth,
   type DiagnosticsExportRequest,
 } from "@octant/contracts/diagnostics";
 import { decodeHostAnswer } from "@octant/contracts";
@@ -13,6 +14,8 @@ export interface DiagnosticsExportClientOptions {
 
 export interface DiagnosticsExportClient {
   exportEvidence(request: DiagnosticsExportRequest): Promise<DiagnosticsExportOutcome>;
+  /** Read when diagnostics open; the host never pushes it on a timer. */
+  readJournalGrowth(): Promise<JournalGrowth>;
 }
 
 export class DiagnosticsExportClientError extends Error {
@@ -73,6 +76,35 @@ export function createDiagnosticsExportClient(
         return decodeHostAnswer(DiagnosticsExportOutcome)(body);
       } catch {
         throw new DiagnosticsExportClientError("Diagnostics export returned an invalid response.");
+      }
+    },
+    async readJournalGrowth() {
+      let response: Response;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), EXPORT_TIMEOUT_MS);
+      try {
+        response = await resolvedFetch(
+          new URL("/api/diagnostics/journal-growth", options.baseUrl).toString(),
+          {
+            method: "GET",
+            headers: buildHeaders(options.windowCapability),
+            signal: controller.signal,
+          },
+        );
+      } catch {
+        throw new DiagnosticsExportClientError("Journal growth is unavailable.");
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!response.ok) {
+        throw new DiagnosticsExportClientError(
+          `Journal growth failed with status ${response.status}.`,
+        );
+      }
+      try {
+        return decodeHostAnswer(JournalGrowth)(await response.json());
+      } catch {
+        throw new DiagnosticsExportClientError("Journal growth returned an invalid response.");
       }
     },
   };

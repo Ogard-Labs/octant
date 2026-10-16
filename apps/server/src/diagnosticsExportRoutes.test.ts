@@ -195,6 +195,24 @@ describe("diagnostics export routes", () => {
     expect(exportSpy).not.toHaveBeenCalled();
   });
 
+  it("reads journal growth for an authenticated local window", async () => {
+    const { handler } = setup();
+    const response = await handler(
+      makeRequest("/api/diagnostics/journal-growth", { method: "GET", capability }),
+    );
+    expect(response!.status).toBe(200);
+    const body = (await response!.json()) as { kinds: ReadonlyArray<{ kind: string }> };
+    expect(body.kinds.map((entry) => entry.kind)).toEqual(["diagnostics-incident"]);
+  });
+
+  it("refuses journal growth without a window capability", async () => {
+    const { handler } = setup();
+    const response = await handler(
+      makeRequest("/api/diagnostics/journal-growth", { method: "GET" }),
+    );
+    expect(response!.status).toBe(401);
+  });
+
   it("rejects non-POST methods", async () => {
     const { handler } = setup();
     const response = await handler(

@@ -17,9 +17,10 @@ export interface PendingRequestSources {
   /** Chat questions a running attempt is parked on; Chat has no per-window authority. */
   readonly chat: () => ReadonlyArray<PendingRequest>;
   /**
-   * Subagents waiting on the person in a thread this window can open. These
-   * rows carry no answer: they find the request, and answering stays in the
-   * parent thread's Agents tab.
+   * Subagents, and the agent itself, waiting on the person in a thread this
+   * window can open. These rows carry no answer: they find the request, and
+   * answering stays on the harness session route, in the thread's own approval
+   * card or its Agents tab.
    */
   readonly children: (windowId: WindowId) => Promise<ReadonlyArray<PendingRequest>>;
 }
@@ -68,6 +69,8 @@ function requestKey(request: PendingRequest): string {
   const handle =
     request.kind === "child-approval" || request.kind === "child-question"
       ? `${request.kind}:${String(request.child.runId)}:${request.text}`
-      : JSON.stringify(request.answer);
+      : request.kind === "lead-approval"
+        ? `${request.kind}:${request.text}`
+        : JSON.stringify(request.answer);
   return `${request.mode}:${String(request.threadId)}:${handle}`;
 }

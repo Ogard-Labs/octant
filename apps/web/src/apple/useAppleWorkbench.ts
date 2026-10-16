@@ -16,6 +16,10 @@ import type {
 } from "@octant/contracts/apple-toolchain-rpc";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppleWorkbenchStatus } from "./AppleWorkbenchPane";
+import { scheduleVisibleInterval } from "../polling/documentVisibility";
+
+/** State and offer reads are not frames, so a few seconds of lag is invisible. */
+const POLL_INTERVAL_MS = 3_000;
 
 export interface UseAppleWorkbenchOptions {
   readonly client: AppleToolchainClient;
@@ -125,11 +129,13 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
         // A poll that fails leaves the last good snapshot; the next one tries again.
       }
     };
-    void pull();
-    const interval = setInterval(() => void pull(), 1_000);
+    // Visible-only: a hidden window does not poll, and showing it again pulls once.
+    const stop = scheduleVisibleInterval(() => void pull(), POLL_INTERVAL_MS, {
+      runImmediately: true,
+    });
     return () => {
       controller.abort();
-      clearInterval(interval);
+      stop();
     };
   }, [
     enabled,

@@ -33,6 +33,13 @@ export function collectThreadAttentionSignals(
       signals.push({ ...shared, reason: "question-asked" });
     } else if (thread.unread === true) {
       signals.push({ ...shared, reason: "turn-finished" });
+    } else if (thread.activity === "attention" && thread.awaitingKind === "approval") {
+      // The agent's own harness approval: the turn is parked until a person decides.
+      signals.push({
+        ...shared,
+        reason: "approval-required",
+        detail: "Waiting for your approval.",
+      });
     }
   }
   for (const thread of sources.workThreads) {
@@ -79,6 +86,14 @@ export function collectThreadAttentionSignals(
       source: "code" as const,
       ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
     };
+    if (thread.awaitingInput === true) {
+      // The agent's own harness approval: the turn is parked until a person decides.
+      signals.push({
+        ...shared,
+        reason: "approval-required",
+        detail: "Waiting for your approval.",
+      });
+    }
     if (thread.followUp === true) {
       signals.push({ ...shared, reason: "question-asked" });
     } else if (

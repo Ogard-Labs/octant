@@ -71,6 +71,7 @@ import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-us
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { DiagnosticsExportControl } from "../support/DiagnosticsExportControl";
+import { JournalGrowthTable } from "../support/JournalGrowthTable";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
@@ -556,7 +557,7 @@ export function SettingsView(props: SettingsViewProps) {
             <div className="settings-view__mobile-titlebar window-drag-region">
               {props.onBack === undefined ? null : (
                 <OctantButton
-                  className="settings-view__mobile-back window-no-drag"
+                  className="settings-view__mobile-back window-no-drag text-muted-foreground"
                   onClick={props.onBack}
                   type="button"
                   variant="ghost"
@@ -569,7 +570,7 @@ export function SettingsView(props: SettingsViewProps) {
               <OctantButton
                 aria-expanded={navigationOpen}
                 aria-haspopup="dialog"
-                className="settings-view__mobile-sections window-no-drag"
+                className="settings-view__mobile-sections window-no-drag text-muted-foreground"
                 onClick={() => setNavigationOpen(true)}
                 ref={navigationTrigger}
                 size="sm"
@@ -2311,6 +2312,17 @@ function MaintenanceSection({
             settingId="export-diagnostics"
           >
             <DiagnosticsExportControl client={diagnosticsExportClient} />
+          </SettingRow>
+        ) : null}
+        {diagnosticsExportClient !== undefined ? (
+          <SettingRow
+            description="Journal events per kind over the last 14 days, read when Settings opens. Counts only."
+            focused={focusedSetting === settingId("journal-growth")}
+            label="Journal growth"
+            scope="host"
+            settingId="journal-growth"
+          >
+            <JournalGrowthTable client={diagnosticsExportClient} />
           </SettingRow>
         ) : null}
       </div>

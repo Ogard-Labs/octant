@@ -1157,7 +1157,10 @@ const FX_WORKSPACE_DENIED_ENTRIES = [
  * broker. Live probing of `fx acp` 0.0.10 and 0.0.13 confirmed the relocation
  * (sessions written under the managed home, the real `~/.fx` untouched) and
  * confirmed that fx still negotiates when its workspace instruction, project
- * config, skill, and project MCP surfaces are unreadable.
+ * config, skill, and project MCP surfaces are unreadable. The minimum version
+ * is 0.0.13, the only probed release whose `set_config_option` reply lists
+ * the `mode` option the session-mode guard reads; 0.0.11 and 0.0.12 were never
+ * probed, so they are refused as too old rather than assumed to match.
  */
 const fxProfile: AcpProviderProfile = {
   kind: "fx",
@@ -1183,7 +1186,7 @@ const fxProfile: AcpProviderProfile = {
   process: {
     agentName: "fx",
     versionPattern: /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\r?\n?$/,
-    minimumVersion: [0, 0, 10],
+    minimumVersion: [0, 0, 13],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     guards: {
       // fx's default `permission_mode` is `auto`, and its ACP `code` mode maps

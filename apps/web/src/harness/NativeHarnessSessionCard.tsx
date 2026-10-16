@@ -11,11 +11,10 @@ import {
   sessionStatsInputOf,
   threadStats,
 } from "@octant/domain";
-import { ApprovalOutsideContentNote } from "../composer/ApprovalOutsideContentNote";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
+import { HarnessApprovalLostPanel, HarnessApprovalPanel } from "./HarnessApprovalPanel";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import "./native-harness.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
@@ -110,48 +109,18 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
     );
   }, [load, props.refreshIntervalMs, pendingQuestion === undefined, pendingApproval === undefined]);
 
-  // The hosts ticked on a marked thread's command, starting from what the
-  // host preselected; reset whenever a different approval is pending.
-  const commandHostKey = (host: { readonly host: string; readonly port: number }) =>
-    `${host.host}:${String(host.port)}`;
-  const [tickedHosts, setTickedHosts] = useState<{
-    readonly approvalId: string;
-    readonly keys: ReadonlySet<string>;
-  }>();
-  const ticked =
-    pendingApproval === undefined
-      ? new Set<string>()
-      : tickedHosts !== undefined && tickedHosts.approvalId === String(pendingApproval.id)
-        ? tickedHosts.keys
-        : new Set(
-            (pendingApproval.commandHosts ?? [])
-              .filter((entry) => entry.preselected)
-              .map(commandHostKey),
-          );
-  const toggleHost = (key: string, on: boolean) => {
-    if (pendingApproval === undefined) return;
-    const keys = new Set(ticked);
-    if (on) keys.add(key);
-    else keys.delete(key);
-    setTickedHosts({ approvalId: String(pendingApproval.id), keys });
-  };
-
   const decideApproval = useCallback(
-    async (decision: "approve" | "approve-always" | "deny") => {
+    async (
+      decision: "approve" | "approve-always" | "deny",
+      commandHosts: ReadonlyArray<{ readonly host: string; readonly port: number }> | undefined,
+    ) => {
       if (pendingApproval === undefined || busy) return;
       setBusy(true);
       try {
-        const listed = pendingApproval.commandHosts;
         const result = await props.client.decideApproval(props.threadId, {
           approvalId: String(pendingApproval.id),
           decision,
-          ...(listed === undefined || decision !== "approve"
-            ? {}
-            : {
-                commandHosts: listed
-                  .filter((entry) => ticked.has(commandHostKey(entry)))
-                  .map((entry) => ({ host: entry.host, port: entry.port })),
-              }),
+          ...(commandHosts === undefined || decision !== "approve" ? {} : { commandHosts }),
         });
         if (result.kind === "approval-refused") setError(result.message);
         await load();
@@ -159,7 +128,7 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
         setBusy(false);
       }
     },
-    [pendingApproval, busy, props.client, props.threadId, load, ticked],
+    [pendingApproval, busy, props.client, props.threadId, load],
   );
 
   const answerQuestion = useCallback(
@@ -235,107 +204,27 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
           {refusal}
         </OctantAlert>
       )}
-      {pendingApproval === undefined ? null : (
-        <section aria-label="Approval requested" className="native-harness-question">
-          {pendingApproval.source === undefined ? null : (
-            <p className="native-harness-card__detail" title={String(pendingApproval.source.runId)}>
-              Child {String(pendingApproval.source.runId).slice(0, 8)} ·{" "}
-              {pendingApproval.source.providerName ?? "Provider"} · {pendingApproval.source.modelId}
-            </p>
-          )}
-          <p className="native-harness-question__prompt">
-            <strong>
-              {pendingApproval.toolName === "provider-action"
-                ? "Provider action"
-                : pendingApproval.toolName}
-            </strong>{" "}
-            {pendingApproval.summary.replace(/^[a-z-]+: /, "")}
-          </p>
-          <p className="native-harness-card__detail">
-            {pendingApproval.source === undefined
-              ? `Needs your say-so (${pendingApproval.approvalClass}).`
-              : "Allow this request for this child."}
-          </p>
-          {pendingApproval.outsideContent === undefined ? null : (
-            <ApprovalOutsideContentNote outsideContent={pendingApproval.outsideContent} />
-          )}
-          {pendingApproval.detail === undefined ? null : (
-            <pre className="native-harness-question__detail">{pendingApproval.detail}</pre>
-          )}
-          {pendingApproval.commandHosts === undefined ? null : (
-            <>
-              <p className="native-harness-card__detail">
-                {pendingApproval.commandHosts.length === 0
-                  ? "This command can reach no host: this thread and its Project allow none."
-                  : "This command can reach only the hosts you tick, and only while it runs."}
-              </p>
-              {pendingApproval.commandHosts.length === 0 ? null : (
-                <ul
-                  aria-label="Hosts this command may reach"
-                  className="native-harness-egress__rules"
-                >
-                  {pendingApproval.commandHosts.map((entry) => {
-                    const key = commandHostKey(entry);
-                    return (
-                      <li className="native-harness-egress__rule" key={key}>
-                        <label className="native-harness-command-host">
-                          <OctantCheckbox
-                            checked={ticked.has(key)}
-                            disabled={busy}
-                            onChange={(event) => toggleHost(key, event.target.checked)}
-                          />
-                          <span className="native-harness-egress__label">
-                            <span className="native-harness-egress__host">
-                              {entry.port === 443 ? entry.host : key}
-                            </span>
-                            <span className="native-harness-egress__meta">
-                              {entry.from === "thread-rule"
-                                ? "Allowed on this thread"
-                                : entry.from === "project-rule"
-                                  ? "Allowed in this Project"
-                                  : "Refused earlier"}
-                            </span>
-                          </span>
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </>
-          )}
-          <div className="native-harness-chips">
-            <OctantButton
-              disabled={busy}
-              onClick={() => void decideApproval("approve")}
-              size="sm"
-              type="button"
-              variant="default"
-            >
-              Allow
-            </OctantButton>
-            {pendingApproval.source === undefined && pendingApproval.singleUse !== true ? (
-              <OctantButton
-                disabled={busy}
-                onClick={() => void decideApproval("approve-always")}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                Allow for this session
-              </OctantButton>
-            ) : null}
-            <OctantButton
-              disabled={busy}
-              onClick={() => void decideApproval("deny")}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              Deny
-            </OctantButton>
-          </div>
-        </section>
+      {pendingApproval === undefined ? null : pendingApproval.source === undefined &&
+        view.session.status === "recovery-required" ? (
+        // A restart took the call this approval guarded; deciding it cannot make
+        // it run, so only the resume that settles it is offered.
+        <HarnessApprovalLostPanel approval={pendingApproval}>
+          <OctantButton
+            disabled={busy}
+            onClick={() => void pauseOrResume()}
+            size="sm"
+            type="button"
+            variant="default"
+          >
+            Resume
+          </OctantButton>
+        </HarnessApprovalLostPanel>
+      ) : (
+        <HarnessApprovalPanel
+          approval={pendingApproval}
+          busy={busy}
+          onDecide={(decision, commandHosts) => void decideApproval(decision, commandHosts)}
+        />
       )}
       {view.steering === undefined || view.steering.length === 0 ? null : (
         <ul aria-label="Notes for the running turn" className="native-harness-steering">

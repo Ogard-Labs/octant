@@ -13,6 +13,13 @@ describe("codeThreadActivity", () => {
     expect(codeThreadActivity({ lifecycle: "active" })).toBe("idle");
     expect(codeThreadActivity({ lifecycle: "archived" })).toBe("idle");
   });
+
+  it("says a thread whose agent waits on its own approval needs the person, not that it works", () => {
+    expect(codeThreadActivity({ lifecycle: "active", executing: true, awaitingInput: true })).toBe(
+      "attention",
+    );
+    expect(codeThreadActivity({ lifecycle: "active", awaitingInput: true })).toBe("attention");
+  });
 });
 
 describe("threadRest", () => {

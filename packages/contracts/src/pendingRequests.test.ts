@@ -353,6 +353,55 @@ describe("pending request contract", () => {
     ).toMatchObject({ kind: "child-approval" });
   });
 
+  it("lists the lead's own harness approval in any mode, with no handle to answer it", () => {
+    const leadApproval = {
+      mode: "chat",
+      kind: "lead-approval",
+      threadId: ids.workThread,
+      threadTitle: "Plan the trip",
+      text: "web-fetch: the travel guide",
+      requestedAt,
+    } as const;
+    const list = decodePendingRequestList({
+      requests: [
+        leadApproval,
+        { ...leadApproval, mode: "work", projectId: ids.project },
+        { ...leadApproval, mode: "code", projectId: ids.project, lostInRestart: true },
+      ],
+      truncated: false,
+    });
+    expect(list.requests.map((request) => `${request.mode}:${request.kind}`)).toEqual([
+      "chat:lead-approval",
+      "work:lead-approval",
+      "code:lead-approval",
+    ]);
+    expect(() => decodePendingRequest({ ...leadApproval, answer: workApproval.answer })).toThrow();
+    expect(() => decodePendingRequest({ ...leadApproval, options: [{ label: "Yes" }] })).toThrow();
+    expect(() => decodePendingRequest({ ...leadApproval, lostInRestart: false })).toThrow();
+  });
+
+  it("keeps a lead approval row's text to its mode's own bounds and sanitization", () => {
+    const leadApproval = {
+      mode: "work",
+      kind: "lead-approval",
+      projectId: ids.project,
+      threadId: ids.workThread,
+      threadTitle: "Quarterly report",
+      text: "edit: summary.md",
+      requestedAt,
+    } as const;
+    expect(() =>
+      decodePendingRequest({ ...leadApproval, text: "edit: /Users/me/notes.md" }),
+    ).toThrow();
+    expect(() => decodePendingRequest({ ...leadApproval, text: " " })).toThrow();
+    expect(() =>
+      decodePendingRequest({ ...leadApproval, mode: "code", text: "é".repeat(1025) }),
+    ).toThrow();
+    expect(
+      decodePendingRequest({ ...leadApproval, mode: "code", text: "edit: /src/parser.ts" }),
+    ).toMatchObject({ kind: "lead-approval" });
+  });
+
   it("bounds the list and requires the truncation flag", () => {
     expect(() => decodePendingRequestList({ requests: [workApproval] })).toThrow();
     expect(() =>
