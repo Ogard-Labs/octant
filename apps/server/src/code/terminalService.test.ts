@@ -223,7 +223,7 @@ describe("TerminalService", () => {
       process.emitData("s");
       process.emitData(" -la\n");
       expect(observer).toHaveBeenCalledOnce();
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(16);
       expect(observer).toHaveBeenCalledTimes(2);
       expect(observer.mock.calls[1]?.[0]).toMatchObject({ text: "s -la\n" });
     } finally {
@@ -254,7 +254,7 @@ describe("TerminalService", () => {
 
       process.emitData("result private-");
       process.emitData("token\n");
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(16);
 
       // A credential split across two PTY callbacks is held back until it can
       // be redacted, so no observer ever sees it in the clear however the
@@ -352,7 +352,7 @@ describe("TerminalService", () => {
       observer.mockClear();
 
       process.emitData("prompt\n");
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(16);
 
       expect(observer).toHaveBeenCalledOnce();
     } finally {
@@ -430,7 +430,7 @@ describe("TerminalService", () => {
       process.emitData("ready before observer\n");
       const observer = vi.fn();
       service.observe("terminal-1", observer);
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(16);
 
       expect(observer).toHaveBeenCalledOnce();
       expect(observer).toHaveBeenCalledWith(
@@ -463,11 +463,11 @@ describe("TerminalService", () => {
       service.observe("terminal-1", observer);
 
       process.emitData("private-");
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(16);
       expect(observer).not.toHaveBeenCalled();
 
       process.emitData("token");
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(16);
       expect(observer).toHaveBeenCalledWith(
         expect.objectContaining({ text: "[REDACTED]", replace: false }),
       );

@@ -91,10 +91,18 @@ function attachGpuRenderer(terminal: Terminal): { readonly dispose: () => void }
     const webgl = new WebglAddon();
     // A lost context is not recoverable in place: dispose the addon and let
     // xterm fall back, rather than leaving a terminal painting nothing.
-    webgl.onContextLoss(() => webgl.dispose());
+    webgl.onContextLoss(() => {
+      console.warn("Octant terminal lost its WebGL context; painting with the DOM renderer.");
+      webgl.dispose();
+    });
     terminal.loadAddon(webgl);
     return webgl;
-  } catch {
+  } catch (error) {
+    // Logged once per mount so a slow terminal can be traced to the fallback.
+    console.warn(
+      "Octant terminal could not start the WebGL renderer; using the DOM renderer.",
+      error,
+    );
     return undefined;
   }
 }
