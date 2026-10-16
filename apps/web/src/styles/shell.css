@@ -1221,6 +1221,7 @@ html[data-octant-native-host="true"]
 
 /* Show more and Show less are one quiet row at the end of a folded list. */
 .project-threads__more {
+  border-radius: var(--oct-radius-sm);
   min-height: var(--oct-space-6);
   padding: 0 var(--oct-space-1);
   color: var(--oct-meta);
@@ -2484,6 +2485,12 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   list-style: none;
 }
 
+/* The bare variant draws nothing, so these take the ghost hover fill themselves. */
+.thread-row-info-card__pr-github:hover,
+.draft-thread__recent-item:hover {
+  background: var(--muted);
+}
+
 .draft-thread__recent-item {
   display: flex;
   width: 100%;
@@ -3084,6 +3091,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-branch-selector__option {
+  border-radius: var(--oct-radius-sm);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3282,16 +3290,6 @@ form > .work-composer-adapter__attachments {
   height: 28px;
   padding: 0;
   place-items: center;
-  color: var(--oct-muted);
-  border: 0;
-  border-radius: var(--oct-radius-sm);
-  background: transparent;
-}
-
-.browser-workspace__history button:hover:not(:disabled),
-.browser-workspace__close:hover {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
 }
 
 .browser-workspace__history button:disabled {

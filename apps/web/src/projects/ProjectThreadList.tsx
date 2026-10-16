@@ -333,6 +333,7 @@ function ThreadRowPullRequests(props: {
                 onClick={() => openOnGithub?.(summary.identity)}
                 title={`Open #${number} on GitHub`}
                 type="button"
+                variant="bare"
               >
                 <ExternalLink aria-hidden="true" size={14} strokeWidth={1.8} />
               </OctantIconButton>
@@ -535,6 +536,7 @@ export function ThreadRowActionsGutter(props: {
           onClick={() => props.actions.onPinThread?.(threadId, !pinned)}
           title={pinLabel}
           type="button"
+          variant="bare"
         >
           {pinned ? (
             <PinOff aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -550,6 +552,7 @@ export function ThreadRowActionsGutter(props: {
           onClick={() => props.actions.onArchiveThread?.(threadId)}
           title="Archive thread"
           type="button"
+          variant="bare"
         >
           <Archive aria-hidden="true" size={14} strokeWidth={1.8} />
         </OctantIconButton>
@@ -839,7 +842,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
             onPointerUp: drag.onPointerUp,
           })}
       type="button"
-      variant="ghost"
+      variant="bare"
     >
       <SidebarThreadRowContent
         {...(rowAge === undefined ? {} : { age: rowAge })}
@@ -1032,7 +1035,7 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
         className="project-threads__more justify-start window-no-drag"
         onClick={() => setShowingAll((current) => !current)}
         type="button"
-        variant="ghost"
+        variant="bare"
       >
         {folded ? `Show more (${String(foldedCount)})` : "Show less"}
       </OctantButton>

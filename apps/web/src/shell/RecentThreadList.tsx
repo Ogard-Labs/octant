@@ -20,7 +20,7 @@ export function RecentThreadList(props: { readonly threads: ReadonlyArray<Recent
               className="draft-thread__recent-item"
               onClick={thread.onOpen}
               type="button"
-              variant="ghost"
+              variant="bare"
             >
               <span className="draft-thread__recent-name">{thread.title}</span>
               {thread.detail === undefined ? null : (
