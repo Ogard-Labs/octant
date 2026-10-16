@@ -1096,6 +1096,9 @@ describe("CodeThreadWorkspace", () => {
       ),
     );
     expect(screen.getByText("The restore was undone.")).toBeVisible();
+    // The message and the button are one live region; without a space between
+    // them a screen reader announces "undone.Undo restore" as a single word.
+    expect(screen.getByRole("status")).toHaveTextContent("The restore was undone. Undo restore");
   });
 
   it("keeps the Undo restore button when the host refuses an undo because another thread is writing", async () => {

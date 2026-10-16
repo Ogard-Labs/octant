@@ -11,6 +11,7 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { SettingRow } from "../../settings/primitives";
 import { CLAUDE_ACCOUNT_ACCENT_LABELS } from "./claudeAccountValues";
+import { moveWithinRadioGroup } from "../../ui/base/radioGroupKeys";
 
 export function ClaudeAccountAccentPicker(props: {
   readonly id: string;
@@ -19,7 +20,12 @@ export function ClaudeAccountAccentPicker(props: {
   readonly onChange: (accent: ClaudeAccountAccent) => void;
 }) {
   return (
-    <div className="claude-account-accent-picker" role="radiogroup" aria-label={props.label}>
+    <div
+      className="claude-account-accent-picker"
+      onKeyDown={moveWithinRadioGroup}
+      role="radiogroup"
+      aria-label={props.label}
+    >
       {CLAUDE_ACCOUNT_ACCENT_VALUES.map((accent) => (
         <OctantButton
           aria-checked={props.value === accent}

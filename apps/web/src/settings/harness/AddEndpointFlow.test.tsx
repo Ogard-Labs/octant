@@ -457,6 +457,19 @@ describe("Add endpoint, step by step", () => {
     expect(hidden.some((ref) => String(ref.modelId) === "vendor/model-37")).toBe(false);
   });
 
+  it("moves focus to the result when Check and add replaces the form", async () => {
+    const user = userEvent.setup();
+    renderFlow({ creates: endpoint("openai-compatible") });
+    const form = await connect(user, "OpenAI-compatible", {
+      name: "Router",
+      url: "https://router.example/v1",
+      key: "k",
+    });
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: /^Added / })).toHaveFocus());
+  });
+
   it("stays on Models with a way to retry when hiding the unchosen models is refused", async () => {
     const user = userEvent.setup();
     const props = renderFlow({

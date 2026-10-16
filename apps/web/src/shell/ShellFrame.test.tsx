@@ -69,6 +69,38 @@ describe("ShellFrame", () => {
     ).toContain("left: var(--octant-window-chrome-leading-width, 148px);");
   });
 
+  it("puts the navigation sidebar ahead of the window chrome in tab order", () => {
+    render(
+      <ShellFrame
+        chrome={
+          <header>
+            <button type="button">Open bottom panel</button>
+          </header>
+        }
+        contextSidebarWidth={360}
+        material="opaque"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        sidebar={
+          <aside>
+            <button type="button">New task</button>
+          </aside>
+        }
+        sidebarResizable={false}
+        sidebarWidth={232}
+        wideContextOpen={false}
+        workspace={
+          <main>
+            <button type="button">Send</button>
+          </main>
+        }
+      />,
+    );
+
+    const order = screen.getAllByRole("button").map((button) => button.textContent);
+    expect(order).toEqual(["New task", "Open bottom panel", "Send"]);
+  });
+
   it("owns one edge-to-edge landmark composition without an outer client frame", () => {
     const { container } = render(
       <ShellFrame
@@ -97,9 +129,9 @@ describe("ShellFrame", () => {
     });
     expect(shell).not.toHaveAttribute("data-client-frame");
     expect(shell?.children).toHaveLength(5);
-    expect(shell?.children[0]).toBe(screen.getByRole("banner", { name: "Workspace actions" }));
-    expect(shell?.children[1]).toBe(screen.getByRole("complementary", { name: "Octant sidebar" }));
-    expect(shell?.children[2]).toHaveClass("shell-frame__sidebar-resize");
+    expect(shell?.children[0]).toBe(screen.getByRole("complementary", { name: "Octant sidebar" }));
+    expect(shell?.children[1]).toHaveClass("shell-frame__sidebar-resize");
+    expect(shell?.children[2]).toBe(screen.getByRole("banner", { name: "Workspace actions" }));
     expect(shell?.children[3]).toHaveClass("workspace-layer");
     expect(shell?.children[4]).toHaveClass("shell-frame__native-drag-strip");
     expect(screen.getAllByRole("banner")).toHaveLength(1);

@@ -1725,6 +1725,21 @@ request from the person.
 - A panel a turn's menu opens inline (a checkpoint's name, the question before
   files are restored) takes focus once the menu has closed, the safe answer
   first, and hands focus back to that turn's More actions control when it ends.
+- A control that opens a panel moves focus into it, and a control that is
+  replaced by what it did hands focus to the next logical control instead of
+  letting it fall to the page: a Tools tile focuses the tool it opened, applying
+  a working folder returns to its Working folder row (to the failure, when
+  the re-read fails) and cancelling returns to Change working folder, and Check and add focuses the result's heading as every
+  other Add endpoint step does.
+- A menu opened from the keyboard starts on its current choice, not its first
+  item; ArrowUp still opens on the last item. A group of radios is one set of
+  choices: the arrow keys move to the neighbour and select it, wrap past either
+  end, and Home and End jump to the ends. A resize separator takes Home for its
+  minimum and End for its maximum as well as the arrows.
+- Tab order follows reading order from the left: the navigation sidebar comes
+  before the window chrome, so the first Tab stop on load is never the controls
+  at the right edge. A live region that holds text and a button keeps a space
+  between them, so assistive technology does not read the two as one word.
 - Keyboard focus draws one indicator, declared once in `octant.css`: a 2px
   inset outline in `--oct-focus-edge`, the foreground at 62% so it holds about
   4.5:1 or better against the control's fill and the surface around it in

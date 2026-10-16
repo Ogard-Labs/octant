@@ -76,6 +76,14 @@ export function ShellResizeHandle(props: ShellResizeHandleProps) {
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>): void {
+    if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      const value = event.key === "Home" ? props.minimum : props.maximum;
+      if (value === props.value) return;
+      props.onPreview(value);
+      props.onCommit(value);
+      return;
+    }
     const direction = keyboardDirection(event.key, props.edge);
     if (direction === undefined) return;
     event.preventDefault();

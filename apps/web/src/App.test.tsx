@@ -4668,12 +4668,12 @@ describe("App", () => {
     const sidebar = screen.getByRole("complementary", { name: "Octant sidebar" });
     expect(sidebar).toHaveClass("sidebar");
     expect(document.querySelectorAll(".shell-frame")).toHaveLength(1);
-    expect(document.querySelector(".shell-frame")?.children[0]).toBe(
-      screen.getAllByRole("banner")[0],
-    );
-    expect(document.querySelector(".shell-frame")?.children[1]).toBe(sidebar);
-    expect(document.querySelector(".shell-frame")?.children[2]).toHaveClass(
+    expect(document.querySelector(".shell-frame")?.children[0]).toBe(sidebar);
+    expect(document.querySelector(".shell-frame")?.children[1]).toHaveClass(
       "shell-frame__sidebar-resize",
+    );
+    expect(document.querySelector(".shell-frame")?.children[2]).toBe(
+      screen.getAllByRole("banner")[0],
     );
     expect(document.querySelector(".shell-frame")?.children[3]).toHaveClass("workspace-layer");
     expect(sidebar).not.toHaveClass("window-drag-region");

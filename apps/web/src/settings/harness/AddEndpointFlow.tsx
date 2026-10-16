@@ -336,6 +336,14 @@ function ConnectStep(props: ConnectStepProps) {
   const credentialInput = useRef<HTMLInputElement>(null);
   const ids = useId();
   const added = props.added;
+  const hasAdded = added !== undefined;
+  const { headingRef } = props;
+  // Check and add swaps the form for the result without leaving the step, so
+  // the flow's own step-change focus never runs and the submit button that held
+  // focus is gone. The result's heading takes it, as every other step's does.
+  useEffect(() => {
+    if (hasAdded) headingRef.current?.focus();
+  }, [hasAdded, headingRef]);
 
   if (added !== undefined) {
     const { status } = added;

@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import type { ReactNode, Ref } from "react";
+import { useEffect, useRef, type ReactNode, type Ref } from "react";
 import { DockUtilityLauncher, type DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import { DockToolIcon } from "./dockToolIcons";
 import { DockToolStrip } from "./DockToolStrip";
@@ -58,6 +58,17 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       MULTI_INSTANCE_DOCK_SURFACES.has(surface.id) ||
       !props.tabs.some((tab) => dockTabSurface(tab).id === surface.id),
   );
+  // A tile that opens a tool is replaced by that tool, so the focus it held
+  // would fall to the page. The opened tool takes it instead. Only a tile asks
+  // for this: selecting a tab in the strip keeps focus on the tab.
+  const toolPanel = useRef<HTMLDivElement>(null);
+  const focusOpenedTool = useRef(false);
+  const openedTabId = activeTab?.id;
+  useEffect(() => {
+    if (!focusOpenedTool.current || openedTabId === undefined) return;
+    focusOpenedTool.current = false;
+    toolPanel.current?.focus();
+  }, [openedTabId]);
   const contents: Readonly<Partial<Record<RightUtilityDockSurfaceId, ReactNode>>> = {
     agents: props.agents,
     browser: props.browser,
@@ -85,7 +96,10 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
             <DockToolStrip
               {...(activeTabId === undefined ? {} : { active: activeTabId })}
               onClose={props.onCloseTab}
-              onSelect={props.onSelectSurface}
+              onSelect={(tabId) => {
+                focusOpenedTool.current = false;
+                props.onSelectSurface(tabId);
+              }}
               tabs={props.tabs}
             />
           )}
@@ -116,7 +130,13 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         {props.resolution.kind === "closed" ? (
           <div className="dock-start">
             {props.overview}
-            <DockWorkMap onOpen={props.onOpenTab} surfaces={props.launchableSurfaces} />
+            <DockWorkMap
+              onOpen={(surface) => {
+                focusOpenedTool.current = true;
+                props.onOpenTab(surface);
+              }}
+              surfaces={props.launchableSurfaces}
+            />
           </div>
         ) : props.resolution.kind === "unavailable" ? (
           <ShellState
@@ -126,8 +146,12 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           />
         ) : activeTab === undefined ? null : (
           <div
+            aria-label={activeTab.label}
             key={activeTab.id}
             className="right-utility-dock__tool"
+            ref={toolPanel}
+            role="region"
+            tabIndex={-1}
             data-dock-inset={
               activeSurface?.id === "plan" ||
               activeSurface?.id === "delivery" ||

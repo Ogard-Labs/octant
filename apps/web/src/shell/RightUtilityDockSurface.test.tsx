@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -94,6 +95,33 @@ describe("the right sidebar surface", () => {
     await user.click(screen.getByRole("button", { name: "Terminal" }));
     expect(onOpenTab).toHaveBeenCalledWith("terminal");
     expect(screen.queryByRole("tab", { name: "Thread tools" })).not.toBeInTheDocument();
+  });
+
+  it("moves focus into the tool a tile opened, because the tile is gone", async () => {
+    const user = userEvent.setup();
+    function Dock() {
+      const [open, setOpen] = useState(false);
+      return (
+        <RightUtilityDockSurface
+          browser={<p>Live Browser</p>}
+          launchableSurfaces={[browser, terminal]}
+          onCloseTab={vi.fn()}
+          onOpenTab={() => setOpen(true)}
+          onSelectSurface={vi.fn()}
+          resolution={
+            open ? { kind: "surface", surface: browser } : { kind: "closed", reason: "no-surface" }
+          }
+          tabs={open ? [browser] : []}
+        />
+      );
+    }
+    render(<Dock />);
+
+    screen.getByRole("button", { name: "Browser" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByRole("region", { name: "Browser" })).toHaveFocus();
+    expect(screen.getByText("Live Browser")).toBeVisible();
   });
 
   it("groups a long tool list under what each tool looks at", () => {

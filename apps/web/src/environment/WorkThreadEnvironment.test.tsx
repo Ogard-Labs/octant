@@ -146,6 +146,21 @@ describe("WorkThreadEnvironment", () => {
 
   it("submits a bounded relative working directory through the focused Change working folder flow", async () => {
     const client = threadClient();
+    vi.mocked(client.execute).mockResolvedValue({
+      kind: "thread-updated",
+      thread: {
+        id: threadId,
+        projectId,
+        title: "Research brief",
+        lifecycle: "active",
+        providerInstanceId: "00000000-0000-4000-8000-000000000902",
+        modelId: "gpt-4",
+        workingDirectory: "research/brief",
+        version: 2,
+        createdAt: "2026-07-16T08:00:00.000Z",
+        updatedAt: "2026-07-16T08:00:01.000Z",
+      },
+    } as never);
     const user = userEvent.setup();
     render(
       <WorkThreadEnvironment
@@ -177,6 +192,11 @@ describe("WorkThreadEnvironment", () => {
           workingDirectory: "research/brief",
         }),
       { timeout: 5_000 },
+    );
+    // The field closes with the apply; focus lands on the row that now shows
+    // the folder, not on the page.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Working folder/ })).toHaveFocus(),
     );
   });
 

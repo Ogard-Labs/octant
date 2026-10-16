@@ -157,6 +157,7 @@ import {
   type OctantHostBridge,
 } from "./hostBridge";
 import { openExternalUrl } from "./openExternalUrl";
+import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import "../styles/settings.css";
 import "../styles/settings-specialty.css";
 import "../styles/extensions-settings.css";
@@ -2404,6 +2405,7 @@ function SidebarBackgroundSettings({
           <span>Preset</span>
           <div
             className="settings-view__preset-grid"
+            onKeyDown={moveWithinRadioGroup}
             role="radiogroup"
             aria-label="Sidebar background presets"
           >

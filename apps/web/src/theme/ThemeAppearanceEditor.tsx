@@ -74,7 +74,12 @@ export function ThemeAppearanceEditor(props: {
         title="Color scheme"
       >
         <div className="setgroup">
-          <div aria-label="Theme mode" className="settings-scheme" role="radiogroup">
+          <div
+            aria-label="Theme mode"
+            className="settings-scheme"
+            onKeyDown={moveWithinRadioGroup}
+            role="radiogroup"
+          >
             {(
               [
                 { value: "system", label: "System" },
@@ -461,3 +466,4 @@ function ThemeTransfer(props: { readonly controller: ThemeController; readonly f
 
 import { useState, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";

@@ -1,5 +1,6 @@
 import type { CodeEnvironmentObservation } from "@octant/contracts";
 import { ChevronRight, FileDiff, Files, GitBranch } from "lucide-react";
+import type { Ref } from "react";
 import type { CodeEnvironmentControllerStatus } from "./useCodeEnvironmentController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { EnvironmentTile } from "./EnvironmentGroup";
@@ -15,6 +16,8 @@ export interface EnvironmentGitGroupProps {
   readonly errorMessage?: string | undefined;
   readonly observation?: CodeEnvironmentObservation | undefined;
   readonly status: CodeEnvironmentControllerStatus;
+  /** The failure block, so a parent can hand it the keyboard when a re-read fails. */
+  readonly failureRef?: Ref<HTMLDivElement>;
   readonly onOpenChanges?: () => void;
 }
 
@@ -35,7 +38,7 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
   }
   if (props.status !== "ready" || props.observation === undefined) {
     return (
-      <div className="environment-git-group__state">
+      <div className="environment-git-group__state" ref={props.failureRef} tabIndex={-1}>
         <OctantAlert className="environment-git-group__error" tone="danger">
           {reason ?? "Repository environment is unavailable."}
         </OctantAlert>

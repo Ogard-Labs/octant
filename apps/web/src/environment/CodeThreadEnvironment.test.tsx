@@ -431,6 +431,88 @@ describe("CodeThreadEnvironment", () => {
     );
   });
 
+  it("keeps keyboard focus on the Working folder row when applying re-reads the checkout", async () => {
+    const user = userEvent.setup();
+    const initial = readyObservation();
+    const reread = { ...initial, workingDirectory: "packages/app", threadVersion: 2 } as never;
+    let reads = 0;
+    const client = projectClient(initial);
+    // The re-read takes long enough for the Environment to render without its
+    // facts, which unmounts the field and the group that held focus.
+    vi.mocked(client.environmentForThread).mockImplementation(async () => {
+      reads += 1;
+      if (reads === 1) return initial;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      return reread;
+    });
+    const onExecute = vi.fn(async () => ({
+      kind: "thread-updated" as const,
+      thread: { workingDirectory: "packages/app", version: 2 },
+    }));
+    render(
+      <CodeThreadEnvironment
+        environmentOpen
+        onExecute={onExecute as never}
+        project={codeProject()}
+        projectClient={client}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    await user.click(screen.getByRole("button", { name: /^Working folder/ }));
+    await user.click(screen.getByRole("button", { name: "Change working folder" }));
+    const workingFolder = await screen.findByDisplayValue(".");
+    await user.clear(workingFolder);
+    await user.type(workingFolder, "packages/app");
+    await user.click(screen.getByRole("button", { name: "Apply working folder" }));
+
+    await waitFor(
+      () => expect(screen.getByRole("button", { name: /^Working folder/ })).toHaveFocus(),
+      { timeout: 5_000 },
+    );
+  });
+
+  it("moves keyboard focus to the failure when the re-read after an apply fails", async () => {
+    const user = userEvent.setup();
+    const initial = readyObservation();
+    let reads = 0;
+    const client = projectClient(initial);
+    vi.mocked(client.environmentForThread).mockImplementation(async () => {
+      reads += 1;
+      if (reads === 1) return initial;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      throw new Error("The Project service did not answer.");
+    });
+    const onExecute = vi.fn(async () => ({
+      kind: "thread-updated" as const,
+      thread: { workingDirectory: "packages/app", version: 2 },
+    }));
+    render(
+      <CodeThreadEnvironment
+        environmentOpen
+        onExecute={onExecute as never}
+        project={codeProject()}
+        projectClient={client}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    await user.click(screen.getByRole("button", { name: /^Working folder/ }));
+    await user.click(screen.getByRole("button", { name: "Change working folder" }));
+    const workingFolder = await screen.findByDisplayValue(".");
+    await user.clear(workingFolder);
+    await user.type(workingFolder, "packages/app");
+    await user.click(screen.getByRole("button", { name: "Apply working folder" }));
+
+    const alert = await screen.findByRole("alert", {}, { timeout: 5_000 });
+    expect(alert).toHaveTextContent("The Project service did not answer.");
+    await waitFor(() => expect(alert.closest(".environment-git-group__state")).toHaveFocus());
+  });
+
   it("surfaces an authoritative Code working-directory rejection", async () => {
     const onExecute = vi.fn(async () => ({
       category: "invalid" as const,

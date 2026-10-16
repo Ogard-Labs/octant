@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CodeComposerAccessMenu } from "./CodeComposerAccessMenu";
@@ -37,5 +37,17 @@ describe("CodeComposerAccessMenu", () => {
     await user.click(remember);
 
     expect(onPersistenceChange).toHaveBeenCalledWith("project-default");
+  });
+
+  it("opens from the keyboard on the current posture, not on the first one", async () => {
+    const user = userEvent.setup();
+    render(<CodeComposerAccessMenu onChange={() => {}} value="auto-accept-edits" />);
+
+    screen.getByRole("button", { name: "Access policy" }).focus();
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(screen.getByRole("menuitemradio", { name: "Auto-accept edits" })).toHaveFocus(),
+    );
   });
 });
