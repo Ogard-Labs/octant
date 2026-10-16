@@ -163,6 +163,7 @@ export function serializeDiagnosticsEvidencePacket(packet: DiagnosticEvidencePac
     recovery: packet.recovery,
     redactions: packet.redactions,
     redacted: packet.redacted,
+    ...(packet.hostHealth === undefined ? {} : { hostHealth: packet.hostHealth }),
     generatedAt: packet.generatedAt,
   });
 }

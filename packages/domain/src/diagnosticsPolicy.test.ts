@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { decodeDiagnosticEvidencePacket } from "@octant/contracts";
 import {
   buildDiagnosticsPacket,
   redactDiagnosticText,
   sealDiagnosticsExport,
+  serializeDiagnosticsEvidencePacket,
   type RawDiagnosticInput,
 } from "./diagnosticsPolicy";
 
@@ -95,6 +97,35 @@ describe("redactDiagnosticText", () => {
     const b = redactDiagnosticText("Bearer abcdef123456 then Bearer zzzzzz999999");
     expect(a.tags).toEqual(b.tags);
     expect(a.tags).toEqual([...new Set(a.tags)].sort());
+  });
+});
+
+describe("serializeDiagnosticsEvidencePacket", () => {
+  const health = {
+    slowStatementCount: 3,
+    slowStatementWorstMs: 120,
+    eventLoopLagCount: 1,
+    eventLoopLagWorstMs: 340,
+  };
+  const serialize = (hostHealth: typeof health | undefined) => {
+    const result = buildDiagnosticsPacket({
+      ...validInput,
+      ...(hostHealth === undefined ? {} : { hostHealth }),
+    });
+    if (result.kind !== "packet") throw new Error("expected a packet");
+    return serializeDiagnosticsEvidencePacket(result.packet);
+  };
+  const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+
+  it("exports the host health counters, covered by the digest", () => {
+    const withHealth = serialize(health);
+    expect(JSON.parse(withHealth).hostHealth).toEqual(health);
+    expect(withHealth.indexOf('"hostHealth"')).toBeLessThan(withHealth.indexOf('"generatedAt"'));
+    expect(digest(serialize({ ...health, slowStatementCount: 4 }))).not.toBe(digest(withHealth));
+  });
+
+  it("omits the field when the host reported none", () => {
+    expect(JSON.parse(serialize(undefined))).not.toHaveProperty("hostHealth");
   });
 });
 
