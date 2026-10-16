@@ -11,6 +11,13 @@ const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.bran
  */
 export const DIAGNOSTICS_PACKET_VERSION = 1 as const;
 
+/**
+ * Version of a packet that carries `journalGrowth`. A version 1 decoder rejects
+ * the extra field, so a packet with the section says so; version 1 packets
+ * without it stay valid.
+ */
+export const DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH = 2 as const;
+
 /** Upper bounds keep a packet reviewable and deny unbounded store dumps. */
 export const MAX_DIAGNOSTIC_VERSIONS = 32;
 export const MAX_DIAGNOSTIC_RECOVERY_FACTS = 16;
@@ -173,7 +180,7 @@ export type JournalGrowthKind = typeof JournalGrowthKind.Type;
 
 /**
  * Journal growth over the last {@link JOURNAL_GROWTH_WINDOW_DAYS} days, plus
- * the whole journal's row count and the database file size. Journal growth
+ * the journal head sequence and the database file size. Journal growth
  * twice hit a limit before anyone saw it, so the export and Settings show it.
  */
 export const JournalGrowth = Schema.Struct({
@@ -183,7 +190,8 @@ export const JournalGrowth = Schema.Struct({
     Schema.itemsCount(JOURNAL_GROWTH_WINDOW_DAYS),
   ),
   kinds: Schema.Array(JournalGrowthKind).pipe(Schema.maxItems(MAX_JOURNAL_GROWTH_KINDS)),
-  totalRows: Schema.NonNegativeInt,
+  /** Highest journal sequence: O(1) to read, and the row count when nothing was purged. */
+  journalHead: Schema.NonNegativeInt,
   databaseBytes: Schema.NonNegativeInt,
 }).annotations(strict);
 export type JournalGrowth = typeof JournalGrowth.Type;
@@ -195,7 +203,10 @@ export type JournalGrowth = typeof JournalGrowth.Type;
  * stores, or private thread/file content.
  */
 export const DiagnosticEvidencePacket = Schema.Struct({
-  packetVersion: Schema.Literal(DIAGNOSTICS_PACKET_VERSION),
+  packetVersion: Schema.Literal(
+    DIAGNOSTICS_PACKET_VERSION,
+    DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
+  ),
   packetId: DiagnosticPacketId,
   domain: DiagnosticFailureDomain,
   failureCode: DiagnosticFailureCode,
@@ -219,9 +230,14 @@ export const DiagnosticEvidencePacket = Schema.Struct({
   redactions: Schema.Array(DiagnosticRedactionTag).pipe(Schema.maxItems(MAX_DIAGNOSTIC_REDACTIONS)),
   redacted: Schema.Literal(true),
   generatedAt: UtcTimestamp,
-  /** Additive: absent when the host could not read the journal. */
+  /** Version 2 only; absent when the host could not read the journal. */
   journalGrowth: Schema.optional(JournalGrowth),
-}).annotations(strict);
+}).pipe(
+  Schema.filter((packet) => packet.packetVersion === 2 || packet.journalGrowth === undefined, {
+    message: () => "Only a version 2 packet carries journal growth.",
+  }),
+  Schema.annotations(strict),
+);
 export type DiagnosticEvidencePacket = typeof DiagnosticEvidencePacket.Type;
 
 /**

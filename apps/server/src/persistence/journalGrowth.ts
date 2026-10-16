@@ -19,8 +19,8 @@ function utcDay(epochMs: number): string {
 
 /**
  * Journal events per aggregate kind per UTC day for the last
- * {@link JOURNAL_GROWTH_WINDOW_DAYS} days, today included, plus the whole
- * journal's row count and the database file size.
+ * {@link JOURNAL_GROWTH_WINDOW_DAYS} days, today included, plus the journal head
+ * sequence and the database file size.
  *
  * It runs one grouped query that the `event_journal_occurred_at` covering index
  * answers from the newest entries, so cost follows the window rather than the
@@ -59,8 +59,12 @@ export function readJournalGrowth(connection: SqliteConnection, now: Date): Jour
     }))
     .sort((a, b) => b.total - a.total || a.kind.localeCompare(b.kind));
 
-  const total = connection.prepare("SELECT count(*) AS rows FROM event_journal").get() as {
-    readonly rows: number;
+  // The head is the rowid maximum, a b-tree edge read. Counting every row would
+  // scan an index that grows with all retained events, on the request path.
+  const head = connection
+    .prepare("SELECT max(global_sequence) AS head FROM event_journal")
+    .get() as {
+    readonly head: number | null;
   };
   const size = connection
     .prepare("SELECT page_count * page_size AS bytes FROM pragma_page_count(), pragma_page_size()")
@@ -70,7 +74,7 @@ export function readJournalGrowth(connection: SqliteConnection, now: Date): Jour
     generatedAt: now.toISOString(),
     days,
     kinds,
-    totalRows: total.rows,
+    journalHead: head.head ?? 0,
     databaseBytes: size.bytes,
   });
 }

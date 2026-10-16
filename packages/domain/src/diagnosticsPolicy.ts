@@ -13,6 +13,7 @@ import {
   MAX_DIAGNOSTIC_RECOVERY_FACTS,
   MAX_DIAGNOSTIC_VERSIONS,
   DIAGNOSTICS_PACKET_VERSION,
+  DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
   decodeDiagnosticEvidencePacket,
   decodeDiagnosticSafeText,
 } from "@octant/contracts";
@@ -361,7 +362,10 @@ export function buildDiagnosticsPacket(input: RawDiagnosticInput): DiagnosticsPa
   })) as ReadonlyArray<DiagnosticRecoveryFact>;
 
   const candidate = {
-    packetVersion: DIAGNOSTICS_PACKET_VERSION,
+    packetVersion:
+      input.journalGrowth === undefined
+        ? DIAGNOSTICS_PACKET_VERSION
+        : DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
     packetId: input.packetId,
     domain: input.domain,
     failureCode: input.failureCode,

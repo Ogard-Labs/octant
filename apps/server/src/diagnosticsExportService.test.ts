@@ -130,16 +130,17 @@ describe("exportDiagnosticsEvidence", () => {
         deps(store),
       );
       if (outcome.kind !== "exported") throw new Error("expected exported outcome");
+      expect(outcome.packet.packetVersion).toBe(2);
       const growth = outcome.packet.journalGrowth;
       expect(growth?.days.at(-1)).toBe("2026-08-10");
       expect(growth?.kinds.map((entry) => entry.kind)).toContain("diagnostics-incident");
-      expect(growth?.totalRows).toBeGreaterThan(0);
+      expect(growth?.journalHead).toBeGreaterThan(0);
       expect(Object.keys(growth ?? {}).sort()).toEqual([
         "databaseBytes",
         "days",
         "generatedAt",
+        "journalHead",
         "kinds",
-        "totalRows",
       ]);
       const serialized = serializeDiagnosticsEvidencePacket(outcome.packet);
       expect(serialized).toContain('"journalGrowth"');

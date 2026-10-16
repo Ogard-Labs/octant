@@ -1922,8 +1922,8 @@ flowchart LR
   second taint mechanism: the observation that produced it already taints the
   thread. Detail is in [Browser captures](design/browser-captures.md).
 - **Journal growth.** A diagnostics export carries journal events per aggregate
-  kind per day for the last 14 days, the journal's row count, and the database
-  size, as kind names and counts only: no payload, identifier, or thread or
+  kind per day for the last 14 days, the journal head sequence, and the database
+  size (a version 2 packet; version 1 packets stay valid), as kind names and counts only: no payload, identifier, or thread or
   Project name. One grouped query over the `event_journal_occurred_at` index
   reads it when diagnostics are exported or Settings opens, never on a timer,
   and Settings shows the same table.

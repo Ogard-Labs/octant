@@ -16,7 +16,7 @@ function clientReading(
 }
 
 describe("JournalGrowthTable", () => {
-  it("shows a row per kind with its 14-day total, plus the journal rows and database size", async () => {
+  it("shows a row per kind with its 14-day total, plus the journal head and database size", async () => {
     const readJournalGrowth = vi.fn(async () =>
       decodeJournalGrowth({
         generatedAt: "2026-10-16T09:30:00.000Z",
@@ -29,17 +29,21 @@ describe("JournalGrowthTable", () => {
             total: 1,
           },
         ],
-        totalRows: 123_456,
+        journalHead: 123_456,
         databaseBytes: 5 * 1_024 * 1_024,
       }),
     );
     render(<JournalGrowthTable client={clientReading(readJournalGrowth)} />);
 
-    expect(await screen.findByText(/123,456 journal rows · 5\.0 MB database/)).toBeInTheDocument();
+    expect(await screen.findByText(/Journal head 123,456 · 5\.0 MB database/)).toBeInTheDocument();
     const rows = screen.getAllByRole("row");
     expect(within(rows[1] as HTMLElement).getByText("chat-thread")).toBeInTheDocument();
     expect(within(rows[1] as HTMLElement).getByText("9")).toBeInTheDocument();
     expect(within(rows[2] as HTMLElement).getByText("automation")).toBeInTheDocument();
+    // The sparkline is decorative; each day's count is in the accessible tree.
+    expect(
+      within(rows[1] as HTMLElement).getByText(/2026-10-03: 4, 2026-10-04: 0/),
+    ).toHaveTextContent(/2026-10-15: 2, 2026-10-16: 3$/);
     expect(screen.getByText(/2026-10-03 to 2026-10-16/)).toBeInTheDocument();
     expect(readJournalGrowth).toHaveBeenCalledOnce();
   });

@@ -64,7 +64,7 @@ describe("journal growth", () => {
       { kind: "chat-thread", counts: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3], total: 9 },
       { kind: "automation", counts: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], total: 1 },
     ]);
-    expect(growth.totalRows).toBe(22);
+    expect(growth.journalHead).toBe(22);
     expect(growth.databaseBytes).toBeGreaterThan(0);
   });
 
@@ -78,6 +78,10 @@ describe("journal growth", () => {
       )
       .all("2026-10-03") as ReadonlyArray<{ readonly detail: string }>;
     expect(plan.map((row) => row.detail).join("\n")).toContain("event_journal_occurred_at");
+    const head = connection
+      .prepare("EXPLAIN QUERY PLAN SELECT max(global_sequence) FROM event_journal")
+      .all() as ReadonlyArray<{ readonly detail: string }>;
+    expect(head.map((row) => row.detail).join("\n")).not.toMatch(/SCAN/);
   });
 
   it("carries kind names and counts only, never payloads or identifiers", () => {
@@ -92,10 +96,10 @@ describe("journal growth", () => {
     expect(serialized).not.toContain("correlation");
   });
 
-  it("reports an empty journal as zero rows and no kinds", () => {
+  it("reports an empty journal as head zero and no kinds", () => {
     const growth = readJournalGrowth(openJournal(), NOW);
     expect(growth.kinds).toEqual([]);
-    expect(growth.totalRows).toBe(0);
+    expect(growth.journalHead).toBe(0);
   });
 
   it("refuses a report that smuggles an extra field past the contract", () => {

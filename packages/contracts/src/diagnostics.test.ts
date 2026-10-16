@@ -360,15 +360,15 @@ describe("JournalGrowth", () => {
     generatedAt: "2026-10-16T09:30:00.000Z",
     days,
     kinds: [{ kind: "chat-thread", counts: [1, ...Array.from({ length: 13 }, () => 0)], total: 1 }],
-    totalRows: 1,
+    journalHead: 1,
     databaseBytes: 4096,
   };
 
   it("decodes a report of counts per kind per day and rides on a packet", () => {
     expect(decodeJournalGrowth(growth).kinds[0]?.total).toBe(1);
     expect(
-      decodeDiagnosticEvidencePacket({ ...validPacket, journalGrowth: growth }).journalGrowth
-        ?.totalRows,
+      decodeDiagnosticEvidencePacket({ ...validPacket, packetVersion: 2, journalGrowth: growth })
+        .journalGrowth?.journalHead,
     ).toBe(1);
     expect(decodeDiagnosticEvidencePacket(validPacket).journalGrowth).toBeUndefined();
   });
@@ -388,5 +388,16 @@ describe("JournalGrowth", () => {
         kinds: [{ ...growth.kinds[0], threadTitle: "Private" }],
       }),
     ).toThrow();
+  });
+
+  it("accepts both packet versions but only version 2 may carry the section", () => {
+    expect(decodeDiagnosticEvidencePacket(validPacket).packetVersion).toBe(1);
+    expect(decodeDiagnosticEvidencePacket({ ...validPacket, packetVersion: 2 }).packetVersion).toBe(
+      2,
+    );
+    expect(() =>
+      decodeDiagnosticEvidencePacket({ ...validPacket, journalGrowth: growth }),
+    ).toThrow();
+    expect(() => decodeDiagnosticEvidencePacket({ ...validPacket, packetVersion: 3 })).toThrow();
   });
 });

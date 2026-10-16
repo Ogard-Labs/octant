@@ -139,7 +139,7 @@ describe("createDiagnosticsExportClient", () => {
       generatedAt: "2026-10-16T09:30:00.000Z",
       days,
       kinds: [{ kind: "chat-thread", counts: Array.from({ length: 14 }, () => 1), total: 14 }],
-      totalRows: 14,
+      journalHead: 14,
       databaseBytes: 8192,
     };
     const fetchImpl = fetchReturning(200, growth);
@@ -149,14 +149,14 @@ describe("createDiagnosticsExportClient", () => {
     };
     const client = createDiagnosticsExportClient({ ...options, fetch: fetchImpl });
 
-    expect((await client.readJournalGrowth()).totalRows).toBe(14);
+    expect((await client.readJournalGrowth()).journalHead).toBe(14);
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("http://127.0.0.1:4100/api/diagnostics/journal-growth");
     expect(init.method).toBe("GET");
 
     const bad = createDiagnosticsExportClient({
       ...options,
-      fetch: fetchReturning(200, { ...growth, totalRows: -1 }),
+      fetch: fetchReturning(200, { ...growth, journalHead: -1 }),
     });
     await expect(bad.readJournalGrowth()).rejects.toBeInstanceOf(DiagnosticsExportClientError);
   });

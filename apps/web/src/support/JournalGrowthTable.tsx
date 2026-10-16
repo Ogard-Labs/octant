@@ -44,7 +44,8 @@ export function JournalGrowthTable({ client }: { readonly client: DiagnosticsExp
   return (
     <div className="journal-growth">
       <p className="journal-growth__summary">
-        {formatCount(growth.totalRows)} journal rows · {formatBytes(growth.databaseBytes)} database
+        Journal head {formatCount(growth.journalHead)} · {formatBytes(growth.databaseBytes)}{" "}
+        database
       </p>
       {growth.kinds.length === 0 ? (
         <p className="journal-growth__note">No journal events in the last 14 days.</p>
@@ -66,6 +67,11 @@ export function JournalGrowthTable({ client }: { readonly client: DiagnosticsExp
                 <th scope="row">{entry.kind}</th>
                 <td>
                   <Sparkline counts={entry.counts} />
+                  <span className="sr-only">
+                    {entry.counts
+                      .map((count, index) => `${growth.days[index]}: ${count}`)
+                      .join(", ")}
+                  </span>
                 </td>
                 <td>{formatCount(entry.total)}</td>
               </tr>
@@ -77,7 +83,7 @@ export function JournalGrowthTable({ client }: { readonly client: DiagnosticsExp
   );
 }
 
-/** A glance at the shape; the total beside it is the accessible number. */
+/** A glance at the shape; the row's screen-reader text lists each day's count. */
 function Sparkline({ counts }: { readonly counts: ReadonlyArray<number> }) {
   const width = 100;
   const height = 20;
