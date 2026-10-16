@@ -1,4 +1,9 @@
-import { describeChord, matchTerminalKeybinding, type OctantKeybindings } from "@octant/domain";
+import {
+  describeChord,
+  isShadowedKeybinding,
+  matchTerminalKeybinding,
+  type OctantKeybindings,
+} from "@octant/domain";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { TerminalTypographyProjection } from "@octant/theme/typography";
 import { useKeybindings } from "../keybindings/useKeybindings";
@@ -165,12 +170,27 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
  */
 function leaveHint(keybindings: OctantKeybindings): string {
   const apple = isApplePlatform();
-  const next = keybindings.bindings.get("terminal-focus-next");
-  const previous = keybindings.bindings.get("terminal-focus-previous");
+  // A chord another action already owns does nothing here, so naming it would
+  // send the user to a key that does not leave.
+  const working = (id: "terminal-focus-next" | "terminal-focus-previous") => {
+    const chord = keybindings.bindings.get(id);
+    return chord === undefined || isShadowedKeybinding(keybindings, id)
+      ? undefined
+      : describeChord(chord, apple);
+  };
+  const next = working("terminal-focus-next");
+  const previous = working("terminal-focus-previous");
+  const palette = keybindings.bindings.get("command-palette");
   const parts = [
-    next === undefined ? undefined : `${describeChord(next, apple)} leaves the terminal`,
-    previous === undefined ? undefined : `${describeChord(previous, apple)} goes back`,
-  ].filter((part): part is string => part !== undefined);
+    next === undefined
+      ? `The chord that leaves the terminal is taken by another action${
+          palette === undefined
+            ? ""
+            : `; ${describeChord(palette, apple)} opens the command palette`
+        }`
+      : `${next} leaves the terminal`,
+    ...(previous === undefined ? [] : [`${previous} goes back`]),
+  ];
   return parts.join(" · ");
 }
 

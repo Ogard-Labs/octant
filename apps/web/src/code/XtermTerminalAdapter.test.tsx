@@ -76,6 +76,49 @@ describe("XtermTerminalAdapter", () => {
       expect(terminal).toHaveFocus();
     });
 
+    it("names no chord that another action already owns, and still points to a way out", async () => {
+      localStorage.setItem(
+        "octant.keybindings.v1",
+        JSON.stringify({ "terminal-focus-next": "Mod+K", "terminal-focus-previous": "Mod+K" }),
+      );
+      try {
+        const { interceptKey } = await mountBetweenControls();
+        const terminal = screen.getByRole("region", { name: "Repository terminal" });
+        const hint = terminal.getAttribute("aria-describedby");
+        const text = document.getElementById(hint ?? "")?.textContent ?? "";
+
+        expect(text).toBe(
+          "The chord that leaves the terminal is taken by another action; Ctrl+K opens the command palette",
+        );
+        expect(text).not.toMatch(/leaves the terminal$/);
+        expect(text).not.toMatch(/goes back/);
+        // The chord belongs to the palette, so the terminal does not claim it either.
+        expect(interceptKey(press("k", { ctrlKey: true }))).toBe(false);
+      } finally {
+        localStorage.removeItem("octant.keybindings.v1");
+      }
+    });
+
+    it("still names the previous-control chord when only the next-control chord is taken", async () => {
+      localStorage.setItem(
+        "octant.keybindings.v1",
+        JSON.stringify({ "terminal-focus-next": "Mod+K" }),
+      );
+      try {
+        await mountBetweenControls();
+        const terminal = screen.getByRole("region", { name: "Repository terminal" });
+        const text =
+          document.getElementById(terminal.getAttribute("aria-describedby") ?? "")?.textContent ??
+          "";
+
+        expect(text).toBe(
+          "The chord that leaves the terminal is taken by another action; Ctrl+K opens the command palette · Ctrl+Shift+Escape goes back",
+        );
+      } finally {
+        localStorage.removeItem("octant.keybindings.v1");
+      }
+    });
+
     it("tells keyboard users the chord while the terminal holds the keyboard", async () => {
       await mountBetweenControls();
       const terminal = screen.getByRole("region", { name: "Repository terminal" });

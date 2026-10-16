@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatChord,
+  isShadowedKeybinding,
   matchKeybinding,
   matchPageKeybinding,
   matchTerminalKeybinding,
@@ -181,6 +182,8 @@ describe("the terminal's way out", () => {
   it("does not run a terminal command whose chord a global action already holds", () => {
     const shared = resolveKeybindings({ "terminal-focus-next": "Mod+K" });
     expect(matchTerminalKeybinding(shared, keyEvent("k", { meta: true }), true)).toBeUndefined();
+    expect(isShadowedKeybinding(shared, "terminal-focus-next")).toBe(true);
+    expect(isShadowedKeybinding(shared, "command-palette")).toBe(false);
   });
 });
 

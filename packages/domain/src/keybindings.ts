@@ -418,6 +418,18 @@ export function matchPageKeybinding(
 }
 
 /**
+ * Whether an action lost its chord to an earlier action that shares it, and so
+ * never runs. Anything that tells the user a chord must ask this first, or it
+ * advertises a key that does nothing.
+ */
+export function isShadowedKeybinding(
+  keybindings: OctantKeybindings,
+  actionId: OctantKeybindingActionId,
+): boolean {
+  return keybindings.conflicts.some((conflict) => conflict.actionIds.slice(1).includes(actionId));
+}
+
+/**
  * Which terminal command a keyboard event runs, if any.
  *
  * The terminal calls this from its own key handler, before the key reaches the
@@ -436,10 +448,7 @@ export function matchTerminalKeybinding(
     if (action.scope !== "terminal") continue;
     const bound = keybindings.bindings.get(action.id);
     if (bound === undefined || !sameChord(bound, chord)) continue;
-    const shadowed = keybindings.conflicts.some((conflict) =>
-      conflict.actionIds.slice(1).includes(action.id),
-    );
-    if (!shadowed) return action.id;
+    if (!isShadowedKeybinding(keybindings, action.id)) return action.id;
   }
   return undefined;
 }
