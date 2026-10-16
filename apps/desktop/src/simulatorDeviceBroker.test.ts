@@ -227,6 +227,16 @@ describe("Simulator input delivery", () => {
     ]);
   });
 
+  it("asks the helpers only for the real orientation when it is read", async () => {
+    const { fake, send } = helpers(() => ({ status: "delivered", orientation: "portrait" }));
+
+    await expect(
+      createSimulatorInputDelivery(fake)({ kind: "read-orientation", udid, budgetMs: 30_000 }),
+    ).resolves.toEqual({ kind: "delivered", orientation: "portrait" });
+
+    expect(send.mock.calls.map(([, sent]) => sent)).toEqual([{ op: "orientation" }]);
+  });
+
   it("passes on which way the Simulator sits after a rotation", async () => {
     const { fake } = helpers(() => ({ status: "delivered", orientation: "landscape" }));
 

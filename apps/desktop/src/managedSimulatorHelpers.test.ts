@@ -335,6 +335,29 @@ describe("managed simulator streams", () => {
     }
   });
 
+  it("reads the real orientation without turning anything or needing the stream", async () => {
+    let wide = true;
+    const managed = tools();
+    const helpers = createManagedSimulatorHelpers(nativeHelpers(), managed, {
+      fetch: fetchStream,
+      inputConnection: connected,
+      sitsWide: async () => wide,
+    });
+    try {
+      await expect(helpers.send(udid, { op: "orientation" }, 2_000)).resolves.toEqual({
+        status: "delivered",
+        orientation: "landscape",
+      });
+      wide = false;
+      await expect(helpers.send(udid, { op: "orientation" }, 2_000)).resolves.toMatchObject({
+        orientation: "portrait",
+      });
+      expect(managed.commands.filter((command) => command[0] === "rotate")).toEqual([]);
+    } finally {
+      helpers.dispose();
+    }
+  });
+
   it("turns the Simulator away from the way it shows when no orientation is named", async () => {
     let wide = false;
     const managed = tools();

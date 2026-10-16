@@ -66,13 +66,21 @@ export const SimulatorDeviceInput = Schema.Union(
     /** Absent: turn the Simulator away from the way it sits now. */
     orientation: Schema.optional(DeviceOrientation),
   }).annotations(strict),
+  /**
+   * Reads which way the Simulator shows its screen right now and changes
+   * nothing. The answer is a `delivered` result that names the orientation.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("read-orientation"),
+    ...destination,
+  }).annotations(strict),
 );
 export type SimulatorDeviceInput = typeof SimulatorDeviceInput.Type;
 
 export const SimulatorDeviceInputResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("delivered"),
-    /** After a rotate: which way the Simulator now sits, as the helper read it. */
+    /** After a rotate or an orientation read: which way the Simulator now sits, as the helper read it. */
     orientation: Schema.optional(DeviceOrientation),
   }).annotations(strict),
   Schema.Struct({

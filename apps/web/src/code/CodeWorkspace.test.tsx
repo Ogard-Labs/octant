@@ -609,6 +609,78 @@ describe("CodeWorkspace", () => {
       expect.objectContaining({ kind: "key-press", key: "home" }),
     );
   });
+  it("keeps reading the host's snapshot while a Simulator view opened directly is up", async () => {
+    const simulatorId = "90000000-0000-4000-8000-000000000006";
+    const simulators = [
+      {
+        simulatorId,
+        name: "iPhone 16",
+        platform: "ios",
+        runtimeVersion: "18.5",
+        state: "booted",
+        udid: simulatorId,
+      },
+    ];
+    const snapshot = vi.fn(async () => ({
+      sequence: 1,
+      active: [],
+      recentEvidence: [],
+      simulators,
+    }));
+    const appleToolchainClient = {
+      discover: vi.fn(async () => ({
+        workspace: {
+          projectPath: "Fixture.xcodeproj",
+          projectKind: "xcode-project",
+          schemes: ["Fixture"],
+          configurations: ["Debug"],
+          targets: ["Fixture"],
+          sourceRevision: "a".repeat(40),
+        },
+        toolchain: { available: true, xcodeVersion: "16.4", sdks: [] },
+        simulators,
+      })),
+      snapshot,
+      execute: vi.fn(),
+      cancel: vi.fn(),
+      watchScreen: vi.fn(() => new Promise<never>(() => undefined)),
+    };
+    render(
+      <CodeWorkspace
+        appleToolchainClient={appleToolchainClient as never}
+        client={codeClient()}
+        controller={controller("full-access")}
+        createUuid={uuidFactory()}
+        hostBridge={
+          {
+            getHostCapabilities: () => ({
+              sidebarVibrancySupported: false,
+              liveSimulatorFrameSupported: true,
+            }),
+          } as never
+        }
+        tab={
+          {
+            id: TAB_ID,
+            kind: "apple-workbench",
+            mode: "code",
+            threadId: ids.thread,
+            title: "iOS Simulator",
+            pane: "device",
+            projectPath: "Fixture.xcodeproj",
+          } as never
+        }
+      />,
+    );
+
+    await waitFor(() => expect(appleToolchainClient.watchScreen).toHaveBeenCalled());
+    const before = snapshot.mock.calls.length;
+    // The host reports the real orientation through this snapshot, and nothing
+    // else asks for it when no action runs.
+    await waitFor(() => expect(snapshot.mock.calls.length).toBeGreaterThan(before), {
+      timeout: 6_000,
+    });
+  }, 10_000);
 });
 
 function controller(

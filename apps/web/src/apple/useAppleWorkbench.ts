@@ -34,6 +34,8 @@ export interface AppleWorkbenchController {
   /** The discovery probe the host reported failing, so the checklist can name the step. */
   readonly errorStep?: AppleDiscoveryStep;
   readonly retry: () => void;
+  /** Reads the host's runtime snapshot again, for a view that follows it while it is open. */
+  readonly refresh: (signal?: AbortSignal) => Promise<AppleRuntimeSnapshot>;
   readonly execute: (request: AppleActionRequest) => Promise<AppleBuildEvidence>;
   readonly cancel: (request: AppleCancelRequest) => Promise<boolean>;
 }
@@ -200,6 +202,7 @@ export function useAppleWorkbench(options: UseAppleWorkbenchOptions): AppleWorkb
     ...(errorCategory === undefined ? {} : { errorCategory }),
     ...(errorStep === undefined ? {} : { errorStep }),
     retry,
+    refresh: refreshSnapshot,
     execute,
     cancel,
   };

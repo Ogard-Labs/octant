@@ -603,6 +603,25 @@ function AppleWorkbenchSurface(props: {
     ...(liveSimulatorOrientation === undefined ? {} : { orientation: liveSimulatorOrientation }),
   });
 
+  // The host re-reads a Simulator's orientation while a view is open, and the
+  // runtime snapshot is where it is reported. The snapshot is otherwise pulled
+  // only while an action runs, so a pane the person opened directly would keep
+  // drawing a stale orientation after Home, a tap, or a change in the foreground app.
+  const followingLiveScreen = liveScreen.status === "connecting" || liveScreen.status === "live";
+  const refreshRuntime = controller.refresh;
+  useEffect(() => {
+    if (!followingLiveScreen) return;
+    const abort = new AbortController();
+    const timer = setInterval(
+      () => void refreshRuntime(abort.signal).catch(() => undefined),
+      3_000,
+    );
+    return () => {
+      abort.abort();
+      clearInterval(timer);
+    };
+  }, [followingLiveScreen, refreshRuntime]);
+
   const run = useCallback(
     async (intent: AppleWorkbenchIntent) => {
       const previous = inputFlight.current;
