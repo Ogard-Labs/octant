@@ -666,7 +666,11 @@ function AcrossNotes(props: {
 
 function IssueStateBadge(props: { readonly state: GithubIssueRow["state"] }) {
   return (
-    <OctantBadge className="github-issue-browser__state" data-state={props.state} variant="outline">
+    <OctantBadge
+      className="github-issue-browser__state"
+      data-state={props.state}
+      variant={props.state === "open" ? "success" : "secondary"}
+    >
       {props.state === "open" ? "Open" : "Closed"}
     </OctantBadge>
   );

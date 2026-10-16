@@ -583,7 +583,7 @@ function PhotoChoice(props: {
       onClick={props.onPick}
       role="radio"
       type="button"
-      variant="ghost"
+      variant="bare"
     >
       {url === null ? null : <img alt="" src={url} />}
       {props.checked ? (

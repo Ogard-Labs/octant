@@ -175,6 +175,11 @@ card, a provider, a Settings group of rows (see "Page shell"). Plain lists, empt
 headers are never cards. A button shaped like a card asks the shared button
 recipe for its `bare` variant, which draws nothing, and the feature stylesheet
 owns its face; every other button keeps the recipe's paint.
+A row of suggestions to type or pick takes the `chip` variant (an outlined pill
+that is quiet until hovered); a one-off kind beside its recurring siblings takes
+the badge's `dashed` variant; and a field whose frame a feature draws (a search
+box inside a toolbar, a stepper's middle segment) passes `unstyled` to the input
+recipe, as the composer prompt does for the textarea.
 
 The window frame is the one place cards carry the layout. The sidebar and the
 gutters around the workspace are a single back surface painted in the sidebar's

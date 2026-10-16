@@ -20,7 +20,7 @@ const buttonVariants = cva(
         default: "bg-primary text-primary-foreground hover:bg-primary/80",
         destructive: "bg-destructive/10 text-destructive hover:bg-destructive/20",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
+          "border-border bg-background hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground [html[data-octant-increased-contrast=true]_&]:border-(--octant-border-strong)",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:
@@ -31,6 +31,10 @@ const buttonVariants = cva(
         // focus handling, and disabled state and draws nothing of its own, so
         // the feature never fights a ghost hover fill or a fixed height.
         bare: "h-auto rounded-none p-0 text-inherit",
+        // A small outlined pill that suggests something to type or pick: a
+        // suggestion chip. Quiet until hovered, so a row of them reads as a
+        // set rather than a row of calls to action.
+        chip: "rounded-full border-border bg-transparent text-muted-foreground hover:text-foreground",
       },
       // Heights are rem so a control grows with the interface size. The root is
       // 13px, not the 16px these steps assume, so the odd steps landed between
@@ -49,6 +53,14 @@ const buttonVariants = cva(
         "icon-sm": "size-[round(1.846rem,2px)] rounded-md [&_svg:not([class*='size-'])]:size-3.5",
       },
     },
+    // A chip sizes itself, so its height and padding follow the label rather
+    // than a size step, which would otherwise win over the variant.
+    compoundVariants: [
+      {
+        variant: "chip",
+        class: "h-auto px-2 py-0.5 text-xs",
+      },
+    ],
     defaultVariants: {
       variant: "default",
       size: "default",

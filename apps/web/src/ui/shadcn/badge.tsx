@@ -20,6 +20,9 @@ const badgeVariants = cva(
         secondary: "bg-secondary text-secondary-foreground",
         destructive: "bg-destructive/10 text-destructive",
         outline: "border-border text-foreground",
+        // The outline's dashed twin marks the one-off kind of a pair, such as a
+        // one-time schedule beside the recurring ones.
+        dashed: "border-dashed border-border text-foreground",
         success: "bg-[var(--octant-success-surface)] text-[var(--octant-success-text)]",
         warning: "bg-[var(--octant-warning-surface)] text-[var(--octant-warning-text)]",
       },
