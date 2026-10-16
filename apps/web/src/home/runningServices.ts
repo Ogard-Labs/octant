@@ -46,3 +46,45 @@ export function runningServiceHealthLabel(health: LocalServerHealth): string {
  * it.
  */
 export const NOT_OWNED_LABEL = "Not owned by Octant";
+
+/** How the person asks to see a server live from another computer. */
+export type RemoteOpenMode = "octant-browser" | "default-browser";
+
+/** What the live opener answers; a refusal carries words fit for the row. */
+export type RemoteOpenOutcome =
+  /** `notice`: something the person should know about pages opened earlier, said once. */
+  | { readonly kind: "opened"; readonly notice?: string }
+  | { readonly kind: "refused"; readonly message: string };
+
+/** One line, because the page runs on this computer and its dev server does not. */
+export const REMOTE_OPEN_LIMITS =
+  "Links to localhost inside the page won't load. Live reload works.";
+
+/**
+ * What a row on another computer offers once this window can open a page live.
+ * The host decides every grant again; this only keeps the row from offering a
+ * control the host is certain to refuse, and says why in the plan's words.
+ */
+export type RemoteOpenOffer =
+  | { readonly kind: "live" }
+  | { readonly kind: "explained"; readonly reason: string };
+
+export function remoteOpenOffer(
+  service: RunningService,
+  host: string,
+): RemoteOpenOffer | undefined {
+  if (!service.openAvailable || service.health !== "listening") return undefined;
+  if (service.ownership !== "octant-owned") {
+    return {
+      kind: "explained",
+      reason: `Octant didn't start this server, so it opens only on ${host}.`,
+    };
+  }
+  if (service.thread === undefined) {
+    return {
+      kind: "explained",
+      reason: `This server isn't in a thread, so it opens only on ${host}.`,
+    };
+  }
+  return { kind: "live" };
+}

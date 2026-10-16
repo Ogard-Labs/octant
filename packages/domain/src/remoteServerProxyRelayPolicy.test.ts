@@ -3,6 +3,7 @@ import {
   isOctantCookieName,
   relayRequestHeaders,
   relayResponseHeaders,
+  relayWebSocketRequestHeaders,
   type RemoteServerRelayHeader,
 } from "./remoteServerProxyRelayPolicy";
 
@@ -122,6 +123,36 @@ describe("headers relayed to a dev server", () => {
     ]);
     expect(headers).toContainEqual(["authorization", "Bearer dev-token"]);
     expect(headers).toContainEqual(["content-type", "multipart/form-data; boundary=x"]);
+  });
+});
+
+describe("headers that open a WebSocket to a dev server", () => {
+  it("makes the handshake the host's own, keeps the page's subprotocols, and offers no extension", () => {
+    const headers = relayWebSocketRequestHeaders({
+      headers: [
+        ["upgrade", "websocket"],
+        ["connection", "Upgrade"],
+        ["sec-websocket-key", "page-key"],
+        ["sec-websocket-version", "13"],
+        ["sec-websocket-extensions", "permessage-deflate"],
+        ["sec-websocket-protocol", "vite-hmr"],
+        ["origin", listenerOrigin],
+        ["x-octant-device-proof", "proof"],
+      ],
+      listenerOrigin,
+      grantPath,
+      upstream: { scheme: "http", port: 5173 },
+      key: "host-key",
+    });
+    expect(headers).toEqual([
+      ["host", "localhost:5173"],
+      ["sec-websocket-protocol", "vite-hmr"],
+      ["origin", "http://localhost:5173"],
+      ["connection", "Upgrade"],
+      ["upgrade", "websocket"],
+      ["sec-websocket-version", "13"],
+      ["sec-websocket-key", "host-key"],
+    ]);
   });
 });
 

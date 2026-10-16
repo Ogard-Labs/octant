@@ -1,12 +1,12 @@
 # Open a dev server from another computer
 
-**Status: approved by the maintainer on 2026-10-14; slices 1 to 3 built: the
-host relays HTTP, and no client calls it yet.** Nothing here is in force. [Architecture](../architecture.md) holds
-only the rules that are true today; each slice below moves its rules there when
-it lands. Today a paired device that opens a server from Local servers or
-Running services gets a Browser tab on the host and sees the host browser's
-picture of the page, never the live page. This plan does not authorize
-merging or releasing anything.
+**Status: approved by the maintainer on 2026-10-14; slices 1 to 4 built: the
+host relays HTTP and WebSockets; slice 5 built for the Running services card
+in the desktop app, its forwarder passing WebSockets on so live reload works,
+and its rules are in the
+[architecture](../architecture.md); the user guide is written.** The parts of
+slice 5 listed under it as not built are still plans. A paired browser and the
+phone keep the host's picture of the page. merging or releasing anything.
 
 ## Design
 
@@ -214,7 +214,7 @@ forwarder serves at the name; a refusal before opening is a line on the row.
 | Server in the Project folder        | This server isn't in a thread, so it opens only on {host}.                               |
 | Paired browser or phone             | To open this page live, use the Octant app on your computer.                             |
 | Thread the device cannot read       | This device can't open servers in that thread.                                           |
-| Server stopped or changed           | The server on port {port} stopped or changed. Open it again from Local servers.          |
+| Server stopped or changed           | The server on port {port} stopped or changed. Open it again from Running services.       |
 | Device revoked                      | This computer no longer has access to {host}. Pair it again to open servers there.       |
 | Host unreachable                    | Can't reach {host}. Check that it's on and on the same network.                          |
 | No Octant window open               | Open an Octant window to keep this page connected.                                       |
@@ -466,6 +466,32 @@ dark; slice 5 makes the feature reachable.
    revoked or the grant closes; the subprotocol passes through; the message
    cap and per-grant socket cap hold.
 
+   **Built.** The socket relay is `relayUpgrade` in the grant service, the
+   dev-server handshake `openDevServerWebSocket` in the relay, its header
+   rules `relayWebSocketRequestHeaders` in the relay policy, and the message
+   framing and the hand-off from the route to the listener's transport
+   `apps/server/src/webSocketRelay.ts`. The rules now in force are in the
+   [architecture](../architecture.md) under WebSockets. Rules this slice
+   resolved, which slice 5 must keep:
+   - The host connects to the dev server before it answers the page, so the
+     page's connection switches only once the dev server accepted, with the
+     subprotocol it chose. A dev server that declines answers the page
+     `upgrade-refused`, not its own HTTP answer.
+   - The host offers the dev server no extension and relays whole messages.
+     Compression stays between the page and the forwarder.
+   - The route's answer carries the accepted upgrade to the transport, since
+     the fetch boundary carries only a `Response`. Node and Bun both switch
+     only on that, so no other route can switch a connection by accident.
+   - An open socket keeps its proxy session from idling out, because a page
+     left open with live reload sends no proxied request and would otherwise
+     lose its grant after 15 minutes. The absolute expiry still ends it.
+   - A socket over its cap answers 503 with the proxy's one-second
+     `Retry-After`, the plan's over-limit answer. A switched socket gives up
+     its proxy-budget slot, since the socket caps bound it instead.
+   - A write the other end does not read is held to twice the message cap,
+     then the socket closes with 1008, rather than pausing the reader: Bun's
+     server sockets offer no pause.
+
 5. **Client forwarder, signer, and Open.** The desktop main-process
    forwarder, name derivation, the claim cookie, response rewriting, failure
    pages, the renderer signing channel, Open and Open in browser on Local
@@ -480,6 +506,111 @@ dark; slice 5 makes the feature reachable.
    it holds; `Location` and `Set-Cookie` rewriting; web component tests for
    the row states and failure lines; rendered QA of both cards on a client
    window reading another computer, at the dock's narrow and wide widths.
+
+   **Built.** The Running services card takes an optional live opener from
+   its window. With one, an Octant-owned, listening server in a thread offers
+   **Open** and **Open in browser** and states the page's limits in one line;
+   a server Octant does not own, or one in no thread, says it opens only on its
+   computer, in the table's words; a refusal from the opener shows on the row.
+   The pieces: name, admission, and header rules in
+   `packages/domain/src/remoteServerPagePolicy.ts`; the proxy session in
+   `RemoteConnection.issueServerProxySession`; grants and the signing door in
+   `packages/client-runtime/src/remoteServerProxyClient.ts`; the forwarder in
+   `packages/client-runtime/src/remoteServerForwarder.ts` (Node only, outside
+   the package barrel); its lifecycle, recorded port, signing round trip,
+   listener transport, and Octant's browser window in
+   `apps/desktop/src/remoteServerPages.ts`; the window's opener in
+   `apps/web/src/home/remoteServerLiveOpener.ts`. Rules this slice resolved:
+   - **Where Open appears.** A desktop window reads its own host, so it had no
+     row of another computer to open. A desktop window whose Environments
+     filter is narrowed to one paired computer that is connected reads that
+     computer's Running services over its paired session, names it, and offers
+     the live opener; with any other filter it reads its own host as before.
+     Rows read that way have no picture Open, since this window's Browser tabs
+     belong to its own host.
+   - **The renderer builds the proof.** The forwarder sends the request's
+     method, full proxy path, and body digest, never a payload to sign. The
+     window canonicalizes the path, refuses it unless it is under the proxy
+     route of a grant it holds (a dot segment that climbs out is refused), and
+     builds and signs the envelope itself, so the channel can sign nothing but
+     a proxy request. The main process accepts back only Octant's own headers
+     (session cookie, proof, CSRF, command id, origin, fetch metadata), and
+     only from the window it asked.
+   - **The signer is the window that opened the page.** Its grants live in its
+     memory, bound to its proxy session. When it closes, its pending
+     signatures fail at once and the page says an Octant window must be open;
+     another window cannot sign for grants it never got.
+   - **A proxy session the host forgot** (idle expiry, a host restart) answers
+     the next grant request 401; the client mints one new session and asks
+     once more, and drops the grants of the old one. A refused proxy session
+     never clears the product session.
+   - **Port.** The forwarder starts on the first Open, not at launch, so the
+     app holds no port until it is used. It binds `127.0.0.1` and `::1` (a
+     computer without IPv6 keeps IPv4 alone) on the recorded port, else the
+     next free one in 47610–47619, and records the one it holds in the app's
+     data folder. A move is said once, on the row, as a notice.
+   - **Secret and claim.** Each name has one 32-byte secret for its life in
+     the forwarder; reopening the same server keeps it. Octant's browser adds
+     it as `x-octant-page-access` only to requests whose origin is exactly the
+     page's. Open in browser loads `/.octant/claim` with a one-time token
+     (two minutes) in the fragment; the page's own script posts it back, and
+     the forwarder answers with the `octant-page-access` cookie, `HttpOnly`,
+     `SameSite=Strict`, host-only. The claim post must carry the page's own
+     `Origin`.
+   - **Octant's browser** is a window of its own per page name in a persistent
+     partition, sandboxed, with every permission refused. It stays on the
+     page's origin; a link or new window to another origin opens in the
+     default browser. No agent can reach it: it is not a Browser tab.
+   - **Forgetting a host's pages (decision 8).** Each page Octant's browser
+     shows is recorded by name, host, and listener in the app's data folder
+     before its window opens, because names are derived and a partition a past
+     launch left would otherwise have no name to clear it by. Removing a host
+     or revoking this device from it (the federation lifecycle's local clear)
+     asks the desktop to forget that host's pages, and forgetting a paired
+     computer forgets the pages of its listener. In order: the pages' windows
+     close, the forwarder stops serving the names, every persistent partition
+     for those names is cleared whole (not one origin, since the forwarder's
+     port may have moved) through `clearRemotePageStorage`, and the names are
+     dropped. A name whose clearing failed stays recorded and is retried by the
+     next forget for that host or listener; removing a host says so in its
+     result's warning, and a paired computer's forget in its refusal copy. A host
+     the other computer revoked on its own is not cleared until the person
+     removes it here. Open in browser pages live in the default browser's
+     storage, which Octant does not clear.
+   - **Transport.** The forwarder reaches the host through the listener trust
+     rule (private address, pinned or platform certificate) with plain Node
+     HTTP and no cookie jar. A trust refusal sends nothing and the page says
+     the host cannot be reached.
+   - **Responses.** Only a response the host marks relayed reaches the page,
+     with `Location`, `Set-Cookie`, and HSTS handled as the design says;
+     anything else is the host's answer and becomes the failure page.
+   - **WebSockets.** The forwarder takes a page's upgrade through the same
+     admission and window signature (a `GET` with an empty body) and sends it
+     to the proxy route; when the host switches with the accept value for the
+     page's own key, it answers the page 101 and passes bytes through both
+     ways unchanged, so the host's slice 4 bounds and close codes hold. The
+     host closes it when the grant closes; the forwarder closes it when it
+     stops serving the host's pages. Octant's browser adds the page's secret
+     to a `ws:` request on the page's own name and port as it does to the
+     page's `http:` requests.
+   - **Decision 4 check.** On macOS 27 the system resolver answers
+     `*.localhost` with `127.0.0.1` and `::1` (checked with `dscacheutil`), so
+     Safari and other browsers that use it reach the name; Chromium resolves it
+     itself. Whether every default browser keeps a dev server's `Secure`
+     cookies on `http://*.localhost` is part of the live check.
+
+   **Not built in this slice:** a Local servers row's Open (its listing carries
+   no ownership), the live-updates indicator,
+   and signing when the opening window has closed. The stopped-or-changed
+   copy names Running services, since Local servers does not offer Open yet;
+   four refusals the table lacked use the copy below.
+
+   | Condition                              | Copy                                                                     |
+   | -------------------------------------- | ------------------------------------------------------------------------ |
+   | Name the forwarder did not open        | Octant didn't open a page at this address.                               |
+   | No secret or a used claim token        | Open this page again from Octant on this computer.                       |
+   | `same-site` or `cross-site` request    | Octant refused a request another site sent to this page.                 |
+   | Proxy session ended, grant not in hand | This page's access to {host} ended. Open it again from Running services. |
 
 6. **User guide.** A page in `apps/docs` on opening a server from another
    computer: what it needs (the desktop app on the computer in front of you,

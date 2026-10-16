@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@octant/client-runtime": "workspace:*",
     "@octant/contracts": "workspace:*",
     "@octant/domain": "workspace:*",
     "@octant/host-runtime": "workspace:*",

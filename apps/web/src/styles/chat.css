@@ -523,14 +523,16 @@
   align-items: center;
   gap: 6px;
   padding: 0 6px;
-  color: var(--oct-muted);
-  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: var(--oct-text-xs);
   text-align: left;
 }
 
-.thread-work-shelf__toggle:hover,
+.thread-work-shelf__history > button {
+  color: var(--oct-muted);
+  border-radius: var(--oct-radius-sm);
+}
+
 .thread-work-shelf__history > button:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
@@ -1123,7 +1125,6 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 }
 
 .composer-voice__button[data-recording="true"] {
-  color: var(--oct-danger-fg);
   animation: chat-composer-live var(--oct-motion-pulse) ease-in-out infinite;
 }
 

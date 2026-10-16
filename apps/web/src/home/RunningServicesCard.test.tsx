@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { HomeDashboard } from "./HomeDashboard";
 import { createRunningServicesCard, type RunningServicesCardSource } from "./RunningServicesCard";
 import { RUNNING_SERVICES_ROW_LIMIT } from "./runningServices";
+import { disconnectedRunningServicesClient } from "./remoteServerLiveOpener";
 
 const requestId = "00000000-0000-4000-8000-000000000904";
 const projectId = "00000000-0000-4000-8000-000000000902";
@@ -191,6 +192,113 @@ describe("the Running services card", () => {
     await screen.findByText("vite");
     expect(screen.queryByRole("button", { name: /^Open / })).toBeNull();
     expect(screen.getByRole("button", { name: "Stop vite on port 5171" })).toBeInTheDocument();
+  });
+
+  describe("on a window that can open another computer's server live", () => {
+    const threaded = { thread: { threadId, title: "Fix login" } };
+
+    it("offers Open and Open in browser for an Octant-owned server in a thread, and states the limits", async () => {
+      const { client } = fakeClient(() => listed([service(1, threaded)]));
+      const openLive = vi.fn(async (_service: RunningService, _mode: string) => ({
+        kind: "opened" as const,
+      }));
+      const onOpenTarget = vi.fn();
+      renderCard(
+        createRunningServicesCard(
+          source(client, { host: "Studio", canOpen: () => false, openLive, onOpenTarget }),
+        ),
+      );
+      await screen.findByText("vite");
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Open vite on port 5171" }));
+      await user.click(
+        screen.getByRole("button", { name: "Open vite on port 5171 in your browser" }),
+      );
+      expect(openLive.mock.calls.map((call) => call[1])).toEqual([
+        "octant-browser",
+        "default-browser",
+      ]);
+      expect(onOpenTarget).not.toHaveBeenCalled();
+      expect(screen.getByText(/Links to localhost inside the page won't load/)).toBeInTheDocument();
+    });
+
+    it("says why a server Octant does not own, or one outside a thread, opens only on its computer", async () => {
+      const { client } = fakeClient(() =>
+        listed([service(1, { ownership: "left-over", ...threaded }), service(2)]),
+      );
+      renderCard(
+        createRunningServicesCard(
+          source(client, {
+            host: "Studio",
+            canOpen: () => false,
+            openLive: vi.fn(async () => ({ kind: "opened" as const })),
+          }),
+        ),
+      );
+      await screen.findAllByText("vite");
+      expect(
+        screen.getByText("Octant didn't start this server, so it opens only on Studio."),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("This server isn't in a thread, so it opens only on Studio."),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^Open / })).toBeNull();
+    });
+
+    it("shows the host's refusal on the row and lets the person try again", async () => {
+      const { client } = fakeClient(() => listed([service(1, threaded)]));
+      const openLive = vi
+        .fn()
+        .mockResolvedValueOnce({
+          kind: "refused",
+          message: "The server on port 5171 stopped or changed. Open it again from Local servers.",
+        })
+        .mockResolvedValueOnce({ kind: "opened" });
+      renderCard(createRunningServicesCard(source(client, { host: "Studio", openLive })));
+      await screen.findByText("vite");
+      const user = userEvent.setup();
+      const open = screen.getByRole("button", { name: "Open vite on port 5171" });
+      await user.click(open);
+      expect(await screen.findByText(/stopped or changed/)).toBeInTheDocument();
+      await user.click(open);
+      await waitFor(() => expect(screen.queryByText(/stopped or changed/)).toBeNull());
+    });
+
+    it("says once that pages opened earlier start with empty storage when the opener moved", async () => {
+      const { client } = fakeClient(() => listed([service(1, threaded)]));
+      const notice =
+        "Octant moved its local port, so pages opened before start with empty storage.";
+      const openLive = vi.fn(async () => ({ kind: "opened" as const, notice }));
+      renderCard(createRunningServicesCard(source(client, { host: "Studio", openLive })));
+      await screen.findByText("vite");
+      await userEvent.setup().click(screen.getByRole("button", { name: "Open vite on port 5171" }));
+      expect(await screen.findByText(notice)).toBeInTheDocument();
+    });
+
+    it("says a selected computer that is not connected cannot be checked, and lists nothing", async () => {
+      renderCard(
+        createRunningServicesCard(
+          source(disconnectedRunningServicesClient("Studio"), {
+            host: "Studio",
+            canOpen: () => false,
+          }),
+        ),
+      );
+      expect(
+        await screen.findByText("Studio isn't connected, so Octant can't check."),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^Stop / })).toBeNull();
+    });
+
+    it("keeps the picture of the page where this window cannot open it live", async () => {
+      const { client } = fakeClient(() => listed([service(1, threaded)]));
+      renderCard(
+        createRunningServicesCard(source(client, { host: "Studio", canOpen: () => true })),
+      );
+      await screen.findByText("vite");
+      expect(screen.getByRole("button", { name: "Open vite on port 5171" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /in your browser/ })).toBeNull();
+    });
   });
 
   it("stops a server Octant owns at once and adopts the listing the host answers with", async () => {

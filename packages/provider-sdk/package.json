@@ -12,7 +12,9 @@
     "./child-observations": "./src/childObservations.ts",
     "./driver": "./src/driver.ts",
     "./driver-plugins": "./src/driverPlugins.ts",
-    "./subscription-oauth": "./src/subscriptionOAuth.ts"
+    "./subscription-oauth": "./src/subscriptionOAuth.ts",
+    "./image-generation": "./src/imageGeneration.ts",
+    "./image-generation-conformance": "./src/imageGenerationConformance.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

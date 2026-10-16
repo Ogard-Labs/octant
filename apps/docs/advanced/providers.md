@@ -462,7 +462,10 @@ and listed:
 - **Ideogram Image** (`ideogram-v3` and `ideogram-v4` as suggestions)
 
 Allowlists are manual-entry; suggested IDs are not the only values Octant
-accepts. Image profiles have no editable base URL. GPT Image models require
+accepts. Black Forest Labs and Ideogram profiles take an optional base URL for
+a proxy (HTTPS, or HTTP on this Mac); leave it blank to call the provider
+directly. Changing it removes the stored API key, so enter the key again.
+The other image profiles have no editable base URL. GPT Image models require
 OpenAI Organization Verification. Black Forest Labs generates exactly one
 image per request and does not accept reference images; it has no quality,
 size, or aspect ratio controls of its own. Ideogram also does not accept

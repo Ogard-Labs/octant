@@ -4,6 +4,7 @@ import { ParseResult } from "effect";
 import {
   decodeSimulatorDeviceInput,
   decodeSimulatorDeviceWatch,
+  SIMULATOR_ORIENTATION_HEADER,
   SIMULATOR_SCREEN_HEADER,
   type SimulatorDeviceInput,
   type SimulatorDeviceInputResult,
@@ -22,7 +23,11 @@ const failure = (status: number) =>
   Response.json({ error: "simulator-device-broker-refused" }, { status });
 
 function result(reply: DeviceHelperReply): SimulatorDeviceInputResult {
-  if (reply.status === "delivered") return { kind: "delivered" };
+  if (reply.status === "delivered") {
+    return reply.orientation === undefined
+      ? { kind: "delivered" }
+      : { kind: "delivered", orientation: reply.orientation };
+  }
   if (reply.status === "refused") {
     return { kind: "refused", reason: reply.code, message: reply.message };
   }
@@ -107,11 +112,17 @@ export function createSimulatorInputDelivery(
     if (command.kind === "repair-input") {
       return result(await helpers.send(command.udid, { op: "repair-input" }, budgetMs, cancelled));
     }
+    if (command.kind === "read-orientation") {
+      return result(await helpers.send(command.udid, { op: "orientation" }, budgetMs, cancelled));
+    }
     if (command.kind === "rotate") {
       const rotated = result(
         await helpers.send(
           command.udid,
-          { op: "rotate", orientation: command.orientation },
+          {
+            op: "rotate",
+            ...(command.orientation === undefined ? {} : { orientation: command.orientation }),
+          },
           budgetMs,
           cancelled,
         ),
@@ -325,6 +336,9 @@ export function createSimulatorScreenStream(
       "content-type": "application/octet-stream",
       "cache-control": "no-store",
       [SIMULATOR_SCREEN_HEADER]: `${looked.screen.width}x${looked.screen.height}`,
+      ...(started.orientation === undefined
+        ? {}
+        : { [SIMULATOR_ORIENTATION_HEADER]: started.orientation }),
     });
     outgoing.flushHeaders();
     stopWatching = started.stop;

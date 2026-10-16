@@ -18,7 +18,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
@@ -213,6 +213,12 @@ import {
   RemoteDeviceControlFailure,
   type RemoteDeviceControlService,
 } from "./remoteDeviceControls";
+import {
+  installPairedComputerIpcHandlers,
+  type PageStoragePort,
+  PAIRED_COMPUTER_PARTITION,
+  PairedComputerPins,
+} from "./pairedComputers";
 import { markHostInteraction } from "./interactionTrace";
 import {
   installCanvasFrameGuards,
@@ -226,6 +232,17 @@ import {
   type CanvasPrototypeSurface,
 } from "./canvasPrototypeSurface";
 import { CANVAS_PROTOTYPE_HOST_SWITCH } from "./canvasPrototypeHost";
+import {
+  createRemoteServerPages,
+  pageAccessHeader,
+  pageNavigation,
+  readRecordedForwarderPort,
+  readRecordedRemotePages,
+  recordForwarderPort,
+  recordRemotePages,
+  validateRemoteServerPageOpenRequest,
+  type RemoteServerPages,
+} from "./remoteServerPages";
 
 const IPC_CHANNELS = {
   nativeMenu: "octant:menu:popup",
@@ -311,6 +328,10 @@ const IPC_CHANNELS = {
   remoteHostIdentityStatus: "octant:remote-host-identity:status",
   remoteHostIdentityRotate: "octant:remote-host-identity:rotate",
   remoteHostIdentityRecover: "octant:remote-host-identity:recover",
+  remoteServerPageOpen: "octant:remote-server-page:open",
+  remoteServerPageSign: "octant:remote-server-page:sign",
+  remoteServerPageSigned: "octant:remote-server-page:signed",
+  remoteServerPageForgetHost: "octant:remote-server-page:forget-host",
 } as const;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -1419,6 +1440,79 @@ async function refreshDesktopWindowAuthorities(host: LocalHostDescriptor): Promi
   return await observed;
 }
 
+let pairedComputerPinStore: PairedComputerPins | undefined;
+
+function pairedComputerPins(): PairedComputerPins {
+  pairedComputerPinStore ??= new PairedComputerPins(
+    join(app.getPath("userData"), "paired-computer-pins.json"),
+  );
+  return pairedComputerPinStore;
+}
+
+/**
+ * The session every paired computer's window uses. Its certificate check is
+ * the pin alone: a name with a recorded pin passes only on that key, and
+ * every other name is refused, since this session opens nothing else.
+ * Installing the check again drops the network service's cached results, so
+ * a pin recorded since then applies to the next connection.
+ */
+function pairedComputerSession(): Electron.Session {
+  const pairedSession = session.fromPartition(PAIRED_COMPUTER_PARTITION);
+  pairedSession.setCertificateVerifyProc((request, callback) => {
+    callback(
+      pairedComputerPins().judgeCertificate(request.hostname, request.certificate.data, Date.now()),
+    );
+  });
+  pairedSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  pairedSession.setPermissionCheckHandler(() => false);
+  return pairedSession;
+}
+
+/** Open paired-computer windows and the origin each is held to, kept until each closes so none is collected mid-pairing. */
+const pairedComputerWindows = new Map<BrowserWindow, string>();
+
+function closePairedComputerWindows(origin: string): void {
+  for (const [window, held] of [...pairedComputerWindows]) {
+    if (held === origin && !window.isDestroyed()) window.destroy();
+  }
+}
+
+/**
+ * A window on another computer's own Octant page. It gets no preload and no
+ * desktop bridge, stays on that one origin, and opens no other window.
+ */
+function openPairedComputerWindow(input: { readonly origin: string; readonly url: string }): void {
+  const window = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      session: pairedComputerSession(),
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+    },
+  });
+  const staysOnOrigin = (url: string): boolean => {
+    try {
+      return new URL(url).origin === input.origin;
+    } catch {
+      return false;
+    }
+  };
+  window.webContents.on("will-navigate", (event) => {
+    if (!staysOnOrigin(event.url)) event.preventDefault();
+  });
+  window.webContents.on("will-redirect", (event) => {
+    if (!staysOnOrigin(event.url)) event.preventDefault();
+  });
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  pairedComputerWindows.set(window, input.origin);
+  window.once("closed", () => pairedComputerWindows.delete(window));
+  void window.loadURL(input.url);
+}
+
 function installTrustedRendererRequestHeaders(): void {
   if (trustedRendererRequestHeadersInstalled) return;
   trustedRendererRequestHeadersInstalled = true;
@@ -1748,6 +1842,7 @@ async function startDesktopOwnedHost(): Promise<LocalHostDescriptor> {
                 ? createSimulatorDeviceHelpers({ helperPath: deviceHelperPath })
                 : createUnavailableSimulatorHelpers(),
               startingManagedToolService,
+              { captureDirectory: join(desktopDataDirectory, "apple-runtime", "captures") },
             ),
           )
         : undefined;
@@ -2980,6 +3075,15 @@ function installIpcHandlers(): void {
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
     service: getHostIdentitySigningService(),
   });
+  installPairedComputerIpcHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
+    pins: pairedComputerPins,
+    windows: { open: openPairedComputerWindow, closeAll: closePairedComputerWindows },
+    storage: pairedComputerSession(),
+    serverPages: { forgetListener: (origin) => remoteServerPages().forgetListener(origin) },
+    webBuildVersion: app.getVersion(),
+  });
   installNativeMenuIpcHandlers({
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     resolveOwnedTopLevelWindow: (event) =>
@@ -3363,6 +3467,33 @@ function installIpcHandlers(): void {
       writeFile: options.writeFile,
     });
   });
+  ipcMain.handle(IPC_CHANNELS.remoteServerPageOpen, async (event, value: unknown) => {
+    ownedTopLevelWindowContext(event);
+    const request = validateRemoteServerPageOpenRequest(value);
+    const signer = event.sender;
+    if (!remoteServerPageSigners.has(signer.id)) {
+      remoteServerPageSigners.set(signer.id, signer);
+      const signerId = signer.id;
+      signer.once("destroyed", () => {
+        remoteServerPageSigners.delete(signerId);
+        remoteServerPages().windowClosed(signerId);
+      });
+    }
+    return await remoteServerPages().open(signer.id, request);
+  });
+  ipcMain.handle(IPC_CHANNELS.remoteServerPageForgetHost, async (event, hostId: unknown) => {
+    ownedTopLevelWindowContext(event);
+    if (typeof hostId !== "string" || !UUID_PATTERN.test(hostId)) {
+      throw new Error("Octant rejected an invalid request to forget a host's pages.");
+    }
+    return await remoteServerPages().forgetHost(hostId);
+  });
+  ipcMain.handle(IPC_CHANNELS.remoteServerPageSigned, (event, value: unknown) => {
+    ownedTopLevelWindowContext(event);
+    if (typeof value !== "object" || value === null) return;
+    const answer = value as { readonly requestId?: unknown; readonly signing?: unknown };
+    remoteServerPages().answer(event.sender.id, answer.requestId, answer.signing);
+  });
   ipcMain.handle(IPC_CHANNELS.browserSurfaceOpenExternal, async (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
     await shell.openExternal(validateExternalBrowserUrl(value));
@@ -3727,6 +3858,111 @@ function decodeCodeOperationApprovalPresentation(value: unknown): {
 
 function ownedWindow(event: IpcMainInvokeEvent): BrowserWindow {
   return ownedWindowContext(event).window;
+}
+
+// The windows that opened a page of another computer, which sign its requests.
+const remoteServerPageSigners = new Map<number, Electron.WebContents>();
+// Octant's browser windows for opened pages, by page name, and the origin each
+// name is served at now (the forwarder's port is part of it).
+const remoteServerPageWindows = new Map<string, BrowserWindow>();
+const remoteServerPageOrigins = new Map<string, string>();
+let remoteServerPagesInstance: RemoteServerPages | undefined;
+
+function remoteServerPages(): RemoteServerPages {
+  remoteServerPagesInstance ??= createRemoteServerPages({
+    readRecordedPort: () => readRecordedForwarderPort(app.getPath("userData")),
+    recordPort: (port) => recordForwarderPort(app.getPath("userData"), port),
+    askWindowToSign: (windowId, requestId, request) => {
+      const signer = remoteServerPageSigners.get(windowId);
+      if (signer === undefined || signer.isDestroyed()) return false;
+      signer.send(IPC_CHANNELS.remoteServerPageSign, { requestId, request });
+      return true;
+    },
+    readPageRecords: () => readRecordedRemotePages(app.getPath("userData")),
+    writePageRecords: (pages) => recordRemotePages(app.getPath("userData"), pages),
+    closePageWindow: closeRemoteServerPageWindow,
+    pageStorage: remoteServerPageStorage,
+    showInOctantBrowser: showRemoteServerPage,
+    openExternal: (url) => shell.openExternal(url),
+  });
+  return remoteServerPagesInstance;
+}
+
+function remoteServerPagePartition(name: string): string {
+  return `persist:octant-remote-page-${name}`;
+}
+
+function closeRemoteServerPageWindow(name: string): void {
+  const window = remoteServerPageWindows.get(name);
+  remoteServerPageWindows.delete(name);
+  remoteServerPageOrigins.delete(name);
+  if (window !== undefined && !window.isDestroyed()) window.destroy();
+}
+
+function remoteServerPageStorage(name: string): PageStoragePort {
+  const pageSession = session.fromPartition(remoteServerPagePartition(name));
+  return {
+    // The whole partition, not one origin: the forwarder's port may have moved.
+    clearStorageData: () => pageSession.clearStorageData(),
+    clearCache: () => pageSession.clearCache(),
+    clearAuthCache: () => pageSession.clearAuthCache(),
+  };
+}
+
+/**
+ * Octant's browser for an opened page: a window of its own in a persistent
+ * partition per page name, which only the person drives. It adds the page's
+ * secret to requests for the page's exact origin, keeps navigation on that
+ * origin, sends other links to the default browser, and grants no permission.
+ */
+function showRemoteServerPage(page: { readonly name: string; readonly pageOrigin: string }): void {
+  remoteServerPageOrigins.set(page.name, page.pageOrigin);
+  const existing = remoteServerPageWindows.get(page.name);
+  if (existing !== undefined && !existing.isDestroyed()) {
+    void existing.loadURL(`${page.pageOrigin}/`);
+    existing.show();
+    existing.focus();
+    return;
+  }
+  const partition = remoteServerPagePartition(page.name);
+  const pageSession = session.fromPartition(partition);
+  const currentOrigin = () => remoteServerPageOrigins.get(page.name) ?? page.pageOrigin;
+  pageSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  pageSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const header = pageAccessHeader(details.url, currentOrigin(), (origin) =>
+      remoteServerPages().accessFor(origin),
+    );
+    callback({
+      requestHeaders:
+        header === undefined
+          ? details.requestHeaders
+          : { ...details.requestHeaders, [header.name]: header.value },
+    });
+  });
+  const window = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    title: page.name,
+    webPreferences: {
+      partition,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (pageNavigation(url, currentOrigin()) === "external") void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  window.webContents.on("will-navigate", (event, url) => {
+    const decision = pageNavigation(url, currentOrigin());
+    if (decision === "stay") return;
+    event.preventDefault();
+    if (decision === "external") void shell.openExternal(url);
+  });
+  window.on("closed", () => remoteServerPageWindows.delete(page.name));
+  remoteServerPageWindows.set(page.name, window);
+  void window.loadURL(`${page.pageOrigin}/`);
 }
 
 function ownedWindowContext(

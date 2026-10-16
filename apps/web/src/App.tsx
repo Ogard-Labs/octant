@@ -36,7 +36,10 @@ import type { HostClient } from "@octant/client-runtime/host-client";
 import type { NavigatorAssistantClient } from "@octant/client-runtime/navigator-assistant-client";
 import {
   createLocalServerClient,
+  createPairingDeviceKeyAdapter,
+  createRemoteProductFetch,
   isRemotePairingOrigin,
+  PLATFORM_LISTENER_TRUST,
   localHostDisplayName,
   readPairingFragment,
   type AgentProfileClient,
@@ -444,6 +447,11 @@ import { reviewWaitingCount, runningThreadCount } from "./shell/runningNow";
 import { RunningTab } from "./home/RunningTab";
 import { stopRunningRow } from "./home/stopRunningRow";
 import { createRunningServicesCard } from "./home/RunningServicesCard";
+import {
+  disconnectedRunningServicesClient,
+  useRemoteServerLiveOpener,
+} from "./home/remoteServerLiveOpener";
+import type { RemoteOpenMode, RemoteOpenOutcome } from "./home/runningServices";
 import { buildReviewEntries, type ReviewEntry } from "./review/reviewModel";
 import { createReviewSource } from "./review/reviewSource";
 import type { ReviewActionOutcome, ReviewPageProps } from "./review/ReviewPage";
@@ -1809,7 +1817,7 @@ function LaunchedShell(
     ],
   );
   const observedHosts = useHostObservation(hostClient);
-  const federation = useHostFederationLifecycle();
+  const federation = useHostFederationLifecycle(props.hostBridge);
   const hostFederationLifecycle = federation?.lifecycle;
   const hostFederationTransports = federation?.transports;
   const [federationRevision, setFederationRevision] = useState(0);
@@ -1869,6 +1877,92 @@ function LaunchedShell(
     }
     return { kind: "all-hosts" };
   }, [environmentSelection]);
+  // A desktop window narrowed to one paired computer reads that computer's
+  // Running services over its paired session, and offers its servers live
+  // here through the desktop's forwarder. Any other window reads its own host.
+  const remoteServerLiveOpener = useRemoteServerLiveOpener(props.hostBridge);
+  const runningServicesRemoteHost = useMemo(() => {
+    if (remoteServerLiveOpener === undefined || createHostViewScope.kind !== "host-filter") {
+      return undefined;
+    }
+    const hostId = String(createHostViewScope.hostId);
+    if (hostId === String(LOCAL_HOST_ID)) return undefined;
+    const slot = hostFederationTransports?.get(hostId);
+    if (
+      slot === undefined ||
+      slot.kind !== "remote" ||
+      slot.bridge === undefined ||
+      slot.origin === undefined ||
+      slot.state.kind !== "ready"
+    ) {
+      // The filter still names that computer: its card says it cannot read
+      // it rather than showing this computer's servers under its name.
+      return {
+        status: "disconnected" as const,
+        hostName: slot?.displayName ?? environmentNames.get(hostId) ?? "That computer",
+      };
+    }
+    return {
+      status: "ready" as const,
+      hostId,
+      hostName: slot.displayName,
+      origin: slot.origin,
+      bridge: slot.bridge,
+    };
+    // The transport slot changes in place; the revision says when to look again.
+  }, [
+    remoteServerLiveOpener,
+    createHostViewScope,
+    hostFederationTransports,
+    federationRevision,
+    environmentNames,
+  ]);
+  const remoteRunningServicesClient = useMemo(
+    () =>
+      runningServicesRemoteHost === undefined
+        ? undefined
+        : runningServicesRemoteHost.status === "disconnected"
+          ? disconnectedRunningServicesClient(runningServicesRemoteHost.hostName)
+          : createLocalServerClient({
+              // The remote session owns the destination; the base URL only shapes
+              // the path, and no window capability leaves this computer.
+              baseUrl: "http://127.0.0.1",
+              fetch: createRemoteProductFetch({ bridge: runningServicesRemoteHost.bridge }),
+              windowCapability: "",
+            }),
+    [runningServicesRemoteHost],
+  );
+  const openRunningServiceLive = useMemo(() => {
+    const host = runningServicesRemoteHost;
+    const opener = remoteServerLiveOpener;
+    const registry = federation?.registry;
+    const deviceKeyStore = federation?.deviceKeyStore;
+    if (host === undefined || host.status !== "ready" || opener === undefined) return undefined;
+    if (registry === undefined || deviceKeyStore === undefined) return undefined;
+    return async (service: RunningService, mode: RemoteOpenMode): Promise<RemoteOpenOutcome> => {
+      const credential = (await registry.get(host.hostId))?.credential;
+      const connection = host.bridge.connection();
+      if (credential === undefined || connection === undefined) {
+        return {
+          kind: "refused",
+          message: `Can't reach ${host.hostName}. Check that it's on and on the same network.`,
+        };
+      }
+      const deviceKey = createPairingDeviceKeyAdapter(deviceKeyStore, credential.keyId);
+      return opener.openLive(
+        {
+          hostId: host.hostId,
+          hostName: host.hostName,
+          origin: host.origin,
+          listenerTrust: credential.listenerTrust ?? PLATFORM_LISTENER_TRUST,
+          issueSession: () => connection.issueServerProxySession(),
+          sign: (payload) => deviceKey.sign(payload),
+        },
+        service,
+        mode,
+      );
+    };
+  }, [runningServicesRemoteHost, remoteServerLiveOpener, federation]);
   useEffect(() => {
     if (hosts.length === 0) return;
     const result = preselectCreateHost({
@@ -3231,6 +3325,7 @@ function LaunchedShell(
   const composerCompaction = useMemo<ComposerCompaction>(
     () => ({
       controller: sessionCompaction,
+      ...(contextClient === undefined ? {} : { client: contextClient }),
       names: {
         provider: (providerInstanceId) =>
           providerController.instances.find(
@@ -3242,7 +3337,12 @@ function LaunchedShell(
             ?.models.find((listed) => String(listed.id) === String(modelId))?.displayName,
       },
     }),
-    [providerController.instances, providerController.observedByInstance, sessionCompaction],
+    [
+      contextClient,
+      providerController.instances,
+      providerController.observedByInstance,
+      sessionCompaction,
+    ],
   );
   const workCreateThreadAvailable = workProviderChoice !== undefined;
   const enabledProjectTypes = new Set(
@@ -4576,18 +4676,28 @@ function LaunchedShell(
       workspace: controller.workspace,
     }),
     createWorkingNowCard(workingNowSource),
-    createRunningServicesCard({
-      client: runningServicesClient,
-      ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
-      // A service on another computer opens only as that thread's Browser tab,
-      // which the host itself shows; this window's own browser cannot reach it.
-      canOpen: (service) =>
-        workingNowHost === undefined ||
-        (service.thread !== undefined &&
-          browserAutomationClient !== undefined &&
-          activePaneId !== undefined),
-      onOpenTarget: openRunningService,
-    }),
+    runningServicesRemoteHost === undefined || remoteRunningServicesClient === undefined
+      ? createRunningServicesCard({
+          client: runningServicesClient,
+          ...(workingNowHost === undefined ? {} : { host: workingNowHost }),
+          // A service on another computer opens only as that thread's Browser tab,
+          // which the host itself shows; this window's own browser cannot reach it.
+          canOpen: (service) =>
+            workingNowHost === undefined ||
+            (service.thread !== undefined &&
+              browserAutomationClient !== undefined &&
+              activePaneId !== undefined),
+          onOpenTarget: openRunningService,
+        })
+      : createRunningServicesCard({
+          client: remoteRunningServicesClient,
+          host: runningServicesRemoteHost.hostName,
+          // This window's Browser tabs belong to its own host, so the other
+          // computer's servers open only live, through the desktop's forwarder.
+          canOpen: () => false,
+          onOpenTarget: openRunningService,
+          ...(openRunningServiceLive === undefined ? {} : { openLive: openRunningServiceLive }),
+        }),
     createPullRequestsCard({
       available: pullRequestCardAvailable({
         mode: activeMode,

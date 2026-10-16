@@ -577,6 +577,9 @@ function AppleWorkbenchSurface(props: {
       (appleInputGrantIsLive(controller.runtime, String(liveSimulatorId), Date.now()) ||
         rememberedUntil > Date.now()));
   const needsAllowInput = approvalGated && !inputAllowed;
+  const liveSimulatorOrientation = controller.runtime?.orientations?.find(
+    (one) => String(one.simulatorId) === String(liveSimulatorId),
+  )?.orientation;
   const screenStreamRequest = useMemo(
     () =>
       liveSimulatorId === undefined
@@ -597,7 +600,27 @@ function AppleWorkbenchSurface(props: {
     enabled: liveFrame.status === "live" && !liveViewStopped && !awaitingChoice,
     attempt: liveViewAttempt,
     ...(screenStreamRequest === undefined ? {} : { request: screenStreamRequest }),
+    ...(liveSimulatorOrientation === undefined ? {} : { orientation: liveSimulatorOrientation }),
   });
+
+  // The host re-reads a Simulator's orientation while a view is open, and the
+  // runtime snapshot is where it is reported. The snapshot is otherwise pulled
+  // only while an action runs, so a pane the person opened directly would keep
+  // drawing a stale orientation after Home, a tap, or a change in the foreground app.
+  const followingLiveScreen = liveScreen.status === "connecting" || liveScreen.status === "live";
+  const refreshRuntime = controller.refresh;
+  useEffect(() => {
+    if (!followingLiveScreen) return;
+    const abort = new AbortController();
+    const timer = setInterval(
+      () => void refreshRuntime(abort.signal).catch(() => undefined),
+      3_000,
+    );
+    return () => {
+      abort.abort();
+      clearInterval(timer);
+    };
+  }, [followingLiveScreen, refreshRuntime]);
 
   const run = useCallback(
     async (intent: AppleWorkbenchIntent) => {
@@ -686,6 +709,14 @@ function AppleWorkbenchSurface(props: {
           inputDisconnected(evidence)
         ) {
           setActionFailure({ kind: "refused", intent, reason: "input-disconnected" });
+        } else if (
+          evidence.outcome !== "succeeded" &&
+          intent.kind === "rotate" &&
+          evidence.diagnostics.some((diagnostic) =>
+            diagnostic.message.includes(": rotate-unavailable: "),
+          )
+        ) {
+          setActionFailure({ kind: "refused", intent, reason: "rotate-unavailable" });
         } else if (evidence.outcome !== "succeeded") {
           setActionFailure({ kind: "outcome", intent, outcome: evidence.outcome });
         }
@@ -901,7 +932,7 @@ function appleActionRequest(input: {
         kind: "rotate",
         simulatorId: intent.simulatorId,
         requestedBy: localUserActor(),
-        orientation: intent.orientation,
+        ...(intent.orientation === undefined ? {} : { orientation: intent.orientation }),
         timeoutMs: 30_000,
       };
   }

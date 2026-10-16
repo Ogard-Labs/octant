@@ -754,8 +754,10 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   gap: 12px;
 }
 
+/* Scoped to the pane's own rows: the approval's outside-content note nests
+   its own list, which a descendant rule here laid out as evidence rows. */
 .computer-use-lifecycle > header,
-.computer-use-lifecycle [role="group"] > div {
+.computer-use-lifecycle [role="group"] > div:last-child {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -767,7 +769,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   margin: 0;
 }
 
-.computer-use-lifecycle ol {
+.computer-use-lifecycle > ol {
   display: grid;
   max-height: 180px;
   padding: 0;
@@ -776,7 +778,7 @@ html[data-octant-native-host="true"]:not([data-octant-host-vibrancy="active"]) b
   list-style: none;
 }
 
-.computer-use-lifecycle li {
+.computer-use-lifecycle > ol > li {
   display: flex;
   justify-content: space-between;
   gap: 10px;

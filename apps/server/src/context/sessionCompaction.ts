@@ -299,6 +299,7 @@ export class SessionCompactionService {
   state(subject: ContextSubjectRef, principal: Principal): ContextCompactionState {
     const admission = this.#admission(subject, principal);
     const latestCompaction = this.#options.harness.latestCompaction(subject);
+    const completedCompactions = this.#options.harness.completedCompactions(subject);
     const executor = admission.run === undefined ? undefined : this.#executor(admission.run);
     // `start` refuses a run it cannot name an executor for, so this does too.
     const compaction: ContextCompactionAvailability =
@@ -309,6 +310,7 @@ export class SessionCompactionService {
       subject,
       compaction,
       ...(latestCompaction === undefined ? {} : { latestCompaction }),
+      ...(completedCompactions.length === 0 ? {} : { completedCompactions }),
       ...(compaction.status === "available" && executor !== undefined ? { executor } : {}),
     };
   }

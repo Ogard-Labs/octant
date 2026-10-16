@@ -117,6 +117,9 @@ describe("compacting a session on request", () => {
 
     const snapshot = world.harness.inspect(subject);
     expect(snapshot.latestCompaction).toEqual(record);
+    expect(world.service.state(subject, "local-window").completedCompactions).toEqual([
+      record.receipt,
+    ]);
     expect(
       snapshot.next.manifest.entries
         .filter((entry) => entry.source.kind === "message" && entry.category === "conversation")

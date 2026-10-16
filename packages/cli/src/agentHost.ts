@@ -1,3 +1,4 @@
+import { approvalOutsideContentLines } from "@octant/domain";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
@@ -7,7 +8,10 @@ import {
   NativeHarnessFollowUpPreview,
   NativeHarnessSessionView,
   type ChatNavigationThread,
+  type DecideNativeHarnessApproval,
   type NativeHarnessApproval,
+  type NativeHarnessCommandHost,
+  type NativeHarnessCommandHostChoice,
   NativeHarnessApprovalDecisionResult,
   type SteerNativeHarnessSession,
   type NativeHarnessSteeringNote,
@@ -241,16 +245,118 @@ export function approvalMayBeRemembered(
   return approval.source === undefined && approval.singleUse !== true;
 }
 
+/**
+ * The lines an approval prints ahead of its question when the thread took in
+ * outside content: why it asks and each source that marked the thread. Empty
+ * for an approval on a clean thread.
+ */
+export function approvalOutsideContentText(
+  approval: Pick<NativeHarnessApproval, "outsideContent">,
+): ReadonlyArray<string> {
+  if (approval.outsideContent === undefined) return [];
+  const { reason, rows, more } = approvalOutsideContentLines(approval.outsideContent, (at) => {
+    if (at === undefined) return undefined;
+    const parsed = new Date(at);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toLocaleString();
+  });
+  return [
+    reason,
+    ...rows.map((row) => `  - ${row.name}: ${row.reads}`),
+    ...(more ? [`  ${more}`] : []),
+  ];
+}
+
+/**
+ * A marked thread's command lists the hosts it may reach. The host ticks its
+ * thread and Project rules and leaves its proposals unticked; these are the
+ * positions (from 0) it ticked.
+ */
+export function preselectedCommandHosts(
+  approval: Pick<NativeHarnessApproval, "commandHosts">,
+): ReadonlySet<number> {
+  const ticked = new Set<number>();
+  approval.commandHosts?.forEach((entry, index) => {
+    if (entry.preselected) ticked.add(index);
+  });
+  return ticked;
+}
+
+/**
+ * Reads the hosts a person names by their number in the list: `1 3`, `1,3`,
+ * or `none`. Anything else, a number the list does not have included, reads
+ * as nothing chosen at all, so a typo never sends a host the person did not
+ * mean.
+ */
+export function readCommandHostNumbers(
+  text: string,
+  count: number,
+): ReadonlySet<number> | undefined {
+  const trimmed = text.trim().toLowerCase();
+  if (trimmed === "none") return new Set();
+  const parts = trimmed.split(/[\s,]+/).filter((part) => part.length > 0);
+  if (parts.length === 0) return undefined;
+  const chosen = new Set<number>();
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return undefined;
+    const number = Number(part);
+    if (number < 1 || number > count) return undefined;
+    chosen.add(number - 1);
+  }
+  return chosen;
+}
+
+/** The listed hosts at the ticked positions, as the host takes them back. */
+export function chosenCommandHosts(
+  approval: Pick<NativeHarnessApproval, "commandHosts">,
+  ticked: ReadonlySet<number>,
+): ReadonlyArray<NativeHarnessCommandHostChoice> {
+  return (approval.commandHosts ?? [])
+    .filter((_entry, index) => ticked.has(index))
+    .map((entry) => ({ host: entry.host, port: entry.port }));
+}
+
+const COMMAND_HOST_ORIGIN: Record<NativeHarnessCommandHost["from"], string> = {
+  "thread-rule": "thread rule",
+  "project-rule": "Project rule",
+  proposal: "proposal",
+};
+
+/** One line per listed host: its tick, number, host and port, and where it came from. */
+export function commandHostLines(
+  approval: Pick<NativeHarnessApproval, "commandHosts">,
+  ticked: ReadonlySet<number>,
+): ReadonlyArray<string> {
+  return (approval.commandHosts ?? []).map(
+    (entry, index) =>
+      `[${ticked.has(index) ? "x" : " "}] ${String(index + 1)}. ${entry.host}:${String(entry.port)}  ${COMMAND_HOST_ORIGIN[entry.from]}`,
+  );
+}
+
+/**
+ * The approval's answer. Hosts go only with "approve" on an approval that
+ * listed them; the command reaches the ones sent and nothing else.
+ */
+export function approvalDecisionBody(
+  approval: Pick<NativeHarnessApproval, "id" | "commandHosts">,
+  decision: "approve" | "approve-always" | "deny",
+  commandHosts: ReadonlyArray<NativeHarnessCommandHostChoice> = [],
+): DecideNativeHarnessApproval {
+  return {
+    approvalId: approval.id,
+    decision,
+    ...(approval.commandHosts !== undefined && decision === "approve" ? { commandHosts } : {}),
+  };
+}
+
 export async function decideAgentApproval(
   session: OpenedLocalControlSession,
   threadId: string,
-  approvalId: string,
-  decision: "approve" | "approve-always" | "deny",
+  body: DecideNativeHarnessApproval,
 ): Promise<NativeHarnessApprovalDecisionResult> {
   const response = await session.send({
     path: `${sessionsPath(threadId)}/approvals`,
     method: "POST",
-    body: { approvalId, decision },
+    body,
   });
   return decodeHostAnswer(NativeHarnessApprovalDecisionResult)(response.body);
 }

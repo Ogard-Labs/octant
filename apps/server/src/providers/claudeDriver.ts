@@ -66,6 +66,7 @@ import {
 } from "./claudeEnvironment";
 import {
   claudeLoginKeychainPath,
+  claudePlanRunsCommands,
   CONFINED_CLAUDE_EXECUTION_POLICIES,
   type ClaudeProcessPort,
 } from "./claudeProcess";
@@ -112,14 +113,31 @@ export function claudeExecutionOptions(
   policy: ProviderExecutionPolicy,
   autoApprove?: boolean,
   mode?: ProviderAcquireInput["mode"],
+  platform: NodeJS.Platform = process.platform,
 ): ClaudeExecutionOptions {
   const options = claudePolicyOptions(policy, autoApprove);
   // Work has no shell or Git authority, so Claude is never offered Bash there
   // rather than offered it and asked about each call: a person approving a
   // command would hand a Work thread authority its mode does not have.
-  return mode === "work"
-    ? { ...options, tools: options.tools.filter((tool) => tool !== "Bash") }
-    : options;
+  if (mode === "work") {
+    return { ...options, tools: options.tools.filter((tool) => tool !== "Bash") };
+  }
+  // A Code Plan turn may run read-only commands where its sandbox can hold the
+  // shell to them (see `claudePlanRunsCommands`). Plan has no approvals, so
+  // the sandbox, not a person, is what keeps those commands read-only.
+  if (policy === "plan" && mode === "code" && claudePlanRunsCommands(platform)) {
+    return { ...options, tools: [...options.tools, "Bash"] };
+  }
+  return options;
+}
+
+/** Whether this call is a Plan turn's shell command, which its sandbox confines. */
+function isPlanShellCommand(
+  policy: ProviderExecutionPolicy,
+  toolName: string,
+  tools: readonly string[],
+): boolean {
+  return policy === "plan" && toolName === "Bash" && tools.includes("Bash");
 }
 
 function claudePolicyOptions(
@@ -1494,7 +1512,8 @@ function makeConnection(
             // every other tool still ask.
             (input.executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
-            CLAUDE_READ_TOOLS.has(request.toolName)
+            CLAUDE_READ_TOOLS.has(request.toolName) ||
+            isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
           ) {
             activeState.settledToolUseIds.add(request.toolUseId);
             return { behavior: "allow" };
@@ -1699,7 +1718,8 @@ function makeConnection(
             (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
             (input.executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
-            (request.toolName !== "AskUserQuestion" && CLAUDE_READ_TOOLS.has(request.toolName))
+            (request.toolName !== "AskUserQuestion" && CLAUDE_READ_TOOLS.has(request.toolName)) ||
+            isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
               ? settledUnasked()
               : askThroughGrant();
           if (input.executionPolicy === "full-access") {

@@ -190,8 +190,12 @@ geometry and close-control presentation are shared with dock tools under
 These tabs add no persisted layout or authority; see
 [decision 0156](../decisions/0156-content-opens-beside-the-conversation.md).
 Several same-authority threads can be pinned or dropped into
-that tree; pointer activity and keyboard input give exactly one pane a visible
-accessible active state. Completed layout operations go through
+that tree; pointer activity and keyboard input make exactly one pane active,
+and the pane's drag handle (its title row) alone marks it visually, with no
+other border, fill, or badge. The pane region carries `aria-current` and its
+accessible name for assistive technology. Increased-contrast mode also fills
+the active pane, as a contrast fallback and the one exception to the handle
+alone. The older plan's separately "marked active pane" is superseded. Completed layout operations go through
 server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.

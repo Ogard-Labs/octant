@@ -9,13 +9,15 @@ import {
   type NativeHarnessQuestionAnswerResult,
   type NativeHarnessSessionCommandResult,
 } from "@octant/contracts";
-import { authenticateRouteWindowId } from "../principalRouteContext";
+import { authenticateRoutePrincipal } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import {
   settleFollowUpSuggestion,
   type FollowUpSuggestionActionDependencies,
 } from "../followUps/followUpSuggestionRoutes";
+import type { NativeHarnessApprovalAnswer } from "./nativeHarnessApprovals";
+import type { ToolEgressPerson } from "./nativeHarnessEgressRules";
 import type { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
 
 const METHODS = "GET, POST, OPTIONS";
@@ -51,7 +53,9 @@ export interface NativeHarnessSessionRouteDependencies {
     readonly threadId: string;
     readonly approvalId: string;
     readonly decision: "approve" | "approve-always" | "deny";
-  }) => "decided" | "approval-not-found" | "already-settled";
+    /** Who decided, from the authenticated request, and the hosts they ticked. */
+    readonly answer: NativeHarnessApprovalAnswer;
+  }) => "decided" | "approval-not-found" | "already-settled" | "host-not-offered";
   readonly steer?: (input: {
     readonly threadId: string;
     readonly command: SteerNativeHarnessSession;
@@ -111,12 +115,18 @@ export function createNativeHarnessSessionRouteHandler(
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
     let windowId: string;
+    let person: ToolEgressPerson;
     try {
-      windowId = authenticateRouteWindowId({
+      const context = authenticateRoutePrincipal({
         request,
         store: dependencies.windowAuthorityStore,
         now: now(),
       });
+      windowId = String(context.scopeId);
+      person =
+        context.principal.kind === "remote-device"
+          ? { kind: "remote-device", deviceId: String(context.principal.deviceId) }
+          : { kind: "local-window" };
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failure("Native harness session request is unauthorized.", 401, origin);
@@ -207,6 +217,11 @@ export function createNativeHarnessSessionRouteHandler(
         threadId,
         approvalId: String(decision.approvalId),
         decision: decision.decision,
+        // The principal comes from the request, never the body.
+        answer: {
+          principal: person,
+          ...(decision.commandHosts === undefined ? {} : { commandHosts: decision.commandHosts }),
+        },
       });
       const settled = dependencies.store
         .read(threadId)
@@ -217,11 +232,16 @@ export function createNativeHarnessSessionRouteHandler(
           : {
               kind: "approval-refused",
               approvalId: decision.approvalId,
-              reason: outcome === "already-settled" ? "already-settled" : "approval-not-found",
+              reason:
+                outcome === "already-settled" || outcome === "host-not-offered"
+                  ? outcome
+                  : "approval-not-found",
               message:
                 outcome === "already-settled"
                   ? "That approval was already decided."
-                  : "No pending approval has that id on this thread.",
+                  : outcome === "host-not-offered"
+                    ? "This command can reach only hosts its approval lists. Nothing was decided."
+                    : "No pending approval has that id on this thread.",
             };
       return json(result, result.kind === "approval-decided" ? 200 : 409, origin);
     }

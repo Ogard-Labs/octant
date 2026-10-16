@@ -332,6 +332,52 @@ export interface RemoteAccessAdministrationBridge {
   readonly revokeAllRemoteDevices: () => Promise<RemoteCredentialOperationReceipt>;
 }
 
+/** Another computer this desktop app paired with from its app pairing code. */
+export interface PairedComputer {
+  readonly origin: string;
+  readonly displayName: string;
+}
+
+export type ForgetPairedComputerOutcome =
+  | { readonly status: "forgotten" }
+  | { readonly status: "refused"; readonly message: string };
+
+export type PairedComputerOutcome =
+  | { readonly status: "opened"; readonly computer: PairedComputer }
+  | { readonly status: "refused"; readonly message: string };
+
+/**
+ * Pairing this desktop app with another computer from its pasted app pairing
+ * code. Present only in the desktop app, whose main process checks that
+ * computer's key against the code's pin; a browser cannot.
+ */
+export interface PairedComputersBridge {
+  readonly pairWithPairingCode: (code: string) => Promise<PairedComputerOutcome>;
+  readonly listPairedComputers: () => Promise<ReadonlyArray<PairedComputer>>;
+  readonly openPairedComputer: (origin: string) => Promise<PairedComputerOutcome>;
+  readonly forgetPairedComputer: (origin: string) => Promise<ForgetPairedComputerOutcome>;
+}
+
+/** The paired-computers bridge when the desktop app exposes every part of it, else nothing. */
+export function pairedComputersOf(
+  bridge: OctantHostBridge | undefined,
+): PairedComputersBridge | undefined {
+  if (
+    bridge?.pairWithPairingCode === undefined ||
+    bridge.listPairedComputers === undefined ||
+    bridge.openPairedComputer === undefined ||
+    bridge.forgetPairedComputer === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    pairWithPairingCode: bridge.pairWithPairingCode,
+    listPairedComputers: bridge.listPairedComputers,
+    openPairedComputer: bridge.openPairedComputer,
+    forgetPairedComputer: bridge.forgetPairedComputer,
+  };
+}
+
 /** The administration bridge when the host exposes every part of it, else nothing. */
 export function remoteAccessAdministrationOf(
   bridge: OctantHostBridge | undefined,
@@ -368,7 +414,30 @@ export function remoteAccessAdministrationOf(
   };
 }
 
-export interface OctantHostBridge extends Partial<RemoteAccessAdministrationBridge> {
+export interface OctantHostBridge
+  extends Partial<RemoteAccessAdministrationBridge>, Partial<PairedComputersBridge> {
+  /**
+   * Shows a server another paired computer granted this device, served by
+   * the desktop's loopback forwarder, in Octant's browser or the default one.
+   * Absent outside the desktop app.
+   */
+  readonly openRemoteServerPage?: (
+    request: unknown,
+  ) => Promise<
+    | { readonly kind: "opened"; readonly notice?: string }
+    | { readonly kind: "refused"; readonly message: string }
+  >;
+  /**
+   * Closes the windows of a removed host's pages, clears their storage, and
+   * forgets their names. Absent outside the desktop app.
+   */
+  readonly forgetRemoteServerPages?: (
+    hostId: string,
+  ) => Promise<{ readonly status: "forgotten" | "incomplete"; readonly message?: string }>;
+  /** Makes this window the signer for the pages it opened. Absent outside the desktop app. */
+  readonly subscribeRemoteServerPageSigning?: (
+    signer: (request: unknown) => Promise<unknown>,
+  ) => () => void;
   readonly popupNativeMenu?: (request: NativeMenuRequest) => Promise<NativeMenuOutcome>;
   readonly getComputerUseStatus?: () => Promise<unknown>;
   readonly requestComputerUsePermissions?: () => Promise<unknown>;

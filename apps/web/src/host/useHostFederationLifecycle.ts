@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { createClientHostRegistry } from "@octant/client-runtime/host-federation-registry";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  createClientHostRegistry,
+  type ClientHostRegistry,
+} from "@octant/client-runtime/host-federation-registry";
 import {
   createHostFederationTransports,
   type HostFederationTransports,
@@ -9,7 +12,11 @@ import {
   type HostFederationLifecycle,
 } from "@octant/client-runtime/host-federation-lifecycle";
 import { createHostReadModelCache } from "@octant/client-runtime/host-federation-merged-reads";
-import { createDefaultDeviceKeyStore } from "@octant/client-runtime/remote-pairing-client";
+import {
+  createDefaultDeviceKeyStore,
+  type RemoteDeviceKeyStore,
+} from "@octant/client-runtime/remote-pairing-client";
+import type { OctantHostBridge } from "../shell/hostBridge";
 import { createBrowserHostRegistryStorage } from "./browserHostRegistryStorage";
 
 /**
@@ -17,19 +24,23 @@ import { createBrowserHostRegistryStorage } from "./browserHostRegistryStorage";
  * Safe when IndexedDB / localStorage are unavailable — falls back to empty
  * in-memory device keys and an empty durable registry.
  */
-export function useHostFederationLifecycle():
-  | {
-      readonly lifecycle: HostFederationLifecycle;
-      readonly transports: HostFederationTransports;
-    }
-  | undefined {
-  const [stack, setStack] = useState<
-    | {
-        readonly lifecycle: HostFederationLifecycle;
-        readonly transports: HostFederationTransports;
-      }
-    | undefined
-  >();
+export interface HostFederationStack {
+  readonly lifecycle: HostFederationLifecycle;
+  readonly transports: HostFederationTransports;
+  /** The paired hosts' records, with each one's device key id and listener trust. */
+  readonly registry: ClientHostRegistry;
+  /** The device keys the paired sessions sign with. */
+  readonly deviceKeyStore: RemoteDeviceKeyStore;
+}
+
+export function useHostFederationLifecycle(
+  hostBridge?: Pick<OctantHostBridge, "forgetRemoteServerPages">,
+): HostFederationStack | undefined {
+  const [stack, setStack] = useState<HostFederationStack | undefined>();
+  // Read when a host is cleared, not when the stack is built, so a bridge that
+  // arrives later is still used.
+  const forgetPages = useRef(hostBridge?.forgetRemoteServerPages);
+  forgetPages.current = hostBridge?.forgetRemoteServerPages;
 
   const built = useMemo(() => {
     if (typeof window === "undefined") return undefined;
@@ -48,8 +59,19 @@ export function useHostFederationLifecycle():
           transports,
           deviceKeyStore,
           cache,
+          onHostCleared: async (hostId) => {
+            const outcome = await forgetPages.current?.(hostId);
+            if (outcome?.status === "incomplete") {
+              throw new Error(
+                outcome.message ??
+                  "Removed, but Octant couldn't clear everything its pages stored on this computer.",
+              );
+            }
+          },
         }),
         transports,
+        registry,
+        deviceKeyStore,
       };
     } catch {
       return undefined;

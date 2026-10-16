@@ -48,6 +48,43 @@ When a turn offers Octant's own tools — the built-in browser, Canvas, computer
 use, the terminal, the Apple and Android simulators, helper agents — the model
 also gets one line per tool saying what it is for.
 
+## Network for commands
+
+On a Code thread that is approval-gated or auto-accepts edits, a harness
+command — `bash`, or the check a goal runs — reaches the network only through
+Octant's egress proxy, on macOS and Linux. It reaches only the hosts and ports
+you allowed for that thread or its Project, until the allowance ends. Every
+other host fails, and so do your own machine, your local network, cloud
+metadata addresses, a connection that skips the proxy, and name lookups.
+HTTPS Git remotes, npm, pip, cargo, Go, and curl use the proxy by themselves;
+SSH remotes, raw TCP, UDP, and HTTP/3 do not work. Full access keeps open
+network, and Plan has none.
+
+When a command is refused a host, the thread's **Agents** tab lists it under
+**Network access** (with **Propose refused hosts** on). Nothing is allowed until
+you choose: allow it on the thread for 1 hour, 8 hours, or 7 days, or on the
+whole Project for 7 or 30 days from a window on this computer, and ask the
+model to try again. Every allowance expires, and **Revoke** ends it at once,
+open connections included.
+
+What a command receives through the proxy counts as outside content. After a
+package install or a clone, the thread asks before every command, and the
+hosts you allowed stop applying to it on their own. Instead, each command's
+approval lists the hosts the thread and its Project allow, already ticked, and
+hosts a command was refused earlier, unticked. The command reaches only the
+hosts you leave ticked when you choose **Allow**, and only while it runs: the
+next command asks again and starts from the list, not from your last answer.
+A helper agent's command on such a thread asks the same way, with the same
+list; a helper never reaches a host its parent thread does not allow.
+
+In `octant agent`, the approval prints the list with `[x]` beside each ticked
+host. Line mode takes `y` for the ticked hosts, `y 1,3` for exactly those, and
+`y none` for none; a number the list does not have refuses the command. In the
+terminal UI, type a host's number and press Enter to tick or untick it, then
+`y` to allow with the hosts ticked. A list longer than eight hosts shows a page
+at a time with the numbers of the ticked hosts on other pages; `>` and `<` turn
+the page.
+
 ## Verifying a model's tools
 
 Checking a connection never spends a request on a model, so Octant does not

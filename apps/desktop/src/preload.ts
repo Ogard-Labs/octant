@@ -92,6 +92,14 @@ export const IPC_CHANNELS = {
   remoteHostIdentityStatus: "octant:remote-host-identity:status",
   remoteHostIdentityRotate: "octant:remote-host-identity:rotate",
   remoteHostIdentityRecover: "octant:remote-host-identity:recover",
+  pairedComputerPair: "octant:paired-computers:pair",
+  pairedComputerList: "octant:paired-computers:list",
+  pairedComputerOpen: "octant:paired-computers:open",
+  pairedComputerForget: "octant:paired-computers:forget",
+  remoteServerPageOpen: "octant:remote-server-page:open",
+  remoteServerPageSign: "octant:remote-server-page:sign",
+  remoteServerPageSigned: "octant:remote-server-page:signed",
+  remoteServerPageForgetHost: "octant:remote-server-page:forget-host",
 } as const;
 
 type ResolvedSidebarMaterial = "opaque" | "translucent";
@@ -312,12 +320,49 @@ export type RemoteHostIdentityRecoveryState =
       readonly localDesktopUsable: true;
     };
 
+/** Another computer this app paired with from its app pairing code. */
+export interface PairedComputer {
+  readonly origin: string;
+  readonly displayName: string;
+}
+
+export type PairedComputerOutcome =
+  | { readonly status: "opened"; readonly computer: PairedComputer }
+  | { readonly status: "refused"; readonly message: string };
+
+export type ForgetPairedComputerOutcome =
+  | { readonly status: "forgotten" }
+  | { readonly status: "refused"; readonly message: string };
+
 export interface RemoteHostIdentityRotationResult {
   readonly status: "rotated";
   readonly fingerprint: string;
 }
 type MaterialListener = (event: unknown, material: unknown) => void;
 type DeepLinkListener = (event: unknown, target: unknown) => void;
+
+export type RemoteServerPageBridgeOutcome =
+  | { readonly kind: "opened"; readonly notice?: string }
+  | { readonly kind: "refused"; readonly message: string };
+
+function decodeRemoteServerPageOutcome(value: unknown): RemoteServerPageBridgeOutcome {
+  if (typeof value === "object" && value !== null) {
+    const record = value as {
+      readonly kind?: unknown;
+      readonly notice?: unknown;
+      readonly message?: unknown;
+    };
+    if (record.kind === "opened") {
+      return typeof record.notice === "string"
+        ? { kind: "opened", notice: record.notice }
+        : { kind: "opened" };
+    }
+    if (record.kind === "refused" && typeof record.message === "string") {
+      return { kind: "refused", message: record.message };
+    }
+  }
+  return { kind: "refused", message: "Octant could not open this server." };
+}
 type AgentStartListener = (event: unknown) => void;
 type SettingsOpenListener = (event: unknown) => void;
 type BoundProjectType = "work" | "code";
@@ -536,6 +581,32 @@ export interface OctantHostBridge {
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
+  /**
+   * Pairs with another computer from its pasted app pairing code. Main reads
+   * the code and checks the computer's key against its pin; the window it
+   * opens is the other computer's own pairing page.
+   */
+  readonly pairWithPairingCode: (code: string) => Promise<PairedComputerOutcome>;
+  readonly listPairedComputers: () => Promise<ReadonlyArray<PairedComputer>>;
+  readonly openPairedComputer: (origin: string) => Promise<PairedComputerOutcome>;
+  readonly forgetPairedComputer: (origin: string) => Promise<ForgetPairedComputerOutcome>;
+  /**
+   * Shows a server of another paired computer, which that computer granted,
+   * in Octant's browser or the default browser. The main process checks the
+   * request; the answer is opened, or refused with words for the row.
+   */
+  readonly openRemoteServerPage: (request: unknown) => Promise<RemoteServerPageBridgeOutcome>;
+  readonly forgetRemoteServerPages: (
+    hostId: string,
+  ) => Promise<{ readonly status: "forgotten" | "incomplete"; readonly message?: string }>;
+  /**
+   * Makes this window the signer for the pages it opens: the forwarder asks
+   * it to sign each of their requests, and it answers with Octant's headers
+   * or a refusal.
+   */
+  readonly subscribeRemoteServerPageSigning: (
+    signer: (request: unknown) => Promise<unknown>,
+  ) => () => void;
   readonly getPrivateListenerStatus: () => Promise<PrivateListenerPublicStatus>;
   readonly enablePrivateListener: (
     request: PrivateListenerEnableBridgeRequest,
@@ -1064,6 +1135,47 @@ export function createHostBridge(
       ipc.on(IPC_CHANNELS.startNewAgent, receive);
       return () => ipc.removeListener(IPC_CHANNELS.startNewAgent, receive);
     },
+    openRemoteServerPage: async (request: unknown): Promise<RemoteServerPageBridgeOutcome> => {
+      try {
+        return decodeRemoteServerPageOutcome(
+          await ipc.invoke(IPC_CHANNELS.remoteServerPageOpen, request),
+        );
+      } catch {
+        return { kind: "refused", message: "Octant could not open this server." };
+      }
+    },
+    forgetRemoteServerPages: async (hostId: string) => {
+      const outcome = (await ipc
+        .invoke(IPC_CHANNELS.remoteServerPageForgetHost, hostId)
+        .catch(() => null)) as {
+        readonly status?: unknown;
+        readonly message?: unknown;
+      } | null;
+      return outcome?.status === "forgotten"
+        ? { status: "forgotten" as const }
+        : {
+            status: "incomplete" as const,
+            ...(typeof outcome?.message === "string" ? { message: outcome.message } : {}),
+          };
+    },
+    subscribeRemoteServerPageSigning: (signer: (request: unknown) => Promise<unknown>) => {
+      const receive: DeepLinkListener = (_event, message) => {
+        if (typeof message !== "object" || message === null) return;
+        const { requestId, request } = message as {
+          readonly requestId?: unknown;
+          readonly request?: unknown;
+        };
+        if (typeof requestId !== "string") return;
+        void signer(request)
+          .catch(() => ({ status: "refused" }))
+          .then((signing) =>
+            ipc.invoke(IPC_CHANNELS.remoteServerPageSigned, { requestId, signing }),
+          )
+          .catch(() => undefined);
+      };
+      ipc.on(IPC_CHANNELS.remoteServerPageSign, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.remoteServerPageSign, receive);
+    },
     getPrivateListenerStatus: async () =>
       decodePrivateListenerStatus(await ipc.invoke(IPC_CHANNELS.privateListenerStatus)),
     enablePrivateListener: async (request: PrivateListenerEnableBridgeRequest) => {
@@ -1157,7 +1269,61 @@ export function createHostBridge(
       decodeRemoteHostIdentityRotation(await invokeRemote(IPC_CHANNELS.remoteHostIdentityRotate)),
     recoverRemoteHostIdentity: async () =>
       decodeRemoteHostIdentityRecovery(await invokeRemote(IPC_CHANNELS.remoteHostIdentityRecover)),
+    pairWithPairingCode: async (code: string): Promise<PairedComputerOutcome> => {
+      if (typeof code !== "string" || code.length > 4_096) {
+        return { status: "refused", message: "Paste the whole pairing code from that computer." };
+      }
+      return decodePairedComputerOutcome(await ipc.invoke(IPC_CHANNELS.pairedComputerPair, code));
+    },
+    listPairedComputers: async () =>
+      decodePairedComputers(await ipc.invoke(IPC_CHANNELS.pairedComputerList)),
+    openPairedComputer: async (origin: string) =>
+      decodePairedComputerOutcome(await ipc.invoke(IPC_CHANNELS.pairedComputerOpen, origin)),
+    forgetPairedComputer: async (origin: string) =>
+      decodeForgetPairedComputerOutcome(
+        await ipc.invoke(IPC_CHANNELS.pairedComputerForget, origin),
+      ),
   });
+}
+
+function decodePairedComputer(value: unknown): PairedComputer {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Octant returned an invalid paired computer.");
+  }
+  const { origin, displayName } = value as Record<string, unknown>;
+  if (typeof origin !== "string" || typeof displayName !== "string") {
+    throw new Error("Octant returned an invalid paired computer.");
+  }
+  return Object.freeze({ origin, displayName });
+}
+
+function decodePairedComputers(value: unknown): ReadonlyArray<PairedComputer> {
+  if (!Array.isArray(value)) throw new Error("Octant returned an invalid paired computer.");
+  return Object.freeze(value.map(decodePairedComputer));
+}
+
+function decodeForgetPairedComputerOutcome(value: unknown): ForgetPairedComputerOutcome {
+  if (typeof value === "object" && value !== null) {
+    const outcome = value as Record<string, unknown>;
+    if (outcome.status === "forgotten") return Object.freeze({ status: "forgotten" });
+    if (outcome.status === "refused" && typeof outcome.message === "string") {
+      return Object.freeze({ status: "refused", message: outcome.message });
+    }
+  }
+  throw new Error("Octant returned an invalid paired-computer answer.");
+}
+
+function decodePairedComputerOutcome(value: unknown): PairedComputerOutcome {
+  if (typeof value === "object" && value !== null) {
+    const outcome = value as Record<string, unknown>;
+    if (outcome.status === "opened") {
+      return Object.freeze({ status: "opened", computer: decodePairedComputer(outcome.computer) });
+    }
+    if (outcome.status === "refused" && typeof outcome.message === "string") {
+      return Object.freeze({ status: "refused", message: outcome.message });
+    }
+  }
+  throw new Error("Octant returned an invalid paired-computer answer.");
 }
 
 const REMOTE_UUID_PATTERN =

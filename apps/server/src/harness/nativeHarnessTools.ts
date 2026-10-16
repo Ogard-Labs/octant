@@ -42,6 +42,7 @@ import { Schema } from "effect";
 import { decodeToolActionRequest } from "@octant/contracts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ToolCallAuthorityService } from "../toolCallAuthorityService";
+import type { ToolEgressCallConfirmation } from "./nativeHarnessEgressRules";
 import type { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { nativeHarnessGoalSummary, type NativeHarnessGoalPort } from "./nativeHarnessGoal";
 
@@ -72,6 +73,13 @@ export interface NativeHarnessShellPort {
     readonly command: string;
     readonly cwd: string;
     readonly timeoutMs: number;
+    /** The authorized call this command runs for; it names the launch's egress records. */
+    readonly callId?: string;
+    /**
+     * Hosts a person confirmed for this one command on a marked thread. Only
+     * a proxied shell reads them, as `call` rules for this launch.
+     */
+    readonly confirmedHosts?: ToolEgressCallConfirmation;
     readonly signal?: AbortSignal;
   }): Promise<NativeHarnessShellRun>;
 }
@@ -188,12 +196,16 @@ export interface NativeHarnessToolPorts {
      * in outside content. A remembered "always" approval does not answer it.
      */
     readonly freshConfirmation: boolean;
+    /** The call being approved; a command it runs names its launch by it. */
+    readonly callId: string;
     readonly signal?: AbortSignal;
   }) => Promise<"approved" | "denied" | "expired" | "cancelled" | "too-many-waiting">;
   /** The thread's goal, when the host can reach it. */
   readonly goal?: NativeHarnessGoalPort;
   /** Queued notes from the person, handed to the lead inside the next tool result. */
   readonly steering?: () => ReadonlyArray<string>;
+  /** Told when an authorized call has finished, whether or not it ran a command. */
+  readonly callEnded?: (callId: string) => void;
   /** Asks the person and waits; resolves with the answer or how the wait ended. */
   readonly askUser?: (input: {
     readonly prompt: string;
@@ -361,6 +373,7 @@ export function createNativeHarnessTools(
         summary: request.intent,
         approvalClass: decision.policy.approvalClass,
         freshConfirmation: decision.reason === "taint-requires-fresh-confirmation",
+        callId: String(request.actionId),
         ...(signal === undefined ? {} : { signal }),
       });
       if (outcome !== "approved") {
@@ -385,10 +398,15 @@ export function createNativeHarnessTools(
               approvedCheck,
               options.ports,
               signal,
+              String(request.actionId),
             )
-          : await execute(name, args, options.ports, signal);
+          : await execute(name, args, options.ports, signal, String(request.actionId));
     } catch {
       return { ...refused("tool-execution-failed"), refused: false };
+    } finally {
+      // A check can stop before its command runs, so whatever its approval
+      // left for the command is let go here rather than when a shell starts.
+      options.ports.callEnded?.(String(request.actionId));
     }
     // A collected child reply was budgeted to fit the provider limit exactly, so
     // a note added now could push it into a lossy preview and be lost with it.
@@ -453,6 +471,7 @@ async function execute(
   args: unknown,
   ports: NativeHarnessToolPorts,
   signal: AbortSignal | undefined,
+  callId: string,
 ): Promise<{ readonly result: unknown; readonly isError?: boolean }> {
   switch (name) {
     case "read": {
@@ -486,6 +505,7 @@ async function execute(
         command: input.command,
         cwd: ports.filesystem!.root,
         timeoutMs: input.timeoutMs ?? DEFAULT_SHELL_TIMEOUT_MS,
+        callId,
         ...(signal === undefined ? {} : { signal }),
       });
       if (run.status === "unavailable") return refused("shell-unavailable");
@@ -637,6 +657,7 @@ async function checkGoalCriterion(
   approvedCheck: string | undefined,
   ports: NativeHarnessToolPorts,
   signal: AbortSignal | undefined,
+  callId: string,
 ): Promise<{ readonly result: unknown; readonly isError?: boolean }> {
   const { goal: port, shell, filesystem } = ports;
   if (port === undefined || shell === undefined || filesystem === undefined) {
@@ -665,6 +686,7 @@ async function checkGoalCriterion(
     command: criterion.check,
     cwd: filesystem.root,
     timeoutMs: GOAL_CHECK_TIMEOUT_MS,
+    callId,
     ...(signal === undefined ? {} : { signal }),
   });
   if (run.status === "unavailable") return refused("shell-unavailable");

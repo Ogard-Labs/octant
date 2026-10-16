@@ -106,9 +106,10 @@ export function FederatedHostsLifecyclePanel(props: FederatedHostsLifecyclePanel
         }
         const result = await props.lifecycle.removeLocal(hostId);
         setMessage(
-          result.localCredentialRemoved
-            ? `Removed ${hostId} from this browser.`
-            : `Removed ${hostId}; local credential cleanup incomplete.`,
+          result.warning ??
+            (result.localCredentialRemoved
+              ? `Removed ${hostId} from this browser.`
+              : `Removed ${hostId}; local credential cleanup incomplete.`),
         );
       } catch (error) {
         setMessage(

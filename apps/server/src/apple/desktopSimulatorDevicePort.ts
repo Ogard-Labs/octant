@@ -1,5 +1,6 @@
 import {
   decodeSimulatorDeviceInputResult,
+  SIMULATOR_ORIENTATION_HEADER,
   SIMULATOR_SCREEN_HEADER,
   type SimulatorDeviceInput,
   type SimulatorDeviceInputResult,
@@ -11,6 +12,8 @@ export type SimulatorScreenWatch =
       readonly kind: "watching";
       /** The device's screen in pixels; frames are scaled down from it. */
       readonly screen: { readonly width: number; readonly height: number };
+      /** Which way the Simulator sat when the watch began, when the desktop read it. */
+      readonly orientation?: "portrait" | "landscape";
       /** Length-prefixed JPEG frames, until the reader cancels or the helper stops. */
       readonly frames: ReadableStream<Uint8Array>;
     }
@@ -102,6 +105,7 @@ export function createDesktopSimulatorDevicePort(
       const size = /^(\d{1,5})x(\d{1,5})$/.exec(
         response.headers.get(SIMULATOR_SCREEN_HEADER) ?? "",
       );
+      const orientation = response.headers.get(SIMULATOR_ORIENTATION_HEADER);
       if (!response.ok || response.body === null || size === null) {
         await response.body?.cancel();
         throw new Error("The desktop's Simulator device broker refused the call.");
@@ -109,6 +113,7 @@ export function createDesktopSimulatorDevicePort(
       return {
         kind: "watching",
         screen: { width: Number(size[1]), height: Number(size[2]) },
+        ...(orientation === "portrait" || orientation === "landscape" ? { orientation } : {}),
         frames: response.body,
       };
     },

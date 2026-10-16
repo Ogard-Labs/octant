@@ -344,14 +344,19 @@ export function ProfileEditor(props: ProfileEditorProps) {
               <OctantButton
                 aria-checked={props.profile.accent === accent}
                 aria-label={ACCENT_NAMES[accent]}
-                className="profile-editor__accent user-avatar"
-                data-accent={accent}
+                className="profile-editor__accent rounded-full"
                 key={accent}
                 onClick={() => apply({ ...props.profile, accent }, true)}
                 role="radio"
                 type="button"
                 variant="ghost"
-              />
+              >
+                <span
+                  aria-hidden="true"
+                  className="profile-editor__swatch user-avatar"
+                  data-accent={accent}
+                />
+              </OctantButton>
             ))}
           </div>
         </fieldset>

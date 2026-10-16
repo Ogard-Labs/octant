@@ -27,7 +27,7 @@ export function ContextHealthWarning(props: ContextHealthWarningProps) {
       data-health={props.health}
       onClick={(event: React.MouseEvent<HTMLButtonElement>) => props.onOpen(event.currentTarget)}
       type="button"
-      variant="ghost"
+      variant="outline"
     >
       <span aria-hidden="true">!</span>
       <span>{health}</span>

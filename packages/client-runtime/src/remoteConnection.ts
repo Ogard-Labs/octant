@@ -30,6 +30,7 @@ import {
 import {
   buildRemoteChallengeProofPayload,
   buildRemoteRequestProofPayload,
+  buildRemoteServerProxySessionProofPayload,
   canonicalizeRemotePathQuery,
   negotiateRemoteProtocol,
   sessionExpiry,
@@ -227,6 +228,13 @@ export interface RemoteConnection {
   readonly updateFetch: (fetch: typeof globalThis.fetch) => void;
   /** Send an authenticated product request with a per-request device proof. */
   readonly authenticatedFetch: (input: AuthenticatedRequestInput) => Promise<Response>;
+  /**
+   * Prove this device's key over the proxy transcript and return a proxy
+   * session: the one session that reaches the host's dev-server proxy route
+   * and nothing else. The product session and this connection's state are
+   * left as they are, and a refusal here clears neither.
+   */
+  readonly issueServerProxySession: () => Promise<RemoteSessionFacts>;
 }
 
 export function createRemoteConnection(config: RemoteConnectionConfig): RemoteConnection {
@@ -335,6 +343,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
     known: DeviceIdentity,
     challenge: RemoteAuthChallengeV1,
     negotiated: NegotiatedProtocolV1,
+    kind: SessionKind,
   ): Promise<RemoteSessionFacts> => {
     const sessionFacts = {
       origin: config.origin,
@@ -343,7 +352,10 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
       capabilityDigest: negotiated.capabilityDigest,
       ...sessionExpiry(Date.parse(challenge.issuedAt)),
     };
-    const payload = buildRemoteChallengeProofPayload({ challenge, sessionFacts });
+    const payload =
+      kind === "product"
+        ? buildRemoteChallengeProofPayload({ challenge, sessionFacts })
+        : buildRemoteServerProxySessionProofPayload({ challenge, sessionFacts });
     const signature = await config.deviceKey.sign(payload);
     const body = {
       challengeId: challenge.challengeId,
@@ -355,7 +367,9 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
       expiresAt: challenge.expiresAt,
       signature,
     };
-    const response = await fetch(new URL("/api/remote/auth/session", config.origin).toString(), {
+    const route =
+      kind === "product" ? "/api/remote/auth/session" : "/api/remote/auth/server-proxy-session";
+    const response = await fetch(new URL(route, config.origin).toString(), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -382,14 +396,17 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
    * Authenticate an already-known device: hello (verify identity) -> challenge
    * -> hello (fresh nonce) -> negotiate -> prove possession -> session.
    */
-  const authenticate = async (known: DeviceIdentity): Promise<RemoteSessionFacts> => {
+  const authenticate = async (
+    known: DeviceIdentity,
+    kind: SessionKind = "product",
+  ): Promise<RemoteSessionFacts> => {
     await verifyHelloIdentity(await fetchHello(), known);
     const challenge = await requestChallenge(known);
     const helloForNegotiate = await fetchHello();
     await verifyHelloIdentity(helloForNegotiate, known);
     const negotiated = await negotiate(known, challenge, helloForNegotiate.hello.nonce);
-    setState("authenticating");
-    return issueSession(known, challenge, negotiated);
+    if (kind === "product") setState("authenticating");
+    return issueSession(known, challenge, negotiated, kind);
   };
 
   const pair = async (): Promise<DeviceIdentity> => {
@@ -580,26 +597,14 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
     if (safe && bodyBytes.byteLength > 0) {
       throw new RemoteConnectionError("invalid", "Safe methods cannot carry a body.");
     }
-    const bodyDigest = toHex(await cryptoSubtleDigest(bodyBytes));
-    const csrfDigest = safe
-      ? undefined
-      : toHex(await cryptoSubtleDigest(new TextEncoder().encode(session.csrfToken)));
-    const timestamp = new Date(now()).toISOString();
-    const nonce = toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
-    const proofPayload = buildRemoteRequestProofPayload({
-      sessionId: session.sessionId,
-      proof: { method, canonicalPathQuery: canonical, bodyDigest, csrfDigest, timestamp, nonce },
-    });
-    const signature = await config.deviceKey.sign(proofPayload);
-    const proof = {
+    const signed = await signRemoteRequest({
+      session,
       method,
       canonicalPathQuery: canonical,
-      bodyDigest,
-      csrfDigest,
-      timestamp,
-      nonce,
-      signature,
-    };
+      bodyDigest: toHex(await cryptoSubtleDigest(bodyBytes)),
+      sign: (payload) => config.deviceKey.sign(payload),
+      now: now(),
+    });
     // Apply caller headers first (filtered to exclude reserved names), then
     // apply the connection's authoritative reserved headers after so a caller
     // can never override the session cookie, device proof, CSRF token, command
@@ -616,7 +621,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
       ...callerHeaders,
       origin: config.origin,
       "sec-fetch-site": "same-origin",
-      "x-octant-device-proof": toBase64Url(new TextEncoder().encode(JSON.stringify(proof))),
+      "x-octant-device-proof": signed.proofHeader,
       cookie: `${SESSION_COOKIE_NAME}=${session.sessionId}`,
     };
     if (!safe) {
@@ -633,6 +638,20 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
     });
   };
 
+  const issueServerProxySession = async (): Promise<RemoteSessionFacts> => {
+    const known = deviceIdentity;
+    if (known === undefined) {
+      throw new RemoteConnectionError("unauthorized", "No device identity is available.");
+    }
+    try {
+      return await authenticate(known, "server-proxy");
+    } catch (error) {
+      // The product session answers for itself; a refused proxy session says
+      // nothing this connection has not or will not learn on its own route.
+      throw mapConnectionError(error, () => undefined);
+    }
+  };
+
   return {
     state: () => state,
     onStateChange,
@@ -645,7 +664,54 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
     deviceIdentity: () => deviceIdentity,
     updateFetch,
     authenticatedFetch,
+    issueServerProxySession,
   };
+}
+
+type SessionKind = "product" | "server-proxy";
+
+/**
+ * The device proof for one request: the signed envelope every authenticated
+ * route verifies, product and proxy alike. Returns the encoded proof header;
+ * the caller adds the session cookie and, for an unsafe method, the CSRF token.
+ */
+export async function signRemoteRequest(input: {
+  readonly session: Pick<RemoteSessionFacts, "sessionId" | "csrfToken">;
+  readonly method: string;
+  readonly canonicalPathQuery: string;
+  /** SHA-256 of the exact body bytes, lowercase hex; of the empty string when none. */
+  readonly bodyDigest: string;
+  readonly sign: (payload: string) => Promise<string>;
+  readonly now: number;
+}): Promise<{ readonly proofHeader: string }> {
+  const safe = SAFE_METHODS.has(input.method);
+  const csrfDigest = safe
+    ? undefined
+    : toHex(await cryptoSubtleDigest(new TextEncoder().encode(input.session.csrfToken)));
+  const timestamp = new Date(input.now).toISOString();
+  const nonce = toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
+  const proofPayload = buildRemoteRequestProofPayload({
+    sessionId: input.session.sessionId,
+    proof: {
+      method: input.method,
+      canonicalPathQuery: input.canonicalPathQuery,
+      bodyDigest: input.bodyDigest,
+      csrfDigest,
+      timestamp,
+      nonce,
+    },
+  });
+  const signature = await input.sign(proofPayload);
+  const proof = {
+    method: input.method,
+    canonicalPathQuery: input.canonicalPathQuery,
+    bodyDigest: input.bodyDigest,
+    csrfDigest,
+    timestamp,
+    nonce,
+    signature,
+  };
+  return { proofHeader: toBase64Url(new TextEncoder().encode(JSON.stringify(proof))) };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

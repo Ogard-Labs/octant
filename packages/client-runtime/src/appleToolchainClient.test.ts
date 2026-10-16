@@ -18,6 +18,7 @@ let createAppleToolchainClient: (options: Record<string, unknown>) => {
     | {
         readonly status: "watching";
         readonly screen: { readonly width: number; readonly height: number };
+        readonly orientation?: "portrait" | "landscape";
         readonly frames: AsyncIterable<Uint8Array>;
       }
     | { readonly status: "failed"; readonly kind: string; readonly message: string }
@@ -230,7 +231,13 @@ describe("appleToolchainClient", () => {
         async (_url: URL, _init?: RequestInit) =>
           new Response(
             chunked([0, 0], [0, 3, 0xff, 0xd8], [0xd9, 0, 0, 0, 2, 0xff], [0xd9, 0, 0]),
-            { status: 200, headers: { "x-octant-simulator-screen": "1206x2622" } },
+            {
+              status: 200,
+              headers: {
+                "x-octant-simulator-screen": "1206x2622",
+                "x-octant-simulator-orientation": "landscape",
+              },
+            },
           ),
       );
       const client = createAppleToolchainClient({
@@ -244,6 +251,7 @@ describe("appleToolchainClient", () => {
       expect(watch.status).toBe("watching");
       if (watch.status !== "watching") return;
       expect(watch.screen).toEqual({ width: 1206, height: 2622 });
+      expect(watch.orientation).toBe("landscape");
       const frames: number[][] = [];
       for await (const frame of watch.frames) frames.push([...frame]);
       // The trailing two bytes are half a header: the stream ended, no frame.

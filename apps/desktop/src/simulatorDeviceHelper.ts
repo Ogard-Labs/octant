@@ -41,14 +41,22 @@ export type DeviceHelperRequest =
    * and closes running apps, so it runs only when a person asks for it.
    */
   | { readonly op: "repair-input" }
-  /** Sets the Simulator's orientation through the managed serve-sim stream. */
-  | { readonly op: "rotate"; readonly orientation: "portrait" | "landscape" };
+  /**
+   * Sets the Simulator's orientation through the managed serve-sim stream.
+   * Without an orientation the helper turns it away from the one serve-sim
+   * reports, which the streamed picture's size cannot tell (it stays portrait).
+   */
+  | { readonly op: "rotate"; readonly orientation?: "portrait" | "landscape" }
+  /** Reads which way the Simulator shows its screen now, from a screenshot's size; changes nothing. */
+  | { readonly op: "orientation" };
 
 export type DeviceHelperReply =
   | {
       readonly status: "delivered";
       /** The device's screen in pixels, when the helper reported one. */
       readonly screen?: { readonly width: number; readonly height: number };
+      /** After a rotate: which way the Simulator sits now. */
+      readonly orientation?: "portrait" | "landscape";
     }
   /** The helper answered and refused: a bad request, or a Simulator it cannot reach. */
   | { readonly status: "refused"; readonly code: string; readonly message: string }
@@ -69,7 +77,12 @@ export interface DeviceViewer {
 }
 
 export type DeviceWatch =
-  | { readonly status: "watching"; readonly stop: () => void }
+  | {
+      readonly status: "watching";
+      readonly stop: () => void;
+      /** Which way the Simulator sat when the watch began, when the helper read it. */
+      readonly orientation?: "portrait" | "landscape";
+    }
   | { readonly status: "refused"; readonly code: string; readonly message: string }
   | { readonly status: "unavailable"; readonly message: string };
 

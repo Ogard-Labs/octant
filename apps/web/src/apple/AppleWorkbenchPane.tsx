@@ -72,7 +72,7 @@ export type AppleWorkbenchIntent =
   | {
       readonly kind: "rotate";
       readonly simulatorId: AppleSimulatorId;
-      readonly orientation: "portrait" | "landscape";
+      readonly orientation?: "portrait" | "landscape";
     };
 
 export interface AppleWorkbenchPaneProps {

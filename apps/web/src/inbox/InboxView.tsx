@@ -238,7 +238,7 @@ export function InboxView(props: InboxViewProps) {
                   className="inbox-view__row"
                   onClick={() => props.onOpenThread(item.signal)}
                   type="button"
-                  variant="ghost"
+                  variant="bare"
                 >
                   <span className="surface-row__copy">
                     <span className="oct-row-label">{item.signal.title}</span>

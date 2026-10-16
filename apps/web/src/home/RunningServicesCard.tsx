@@ -9,6 +9,10 @@ import type { HomeCardContent, HomeCardDefinition } from "./homeCards";
 import {
   capRunningServices,
   NOT_OWNED_LABEL,
+  REMOTE_OPEN_LIMITS,
+  remoteOpenOffer,
+  type RemoteOpenMode,
+  type RemoteOpenOutcome,
   runningServiceHealthLabel,
   runningServiceName,
   runningServiceOrigin,
@@ -33,6 +37,12 @@ export interface RunningServicesCardSource {
     service: RunningService,
     target: LocalServerOpenTarget,
   ) => void | Promise<void>;
+  /**
+   * Opens a server of another computer live on this one. Absent where this
+   * window cannot (a browser without the desktop app, the phone); rows then
+   * keep their picture of the page. The host judges every request again.
+   */
+  readonly openLive?: (service: RunningService, mode: RemoteOpenMode) => Promise<RemoteOpenOutcome>;
 }
 
 /**
@@ -79,6 +89,7 @@ function RunningServiceRows(props: {
   const { controller, source } = props;
   const [confirming, setConfirming] = useState<RunningService>();
   const { shown, hidden } = capRunningServices(controller.services);
+  const { host, openLive } = source;
   return (
     <>
       {controller.failure === undefined ? null : (
@@ -101,6 +112,14 @@ function RunningServiceRows(props: {
                   : void controller.stop(service, false)
               }
               openable={source.canOpen(service)}
+              {...(openLive === undefined || host === undefined
+                ? {}
+                : {
+                    remote: {
+                      offer: remoteOpenOffer(service, host),
+                      openLive: (mode: RemoteOpenMode) => openLive(service, mode),
+                    },
+                  })}
               service={service}
               {...(source.host === undefined ? {} : { host: source.host })}
             />
@@ -137,11 +156,34 @@ function RunningServiceRow(props: {
   readonly host?: string;
   readonly busy: boolean;
   readonly openable: boolean;
+  /** Present when this window can open a page of another computer live. */
+  readonly remote?: {
+    readonly offer: ReturnType<typeof remoteOpenOffer>;
+    readonly openLive: (mode: RemoteOpenMode) => Promise<RemoteOpenOutcome>;
+  };
   readonly onOpen: () => Promise<void>;
   readonly onStop: () => void;
 }) {
   const { service } = props;
   const [openFailed, setOpenFailed] = useState(false);
+  const [liveRefusal, setLiveRefusal] = useState<string>();
+  const [liveNotice, setLiveNotice] = useState<string>();
+  const [liveBusy, setLiveBusy] = useState(false);
+  const live = props.remote?.offer?.kind === "live" ? props.remote : undefined;
+  const openLive = async (mode: RemoteOpenMode) => {
+    if (live === undefined) return;
+    setLiveRefusal(undefined);
+    setLiveBusy(true);
+    try {
+      const outcome = await live.openLive(mode);
+      if (outcome.kind === "refused") setLiveRefusal(outcome.message);
+      else if (outcome.notice !== undefined) setLiveNotice(outcome.notice);
+    } catch {
+      setLiveRefusal("Octant could not open this server.");
+    } finally {
+      setLiveBusy(false);
+    }
+  };
   const name = runningServiceName(service);
   const HealthIcon =
     service.health === "listening"
@@ -176,6 +218,26 @@ function RunningServiceRow(props: {
             </span>
           </span>
         )}
+        {props.remote?.offer?.kind === "explained" ? (
+          <span className="oct-meta running-services__detail">
+            <span className="running-services__detail-text">{props.remote.offer.reason}</span>
+          </span>
+        ) : null}
+        {live === undefined ? null : (
+          <span className="oct-meta running-services__detail">
+            <span className="running-services__detail-text">{REMOTE_OPEN_LIMITS}</span>
+          </span>
+        )}
+        {liveNotice === undefined ? null : (
+          <span className="oct-meta running-services__detail">
+            <span className="running-services__detail-text">{liveNotice}</span>
+          </span>
+        )}
+        {liveRefusal === undefined ? null : (
+          <OctantAlert className="running-services__alert" tone="danger">
+            {liveRefusal}
+          </OctantAlert>
+        )}
         {openFailed ? (
           <OctantAlert className="running-services__alert" tone="danger">
             Octant could not open this server.
@@ -183,7 +245,33 @@ function RunningServiceRow(props: {
         ) : null}
       </div>
       <div className="running-services__actions">
-        {service.openAvailable && props.openable ? (
+        {live !== undefined ? (
+          <>
+            <OctantButton
+              aria-label={`Open ${name} on port ${String(service.port)}`}
+              className="window-no-drag"
+              disabled={props.busy || liveBusy}
+              onClick={() => void openLive("octant-browser")}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              <ExternalLink aria-hidden="true" size={14} strokeWidth={1.8} />
+              <span>Open</span>
+            </OctantButton>
+            <OctantButton
+              aria-label={`Open ${name} on port ${String(service.port)} in your browser`}
+              className="window-no-drag"
+              disabled={props.busy || liveBusy}
+              onClick={() => void openLive("default-browser")}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              <span>Open in browser</span>
+            </OctantButton>
+          </>
+        ) : service.openAvailable && props.openable ? (
           <OctantButton
             aria-label={`Open ${name} on port ${String(service.port)}`}
             className="window-no-drag"

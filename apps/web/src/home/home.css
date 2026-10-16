@@ -447,16 +447,19 @@
 .running-services__row {
   display: flex;
   min-width: 0;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-2);
   padding: var(--oct-space-2) var(--oct-space-1);
 }
 
+/* A 12rem floor: with Open, Open in browser, and Stop beside it, a narrow dock
+   moves the actions below the text instead of squeezing the name to nothing. */
 .running-services__main {
   display: grid;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1 1 12rem;
   gap: 2px;
 }
 
@@ -504,6 +507,7 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
+  margin-left: auto;
 }
 
 .running-services__more {
