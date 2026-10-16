@@ -79,6 +79,17 @@ export function readDesktopPrototypeEvent(
   }
 }
 
+/**
+ * Whether a message claims to be a frame of this prototype, well formed or
+ * not. The host sends the next frame only once the window says it drew this
+ * one, so even a frame that is not drawn is answered.
+ */
+function isFrameOf(value: unknown, surfaceId: string): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const event = value as Record<string, unknown>;
+  return event.kind === "frame" && event.surfaceId === surfaceId;
+}
+
 /** The cursors a page may show; anything else shows the default. */
 const CURSORS: Readonly<Record<string, string>> = {
   default: "default",
@@ -224,12 +235,15 @@ export function DesktopPrototypeSurface({
     let live = true;
     closing.current = false;
     const unsubscribe = subscribe((value) => {
+      if (!live) return;
       const event = readDesktopPrototypeEvent(value, surfaceId);
-      if (!live || event === undefined) return;
-      if (event.kind === "gone") latest.current.onGone();
-      else if (event.kind === "bridge") latest.current.onBridge(event.payload);
-      else if (event.kind === "cursor") setCursor(CURSORS[event.cursor] ?? "default");
-      else paint(canvasRef.current, event);
+      if (event?.kind === "gone") latest.current.onGone();
+      else if (event?.kind === "bridge") latest.current.onBridge(event.payload);
+      else if (event?.kind === "cursor") setCursor(CURSORS[event.cursor] ?? "default");
+      else if (event?.kind === "frame") paint(canvasRef.current, event);
+      if (isFrameOf(value, surfaceId)) {
+        void bridge?.acknowledgeCanvasPrototypeFrame?.(surfaceId).catch(() => undefined);
+      }
     });
     if (openedSrc.current !== src) {
       openedSrc.current = src;

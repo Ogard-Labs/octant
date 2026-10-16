@@ -468,6 +468,12 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
       host?.send({ kind: "resize", surfaceId, width, height });
     },
 
+    /** The window drew the last frame it heard, so the host may send the next. */
+    drawn: (owner: CanvasPrototypeOwner, surfaceId: unknown): void => {
+      if (!ownedBy(owner, surfaceId)) return;
+      host?.send({ kind: "drawn", surfaceId });
+    },
+
     close: (owner: CanvasPrototypeOwner, surfaceId: unknown): void => {
       if (!ownedBy(owner, surfaceId)) return;
       owners.delete(surfaceId);
@@ -519,17 +525,37 @@ export function closeCanvasPrototypesWith(
 /**
  * Starts the prototype host as a child of this process, with an IPC channel
  * that carries the page's pixels as bytes. The host leaves when the channel
- * closes, so it does not outlive the app.
+ * closes; one that does not is stopped, then killed, and one still running
+ * as the app exits is killed then, so it never outlives the app.
  */
-export function spawnCanvasPrototypeHost(command: {
-  readonly executable: string;
-  readonly args: ReadonlyArray<string>;
-}): CanvasPrototypeHostConnection {
+export function spawnCanvasPrototypeHost(
+  command: {
+    readonly executable: string;
+    readonly args: ReadonlyArray<string>;
+  },
+  lifetime: {
+    readonly quitGraceMs?: number;
+    /** Runs a listener as the app's process exits, until the returned function is called. */
+    readonly onAppExit?: (listener: () => void) => () => void;
+  } = {},
+): CanvasPrototypeHostConnection {
   const child = spawn(command.executable, [...command.args], {
     stdio: ["ignore", "ignore", "ignore", "ipc"],
     serialization: "advanced",
   });
   child.on("error", () => undefined);
+  const running = () => child.exitCode === null && child.signalCode === null;
+  const graceMs = lifetime.quitGraceMs ?? HOST_QUIT_GRACE_MS;
+  const onAppExit =
+    lifetime.onAppExit ??
+    ((listener) => {
+      process.once("exit", listener);
+      return () => process.removeListener("exit", listener);
+    });
+  const forgetAppExit = onAppExit(() => {
+    if (running()) child.kill("SIGKILL");
+  });
+  child.once("exit", forgetAppExit);
   return {
     send: (message) => {
       if (child.connected) child.send(message);
@@ -545,14 +571,19 @@ export function spawnCanvasPrototypeHost(command: {
       child.once("exit", () => listener());
       child.once("error", () => listener());
     },
-    // Closing the channel lets the host quit on its own; one that does not
-    // within a moment is killed.
+    // Closing the channel lets the host quit on its own. One still running a
+    // moment later is asked to stop, and a moment after that, killed. The
+    // timers do not keep the app open; the exit listener above covers that.
     stop: () => {
-      if (child.exitCode !== null || child.signalCode !== null) return;
+      if (!running()) return;
       if (child.connected) child.disconnect();
       setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) child.kill();
-      }, HOST_QUIT_GRACE_MS).unref();
+        if (!running()) return;
+        child.kill("SIGTERM");
+        setTimeout(() => {
+          if (running()) child.kill("SIGKILL");
+        }, graceMs).unref();
+      }, graceMs).unref();
     },
   };
 }

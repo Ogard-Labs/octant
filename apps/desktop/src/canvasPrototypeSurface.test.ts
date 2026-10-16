@@ -5,6 +5,7 @@ import {
   closeCanvasPrototypesWith,
   createCanvasPrototypeSurface,
   decodeCanvasPrototypeInput,
+  spawnCanvasPrototypeHost,
   designPageTicket,
   type CanvasPrototypeHostConnection,
   type CanvasPrototypeOwner,
@@ -239,11 +240,13 @@ describe("a prototype's window", () => {
     const click = { type: "mouseDown", x: 10.4, y: 20, button: "left", clickCount: 1 };
     made.input(second.port, surfaceId, click);
     made.resize(second.port, surfaceId, 100, 100);
+    made.drawn(second.port, surfaceId);
     made.close(second.port, surfaceId);
     expect(host.sent).toEqual([]);
 
     made.input(first.port, surfaceId, click);
     made.resize(first.port, surfaceId, 390, 900);
+    made.drawn(first.port, surfaceId);
     made.close(first.port, surfaceId);
     expect(host.sent).toEqual([
       {
@@ -252,6 +255,7 @@ describe("a prototype's window", () => {
         input: { type: "mouseDown", x: 10, y: 20, button: "left", clickCount: 1, modifiers: [] },
       },
       { kind: "resize", surfaceId, width: 390, height: 900 },
+      { kind: "drawn", surfaceId },
       { kind: "close", surfaceId },
     ]);
   });
@@ -414,6 +418,50 @@ describe("a window whose renderer exits", () => {
     expect(host.stop).not.toHaveBeenCalled();
     made.closeOwnedBy(preparer.id);
     expect(host.stop).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the prototype host process's lifetime", () => {
+  // A stand-in host that ignores its channel closing and SIGTERM, as a host
+  // held by a page's `beforeunload` once did, and says when it is listening.
+  const stubborn = [
+    "-e",
+    'process.on("SIGTERM", () => {}); process.on("disconnect", () => {}); setInterval(() => {}, 1000); process.send({ kind: "ready" });',
+  ];
+
+  function started(onAppExit?: (listener: () => void) => () => void) {
+    const connection = spawnCanvasPrototypeHost(
+      { executable: process.execPath, args: stubborn },
+      { quitGraceMs: 100, ...(onAppExit === undefined ? {} : { onAppExit }) },
+    );
+    const ready = new Promise<void>((resolve) =>
+      connection.onEvent((event) => {
+        if (event.kind === "ready") resolve();
+      }),
+    );
+    const exited = new Promise<void>((resolve) => connection.onExit(resolve));
+    return { connection, ready, exited };
+  }
+
+  it("ends a host that ignores its channel closing and SIGTERM", async () => {
+    const { connection, ready, exited } = started();
+    await ready;
+    connection.stop();
+    await exited;
+  });
+
+  it("kills a host still running as the app exits", async () => {
+    let appExit: (() => void) | undefined;
+    const forget = vi.fn();
+    const { ready, exited } = started((listener) => {
+      appExit = listener;
+      return forget;
+    });
+    await ready;
+    appExit?.();
+    await exited;
+    // Once the host is gone, its exit listener is dropped.
+    await vi.waitFor(() => expect(forget).toHaveBeenCalledOnce());
   });
 });
 

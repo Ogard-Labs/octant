@@ -728,7 +728,10 @@ answers every name with not-found among them:
 - **The process.** `apps/desktop` starts the host from its own executable with
   a host switch (a packaged app always runs its own entry, so the entry runs
   either the app or the host). It has no Dock icon or windows on screen, a
-  throwaway data directory, and leaves when the app's IPC channel closes. It
+  throwaway data directory, and leaves when the app's IPC channel closes or it
+  is sent SIGTERM, at once and whatever a page's `beforeunload` asks; a host
+  still running after that is killed, and the app kills one still running as
+  it exits. It
   runs while a window that prepared it or opened a prototype keeps its page:
   when the last such window closes, loads another page, or its renderer exits,
   the app stops the host, even one still starting, and the next run starts a
@@ -761,7 +764,11 @@ answers every name with not-found among them:
   Nothing else is served, so the page needs no route to the host's loopback
   address and the host API is unreachable from it.
 - **Drawing and input.** The host paints the page offscreen, at twice its
-  pixels on a Retina display, and sends each changed rectangle; the renderer
+  pixels on a Retina display, and sends each changed rectangle, one frame at a
+  time: the next goes only once the window says it drew the last, and paints
+  meanwhile fold into one changed rectangle of the latest. Each prototype may
+  send 128 MB of pixels a second; a larger frame goes, and the next waits until
+  it is paid back. The renderer
   paints it on a canvas the same size, scale, and placement as a frame, so
   expanded and in-thread placements, sizing to content, and redraw without
   restart are unchanged. The renderer forwards pointer, wheel, and key events
@@ -771,8 +778,9 @@ answers every name with not-found among them:
   method's composition, and assistive technology reading inside the page, do
   not reach it: the page is a picture to the window.
 - **The bridge.** The page's preload forwards its bridge messages, cut to type,
-  height, and message text, to the host, which passes them on as events of
-  that prototype. The renderer applies the same channel, type, bounds,
+  height, and message text, to the host, which passes on at most 251 a second
+  (one past the renderer's flood limit, so the renderer still sees a flood) as
+  events of that prototype. The host runs only the six edit commands by name. The renderer applies the same channel, type, bounds,
   heartbeat, and flood checks, and also stops a prototype whose page goes away.
   There is no window or origin to check because the page has no parent frame to
   post to.

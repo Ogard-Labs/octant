@@ -173,6 +173,7 @@ describe("desktop preload bridge", () => {
     const [key, bridge] = exposeInMainWorld.mock.calls[0] as [string, Record<string, unknown>];
     expect(key).toBe(HOST_BRIDGE_KEY);
     expect(Object.keys(bridge).sort()).toEqual([
+      "acknowledgeCanvasPrototypeFrame",
       "acknowledgeWhatsNew",
       "addProviderApiKey",
       "approveRemotePairingRequest",

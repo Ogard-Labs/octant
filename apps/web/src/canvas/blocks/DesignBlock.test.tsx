@@ -62,6 +62,7 @@ const prototypeHost = {
   listeners: new Set<(event: unknown) => void>(),
   opened: [] as Array<{ readonly surfaceId: string; readonly src: string }>,
   closed: [] as Array<string>,
+  drawn: [] as Array<string>,
   inputs: [] as Array<Record<string, unknown>>,
   emit(event: Record<string, unknown>) {
     for (const listener of this.listeners) listener(event);
@@ -70,6 +71,7 @@ const prototypeHost = {
     this.listeners.clear();
     this.opened.length = 0;
     this.closed.length = 0;
+    this.drawn.length = 0;
     this.inputs.length = 0;
   },
 };
@@ -101,6 +103,9 @@ function installDesktopBridge(fields: Record<string, unknown> = {}) {
       prototypeHost.inputs.push(input);
     },
     resizeCanvasPrototype: async () => undefined,
+    acknowledgeCanvasPrototypeFrame: async (surfaceId: string) => {
+      prototypeHost.drawn.push(surfaceId);
+    },
     closeCanvasPrototype: async (surfaceId: string) => {
       prototypeHost.closed.push(surfaceId);
     },
@@ -729,6 +734,29 @@ describe("running prototype in the desktop app", () => {
       await Promise.resolve();
     });
     expect(prototypeHost.closed).toEqual([prototypeHost.opened[0]?.surfaceId]);
+  });
+
+  it("answers each frame of its own prototype, drawn or malformed, so the host sends the next", async () => {
+    runDesktop({ runsOnOpen: true });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const surfaceId = prototypeHost.opened[0]?.surfaceId;
+    const frame = {
+      kind: "frame",
+      frameWidth: 2,
+      frameHeight: 2,
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      pixels: new Uint8Array(4),
+    };
+    act(() => prototypeHost.emit({ ...frame, surfaceId }));
+    act(() => prototypeHost.emit({ ...frame, surfaceId, pixels: new Uint8Array(3) }));
+    act(() => prototypeHost.emit({ ...frame, surfaceId: "33333333-3333-4333-8333-333333333333" }));
+    act(() => prototypeHost.emit({ kind: "cursor", surfaceId, cursor: "pointer" }));
+    expect(prototypeHost.drawn).toEqual([surfaceId, surfaceId]);
   });
 
   it("keeps a prototype running while its page beats, stops it when the beats stop, and offers to run it again", async () => {

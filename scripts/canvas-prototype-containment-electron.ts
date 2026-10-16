@@ -29,6 +29,7 @@ import {
   createCanvasPrototypeSurface,
   spawnCanvasPrototypeHost,
   type CanvasPrototypeOwner,
+  type CanvasPrototypeSurface,
   type CanvasPrototypeSurfaceEvent,
 } from "../apps/desktop/src/canvasPrototypeSurface";
 import { CANVAS_PROTOTYPE_HOST_SWITCH } from "../apps/desktop/src/canvasPrototypeHost";
@@ -117,8 +118,11 @@ function resolvedCanaries(logPath: string, address: string): LogReading {
   };
 }
 
-/** What the window that opened the prototypes hears, and the page it was drawn as. */
-function recordingOwner() {
+/**
+ * What the window that opened the prototypes hears, and the page it was drawn
+ * as. Like a window, it says when it drew each frame, so the host sends the next.
+ */
+function recordingOwner(surface: CanvasPrototypeSurface) {
   const bridge: Array<BridgeRecord> = [];
   const frames = { count: 0, width: 0, height: 0, pixels: new Uint8Array() };
   const gone: Array<string> = [];
@@ -141,6 +145,8 @@ function recordingOwner() {
             ((event.y + row) * frames.width + event.x) * 4,
           );
         }
+        const { surfaceId } = event;
+        setImmediate(() => surface.drawn(owner, surfaceId));
       }
     },
   };
@@ -179,7 +185,7 @@ function surfaceFor() {
  */
 async function pointerRun(): Promise<never> {
   const surface = surfaceFor();
-  const recorded = recordingOwner();
+  const recorded = recordingOwner(surface);
   const prepared = await surface.prepare(recorded.owner);
   if (prepared.status !== "ready") finish({ mode, prepared });
   const surfaceId = randomUUID();
@@ -228,7 +234,7 @@ async function pointerRun(): Promise<never> {
 
 async function containedRun(): Promise<never> {
   const surface = surfaceFor();
-  const recorded = recordingOwner();
+  const recorded = recordingOwner(surface);
   const prepared = await surface.prepare(recorded.owner);
   if (prepared.status !== "ready") finish({ mode, prepared });
   // The renderer is not trusted to choose what the host shows: anything but

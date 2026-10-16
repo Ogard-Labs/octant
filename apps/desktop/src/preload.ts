@@ -25,6 +25,7 @@ export const IPC_CHANNELS = {
   canvasPrototypeInput: "octant:canvas:prototype:input",
   canvasPrototypeResize: "octant:canvas:prototype:resize",
   canvasPrototypeClose: "octant:canvas:prototype:close",
+  canvasPrototypeDrawn: "octant:canvas:prototype:drawn",
   canvasPrototypeEvent: "octant:canvas:prototype:event",
   appUpdateState: "octant:app-update:state",
   appUpdateCheck: "octant:app-update:check",
@@ -474,6 +475,8 @@ export interface OctantHostBridge {
     height: number,
   ) => Promise<void>;
   readonly closeCanvasPrototype: (surfaceId: string) => Promise<void>;
+  /** Says the window drew a prototype's last frame, so the host sends the next. */
+  readonly acknowledgeCanvasPrototypeFrame: (surfaceId: string) => Promise<void>;
   /**
    * What the prototypes this window opened report: painted pixels, bridge
    * messages, cursor, and a page that went away. Each is a claim the renderer
@@ -735,6 +738,9 @@ export function createHostBridge(
     },
     closeCanvasPrototype: async (surfaceId: string) => {
       await ipc.invoke(IPC_CHANNELS.canvasPrototypeClose, surfaceId);
+    },
+    acknowledgeCanvasPrototypeFrame: async (surfaceId: string) => {
+      await ipc.invoke(IPC_CHANNELS.canvasPrototypeDrawn, surfaceId);
     },
     attachBrowserSurface: async (request: BrowserSurfaceRequest) => {
       validateBrowserSurfaceRequest(request);

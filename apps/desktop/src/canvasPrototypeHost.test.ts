@@ -11,6 +11,9 @@ import {
   type CanvasPrototypeHostPagePort,
   type CanvasPrototypeHostSessionPort,
   type CanvasPrototypeInput,
+  type CanvasPrototypePaint,
+  type CanvasPrototypeRectangle,
+  MAX_BRIDGE_MESSAGES_PER_SECOND,
 } from "./canvasPrototypeHost";
 
 const NO_ROUTE = "SOCKS5 127.0.0.1:1";
@@ -42,9 +45,12 @@ function fakePage() {
   let navigate: ((event: CanvasPrototypeCancellable) => void) | undefined;
   let gone: (() => void) | undefined;
   let bridge: ((payload: unknown) => void) | undefined;
+  let paint: ((paint: CanvasPrototypePaint) => void) | undefined;
   const inputs: Array<CanvasPrototypeInput> = [];
   const port = {
-    onPaint: vi.fn(),
+    onPaint: (listener: (painted: CanvasPrototypePaint) => void) => {
+      paint = listener;
+    },
     onCursor: vi.fn(),
     onBridge: (listener: (payload: unknown) => void) => {
       bridge = listener;
@@ -57,6 +63,7 @@ function fakePage() {
     },
     refuseNewWindows: vi.fn(),
     refuseNonProxiedUdp: vi.fn(),
+    refuseUnloadPrompts: vi.fn(),
     load: vi.fn(),
     input: (input: CanvasPrototypeInput) => inputs.push(input),
     setSize: vi.fn(),
@@ -71,6 +78,7 @@ function fakePage() {
       return cancelled;
     },
     bridge: (payload: unknown) => bridge?.(payload),
+    paint: (painted: CanvasPrototypePaint) => paint?.(painted),
     gone: () => gone?.(),
   };
 }
@@ -176,6 +184,8 @@ describe("a page in the prototype host", () => {
     const page = pages[0];
     expect(page?.port.refuseNewWindows).toHaveBeenCalledOnce();
     expect(page?.port.refuseNonProxiedUdp).toHaveBeenCalledOnce();
+    // A page's `beforeunload` cannot keep it, or the host, from closing.
+    expect(page?.port.refuseUnloadPrompts).toHaveBeenCalledOnce();
     expect(page?.navigate()).toBe(true);
   });
 
@@ -197,6 +207,111 @@ describe("a page in the prototype host", () => {
       { kind: "gone", surfaceId },
     ]);
     expect(pages[0]?.port.close).toHaveBeenCalledOnce();
+  });
+});
+
+/** A paint of a whole frame of the tallest, widest page at twice its pixels. */
+function largePaint(dirty: CanvasPrototypeRectangle, reads: Array<CanvasPrototypeRectangle>) {
+  const frameWidth = 3_840;
+  const frameHeight = 24_000;
+  return {
+    frameWidth,
+    frameHeight,
+    dirty,
+    read: (rectangle: CanvasPrototypeRectangle) => {
+      reads.push(rectangle);
+      // The budget counts the rectangle's RGBA bytes; the test need not make them.
+      return new Uint8Array(0);
+    },
+  } satisfies CanvasPrototypePaint;
+}
+
+describe("a page's frames", () => {
+  it("never leave more than one frame waiting for the window, and fold paints meanwhile into the next", async () => {
+    vi.useFakeTimers();
+    try {
+      const { host: started, sent, pages } = host();
+      await started.start();
+      started.receive(open);
+      sent.length = 0;
+      const reads: Array<CanvasPrototypeRectangle> = [];
+      const page = pages[0];
+      for (let index = 0; index < 500; index += 1) {
+        page?.paint(largePaint({ x: index, y: index, width: 10, height: 10 }, reads));
+      }
+      const frames = () => sent.filter((event) => event.kind === "frame");
+      // The first paint goes; the other 499 wait, read nothing, and send nothing.
+      expect(frames()).toHaveLength(1);
+      expect(reads).toEqual([{ x: 0, y: 0, width: 10, height: 10 }]);
+
+      started.receive({ kind: "drawn", surfaceId });
+      expect(frames()).toHaveLength(2);
+      expect(reads.at(-1)).toEqual({ x: 1, y: 1, width: 508, height: 508 });
+      // Drawn again with nothing new painted, nothing is sent.
+      started.receive({ kind: "drawn", surfaceId });
+      expect(frames()).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keep to a byte budget each second, so whole-page repaints wait their turn", async () => {
+    vi.useFakeTimers();
+    try {
+      const { host: started, sent, pages } = host();
+      await started.start();
+      started.receive(open);
+      sent.length = 0;
+      const reads: Array<CanvasPrototypeRectangle> = [];
+      const whole = { x: 0, y: 0, width: 3_840, height: 24_000 };
+      const frames = () => sent.filter((event) => event.kind === "frame").length;
+      // A whole frame is about 370 MB, past a second's budget: it goes, and
+      // the next waits until that is paid back.
+      pages[0]?.paint(largePaint(whole, reads));
+      started.receive({ kind: "drawn", surfaceId });
+      pages[0]?.paint(largePaint(whole, reads));
+      expect(frames()).toBe(1);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(frames()).toBe(1);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(frames()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("a page's input and bridge", () => {
+  it("runs only the six edit commands, whatever name arrives", async () => {
+    const { host: started, pages } = host();
+    await started.start();
+    started.receive(open);
+    for (const command of ["loadURL", "executeJavaScript", "constructor", "copy"]) {
+      started.receive({
+        kind: "input",
+        surfaceId,
+        input: { type: "edit", command } as CanvasPrototypeInput,
+      });
+    }
+    expect(pages[0]?.inputs).toEqual([{ type: "edit", command: "copy" }]);
+  });
+
+  it("passes on no more bridge messages a second than shows the window a flood", async () => {
+    vi.useFakeTimers();
+    try {
+      const { host: started, sent, pages } = host();
+      await started.start();
+      started.receive(open);
+      sent.length = 0;
+      const heartbeat = { channel: CANVAS_DESIGN_BRIDGE_CHANNEL, type: "heartbeat" };
+      for (let index = 0; index < 5_000; index += 1) pages[0]?.bridge(heartbeat);
+      expect(sent).toHaveLength(MAX_BRIDGE_MESSAGES_PER_SECOND);
+      await vi.advanceTimersByTimeAsync(1_000);
+      pages[0]?.bridge(heartbeat);
+      expect(sent).toHaveLength(MAX_BRIDGE_MESSAGES_PER_SECOND + 1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

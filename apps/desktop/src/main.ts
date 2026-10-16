@@ -271,6 +271,7 @@ const IPC_CHANNELS = {
   canvasPrototypeInput: "octant:canvas:prototype:input",
   canvasPrototypeResize: "octant:canvas:prototype:resize",
   canvasPrototypeClose: "octant:canvas:prototype:close",
+  canvasPrototypeDrawn: "octant:canvas:prototype:drawn",
   canvasPrototypeEvent: "octant:canvas:prototype:event",
   appUpdateState: "octant:app-update:state",
   appUpdateCheck: "octant:app-update:check",
@@ -3514,6 +3515,10 @@ function installIpcHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.canvasPrototypeClose, (event, surfaceId: unknown) => {
     ownedTopLevelWindowContext(event);
     canvasPrototypeSurface?.close(canvasPrototypeOwner(event.sender), surfaceId);
+  });
+  ipcMain.handle(IPC_CHANNELS.canvasPrototypeDrawn, (event, surfaceId: unknown) => {
+    ownedTopLevelWindowContext(event);
+    canvasPrototypeSurface?.drawn(canvasPrototypeOwner(event.sender), surfaceId);
   });
   ipcMain.handle(IPC_CHANNELS.canvasPrototypeInput, (event, surfaceId: unknown, input: unknown) => {
     ownedTopLevelWindowContext(event);

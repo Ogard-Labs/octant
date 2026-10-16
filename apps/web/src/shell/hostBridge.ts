@@ -472,6 +472,8 @@ export interface OctantHostBridge
     height: number,
   ) => Promise<void>;
   readonly closeCanvasPrototype?: (surfaceId: string) => Promise<void>;
+  /** Says the window drew a prototype's last frame, so the host sends the next. */
+  readonly acknowledgeCanvasPrototypeFrame?: (surfaceId: string) => Promise<void>;
   readonly subscribeCanvasPrototypeEvents?: (listener: (event: unknown) => void) => () => void;
   readonly attachBrowserSurface?: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds?: (request: BrowserSurfaceRequest) => Promise<void>;

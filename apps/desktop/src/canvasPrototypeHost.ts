@@ -9,6 +9,7 @@ import type {
   NativeImage,
   Rectangle,
   Session,
+  WebContents,
 } from "electron";
 import { CANVAS_PROTOTYPE_PRELOAD_FILENAME } from "./runtimePaths";
 
@@ -68,9 +69,32 @@ export const CANVAS_PROTOTYPE_PAGE_BRIDGE_CHANNEL = "octant-canvas-prototype-bri
 const SURFACE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** A prototype paints at most this often; each paint crosses two processes. */
 const FRAME_RATE = 30;
+/**
+ * The pixel bytes one prototype may send the app in a second. A frame is raw
+ * RGBA and crosses two processes, and the tallest page at twice its pixels is
+ * about 370 MB, so a page that repaints all of itself would otherwise flood
+ * both. This allows a full phone-sized repaint (5 MB at 2x) about 25 times a
+ * second; a frame larger than what is left is sent, and the next one waits
+ * until the budget is paid back.
+ */
+export const MAX_FRAME_BYTES_PER_SECOND = 128 * 1024 * 1024;
+/**
+ * The bridge messages one page may pass on in a second: the renderer stops a
+ * page past 250, so one more still shows it the flood, and the rest of that
+ * second is dropped here rather than crossing two processes.
+ */
+export const MAX_BRIDGE_MESSAGES_PER_SECOND = 251;
 
 export type CanvasPrototypeModifier = "shift" | "control" | "alt" | "meta";
 export type CanvasPrototypeEditCommand = "copy" | "cut" | "paste" | "selectAll" | "undo" | "redo";
+const EDIT_COMMANDS: ReadonlySet<string> = new Set<CanvasPrototypeEditCommand>([
+  "copy",
+  "cut",
+  "paste",
+  "selectAll",
+  "undo",
+  "redo",
+]);
 
 /** What the app forwards for a page: a person's pointer, wheel, keys, focus, and edit commands. */
 export type CanvasPrototypeInput =
@@ -121,7 +145,29 @@ export type CanvasPrototypeHostCommand =
       readonly height: number;
     }
   | { readonly kind: "input"; readonly surfaceId: string; readonly input: CanvasPrototypeInput }
+  /** The window drew the last frame it was sent, so the next may go. */
+  | { readonly kind: "drawn"; readonly surfaceId: string }
   | { readonly kind: "close"; readonly surfaceId: string };
+
+/** A rectangle of a page, in device pixels. */
+export interface CanvasPrototypeRectangle {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * One paint of a page: the whole frame's size, the rectangle that changed, and
+ * a way to read any rectangle of this paint as RGBA. Reading is the costly
+ * part, so it happens only for what is sent.
+ */
+export interface CanvasPrototypePaint {
+  readonly frameWidth: number;
+  readonly frameHeight: number;
+  readonly dirty: CanvasPrototypeRectangle;
+  readonly read: (rectangle: CanvasPrototypeRectangle) => Uint8Array;
+}
 
 /** A changed rectangle of a page, in device pixels, as RGBA. */
 export interface CanvasPrototypeFrame {
@@ -161,13 +207,15 @@ export interface CanvasPrototypeHostSessionPort {
 
 /** One page drawn offscreen. */
 export interface CanvasPrototypeHostPagePort {
-  readonly onPaint: (listener: (frame: CanvasPrototypeFrame) => void) => void;
+  readonly onPaint: (listener: (paint: CanvasPrototypePaint) => void) => void;
   readonly onCursor: (listener: (cursor: string) => void) => void;
   readonly onBridge: (listener: (payload: unknown) => void) => void;
   readonly onGone: (listener: () => void) => void;
   readonly onNavigation: (listener: (event: CanvasPrototypeCancellable) => void) => void;
   readonly refuseNewWindows: () => void;
   readonly refuseNonProxiedUdp: () => void;
+  /** Lets the page be closed whatever its `beforeunload` asks. */
+  readonly refuseUnloadPrompts: () => void;
   readonly load: (url: string) => void;
   readonly input: (input: CanvasPrototypeInput) => void;
   readonly setSize: (width: number, height: number) => void;
@@ -182,6 +230,135 @@ export interface CanvasPrototypeHostOptions {
     readonly scaleFactor: number;
   }) => CanvasPrototypeHostPagePort;
   readonly send: (event: CanvasPrototypeHostEvent) => void;
+}
+
+/** The smallest rectangle holding both, or the one that exists. */
+function union(
+  first: CanvasPrototypeRectangle | undefined,
+  second: CanvasPrototypeRectangle,
+): CanvasPrototypeRectangle {
+  if (first === undefined) return second;
+  const x = Math.min(first.x, second.x);
+  const y = Math.min(first.y, second.y);
+  return {
+    x,
+    y,
+    width: Math.max(first.x + first.width, second.x + second.width) - x,
+    height: Math.max(first.y + first.height, second.y + second.height) - y,
+  };
+}
+
+/** A rectangle cut to the frame, whole pixels only. */
+function within(
+  rectangle: CanvasPrototypeRectangle,
+  frameWidth: number,
+  frameHeight: number,
+): CanvasPrototypeRectangle {
+  const x = Math.max(0, Math.min(frameWidth, Math.floor(rectangle.x)));
+  const y = Math.max(0, Math.min(frameHeight, Math.floor(rectangle.y)));
+  const right = Math.max(x, Math.min(frameWidth, Math.ceil(rectangle.x + rectangle.width)));
+  const bottom = Math.max(y, Math.min(frameHeight, Math.ceil(rectangle.y + rectangle.height)));
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+/**
+ * Sends a page's paints to the app at the pace the app draws them: one frame
+ * at a time until the window says it drew it, within a byte budget per second.
+ * Paints meanwhile are folded into one changed rectangle of the latest paint,
+ * so a page that paints faster than the window draws costs no more.
+ */
+function paceFrames(
+  surfaceId: string,
+  send: (event: CanvasPrototypeHostEvent) => void,
+): {
+  readonly painted: (paint: CanvasPrototypePaint) => void;
+  readonly drawn: () => void;
+  readonly stop: () => void;
+} {
+  let latest: CanvasPrototypePaint | undefined;
+  let changed: CanvasPrototypeRectangle | undefined;
+  let awaitingDrawn = false;
+  let budget = MAX_FRAME_BYTES_PER_SECOND;
+  let budgetAt = Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+
+  const flush = () => {
+    if (stopped || awaitingDrawn || timer !== undefined) return;
+    if (latest === undefined || changed === undefined) return;
+    const now = Date.now();
+    budget = Math.min(
+      MAX_FRAME_BYTES_PER_SECOND,
+      budget + ((now - budgetAt) * MAX_FRAME_BYTES_PER_SECOND) / 1000,
+    );
+    budgetAt = now;
+    if (budget < 0) {
+      timer = setTimeout(
+        () => {
+          timer = undefined;
+          flush();
+        },
+        Math.ceil((-budget * 1000) / MAX_FRAME_BYTES_PER_SECOND),
+      );
+      return;
+    }
+    const { frameWidth, frameHeight } = latest;
+    const rectangle = within(changed, frameWidth, frameHeight);
+    changed = undefined;
+    if (rectangle.width === 0 || rectangle.height === 0) return;
+    const pixels = latest.read(rectangle);
+    budget -= rectangle.width * rectangle.height * 4;
+    awaitingDrawn = true;
+    send({ kind: "frame", surfaceId, frameWidth, frameHeight, ...rectangle, pixels });
+  };
+
+  return {
+    painted: (paint) => {
+      // A frame of a new size starts the window's canvas over: all of it is new.
+      const resized =
+        latest !== undefined &&
+        (latest.frameWidth !== paint.frameWidth || latest.frameHeight !== paint.frameHeight);
+      latest = paint;
+      changed = resized
+        ? { x: 0, y: 0, width: paint.frameWidth, height: paint.frameHeight }
+        : union(changed, paint.dirty);
+      flush();
+    },
+    drawn: () => {
+      awaitingDrawn = false;
+      flush();
+    },
+    stop: () => {
+      stopped = true;
+      latest = undefined;
+      if (timer !== undefined) clearTimeout(timer);
+    },
+  };
+}
+
+/** Passes on at most so many of a page's bridge messages in each second. */
+function capBridgeMessages(forward: (payload: unknown) => void): (payload: unknown) => void {
+  let windowStart = 0;
+  let count = 0;
+  return (payload) => {
+    const now = Date.now();
+    if (now - windowStart >= 1000) {
+      windowStart = now;
+      count = 0;
+    }
+    count += 1;
+    if (count <= MAX_BRIDGE_MESSAGES_PER_SECOND) forward(payload);
+  };
+}
+
+/**
+ * The input to play back on a page, or `undefined`. The app checks input
+ * before sending it, and this checks the edit command again because it names a
+ * method the host calls.
+ */
+function admittedInput(input: CanvasPrototypeInput): CanvasPrototypeInput | undefined {
+  if (input.type === "edit" && !EDIT_COMMANDS.has(input.command)) return undefined;
+  return input;
 }
 
 function pageAddress(surfaceId: string): string {
@@ -203,6 +380,7 @@ function addressedSurface(address: string): string | undefined {
 
 export function createCanvasPrototypeHost(options: CanvasPrototypeHostOptions) {
   const pages = new Map<string, CanvasPrototypeHostPagePort>();
+  const pacers = new Map<string, ReturnType<typeof paceFrames>>();
   // A page is served once, to the load this process starts for it.
   const unserved = new Map<string, CanvasPrototypeHostPage>();
 
@@ -218,6 +396,8 @@ export function createCanvasPrototypeHost(options: CanvasPrototypeHostOptions) {
 
   const close = (surfaceId: string) => {
     unserved.delete(surfaceId);
+    pacers.get(surfaceId)?.stop();
+    pacers.delete(surfaceId);
     pages.get(surfaceId)?.close();
     pages.delete(surfaceId);
   };
@@ -231,14 +411,19 @@ export function createCanvasPrototypeHost(options: CanvasPrototypeHostOptions) {
       scaleFactor: command.scaleFactor,
     });
     pages.set(surfaceId, page);
+    const pacer = paceFrames(surfaceId, options.send);
+    pacers.set(surfaceId, pacer);
     page.refuseNonProxiedUdp();
     page.refuseNewWindows();
+    page.refuseUnloadPrompts();
     // The page this process loads is the only one: a page that moves itself,
     // or is redirected, loads nothing.
     page.onNavigation((event) => event.preventDefault());
-    page.onPaint((frame) => options.send({ kind: "frame", surfaceId, ...frame }));
+    page.onPaint(pacer.painted);
     page.onCursor((cursor) => options.send({ kind: "cursor", surfaceId, cursor }));
-    page.onBridge((payload) => options.send({ kind: "bridge", surfaceId, payload }));
+    page.onBridge(
+      capBridgeMessages((payload) => options.send({ kind: "bridge", surfaceId, payload })),
+    );
     page.onGone(() => {
       close(surfaceId);
       options.send({ kind: "gone", surfaceId });
@@ -296,8 +481,13 @@ export function createCanvasPrototypeHost(options: CanvasPrototypeHostOptions) {
         case "resize":
           pages.get(command.surfaceId)?.setSize(command.width, command.height);
           return;
-        case "input":
-          pages.get(command.surfaceId)?.input(command.input);
+        case "input": {
+          const input = admittedInput(command.input);
+          if (input !== undefined) pages.get(command.surfaceId)?.input(input);
+          return;
+        }
+        case "drawn":
+          pacers.get(command.surfaceId)?.drawn();
           return;
         case "close":
           close(command.surfaceId);
@@ -319,17 +509,38 @@ function rgbaFrom(bitmap: Buffer): Uint8Array {
   return pixels;
 }
 
-function paintedFrame(dirty: Rectangle, image: NativeImage): CanvasPrototypeFrame {
+function paintOf(dirty: Rectangle, image: NativeImage): CanvasPrototypePaint {
   const frame = image.getSize();
-  const x = Math.max(0, Math.min(frame.width, dirty.x));
-  const y = Math.max(0, Math.min(frame.height, dirty.y));
-  const width = Math.max(0, Math.min(frame.width - x, dirty.width));
-  const height = Math.max(0, Math.min(frame.height - y, dirty.height));
-  const pixels =
-    width === 0 || height === 0
-      ? new Uint8Array()
-      : rgbaFrom(image.crop({ x, y, width, height }).toBitmap());
-  return { frameWidth: frame.width, frameHeight: frame.height, x, y, width, height, pixels };
+  return {
+    frameWidth: frame.width,
+    frameHeight: frame.height,
+    dirty,
+    read: (rectangle) => rgbaFrom(image.crop(rectangle).toBitmap()),
+  };
+}
+
+/** Runs one of the edit commands a page takes, by name, and nothing else. */
+function runEditCommand(contents: WebContents, command: CanvasPrototypeEditCommand): void {
+  switch (command) {
+    case "copy":
+      contents.copy();
+      return;
+    case "cut":
+      contents.cut();
+      return;
+    case "paste":
+      contents.paste();
+      return;
+    case "selectAll":
+      contents.selectAll();
+      return;
+    case "undo":
+      contents.undo();
+      return;
+    case "redo":
+      contents.redo();
+      return;
+  }
 }
 
 type ElectronInput = MouseInputEvent | MouseWheelInputEvent | KeyboardInputEvent;
@@ -405,13 +616,21 @@ export async function runCanvasPrototypeHost(): Promise<void> {
   const send = (event: CanvasPrototypeHostEvent) => {
     if (process.connected) process.send?.(event);
   };
-  app.on("will-quit", () => rmSync(userData, { recursive: true, force: true }));
+  const removeData = () => rmSync(userData, { recursive: true, force: true });
+  app.on("will-quit", removeData);
   // Started without the app's channel, it has nobody to paint for.
   if (process.send === undefined) {
     app.quit();
     return;
   }
-  process.on("disconnect", () => app.quit());
+  // When the app is gone, or asks this to stop, this leaves at once: a quit
+  // could wait on a page's `beforeunload`, and a page has no say here.
+  const leave = () => {
+    removeData();
+    app.exit(0);
+  };
+  process.on("disconnect", leave);
+  process.on("SIGTERM", leave);
   // A closed page is not the end of the host: it stays until the app is gone.
   app.on("window-all-closed", () => undefined);
 
@@ -453,7 +672,7 @@ export async function runCanvasPrototypeHost(): Promise<void> {
       contents.setFrameRate(FRAME_RATE);
       return {
         onPaint: (listener) =>
-          contents.on("paint", (_event, dirty, image) => listener(paintedFrame(dirty, image))),
+          contents.on("paint", (_event, dirty, image) => listener(paintOf(dirty, image))),
         onCursor: (listener) => contents.on("cursor-changed", (_event, type) => listener(type)),
         onBridge: (listener) => {
           bridges.set(id, listener);
@@ -471,6 +690,8 @@ export async function runCanvasPrototypeHost(): Promise<void> {
         },
         refuseNewWindows: () => contents.setWindowOpenHandler(() => ({ action: "deny" })),
         refuseNonProxiedUdp: () => contents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp"),
+        refuseUnloadPrompts: () =>
+          contents.on("will-prevent-unload", (event) => event.preventDefault()),
         load: (url) => {
           void contents.loadURL(url).catch(() => undefined);
         },
@@ -478,7 +699,7 @@ export async function runCanvasPrototypeHost(): Promise<void> {
           if (window.isDestroyed()) return;
           if (input.type === "focus") window.focusOnWebView();
           else if (input.type === "blur") window.blurWebView();
-          else if (input.type === "edit") contents[input.command]();
+          else if (input.type === "edit") runEditCommand(contents, input.command);
           else {
             const event = electronInput(input);
             if (event !== undefined) contents.sendInputEvent(event);
