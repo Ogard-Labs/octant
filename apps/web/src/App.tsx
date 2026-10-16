@@ -4273,7 +4273,6 @@ function LaunchedShell(
       addZenProjectTerminal,
       addZenTerminal,
       archiveCodeThread: codeController.archiveThread,
-      canAddZenTerminal,
       closeBottomPanel,
       closeBottomPanelTab,
       closeDock,
@@ -6019,15 +6018,6 @@ function LaunchedShell(
     if (started.kind !== "project-terminal" || started.terminal.state !== "running") return;
     if (await zen.pinProjectTerminal({ projectId, terminalId })) return;
     await stop();
-  }
-
-  function canAddZenTerminal(
-    sourceContext: import("@octant/contracts/zen").ZenSourceContext,
-  ): boolean {
-    return (
-      resolveZenTerminalPinTarget(sourceContext, codeController.bootstrap?.threads ?? []) !==
-      undefined
-    );
   }
 
   function addZenBrowser(sourceContext: import("@octant/contracts/zen").ZenSourceContext): void {

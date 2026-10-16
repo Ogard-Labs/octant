@@ -1,6 +1,6 @@
 import { decodeCodeThreadId } from "@octant/contracts/code";
 import { decodeWorkThreadId, type CodeOperationId } from "@octant/contracts";
-import { memo, Suspense, useMemo, type ReactNode } from "react";
+import { memo, Suspense, useCallback, useMemo, type ReactNode } from "react";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
 import type { useNavigatorAssistant } from "../navigator/useNavigatorAssistant";
 import type { useProjectController } from "../projects/useProjectController";
@@ -16,8 +16,10 @@ import type { OctantHostBridge } from "../shell/hostBridge";
 import type { useShellController } from "../shell/useShellController";
 import type { useSidebarBackgroundFetcher } from "../shell/useShellPresentation";
 import type { CodeThread } from "@octant/contracts/code";
+import type { ZenSourceContext } from "@octant/contracts/zen";
 import type { resolveAppBackground } from "@octant/domain/theme-policy";
 import { resolveZenLiveThreadCard, type ZenLiveThreadClients } from "../zen/ZenLiveThreadCards";
+import { resolveZenTerminalPinTarget } from "../zen/zenThreadActions";
 import { ZenRoot } from "../zen/ZenRoot";
 import type { useZenController } from "../zen/useZenController";
 import type { ShellActions } from "./shellActions";
@@ -25,11 +27,7 @@ import type { ShellActions } from "./shellActions";
 export interface ZenContainerProps {
   readonly actions: Pick<
     ShellActions,
-    | "addZenBrowser"
-    | "addZenProjectTerminal"
-    | "addZenTerminal"
-    | "canAddZenTerminal"
-    | "openSettings"
+    "addZenBrowser" | "addZenProjectTerminal" | "addZenTerminal" | "openSettings"
   >;
   readonly allProjects: ReturnType<typeof useProjectController>["allProjects"];
   readonly appBackground: ReturnType<typeof resolveAppBackground> | undefined;
@@ -85,6 +83,15 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
     }
     return undefined;
   }, [allProjects, workspace]);
+
+  // Asked while the Add terminal menu renders, so it is a prop derived here
+  // rather than an action: actions answer with the committed render, and a
+  // thread the menu is drawing for must be judged by the same render.
+  const canAddTerminal = useCallback(
+    (sourceContext: ZenSourceContext): boolean =>
+      resolveZenTerminalPinTarget(sourceContext, codeThreads ?? []) !== undefined,
+    [codeThreads],
+  );
 
   const zenProjectTerminalTarget = useMemo(() => {
     const projectId = workspace.contextByMode.code.projectId ?? undefined;
@@ -260,7 +267,7 @@ export const ZenContainer = memo(function ZenContainer(props: ZenContainerProps)
               onAddTerminal={(sourceContext) => {
                 void actions.addZenTerminal(sourceContext);
               }}
-              canAddTerminal={actions.canAddZenTerminal}
+              canAddTerminal={canAddTerminal}
               onPinThread={(catalogRef) => void zen.pinThread(catalogRef)}
               onCloseAssistant={() => zen.setAssistantOpen(false)}
               onCloseThreadPicker={() => zen.setThreadPickerOpen(false)}

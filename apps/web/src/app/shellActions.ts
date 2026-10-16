@@ -65,7 +65,6 @@ export type ShellActions = {
   readonly addZenProjectTerminal: (projectId: ProjectId) => Promise<void>;
   readonly addZenTerminal: (sourceContext: ZenSourceContext) => Promise<void>;
   readonly archiveCodeThread: CodeController["archiveThread"];
-  readonly canAddZenTerminal: (sourceContext: ZenSourceContext) => boolean;
   readonly closeBottomPanel: (restoreFocus?: boolean) => void;
   readonly closeBottomPanelTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly closeDock: () => void;
