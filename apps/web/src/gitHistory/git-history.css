@@ -149,7 +149,7 @@
   color: var(--oct-muted);
 }
 .git-history__more {
-  padding: 6px 12px;
+  padding: var(--oct-space-2) 12px;
   border-top: 1px solid var(--oct-border);
 }
 .git-history__detail {
@@ -166,7 +166,7 @@
   overflow-wrap: anywhere;
 }
 .git-history__commit-header p {
-  margin: 6px 0;
+  margin: var(--oct-space-1) 0;
   color: var(--oct-muted);
   font-size: var(--oct-text-detail);
 }
@@ -186,7 +186,7 @@
 }
 .git-history__diffs summary {
   cursor: pointer;
-  padding: 10px 12px;
+  padding: var(--oct-space-3) 12px;
   overflow-wrap: anywhere;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-detail);
@@ -233,7 +233,7 @@
   cursor: pointer;
   color: var(--oct-muted);
   font-size: var(--oct-text-detail);
-  padding-block: 6px;
+  padding-block: var(--oct-space-2);
 }
 
 .git-history__table tr[data-selected="true"] {

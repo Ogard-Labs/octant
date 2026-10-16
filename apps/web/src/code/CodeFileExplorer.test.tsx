@@ -11,6 +11,8 @@ import {
 } from "./CodeFileExplorer";
 
 const codeStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/code.css"), "utf8");
+const dockStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/dock.css"), "utf8");
+const systemStylesheet = readFileSync(resolve(import.meta.dirname, "../styles/octant.css"), "utf8");
 
 describe("CodeFileExplorer", () => {
   it("renders authoritative relative paths and opens an available file from the keyboard", async () => {
@@ -283,8 +285,19 @@ describe("CodeFileExplorer", () => {
     // the bare 30px search field: that is what lost its padding and hairline.
     const head = ruleBody(codeStylesheet, ".code-file-explorer__head");
     expect(head).toMatch(/min-height:\s*44px/);
-    expect(head).toMatch(/padding:\s*7px 12px/);
+    expect(head).toMatch(/padding:\s*var\(--oct-space-2\) 12px/);
     expect(head).toMatch(/border-bottom:\s*1px solid var\(--oct-border\)/);
+  });
+
+  it("closes the docked head on the 38px rail: 4px, the 30px field, then 3px and the hairline", () => {
+    // Measured in a browser: 4px above, 3px below and a 1px hairline around the
+    // 30px field is 38px; a plain 4px below made the head 39px and its hairline
+    // missed the title band beside it.
+    expect(systemStylesheet).toMatch(/--oct-rail-pad-end:\s*calc\(var\(--oct-space-1\) - 1px\)/);
+    expect(dockStylesheet).toMatch(
+      /padding:\s*4px var\(--oct-space-3\) var\(--oct-rail-pad-end\);/,
+    );
+    expect(codeStylesheet).toMatch(/\.code-file-explorer__search input \{[^}]*height:\s*30px/);
   });
 });
 

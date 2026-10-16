@@ -61,7 +61,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 10px;
+  gap: var(--oct-space-1) var(--oct-space-2);
 }
 
 .code-pr-review__header .code-pr-review__actions {
@@ -129,7 +129,7 @@
 }
 
 .code-pr-review__section-header {
-  margin-bottom: 10px;
+  margin-bottom: var(--oct-space-2);
 }
 
 .code-pr-review__commits,
@@ -148,7 +148,7 @@
 .code-pr-review__reviews > li,
 .code-pr-review__comments > li {
   display: grid;
-  gap: 6px;
+  gap: var(--oct-space-1);
 }
 
 .code-pr-review__files > li,
@@ -159,7 +159,7 @@
 }
 
 .code-pr-review__prose > * + * {
-  margin-top: 10px;
+  margin-top: var(--oct-space-2);
 }
 
 .code-pr-review__prose :is(h2, h3, h4) {
@@ -185,7 +185,7 @@
 }
 
 .code-pr-review__prose li + li {
-  margin-top: 6px;
+  margin-top: var(--oct-space-1);
 }
 
 .code-pr-review__prose a {
@@ -200,7 +200,7 @@
 }
 
 .code-pr-review__source {
-  margin-top: 10px;
+  margin-top: var(--oct-space-2);
 }
 
 .code-pr-review__source > summary {

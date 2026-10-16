@@ -83,7 +83,7 @@
 .settings-view .provider-settings__manual {
   display: grid;
   justify-items: start;
-  gap: 14px;
+  gap: var(--oct-space-3);
 }
 
 .settings-view
@@ -200,7 +200,7 @@
 /* Agent policy */
 .settings-view .agent-run-settings-panel__error {
   margin: 0;
-  padding: 10px 12px;
+  padding: var(--oct-space-3) 12px;
   border: 1px solid color-mix(in oklab, var(--oct-danger) 45%, transparent);
   border-radius: var(--oct-radius-sm);
   background: color-mix(in oklab, var(--oct-danger) 9%, transparent);
@@ -220,7 +220,7 @@
 
 .settings-view .native-harness-card {
   margin: 0;
-  padding: 14px 0;
+  padding: var(--oct-space-4) 0;
   border: 0;
   border-top: 1px solid var(--oct-hairline);
   border-radius: 0;
@@ -314,7 +314,7 @@
 }
 
 .settings-view .usage-dashboard__section-header {
-  padding: 10px 0 8px;
+  padding: var(--oct-space-3) 0 8px;
 }
 
 @media (max-width: 720px) {

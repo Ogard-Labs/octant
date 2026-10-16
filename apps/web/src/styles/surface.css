@@ -205,7 +205,7 @@
 }
 
 .surface-section > .oct-section-label {
-  padding: 10px 0 8px;
+  padding: var(--oct-space-3) 0 8px;
   border-bottom: 1px solid var(--oct-hairline);
 }
 
@@ -370,7 +370,7 @@
   min-height: 100%;
   padding-block: min(16vh, 148px) 48px;
   margin: 0 auto;
-  gap: 18px;
+  gap: var(--oct-space-4);
 }
 
 .welcome__heading {

@@ -7,7 +7,7 @@
    one line of attribution. The reader keeps the body as plain text on
    purpose, in a card, with the comments as cards under it. */
 .github-issue-browser__repository {
-  gap: 6px;
+  gap: var(--oct-space-1);
 }
 
 .github-issue-browser__repository-name {
@@ -155,7 +155,7 @@
   width: 100%;
   height: auto;
   min-height: 0;
-  padding: 10px var(--oct-space-4);
+  padding: var(--oct-space-3) var(--oct-space-4);
   border: 0;
   border-radius: 0;
   text-align: start;

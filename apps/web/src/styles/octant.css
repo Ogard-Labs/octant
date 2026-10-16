@@ -209,6 +209,10 @@
   --oct-title-rail-h: 38px;
   --oct-rail-tab-h: 30px;
   --oct-rail-button-h: 28px;
+  /* The bottom edge of a rail head: the 4px step less the hairline, so a 30px
+     field between 4px above and this below still closes a 38px rail with its
+     1px border. A plain 4px made the Files head 39px. */
+  --oct-rail-pad-end: calc(var(--oct-space-1) - 1px);
   --oct-nav-head-h: 40px;
   --oct-nav-row-h: 32px;
   --oct-nav-inset: 12px;
@@ -634,7 +638,7 @@ h4 {
 .topnav .logo {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--oct-space-2);
   /* The wordmark is the one thing in the bar that must not be squeezed. As a
      flex item it shrinks by default, and because it is nowrap it does not get
      narrower when it shrinks — it keeps its glyphs and slides them under
@@ -765,8 +769,8 @@ h4 {
 .pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: var(--oct-space-1);
+  padding: 4px var(--oct-space-3);
   background: var(--oct-accent-soft);
   color: var(--oct-accent-fg);
   border-radius: var(--oct-radius-pill);
@@ -799,7 +803,7 @@ h4 {
   min-height: 18px;
   align-items: center;
   gap: var(--oct-space-1);
-  padding: 1px 6px;
+  padding: 1px var(--oct-space-2);
   color: var(--oct-meta);
   background: transparent;
   border: 1px solid transparent;
@@ -944,7 +948,7 @@ h4 {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--oct-space-1);
 }
 .field label {
   font-size: var(--oct-text-sm);
@@ -1473,7 +1477,7 @@ input.switch:checked::after {
 .code {
   font-family: var(--oct-font-mono);
   font-size: 0.9em;
-  padding: 2px 6px;
+  padding: 2px var(--oct-space-2);
   border-radius: var(--oct-radius-sm);
   background: var(--oct-fg-soft);
   color: var(--oct-fg-2);
@@ -1684,7 +1688,7 @@ input.switch:checked::after {
   display: grid;
   grid-template-columns: 120px minmax(0, 1fr) 100px;
   gap: var(--oct-space-8);
-  padding: 22px 0;
+  padding: var(--oct-space-6) 0;
   border-top: 1px solid var(--oct-border);
   align-items: baseline;
 }
@@ -1879,7 +1883,7 @@ input.switch:checked::after {
 }
 .skeleton-text {
   height: 12px;
-  margin-block: 6px;
+  margin-block: var(--oct-space-1);
 }
 .skeleton-title {
   height: 22px;
@@ -2029,7 +2033,7 @@ input.switch:checked::after {
 
 .octant-tooltip {
   max-width: min(280px, calc(100vw - 24px));
-  padding: 7px 10px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   border: 1px solid color-mix(in srgb, var(--oct-fg) 12%, var(--oct-border));
   border-radius: var(--oct-radius-sm);
   background: var(--oct-fg);
@@ -2042,7 +2046,7 @@ input.switch:checked::after {
    ordinary raised ground rather than the label chip's inverted one. */
 .octant-tooltip--card {
   max-width: min(320px, calc(100vw - 24px));
-  padding: 10px 12px;
+  padding: var(--oct-space-3) 12px;
   border-color: var(--oct-border);
   background: var(--oct-surface);
   color: var(--oct-fg);
@@ -2060,7 +2064,7 @@ input.switch:checked::after {
 
 .octant-preview-card {
   max-width: min(320px, calc(100vw - 24px));
-  padding: 10px 12px;
+  padding: var(--oct-space-3) 12px;
   /* No border of its own: the overlay shadow already carries the hairline, and
      the two together drew a double ring. */
   border-radius: var(--oct-radius-md);
@@ -2516,7 +2520,7 @@ input.switch:checked::after {
   width: auto;
   max-width: min(80%, 620px);
   justify-self: end;
-  padding: 10px 14px;
+  padding: var(--oct-space-3) var(--oct-space-4);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface-warm);
@@ -2582,7 +2586,7 @@ input.switch:checked::after {
   align-items: center;
   gap: 8px 12px;
   min-width: 0;
-  padding: 8px 12px 8px 14px;
+  padding: 8px 12px 8px var(--oct-space-4);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
@@ -2637,7 +2641,7 @@ input.switch:checked::after {
   flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--oct-space-1);
   max-width: 100%;
   margin-inline-start: auto;
 }
@@ -4420,6 +4424,8 @@ input.switch:checked::after {
   width: 100%;
   min-height: 48px;
   max-height: 180px;
+  /* 18px is the measured prompt offset the visual language contract pins, so it
+     stays off the 4px scale on purpose. */
   padding: 18px var(--oct-composer-gutter) 12px;
   border: 0;
   border-radius: 0;
@@ -4451,7 +4457,7 @@ input.switch:checked::after {
   flex-wrap: wrap;
   align-items: center;
   min-height: 36px;
-  gap: 6px;
+  gap: var(--oct-space-1);
   /* A text trigger carries 8px of its own inset, so it lands on the gutter;
      the send circle's right edge lands on it too. */
   padding: 0 var(--oct-composer-gutter) 12px calc(var(--oct-composer-gutter) - 8px);
@@ -4464,7 +4470,7 @@ input.switch:checked::after {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
   margin-inline-start: auto;
 }
 /* A narrow column shortens the model's name before anything else moves, and
@@ -4517,7 +4523,7 @@ input.switch:checked::after {
   width: auto;
   max-width: 190px;
   min-height: 28px;
-  padding-inline: 8px 22px;
+  padding-inline: 8px var(--oct-space-6);
   border-color: transparent;
   border-radius: var(--oct-radius-sm);
   color: var(--oct-meta);
@@ -4543,7 +4549,7 @@ input.switch:checked::after {
   gap: var(--oct-space-1);
   min-height: 28px;
   padding-block: 0;
-  padding-inline: 8px 6px;
+  padding-inline: 8px var(--oct-space-2);
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -4601,7 +4607,7 @@ input.switch:checked::after {
 }
 .thread-composer__surface .composer-input {
   min-height: calc(40px + 1lh);
-  padding: 12px 12px 6px;
+  padding: 12px 12px var(--oct-space-2);
 }
 .thread-composer__surface > .composer-row {
   min-height: 32px;
@@ -4657,7 +4663,7 @@ input.switch:checked::after {
   gap: 2px 12px;
   min-height: 18px;
   margin: 0;
-  padding: 0 var(--oct-composer-gutter) 10px;
+  padding: 0 var(--oct-composer-gutter) var(--oct-space-3);
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
@@ -8219,7 +8225,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   align-items: center;
   justify-content: space-between;
   flex: 0 0 auto;
-  padding: 14px var(--oct-space-6) 2px;
+  padding: var(--oct-space-4) var(--oct-space-6) 2px;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   color: var(--oct-fg);
@@ -8310,7 +8316,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   gap: 2px;
   flex: 0 0 auto;
   margin: 0 var(--oct-space-3) var(--oct-space-3);
-  padding: 6px;
+  padding: var(--oct-space-2);
   border-radius: var(--oct-radius-pill);
 }
 .tabitem {
@@ -8377,7 +8383,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 .statuscard-label {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--oct-space-1);
 }
 .statuscard-title {
   font-family: var(--oct-font-display);
@@ -8576,9 +8582,9 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 .attempt {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
   align-self: flex-start;
-  padding: 4px 10px;
+  padding: 4px var(--oct-space-3);
   margin-bottom: var(--oct-space-2);
   border: 1px solid var(--oct-border-soft);
   border-radius: var(--oct-radius-md);
@@ -8601,8 +8607,8 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 .stage {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1) var(--oct-space-3);
   border-radius: var(--oct-radius-pill);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
@@ -8951,7 +8957,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 .mfield {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--oct-space-1);
   text-align: left;
 }
 .mfield label {

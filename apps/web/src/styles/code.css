@@ -293,7 +293,7 @@
   min-height: 44px;
   align-items: center;
   gap: var(--oct-space-2);
-  padding: 7px 12px;
+  padding: var(--oct-space-2) 12px;
   background: var(--oct-surface);
   border-bottom: 1px solid var(--oct-border);
 }
@@ -317,7 +317,7 @@
 
 .code-file-explorer__search input {
   height: 30px;
-  padding: 0 32px 0 30px;
+  padding: 0 32px 0 var(--oct-space-8);
   border-color: var(--oct-border);
   background: var(--oct-surface);
 }
@@ -362,7 +362,7 @@
   min-width: 0;
   min-height: var(--oct-file-row-h);
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
   padding-block: 2px;
   padding-inline-end: var(--oct-space-2);
   /* One step per level, capped where a name would otherwise have nothing
@@ -616,7 +616,7 @@
 .unified-diff__counts {
   display: inline-flex;
   flex: none;
-  gap: 6px;
+  gap: var(--oct-space-1);
   font-family: var(--oct-font-mono);
 }
 
@@ -646,7 +646,7 @@
 .unified-diff__number {
   width: 1%;
   min-width: 3.5ch;
-  padding: 0 6px;
+  padding: 0 var(--oct-space-2);
   color: var(--oct-meta);
   text-align: right;
   vertical-align: top;
@@ -655,7 +655,7 @@
 
 .unified-diff__marker {
   width: 1%;
-  padding: 0 2px 0 6px;
+  padding: 0 2px 0 var(--oct-space-2);
   color: var(--oct-meta);
   text-align: center;
   vertical-align: top;
@@ -663,7 +663,7 @@
 }
 
 .unified-diff__code {
-  padding: 0 var(--oct-space-3) 0 6px;
+  padding: 0 var(--oct-space-3) 0 var(--oct-space-2);
   white-space: pre;
   tab-size: 4;
 }
@@ -1365,7 +1365,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   align-self: center;
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
-  padding: 30px 28px 18px;
+  padding: var(--oct-space-8) 28px var(--oct-space-5);
 }
 
 .code-overview__card {
@@ -1406,7 +1406,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 }
 
 .code-overview__card p {
-  margin: 6px 0 0;
+  margin: var(--oct-space-1) 0 0;
   overflow-wrap: anywhere;
   color: var(--octant-text-muted);
   font-size: var(--oct-text-detail);
@@ -1482,7 +1482,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-overview__toolbar {
   align-items: flex-start;
-  padding: 22px 28px 18px;
+  padding: var(--oct-space-6) 28px var(--oct-space-5);
   background: var(--octant-chrome);
 }
 
@@ -1506,7 +1506,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-overview__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--oct-space-2);
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
 }
@@ -1527,7 +1527,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-overview__policy {
   flex: none;
-  padding: 6px 9px;
+  padding: var(--oct-space-2) var(--oct-space-2);
   color: var(--octant-text-secondary);
   background: var(--octant-control);
   border: 1px solid var(--octant-border-strong);
@@ -1548,7 +1548,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-self: center;
   gap: 8px;
-  padding: 0 28px 30px;
+  padding: 0 28px var(--oct-space-8);
   border-bottom: 0;
 }
 
@@ -1645,7 +1645,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-thread {
   display: grid;
   gap: 4px;
-  padding: 10px 0;
+  padding: var(--oct-space-3) 0;
   border-bottom: 1px solid var(--oct-border);
 }
 
@@ -1679,7 +1679,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
 }
 
 .code-project-thread__pin {
@@ -1697,7 +1697,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-thread__facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 14px;
+  gap: 2px var(--oct-space-3);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1753,9 +1753,9 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
    interior placement of the title row, inline facts, and disclosure. */
 .code-project-thread {
   display: grid;
-  gap: 10px;
+  gap: var(--oct-space-2);
   min-width: 0;
-  padding: 10px 14px 12px;
+  padding: var(--oct-space-3) var(--oct-space-4) 12px;
 }
 
 .code-project-thread__row {
@@ -1784,7 +1784,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
 }
 
 .code-project-thread__pin {
@@ -1813,7 +1813,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-overview__quick-start .code-composer-adapter {
   min-height: 0;
   height: auto;
-  margin-top: 14px;
+  margin-top: var(--oct-space-3);
   background: transparent;
 }
 
@@ -1832,7 +1832,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   .code-project-overview__facts,
   .code-project-overview__sessions,
   .code-project-overview__quick-start {
-    padding-inline: 18px;
+    padding-inline: var(--oct-space-5);
   }
 }
 
@@ -1843,7 +1843,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
   .code-overview__toolbar,
   .code-overview__context {
-    padding-inline: 18px;
+    padding-inline: var(--oct-space-5);
   }
 
   .code-overview__toolbar .project-overview__name {
@@ -1852,12 +1852,12 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
   .code-overview__card--delivery {
     grid-template-columns: 1fr;
-    gap: 18px;
+    gap: var(--oct-space-4);
   }
 
   .code-overview .project-overview__actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    padding-inline: 18px;
+    padding-inline: var(--oct-space-5);
   }
 }
 
@@ -1903,8 +1903,8 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   height: auto;
   min-height: var(--oct-control-height-sm);
   align-items: center;
-  gap: 6px;
-  padding: 0 10px;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-3);
   font-size: var(--oct-text-xs);
 }
 
@@ -1913,7 +1913,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
    the system `.callout` recipe in the thread column below. */
 .code-thread-workspace__error {
   margin: 0;
-  padding: 10px clamp(20px, 4vw, 48px);
+  padding: var(--oct-space-3) clamp(20px, 4vw, 48px);
   color: var(--oct-warn-fg);
   background: var(--oct-warn-soft);
   border-bottom: 1px solid var(--oct-border);
@@ -2019,7 +2019,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   flex: 1 1 auto;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
 }
 .code-checkout-bar__project {
   flex: 0 1 auto;
@@ -2041,7 +2041,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-checkout-bar__diffstat {
   display: inline-flex;
   flex: 0 0 auto;
-  gap: 6px;
+  gap: var(--oct-space-1);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2115,15 +2115,15 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 /* The transcript gallery reuses the attachment classes without the composer's
    chip frame, so the message rows keep a frame and a readable thumbnail. */
 .code-thread-workspace__message .code-thread-workspace__attachments {
-  margin: 6px 0 0;
+  margin: var(--oct-space-1) 0 0;
   padding: 0;
 }
 
 .code-thread-workspace__message .code-thread-workspace__attachment {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 6px 3px 3px;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-1) var(--oct-space-2) var(--oct-space-1) var(--oct-space-1);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
 }
@@ -2169,8 +2169,8 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
+  gap: var(--oct-space-1);
+  margin-top: var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
@@ -2254,7 +2254,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-turn-files__counts {
   display: inline-flex;
   flex: 0 0 auto;
-  gap: 6px;
+  gap: var(--oct-space-1);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
@@ -2393,7 +2393,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--oct-space-2) 10px;
+  gap: var(--oct-space-2) var(--oct-space-2);
 }
 
 .code-project-pull-requests__list {
@@ -2409,7 +2409,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   grid-template-columns: 16px minmax(0, 1fr);
   width: 100%;
   height: auto;
-  gap: 10px;
+  gap: var(--oct-space-2);
   min-height: 64px;
   padding: var(--oct-space-3) var(--oct-space-2);
   border: 0;

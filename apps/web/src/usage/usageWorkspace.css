@@ -30,7 +30,7 @@
 .usage-workspace__filters {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
+  gap: var(--oct-space-2);
   min-width: 0;
   padding: var(--oct-space-3);
   background: var(--oct-surface);
@@ -63,7 +63,7 @@
 .usage-workspace__total {
   display: grid;
   gap: 2px;
-  padding: 10px;
+  padding: var(--oct-space-3);
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
@@ -94,7 +94,7 @@
 .usage-workspace__highlights,
 .usage-workspace__hosts {
   display: grid;
-  gap: 6px;
+  gap: var(--oct-space-1);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -110,7 +110,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-2);
-  padding: 6px var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-2);
   border: 1px solid color-mix(in oklab, var(--oct-fg) 26%, transparent);
   border-radius: var(--oct-radius-sm);
 }
@@ -142,7 +142,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--oct-space-1) var(--oct-space-3);
-  padding: 6px var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-2);
   border: 1px solid color-mix(in oklab, var(--oct-fg) 26%, transparent);
   border-radius: var(--oct-radius-sm);
 }
@@ -176,7 +176,7 @@
 .usage-workspace__sources div {
   display: grid;
   gap: 2px;
-  padding: var(--oct-space-2) 10px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
 }
@@ -203,7 +203,7 @@
 }
 
 .usage-workspace__source-status {
-  padding: 1px 6px;
+  padding: 1px var(--oct-space-2);
   border: 1px solid currentcolor;
   border-radius: var(--oct-radius-pill);
   font-family: var(--oct-font-mono);
@@ -225,7 +225,7 @@
 
 .usage-table th,
 .usage-table td {
-  padding: 6px var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-2);
   text-align: left;
   border-bottom: 1px solid var(--oct-border-soft);
   white-space: nowrap;
@@ -247,7 +247,7 @@
 
 .usage-table--narrow th,
 .usage-table--narrow td {
-  padding: var(--oct-space-1) 6px;
+  padding: var(--oct-space-1) var(--oct-space-2);
 }
 
 .usage-heatmap {
@@ -267,7 +267,7 @@
 .usage-heatmap__legend {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--oct-space-1) 14px;
+  gap: var(--oct-space-1) var(--oct-space-3);
   margin: 0;
   padding: 0;
   list-style: none;

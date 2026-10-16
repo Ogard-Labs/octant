@@ -91,7 +91,7 @@
 
 .remote-shell__surface-grid {
   display: grid;
-  gap: 10px;
+  gap: var(--oct-space-2);
 }
 
 /* Border, background, radius, and shadow now come from the OctantCard
@@ -143,7 +143,7 @@
 
 .remote-shell__status {
   display: flex;
-  gap: 6px;
+  gap: var(--oct-space-1);
   align-items: baseline;
   margin: 0;
   color: var(--oct-fg-2);
@@ -157,7 +157,7 @@
 
 .remote-shell__device-panel {
   display: grid;
-  gap: 10px;
+  gap: var(--oct-space-2);
   padding: var(--oct-space-4);
   background: var(--oct-surface);
   border: 1px solid var(--oct-border);
