@@ -223,9 +223,42 @@ describe("TerminalService", () => {
       process.emitData("s");
       process.emitData(" -la\n");
       expect(observer).toHaveBeenCalledOnce();
-      await vi.advanceTimersByTimeAsync(16);
+      await vi.advanceTimersByTimeAsync(50);
       expect(observer).toHaveBeenCalledTimes(2);
       expect(observer.mock.calls[1]?.[0]).toMatchObject({ text: "s -la\n" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("emits at most once per 50 ms window from a flooding terminal", async () => {
+    vi.useFakeTimers();
+    try {
+      const process = fakeProcess();
+      const service = new TerminalService({
+        port: { start: () => process },
+        inheritedEnvironment: {},
+        credentials: { resolve: async () => "private-token" },
+      });
+      await service.launch({
+        terminalId: "terminal-1",
+        shell: "/bin/zsh",
+        cwd: "/repo",
+        stateScope: "repo_test",
+        columns: 80,
+        rows: 24,
+        credentialReferences: [],
+      });
+      const observer = vi.fn();
+      service.observe("terminal-1", observer);
+
+      // One leading-edge publish, then one per 50 ms window: 21 in a second.
+      for (let ms = 0; ms < 1000; ms += 1) {
+        process.emitData("x");
+        await vi.advanceTimersByTimeAsync(1);
+      }
+
+      expect(observer.mock.calls.length).toBeLessThanOrEqual(21);
     } finally {
       vi.useRealTimers();
     }
@@ -254,7 +287,7 @@ describe("TerminalService", () => {
 
       process.emitData("result private-");
       process.emitData("token\n");
-      await vi.advanceTimersByTimeAsync(16);
+      await vi.advanceTimersByTimeAsync(50);
 
       // A credential split across two PTY callbacks is held back until it can
       // be redacted, so no observer ever sees it in the clear however the
@@ -352,7 +385,7 @@ describe("TerminalService", () => {
       observer.mockClear();
 
       process.emitData("prompt\n");
-      await vi.advanceTimersByTimeAsync(16);
+      await vi.advanceTimersByTimeAsync(50);
 
       expect(observer).toHaveBeenCalledOnce();
     } finally {
@@ -430,7 +463,7 @@ describe("TerminalService", () => {
       process.emitData("ready before observer\n");
       const observer = vi.fn();
       service.observe("terminal-1", observer);
-      await vi.advanceTimersByTimeAsync(16);
+      await vi.advanceTimersByTimeAsync(50);
 
       expect(observer).toHaveBeenCalledOnce();
       expect(observer).toHaveBeenCalledWith(
@@ -463,11 +496,11 @@ describe("TerminalService", () => {
       service.observe("terminal-1", observer);
 
       process.emitData("private-");
-      await vi.advanceTimersByTimeAsync(16);
+      await vi.advanceTimersByTimeAsync(50);
       expect(observer).not.toHaveBeenCalled();
 
       process.emitData("token");
-      await vi.advanceTimersByTimeAsync(16);
+      await vi.advanceTimersByTimeAsync(50);
       expect(observer).toHaveBeenCalledWith(
         expect.objectContaining({ text: "[REDACTED]", replace: false }),
       );

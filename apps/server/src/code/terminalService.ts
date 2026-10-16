@@ -5,7 +5,12 @@ export const MAX_TERMINAL_OUTPUT_CHUNK_BYTES = 64 * 1024;
 
 const TRUNCATION_MARKER = "[Octant terminal output truncated]\n";
 const MAX_LIVE_TERMINAL_TRANSCRIPT_CHARACTERS = 64 * 1024;
-const OUTPUT_PUBLISH_DELAY_MS = 16;
+// Every emission is written synchronously to the evidence store and the
+// journal, and the store holds at most 100,000 entries before it refuses a
+// write and the live shell is closed. At 50 ms a flooding terminal reaches that
+// ceiling in about 83 minutes; at one frame (16 ms) in about 27. The renderer
+// does not depend on the window, so it stays at 50 ms.
+const OUTPUT_PUBLISH_DELAY_MS = 50;
 const INHERITED_ENVIRONMENT_ALLOWLIST = new Set([
   "HOME",
   "LANG",
