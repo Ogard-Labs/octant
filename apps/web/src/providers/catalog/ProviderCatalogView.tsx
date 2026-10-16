@@ -276,7 +276,7 @@ function ProviderCatalogDetail(
     props.onBack();
   };
   const status = providerCatalogStatus(state);
-  const { modes, agentLoop } = state.capabilities;
+  const { modes, agentLoop, sandbox } = state.capabilities;
   const runtimeCard =
     state.setup === "runtime" && state.instance !== undefined
       ? props.renderRuntimeCard?.(state.instance)
@@ -370,7 +370,7 @@ function ProviderCatalogDetail(
           </div>
           <div className="provider-catalog__fact">
             <dt>Agent loop</dt>
-            <dd>{agentLoopLabel(agentLoop)}</dd>
+            <dd>{agentLoopLabel(agentLoop, sandbox)}</dd>
           </div>
         </dl>
       </SettingsSection>

@@ -2376,7 +2376,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
-  driver's modes and agent loop, and picks one next step that acts on the
+  driver's modes, agent loop, and sandbox (who confines a runtime, held to the
+  confinement matrix by `providerProcessConfinement.test.ts`), and picks one next step that acts on the
   configured instance when one exists. Opening the catalog starts nothing. A
   scan, connect, enable, or connection check runs only from its step's button,
   and sign-in, Locate binary, and credentials stay on the runtime's own card.

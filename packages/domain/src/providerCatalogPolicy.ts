@@ -80,9 +80,19 @@ export type ProviderCatalogModeSupport = "yes" | "checked-models" | "verified-mo
  */
 export type ProviderCatalogAgentLoop = "runtime" | "octant-harness" | "replies-only" | "none";
 
+/**
+ * Who confines a runtime's own tools, as the confinement matrix in the
+ * architecture's security section records it: Octant's sandbox in every
+ * posture below Full access, in Plan only, or never (the runtime's own sandbox
+ * answers). `not-applicable` is a driver whose agent loop is not a provider
+ * runtime, so the matrix has no row for it.
+ */
+export type ProviderCatalogSandbox = "octant" | "octant-in-plan" | "runtime" | "not-applicable";
+
 export interface ProviderCatalogCapabilities {
   readonly modes: Readonly<Record<OctantMode, ProviderCatalogModeSupport>>;
   readonly agentLoop: ProviderCatalogAgentLoop;
+  readonly sandbox: ProviderCatalogSandbox;
 }
 
 export interface ProviderCatalogState {
@@ -117,18 +127,40 @@ export function providerCatalogCapabilities(
     return {
       modes: { chat: "yes", work: "verified-models", code: "verified-models" },
       agentLoop: "octant-harness",
+      sandbox: "not-applicable",
     };
   }
   if (driverKind === "ollama") {
-    return { modes: { chat: "yes", work: "no", code: "no" }, agentLoop: "replies-only" };
+    return {
+      modes: { chat: "yes", work: "no", code: "no" },
+      agentLoop: "replies-only",
+      sandbox: "not-applicable",
+    };
   }
   if (isNativeToolRuntimeDriver(driverKind)) {
     return {
       modes: { chat: "yes", work: "checked-models", code: "checked-models" },
       agentLoop: "runtime",
+      sandbox: runtimeSandbox(driverKind),
     };
   }
-  return { modes: { chat: "no", work: "no", code: "no" }, agentLoop: "none" };
+  return {
+    modes: { chat: "no", work: "no", code: "no" },
+    agentLoop: "none",
+    sandbox: "not-applicable",
+  };
+}
+
+/**
+ * Codex keeps one app-server for every thread on an instance, so no profile
+ * fits it; Claude's postures that write rest on its own sandbox settings.
+ * Every other runtime launches wrapped. `providerProcessConfinement.test.ts`
+ * holds this to the matrix.
+ */
+function runtimeSandbox(driverKind: ProviderDriverKind): ProviderCatalogSandbox {
+  if (driverKind === "codex") return "runtime";
+  if (driverKind === "claude") return "octant-in-plan";
+  return "octant";
 }
 
 export function providerCatalogSetupKind(driverKind: ProviderDriverKind): ProviderCatalogSetupKind {
