@@ -1,5 +1,5 @@
 import type { AndroidToolchainClient } from "@octant/client-runtime/android-toolchain-client";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAndroidEmulator } from "./useAndroidEmulator";
 
