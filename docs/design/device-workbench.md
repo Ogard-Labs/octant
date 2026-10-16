@@ -395,9 +395,12 @@ one the person starts themselves keeps its own snapshot behavior.
 The emulator runs as the leader of its own process group, because the launcher
 starts the emulator proper as a child. A boot that does not come online in time,
 or is cancelled, ends that group (a polite stop, then a kill after 5 s, each
-bounded) and nothing else. Its evidence says `cleanup: "complete"` only when the
-group is gone; if it will not stop, the outcome is `interrupted` with
-`cleanup: "uncertain"`.
+bounded) and nothing else. The group id is the process's pid, which the system
+may reuse once the process is gone, so nothing is signalled after the process
+Octant started has exited. Its evidence says `cleanup: "complete"` only when no
+running member is left (a member that exited but was never reaped does not
+count); if the group will not stop, or cannot be proven gone, the outcome is
+`interrupted` with `cleanup: "uncertain"`.
 
 ### Shut down from the Android pane
 
