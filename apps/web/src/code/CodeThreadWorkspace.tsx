@@ -433,6 +433,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // Save to Project answers beside the composer, as Work does in its thread:
   // the saved path on success, and the host's reason when it did not save.
   const [imageSaveMessage, setImageSaveMessage] = useState<string>();
+  // A save that finishes after the person moved to another thread must not
+  // print its path or failure under that thread.
+  const imageSaveThreadKey = useRef(String(props.threadId));
 
   useEffect(() => {
     setDraft(props.controller.pendingDraft);
@@ -481,6 +484,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }, [composerReady, props.threadId]);
   useEffect(() => {
     setTurnAccessOverride(undefined);
+    imageSaveThreadKey.current = String(props.threadId);
     setImageSaveMessage(undefined);
   }, [props.threadId]);
   useEffect(() => {
@@ -1677,6 +1681,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           onAttach={(file) => attachments.attach([file])}
           onSaveToProject={(job, artifact) => {
             setImageSaveMessage(undefined);
+            const startedOn = String(props.threadId);
+            const report = (message: string) => {
+              if (imageSaveThreadKey.current === startedOn) setImageSaveMessage(message);
+            };
             void props.imageGenerationClient
               ?.save({
                 jobId: job.id,
@@ -1685,12 +1693,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               })
               .then((result) => {
                 if (result === undefined) return;
-                setImageSaveMessage(
-                  result.status === "saved" ? `Saved ${result.relativePath}.` : result.reason,
-                );
+                report(result.status === "saved" ? `Saved ${result.relativePath}.` : result.reason);
               })
               .catch(() => {
-                setImageSaveMessage("The image could not be saved.");
+                report("The image could not be saved.");
               });
           }}
           profiles={props.imageGenerationProfiles}

@@ -3245,6 +3245,37 @@ describe("CodeThreadWorkspace", () => {
     expect(await screen.findByText("That path is outside the project.")).toBeVisible();
   });
 
+  it("does not show a finished save from the thread it was started on after switching threads", async () => {
+    const user = userEvent.setup();
+    let finishSave: ((value: unknown) => void) | undefined;
+    const save = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const client = {
+      list: async () => ({ jobs: [completedGeneratedJob()] }),
+      artifact: async () => new Blob([Uint8Array.from([1])], { type: "image/png" }),
+      save,
+    } as never;
+    const tree = (id: never) => (
+      <CodeThreadWorkspace
+        controller={controller({}, id)}
+        imageGenerationClient={client}
+        imageGenerationProfiles={[imageProfile()]}
+        providerGroups={[providerGroup()]}
+        threadId={id}
+      />
+    );
+    const view = render(tree(threadId));
+    await user.click(await screen.findByRole("button", { name: "Save to Project" }));
+    view.rerender(tree(anotherThreadId));
+    await act(async () => finishSave?.({ status: "saved", relativePath: "generated/ab12.png" }));
+
+    expect(screen.queryByText("Saved generated/ab12.png.")).not.toBeInTheDocument();
+  });
+
   it("shows why Save to Project failed instead of leaving an unhandled rejection", async () => {
     const user = userEvent.setup();
     const save = vi.fn(async () => {

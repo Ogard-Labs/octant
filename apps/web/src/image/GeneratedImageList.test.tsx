@@ -273,6 +273,46 @@ describe("generated image arrival", () => {
   });
 });
 
+describe("generated image arrival during a read", () => {
+  it("reads again after the in-flight read when a job finishes while it is running", async () => {
+    let settleFirst: ((value: { readonly jobs: ReadonlyArray<ImageJob> }) => void) | undefined;
+    const list = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ readonly jobs: ReadonlyArray<ImageJob> }>((resolve) => {
+            settleFirst = resolve;
+          }),
+      )
+      .mockResolvedValue({ jobs: [completedJob()] });
+    const client = {
+      list,
+      artifact: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+    } as unknown as ImageGenerationClient;
+    const tree = (revision: number) => (
+      <ImageJobChangeRevisionContext.Provider value={revision}>
+        <GeneratedImageList
+          client={client}
+          profiles={[profile()]}
+          scopeId={scopeId}
+          threadKind="chat-thread"
+        />
+      </ImageJobChangeRevisionContext.Provider>
+    );
+    const view = render(tree(0));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+
+    // The job finishes after the host answered this read's snapshot but
+    // before the read settles: the stale answer must not be the last word.
+    view.rerender(tree(1));
+    expect(list).toHaveBeenCalledTimes(1);
+    await act(async () => settleFirst?.({ jobs: [] }));
+
+    expect(await screen.findByTestId("generated-image-card")).toBeVisible();
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("generated image attribution", () => {
   it("names the custom source a job ran on, not every source on its provider", async () => {
     const shared = {
