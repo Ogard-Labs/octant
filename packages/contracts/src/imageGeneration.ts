@@ -237,6 +237,19 @@ export const ImageGenerationProfileView = Schema.Struct({
   ),
   modelAllowlist: Schema.Array(ProviderModelId).pipe(Schema.minItems(1)),
   defaultModel: ProviderModelId,
+  /**
+   * Custom image sources only: the label Settings gave the source behind each
+   * model, so a surface can name the source a job ran on instead of the whole
+   * provider.
+   */
+  sourceLabels: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        modelId: ProviderModelId,
+        label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(120)),
+      }).annotations(strict),
+    ),
+  ),
   quality: Schema.optional(OpenAiImageQuality),
   size: Schema.optional(OpenAiImageSize),
   aspectRatio: Schema.optional(GeminiImageAspectRatio),

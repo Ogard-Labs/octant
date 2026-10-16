@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { samePollingData } from "../polling/samePollingData";
 import { GeneratedImageCard } from "./GeneratedImageCard";
+import { useImageJobChangeRevision } from "./ImageJobChangeRevision";
 import { ImageGenerationSheet } from "./ImageGenerationSheet";
 import type { ImageGenerationDraft } from "./ImageGenerationSheet";
 
@@ -27,6 +28,7 @@ export interface GeneratedImageListProps {
 
 export function GeneratedImageList(props: GeneratedImageListProps) {
   const workspace = useWorkspaceContentView();
+  const changeRevision = useImageJobChangeRevision();
   const [jobs, setJobs] = useState<ReadonlyArray<ImageJob>>([]);
   const [revise, setRevise] = useState<
     { readonly job: ImageJob; readonly artifact: ImageArtifactRecord } | undefined
@@ -70,6 +72,12 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
       cancelled = true;
     };
   }, [props.client, props.scopeId, props.threadKind]);
+
+  // The host says when a job is queued or finishes, including the ones the
+  // agent started. The first revision is the mount's own read.
+  useEffect(() => {
+    if (changeRevision > 0) refreshRef.current();
+  }, [changeRevision]);
 
   // Fast only while a job is in flight. With nothing pending the list can
   // change only when someone enqueues (which refreshes here) or a turn's

@@ -3195,6 +3195,56 @@ describe("CodeThreadWorkspace", () => {
     });
   });
 
+  it("confirms where Save to Project put the image", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => ({
+      status: "saved" as const,
+      relativePath: "generated/ab12.png",
+    }));
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        imageGenerationClient={
+          {
+            list: async () => ({ jobs: [completedGeneratedJob()] }),
+            artifact: async () => new Blob([Uint8Array.from([1])], { type: "image/png" }),
+            save,
+          } as never
+        }
+        imageGenerationProfiles={[imageProfile()]}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Save to Project" }));
+    expect(await screen.findByText("Saved generated/ab12.png.")).toBeVisible();
+  });
+
+  it("says why Save to Project was refused", async () => {
+    const user = userEvent.setup();
+    const save = vi.fn(async () => ({
+      status: "refused" as const,
+      reason: "That path is outside the project.",
+    }));
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        imageGenerationClient={
+          {
+            list: async () => ({ jobs: [completedGeneratedJob()] }),
+            artifact: async () => new Blob([Uint8Array.from([1])], { type: "image/png" }),
+            save,
+          } as never
+        }
+        imageGenerationProfiles={[imageProfile()]}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Save to Project" }));
+    expect(await screen.findByText("That path is outside the project.")).toBeVisible();
+  });
+
   it("shows why Save to Project failed instead of leaving an unhandled rejection", async () => {
     const user = userEvent.setup();
     const save = vi.fn(async () => {

@@ -5,6 +5,7 @@ import type { ImageArtifactRecord, ImageGenerationProfileView, ImageJob } from "
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GeneratedImageList } from "./GeneratedImageList";
+import { ImageJobChangeRevisionContext } from "./ImageJobChangeRevision";
 
 const scopeId = "a3000000-0000-4000-8000-000000000002" as never;
 const nextScopeId = "a3000000-0000-4000-8000-000000000003" as never;
@@ -238,5 +239,69 @@ describe("GeneratedImageList polling", () => {
     // Without its own re-read the queued revision stays hidden for the whole
     // thirty-second idle interval.
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("generated image arrival", () => {
+  it("shows an image the moment the host reports its job finished, without waiting for the idle read", async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({ jobs: [] })
+      .mockResolvedValue({ jobs: [completedJob()] });
+    const client = {
+      list,
+      artifact: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+    } as unknown as ImageGenerationClient;
+    const tree = (revision: number) => (
+      <ImageJobChangeRevisionContext.Provider value={revision}>
+        <GeneratedImageList
+          client={client}
+          profiles={[profile()]}
+          scopeId={scopeId}
+          threadKind="chat-thread"
+        />
+      </ImageJobChangeRevisionContext.Provider>
+    );
+    const view = render(tree(0));
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("generated-image-card")).not.toBeInTheDocument();
+
+    view.rerender(tree(1));
+
+    expect(await screen.findByTestId("generated-image-card")).toBeVisible();
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("generated image attribution", () => {
+  it("names the custom source a job ran on, not every source on its provider", async () => {
+    const shared = {
+      ...profile(),
+      displayName: "Local images",
+      driverKind: "openai-compatible-image" as const,
+      modelAllowlist: ["image-small" as never, "image-large" as never],
+      defaultModel: "image-small" as never,
+      sourceLabels: [
+        { modelId: "image-small" as never, label: "Fake small" },
+        { modelId: "image-large" as never, label: "Fake large" },
+      ],
+    } satisfies ImageGenerationProfileView;
+    const job = { ...completedJob(), modelId: "image-large" as never };
+    const client = {
+      list: vi.fn(async () => ({ jobs: [job] })),
+      artifact: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+    } as unknown as ImageGenerationClient;
+    render(
+      <GeneratedImageList
+        client={client}
+        profiles={[shared]}
+        scopeId={scopeId}
+        threadKind="chat-thread"
+      />,
+    );
+
+    expect(await screen.findByTestId("generated-image-attribution")).toHaveTextContent(
+      "Fake large · image-large",
+    );
   });
 });

@@ -63,6 +63,24 @@ function runningJob(): ImageJob {
 }
 
 describe("ImageGenerationSheet", () => {
+  it("names the custom source behind each model instead of a list of every source", () => {
+    const shared: ImageGenerationProfileView = {
+      ...openAiProfile(),
+      displayName: "Local images",
+      driverKind: "openai-compatible-image",
+      modelAllowlist: ["image-small" as never, "image-large" as never],
+      defaultModel: "image-small" as never,
+      sourceLabels: [
+        { modelId: "image-small" as never, label: "Fake small" },
+        { modelId: "image-large" as never, label: "Fake large" },
+      ],
+    };
+    render(<ImageGenerationSheet onClose={vi.fn()} onSubmit={vi.fn()} open profiles={[shared]} />);
+
+    expect(screen.getByLabelText("Image profile")).toHaveTextContent("Local images");
+    expect(screen.getByLabelText("Image model")).toHaveTextContent("Fake small · image-small");
+  });
+
   it("names a revision dialog from its visible heading", () => {
     const parentArtifactRef: ImageArtifactRef = {
       attachmentId: "a3000000-0000-4000-8000-000000000008" as ImageArtifactRef["attachmentId"],

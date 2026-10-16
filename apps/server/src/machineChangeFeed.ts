@@ -1,5 +1,6 @@
 import {
   CONTEXT_COMPACTION_EVENT_NAMES,
+  IMAGE_JOB_AGGREGATE_TYPE,
   NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
 } from "@octant/contracts";
@@ -227,6 +228,9 @@ function topicsForEvent(event: {
   }
   if (aggregateType.startsWith("code-")) return ["code-navigation"];
   if (aggregateType.startsWith("extension-")) return ["extensions"];
+  // The agent's image tool queues and finishes jobs outside any request the
+  // renderer made, so the thread learns of them here rather than on a timer.
+  if (aggregateType === IMAGE_JOB_AGGREGATE_TYPE) return ["image-jobs"];
   return [];
 }
 

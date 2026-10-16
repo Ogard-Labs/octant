@@ -1985,7 +1985,9 @@ flowchart LR
   thread, oldest first; export and `#thread` mentions read the whole thread on
   the host. One post-commit Machine change feed invalidates mode
   navigation and Project/extension projections instead of independent polling
-  timers. A running turn's start time and latest step (a tool name and one
+  timers. An image job queued or finished journals on its own `image-jobs`
+  topic, so a thread's generated-image list re-reads when the agent's image
+  tool completes a job rather than on its idle cadence. A running turn's start time and latest step (a tool name and one
   redacted, truncated argument, or a wait on approval or an answer) ride on the
   same Chat, Work, and Code navigation rows as `executing`, optional and absent
   together outside a live turn. They are held in memory by one process-local
@@ -2472,7 +2474,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   through `/api/image/` when an enabled image profile exists (a dedicated
   image provider, or a custom image source named in Settings › Image
   generation, which every renderer surface lists alongside them); the composers
-  carry no generation action. Agent-generated images preview in the thread by
+  carry no generation action. A custom source is a provider plus a model, so
+  several sources on one provider share one profile: the profile view names the
+  provider when it holds more than one source, and carries each source's own
+  label by model, which names the source a generated image ran on.
+  Agent-generated images preview in the thread by
   opaque attachment id, chain edits through `parentArtifactRef`, export with the thread, and
   never grant Chat filesystem authority.
   **Voice** is an app-managed capability rather than a provider kind: speech

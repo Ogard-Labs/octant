@@ -32,6 +32,21 @@ describe("useMachineChangeFeed", () => {
     expect(result.current.codeNavigation).toBe(1);
     expect(result.current.chatNavigation).toBe(0);
   });
+
+  it("counts an image job change on its own revision", async () => {
+    let delivered = false;
+    const client: MachineChangeClient = {
+      subscribe: async function* () {
+        if (delivered) return;
+        delivered = true;
+        yield { kind: "changed" as const, sequence: 1, topics: ["image-jobs" as const] };
+      },
+    };
+    const { result } = renderHook(() => useMachineChangeFeed(client));
+
+    await waitFor(() => expect(result.current.imageJobs).toBe(1));
+    expect(result.current.chatNavigation).toBe(0);
+  });
 });
 
 function deferred<T>() {

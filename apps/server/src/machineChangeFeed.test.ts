@@ -30,6 +30,21 @@ describe("MachineChangeFeed", () => {
     await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 
+  it("tells a subscriber when an image job is queued or finishes", async () => {
+    const feed = new MachineChangeFeed();
+    const controller = new AbortController();
+    const stream = feed.subscribe({ afterSequence: 0, signal: controller.signal });
+
+    feed.publishCommitted({ events: [{ aggregateType: "image-job" }] });
+
+    await expect(stream.next()).resolves.toMatchObject({
+      done: false,
+      value: { kind: "changed", sequence: 1, topics: ["image-jobs"] },
+    });
+    controller.abort();
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+  });
+
   it("wakes held Chat streams when a Chat session's compaction ends, and for nothing else on the ledger", async () => {
     const feed = new MachineChangeFeed();
     const controller = new AbortController();

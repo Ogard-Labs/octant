@@ -430,6 +430,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // A send refused before the host saw it explains itself beside the composer,
   // since no turn exists to carry a reason.
   const [sendNotice, setSendNotice] = useState<string>();
+  // Save to Project answers beside the composer, as Work does in its thread:
+  // the saved path on success, and the host's reason when it did not save.
+  const [imageSaveMessage, setImageSaveMessage] = useState<string>();
 
   useEffect(() => {
     setDraft(props.controller.pendingDraft);
@@ -478,6 +481,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }, [composerReady, props.threadId]);
   useEffect(() => {
     setTurnAccessOverride(undefined);
+    setImageSaveMessage(undefined);
   }, [props.threadId]);
   useEffect(() => {
     const nextCeiling = view?.thread.executionPolicy;
@@ -779,6 +783,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       return;
     }
     setSendNotice(undefined);
+    setImageSaveMessage(undefined);
     const originThreadKey = String(props.threadId);
     const override = turnAccessOverride;
     const access = nextTurnAccess;
@@ -1671,6 +1676,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           client={props.imageGenerationClient}
           onAttach={(file) => attachments.attach([file])}
           onSaveToProject={(job, artifact) => {
+            setImageSaveMessage(undefined);
             void props.imageGenerationClient
               ?.save({
                 jobId: job.id,
@@ -1679,10 +1685,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               })
               .then((result) => {
                 if (result === undefined) return;
-                if (result.status !== "saved") attachments.refuse(result.reason);
+                setImageSaveMessage(
+                  result.status === "saved" ? `Saved ${result.relativePath}.` : result.reason,
+                );
               })
               .catch(() => {
-                attachments.refuse("The image could not be saved.");
+                setImageSaveMessage("The image could not be saved.");
               });
           }}
           profiles={props.imageGenerationProfiles}
@@ -2113,6 +2121,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               /* ui-boundary-exception: compact-status */
               <span className="code-thread-workspace__hint" role="status" title={mergeMessage}>
                 {mergeMessage}
+              </span>
+            )}
+            {imageSaveMessage === undefined ? null : (
+              /* ui-boundary-exception: compact-status */
+              <span className="code-thread-workspace__hint" role="status" title={imageSaveMessage}>
+                {imageSaveMessage}
               </span>
             )}
             {sendNotice === undefined ? null : (

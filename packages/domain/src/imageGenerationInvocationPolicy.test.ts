@@ -201,15 +201,33 @@ describe("custom image profiles", () => {
     expect(profiles).toHaveLength(1);
     expect(profiles[0]).toMatchObject({
       instanceId: instance.id,
-      displayName: "Recraft square, Recraft vector",
       driverKind: "openai-compatible-image",
       modelAllowlist: ["recraftv3", "recraftv3-vector"],
       defaultModel: "recraftv3",
+      sourceLabels: [
+        { modelId: "recraftv3", label: "Recraft square" },
+        { modelId: "recraftv3-vector", label: "Recraft vector" },
+      ],
     });
   });
 
-  it("bounds a combined displayName to the profile contract's 120-character limit", () => {
+  it("names the provider, never a list of every source on it, when several share one instance", () => {
     const instance = recraft();
+    const customSources: ReadonlyArray<ImageGenerationCustomSource> = [
+      { providerInstanceId: instance.id, modelId: "recraftv3" as never, label: "Recraft square" },
+      {
+        providerInstanceId: instance.id,
+        modelId: "recraftv3-vector" as never,
+        label: "Recraft vector",
+      },
+    ];
+    const [profile] = listCustomImageProfiles(customSources, [instance]);
+    expect(profile?.displayName).toBe(instance.displayName);
+    expect(profile?.displayName).not.toContain("Recraft square");
+  });
+
+  it("bounds a long provider name to the profile contract's 120-character limit", () => {
+    const instance = { ...recraft(), displayName: "a".repeat(200) };
     const label = "a".repeat(120);
     const customSources: ReadonlyArray<ImageGenerationCustomSource> = [
       { providerInstanceId: instance.id, modelId: "recraftv3" as never, label },

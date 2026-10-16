@@ -49,14 +49,12 @@ export type ImageGenerationHonoredOptions =
     };
 
 // Matches ImageGenerationProfileView.displayName's own Schema.maxLength(120):
-// two maximum-length labels joined would otherwise exceed it and fail to
-// decode.
+// a provider name can be longer than that and would otherwise fail to decode.
 const MAX_PROFILE_DISPLAY_NAME_LENGTH = 120;
 
-function boundedDisplayName(labels: ReadonlyArray<string>): string {
-  const joined = labels.join(", ");
-  if (joined.length <= MAX_PROFILE_DISPLAY_NAME_LENGTH) return joined;
-  return `${joined.slice(0, MAX_PROFILE_DISPLAY_NAME_LENGTH - 1)}…`;
+function boundedDisplayName(name: string): string {
+  if (name.length <= MAX_PROFILE_DISPLAY_NAME_LENGTH) return name;
+  return `${name.slice(0, MAX_PROFILE_DISPLAY_NAME_LENGTH - 1)}…`;
 }
 
 /**
@@ -72,6 +70,10 @@ function boundedDisplayName(labels: ReadonlyArray<string>): string {
  * second profile at the same id would be unreachable by
  * `profiles.find((p) => p.instanceId === id)` and its model silently
  * rejected against the first profile's one-model allowlist instead.
+ *
+ * The profile is named for the one source it holds, or for the provider when
+ * it holds several; `sourceLabels` carries each source's own label so a job
+ * is attributed to the source it ran on, never to a list of every source.
  */
 export function listCustomImageProfiles(
   customSources: ReadonlyArray<ImageGenerationCustomSource>,
@@ -82,8 +84,11 @@ export function listCustomImageProfiles(
     {
       readonly instanceId: ImageGenerationProfileView["instanceId"];
       readonly defaultModel: ImageGenerationProfileView["defaultModel"];
-      readonly labels: Array<string>;
-      readonly modelIds: Array<ImageGenerationProfileView["defaultModel"]>;
+      readonly providerName: string;
+      readonly sources: Array<{
+        readonly modelId: ImageGenerationProfileView["defaultModel"];
+        readonly label: string;
+      }>;
     }
   >();
   for (const source of customSources) {
@@ -95,20 +100,24 @@ export function listCustomImageProfiles(
       byInstance.set(key, {
         instanceId: resolution.instance.id,
         defaultModel: resolution.modelId,
-        labels: [resolution.label],
-        modelIds: [resolution.modelId],
+        providerName: resolution.instance.displayName,
+        sources: [{ modelId: resolution.modelId, label: resolution.label }],
       });
       continue;
     }
-    group.labels.push(resolution.label);
-    group.modelIds.push(resolution.modelId);
+    group.sources.push({ modelId: resolution.modelId, label: resolution.label });
   }
   return [...byInstance.values()].map((group) => ({
     instanceId: group.instanceId,
-    displayName: boundedDisplayName(group.labels),
+    displayName: boundedDisplayName(
+      group.sources.length === 1
+        ? (group.sources[0]?.label ?? group.providerName)
+        : group.providerName,
+    ),
     driverKind: "openai-compatible-image",
-    modelAllowlist: group.modelIds,
+    modelAllowlist: group.sources.map((source) => source.modelId),
     defaultModel: group.defaultModel,
+    sourceLabels: group.sources,
   }));
 }
 
