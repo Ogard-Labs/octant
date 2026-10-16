@@ -634,6 +634,7 @@ describe("ShellSidebar", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("searchbox", { name: "Filter threads" })).not.toBeInTheDocument();
     expect(onQueryChange).toHaveBeenLastCalledWith("");
+    expect(screen.getByRole("button", { name: "Search" })).toHaveFocus();
     // The command overlay stays on its own shortcut; the icon now filters in place.
     expect(onOpenSearch).not.toHaveBeenCalled();
 
