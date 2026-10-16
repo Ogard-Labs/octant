@@ -504,6 +504,12 @@ interface PreparedChatContent {
 export interface ChatServiceOptions {
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
+  /**
+   * Whether the agent's own harness approval is waiting on a person in this
+   * thread. Its turn is parked then, not executing, so the navigation row says
+   * the thread needs the person.
+   */
+  readonly awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly attachmentStore?: ChatAttachmentStore;
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly persistence: PersistenceService;
@@ -796,6 +802,7 @@ export class ChatService {
   readonly #scratchStore: ChatScratchStore;
   readonly #turnRunner: ChatTurnRunner;
   readonly #liveTurns?: LiveTurnRegistry;
+  readonly #awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly #researchRouter: ResearchRouter;
   readonly #contextMaintenanceTimeoutMs?: number;
   readonly #contextMaintenanceShutdownTimeoutMs?: number;
@@ -856,6 +863,9 @@ export class ChatService {
     this.#beforeAttachmentPurge = options.beforeAttachmentPurge;
     this.#scratchStore = new ChatScratchStore(options.dataDirectory);
     if (options.liveTurns !== undefined) this.#liveTurns = options.liveTurns;
+    if (options.awaitsHarnessApproval !== undefined) {
+      this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
+    }
     this.#researchRouter = options.researchRouter;
     if (options.providerRuntimeRegistry !== undefined) {
       this.#providerRuntimeRegistry = options.providerRuntimeRegistry;
@@ -1134,6 +1144,12 @@ export class ChatService {
         .filter((thread) => !hidden.has(String(thread.id)))
         .slice(0, MAX_CHAT_NAVIGATION_THREADS)
         .map((thread) => {
+          // A turn parked on the agent's own approval is owed by the person,
+          // not executing, the same as the boards read it. The thread keeps
+          // saying so after a restart took the turn, until it is resumed.
+          if (this.#awaitsHarnessApproval?.(String(thread.id)) === true) {
+            return { ...thread, executing: false, awaitingInput: true as const };
+          }
           // Only a row projected as executing speaks for a live turn; a stale
           // registry entry can never make an idle row look busy.
           const live = thread.executing ? this.#liveTurns?.read(String(thread.id)) : undefined;
@@ -1230,6 +1246,26 @@ export class ChatService {
         thread: this.#withAggregateHeadVersion(read.window.view.thread),
       },
     };
+  }
+
+  /**
+   * Whether this thread is one a Needs you row may name: an active, listed
+   * thread filed under no Project or an active Chat Project, the same test the
+   * pending questions pass. Chat has no per-window authority.
+   */
+  listsActiveThread(threadId: string): boolean {
+    this.#assertReady();
+    if (this.#hiddenThreadIds().has(threadId)) return false;
+    const thread = (() => {
+      try {
+        return this.#persistence.readChatThread(decodeChatThreadId(threadId));
+      } catch {
+        // Not a Chat thread id.
+        return undefined;
+      }
+    })();
+    if (thread === undefined || thread.lifecycle !== "active") return false;
+    return thread.projectId === undefined || this.#isActiveChatProject(thread.projectId);
   }
 
   /**

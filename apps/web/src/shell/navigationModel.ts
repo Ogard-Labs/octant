@@ -85,6 +85,8 @@ export function sameLiveTurn(a: LiveTurnFacts | undefined, b: LiveTurnFacts | un
 
 export interface ChatThreadNavigationSource {
   readonly executing?: boolean;
+  /** The agent's own approval waits on the person; the thread is parked, not working. */
+  readonly awaitingInput?: boolean;
   /** When the running turn began and what it is doing; absent outside a live turn. */
   readonly turnStartedAt?: string | undefined;
   readonly liveStep?: ThreadLiveStep | undefined;
@@ -251,9 +253,17 @@ export function buildChatThreadNavigation(
   threads: ReadonlyArray<ChatThreadNavigationSource>,
 ): ReadonlyArray<ChatThreadNavigationItem> {
   return threads.map((thread) => ({
-    ...(thread.executing === true ? { activity: "working" as const } : {}),
-    ...(thread.turnStartedAt === undefined ? {} : { turnStartedAt: thread.turnStartedAt }),
-    ...(thread.liveStep === undefined ? {} : { liveStep: thread.liveStep }),
+    ...(thread.awaitingInput === true
+      ? { activity: "attention" as const, awaitingKind: "approval" as const }
+      : thread.executing === true
+        ? { activity: "working" as const }
+        : {}),
+    ...(thread.awaitingInput === true || thread.turnStartedAt === undefined
+      ? {}
+      : { turnStartedAt: thread.turnStartedAt }),
+    ...(thread.awaitingInput === true || thread.liveStep === undefined
+      ? {}
+      : { liveStep: thread.liveStep }),
     ...(thread.followUpOpen === undefined ? {} : { followUp: thread.followUpOpen }),
     ...(thread.lineageParentThreadId === undefined
       ? {}

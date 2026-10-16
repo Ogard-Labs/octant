@@ -70,6 +70,32 @@ export function isChildPendingRequest(request: PendingRequest): request is Child
   return request.kind === "child-approval" || request.kind === "child-question";
 }
 
+/**
+ * The agent's own harness approval, waiting on the person. The row finds the
+ * request; the approval card in the thread is where it is answered, so there
+ * is nothing to answer here.
+ */
+export type LeadApprovalPendingRequest = Extract<
+  PendingRequest,
+  { readonly kind: "lead-approval" }
+>;
+
+export function isLeadApprovalPendingRequest(
+  request: PendingRequest,
+): request is LeadApprovalPendingRequest {
+  return request.kind === "lead-approval";
+}
+
+/**
+ * A row that finds a request and leaves the answer to the thread: a waiting
+ * subagent, or the agent's own approval. Neither carries an answer handle.
+ */
+export function isFindOnlyPendingRequest(
+  request: PendingRequest,
+): request is ChildPendingRequest | LeadApprovalPendingRequest {
+  return isChildPendingRequest(request) || isLeadApprovalPendingRequest(request);
+}
+
 const ROLE_WORD: Readonly<Record<ChildPendingRequest["child"]["role"], string>> = {
   research: "Research",
   implementation: "Implementation",
@@ -95,11 +121,15 @@ export function pendingRequestKey(request: PendingRequest): string {
 
 /**
  * A decision is named by the turn that asked it, a subagent's request by its
- * run and when it asked, and every other request by its own id.
+ * run and when it asked, the agent's own approval by when it asked, and every
+ * other request by its own id.
  */
 function answerHandle(request: PendingRequest): string {
   if (isChildPendingRequest(request)) {
     return `${request.kind}:${String(request.child.runId)}:${request.requestedAt}:${request.text}`;
+  }
+  if (isLeadApprovalPendingRequest(request)) {
+    return `${request.kind}:${request.requestedAt}:${request.text}`;
   }
   if (request.kind === "decision") {
     return request.mode === "code"
@@ -151,7 +181,7 @@ export async function answerPendingRequest(
   response: PendingRequestResponse,
 ): Promise<PendingRequestAnswerResult> {
   try {
-    if (isChildPendingRequest(request)) return NOT_DELIVERED;
+    if (isFindOnlyPendingRequest(request)) return NOT_DELIVERED;
     if (request.kind === "decision") {
       if (response.kind !== "choice") return NOT_DELIVERED;
       if (!request.options.some((option) => option.label === response.label)) {

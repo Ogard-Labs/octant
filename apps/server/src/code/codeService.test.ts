@@ -21,6 +21,7 @@ import {
   type AgentProfileScope,
   type Project,
   type CodeCheckoutIdentity,
+  type CodeThreadId,
   type CodeEventFrame,
   type EventEnvelope,
   type CodeWorktreeRemoteFacts,
@@ -493,6 +494,49 @@ describe("CodeService reads", () => {
     const after = await fixture.service.navigation(ids.window);
     expect(after.runtime[0]).not.toHaveProperty("turnStartedAt");
     expect(after.runtime[0]).not.toHaveProperty("liveStep");
+  });
+
+  it("reports a running thread whose agent waits on an approval as awaiting input, not executing", async () => {
+    const waiting = thread();
+    const other = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const liveTurns = new LiveTurnRegistry();
+    liveTurns.tracker(String(waiting.id), "code-navigation").begin(now);
+    const fixture = serviceFixture({
+      threads: [waiting, other],
+      liveTurns,
+      awaitsHarnessApproval: (threadId) => threadId === String(waiting.id),
+    });
+    fixture.persistence.readCodeRuntimeWorks.mockImplementation((threadId) => [
+      {
+        work: decodeCodeRuntimeWork({
+          id: testUuid(31),
+          threadId,
+          kind: "provider-turn",
+          state: "running",
+          updatedAt: now,
+        }),
+        firstSequence: 1,
+      },
+    ]);
+
+    const { runtime } = await fixture.service.navigation(ids.window);
+
+    expect(runtime[0]).toMatchObject({
+      threadId: waiting.id,
+      executing: false,
+      awaitingInput: true,
+    });
+    expect(runtime[0]).not.toHaveProperty("turnStartedAt");
+    expect(runtime[1]).toMatchObject({ threadId: other.id, executing: true });
+    expect(runtime[1]).not.toHaveProperty("awaitingInput");
+  });
+
+  it("keeps saying a thread awaits its agent's approval after a restart took the turn", async () => {
+    const fixture = serviceFixture({ awaitsHarnessApproval: () => true });
+
+    const { runtime } = await fixture.service.navigation(ids.window);
+
+    expect(runtime[0]).toMatchObject({ executing: false, awaitingInput: true });
   });
 
   it("does not report a live step for a thread whose Project the window cannot browse", async () => {
@@ -4215,6 +4259,7 @@ function serviceFixture(
     readonly pullRequests?: CodeServiceOptions["pullRequests"];
     readonly gitHistory?: CodeServiceOptions["gitHistory"];
     readonly liveTurns?: CodeServiceOptions["liveTurns"];
+    readonly awaitsHarnessApproval?: CodeServiceOptions["awaitsHarnessApproval"];
     readonly forkMergeBack?: CodeServiceOptions["forkMergeBack"];
     readonly forkConversation?: CodeServiceOptions["forkConversation"];
     readonly recordExternalContentIngestion?: CodeServiceOptions["recordExternalContentIngestion"];
@@ -4242,7 +4287,7 @@ function serviceFixture(
       () => options.activity ?? ([] as ReturnType<CodePersistencePort["readCodeThreadActivity"]>),
     ),
     readCodeRuntimeWorks: vi.fn(
-      () => [] as ReturnType<CodePersistencePort["readCodeRuntimeWorks"]>,
+      (_threadId: CodeThreadId) => [] as ReturnType<CodePersistencePort["readCodeRuntimeWorks"]>,
     ),
     readCodeCheckout: vi.fn((checkoutId: string) =>
       checkoutList.find((candidate) => String(candidate.id) === checkoutId),
@@ -4328,6 +4373,9 @@ function serviceFixture(
     ...(options.gitHistory === undefined ? {} : { gitHistory: options.gitHistory }),
     ...(options.pullRequests === undefined ? {} : { pullRequests: options.pullRequests }),
     ...(options.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
+    ...(options.awaitsHarnessApproval === undefined
+      ? {}
+      : { awaitsHarnessApproval: options.awaitsHarnessApproval }),
     ...(options.forkMergeBack === undefined ? {} : { forkMergeBack: options.forkMergeBack }),
     ...(options.forkConversation === undefined
       ? {}

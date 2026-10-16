@@ -9,6 +9,8 @@ import { OctantButton } from "../ui/base/OctantButton";
 import {
   childRequestHeadline,
   isChildPendingRequest,
+  isFindOnlyPendingRequest,
+  isLeadApprovalPendingRequest,
   pendingRequestChoices,
   type PendingRequestAnswerResult,
   type PendingRequestResponse,
@@ -40,7 +42,8 @@ export interface PendingRequestRowProps {
   /**
    * Opens the thread, where a typed answer goes in its composer. For a
    * subagent's request it opens the thread's Agents tab on that subagent, the
-   * only place the request is answered.
+   * only place the request is answered. For the agent's own approval it opens
+   * the thread, whose approval card answers it.
    */
   readonly onOpenThread: (request: PendingRequest) => void;
 }
@@ -53,8 +56,9 @@ export interface PendingRequestRowProps {
  * has focus) and Reply…, which opens the thread to type an answer. A decision
  * is the ask a finished turn closed with: its options are numbered the same
  * way, the recommended one first and marked, and picking one sends those
- * words as the thread's next turn. A waiting subagent's request is only found
- * here: it has one action, Review request, and no answer. The row owns only
+ * words as the thread's next turn. A waiting subagent's request, and the
+ * agent's own approval, are only found here: each has one action, Review
+ * request, and no answer; the thread's own cards decide them. The row owns only
  * its own busy state and its refusal line; it carries no authority and knows
  * nothing about the card or board that lists it.
  */
@@ -98,14 +102,17 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
   const embedded = props.embedded === true;
   const ModeIcon = modeIcons[request.mode];
   const child = isChildPendingRequest(request) ? request : undefined;
+  const lead = isLeadApprovalPendingRequest(request) ? request : undefined;
   return (
     <div
       aria-label={
         child !== undefined
           ? `${request.threadTitle} has a subagent waiting for you`
-          : request.kind === "decision"
-            ? `${request.threadTitle} asks you to decide`
-            : `${request.threadTitle} is waiting for you`
+          : lead !== undefined
+            ? `${request.threadTitle} needs your approval`
+            : request.kind === "decision"
+              ? `${request.threadTitle} asks you to decide`
+              : `${request.threadTitle} is waiting for you`
       }
       className="pending-request"
       data-embedded={embedded ? "true" : "false"}
@@ -151,12 +158,17 @@ export function PendingRequestRow(props: PendingRequestRowProps) {
           {` · ${child.child.task}`}
         </p>
       )}
+      {lead?.lostInRestart !== true ? null : (
+        <p className="oct-meta pending-request__subagent">
+          Octant restarted while this was waiting, so it did not run.
+        </p>
+      )}
       <p className="oct-row-detail pending-request__text" title={request.text}>
         {request.text}
       </p>
       {open ? (
         <div className="pending-request__actions">
-          {child !== undefined ? (
+          {isFindOnlyPendingRequest(request) ? (
             <OctantButton
               onClick={() => props.onOpenThread(request)}
               size="sm"

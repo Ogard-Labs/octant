@@ -10,6 +10,7 @@ import {
   pendingIds,
   workApproval,
   workChildApproval,
+  workLeadApproval,
 } from "./pendingRequests.test-fixtures";
 
 const NOW = Date.parse("2026-10-06T08:04:30.000Z");
@@ -143,6 +144,26 @@ describe("the Needs you commands", () => {
     expect(onOpenSubagentRequest).toHaveBeenCalledTimes(2);
     expect(onOpenSubagentRequest).toHaveBeenCalledWith(child);
     expect(onOpenThread).not.toHaveBeenCalled();
+    expect(onAnswerApproval).not.toHaveBeenCalled();
+  });
+
+  it("lists the agent's own approval as one row that opens the thread, with no Approve or Deny", () => {
+    const onOpenThread = vi.fn();
+    const onAnswerApproval = vi.fn();
+    const commands = buildNeedsYouCommands(
+      sources({ requests: [workLeadApproval()], onOpenThread, onAnswerApproval }),
+    );
+
+    expect(commands.map((command) => [command.title, command.detail])).toEqual([
+      ["Quarterly report", "Work · waiting on approval · <1m"],
+    ]);
+    run(commands[0]);
+    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith({
+      threadId: pendingIds.workThread,
+      title: "Quarterly report",
+      mode: "work",
+      projectId: pendingIds.project,
+    });
     expect(onAnswerApproval).not.toHaveBeenCalled();
   });
 

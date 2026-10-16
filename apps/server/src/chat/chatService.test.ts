@@ -235,6 +235,7 @@ function openFixture(options?: {
   readonly chatEnabled?: { current: boolean };
   readonly hiddenThreadIds?: () => ReadonlySet<string>;
   readonly liveTurns?: import("../liveTurn/liveTurnRegistry").LiveTurnRegistry;
+  readonly awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly resolveSideChatSourceContext?: (input: {
     readonly sidecarThreadId: ChatThreadId;
     readonly windowId?: WindowId;
@@ -632,6 +633,9 @@ function openFixture(options?: {
     recordExternalContentIngestion:
       options?.recordExternalContentIngestion ?? ((input) => ingestions.record(input)),
     ...(options?.liveTurns === undefined ? {} : { liveTurns: options.liveTurns }),
+    ...(options?.awaitsHarnessApproval === undefined
+      ? {}
+      : { awaitsHarnessApproval: options.awaitsHarnessApproval }),
     ...(options?.beforeAttachmentPurge === undefined
       ? {}
       : { beforeAttachmentPurge: options.beforeAttachmentPurge }),
@@ -5043,7 +5047,7 @@ describe("ChatService", () => {
     ).toBe(false);
   });
 
-  it("shows a running answer's start time and latest tool step on navigation, and clears them when it ends", async () => {
+  it("shows a running answer's start time and latest tool step on navigation, says it needs the person while an approval waits, and clears them when it ends", async () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -5080,7 +5084,12 @@ describe("ChatService", () => {
         }),
     } as unknown as ProviderDriver;
     const liveTurns = new LiveTurnRegistry();
-    const { service } = openFixture({ driver, liveTurns });
+    let approvalWaiting = false;
+    const { service } = openFixture({
+      driver,
+      liveTurns,
+      awaitsHarnessApproval: () => approvalWaiting,
+    });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",
@@ -5100,6 +5109,16 @@ describe("ChatService", () => {
       turnStartedAt: now,
       liveStep: { kind: "tool", tool: "Command", argument: "bun run test" },
     });
+    expect(service.navigation().threads[0]).not.toHaveProperty("awaitingInput");
+
+    // The turn is parked on the agent's own approval: the thread needs the
+    // person, so it is not reported as working.
+    approvalWaiting = true;
+    const parked = service.navigation().threads[0];
+    expect(parked).toMatchObject({ executing: false, awaitingInput: true });
+    expect(parked).not.toHaveProperty("turnStartedAt");
+    approvalWaiting = false;
+    expect(service.navigation().threads[0]).toMatchObject({ executing: true });
 
     release();
     await sending;
@@ -5853,6 +5872,33 @@ describe("ChatService", () => {
         answer: "Resolve",
       }),
     ).rejects.toMatchObject({ failure: { category: "invalid" } });
+  });
+
+  it("keeps saying an idle thread awaits its agent's approval, as after a restart took the turn", async () => {
+    const { service } = openFixture({ awaitsHarnessApproval: () => true });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Restarted thread",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    expect(service.navigation().threads[0]).toMatchObject({
+      executing: false,
+      awaitingInput: true,
+    });
+  });
+
+  it("lists only an active Chat thread as one a Needs you row may name", async () => {
+    const { service } = openFixture({});
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Listed thread",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    expect(service.listsActiveThread(String(created.thread.id))).toBe(true);
+    expect(service.listsActiveThread("00000000-0000-4000-8000-00000000dead")).toBe(false);
+    expect(service.listsActiveThread("not-a-thread-id")).toBe(false);
   });
 
   it("lists a question a running turn is parked on and answers it with the listed handle", async () => {

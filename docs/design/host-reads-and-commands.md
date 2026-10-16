@@ -41,7 +41,12 @@ An answer goes through the mode's own command with the handle the host listed:
 A waiting subagent's request has no row here: it is listed with no answer
 handle, and its **Review request** action opens the parent thread's Agents tab,
 where the child's own approval or question controls answer through the
-harness session route.
+harness session route. The agent's own harness approval is listed the same way
+(`lead-approval`, in any mode): no answer handle, and **Review request** opens
+the thread, whose approval card above the composer decides it through the same
+session route, with the host checking the window and principal first. After a
+restart it stays listed, marked `lostInRestart`, until the session is resumed;
+the card then offers only **Resume**.
 
 The command palette's **Approve** and **Deny** commands use
 `resolve-work-request` and `answer-provider-approval` without opening the

@@ -1070,6 +1070,13 @@ export const ChatNavigationThread = Schema.Struct({
   lastSequence: GlobalSequence,
   followUpOpen: Schema.Boolean,
   executing: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * The thread's running turn is parked on the person: the agent's own harness
+   * approval is waiting. Carried only when true, with `executing` false, so the
+   * sidebar says the thread needs the person rather than that it is working.
+   * Absent reads as not waiting, so an older host's payload still decodes.
+   */
+  awaitingInput: Schema.optional(Schema.Literal(true)),
   /** The latest turn's start and latest step while it runs; absent otherwise. */
   ...ThreadLiveTurnFields,
   /** Completed and snoozed rest, so the sidebar can file the row; absent on an older host. */
