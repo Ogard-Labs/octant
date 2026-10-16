@@ -997,6 +997,39 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Files restored to this point.")).toBeVisible();
   });
 
+  it("puts focus on keeping the files when the restore question opens, and hands it back to the turn's menu", async () => {
+    const user = userEvent.setup();
+    const executeOperation = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+            { id: "turn-1:assistant", role: "assistant" as const, text: "done" },
+          ],
+        } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation } as never}
+        requestApproval={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    await chooseTurnAction(user, "Restore files to this point", "rewrite the parser");
+    // The question sits ahead of the menu in tab order, so without a move of
+    // its own a keyboard user lands back on the menu with the question behind.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Keep current files" })).toHaveFocus(),
+    );
+
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("button", { name: "Restore files" })).not.toBeInTheDocument();
+    expect(
+      within(turnArticle("rewrite the parser")).getByRole("button", { name: "More actions" }),
+    ).toHaveFocus();
+    expect(executeOperation).not.toHaveBeenCalled();
+  });
+
   it("keeps the checkpoint a restore replaced reachable after a tab switch unmounts this surface", async () => {
     const user = userEvent.setup();
     const undo = { worktree: "e".repeat(40), index: "f".repeat(40) };
