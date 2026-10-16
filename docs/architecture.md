@@ -1246,9 +1246,10 @@ The rules:
 **Delivery (publishing to a user-owned target) is dormant.** The ship service
 and its journaled events exist, but the host wires no target source, no
 artifact observer that saw a build produced, and no issuer of the per-act
-approval bound to the exact target, revision, and build (`server.ts` passes an
-empty target list, `observedArtifact` and `approval` that return nothing, and a
-publish path that fails). The renderer shows Delivery only when a thread has an
+approval bound to the exact target, revision, and build (the host's workspace
+wiring, `apps/server/src/wiring/workspace.ts`, passes an empty target list,
+`observedArtifact` and `approval` that return nothing, and a publish path that
+fails). The renderer shows Delivery only when a thread has an
 enabled target (`hasActionableDelivery`), so it stays absent. It stays absent
 until all three exist; a standing grant never substitutes for the per-act
 approval.

@@ -1,0 +1,1244 @@
+import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import {
+  type AndroidRpcEnvelope,
+  type AppleRpcEnvelope,
+  type CodeProjectPullRequestRow,
+  decodeCodeEvidenceContentId,
+  decodeCodeFailure,
+  decodeCodeRelativePath,
+  decodeCodeThreadId,
+  decodeContextSubjectRef,
+  decodeThreadWorkingDirectory,
+  LOCAL_TOOL_HOST_ID,
+  THREAD_RETENTION_EVENT_NAMES,
+  type WindowId,
+} from "@octant/contracts";
+import { Effect } from "effect";
+import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
+import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
+import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
+import { CodeService, CodeServiceError } from "../code/codeService";
+import {
+  type CodeOperationRuntime,
+  createCodeOperationRuntime,
+} from "../code/codeOperationRuntime";
+import { CodePlannerService } from "../code/codePlannerService";
+import { INHERITED_MARK_REFUSAL } from "../context/inheritedExternalContentMark";
+import {
+  createCodeProfileSkillResolver,
+  createStoredCodeProfileSkillTextLoader,
+} from "../code/codeProfileSkillResolver";
+import { MAX_CODE_OPERATION_REPLAY_LIMIT } from "../code/codeOperationEventStore";
+import { CodeThreadMetadataService } from "../code/codeThreadMetadataService";
+import {
+  boardRuntimeActivityFromWorks,
+  type CodeBoardThread,
+  CodeThreadBoardService,
+} from "../code/codeThreadBoardService";
+import { CodeFollowUpService } from "../code/codeFollowUpService";
+import { FailingChecksFollowUps } from "../code/failingChecksFollowUps";
+import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
+import { TerminalProcessPort } from "../code/terminalProcessPort";
+import { defaultTerminalShell } from "../code/terminalShell";
+import type { CodeRouteService } from "../codeRoutes";
+import { GitMutationPort } from "../code/gitMutationPort";
+import { codeThreadTurns } from "../code/codeForkPoint";
+import { seedCodeForkHarnessSession } from "../harness/nativeHarnessFork";
+import { githubReadToolSetIfEffective } from "../github/githubIntegrationEffective";
+import { TerminalBrowserGrantService } from "../code/terminalBrowserGrantService";
+import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import {
+  createCodeThreadMentionDirectory,
+  threadMentionContextResolver,
+  ThreadMentionService,
+} from "../chat/threadMentionService";
+import { fileMentionContextBlocks, FileMentionService } from "../fileMentionService";
+import { createAgentMessageTools } from "../agentMessage/agentMessageTools";
+import { codeSiblingThreadSource } from "../siblingThreads/codeSiblingThreadSource";
+import { createSiblingThreadTools } from "../siblingThreads/siblingThreadTools";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
+import { createSideTaskTools } from "../sideTasks/sideTaskTools";
+import { type AppleExecutionContext, AppleToolchainService } from "../apple/appleToolchainService";
+import {
+  type AndroidExecutionContext,
+  AndroidToolchainService,
+  isReplayedAndroidEvidence,
+} from "../android/androidToolchainService";
+import { isNativeHarnessDriverKind } from "@octant/domain";
+import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
+import { type CodeWiring, stableCodeFileId } from "./code";
+import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
+import type { ServerStart } from "./serverShape";
+import type { LateBindings } from "./lateBindings";
+import type { AuthorityWiring } from "./authority";
+import type { AgentRunsWiring } from "./agentRuns";
+import type { IntegrationsWiring } from "./integrations";
+import type { ComputerUseWiring } from "./computerUse";
+import type { WorkspaceWiring } from "./workspace";
+import type { BrowserWiring } from "./browser";
+
+function withCodeOperationRuntime(
+  service: CodeRouteService,
+  runtime: CodeOperationRuntime,
+): CodeRouteService {
+  const readEvidenceBatch = runtime.readEvidenceBatch?.bind(runtime);
+  return {
+    bootstrap: (windowId) => service.bootstrap(windowId),
+    navigation: (windowId) => service.navigation(windowId),
+    read: (windowId, threadId) => service.read(windowId, threadId),
+    execute: (windowId, command) => service.execute(windowId, command),
+    executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
+    inspectTerminal: (windowId, input) => runtime.inspectTerminal(windowId, input),
+    subscribe: (windowId, threadId, afterSequence, signal) =>
+      service.subscribe(windowId, threadId, afterSequence, signal),
+    subscribeOperation: async function* (windowId, threadId, operationId, afterCursor) {
+      const frames = await runtime.subscribe(windowId, threadId, operationId, afterCursor, 100);
+      yield* frames;
+    },
+    conversation: (windowId, threadId, afterCursor, limit) =>
+      runtime.conversation(windowId, threadId, afterCursor, limit),
+    conversationWindow: (windowId, threadId, request) =>
+      runtime.conversationWindow(windowId, threadId, request),
+    readContent: (windowId, contentId) => service.readContent(windowId, contentId),
+    readOperationContent: (windowId, threadId, operationId, contentId) =>
+      runtime.readEvidence(windowId, threadId, operationId, decodeCodeEvidenceContentId(contentId)),
+    ...(readEvidenceBatch === undefined
+      ? {}
+      : { readOperationContents: (windowId, input) => readEvidenceBatch(windowId, input) }),
+    saveFile: (windowId, input) => service.saveFile(windowId, input),
+    openFile: (windowId, input) => service.openFile(windowId, input),
+    ...(service.readGitHistory === undefined
+      ? {}
+      : { readGitHistory: service.readGitHistory.bind(service) }),
+    ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
+    ...(service.readFile === undefined ? {} : { readFile: service.readFile.bind(service) }),
+    ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
+    readRepositoryTestStatus: (windowId, input) =>
+      runtime.readRepositoryTestStatus(windowId, input.threadId, input.checkoutId),
+    ...(service.watchFiles === undefined ? {} : { watchFiles: service.watchFiles.bind(service) }),
+    ...(service.searchFiles === undefined
+      ? {}
+      : { searchFiles: service.searchFiles.bind(service) }),
+    ...(service.stageEvidence === undefined
+      ? {}
+      : { stageEvidence: service.stageEvidence.bind(service) }),
+    ...(service.stageAttachment === undefined
+      ? {}
+      : { stageAttachment: service.stageAttachment.bind(service) }),
+    ...(service.readAttachment === undefined
+      ? {}
+      : { readAttachment: service.readAttachment.bind(service) }),
+    ...(service.discardAttachment === undefined
+      ? {}
+      : { discardAttachment: service.discardAttachment.bind(service) }),
+    ...(service.mergeProjectPullRequest === undefined
+      ? {}
+      : { mergeProjectPullRequest: service.mergeProjectPullRequest.bind(service) }),
+  };
+}
+
+function withCodeBoard(
+  service: CodeRouteService,
+  queryBoard: NonNullable<CodeRouteService["queryBoard"]>,
+): CodeRouteService {
+  return {
+    bootstrap: (windowId) => service.bootstrap(windowId),
+    navigation: (windowId) => service.navigation(windowId),
+    read: (windowId, threadId) => service.read(windowId, threadId),
+    execute: (windowId, command, signal) => service.execute(windowId, command, signal),
+    subscribe: (windowId, threadId, afterSequence, signal) =>
+      service.subscribe(windowId, threadId, afterSequence, signal),
+    readContent: (windowId, contentId) => service.readContent(windowId, contentId),
+    saveFile: (windowId, input) => service.saveFile(windowId, input),
+    openFile: (windowId, input) => service.openFile(windowId, input),
+    ...(service.readGitHistory === undefined
+      ? {}
+      : { readGitHistory: service.readGitHistory.bind(service) }),
+    ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
+    ...(service.readFile === undefined ? {} : { readFile: service.readFile.bind(service) }),
+    ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
+    ...(service.readRepositoryTestStatus === undefined
+      ? {}
+      : { readRepositoryTestStatus: service.readRepositoryTestStatus.bind(service) }),
+    ...(service.watchFiles === undefined ? {} : { watchFiles: service.watchFiles.bind(service) }),
+    ...(service.searchFiles === undefined
+      ? {}
+      : { searchFiles: service.searchFiles.bind(service) }),
+    queryBoard,
+    ...(service.executeOperation === undefined
+      ? {}
+      : { executeOperation: service.executeOperation.bind(service) }),
+    ...(service.inspectTerminal === undefined
+      ? {}
+      : { inspectTerminal: service.inspectTerminal.bind(service) }),
+    ...(service.subscribeOperation === undefined
+      ? {}
+      : { subscribeOperation: service.subscribeOperation.bind(service) }),
+    ...(service.conversation === undefined
+      ? {}
+      : { conversation: service.conversation.bind(service) }),
+    ...(service.conversationWindow === undefined
+      ? {}
+      : { conversationWindow: service.conversationWindow.bind(service) }),
+    ...(service.readOperationContent === undefined
+      ? {}
+      : { readOperationContent: service.readOperationContent.bind(service) }),
+    ...(service.readOperationContents === undefined
+      ? {}
+      : { readOperationContents: service.readOperationContents.bind(service) }),
+    ...(service.stageEvidence === undefined
+      ? {}
+      : { stageEvidence: service.stageEvidence.bind(service) }),
+    ...(service.stageAttachment === undefined
+      ? {}
+      : { stageAttachment: service.stageAttachment.bind(service) }),
+    ...(service.readAttachment === undefined
+      ? {}
+      : { readAttachment: service.readAttachment.bind(service) }),
+    ...(service.discardAttachment === undefined
+      ? {}
+      : { discardAttachment: service.discardAttachment.bind(service) }),
+    ...(service.mergeProjectPullRequest === undefined
+      ? {}
+      : { mergeProjectPullRequest: service.mergeProjectPullRequest.bind(service) }),
+  };
+}
+
+export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> & {
+  /** Cells settled by a later wiring call; read per use, never at construction. */
+  readonly late: Pick<
+    LateBindings,
+    | "canvasAgentToolPort"
+    | "codeOperationRuntime"
+    | "nativeHarnessComposition"
+    | "observeRefreshedPullRequestRows"
+    | "terminalBrowserGrants"
+    | "terminalProcessPort"
+    | "workRequestRuntime"
+  >;
+} & Pick<
+    AuthorityWiring,
+    | "agentRunPersistence"
+    | "androidInputGrants"
+    | "codeApprovalStore"
+    | "codeSessionAuthority"
+    | "liveTurns"
+    | "machineChangeFeed"
+    | "requireBrowserAutomationService"
+    | "requireBrowserToolApprovalService"
+    | "simulatorInputGrants"
+  > &
+  Pick<
+    AgentRunsWiring,
+    | "agentsManagedToolsFor"
+    | "externalContentIngestionStore"
+    | "nativeHarnessHooks"
+    | "runtimeOutsideContentMarks"
+    | "sideTasks"
+    | "spendCeiling"
+  > &
+  Pick<
+    IntegrationsWiring,
+    | "agentMessageService"
+    | "consumeCreateFromIssueFramed"
+    | "githubExtensionSnapshot"
+    | "githubReadToolService"
+    | "peekCreateFromIssueFramed"
+    | "siblingThreadsService"
+    | "threadOutsideContentMarks"
+  > &
+  Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
+  Pick<WorkspaceWiring, "codeBoardPlanProgressSource" | "contextHarness" | "projectService"> &
+  Pick<
+    CodeWiring,
+    | "canAccessCodeProject"
+    | "codeAttachments"
+    | "codeBoardEventStore"
+    | "codeEvidence"
+    | "codeProjectAccess"
+    | "codeService"
+    | "codeTestDiscovery"
+    | "isCodeProviderModelAllowed"
+    | "projectPullRequestCadence"
+    | "projectPullRequestService"
+    | "roots"
+    | "selectCodeConversation"
+  > &
+  Pick<
+    ProvidersWiring,
+    | "codeThreadDrivers"
+    | "configuredDriverOptions"
+    | "extensionApiService"
+    | "extensionPackageStore"
+    | "nativeHarnessTranscripts"
+    | "probeProviderForThreads"
+    | "providerDataDirectory"
+    | "providerRuntimeRegistry"
+    | "resolveSelectedExtensions"
+  > &
+  Pick<BrowserWiring, "browserAuthority" | "productFeedbackService"> & {
+    /** Wired by wireDevices; read only after startup. */
+    readonly androidToolchainService: () => AndroidToolchainService;
+    /** Wired by wireDevices; read only after startup. */
+    readonly appleToolchainService: () => AppleToolchainService;
+    /** Wired by wireChat; read only after startup. */
+    readonly codeThreadMentionDirectory: () => ReturnType<typeof createCodeThreadMentionDirectory>;
+    /** Wired by wireWork; read only after startup. */
+    readonly fileMentionService: () => FileMentionService;
+    /** Wired by wireDevices; read only after startup. */
+    readonly recordAppleEvidence: () => (
+      evidence: import("@octant/contracts").AppleBuildEvidence,
+      startedAt: string,
+    ) => void;
+    /** Wired by wireDevices; read only after startup. */
+    readonly resolveAndroidContext: () => (
+      windowId: WindowId,
+      scope: {
+        readonly authority: import("@octant/contracts").ToolActionAuthority;
+        readonly threadId: import("@octant/contracts").CodeThreadId;
+        readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
+      },
+      envelope: AndroidRpcEnvelope,
+    ) => Promise<AndroidExecutionContext | undefined>;
+    /** Wired by wireDevices; read only after startup. */
+    readonly resolveAppleContext: () => (
+      windowId: WindowId,
+      scope: {
+        readonly authority: import("@octant/contracts").ToolActionAuthority;
+        readonly threadId: import("@octant/contracts").CodeThreadId;
+        readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
+      },
+      envelope: AppleRpcEnvelope,
+    ) => Promise<AppleExecutionContext | undefined>;
+    /** Wired by wireChat; read only after startup. */
+    readonly threadMentionService: () => ThreadMentionService;
+  };
+
+export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
+  const {
+    late,
+    agentMessageService,
+    agentRunPersistence,
+    agentsManagedToolsFor,
+    androidInputGrants,
+    androidToolchainService,
+    appleToolchainService,
+    browserAuthority,
+    canAccessCodeProject,
+    codeApprovalStore,
+    codeAttachments,
+    codeBoardEventStore,
+    codeBoardPlanProgressSource,
+    codeEvidence,
+    codeProjectAccess,
+    codeService,
+    codeSessionAuthority,
+    codeTestDiscovery,
+    codeThreadDrivers,
+    codeThreadMentionDirectory,
+    computerToolsFor,
+    computerUseTools,
+    configuredDriverOptions,
+    consumeCreateFromIssueFramed,
+    contextHarness,
+    extensionApiService,
+    extensionPackageStore,
+    externalContentIngestionStore,
+    fileMentionService,
+    githubExtensionSnapshot,
+    githubReadToolService,
+    isCodeProviderModelAllowed,
+    liveTurns,
+    machineChangeFeed,
+    nativeHarnessHooks,
+    nativeHarnessTranscripts,
+    options,
+    peekCreateFromIssueFramed,
+    persistence,
+    probeProviderForThreads,
+    productFeedbackService,
+    projectPullRequestCadence,
+    projectPullRequestService,
+    projectService,
+    providerDataDirectory,
+    providerRuntimeRegistry,
+    recordAppleEvidence,
+    requireBrowserAutomationService,
+    requireBrowserToolApprovalService,
+    resolveAndroidContext,
+    resolveAppleContext,
+    resolveSelectedExtensions,
+    roots,
+    runtimeOutsideContentMarks,
+    selectCodeConversation,
+    siblingThreadsService,
+    sideTasks,
+    simulatorInputGrants,
+    spendCeiling,
+    threadMentionService,
+    threadOutsideContentMarks,
+  } = deps;
+  return Effect.gen(function* () {
+    if (late.codeOperationRuntime.current === undefined && options.codeService === undefined) {
+      late.terminalProcessPort.current = new TerminalProcessPort({
+        receiptDirectory: join(providerDataDirectory, "code", "terminal-receipts"),
+        shellStateDirectory: join(providerDataDirectory, "code", "terminal-shell"),
+      });
+      const repositoryTestProcessPort = new RepositoryTestProcessPort({
+        receiptDirectory: join(providerDataDirectory, "code", "test-receipts"),
+      });
+      // A scaffold generator downloads what it writes, so it gets its own
+      // private work directory and is pointed at it for every package cache.
+      // Nothing it fetches lands in the user's own caches, and the confinement
+      // still writes only the checkout and this directory.
+      const scaffoldWorkDirectory = join(providerDataDirectory, "code", "scaffold-work");
+      const scaffoldProcessPort = new RepositoryTestProcessPort({
+        receiptDirectory: join(providerDataDirectory, "code", "scaffold-receipts"),
+        temporaryDirectory: scaffoldWorkDirectory,
+      });
+      const rootProbePath = decodeCodeRelativePath("package.json");
+      // A confined commit cannot read the user's global gitconfig, so the
+      // host's own profile is the identity a checkout without local config
+      // falls back to. Read it per call: the profile is editable while the
+      // server runs, and a restart is too high a price for a name.
+      const gitMutationPort = new GitMutationPort(undefined, {
+        commitIdentity: () => {
+          const profile = persistence.readShellSettings()?.settings.userProfile;
+          // The profile's fields are independent: a name without an address
+          // still completes a checkout that has an address but no name. The
+          // port merges per field and refuses only when the combination
+          // cannot name an author at all.
+          return {
+            ...(profile?.displayName === undefined ? {} : { name: profile.displayName }),
+            ...(profile?.email === undefined ? {} : { email: profile.email }),
+          };
+        },
+      });
+      // A grant lets a provider CLI the person types into one thread terminal
+      // drive that thread's Browser. It is served from this host's memory only,
+      // through the same Browser, approval, and authority services a managed
+      // turn uses, and the terminal's own running state is read live.
+      const grants = new TerminalBrowserGrantService({
+        readThread: persistence.readCodeThread,
+        canAccessProject: canAccessCodeProject,
+        terminalIsRunning: (terminalId) => {
+          try {
+            return (
+              late.codeOperationRuntime.current?.terminals?.attach(String(terminalId)).status ===
+              "running"
+            );
+          } catch {
+            return false;
+          }
+        },
+        browser: {
+          resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
+          automation: {
+            inspectThread: (windowId, threadId) =>
+              requireBrowserAutomationService().inspectThread(windowId, threadId),
+            create: (input) => requireBrowserAutomationService().create(input),
+            act: (input) => requireBrowserAutomationService().act(input),
+            releaseThread: (windowId, threadId) =>
+              requireBrowserAutomationService().releaseThread(windowId, threadId),
+          },
+          approvals: requireBrowserToolApprovalService(),
+        },
+        ...(options.terminalLauncher === undefined ? {} : { launcher: options.terminalLauncher }),
+        journal: persistence.journal,
+        personActor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+        hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      });
+      late.terminalBrowserGrants.current = grants;
+      const unsubscribeTerminalBrowserGrants = persistence.journal.subscribeCommitted((append) => {
+        for (const event of append.events) {
+          if (
+            event.eventName === "code.thread-updated@1" &&
+            event.aggregateType === "code-thread"
+          ) {
+            // An archive or completion ends the grants a thread holds at once;
+            // the next call would find it too, but the record should not wait.
+            const thread = persistence.readCodeThread(decodeCodeThreadId(event.aggregateId));
+            if (thread?.lifecycle !== "active") {
+              grants.threadSettled(event.aggregateId, "thread-archived");
+            } else if (thread.completedAt !== undefined) {
+              grants.threadSettled(event.aggregateId, "thread-completed");
+            }
+          } else if (event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged) {
+            const purged = event.payload as {
+              readonly mode?: unknown;
+              readonly threadId?: unknown;
+            };
+            if (purged.mode === "code" && typeof purged.threadId === "string") {
+              grants.threadSettled(purged.threadId, "thread-deleted");
+            }
+          }
+        }
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(async () => {
+          unsubscribeTerminalBrowserGrants();
+          await grants.close();
+        }),
+      );
+      late.codeOperationRuntime.current = createCodeOperationRuntime({
+        liveTurns,
+        terminalBrowserGrants: grants,
+        onPendingRequestWithdrawn: () => machineChangeFeed.publish(["code-navigation"]),
+        gitMutationPort,
+        agentRuns: agentRunPersistence,
+        resolveSelectedExtensions,
+        computerUseTools: ({ windowId, thread, selection }) =>
+          computerToolsFor(
+            decodeComputerUseOwner({
+              windowId,
+              threadId: thread.id,
+              mode: "code",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+              executionPolicy: thread.executionPolicy,
+            }),
+            selection,
+          ),
+        computerUseUnattachedTools: ({ windowId, thread }) =>
+          computerUseTools?.unattachedToolSet(
+            decodeComputerUseOwner({
+              windowId,
+              threadId: thread.id,
+              mode: "code",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+              executionPolicy: thread.executionPolicy,
+            }),
+          ),
+        spendCeiling,
+        terminalProcessPort: late.terminalProcessPort.current,
+        repositoryTestProcessPort,
+        scaffoldProcess: {
+          execute: (input, signal) => scaffoldProcessPort.execute(input, signal),
+          environment: {
+            BUN_INSTALL_CACHE_DIR: join(scaffoldWorkDirectory, "bun-cache"),
+            npm_config_cache: join(scaffoldWorkDirectory, "npm-cache"),
+            TMPDIR: scaffoldWorkDirectory,
+          },
+        },
+        repositoryTestDiscovery: codeTestDiscovery,
+        attachments: codeAttachments,
+        persistence: {
+          journal: persistence.journal,
+          readCodeThread: persistence.readCodeThread,
+          readCodeCheckout: persistence.readCodeCheckout,
+          readCodeRuntimeWorkAggregateVersion: persistence.readCodeRuntimeWorkAggregateVersion,
+          readReviewFinding: persistence.readCodeReviewFinding,
+          readReviewFindings: persistence.readCodeReviewFindings,
+        },
+        probeProvider: (instanceId) => probeProviderForThreads(instanceId),
+        isProviderModelAllowed: (thread) =>
+          isCodeProviderModelAllowed({
+            projectId: thread.projectId,
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          }),
+        windowAccess: {
+          canAccessProject: canAccessCodeProject,
+          standingAuthority: (run) => codeProjectAccess.standingAuthority(run),
+        },
+        resolveCheckoutRoot: async (windowId, thread, checkout) => {
+          const root = await roots.resolve(windowId, thread, checkout, rootProbePath);
+          if (root === undefined) return undefined;
+          const workingDirectory = await resolveThreadWorkingDirectory(
+            root.rootPath,
+            thread.workingDirectory ?? decodeThreadWorkingDirectory("."),
+          );
+          return {
+            checkoutRoot: root.rootPath,
+            workingDirectory,
+            shell: defaultTerminalShell(),
+            credentialReferences: [],
+            environment: {},
+          };
+        },
+        resolveProviderDriver: (thread) => {
+          const instance = persistence.readProviderInstance(thread.providerInstanceId);
+          if (instance === undefined || !instance.enabled) return undefined;
+          try {
+            const key = String(thread.id);
+            const retained = codeThreadDrivers.get(key);
+            if (
+              retained?.instanceId === String(instance.id) &&
+              retained.version === instance.version
+            )
+              return retained.driver;
+            const driver = attachWorkRequestRuntime(
+              makeConfiguredProviderDriver(instance, configuredDriverOptions),
+              () => late.workRequestRuntime.current,
+            );
+            codeThreadDrivers.set(key, {
+              instanceId: String(instance.id),
+              version: instance.version,
+              driver,
+            });
+            return driver;
+          } catch {
+            return undefined;
+          }
+        },
+        agents: (input) =>
+          agentsManagedToolsFor({
+            windowId: String(input.windowId),
+            parentThreadId: String(input.thread.id),
+            mode: "code",
+            projectId: input.thread.projectId,
+          }),
+        nativeHarnessTools: (input) => late.nativeHarnessComposition.current?.forCode(input),
+        nativeHarness: nativeHarnessHooks,
+        onProviderTurnRequested: (threadId) => {
+          if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
+        },
+        supportsAppManagedTools: (thread) => {
+          const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
+          return (
+            observed?.capabilities.appManagedTools === "supported" ||
+            observed?.verifiedToolModelIds?.some(
+              (candidate) => String(candidate) === String(thread.modelId),
+            ) === true
+          );
+        },
+        supportsAcpClientCapabilities: (thread) =>
+          providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
+            .acpClientCapabilities === "supported",
+        supportsModelSwitch: (thread) =>
+          providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
+            .modelSwitch === "supported",
+        compactionRunning: (threadId) =>
+          contextHarness.compactionRunning(
+            decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+          ),
+        sessionCompactions: {
+          record: ({ threadId, ...input }) => {
+            contextHarness.recordAutomaticCompaction({
+              subject: decodeContextSubjectRef({
+                aggregateType: "code-thread",
+                aggregateId: threadId,
+              }),
+              ...input,
+            });
+          },
+          compactedAfter: (threadId, globalSequence) =>
+            contextHarness.sessionCompactedAfter(
+              decodeContextSubjectRef({ aggregateType: "code-thread", aggregateId: threadId }),
+              globalSequence,
+            ),
+        },
+        providerSwitchContext: ({ thread, excludeOperationId, inheritedFrom }) =>
+          selectCodeConversation(thread.id, {
+            purpose: "provider-switch",
+            excludeOperationId: String(excludeOperationId),
+            ...(inheritedFrom === undefined
+              ? {}
+              : {
+                  inherited: {
+                    threadId: inheritedFrom.source.id,
+                    throughOperationId: inheritedFrom.throughOperationId,
+                    externalContentIngested: readThreadExternalContentTaint(
+                      persistence.connection,
+                      String(inheritedFrom.source.id),
+                    ).externalContentIngested,
+                  },
+                }),
+          }),
+        supportsAttachments: (thread) => {
+          const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
+          if (observed?.capabilities.nativeAttachments !== "supported") return false;
+          // Provider-level support only says some model reads images. A turn
+          // goes to one model, so the thread's own model has to be that one.
+          return observed.models.some(
+            (model) =>
+              String(model.id) === String(thread.modelId) &&
+              model.inputModalities.includes("image"),
+          );
+        },
+        browserAutomation: {
+          resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
+          inspectThread: (windowId, threadId) =>
+            requireBrowserAutomationService().inspectThread(windowId, threadId),
+          create: (input) => requireBrowserAutomationService().create(input),
+          act: (input) => requireBrowserAutomationService().act(input),
+          releaseThread: (windowId, threadId) =>
+            requireBrowserAutomationService().releaseThread(windowId, threadId),
+        },
+        isBrowserOriginRemembered: (origin) =>
+          requireBrowserToolApprovalService().isRemembered(origin),
+        // The agent's Apple capability resolves its execution context through
+        // exactly the resolver the workbench route uses, so a tool call and a
+        // click are the same request to the same policy.
+        appleToolchain: {
+          resolveAuthority: (_windowId, thread) => ({
+            hostId: LOCAL_TOOL_HOST_ID,
+            mode: "code" as const,
+            projectId: thread.projectId,
+            providerInstanceId: thread.providerInstanceId,
+            extension: { kind: "core" as const },
+          }),
+          discover: async (windowId, request) => {
+            const context = await resolveAppleContext()(
+              windowId,
+              {
+                authority: request.authority,
+                threadId: request.threadId,
+                checkoutId: request.checkoutId,
+              },
+              { kind: "apple-discovery-request", request },
+            );
+            if (context === undefined) return undefined;
+            return await appleToolchainService().discover(request, context);
+          },
+          execute: async (windowId, request) => {
+            const startedAt = new Date().toISOString();
+            const context = await resolveAppleContext()(
+              windowId,
+              {
+                authority: request.authority,
+                threadId: request.threadId,
+                checkoutId: request.checkoutId,
+              },
+              { kind: "apple-action-request", request },
+            );
+            if (context === undefined) return undefined;
+            const evidence = await appleToolchainService().execute(request, context);
+            // An agent's shutdown closes a Simulator to every thread, and its
+            // input keeps a live grant open, the same as the pane's.
+            simulatorInputGrants.settle(String(windowId), request, evidence, context);
+            await recordAppleEvidence()(evidence, startedAt);
+            return evidence;
+          },
+          readScreenshot: async (windowId, scope, reference) => {
+            const context = await resolveAppleContext()(windowId, scope, {
+              kind: "apple-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            const artifact = await appleToolchainService().readScreenshotArtifact(
+              reference,
+              context,
+            );
+            return artifact.kind === "found" ? artifact.bytes : undefined;
+          },
+          snapshot: async (windowId, scope) => {
+            const context = await resolveAppleContext()(windowId, scope, {
+              kind: "apple-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            return context === undefined ? undefined : appleToolchainService().snapshot(context);
+          },
+          requestPaneOpen: async (windowId, scope, simulatorId) => {
+            const context = await resolveAppleContext()(windowId, scope, {
+              kind: "apple-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            return appleToolchainService().requestPaneOpen(context, simulatorId);
+          },
+          inputGrantIsOpen: (windowId, threadId, simulatorId) =>
+            simulatorInputGrants.isOpen({
+              windowId: String(windowId),
+              threadId: String(threadId),
+              simulatorId: String(simulatorId),
+            }),
+        },
+        androidToolchain: {
+          resolveAuthority: (_windowId, thread) => ({
+            hostId: LOCAL_TOOL_HOST_ID,
+            mode: "code" as const,
+            projectId: thread.projectId,
+            providerInstanceId: thread.providerInstanceId,
+            extension: { kind: "core" as const },
+          }),
+          discover: async (windowId, request) => {
+            const context = await resolveAndroidContext()(
+              windowId,
+              {
+                authority: request.authority,
+                threadId: request.threadId,
+                checkoutId: request.checkoutId,
+              },
+              { kind: "android-discovery-request", request },
+            );
+            if (context === undefined) return undefined;
+            return await androidToolchainService().discover(request, context);
+          },
+          execute: async (windowId, request) => {
+            const context = await resolveAndroidContext()(
+              windowId,
+              {
+                authority: request.authority,
+                threadId: request.threadId,
+                checkoutId: request.checkoutId,
+              },
+              { kind: "android-action-request", request },
+            );
+            if (context === undefined) return undefined;
+            const evidence = await androidToolchainService().execute(request, context);
+            if (!isReplayedAndroidEvidence(evidence)) {
+              androidInputGrants.settle(
+                String(windowId),
+                { kind: request.kind, simulatorId: request.emulatorId },
+                evidence,
+                context,
+              );
+            }
+            return evidence;
+          },
+          readScreenshot: async (windowId, scope, reference) => {
+            const context = await resolveAndroidContext()(windowId, scope, {
+              kind: "android-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            const artifact = await androidToolchainService().readScreenshotArtifact(
+              reference,
+              context,
+            );
+            return artifact.kind === "found" ? artifact.bytes : undefined;
+          },
+          snapshot: async (windowId, scope) => {
+            const context = await resolveAndroidContext()(windowId, scope, {
+              kind: "android-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            return context === undefined ? undefined : androidToolchainService().snapshot(context);
+          },
+          requestPaneOpen: async (windowId, scope, emulatorId) => {
+            const context = await resolveAndroidContext()(windowId, scope, {
+              kind: "android-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            if (context === undefined) return undefined;
+            return androidToolchainService().requestPaneOpen(context, emulatorId);
+          },
+          inputGrantIsOpen: (windowId, threadId, emulatorId) =>
+            androidInputGrants.isOpen({
+              windowId: String(windowId),
+              threadId: String(threadId),
+              simulatorId: String(emulatorId),
+            }),
+        },
+        credentialResolver: { resolve: async () => undefined },
+        resolveThreadMentionContext: threadMentionContextResolver(
+          () => threadMentionService(),
+          threadOutsideContentMarks,
+        ),
+        resolveFileMentionContext: async ({ fileMentionPaths, windowId, threadId, checkoutId }) =>
+          fileMentionContextBlocks(fileMentionService(), {
+            windowId,
+            scope: { mode: "code", threadId, checkoutId },
+            paths: fileMentionPaths,
+          }),
+        takeProductFeedbackForTurn: createProductFeedbackTurnPort({
+          service: productFeedbackService,
+        }),
+        peekIssueContextFramed: peekCreateFromIssueFramed,
+        consumeIssueContextFramed: consumeCreateFromIssueFramed,
+        // Where a run comes home to: the directory the thread's Project binds.
+        // A run on a managed worktree works in a sibling tree; the merge lands
+        // in the person's own checkout, and only the Project knows where that
+        // is.
+        resolveBaseCheckoutRoot: async (thread) => {
+          const project = persistence.readProject(thread.projectId);
+          return project?.type === "code" && project.lifecycle === "active"
+            ? project.binding.canonicalRoot
+            : undefined;
+        },
+        forkContext: ({ source, throughOperationId }) =>
+          selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
+        forkMergeBackContext: ({ fork, afterOperationId, throughOperationId }) =>
+          selectCodeConversation(fork.id, {
+            purpose: "fork-merge-back",
+            throughOperationId,
+            ...(afterOperationId === undefined ? {} : { afterOperationId }),
+          }),
+        forkProviderSession: (input) =>
+          seedCodeForkHarnessSession(
+            {
+              transcripts: nativeHarnessTranscripts,
+              harnessDriverKind: (instanceId) => {
+                const instance = persistence.readProviderInstance(instanceId);
+                return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind)
+                  ? instance.driverKind
+                  : undefined;
+              },
+              sourceTurns: (threadId) =>
+                codeThreadTurns((page) => codeBoardEventStore.conversation(page), threadId),
+              sourceConversations: (threadId) =>
+                codeBoardEventStore.providerConversationsOfTurns(threadId),
+            },
+            input,
+          ),
+        resolveProfileSkills: createCodeProfileSkillResolver({
+          snapshot: () => extensionApiService.snapshot(),
+          loadSkillText: createStoredCodeProfileSkillTextLoader({
+            snapshot: () => extensionApiService.snapshot(),
+            readVerifiedComponentText: async (target) =>
+              extensionPackageStore.readVerifiedComponentText(target, target.componentId),
+          }),
+        }),
+        githubReadTools: ({ windowId, thread, readThread }) =>
+          githubReadToolSetIfEffective(githubExtensionSnapshot.read(), () =>
+            githubReadToolService.createToolSet({ windowId, thread, readThread }),
+          ),
+        agentMessages: ({ thread, readPosture }) =>
+          createAgentMessageTools({
+            service: agentMessageService,
+            senderThreadId: String(thread.id),
+            toolConstraints: thread.toolConstraints ?? [],
+            profileDisplayName: thread.profileDisplayName ?? "the bound profile",
+            readPosture,
+          }),
+        // The facts come from the host's own records on every call. The
+        // Code runtime, the decision reader, and the mention directory are
+        // declared later in this startup; a turn runs only after they exist.
+        siblingThreads: ({ windowId, thread }) =>
+          createSiblingThreadTools({
+            service: siblingThreadsService,
+            source: codeSiblingThreadSource(
+              {
+                threads: () => persistence.readCodeThreads(),
+                thread: (threadId) => persistence.readCodeThread(threadId),
+                runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
+                turnAwaitsPerson: (threadId) =>
+                  late.codeOperationRuntime.current?.turnAwaitsPerson?.(String(threadId)) === true,
+                decisionPending: (candidate) =>
+                  codeTurnDecisions.forThread(candidate) !== undefined,
+                mentions: {
+                  readTranscript: async (readerWindowId, threadId, options) =>
+                    await codeThreadMentionDirectory().readTranscript(
+                      readerWindowId,
+                      threadId,
+                      options,
+                    ),
+                },
+              },
+              windowId,
+            ),
+            callerThreadId: String(thread.id),
+            toolConstraints: thread.toolConstraints ?? [],
+            profileDisplayName: thread.profileDisplayName ?? "the bound profile",
+          }),
+        carryAgentMessages: (threadId) => agentMessageService.carryIntoTurn(threadId),
+        confirmAgentMessagesDelivered: (messageIds) =>
+          agentMessageService.confirmDelivered(messageIds),
+        sideTasks: ({ thread }) =>
+          createSideTaskTools({
+            store: sideTasks,
+            threadId: String(thread.id),
+            mode: "code",
+            projectId: thread.projectId,
+            suggestedBy: thread,
+            uuid: randomUUID,
+            clock: () => new Date().toISOString(),
+          }),
+        canvas: ({ windowId, thread }) =>
+          late.canvasAgentToolPort.current === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId,
+                mode: "code",
+                thread: {
+                  id: String(thread.id),
+                  projectId: String(thread.projectId),
+                  providerInstanceId: thread.providerInstanceId,
+                  modelId: thread.modelId,
+                },
+                port: late.canvasAgentToolPort.current,
+              }),
+        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        outsideContentMarks: runtimeOutsideContentMarks,
+        readThreadExternalContentTaint: (threadId) =>
+          readThreadExternalContentTaint(persistence.connection, String(threadId)),
+        resolveProviderCapabilities: (thread) =>
+          providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities,
+        // Planner tools resolve their designation on every call through the
+        // services declared after this runtime; the closures run only once a
+        // turn is live, well after startup finishes wiring them.
+        planner: {
+          isPlannerThread: (threadId) => codePlannerService.isPlannerThread(threadId),
+          board: async (windowId, threadId) => {
+            const scope = codePlannerService.boardScope(threadId);
+            if (scope.status === "refused") return scope;
+            const queryBoard = routeCodeService.queryBoard;
+            if (queryBoard === undefined) {
+              return {
+                status: "refused",
+                reason: "planner-unavailable",
+                message: "The Code Thread Board is unavailable on this host.",
+              };
+            }
+            // The planner reads the same server-authoritative board read-model
+            // the UI queries, scoped strictly to its own Project. No GitHub
+            // call happens here; cached PR facts arrive with their freshness.
+            const board = await queryBoard(windowId, {
+              version: 1,
+              projectIds: [scope.projectId],
+            });
+            return { status: "ok", board };
+          },
+          propose: async (_windowId, threadId, draft) =>
+            codePlannerService.propose(threadId, draft),
+        },
+        resolvePullRequestTarget: async (threadId) => {
+          const thread = persistence.readCodeThread(threadId);
+          if (thread === undefined) return undefined;
+          const owner = thread.deliveryTarget.proposedBaseRepository.split("/")[0];
+          if (owner === undefined || owner.length === 0) return undefined;
+          return {
+            authorization: "confirmed-delivery-target",
+            baseRepository: thread.deliveryTarget.proposedBaseRepository,
+            baseBranch: thread.deliveryTarget.proposedBaseBranch,
+            head: `${owner}:${thread.deliveryTarget.branchIntent}`,
+          };
+        },
+        reviewFiles: {
+          resolve: (input) => {
+            const reference = persistence.readCodeFileReference(input.fileId);
+            if (
+              reference === undefined ||
+              reference.id !== stableCodeFileId(input.threadId, input.checkoutId, input.path) ||
+              reference.threadId !== input.threadId ||
+              reference.checkoutId !== input.checkoutId ||
+              reference.digest !== input.digest
+            ) {
+              return undefined;
+            }
+            return {
+              threadId: input.threadId,
+              checkoutId: input.checkoutId,
+              path: input.path,
+              digest: input.digest,
+            };
+          },
+        },
+        evidence: {
+          put: (content, metadata) => codeEvidence.put(content, metadata),
+          read: async (reference) => codeEvidence.read(reference),
+        },
+        actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+        clock: () => new Date().toISOString(),
+        uuid: randomUUID,
+        approvalStore: codeApprovalStore,
+        sessionAuthority: codeSessionAuthority,
+        ...(options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable }),
+      });
+    }
+    yield* Effect.promise(
+      () => late.codeOperationRuntime.current?.reconcile?.() ?? Promise.resolve(),
+    );
+    const baseRouteCodeService: CodeRouteService =
+      late.codeOperationRuntime.current === undefined
+        ? codeService
+        : withCodeOperationRuntime(codeService, late.codeOperationRuntime.current);
+    // A finished Code turn that closed with an ask, read back from the journal
+    // so the board and every attention surface agree after a restart.
+    const codeTurnDecisions = new CodeTurnDecisions({
+      threads: async (windowId) => (await baseRouteCodeService.navigation(windowId)).threads,
+      admitsTurn: async (windowId, thread) =>
+        (await late.codeOperationRuntime.current?.admitsTurn?.(windowId, thread)) === true,
+      runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
+      replay: (input) => {
+        try {
+          const replay = codeBoardEventStore.replay({
+            ...input,
+            limit: MAX_CODE_OPERATION_REPLAY_LIMIT,
+          });
+          return replay.status === "ok" ? replay.frames : undefined;
+        } catch {
+          return undefined;
+        }
+      },
+      readEvidence: (reference) => codeEvidence.read(reference),
+    });
+    // The Code Thread Board composes the journal-rebuildable operational
+    // metadata projection with live runtime works. Local Git worktree
+    // observation still degrades to unavailable here when the checkout cannot
+    // be observed; GitHub is never called. Cached PR evidence comes from the
+    // operation journal, labeled with freshness, and cannot independently
+    // satisfy a delivery target when stale.
+    const codeThreadMetadataService = new CodeThreadMetadataService({
+      git: { observe: () => ({ status: "unavailable" }) },
+      history: {
+        read: (threadId) => codeBoardEventStore.historyForThread(threadId),
+      },
+    });
+    // Persistent Code follow-up. Follow-up is a durable user
+    // obligation independent of unread and runtime status; it reuses the
+    // mode-neutral `thread-follow-up` aggregate so a single normalized model
+    // spans Chat, Work, and Code.
+    const codeFollowUpService = new CodeFollowUpService({
+      persistence,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    // The Project planner: one designated Code thread per Code Project that
+    // may read the Project's board and propose work. A confirmed proposal
+    // creates its thread through the ordinary creation command path below;
+    // the planner has no creation authority of its own. Only the host's own
+    // CodeService takes the host-only mark a thread confirmed from a marked
+    // planner starts with; a route service a host was given instead has no
+    // such input, so a confirm that needs the mark is refused there rather
+    // than creating the thread unmarked.
+    const codePlannerService = new CodePlannerService({
+      persistence,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      canAccessProject: canAccessCodeProject,
+      createThread: async (windowId, creation, signal, executionContext) => {
+        if (codeService instanceof CodeService) {
+          return codeService.execute(windowId, creation, signal, executionContext);
+        }
+        if (executionContext.inheritedMark !== undefined) {
+          throw new CodeServiceError(
+            decodeCodeFailure({ category: "unavailable", message: INHERITED_MARK_REFUSAL }),
+          );
+        }
+        return codeService.execute(windowId, creation, signal);
+      },
+      isMarkedWithOutsideContent: (threadId) =>
+        readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,
+    });
+    // A linked pull request's checks turning red is a user obligation, not an
+    // agent event: every snapshot refresh feeds the durable follow-up marker on
+    // the owning thread. Read-only toward GitHub; only an explicit completion
+    // clears the marker.
+    const failingChecksFollowUps = new FailingChecksFollowUps({
+      followUps: codeFollowUpService,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    const observeRefreshedPullRequestRows:
+      | ((rows: ReadonlyArray<CodeProjectPullRequestRow>) => void)
+      | undefined = (rows) => {
+      void failingChecksFollowUps.observe(rows);
+    };
+    late.observeRefreshedPullRequestRows.current = observeRefreshedPullRequestRows;
+    const boardRouteCodeService: CodeRouteService = withCodeBoard(
+      baseRouteCodeService,
+      async (windowId, query) => {
+        const bootstrap = await baseRouteCodeService.bootstrap(windowId);
+        const projects = await projectService.bootstrap(windowId);
+        const projectById = new Map(
+          projects.active.map((project) => [String(project.id), project] as const),
+        );
+        const checkoutById = new Map(
+          bootstrap.checkouts.map((checkout) => [String(checkout.id), checkout] as const),
+        );
+        const boardThreads: CodeBoardThread[] = bootstrap.threads
+          .filter((thread) => thread.lifecycle !== "archived" && thread.completedAt === undefined)
+          .map((thread) => {
+            const project = projectById.get(String(thread.projectId));
+            return {
+              thread,
+              project: { id: thread.projectId, name: project?.name ?? thread.title },
+              checkout: checkoutById.get(String(thread.checkoutId)),
+              // A temporarily missing Project projection keeps the thread visible
+              // in a recovery state instead of dropping the card.
+              projectProjectionPresent: project !== undefined,
+              // Follow-up is the durable, journal-rebuildable obligation.
+              // Client unread is overlaid by each renderer and never stored on
+              // the server card.
+              followUp: codeFollowUpService.read(thread.id).followUp?.state === "open",
+            };
+          });
+        const board = new CodeThreadBoardService({
+          threads: { list: () => boardThreads },
+          metadata: codeThreadMetadataService,
+          runtime: {
+            observe: (threadId) => {
+              const thread = persistence.readCodeThread(threadId);
+              return {
+                ...boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
+                  turnParkedOnPerson:
+                    late.codeOperationRuntime.current?.turnAwaitsPerson?.(String(threadId)) ===
+                    true,
+                }),
+                decisionPending:
+                  thread !== undefined && codeTurnDecisions.forThread(thread) !== undefined,
+              };
+            },
+          },
+          pullRequests: {
+            snapshot: () => projectPullRequestService.boardSnapshot(windowId),
+          },
+          planProgress: codeBoardPlanProgressSource,
+          clock: () => new Date().toISOString(),
+        });
+        return board.query(query);
+      },
+    );
+    const routeCodeService: CodeRouteService = {
+      ...boardRouteCodeService,
+      readFollowUp: (_windowId, threadId) => codeFollowUpService.read(threadId),
+      executeFollowUp: (_windowId, command) => codeFollowUpService.execute(command),
+      readPlanner: (windowId, projectId) => codePlannerService.readView(windowId, projectId),
+      executePlanner: (windowId, command) => codePlannerService.execute(windowId, command),
+      executePlannerProposal: (windowId, command, signal) =>
+        codePlannerService.resolveProposal(windowId, command, signal),
+      queryProjectPullRequests: (windowId, query) =>
+        projectPullRequestService.query(windowId, query),
+      refreshProjectPullRequests: async (windowId, command, signal) => {
+        const view = await projectPullRequestService.refresh(
+          windowId,
+          command,
+          signal ?? new AbortController().signal,
+        );
+        // A fresh explicit refresh proves gh works again; it is one of the
+        // two documented signals that restart a cadence stopped by an
+        // unauthorized observation.
+        if (view.freshness.status === "fresh") {
+          projectPullRequestCadence.noteExplicitRefreshSucceeded();
+        }
+        return view;
+      },
+      queryProjectPullRequestDetail: (windowId, query) =>
+        projectPullRequestService.queryDetail(windowId, query),
+      refreshProjectPullRequestDetail: (windowId, command, signal) =>
+        projectPullRequestService.refreshDetail(
+          windowId,
+          command,
+          signal ?? new AbortController().signal,
+        ),
+      mergeProjectPullRequest: (windowId, command, signal, initiator) => {
+        if (initiator !== "user")
+          return Promise.resolve({ status: "refused", reason: "not-authorized" });
+        return projectPullRequestService.merge(
+          windowId,
+          command,
+          signal ?? new AbortController().signal,
+        );
+      },
+    };
+    return {
+      baseRouteCodeService,
+      codeOperationRuntime: late.codeOperationRuntime.current,
+      codeTurnDecisions,
+      routeCodeService,
+      terminalProcessPort: late.terminalProcessPort.current,
+    };
+  });
+}
+
+export type CodeRuntimeWiring = Effect.Effect.Success<ReturnType<typeof wireCodeRuntime>>;

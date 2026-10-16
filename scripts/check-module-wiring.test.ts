@@ -57,6 +57,33 @@ describe("findUnregisteredRouteModules", () => {
 
     expect(violations).toEqual([]);
   });
+
+  it("accepts a route module registered through a wiring module the root composes", () => {
+    const violations = findUnregisteredRouteModules([
+      server(`import { wireWorkspace } from "./wiring/workspace";`),
+      {
+        path: "apps/server/src/wiring/workspace.ts",
+        content: `import { createGoalRouteHandler } from "../goal/goalRoutes";`,
+      },
+      { path: "apps/server/src/goal/goalRoutes.ts", content: "export const b = 1;" },
+      { path: "apps/server/src/chatRoutes.ts", content: "export const a = 1;" },
+    ]);
+
+    expect(violations.map(({ path }) => path)).toEqual(["apps/server/src/chatRoutes.ts"]);
+  });
+
+  it("does not follow imports from modules outside the wiring folder", () => {
+    const violations = findUnregisteredRouteModules([
+      server(`import { helper } from "./goal/goalService";`),
+      {
+        path: "apps/server/src/goal/goalService.ts",
+        content: `import { createGoalRouteHandler } from "./goalRoutes";`,
+      },
+      { path: "apps/server/src/goal/goalRoutes.ts", content: "export const b = 1;" },
+    ]);
+
+    expect(violations.map(({ path }) => path)).toEqual(["apps/server/src/goal/goalRoutes.ts"]);
+  });
 });
 
 describe("bundled process entry points", () => {

@@ -11,7 +11,8 @@ import { fileURLToPath } from "node:url";
  * route module of 47 that `server.ts` never registered, whose endpoints answered
  * 404 on a booted host.
  *
- * Rule A: every server route module is registered in `server.ts`.
+ * Rule A: every server route module is registered by the composition root
+ * (`server.ts`) or by one of the `wiring/` modules it imports.
  * Rule B: no source module is reachable only from tests.
  * Rule C: every endpoint the server answers has a caller.
  * Rule D: no package module is used only by its own barrel.
@@ -592,17 +593,29 @@ export function findStaleIslandExemptions(
   return violations;
 }
 
+const SERVER_ROOT_PATH = "apps/server/src/server.ts";
+const SERVER_WIRING_PREFIX = "apps/server/src/wiring/";
+
 export function findUnregisteredRouteModules(
   files: ReadonlyArray<ScannedFile>,
 ): ReadonlyArray<WiringViolation> {
-  const server = files.find((file) => file.path === "apps/server/src/server.ts");
+  const server = files.find((file) => file.path === SERVER_ROOT_PATH);
   if (server === undefined) return [];
   const known = new Set(files.map((file) => file.path));
+  const byPath = new Map(files.map((file) => [file.path, file]));
+  const resolveImports = (file: ScannedFile): ReadonlyArray<string> =>
+    extractSpecifiers(file.content)
+      .filter((specifier) => specifier.startsWith("."))
+      .map((specifier) => resolveRelative(file.path, specifier, known))
+      .filter((resolved): resolved is string => resolved !== undefined);
+  // The root composes per-area wiring modules; a route handler is registered
+  // when the root or one of those modules imports it.
   const registered = new Set<string>();
-  for (const specifier of extractSpecifiers(server.content)) {
-    if (!specifier.startsWith(".")) continue;
-    const resolved = resolveRelative(server.path, specifier, known);
-    if (resolved !== undefined) registered.add(resolved);
+  for (const resolved of resolveImports(server)) {
+    registered.add(resolved);
+    const wiring = byPath.get(resolved);
+    if (wiring === undefined || !resolved.startsWith(SERVER_WIRING_PREFIX)) continue;
+    for (const nested of resolveImports(wiring)) registered.add(nested);
   }
   return files
     .filter((file) => /^apps\/server\/src\/.*Routes\.ts$/.test(file.path))
@@ -611,7 +624,8 @@ export function findUnregisteredRouteModules(
     .filter((file) => !KNOWN_UNREGISTERED_ROUTES.has(file.path))
     .map((file) => ({
       path: file.path,
-      reason: "route module is never imported by apps/server/src/server.ts, so its endpoints 404",
+      reason:
+        "route module is never imported by apps/server/src/server.ts or a wiring module it composes, so its endpoints 404",
     }));
 }
 
