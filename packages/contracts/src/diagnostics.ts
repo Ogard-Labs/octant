@@ -151,6 +151,43 @@ export const DiagnosticRecoveryFact = Schema.Struct({
 }).annotations(strict);
 export type DiagnosticRecoveryFact = typeof DiagnosticRecoveryFact.Type;
 
+/** Days of journal growth an export reports, today included. */
+export const JOURNAL_GROWTH_WINDOW_DAYS = 14;
+/** Aggregate kinds are a small closed vocabulary; the cap denies an unbounded dump. */
+export const MAX_JOURNAL_GROWTH_KINDS = 128;
+
+/**
+ * One aggregate kind's journal events per day. `counts` lines up with the
+ * report's `days`, oldest first. Only the kind name and counts are
+ * representable: no payload, identifier, or thread or project name.
+ */
+export const JournalGrowthKind = Schema.Struct({
+  kind: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(64),
+    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  ),
+  counts: Schema.Array(Schema.NonNegativeInt).pipe(Schema.itemsCount(JOURNAL_GROWTH_WINDOW_DAYS)),
+  total: Schema.NonNegativeInt,
+}).annotations(strict);
+export type JournalGrowthKind = typeof JournalGrowthKind.Type;
+
+/**
+ * Journal growth over the last {@link JOURNAL_GROWTH_WINDOW_DAYS} days, plus
+ * the whole journal's row count and the database file size. Journal growth
+ * twice hit a limit before anyone saw it, so the export and Settings show it.
+ */
+export const JournalGrowth = Schema.Struct({
+  generatedAt: UtcTimestamp,
+  /** UTC calendar days, oldest first, as YYYY-MM-DD. */
+  days: Schema.Array(Schema.String.pipe(Schema.pattern(/^\d{4}-\d{2}-\d{2}$/))).pipe(
+    Schema.itemsCount(JOURNAL_GROWTH_WINDOW_DAYS),
+  ),
+  kinds: Schema.Array(JournalGrowthKind).pipe(Schema.maxItems(MAX_JOURNAL_GROWTH_KINDS)),
+  totalRows: Schema.NonNegativeInt,
+  databaseBytes: Schema.NonNegativeInt,
+}).annotations(strict);
+export type JournalGrowth = typeof JournalGrowth.Type;
+
 /**
  * A supported, fully redacted diagnostics evidence packet. `redacted` is a
  * literal `true` so a packet can never claim it skipped redaction, and no field
@@ -182,6 +219,8 @@ export const DiagnosticEvidencePacket = Schema.Struct({
   redactions: Schema.Array(DiagnosticRedactionTag).pipe(Schema.maxItems(MAX_DIAGNOSTIC_REDACTIONS)),
   redacted: Schema.Literal(true),
   generatedAt: UtcTimestamp,
+  /** Additive: absent when the host could not read the journal. */
+  journalGrowth: Schema.optional(JournalGrowth),
 }).annotations(strict);
 export type DiagnosticEvidencePacket = typeof DiagnosticEvidencePacket.Type;
 
@@ -332,3 +371,4 @@ export const decodeDiagnosticsExportReceiptRecorded = Schema.decodeUnknownSync(
   DiagnosticsExportReceiptRecorded,
 );
 export const decodeDiagnosticsExportOutcome = Schema.decodeUnknownSync(DiagnosticsExportOutcome);
+export const decodeJournalGrowth = Schema.decodeUnknownSync(JournalGrowth);

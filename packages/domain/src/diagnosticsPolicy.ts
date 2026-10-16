@@ -6,6 +6,7 @@ import type {
   DiagnosticRecoveryFact,
   DiagnosticRedactionTag,
   DiagnosticsExportFailure,
+  JournalGrowth,
 } from "@octant/contracts";
 import {
   MAX_DIAGNOSTIC_CORRELATIONS,
@@ -163,6 +164,7 @@ export function serializeDiagnosticsEvidencePacket(packet: DiagnosticEvidencePac
     redactions: packet.redactions,
     redacted: packet.redacted,
     generatedAt: packet.generatedAt,
+    ...(packet.journalGrowth === undefined ? {} : { journalGrowth: packet.journalGrowth }),
   });
 }
 
@@ -215,6 +217,8 @@ export interface RawDiagnosticInput {
   }>;
   readonly recovery: ReadonlyArray<{ readonly action: string; readonly automated: boolean }>;
   readonly generatedAt: string;
+  /** Kinds and counts only; the contract schema admits nothing else. */
+  readonly journalGrowth?: JournalGrowth;
   /** When the underlying operation actually succeeded, no failure packet exists. */
   readonly succeeded?: boolean;
 }
@@ -373,6 +377,7 @@ export function buildDiagnosticsPacket(input: RawDiagnosticInput): DiagnosticsPa
     redactions: collectedTags,
     redacted: true as const,
     generatedAt: input.generatedAt,
+    ...(input.journalGrowth === undefined ? {} : { journalGrowth: input.journalGrowth }),
   };
 
   try {

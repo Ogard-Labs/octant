@@ -610,6 +610,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "export diagnostics evidence packet support redacted safe sealed receipt provider storage network remote auth migration confinement process cleanup",
         },
+        {
+          id: settingId("journal-growth"),
+          label: "Journal growth",
+          scope: "host",
+          keywords: "journal growth events per day kind rows database size diagnostics",
+        },
       ],
     },
     {

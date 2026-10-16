@@ -117,6 +117,40 @@ describe("exportDiagnosticsEvidence", () => {
     }
   });
 
+  it("carries journal growth as kind names and counts only, inside the digested packet", () => {
+    const store = setup();
+    try {
+      recordFailure(store, "00000000-0000-4000-8000-000000000001", "provider");
+      const outcome = exportDiagnosticsEvidence(
+        request({
+          correlationId: "00000000-0000-4000-8000-000000000001",
+          domain: "provider",
+          summary: "Provider stopped responding after retrying twice.",
+        }),
+        deps(store),
+      );
+      if (outcome.kind !== "exported") throw new Error("expected exported outcome");
+      const growth = outcome.packet.journalGrowth;
+      expect(growth?.days.at(-1)).toBe("2026-08-10");
+      expect(growth?.kinds.map((entry) => entry.kind)).toContain("diagnostics-incident");
+      expect(growth?.totalRows).toBeGreaterThan(0);
+      expect(Object.keys(growth ?? {}).sort()).toEqual([
+        "databaseBytes",
+        "days",
+        "generatedAt",
+        "kinds",
+        "totalRows",
+      ]);
+      const serialized = serializeDiagnosticsEvidencePacket(outcome.packet);
+      expect(serialized).toContain('"journalGrowth"');
+      expect(outcome.receipt.contentDigest).toBe(
+        createHash("sha256").update(serialized).digest("hex"),
+      );
+    } finally {
+      store.connection.close();
+    }
+  });
+
   it("redacts a secret embedded in the user-supplied summary before sealing", () => {
     const store = setup();
     try {

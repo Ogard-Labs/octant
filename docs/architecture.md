@@ -1921,6 +1921,12 @@ flowchart LR
   takes: that thread's export, or the host-wide data export that embeds it. A capture adds no Project filesystem authority and no
   second taint mechanism: the observation that produced it already taints the
   thread. Detail is in [Browser captures](design/browser-captures.md).
+- **Journal growth.** A diagnostics export carries journal events per aggregate
+  kind per day for the last 14 days, the journal's row count, and the database
+  size, as kind names and counts only: no payload, identifier, or thread or
+  Project name. One grouped query over the `event_journal_occurred_at` index
+  reads it when diagnostics are exported or Settings opens, never on a timer,
+  and Settings shows the same table.
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window
