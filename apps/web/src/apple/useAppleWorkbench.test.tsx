@@ -1,6 +1,6 @@
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
-import { renderHook, waitFor } from "@testing-library/react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 let useAppleWorkbench: (options: Record<string, unknown>) => any;
 
@@ -12,7 +12,16 @@ beforeAll(async () => {
   useAppleWorkbench = loaded!.useAppleWorkbench;
 });
 
+function setVisibility(value: DocumentVisibilityState): void {
+  Object.defineProperty(document, "visibilityState", { configurable: true, value });
+}
+
 describe("useAppleWorkbench", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    setVisibility("visible");
+  });
+
   it("loads discovery before replay-safe runtime state and refreshes after an action", async () => {
     const discovery = { workspace: { schemes: ["Fixture"] }, toolchain: {}, simulators: [] };
     const snapshot = { sequence: 1, active: [], recentEvidence: [{}] };
@@ -319,5 +328,60 @@ describe("useAppleWorkbench", () => {
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(result.current.discovery).toBe(discovery);
     expect(result.current.runtime).toBe(snapshot);
+  });
+
+  it("reads state at most every three seconds while a tool runs, pauses while hidden, and catches up when shown", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const running = { sequence: 1, active: [{}], recentEvidence: [], simulators: [] };
+    const progressed = { sequence: 2, active: [{}], recentEvidence: [{}], simulators: [] };
+    let current: unknown = running;
+    const client = {
+      discover: vi.fn(async () => ({ workspace: {}, toolchain: {}, simulators: [] })),
+      snapshot: vi.fn(async () => current),
+      execute: vi.fn(),
+      cancel: vi.fn(),
+    } as unknown as AppleToolchainClient;
+    const { result } = renderHook(() =>
+      useAppleWorkbench({
+        client,
+        discoveryRequest: { projectPath: "Fixture.xcodeproj" },
+        snapshotRequest: { kind: "apple-snapshot-request" },
+      }),
+    );
+    // waitFor polls on a faked interval, so flush the loading promises by hand.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.status).toBe("ready");
+    const settled = (client.snapshot as any).mock.calls.length;
+
+    current = progressed;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(result.current.runtime).toBe(progressed);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9_000);
+    });
+    // Twelve seconds used to cost twelve reads; it now costs four.
+    expect((client.snapshot as any).mock.calls.length - settled).toBeLessThanOrEqual(4);
+
+    current = running;
+    setVisibility("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    const hiddenAt = (client.snapshot as any).mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect((client.snapshot as any).mock.calls.length).toBe(hiddenAt);
+
+    setVisibility("visible");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect((client.snapshot as any).mock.calls.length).toBe(hiddenAt + 1);
+    expect(result.current.runtime).toBe(running);
   });
 });

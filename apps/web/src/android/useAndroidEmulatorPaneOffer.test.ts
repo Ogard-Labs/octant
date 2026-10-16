@@ -1,7 +1,7 @@
 import type { AndroidToolchainClient } from "@octant/client-runtime/android-toolchain-client";
 import type { AndroidSnapshotRequest } from "@octant/contracts/android-toolchain-rpc";
-import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAndroidEmulatorPaneOffer } from "./useAndroidEmulatorPaneOffer";
 
 const paneOpenRequest = {
@@ -25,7 +25,16 @@ function snapshotRequest(threadId: string): AndroidSnapshotRequest {
   };
 }
 
+function setVisibility(value: DocumentVisibilityState): void {
+  Object.defineProperty(document, "visibilityState", { configurable: true, value });
+}
+
 describe("useAndroidEmulatorPaneOffer", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    setVisibility("visible");
+  });
+
   it("reads a pane-open request from the runtime snapshot when an Android tool is active", async () => {
     const snapshot = vi.fn(async () => ({ paneOpenRequest }));
     const client = { snapshot } as unknown as AndroidToolchainClient;
@@ -73,5 +82,79 @@ describe("useAndroidEmulatorPaneOffer", () => {
       snapshotRequest: snapshotRequest("90000000-0000-4000-8000-000000000099"),
     });
     expect(result.current).toBeUndefined();
+  });
+
+  it("asks no more than every three seconds, stops while hidden, and picks up a new request within one interval", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    let current: typeof paneOpenRequest | undefined;
+    const snapshot = vi.fn(async () => ({ paneOpenRequest: current }));
+    const client = { snapshot } as unknown as AndroidToolchainClient;
+    const { result } = renderHook(() =>
+      useAndroidEmulatorPaneOffer({
+        client,
+        enabled: true,
+        watch: true,
+        activityKey: "call-1:started",
+        snapshotRequest: snapshotRequest("90000000-0000-4000-8000-000000000003"),
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(snapshot).toHaveBeenCalledTimes(1);
+
+    current = paneOpenRequest;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(result.current).toEqual(paneOpenRequest);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9_000);
+    });
+    // Twelve seconds used to cost sixteen reads; it now costs five.
+    expect(snapshot).toHaveBeenCalledTimes(5);
+
+    setVisibility("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(snapshot).toHaveBeenCalledTimes(5);
+
+    setVisibility("visible");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(snapshot).toHaveBeenCalledTimes(6);
+  });
+
+  it("defers the final read to when the window is shown if the tool finishes while hidden", async () => {
+    const snapshot = vi.fn(async () => ({ paneOpenRequest }));
+    const client = { snapshot } as unknown as AndroidToolchainClient;
+    setVisibility("hidden");
+    const { rerender } = renderHook(
+      (props: { readonly watch: boolean }) =>
+        useAndroidEmulatorPaneOffer({
+          client,
+          enabled: true,
+          watch: props.watch,
+          activityKey: "call-1:finished",
+          snapshotRequest: snapshotRequest("90000000-0000-4000-8000-000000000003"),
+        }),
+      { initialProps: { watch: true } },
+    );
+    rerender({ watch: false });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(snapshot).not.toHaveBeenCalled();
+
+    setVisibility("visible");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(snapshot).toHaveBeenCalledTimes(1);
   });
 });
