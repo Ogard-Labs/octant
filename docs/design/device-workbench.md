@@ -408,7 +408,10 @@ emulator as `shutting-down` whatever adb says, so a refresh cannot bring it back
 as running or call it shut down. A `shutting-down` emulator is not streamed: the
 host refuses a screen watch for it and the pane does not attach or reconnect the
 live view, so "Live view lost" does not appear between "Shutting down" and "No
-device running".
+device running". A shutdown an agent (or another window) starts reaches a pane
+the same way: while any emulator is not shut down the pane keeps reading the
+host's runtime state every 3 s (only while visible), and it stops reading once
+none runs.
 
 `serve-avd` is keyed by serial and does not exit when its emulator does. When the
 host records an emulator as stopped, by a shutdown or because discovery no longer

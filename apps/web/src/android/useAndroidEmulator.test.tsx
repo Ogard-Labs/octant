@@ -68,4 +68,53 @@ describe("useAndroidEmulator", () => {
     expect(snapshot.mock.calls.length).toBe(hiddenAt + 1);
     expect(result.current.runtime).toBe(running);
   });
+  it("keeps reading the host while an emulator runs, so a shutdown started elsewhere reaches the pane, and stops once none runs", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const emulator = (state: string) => ({ emulatorId: "Pixel_8", name: "Pixel 8", state });
+    const snapshotOf = (state: string) => ({
+      sequence: 1,
+      active: [],
+      recentEvidence: [],
+      emulators: [emulator(state)],
+    });
+    let current: unknown = snapshotOf("booted");
+    const snapshot = vi.fn(async () => current);
+    const client = {
+      discover: vi.fn(async () => ({ emulators: [emulator("booted")] })),
+      snapshot,
+      execute: vi.fn(),
+      cancel: vi.fn(),
+    } as unknown as AndroidToolchainClient;
+    const { result } = renderHook(() =>
+      useAndroidEmulator({
+        client,
+        discoveryRequest: { kind: "android-discovery-request" } as never,
+        snapshotRequest: { kind: "android-snapshot-request" } as never,
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.status).toBe("ready");
+
+    // An agent shuts the emulator down; no action of this pane is running.
+    current = snapshotOf("shutting-down");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(result.current.discovery?.emulators[0]?.state).toBe("shutting-down");
+
+    current = snapshotOf("shutdown");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(result.current.discovery?.emulators[0]?.state).toBe("shutdown");
+
+    // With nothing running there is nothing to watch for.
+    const idleAt = snapshot.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(snapshot.mock.calls.length).toBe(idleAt);
+  });
 });
