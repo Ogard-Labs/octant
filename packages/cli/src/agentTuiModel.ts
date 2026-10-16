@@ -14,6 +14,7 @@ import {
   harnessRetryStatusText,
   sessionStatsInputOf,
   threadStatsLine,
+  withoutFollowUpBlocks,
 } from "@octant/domain";
 
 /**
@@ -208,7 +209,9 @@ export function transcriptFrom(
     entries.push({
       kind: "lead",
       at: formatClock(turn.replyAt),
-      text: turn.reply,
+      // The follow-ups the reply ends with are their own panel here, as chips
+      // are in the app, so the block that carries them is not part of the text.
+      text: withoutFollowUpBlocks(turn.reply, { streaming: !isDone(turn.outcome) }),
       outcome: turn.outcome,
       ...(record === undefined
         ? {}

@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline";
-import { nativeHarnessStatusLabel } from "@octant/domain";
+import { nativeHarnessStatusLabel, withoutFollowUpBlocks } from "@octant/domain";
 import {
   NativeHarnessSessionView,
   type OctantMode,
@@ -33,6 +33,8 @@ import { askSiteApproval, listAgentSiteApprovals } from "./agentSiteApprovals";
 import {
   attachAgentThread,
   agentThreadPort,
+  openAgentThreadById,
+  openChatAgentThread,
   type AgentThreadPort,
   createAgentThread,
   isAgentSnapshotRunning,
@@ -221,6 +223,12 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
     return 0;
   }
   if (input.command.action === "harness-session") {
+    // The host answers a thread's session only to a window that has it open.
+    const opened = await openAgentThreadById(input.session, input.command.threadId);
+    if (opened.kind === "refused") {
+      input.stderr.write(`${opened.message}\n`);
+      return 1;
+    }
     const view = await readSession(input, input.command.threadId);
     if (view === "unavailable") return 1;
     if (input.command.json) {
@@ -690,7 +698,7 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
   }
   if (input.command.threadId !== undefined) {
     resolvedMode = "chat";
-    return input.command.threadId;
+    return await openedChatThread(input, input.command.threadId);
   }
   if (input.command.last) {
     const latest = (await listAgentThreads(input.session))[0];
@@ -698,7 +706,7 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
       input.stderr.write("There is no Chat thread to continue yet.\n");
       return undefined;
     }
-    return String(latest.id);
+    return await openedChatThread(input, String(latest.id));
   }
   const created = await createAgentThread(input.session, {
     mode: input.command.mode,
@@ -720,6 +728,19 @@ async function resolveThread(input: RunAgentCliCommandInput): Promise<string | u
     );
   }
   return created.threadId;
+}
+
+/** A Chat thread's id once this terminal's window has it open, so its session answers. */
+async function openedChatThread(
+  input: RunAgentCliCommandInput,
+  threadId: string,
+): Promise<string | undefined> {
+  const opened = await openChatAgentThread(input.session, threadId);
+  if (opened.kind === "refused") {
+    input.stderr.write(`${opened.message}\n`);
+    return undefined;
+  }
+  return threadId;
 }
 
 /** The mode a thread created under `auto` turned out to be in. */
@@ -835,7 +856,13 @@ async function followTurn(
     if (current === undefined) continue;
     const turn = current.turns.at(-1);
     if (turn?.id === before && sent === undefined) continue;
-    const text = turn?.reply ?? "";
+    const reply = turn?.reply ?? "";
+    // The suggested follow-ups are offered as their own list, as the app does,
+    // so the block that carries them is not printed with the reply. A script
+    // reading --json still gets the reply exactly as the model wrote it.
+    const text = input.command.json
+      ? reply
+      : withoutFollowUpBlocks(reply, { streaming: isAgentSnapshotRunning(current) });
     if (text.length > printed.length && text.startsWith(printed)) {
       const delta = text.slice(printed.length);
       if (input.command.json)

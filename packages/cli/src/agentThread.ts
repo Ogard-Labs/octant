@@ -573,14 +573,24 @@ export async function createAgentThread(
       };
     }
     const created = decodeHostAnswer(ChatCommandResult)(response.body);
-    return created.kind === "thread-created"
-      ? {
+    if (created.kind !== "thread-created") {
+      return { kind: "refused", message: "The host did not create a thread." };
+    }
+    // The harness session routes (questions, pause, follow-ups) answer only a
+    // window that has the thread open, a Chat thread included.
+    const threadOpened = await openAgentWindow(session, {
+      mode: "chat",
+      ...(project === undefined ? {} : { project: { id: String(project.id), name: project.name } }),
+      thread: { id: String(created.thread.id), title: input.title },
+    });
+    return threadOpened.kind === "refused"
+      ? threadOpened
+      : {
           kind: "created",
           threadId: String(created.thread.id),
           mode: "chat",
           ...(project === undefined ? {} : { projectName: project.name }),
-        }
-      : { kind: "refused", message: "The host did not create a thread." };
+        };
   }
   if (project === undefined || project.type !== mode) {
     return { kind: "refused", message: "The Project for this thread is unavailable." };
@@ -794,6 +804,61 @@ export async function attachAgentThread(
     return { kind: "attached", threadId: thread.id, mode, projectName: project.name };
   }
   return { kind: "not-found" };
+}
+
+/**
+ * Opens an existing Chat thread in this terminal's window, with its Project
+ * when it has one, so the host answers the thread's harness session.
+ */
+export async function openChatAgentThread(
+  session: OpenedLocalControlSession,
+  threadId: string,
+): Promise<HostRefusal | { readonly kind: "opened" }> {
+  const response = await session.send({
+    path: `/api/chat/threads/${encodeURIComponent(threadId)}`,
+    method: "GET",
+  });
+  if (response.status !== 200) {
+    return {
+      kind: "refused",
+      message: refusalMessage(response, `No Chat thread ${threadId} on this host.`),
+    };
+  }
+  const { thread } = decodeHostAnswer(ChatThreadView)(response.body);
+  let project: { readonly id: string; readonly name: string } | undefined;
+  if (thread.projectId !== undefined) {
+    const projects = await session.send({ path: "/api/projects/bootstrap", method: "GET" });
+    const found =
+      projects.status === 200
+        ? decodeHostAnswer(ProjectBootstrap)(projects.body).active.find(
+            (entry) => String(entry.id) === String(thread.projectId),
+          )
+        : undefined;
+    if (found === undefined) {
+      return { kind: "refused", message: "The Project for this thread is unavailable." };
+    }
+    project = { id: String(found.id), name: found.name };
+  }
+  return await openAgentWindow(session, {
+    mode: "chat",
+    ...(project === undefined ? {} : { project }),
+    thread: { id: threadId, title: thread.title },
+  });
+}
+
+/**
+ * Opens the thread a bare id names, whatever its mode, so one read of its
+ * harness session is allowed: a Work or Code thread through its Project, any
+ * other id as a Chat thread.
+ */
+export async function openAgentThreadById(
+  session: OpenedLocalControlSession,
+  threadId: string,
+): Promise<HostRefusal | { readonly kind: "opened" }> {
+  const attached = await attachAgentThread(session, { threadId, mode: "auto" });
+  if (attached.kind === "refused") return attached;
+  if (attached.kind === "attached") return { kind: "opened" };
+  return await openChatAgentThread(session, threadId);
 }
 
 /** A Project's active threads in this mode, most recently updated first. */
