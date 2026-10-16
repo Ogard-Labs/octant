@@ -582,6 +582,12 @@ export interface CodeServiceExecutionContext {
 export interface CodeServiceOptions {
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
+  /**
+   * Whether the agent's own harness approval is waiting on a person in this
+   * thread. Its turn is parked then, not executing, so the navigation row says
+   * the thread needs the person.
+   */
+  readonly awaitsHarnessApproval?: (threadId: string) => boolean;
   readonly gitHistory?: Pick<GitHistoryPort, "read">;
   readonly persistence: CodePersistencePort;
   readonly access: CodeWindowAccessPort;
@@ -854,6 +860,7 @@ export class CodeService {
   readonly #waitForThreadChange: CodeServiceOptions["waitForThreadChange"];
   readonly #pullRequests: CodeNavigationPullRequestSource | undefined;
   readonly #liveTurns: LiveTurnRegistry | undefined;
+  readonly #awaitsHarnessApproval: ((threadId: string) => boolean) | undefined;
   readonly #issueContext?: GithubIssueContextPort;
   readonly #linearIssueContext?: LinearIssueContextPort;
   /**
@@ -904,6 +911,7 @@ export class CodeService {
     this.#waitForThreadChange = options.waitForThreadChange;
     this.#pullRequests = options.pullRequests;
     this.#liveTurns = options.liveTurns;
+    this.#awaitsHarnessApproval = options.awaitsHarnessApproval;
     if (options.issueContext !== undefined) {
       this.#issueContext = options.issueContext;
     }
@@ -1107,15 +1115,20 @@ export class CodeService {
       const hasPullRequests =
         pullRequestSummaries !== undefined &&
         (pullRequestSummaries.items.length > 0 || pullRequestSummaries.hiddenCount > 0);
+      // A turn parked on the agent's own approval is owed by the person, not
+      // executing, the same as the board reads it. The thread keeps saying so
+      // after a restart took the turn: the approval stays until it is resumed.
+      const parked = this.#awaitsHarnessApproval?.(String(thread.id)) === true;
       return {
         threadId: thread.id,
-        executing: activity.executing,
+        executing: activity.executing && !parked,
+        ...(parked ? { awaitingInput: true as const } : {}),
         ...(checkoutChip === undefined ? {} : { checkoutChip }),
         ...(hasPullRequests ? { pullRequestSummaries } : {}),
         // Rides on the row the caller was already allowed to see: `threads`
         // is the authority-filtered list, so a window never learns what a
         // thread it cannot browse is running.
-        ...this.#liveTurns?.read(String(thread.id)),
+        ...(parked ? {} : this.#liveTurns?.read(String(thread.id))),
       };
     });
   }

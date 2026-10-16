@@ -616,5 +616,9 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
   );
 });
 
-/** Only Work and Code turns ask decisions; one array, so a read is not redone per render. */
-const DECISION_MODES: ReadonlyArray<OctantMode> = ["work", "code"];
+/**
+ * The Inbox reads the requests it lists from every mode: only Work and Code
+ * turns ask decisions, but the agent's own approval waits in any of the three.
+ * One array, so a read is not redone per render.
+ */
+const DECISION_MODES: ReadonlyArray<OctantMode> = ["chat", "work", "code"];

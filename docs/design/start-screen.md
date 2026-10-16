@@ -405,10 +405,12 @@ it reads. Each item names its mode, Project, thread and title, kind, text,
 options where the mode has them, and when it was asked, and carries the handle
 that mode's own answer command takes, so a surface answers in place through the
 commands the open thread already uses. An answered or ended request is gone
-from the host's next list. The Inbox lists each decision, and each waiting subagent, as the same row
-(a decision answered in place, a subagent request reviewed in its Agents tab),
-above its other waiting threads, and a thread with a
-decision is not listed again as a finished turn. The list is read at a local
+from the host's next list. The Inbox lists each decision, each waiting subagent, and each agent's own
+harness approval as the same row (a decision answered in place, a subagent
+request reviewed in its Agents tab, an approval reviewed in its thread, where
+the approval card decides it), above its other waiting threads, and a thread
+with a decision is not listed again as a finished turn, nor a thread with a
+listed approval again as waiting for approval. The list is read at a local
 window only, so a remote window has no Needs you source. What it includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
 With every window closed, the desktop menu bar carries the same waiting threads
@@ -421,7 +423,8 @@ that list. It has one row per waiting thread, titled with the thread and
 detailed with its mode, what it waits on, and how long, and Enter opens the
 thread (when every request on a thread is a subagent's, Enter opens that
 child's Agents tab). A waiting subagent gets one **Review request** command and
-no Approve or Deny. Each approval also gets **Approve** and **Deny** commands, so typing
+no Approve or Deny; an agent's own approval is only its thread's row, which
+opens the thread. Each approval also gets **Approve** and **Deny** commands, so typing
 "approve" finds them; they answer through the mode's own approval command
 without opening the thread,
 and a refusal shows as a notice. A question's choices are not listed, so its row

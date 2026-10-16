@@ -14,6 +14,8 @@ export interface ShellNavigationModel {
   readonly markedThreadGroups: ReturnType<typeof sidebarThreadGroupsForMode>;
   readonly providerByThreadId: ReadonlyMap<string, ThreadProviderIdentity>;
   readonly runningThreadIds: ReadonlySet<string>;
+  /** Threads parked on the agent's own approval: not running, needing the person. */
+  readonly needsPersonThreadIds: ReadonlySet<string>;
   readonly withProviderMark: (thread: ChatThreadNavigationItem) => ChatThreadNavigationItem;
   readonly workProjectThreads: ReadonlyArray<ChatThreadNavigationItem>;
 }

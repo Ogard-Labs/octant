@@ -5,6 +5,7 @@ import {
   codeChildQuestion,
   codeDecision,
   workChildApproval,
+  workLeadApproval,
 } from "../palette/pendingRequests.test-fixtures";
 import { PendingRequestRow } from "./PendingRequestRow";
 
@@ -117,6 +118,68 @@ describe("a waiting subagent row", () => {
       />,
     );
     expect(screen.getByText("Review subagent asked a question")).toBeInTheDocument();
+    await user.tab();
+    await user.keyboard("1");
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+});
+
+describe("an agent approval row", () => {
+  it("says the agent needs approval and offers only Review request, never Approve or Deny", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn();
+    const onOpenThread = vi.fn();
+    const request = workLeadApproval();
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={onAnswer}
+        onOpenThread={onOpenThread}
+        request={request}
+      />,
+    );
+    const row = screen.getByRole("group", { name: "Quarterly report needs your approval" });
+    expect(within(row).getByText("edit: summary.md")).toBeInTheDocument();
+    expect(within(row).getByText("Waiting 3m")).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Deny" })).toBeNull();
+    expect(
+      within(row)
+        .getAllByRole("button")
+        .slice(1)
+        .map((button) => button.textContent),
+    ).toEqual(["Review request"]);
+    await user.click(screen.getByRole("button", { name: "Review request" }));
+    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+
+  it("says an approval a restart left behind did not run", () => {
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={vi.fn()}
+        onOpenThread={vi.fn()}
+        request={workLeadApproval(true)}
+      />,
+    );
+    expect(
+      screen.getByText("Octant restarted while this was waiting, so it did not run."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review request" })).toBeInTheDocument();
+  });
+
+  it("answers nothing from a number key", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn();
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={onAnswer}
+        onOpenThread={vi.fn()}
+        request={workLeadApproval()}
+      />,
+    );
     await user.tab();
     await user.keyboard("1");
     expect(onAnswer).not.toHaveBeenCalled();

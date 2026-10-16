@@ -208,6 +208,48 @@ const childTextKeepsModeBounds = (request: {
       ? isCodeApprovalText(request.text)
       : isCodeQuestionText(request.text);
 
+/**
+ * The lead's own native-harness approval waiting on the person. Like a
+ * subagent's row it exists so the request can be found from anywhere in the
+ * window, not so it can be answered there: there is no `answer` and no
+ * `options`. The answer is the thread's inline approval card, through the
+ * harness session's own route, which checks the window and the principal
+ * before anything is decided.
+ *
+ * `lostInRestart` marks an approval the journal still holds as pending but no
+ * running turn is waiting on, as after a host restart. Nothing can run for it;
+ * resuming the session settles it, and the lead asks again if it still needs
+ * the call.
+ */
+const LeadApprovalFields = {
+  ...PendingRequestFields,
+  mode: Schema.Literal("chat", "work", "code"),
+  kind: Schema.Literal("lead-approval"),
+  /** Absent for a Chat thread filed under no Project. */
+  projectId: Schema.optional(ProjectId),
+  threadId: AgentRunParentThreadId,
+  text: Schema.NonEmptyTrimmedString,
+  lostInRestart: Schema.optional(Schema.Literal(true)),
+} as const;
+
+/** A harness approval summary is at most this long, in every mode. */
+const MAX_LEAD_APPROVAL_TEXT_LENGTH = 240;
+
+/**
+ * A lead approval row is never looser than the mode's own rows: Work text is
+ * Work's sanitized request text, with no path or URL, Code keeps the byte
+ * bound of a Code approval summary, and Chat keeps the harness summary bound.
+ */
+const leadTextKeepsModeBounds = (request: {
+  readonly mode: "chat" | "work" | "code";
+  readonly text: string;
+}): boolean =>
+  request.mode === "work"
+    ? isWorkRequestText(request.text)
+    : request.mode === "code"
+      ? isCodeApprovalText(request.text)
+      : request.text.length <= MAX_LEAD_APPROVAL_TEXT_LENGTH;
+
 export const PendingRequest = Schema.Union(
   Schema.Struct({ ...WorkPendingRequestFields, kind: Schema.Literal("approval") }).annotations(
     strict,
@@ -277,6 +319,9 @@ export const PendingRequest = Schema.Union(
   })
     .annotations(strict)
     .pipe(Schema.filter(childTextKeepsModeBounds, { jsonSchema: {} })),
+  Schema.Struct(LeadApprovalFields)
+    .annotations(strict)
+    .pipe(Schema.filter(leadTextKeepsModeBounds, { jsonSchema: {} })),
   Schema.Struct({
     ...PendingRequestFields,
     mode: Schema.Literal("chat"),

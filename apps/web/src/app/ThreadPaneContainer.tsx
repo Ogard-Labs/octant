@@ -328,7 +328,8 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     workThreadClient,
     workTurnClient,
   } = props.clients;
-  const { liveThreadTitles, providerByThreadId, runningThreadIds } = navigation;
+  const { liveThreadTitles, needsPersonThreadIds, providerByThreadId, runningThreadIds } =
+    navigation;
   return (
     <AgentProfileNamesProvider profiles={agentProfiles}>
       <ThreadStatsProvider
@@ -653,6 +654,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               liveThreadTitles={liveThreadTitles}
               providerByThreadId={providerByThreadId}
               runningThreadIds={runningThreadIds}
+              waitingThreadIds={needsPersonThreadIds}
               showProviderIcons={settings.showThreadProviderIcons}
               environmentNames={environmentNames}
               {...(projectController.activeProject === undefined

@@ -7,16 +7,20 @@ import type { ThreadSearchListingStatus } from "./ThreadSearchOverlay";
 /**
  * What a Code thread's status dot says.
  *
- * A host-projected executing turn lights `working` first: that is the live
+ * A turn parked on the agent's own approval says `attention` before anything
+ * else: the thread cannot go on until the person decides, so it is not working.
+ * Otherwise a host-projected executing turn lights `working` first: that is the live
  * claim the board reasons from. An open follow-up or waiting/interrupted
  * lifecycle outranks unread when the turn has settled. Idle is the rest.
  */
 export function codeThreadActivity(thread: {
+  readonly awaitingInput?: boolean;
   readonly executing?: boolean;
   readonly followUp?: boolean;
   readonly lifecycle: "active" | "waiting" | "interrupted" | "archived";
   readonly unread?: boolean;
 }): ThreadRowActivity {
+  if (thread.awaitingInput === true) return "attention";
   if (thread.executing === true) return "working";
   if (thread.followUp === true) return "attention";
   if (thread.lifecycle === "waiting" || thread.lifecycle === "interrupted") return "attention";

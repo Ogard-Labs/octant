@@ -111,6 +111,7 @@ import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
+import { ThreadHarnessApproval } from "../harness/ThreadHarnessApproval";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { useWorkResearchController } from "../work/useWorkResearchController";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
@@ -449,6 +450,7 @@ export interface WorkspaceViewProps {
   readonly providerByThreadId?: ReadonlyMap<string, ThreadProviderIdentity>;
   /** Threads the host projects as executing, read from the same rows the sidebar draws. */
   readonly runningThreadIds?: ReadonlySet<string>;
+  readonly waitingThreadIds?: ReadonlySet<string>;
   /** Mirrors the sidebar preference for the compact pane tab mark. */
   readonly showProviderIcons?: boolean;
   /** Host names by host id, for the pane title's environment mark. */
@@ -802,6 +804,9 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           {...(props.runningThreadIds === undefined
             ? {}
             : { runningThreadIds: props.runningThreadIds })}
+          {...(props.waitingThreadIds === undefined
+            ? {}
+            : { waitingThreadIds: props.waitingThreadIds })}
           {...(props.showProviderIcons === undefined
             ? {}
             : { showProviderIcons: props.showProviderIcons })}
@@ -902,22 +907,43 @@ function outsideContentFor(
 }
 
 /**
- * The thread's subagent tray, for the composer of a pane that shows a Chat,
- * Work, or Code thread. It mounts — and reads the host — only once that
- * composer renders, so a thread still loading asks for nothing.
+ * What the composer of a pane that shows a Chat, Work, or Code thread keeps
+ * above it: the agent's own approval waiting on the person, and the thread's
+ * subagent tray. Both mount, and read the host, only once that composer
+ * renders, so a thread still loading asks for nothing.
  */
 function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): ReactNode {
-  if (props.agentRunClient === undefined || !offersThreadComposer(surface)) return null;
+  if (!offersThreadComposer(surface)) return null;
   if (!("threadId" in surface)) return null;
+  const threadId = String(surface.threadId);
+  // The approval card reads this window's host, so a pane showing a thread on
+  // another host has no local approval to show.
+  const ownHost = !("hostId" in surface) || surface.hostId === undefined;
+  const approval =
+    props.nativeHarnessClient === undefined || !ownHost ? null : (
+      <ThreadHarnessApproval
+        client={props.nativeHarnessClient}
+        threadId={threadId}
+        waiting={props.waitingThreadIds?.has(threadId) === true}
+      />
+    );
+  const tray =
+    props.agentRunClient === undefined ? null : (
+      <ThreadSubagentsTray
+        client={props.agentRunClient}
+        {...(props.nativeHarnessClient === undefined
+          ? {}
+          : { interactionsClient: props.nativeHarnessClient })}
+        {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
+        threadId={threadId}
+      />
+    );
+  if (approval === null && tray === null) return null;
   return (
-    <ThreadSubagentsTray
-      client={props.agentRunClient}
-      {...(props.nativeHarnessClient === undefined
-        ? {}
-        : { interactionsClient: props.nativeHarnessClient })}
-      {...(props.onOpenSubagent === undefined ? {} : { onOpenSubagent: props.onOpenSubagent })}
-      threadId={String(surface.threadId)}
-    />
+    <>
+      {approval}
+      {tray}
+    </>
   );
 }
 
