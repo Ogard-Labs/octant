@@ -2,6 +2,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatThread, CodeThread, ToolActionAuthority, WorkThread } from "@octant/contracts";
+import { childAgentTools } from "../chat/sideChatDelegation";
+import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import { createNativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { createNativeHarnessComposition } from "./nativeHarnessComposition";
@@ -526,6 +528,23 @@ describe("native harness composition", () => {
         "context-remaining",
         "second-opinion",
       ]);
+    });
+
+    it("gives a Side Chat no delegation in the tool set it finally receives", () => {
+      const { composition } = harness(false, productionPorts);
+      const agents = (): AppManagedToolSet => ({
+        definitions: [{ name: "octant_agents" } as never],
+        execute: async () => ({ result: {} }),
+      });
+      const finalSet = (sideChat: boolean) =>
+        combineAppManagedToolSets(
+          composition.forChat({ thread: chatThread, windowId: "window-1", sideChat }),
+          childAgentTools({ sideChat, tools: agents }),
+        );
+      expect(names(finalSet(true))).not.toContain("delegate");
+      expect(names(finalSet(true))).not.toContain("octant_agents");
+      // An ordinary Chat thread keeps both.
+      expect(names(finalSet(false))).toEqual(expect.arrayContaining(["delegate", "octant_agents"]));
     });
 
     it("keeps the composition call site supplying every port the offered set depends on", () => {

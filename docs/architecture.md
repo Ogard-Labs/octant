@@ -4139,7 +4139,8 @@ native harness in `apps/server/src/harness`:
      another thread is not the lead of a thread the person is steering, so it
      is offered only `context-remaining`, `second-opinion`, and (while its
      research is on) the web tools, never `todo-write`, `delegate`,
-     `ask-user`, or `goal`. `nativeHarnessComposition.test.ts` pins the full
+     `ask-user`, or `goal`, and not the `octant_agents` child-agent
+     tool either. `nativeHarnessComposition.test.ts` pins the full
      set per mode with every port supplied, the Side Chat set, the reduced
      set without them, and that the composition call site still supplies each
      port.

@@ -44,6 +44,7 @@ import { createImageAgentTools } from "../image/imageAgentTools";
 import { createLinkedThreadRouteHandler } from "../linkedThread/linkedThreadRoutes";
 import { createLinkedThreadRuntime } from "../linkedThread/linkedThreadRuntime";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { childAgentTools } from "../chat/sideChatDelegation";
 import { SideChatSidecarStore } from "../chat/sideChatSidecarStore";
 import {
   createChatSideChatThreadFactory,
@@ -454,14 +455,15 @@ export function wireChat(deps: ChatDependencies) {
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
       nativeHarness: nativeHarnessHooks,
-      resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) =>
-        combineAppManagedToolSets(
+      resolveAppManagedTools: ({ windowId, thread, threadMentionIds, coordinationDepth }) => {
+        const sideChat = sideChatSidecars.findBySidecarThread(thread.id) !== undefined;
+        return combineAppManagedToolSets(
           taintAppManagedToolResults({
             tools: combineAppManagedToolSets(
               nativeHarnessComposition?.forChat({
                 thread,
                 windowId,
-                sideChat: sideChatSidecars.findBySidecarThread(thread.id) !== undefined,
+                sideChat,
               }),
               late.zenAssistantTools.current?.forThread(windowId, thread),
               sideChatFileTools(windowId, thread.id),
@@ -511,13 +513,18 @@ export function wireChat(deps: ChatDependencies) {
               }),
           // Host-internal: its results are Octant's own answers, not external
           // content, and `delegate` itself refuses while the thread is tainted.
-          agentsManagedToolsFor({
-            windowId,
-            parentThreadId: String(thread.id),
-            mode: "chat",
-            ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+          childAgentTools({
+            sideChat,
+            tools: () =>
+              agentsManagedToolsFor({
+                windowId,
+                parentThreadId: String(thread.id),
+                mode: "chat",
+                ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+              }),
           }),
-        ),
+        );
+      },
       resolveExtensionSelectionContext: createExtensionChatResolver({
         snapshot: () => extensionApiService.snapshot(),
         resolveEffectiveState: (snapshot, query) =>
