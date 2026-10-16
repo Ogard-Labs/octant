@@ -7,20 +7,17 @@ import { fileURLToPath } from "node:url";
 import { decodeChatThreadId, decodeCodeThreadId, decodeWorkThreadId } from "@octant/contracts";
 import { createMachineChangeRouteHandler } from "../machineChangeRoutes";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
-import { WorkThreadProjection } from "../work/workThreadProjection";
 import { createComputerUseRuntime } from "../computerUse/computerUseRuntime";
 import { createNodeComputerUseProcessPort } from "../computerUse/nodeComputerUseProcessPort";
 import { createComputerUseValidationEvidenceRecorder } from "../computerUse/computerUseValidationEvidence";
 import { createComputerUseRouteHandler } from "../computerUseRoutes";
 import { LaunchSessionStore } from "../launchSessionStore";
 import { createLaunchSessionRouteHandler } from "../launchSessionRoutes";
-import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { createWebAssetsHandler } from "../webAssets";
 import {
   readApprovalOutsideContent,
   readThreadExternalContentTaint,
 } from "../context/externalContentTaintProjection";
-import { ServerBrowserAuthorityResolver } from "../browser/browserAuthorityResolver";
 import { readFile as readFileFromDisk, stat as statFromDisk } from "node:fs/promises";
 import { defaultShellSettings } from "@octant/domain";
 import { withToolFamilyHelp } from "../providers/appManagedToolSet";
@@ -30,6 +27,7 @@ import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { UsageWiring } from "./usage";
+import type { FoundationsWiring } from "./foundations";
 
 export function resolveWebAssetsPath(): string {
   const fromEnv = process.env.OCTANT_WEB_DIST_PATH;
@@ -44,14 +42,8 @@ export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence
     "machineChangeFeed" | "onWindowRevoked" | "processAuthorityNow" | "windowAuthorityStore"
   > &
   Pick<AgentRunsWiring, "externalContentIngestionStore"> &
-  Pick<UsageWiring, "validationEventStore"> & {
-    /** Wired by wireBrowser; read only after startup. */
-    readonly browserAuthority: () => ServerBrowserAuthorityResolver;
-    /** Wired by wireProviders; read only after startup. */
-    readonly providerRuntimeRegistry: () => ProviderRuntimeRegistry;
-    /** Wired by wireWorkspace; read only after startup. */
-    readonly workThreadProjection: () => WorkThreadProjection;
-  };
+  Pick<UsageWiring, "validationEventStore"> &
+  Pick<FoundationsWiring, "browserAuthority" | "providerRuntimeRegistry" | "workThreadProjection">;
 
 export function wireComputerUse(deps: ComputerUseDependencies) {
   const {
@@ -81,14 +73,14 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
           settings: () =>
             (persistence.readShellSettings()?.settings ?? defaultShellSettings()).computerUse,
           authority: (owner) =>
-            browserAuthority().resolve(decodeBrowserThreadId(owner.threadId), owner.mode),
+            browserAuthority.resolve(decodeBrowserThreadId(owner.threadId), owner.mode),
           ownerIsCurrent: (owner) => {
             const current =
               owner.mode === "chat"
                 ? persistence.readChatThread(decodeChatThreadId(owner.threadId))
                 : owner.mode === "code"
                   ? persistence.readCodeThread(decodeCodeThreadId(owner.threadId))
-                  : workThreadProjection().read(decodeWorkThreadId(owner.threadId));
+                  : workThreadProjection.read(decodeWorkThreadId(owner.threadId));
             return (
               current?.lifecycle === "active" &&
               String(current.providerInstanceId) === String(owner.providerInstanceId) &&
@@ -98,7 +90,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
                 current.executionPolicy === "plan" &&
                 owner.executionPolicy !== "plan"
               ) &&
-              browserAuthority().canAccessWindow(
+              browserAuthority.canAccessWindow(
                 owner.windowId,
                 decodeBrowserThreadId(owner.threadId),
                 owner.mode,
@@ -120,7 +112,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
               ? persistence.readChatThread(decodeChatThreadId(owner.threadId))?.title
               : owner.mode === "code"
                 ? persistence.readCodeThread(decodeCodeThreadId(owner.threadId))?.title
-                : workThreadProjection().read(decodeWorkThreadId(owner.threadId))?.title) ??
+                : workThreadProjection.read(decodeWorkThreadId(owner.threadId))?.title) ??
             "this task",
           record: (() => {
             const recorder = createComputerUseValidationEvidenceRecorder({
@@ -138,7 +130,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     void computerUseTools?.revokeWindow(windowId);
   });
   const computerToolsFor = (owner: ComputerUseOwner, selection: unknown) => {
-    const model = providerRuntimeRegistry()
+    const model = providerRuntimeRegistry
       .observedState(owner.providerInstanceId)
       ?.models.find((candidate) => String(candidate.id) === String(owner.modelId));
     const tools = computerUseTools?.toolSet(

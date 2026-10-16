@@ -17,6 +17,7 @@ import { ZenAssistantTools } from "../zen/zenAssistantTools";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { UsageWiring } from "./usage";
 import type { WorkspaceWiring } from "./workspace";
 import type { ProvidersWiring } from "./providers";
@@ -31,13 +32,14 @@ export type ZenDependencies = Pick<ServerStart, "persistence"> & {
   readonly late: Pick<LateBindings, "zenAssistantTools">;
 } & Pick<AuthorityWiring, "windowAuthorityStore"> &
   Pick<UsageWiring, "zenEventStore"> &
-  Pick<WorkspaceWiring, "projectService" | "shellService" | "workThreadProjection"> &
-  Pick<ProvidersWiring, "providerDataDirectory" | "providerRuntimeRegistry"> &
+  Pick<WorkspaceWiring, "projectService" | "shellService"> &
+  Pick<ProvidersWiring, "providerDataDirectory"> &
   Pick<BrowserWiring, "windowHoldsProject"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime"> &
   Pick<CodeToolingWiring, "projectTerminals"> &
   Pick<ChatWiring, "chatService" | "navigatorAssistantBindings"> &
-  Pick<WorkWiring, "workTurnService">;
+  Pick<WorkWiring, "workTurnService"> &
+  Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection">;
 
 export function wireZen(deps: ZenDependencies) {
   const {

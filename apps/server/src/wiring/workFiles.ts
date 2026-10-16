@@ -38,6 +38,7 @@ import {
 } from "@octant/domain";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { WorkspaceWiring } from "./workspace";
 import type { ProvidersWiring } from "./providers";
 import type { CodeRuntimeWiring } from "./codeRuntime";
@@ -51,8 +52,9 @@ export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence">
   Pick<ProvidersWiring, "credentialResolver" | "providerDataDirectory"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<ChatWiring, "imageJobService"> &
-  Pick<WorkWiring, "workArtifactProjection" | "workThreadService" | "workTurnProjection"> &
-  Pick<ContextWiring, "windowCanOpenThread">;
+  Pick<WorkWiring, "workArtifactProjection" | "workThreadService"> &
+  Pick<ContextWiring, "windowCanOpenThread"> &
+  Pick<FoundationsWiring, "workTurnProjection">;
 
 export function wireWorkFiles(deps: WorkFilesDependencies) {
   const {

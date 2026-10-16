@@ -82,10 +82,12 @@ import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers"
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkspaceWiring } from "./workspace";
+import type { WorkRequestStateWiring } from "./workRequestState";
 import type { CodeWiring } from "./code";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessWiring } from "./harness";
@@ -101,7 +103,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
   readonly late: Pick<
     LateBindings,
-    "canvasAgentToolPort" | "purgeQueuedChatMessages" | "workRequestRuntime" | "zenAssistantTools"
+    "canvasAgentToolPort" | "purgeQueuedChatMessages" | "zenAssistantTools"
   >;
 } & Pick<
     AuthorityWiring,
@@ -132,6 +134,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
   Pick<WorkspaceWiring, "contextHarness" | "shellService"> &
+  Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<CodeWiring, "codeService" | "environmentService"> &
   Pick<
     ProvidersWiring,
@@ -143,7 +146,6 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     | "extensionActivationService"
     | "extensionApiService"
     | "extensionPackageStore"
-    | "providerRuntimeRegistry"
     | "reviewedModelManifest"
     | "skillDiscoveryService"
   > &
@@ -155,7 +157,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     readonly workThreadService: () => WorkThreadService;
     /** Wired by wireWork; read only after startup. */
     readonly workTurnService: () => WorkTurnService;
-  };
+  } & Pick<FoundationsWiring, "providerRuntimeRegistry">;
 
 export function wireChat(deps: ChatDependencies) {
   const {
@@ -204,6 +206,7 @@ export function wireChat(deps: ChatDependencies) {
     workFileListingService,
     workThreadService,
     workTurnService,
+    workRequestRuntime,
   } = deps;
   return Effect.gen(function* () {
     let threadDialogueService: ThreadDialogueService | undefined;
@@ -446,7 +449,7 @@ export function wireChat(deps: ChatDependencies) {
         }
         return attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, configuredDriverOptions),
-          () => late.workRequestRuntime.current,
+          () => workRequestRuntime,
         );
       },
       contextHarness,

@@ -73,10 +73,12 @@ import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers"
 import type { ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkspaceWiring } from "./workspace";
+import type { WorkRequestStateWiring } from "./workRequestState";
 import type { BrowserWiring } from "./browser";
 
 function withCodeOperationRuntime(
@@ -210,10 +212,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   /** Cells settled by a later wiring call; read per use, never at construction. */
   readonly late: Pick<
     LateBindings,
-    | "canvasAgentToolPort"
-    | "codeOperationRuntime"
-    | "nativeHarnessComposition"
-    | "workRequestRuntime"
+    "canvasAgentToolPort" | "codeOperationRuntime" | "nativeHarnessComposition"
   >;
 } & Pick<
     AuthorityWiring,
@@ -248,12 +247,11 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
   Pick<WorkspaceWiring, "codeBoardPlanProgressSource" | "contextHarness" | "projectService"> &
+  Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<
     CodeWiring,
     | "canAccessCodeProject"
     | "codeAttachments"
-    | "codeBoardEventStore"
-    | "codeEvidence"
     | "codeProjectAccess"
     | "codeService"
     | "codeTestDiscovery"
@@ -262,7 +260,6 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "projectPullRequestCadence"
     | "projectPullRequestService"
     | "roots"
-    | "selectCodeConversation"
   > &
   Pick<
     ProvidersWiring,
@@ -273,15 +270,11 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "nativeHarnessTranscripts"
     | "probeProviderForThreads"
     | "providerDataDirectory"
-    | "providerRuntimeRegistry"
     | "resolveSelectedExtensions"
   > &
   Pick<
     BrowserWiring,
-    | "browserAuthority"
-    | "browserAutomationService"
-    | "browserToolApprovalService"
-    | "productFeedbackService"
+    "browserAutomationService" | "browserToolApprovalService" | "productFeedbackService"
   > & {
     /** Wired by wireDevices; read only after startup. */
     readonly androidToolchainService: () => AndroidToolchainService;
@@ -318,7 +311,14 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     ) => Promise<AppleExecutionContext | undefined>;
     /** Wired by wireChat; read only after startup. */
     readonly threadMentionService: () => ThreadMentionService;
-  };
+  } & Pick<
+    FoundationsWiring,
+    | "browserAuthority"
+    | "codeBoardEventStore"
+    | "codeEvidence"
+    | "providerRuntimeRegistry"
+    | "selectCodeConversation"
+  >;
 
 export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const {
@@ -386,6 +386,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     spendCeiling,
     threadMentionService,
     threadOutsideContentMarks,
+    workRequestRuntime,
   } = deps;
   return Effect.gen(function* () {
     let terminalProcessPort: TerminalProcessPort | undefined;
@@ -582,7 +583,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               return retained.driver;
             const driver = attachWorkRequestRuntime(
               makeConfiguredProviderDriver(instance, configuredDriverOptions),
-              () => late.workRequestRuntime.current,
+              () => workRequestRuntime,
             );
             codeThreadDrivers.set(key, {
               instanceId: String(instance.id),

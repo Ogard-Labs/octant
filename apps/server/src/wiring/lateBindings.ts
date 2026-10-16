@@ -1,30 +1,6 @@
-import type { ComputerUseToolService } from "../computerUse/computerUseToolService";
-import type {
-  ChatThreadId,
-  CodeProjectPullRequestRow,
-  ProviderInstance,
-  ProviderProbeResult,
-  WindowId,
-  WorkAccess,
-  WorkThreadId,
-} from "@octant/contracts";
-import type { WorkBoardRuntimeActivity } from "../work/workThreadBoardService";
-import { WorkRequestRuntime } from "../work/workRequestRuntime";
-import { WorkRequestService } from "../work/workRequestService";
-import type {
-  CodeWorktreeRefsPort,
-  CodeWorktreeSourcePreviewPort,
-  ManagedCodeThreadCreationPort,
-} from "../code/codeService";
+import type { ChatThreadId, WorkAccess } from "@octant/contracts";
 import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
-import { TerminalProcessPort } from "../code/terminalProcessPort";
-import type { CodeRouteService } from "../codeRoutes";
-import type { ComputerUseRuntime } from "../computerUse/computerUseRuntime";
 import type { AgentRunRouteDependencies } from "../agentRun/agentRunRoutes";
-import { TerminalBrowserGrantService } from "../code/terminalBrowserGrantService";
-import { ProjectBrowserService } from "../browser/projectBrowserService";
-import { BrowserAutomationService } from "../browser/browserAutomationService";
-import { BrowserToolApprovalService } from "../browser/browserToolApprovalService";
 import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
@@ -34,8 +10,6 @@ import { createAgentRunInteractions } from "../agentRun/agentRunInteractions";
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
 import { ZenAssistantTools } from "../zen/zenAssistantTools";
 import type { CanvasAgentToolPort } from "../canvas/canvasAgentTools";
-import type { PrivateListener } from "../privateListener";
-import type { RemoteGateway } from "../remote/remoteGateway";
 
 /**
  * Values one wiring module assigns after another module has already captured
@@ -45,7 +19,6 @@ import type { RemoteGateway } from "../remote/remoteGateway";
  * dereferences it per call, as the captured `let` was read before.
  */
 export interface LateBindings {
-  readonly workRequestRuntime: { current: WorkRequestRuntime | undefined };
   // The native harness is composed once the research router and plan
   // service exist; every consumer here reads these per turn or per request,
   // long after boot, never at construction.
@@ -61,13 +34,6 @@ export interface LateBindings {
   readonly snapshotCanvasImpl: {
     current: NonNullable<AgentRunRouteDependencies["snapshotCanvas"]>;
   };
-  readonly refreshStandaloneSkills: { current: () => Promise<void> };
-  readonly managedWorktreeSourcePreview: { current: CodeWorktreeSourcePreviewPort["preview"] };
-  readonly managedWorktreeRefsList: { current: CodeWorktreeRefsPort["list"] };
-  readonly managedCodeThreadCreation: { current: ManagedCodeThreadCreationPort };
-  readonly probeProviderForThreads: {
-    current: (providerInstanceId: ProviderInstance["id"]) => Promise<ProviderProbeResult>;
-  };
   readonly codeOperationRuntime: { current: CodeOperationRuntime | undefined };
   // The Chat, Work, and Code services a follow-up creates through are
   // composed after these routes; the creator is bound once they exist.
@@ -82,10 +48,4 @@ export interface LateBindings {
   readonly purgeQueuedChatMessages: {
     current: ((threadId: ChatThreadId) => Promise<void>) | undefined;
   };
-  // Bound after Work request and agent-run ports exist; until then bootstrap
-  // reports no executing threads rather than inventing a second run source.
-  readonly observeWorkThreadRuntime: {
-    current: ((threadId: WorkThreadId) => WorkBoardRuntimeActivity) | undefined;
-  };
-  readonly workRequestService: { current: WorkRequestService | undefined };
 }

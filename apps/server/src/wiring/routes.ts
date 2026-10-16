@@ -39,7 +39,6 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats"> &
   Pick<ComputerUseWiring, "computerUseRoutes" | "launchSessionRoutes" | "machineChangeRoutes"> &
   Pick<
     WorkspaceWiring,
-    | "agentMessageRoutes"
     | "githubCloneRoutes"
     | "goalRoutes"
     | "planRoutes"
@@ -97,7 +96,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats"> &
     ZenWiring,
     "navigatorAssistantRoutes" | "workTurnRoutes" | "zenBackgroundRoutes" | "zenRoutes"
   > &
-  Pick<ContextWiring, "browserAutomationRoutes" | "contextRoutes"> &
+  Pick<ContextWiring, "agentMessageRoutes" | "browserAutomationRoutes" | "contextRoutes"> &
   Pick<
     WorkFilesWiring,
     | "imageRoutes"

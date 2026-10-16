@@ -72,10 +72,10 @@ import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListen
 import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
-import type { WorkspaceWiring } from "./workspace";
 import type { CodeWiring } from "./code";
 import type { ProvidersWiring } from "./providers";
 import type { CodeToolingWiring } from "./codeTooling";
@@ -93,7 +93,6 @@ export type RemoteDependencies = Pick<
   Pick<AgentRunsWiring, "externalContentIngestionStore"> &
   Pick<IntegrationsWiring, "agentMessageService" | "toolEgressRules"> &
   Pick<ComputerUseWiring, "webAssets"> &
-  Pick<WorkspaceWiring, "workThreadProjection"> &
   Pick<
     CodeWiring,
     "codeAttachments" | "codeProjectAccess" | "folderBrowseService" | "workAttachments"
@@ -104,7 +103,6 @@ export type RemoteDependencies = Pick<
     | "credentialBroker"
     | "credentialResolver"
     | "providerDataDirectory"
-    | "providerRuntimeRegistry"
     | "providerService"
   > &
   Pick<CodeToolingWiring, "remoteServerGrants"> &
@@ -120,7 +118,9 @@ export type RemoteDependencies = Pick<
     | "resolveCanvasWorkspace"
   > &
   Pick<AutomationWiring, "pushNotificationTokenStore"> &
-  Pick<RoutesWiring, "authenticatedProductDispatch">;
+  Pick<RoutesWiring, "authenticatedProductDispatch"> &
+  Pick<FoundationsWiring, "workThreadProjection"> &
+  Pick<FoundationsWiring, "providerRuntimeRegistry">;
 
 export function wireRemote(deps: RemoteDependencies) {
   const {

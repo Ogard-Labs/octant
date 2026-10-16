@@ -61,6 +61,7 @@ import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers"
 import type { ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
 import type { CodeRuntimeWiring } from "./codeRuntime";
@@ -95,7 +96,7 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> & {
     | "threadFollowUpSuggestions"
   > &
   Pick<IntegrationsWiring, "toolEgressRules"> &
-  Pick<WorkspaceWiring, "contextHarness" | "goalService" | "workThreadProjection"> &
+  Pick<WorkspaceWiring, "contextHarness" | "goalService"> &
   Pick<
     ProvidersWiring,
     "configuredDriverOptions" | "nativeHarnessEndpoints" | "providerDataDirectory"
@@ -103,7 +104,7 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> & {
   Pick<CodeRuntimeWiring, "codeOperationRuntime"> & {
     /** Wired by wireWork; read only after startup. */
     readonly goalLoopService: () => GoalLoopService;
-  };
+  } & Pick<FoundationsWiring, "workThreadProjection">;
 
 export function wireHarness(deps: HarnessDependencies) {
   const {

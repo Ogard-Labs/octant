@@ -7,7 +7,6 @@ import {
 } from "@octant/contracts";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import { Effect } from "effect";
-import { WorkThreadProjection } from "../work/workThreadProjection";
 import { GhAuthenticationPort } from "../github/ghAuthenticationPort";
 import { GhRepositoryCataloguePort } from "../github/ghRepositoryCataloguePort";
 import { GithubCapabilityService } from "../github/githubCapabilityService";
@@ -53,13 +52,12 @@ import { isNativeHarnessDriverKind } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
+import type { FoundationsWiring } from "./foundations";
 
 export type IntegrationsDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AuthorityWiring, "windowAuthorityStore"> &
-  Pick<AgentRunsWiring, "externalContentIngestionStore"> & {
-    /** Wired by wireWorkspace; read only after startup. */
-    readonly workThreadProjection: () => WorkThreadProjection;
-  };
+  Pick<AgentRunsWiring, "externalContentIngestionStore"> &
+  Pick<FoundationsWiring, "workThreadProjection">;
 
 export function wireIntegrations(deps: IntegrationsDependencies) {
   const {
@@ -205,9 +203,7 @@ export function wireIntegrations(deps: IntegrationsDependencies) {
           terminal: code.lifecycle !== "active",
         };
       }
-      const work = workThreadProjection()
-        .list()
-        .find((thread) => String(thread.id) === threadId);
+      const work = workThreadProjection.list().find((thread) => String(thread.id) === threadId);
       if (work !== undefined) {
         return {
           mode: "work",

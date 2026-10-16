@@ -3,11 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { ReplayCursor, type WindowId } from "@octant/contracts";
 import { Effect, Schema } from "effect";
-import {
-  hydrateWorkSettingsFromJournal,
-  hydrateWorkThreadProjectionFromJournal,
-  WorkThreadProjection,
-} from "../work/workThreadProjection";
+import { hydrateWorkSettingsFromJournal } from "../work/workThreadProjection";
 import { createThemeRouteHandler } from "../theme/themeRoutes";
 import { createGoalRouteHandler } from "../goal/goalRoutes";
 import { createShipRouteHandler } from "../ship/shipRoutes";
@@ -30,12 +26,10 @@ import { ManagedCloneService } from "../github/managedCloneService";
 import { ManagedRepositoryInventory } from "../github/managedRepositoryInventory";
 import { createGithubCloneRouteHandler } from "../githubCloneRoutes";
 import { createProjectBindingRouteHandler } from "../projectBindingRoutes";
-import { createAgentMessageRouteHandler } from "../agentMessage/agentMessageRoutes";
 import { ProjectService } from "../projectService";
 import { ProjectRootPort } from "../projectRootPort";
 import { WorkProjectStatusFiles } from "../work/workProjectStatusFiles";
 import { WorkProjectStatusReader } from "../work/workProjectStatusReader";
-import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { createShellRouteHandler } from "../shellRoutes";
 import { OCTANT_LOCAL_ACTOR_ID, ShellService } from "../shellService";
 import { notMeasuredProvider, SpendCeilingService } from "../spendCeilingService";
@@ -44,26 +38,16 @@ import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
+import type { FoundationsWiring } from "./foundations";
 
 export type WorkspaceDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AuthorityWiring, "bindingReceiptStore" | "onWindowRevoked" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "spendCeilingHolder"> &
-  Pick<
-    IntegrationsWiring,
-    "agentMessageProjection" | "githubCapabilityService" | "githubIntegrationIsEffective"
-  > & {
-    /** Wired by wireProviders; read only after startup. */
-    readonly providerRuntimeRegistry: () => ProviderRuntimeRegistry;
-    /** Wired by wireContext; read only after startup. */
-    readonly windowCanOpenThreadById: () => (
-      windowId: WindowId,
-      threadId: string,
-    ) => Promise<boolean>;
-  };
+  Pick<IntegrationsWiring, "githubCapabilityService" | "githubIntegrationIsEffective"> &
+  Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection">;
 
 export function wireWorkspace(deps: WorkspaceDependencies) {
   const {
-    agentMessageProjection,
     bindingReceiptStore,
     githubCapabilityService,
     githubIntegrationIsEffective,
@@ -73,7 +57,7 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
     providerRuntimeRegistry,
     spendCeilingHolder,
     windowAuthorityStore,
-    windowCanOpenThreadById,
+    workThreadProjection,
   } = deps;
   return Effect.gen(function* () {
     const projectRootPort = new ProjectRootPort();
@@ -112,7 +96,6 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
-    const workThreadProjection = new WorkThreadProjection();
     const spendCeilingService = new SpendCeilingService({
       connection: persistence.connection,
       journal: persistence.journal,
@@ -133,26 +116,12 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
         notMeasuredProvider(
           {
             readProviderInstances: () => persistence.readProviderInstances(),
-            observedState: (instanceId) => providerRuntimeRegistry().observedState(instanceId),
+            observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
           },
           providerInstanceId,
         ),
     });
     spendCeilingHolder.service = spendCeilingService;
-    requireJournalHydration(
-      hydrateWorkThreadProjectionFromJournal({
-        replay: (cursor) =>
-          persistence.journal.replayAggregateType({
-            ...Schema.decodeUnknownSync(ReplayCursor)({
-              afterSequence: cursor.afterSequence,
-              limit: cursor.limit,
-            }),
-            aggregateType: cursor.aggregateType ?? "work-thread",
-          }),
-        projection: workThreadProjection,
-      }),
-      "Work thread",
-    );
     requireJournalHydration(
       hydrateWorkSettingsFromJournal({
         replay: (cursor) =>
@@ -335,11 +304,6 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       windowAuthorityStore,
       authorizeThread: authorizeCodeThreadForWindow,
     });
-    const agentMessageRoutes = createAgentMessageRouteHandler({
-      windowAuthorityStore,
-      projection: agentMessageProjection,
-      windowCanOpenThread: (windowId, threadId) => windowCanOpenThreadById()(windowId, threadId),
-    });
     const projectBindingRoutes = createProjectBindingRouteHandler({
       desktopBridgeSecret: options.desktopBridgeSecret,
       windowAuthorityStore,
@@ -370,7 +334,6 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       },
     });
     return {
-      agentMessageRoutes,
       authorizeWorkThreadForWindow,
       codeBoardPlanProgressSource,
       contextHarness,
@@ -393,7 +356,6 @@ export function wireWorkspace(deps: WorkspaceDependencies) {
       themeRoutes,
       workProjectStatusFiles,
       workProjectStatusReader,
-      workThreadProjection,
     };
   });
 }

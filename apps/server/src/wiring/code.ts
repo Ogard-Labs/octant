@@ -12,7 +12,6 @@ import {
   type CodeCheckoutIdentity,
   type CodeProjectPullRequestRow,
   type CodeRepositoryId,
-  type CodeThreadId,
   type CodeWorktreeRemoteFacts,
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
@@ -30,7 +29,6 @@ import { Effect } from "effect";
 import { WorkAttachmentStore } from "../work/workAttachmentStore";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
 import { CodeContentStore } from "../code/codeContentStore";
-import { CodeEvidenceStore } from "../code/codeEvidenceStore";
 import { CodeAttachmentStore } from "../code/codeAttachmentStore";
 import { CodeFileService } from "../code/codeFileService";
 import { CodeFileListingService } from "../code/codeFileListingService";
@@ -43,7 +41,6 @@ import {
   CodeService,
 } from "../code/codeService";
 import type { CompletedThreadArchiveInput } from "../completedThreadArchiveSweep";
-import { CodeOperationEventStore } from "../code/codeOperationEventStore";
 import { pullRequestIdentitiesFromHistory } from "../code/codeThreadMetadataService";
 import {
   type CodeProjectPullRequestDetailPort,
@@ -66,23 +63,18 @@ import type { PersistenceService } from "../persistence/persistenceService";
 import { createProjectRouteHandler } from "../projectRoutes";
 import { createAgentProfileRouteHandler } from "../agentProfileRoutes";
 import { AgentProfileService } from "../agentProfileService";
-import {
-  admittedParentCodeContext,
-  type AdmittedParentCodeContextInput,
-} from "../agentRun/agentRunParentContext";
 import { createFolderBrowseRouteHandler } from "../folderBrowseRoutes";
 import { FolderBrowseService } from "../folderBrowseService";
 import { ProjectService } from "../projectService";
 import { CodeProjectAccess } from "../codeProjectAccess";
-import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
-import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
-import { isProviderAllowedByProjectPolicy } from "@octant/domain";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
+import type { ProvidersWiring } from "./providers";
+import type { FoundationsWiring } from "./foundations";
 
 export function createExistingWorktreeCodeFileRootAuthority(options: {
   readonly projects: Pick<ProjectService, "bootstrap">;
@@ -486,15 +478,7 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
 
 export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<
-    LateBindings,
-    | "codeOperationRuntime"
-    | "managedCodeThreadCreation"
-    | "managedWorktreeRefsList"
-    | "managedWorktreeSourcePreview"
-    | "probeProviderForThreads"
-    | "refreshStandaloneSkills"
-  >;
+  readonly late: Pick<LateBindings, "codeOperationRuntime">;
 } & Pick<
     AuthorityWiring,
     | "bindingReceiptStore"
@@ -519,6 +503,21 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   Pick<
     WorkspaceWiring,
     "gitEnvironmentPort" | "gitObservationPort" | "projectRootPort" | "projectService"
+  > &
+  Pick<
+    FoundationsWiring,
+    | "codeBoardEventStore"
+    | "codeEvidence"
+    | "isProjectPolicyTargetAllowed"
+    | "selectCodeConversation"
+  > &
+  Pick<
+    ProvidersWiring,
+    | "managedCodeThreadCreation"
+    | "managedWorktreeRefsList"
+    | "managedWorktreeSourcePreview"
+    | "probeProviderForThreads"
+    | "refreshStandaloneSkills"
   >;
 
 export function wireCode(deps: CodeDependencies) {
@@ -528,26 +527,34 @@ export function wireCode(deps: CodeDependencies) {
     bindingReceiptStore,
     cacheStats,
     codeApprovalStore,
+    codeBoardEventStore,
+    codeEvidence,
     codeSessionAuthority,
     externalContentIngestionStore,
     gitEnvironmentPort,
     githubIssueContextService,
     gitObservationPort,
+    isProjectPolicyTargetAllowed,
     linearIssueContextService,
     liveTurns,
     machineChangeFeed,
+    managedCodeThreadCreation,
     managedWorktreeReceipts,
+    managedWorktreeRefsList,
+    managedWorktreeSourcePreview,
     onGithubPullRequestsUnreadable,
     onWindowRevoked,
     options,
     persistence,
+    probeProviderForThreads,
     projectRootPort,
     projectService,
+    refreshStandaloneSkills,
+    selectCodeConversation,
     windowAuthorityStore,
   } = deps;
   return Effect.gen(function* () {
     const codeContent = new CodeContentStore();
-    const codeEvidence = new CodeEvidenceStore({ connection: persistence.connection });
     const codeAttachments = new CodeAttachmentStore(persistence.dataDirectory);
     const workAttachments = new WorkAttachmentStore(persistence.dataDirectory);
     // Listing reads directory entries under the bound checkout and needs no
@@ -669,23 +676,6 @@ export function wireCode(deps: CodeDependencies) {
     });
     const canAccessCodeProject = (scopeId: WindowId, projectId: ProjectId) =>
       codeProjectAccess.canAccessProject(scopeId, projectId);
-    // The catalog, not the runtime observation, carries a model's data tags,
-    // so an `eu-zdr` policy is judged against it.
-    const isProjectPolicyTargetAllowed = (
-      project: Exclude<
-        ReturnType<typeof persistence.readProject>,
-        undefined | { readonly type: "chat" }
-      >,
-      providerInstanceId: ProviderInstance["id"],
-      modelId: ProviderModel["id"],
-    ): boolean => {
-      const provider = persistence.readProviderInstance(providerInstanceId);
-      if (provider === undefined) return false;
-      const model = persistence
-        .readProviderCatalog?.(providerInstanceId)
-        ?.models.find((candidate) => String(candidate.id) === String(modelId));
-      return isProviderAllowedByProjectPolicy(project, provider, model);
-    };
     const isCodeProviderModelAllowed = (input: {
       readonly projectId: ProjectId;
       readonly providerInstanceId: ProviderInstance["id"];
@@ -720,10 +710,10 @@ export function wireCode(deps: CodeDependencies) {
         approvals: codeApprovalStore,
         sessionAuthority: codeSessionAuthority,
         worktreeSourcePreview: {
-          preview: (input, signal) => late.managedWorktreeSourcePreview.current(input, signal),
+          preview: (input, signal) => managedWorktreeSourcePreview(input, signal),
         },
         worktreeRefs: {
-          list: (input, signal) => late.managedWorktreeRefsList.current(input, signal),
+          list: (input, signal) => managedWorktreeRefsList(input, signal),
         },
         // Late-bound: the operation runtime that reads a thread's turns and
         // checkout is constructed after this service.
@@ -751,10 +741,10 @@ export function wireCode(deps: CodeDependencies) {
                 ),
         },
         managedThreadCreation: {
-          prepare: (input, signal) => late.managedCodeThreadCreation.current.prepare(input, signal),
+          prepare: (input, signal) => managedCodeThreadCreation.prepare(input, signal),
           commit: (input, preparation, signal) =>
-            late.managedCodeThreadCreation.current.commit(input, preparation, signal),
-          cleanup: (input, signal) => late.managedCodeThreadCreation.current.cleanup(input, signal),
+            managedCodeThreadCreation.commit(input, preparation, signal),
+          cleanup: (input, signal) => managedCodeThreadCreation.cleanup(input, signal),
         },
         workingDirectories: {
           resolve: async (windowId, thread, checkout, workingDirectory) => {
@@ -769,10 +759,9 @@ export function wireCode(deps: CodeDependencies) {
               : resolveThreadWorkingDirectory(root.rootPath, workingDirectory);
           },
         },
-        onWorkingDirectoryChanged: async () => late.refreshStandaloneSkills.current(),
+        onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
         waitForThreadChange: (signal) => machineChangeFeed.waitFor("code-navigation", signal),
-        probeProvider: (providerInstanceId) =>
-          late.probeProviderForThreads.current(providerInstanceId),
+        probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
         isProviderModelAllowed: isCodeProviderModelAllowed,
         issueContext: githubIssueContextService,
         linearIssueContext: linearIssueContextService,
@@ -796,37 +785,6 @@ export function wireCode(deps: CodeDependencies) {
               codeService.archiveCompletedThread(decodeCodeThreadId(threadId), input),
           }
         : undefined;
-    const codeBoardEventStore = new CodeOperationEventStore({
-      journal: persistence.journal,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
-    });
-    // A child's parent context and a provider switch's handoff read a Code
-    // thread through one selector, so both carry the same bounds, attribution,
-    // taint and omissions.
-    const selectCodeConversation = (
-      threadId: CodeThreadId,
-      options: Pick<
-        AdmittedParentCodeContextInput,
-        "purpose" | "excludeOperationId" | "throughOperationId" | "afterOperationId" | "inherited"
-      > = {},
-    ) =>
-      admittedParentCodeContext({
-        threadId,
-        externalContentIngested: readThreadExternalContentTaint(
-          persistence.connection,
-          String(threadId),
-        ).externalContentIngested,
-        readThread: (id) => persistence.readCodeThread(id),
-        readActivity: (id) =>
-          persistence
-            .readCodeThreadActivity()
-            .find((activity) => String(activity.threadId) === String(id)),
-        conversation: (input) => codeBoardEventStore.conversation(input),
-        readEvidence: (reference) => codeEvidence.read(reference),
-        ...options,
-      });
     const projectPullRequestPorts = createProjectPullRequestPorts(options.ghExecutable);
     // Host-wide on purpose: the snapshot cache is shared across windows, so
     // linked-thread facts must come from every persisted Code thread, not from
@@ -938,9 +896,7 @@ export function wireCode(deps: CodeDependencies) {
       agentProfileRoutes,
       canAccessCodeProject,
       codeAttachments,
-      codeBoardEventStore,
       codeCompletedThreadSource,
-      codeEvidence,
       codeProjectAccess,
       codeService,
       codeTestDiscovery,
@@ -949,13 +905,11 @@ export function wireCode(deps: CodeDependencies) {
       folderBrowseRoutes,
       folderBrowseService,
       isCodeProviderModelAllowed,
-      isProjectPolicyTargetAllowed,
       onPullRequestSnapshotRefreshed,
       projectPullRequestCadence,
       projectPullRequestService,
       projectRoutes,
       roots,
-      selectCodeConversation,
       workAttachments,
     };
   });

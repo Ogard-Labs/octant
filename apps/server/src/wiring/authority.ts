@@ -29,14 +29,12 @@ import {
 import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
 import { BrowserCaptureService } from "../browser/browserCaptureService";
 import { BrowserCaptureStore } from "../browser/browserCaptureStore";
-import { ServerBrowserAuthorityResolver } from "../browser/browserAuthorityResolver";
 import { SimulatorInputGrants } from "../apple/simulatorInputGrants";
 import type { ServerStart } from "./serverShape";
+import type { FoundationsWiring } from "./foundations";
 
-export type AuthorityDependencies = Pick<ServerStart, "persistence"> & {
-  /** Wired by wireBrowser; read only after startup. */
-  readonly browserAuthority: () => ServerBrowserAuthorityResolver;
-};
+export type AuthorityDependencies = Pick<ServerStart, "persistence"> &
+  Pick<FoundationsWiring, "browserAuthority">;
 
 export function wireAuthority(deps: AuthorityDependencies) {
   const { browserAuthority, persistence } = deps;
@@ -91,7 +89,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
       if (project.type !== "work" && project.type !== "code") {
         return chatThreadStandsInProject(chatThread(), projectId);
       }
-      const authority = browserAuthority().resolve(decodeBrowserThreadId(threadId), project.type);
+      const authority = browserAuthority.resolve(decodeBrowserThreadId(threadId), project.type);
       return authority !== undefined && String(authority.projectId) === String(project.id);
     },
     // A usage-limit resume replays its stopped Work turn's extension
@@ -108,11 +106,11 @@ export function wireAuthority(deps: AuthorityDependencies) {
         return false;
       }
       const thread = decodeBrowserThreadId(threadId);
-      const authority = browserAuthority().resolve(thread, project.type);
+      const authority = browserAuthority.resolve(thread, project.type);
       return (
         authority !== undefined &&
         String(authority.projectId) === String(project.id) &&
-        browserAuthority().canAccessWindow(windowId, thread, project.type)
+        browserAuthority.canAccessWindow(windowId, thread, project.type)
       );
     },
   });

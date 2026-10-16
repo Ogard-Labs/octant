@@ -90,6 +90,7 @@ import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers"
 import type { ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
@@ -136,17 +137,13 @@ export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> & 
 } & Pick<AuthorityWiring, "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "managedWorktreeReceipts"> &
   Pick<IntegrationsWiring, "gistConnection" | "threadOutsideContentMarks"> &
-  Pick<WorkspaceWiring, "projectService" | "shellService" | "workThreadProjection"> &
+  Pick<WorkspaceWiring, "projectService" | "shellService"> &
   Pick<CodeWiring, "folderBrowseService"> &
-  Pick<
-    ProvidersWiring,
-    | "chatDataDirectory"
-    | "configuredDriverOptions"
-    | "extensionApiService"
-    | "providerRuntimeRegistry"
-  > &
+  Pick<ProvidersWiring, "chatDataDirectory" | "configuredDriverOptions" | "extensionApiService"> &
   Pick<ChatWiring, "imageJobService"> &
-  Pick<WorkWiring, "threadExportService" | "workArtifactProjection">;
+  Pick<WorkWiring, "threadExportService" | "workArtifactProjection"> &
+  Pick<FoundationsWiring, "workThreadProjection"> &
+  Pick<FoundationsWiring, "providerRuntimeRegistry">;
 
 export function wireCanvas(deps: CanvasDependencies) {
   const {

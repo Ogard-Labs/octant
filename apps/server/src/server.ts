@@ -3,24 +3,14 @@ import {
   UNCLASSIFIED_STARTUP_FAILURE,
   withStartupFailureReason,
 } from "./startupFailureReason";
-import type {
-  AndroidRpcEnvelope,
-  AppleRpcEnvelope,
-  CodeThreadId,
-  ProviderInstance,
-  ProviderModel,
-  WindowId,
-} from "@octant/contracts";
+import type { AndroidRpcEnvelope, AppleRpcEnvelope, WindowId } from "@octant/contracts";
 import { Effect, Scope } from "effect";
 import { ChatService } from "./chat/chatService";
 import { WorkFileListingService } from "./work/workFileListingService";
-import { WorkThreadProjection } from "./work/workThreadProjection";
 import { WorkThreadService } from "./work/workThreadService";
-import { WorkTurnProjection } from "./work/workTurnProjection";
 import { WorkTurnService } from "./work/workTurnService";
 import { GoalLoopService } from "./goal/goalLoopService";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
-import { CodeOperationEventStore } from "./code/codeOperationEventStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
 import { healthResponse } from "./health";
 import {
@@ -28,11 +18,6 @@ import {
   type PersistenceService,
   PersistenceStartupFailed,
 } from "./persistence/persistenceService";
-import {
-  admittedParentCodeContext,
-  type AdmittedParentCodeContextInput,
-} from "./agentRun/agentRunParentContext";
-import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
 import { LatencyStatsProjection } from "./latencyStatsProjection";
 import {
   isAllowedRendererOrigin,
@@ -46,7 +31,6 @@ import {
 import { FileMentionService } from "./fileMentionService";
 import { NativeHarnessRouter } from "./harness/nativeHarnessRouter";
 import { NativeHarnessSessionStore } from "./harness/nativeHarnessSessionStore";
-import { ServerBrowserAuthorityResolver } from "./browser/browserAuthorityResolver";
 import { type AppleExecutionContext, AppleToolchainService } from "./apple/appleToolchainService";
 import {
   type AndroidExecutionContext,
@@ -71,6 +55,8 @@ import { wireIntegrations } from "./wiring/integrations";
 import { wireUsage } from "./wiring/usage";
 import { wireComputerUse } from "./wiring/computerUse";
 import { wireWorkspace } from "./wiring/workspace";
+import { wireFoundations } from "./wiring/foundations";
+import { wireWorkRequestState } from "./wiring/workRequestState";
 import { wireCode } from "./wiring/code";
 import { wireBrowser } from "./wiring/browser";
 import { wireCodeRuntime } from "./wiring/codeRuntime";
@@ -183,7 +169,6 @@ export function startOctantServer(
     const version = options.version ?? "0.0.0-dev";
     const startedAt = Date.now();
     const late: LateBindings = {
-      workRequestRuntime: { current: undefined },
       nativeHarnessComposition: { current: undefined },
       nativeHarnessSessions: { current: undefined },
       nativeHarnessObserver: { current: undefined },
@@ -197,35 +182,23 @@ export function startOctantServer(
           message: "Canvas is unavailable on this host.",
         }),
       },
-      refreshStandaloneSkills: { current: async (): Promise<void> => undefined },
-      managedWorktreeSourcePreview: {
-        current: async () => ({
-          kind: "failed",
-          reason: "unavailable",
-        }),
-      },
-      managedWorktreeRefsList: { current: async () => [] },
-      managedCodeThreadCreation: {
-        current: {
-          prepare: async () => ({ status: "waiting" }),
-          commit: async () => ({ status: "waiting" }),
-          cleanup: async () => ({ status: "waiting" }),
-        },
-      },
-      probeProviderForThreads: {
-        current: async () => {
-          throw new Error("Provider probing is unavailable during server startup.");
-        },
-      },
       codeOperationRuntime: { current: options.codeOperationRuntime },
       runningWorkTurnAccess: { current: undefined },
       zenAssistantTools: { current: undefined },
       canvasAgentToolPort: { current: undefined },
       purgeQueuedChatMessages: { current: undefined },
-      observeWorkThreadRuntime: { current: undefined },
-      workRequestService: { current: undefined },
     };
 
+    const {
+      browserAuthority,
+      codeBoardEventStore,
+      codeEvidence,
+      isProjectPolicyTargetAllowed,
+      providerRuntimeRegistry,
+      selectCodeConversation,
+      workThreadProjection,
+      workTurnProjection,
+    } = wireFoundations({ latencyStats, options, persistence });
     const {
       agentRunParentAuthority,
       agentRunPersistence,
@@ -247,7 +220,7 @@ export function startOctantServer(
       unsubscribeMachineChanges,
       windowAuthorityStore,
     } = wireAuthority({
-      browserAuthority: (): ServerBrowserAuthorityResolver => browserAuthority,
+      browserAuthority,
       persistence,
     });
     const {
@@ -276,33 +249,20 @@ export function startOctantServer(
       late,
       agentRunPersistence,
       chatService: (): ChatService => chatService,
-      codeBoardEventStore: (): CodeOperationEventStore => codeBoardEventStore,
+      codeBoardEventStore,
       codeSessionAuthority,
       configuredDriverOptions: (): ConfiguredProviderDriverOptions => configuredDriverOptions,
-      isProjectPolicyTargetAllowed: (): ((
-        project: Exclude<
-          ReturnType<PersistenceService["readProject"]>,
-          undefined | { readonly type: "chat" }
-        >,
-        providerInstanceId: ProviderInstance["id"],
-        modelId: ProviderModel["id"],
-      ) => boolean) => isProjectPolicyTargetAllowed,
+      isProjectPolicyTargetAllowed,
       nativeHarnessRouterLive: (): NativeHarnessRouter => nativeHarnessRouterLive,
       nativeHarnessSessionsLive: (): NativeHarnessSessionStore => nativeHarnessSessionsLive,
       onAgentRunExecutionAccepted,
       options,
       persistence,
-      providerRuntimeRegistry: (): ProviderRuntimeRegistry => providerRuntimeRegistry,
-      selectCodeConversation: (): ((
-        threadId: CodeThreadId,
-        options?: Pick<
-          AdmittedParentCodeContextInput,
-          "purpose" | "excludeOperationId" | "throughOperationId" | "afterOperationId" | "inherited"
-        >,
-      ) => ReturnType<typeof admittedParentCodeContext>) => selectCodeConversation,
+      providerRuntimeRegistry,
+      selectCodeConversation,
       windowAuthorityStore,
-      workThreadProjection: (): WorkThreadProjection => workThreadProjection,
-      workTurnProjection: (): WorkTurnProjection => workTurnProjection,
+      workThreadProjection,
+      workTurnProjection,
     });
     const {
       agentMessageProjection,
@@ -330,7 +290,7 @@ export function startOctantServer(
       options,
       persistence,
       windowAuthorityStore,
-      workThreadProjection: (): WorkThreadProjection => workThreadProjection,
+      workThreadProjection,
     });
     const {
       diagnosticsExportRoutes,
@@ -361,19 +321,18 @@ export function startOctantServer(
       webAssets,
     } = wireComputerUse({
       onWindowRevoked,
-      browserAuthority: (): ServerBrowserAuthorityResolver => browserAuthority,
+      browserAuthority,
       externalContentIngestionStore,
       machineChangeFeed,
       options,
       persistence,
       processAuthorityNow,
-      providerRuntimeRegistry: (): ProviderRuntimeRegistry => providerRuntimeRegistry,
+      providerRuntimeRegistry,
       validationEventStore,
       windowAuthorityStore,
-      workThreadProjection: (): WorkThreadProjection => workThreadProjection,
+      workThreadProjection,
     });
     const {
-      agentMessageRoutes,
       authorizeWorkThreadForWindow,
       codeBoardPlanProgressSource,
       contextHarness,
@@ -396,28 +355,79 @@ export function startOctantServer(
       themeRoutes,
       workProjectStatusFiles,
       workProjectStatusReader,
-      workThreadProjection,
     } = yield* wireWorkspace({
       onWindowRevoked,
-      agentMessageProjection,
       bindingReceiptStore,
       githubCapabilityService,
       githubIntegrationIsEffective,
       options,
       persistence,
-      providerRuntimeRegistry: (): ProviderRuntimeRegistry => providerRuntimeRegistry,
+      providerRuntimeRegistry,
       spendCeilingHolder,
       windowAuthorityStore,
-      windowCanOpenThreadById: (): ((windowId: WindowId, threadId: string) => Promise<boolean>) =>
-        windowCanOpenThreadById,
+      workThreadProjection,
+    });
+    const { workRequestRuntime, workRequestService } = wireWorkRequestState({
+      persistence,
+      workThreadProjection,
+    });
+    const {
+      agentPluginMcpSessionManager,
+      chatAttachmentStore,
+      chatDataDirectory,
+      claudeResumeIdentityStore,
+      codeThreadDrivers,
+      configuredDriverOptions,
+      credentialBroker,
+      credentialResolver,
+      discoveryRoutes,
+      extensionActivationService,
+      extensionApiService,
+      extensionPackageStore,
+      extensionRoutes,
+      localUsageHistoryRoutes,
+      managedCodeThreadCreation,
+      managedWorktreeRefsList,
+      managedWorktreeSourcePreview,
+      nativeHarnessEndpoints,
+      nativeHarnessTranscripts,
+      probeProviderForThreads,
+      providerDataDirectory,
+      providerOAuthRoutes,
+      providerRoutes,
+      providerService,
+      providerUsageLimitsRoutes,
+      providerUsageLimitsService,
+      refreshStandaloneSkills,
+      resolveSelectedExtensions,
+      reviewedModelManifest,
+      skillDiscoveryService,
+    } = yield* wireProviders({
+      providerRuntimeRegistry,
+      workRequestRuntime,
+      late,
+      agentRunChildWorktree,
+      agentRunProcessSupervisor,
+      agentRunSessionStore,
+      computerUseProcess,
+      extensionToolApprovalService,
+      externalContentIngestionStore,
+      githubExtensionSnapshot,
+      isPairedDeviceScope,
+      latencyStats,
+      managedWorktreeReceipts,
+      options,
+      persistence,
+      processAuthorityNow,
+      version,
+      windowAuthorityStore,
+      workThreadProjection,
     });
     const {
       agentProfileRoutes,
       canAccessCodeProject,
       codeAttachments,
-      codeBoardEventStore,
       codeCompletedThreadSource,
-      codeEvidence,
       codeProjectAccess,
       codeService,
       codeTestDiscovery,
@@ -426,15 +436,22 @@ export function startOctantServer(
       folderBrowseRoutes,
       folderBrowseService,
       isCodeProviderModelAllowed,
-      isProjectPolicyTargetAllowed,
       onPullRequestSnapshotRefreshed,
       projectPullRequestCadence,
       projectPullRequestService,
       projectRoutes,
       roots,
-      selectCodeConversation,
       workAttachments,
     } = yield* wireCode({
+      codeBoardEventStore,
+      codeEvidence,
+      isProjectPolicyTargetAllowed,
+      selectCodeConversation,
+      managedCodeThreadCreation,
+      managedWorktreeRefsList,
+      managedWorktreeSourcePreview,
+      probeProviderForThreads,
+      refreshStandaloneSkills,
       onGithubPullRequestsUnreadable,
       onWindowRevoked,
       threadAwaitsHarnessApproval,
@@ -458,55 +475,6 @@ export function startOctantServer(
       windowAuthorityStore,
     });
     const {
-      agentPluginMcpSessionManager,
-      chatAttachmentStore,
-      chatDataDirectory,
-      claudeResumeIdentityStore,
-      codeThreadDrivers,
-      configuredDriverOptions,
-      credentialBroker,
-      credentialResolver,
-      discoveryRoutes,
-      extensionActivationService,
-      extensionApiService,
-      extensionPackageStore,
-      extensionRoutes,
-      localUsageHistoryRoutes,
-      nativeHarnessEndpoints,
-      nativeHarnessTranscripts,
-      probeProviderForThreads,
-      providerDataDirectory,
-      providerOAuthRoutes,
-      providerRoutes,
-      providerRuntimeRegistry,
-      providerService,
-      providerUsageLimitsRoutes,
-      providerUsageLimitsService,
-      refreshStandaloneSkills,
-      resolveSelectedExtensions,
-      reviewedModelManifest,
-      skillDiscoveryService,
-    } = yield* wireProviders({
-      late,
-      agentRunChildWorktree,
-      agentRunProcessSupervisor,
-      agentRunSessionStore,
-      computerUseProcess,
-      extensionToolApprovalService,
-      externalContentIngestionStore,
-      githubExtensionSnapshot,
-      isPairedDeviceScope,
-      latencyStats,
-      managedWorktreeReceipts,
-      options,
-      persistence,
-      processAuthorityNow,
-      version,
-      windowAuthorityStore,
-      workThreadProjection,
-    });
-    const {
-      browserAuthority,
       browserAutomationService,
       browserToolApprovalService,
       liveProjectBrowsers,
@@ -515,6 +483,7 @@ export function startOctantServer(
       projectBrowserService,
       windowHoldsProject,
     } = yield* wireBrowser({
+      browserAuthority,
       onWindowRevoked,
       browserCaptures,
       codeEvidence,
@@ -525,7 +494,6 @@ export function startOctantServer(
       providerDataDirectory,
       shellService,
       windowAuthorityStore,
-      workThreadProjection,
     });
     const {
       baseRouteCodeService,
@@ -534,6 +502,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      workRequestRuntime,
       onPullRequestSnapshotRefreshed,
       onWindowRevoked,
       threadAwaitsHarnessApproval,
@@ -713,6 +682,7 @@ export function startOctantServer(
       threadMentionService,
       workspacePresetRoutes,
     } = yield* wireChat({
+      workRequestRuntime,
       threadAwaitsHarnessApproval,
       late,
       agentMessageProjection,
@@ -769,12 +739,16 @@ export function startOctantServer(
       threadMessageQueue,
       threadMessageQueueRoutes,
       workArtifactProjection,
+      observeWorkThreadRuntime,
       workThreadService,
       workThreadServiceWithWorkflows,
-      workTurnProjection,
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      workTurnProjection,
+      threadAwaitsHarnessApproval,
+      workRequestRuntime,
+      workRequestService,
       onWindowRevoked,
       late,
       agentRunPersistence,
@@ -860,8 +834,9 @@ export function startOctantServer(
         workTurnService,
         zenEventStore,
       });
-    const { browserAutomationRoutes, contextRoutes, windowCanOpenThread, windowCanOpenThreadById } =
+    const { agentMessageRoutes, browserAutomationRoutes, contextRoutes, windowCanOpenThread } =
       wireContext({
+        agentMessageProjection,
         browserAuthority,
         browserAutomationService,
         browserCaptures,
@@ -968,8 +943,8 @@ export function startOctantServer(
       workRequestRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
-      threadAwaitsHarnessApproval,
-      late,
+      observeWorkThreadRuntime,
+      workRequestService,
       agentRunPersistence,
       baseRouteCodeService,
       chatService,
