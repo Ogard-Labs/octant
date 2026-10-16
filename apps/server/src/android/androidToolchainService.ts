@@ -46,6 +46,15 @@ export interface AndroidProcessResult {
   readonly cleanupUncertain: boolean;
 }
 
+/**
+ * A process Octant started and does not wait on. `stop` ends exactly that
+ * process, within a bound, and reports whether it is gone; it never names a
+ * process by anything but the handle it was started with.
+ */
+export type DetachedProcessStart =
+  | { readonly kind: "spawned"; readonly stop: () => Promise<"stopped" | "still-running"> }
+  | { readonly kind: "unavailable"; readonly message: string };
+
 export interface AndroidExecutionContext extends AndroidExecutionScope {
   readonly checkoutRoot: string;
   readonly artifactRoot: string;
@@ -85,9 +94,7 @@ export interface AndroidToolchainServiceOptions {
     readonly argv: ReadonlyArray<string>;
     readonly cwd: string;
     readonly environment: Readonly<Record<string, string>>;
-  }) => Promise<
-    { readonly kind: "spawned" } | { readonly kind: "unavailable"; readonly message: string }
-  >;
+  }) => Promise<DetachedProcessStart>;
   readonly realpath: (path: string) => Promise<string>;
   readonly observeEmulators?: (emulators: ReadonlyArray<AndroidEmulatorRecord>) => void;
   readonly writeArtifact: (
@@ -584,7 +591,16 @@ export class AndroidToolchainService {
       }
       this.#setState(request.emulatorId, "booting");
       const started = await spawn({
-        argv: [emulatorBin, "-avd", String(request.emulatorId), "-no-window", "-no-audio"],
+        argv: [
+          emulatorBin,
+          "-avd",
+          String(request.emulatorId),
+          "-no-window",
+          "-no-audio",
+          // Every boot is cold. A quickboot snapshot saved at power-off can
+          // load "successfully" and then leave adb offline for minutes.
+          "-no-snapshot",
+        ],
         cwd: context.checkoutRoot,
         environment: androidEnv(this.#options.environment?.() ?? {}, this.#sdk),
       });
@@ -598,18 +614,26 @@ export class AndroidToolchainService {
         request.timeoutMs,
         signal,
       );
+      // An emulator that never came online keeps running and holds the AVD,
+      // so a boot that gives up ends the process it started.
+      const stopped = ready ? undefined : await started.stop();
+      const stuck = stopped === "still-running";
       this.#setState(request.emulatorId, ready ? "booted" : "shutdown");
       return await this.#logged(
         request,
-        ready ? "succeeded" : signal.aborted ? "cancelled" : "timed-out",
+        ready ? "succeeded" : stuck ? "interrupted" : signal.aborted ? "cancelled" : "timed-out",
         startedAt,
         [
           {
             severity: "note",
-            message: ready ? "emulator booted" : "emulator did not become ready",
+            message: ready
+              ? "emulator booted"
+              : stuck
+                ? "emulator did not become ready and could not be stopped"
+                : "emulator did not become ready; the process was stopped",
           },
         ],
-        "complete",
+        stuck ? "uncertain" : "complete",
       );
     }
     if (adb === undefined) return await this.#unavailable(request, startedAt, "adb");

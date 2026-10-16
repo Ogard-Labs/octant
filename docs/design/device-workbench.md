@@ -382,6 +382,23 @@ timed out, desktop unreachable, or no frames). The pane shows it as a quiet
 sent through `serve-avd` says so in its evidence. An agent must not launch
 Simulator.app, `serve-sim`, or `serve-avd`.
 
+### Boot from the Android pane
+
+Octant starts the emulator as `emulator -avd <name> -no-window -no-audio
+-no-snapshot`: every boot is cold, and the emulator neither loads nor saves a
+quickboot snapshot. A snapshot written at power-off loaded "successfully" on the
+next boot and then left `adb` showing the emulator offline for minutes, so the
+boot timed out; a cold boot reached the first frame in about a minute, and the
+saved state is not worth that risk. The rule covers emulators Octant launches;
+one the person starts themselves keeps its own snapshot behavior.
+
+The emulator runs as the leader of its own process group, because the launcher
+starts the emulator proper as a child. A boot that does not come online in time,
+or is cancelled, ends that group (a polite stop, then a kill after 5 s, each
+bounded) and nothing else. Its evidence says `cleanup: "complete"` only when the
+group is gone; if it will not stop, the outcome is `interrupted` with
+`cleanup: "uncertain"`.
+
 ### Shut down from the Android pane
 
 Shut down is an approval-gated action like Boot: the pane raises the in-app
