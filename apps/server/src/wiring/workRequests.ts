@@ -49,7 +49,7 @@ import type { FoundationsWiring } from "./foundations";
 import type { WorkspaceWiring } from "./workspace";
 import type { ProvidersWiring } from "./providers";
 import type { CodeRuntimeWiring } from "./codeRuntime";
-import type { HarnessWiring } from "./harness";
+import type { HarnessStateWiring } from "./harnessState";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 import type { WorkFilesWiring } from "./workFiles";
@@ -67,8 +67,8 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> &
     "baseRouteCodeService" | "codeOperationRuntime" | "codeTurnDecisions" | "routeCodeService"
   > &
   Pick<
-    HarnessWiring,
-    "nativeHarnessApprovals" | "nativeHarnessQuestionsLive" | "nativeHarnessSessionsLive"
+    HarnessStateWiring,
+    "nativeHarnessApprovals" | "nativeHarnessQuestions" | "nativeHarnessSessions"
   > &
   Pick<ChatWiring, "chatService"> &
   Pick<
@@ -92,8 +92,8 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     gitObservationPort,
     goalService,
     nativeHarnessApprovals,
-    nativeHarnessQuestionsLive,
-    nativeHarnessSessionsLive,
+    nativeHarnessQuestions,
+    nativeHarnessSessions,
     observeWorkThreadRuntime,
     persistence,
     projectService,
@@ -208,8 +208,8 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     ...(await listChildPendingRequests(
       {
         approvals: nativeHarnessApprovals,
-        questions: nativeHarnessQuestionsLive,
-        readSession: (threadId) => nativeHarnessSessionsLive.read(threadId),
+        questions: nativeHarnessQuestions,
+        readSession: (threadId) => nativeHarnessSessions.read(threadId),
         getRun: (id) => agentRunPersistence.getById(id),
         parentThreadTitle: (run) =>
           resolveAgentRunParentThreadTitle({
@@ -225,7 +225,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     ...(await listLeadApprovalRequests(
       {
         approvals: nativeHarnessApprovals,
-        sessions: nativeHarnessSessionsLive,
+        sessions: nativeHarnessSessions,
         threadFacts: ({ threadId, mode }) =>
           resolveHarnessThreadFacts({ persistence, workThreadProjection, threadId, mode }),
         authorizeThread: ({ threadId, mode, windowId: asking }) =>

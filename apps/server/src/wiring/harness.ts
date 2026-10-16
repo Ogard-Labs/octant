@@ -4,10 +4,8 @@ import { realpath, stat as statFromDisk } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AggregateId,
-  decodeChatThreadId,
   decodeCodeThreadId,
   decodeWindowId,
-  decodeWorkThreadId,
   LOCAL_HOST_ID,
   type OctantMode,
   ToolEgressLaunchId,
@@ -20,10 +18,7 @@ import { GoalLoopService } from "../goal/goalLoopService";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { nativeHarnessRecoveryBlockers } from "../harness/nativeHarnessRecovery";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
-import {
-  readApprovalOutsideContent,
-  readThreadExternalContentTaint,
-} from "../context/externalContentTaintProjection";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "../harness/nativeHarnessAuthority";
 import {
   createNativeHarnessComposition,
@@ -36,7 +31,6 @@ import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFa
 import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
-import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
 import {
   createFollowUp,
   type FollowUpCreationDependencies,
@@ -46,9 +40,6 @@ import {
   type FollowUpSuggestionActionDependencies,
 } from "../followUps/followUpSuggestionRoutes";
 import { createSideTaskRouteHandler } from "../sideTasks/sideTaskRoutes";
-import { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
-import { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
-import { createAgentRunInteractions } from "../agentRun/agentRunInteractions";
 import { createNativeHarnessSessionRouteHandler } from "../harness/nativeHarnessSessionRoutes";
 import { createNativeHarnessEgressRouteHandler } from "../harness/nativeHarnessEgressRoutes";
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
@@ -65,18 +56,15 @@ import type { FoundationsWiring } from "./foundations";
 import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
 import type { CodeRuntimeWiring } from "./codeRuntime";
+import type { HarnessStateWiring } from "./harnessState";
 
 export type HarnessDependencies = Pick<ServerStart, "persistence"> & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
   readonly late: Pick<
     LateBindings,
-    | "agentRunInteractions"
-    | "nativeHarnessApprovalStore"
     | "nativeHarnessComposition"
     | "nativeHarnessLeadFallback"
     | "nativeHarnessObserver"
-    | "nativeHarnessQuestions"
-    | "nativeHarnessSessions"
     | "runningWorkTurnAccess"
   >;
 } & Pick<
@@ -101,7 +89,14 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> & {
     ProvidersWiring,
     "configuredDriverOptions" | "nativeHarnessEndpoints" | "providerDataDirectory"
   > &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime"> & {
+  Pick<CodeRuntimeWiring, "codeOperationRuntime"> &
+  Pick<
+    HarnessStateWiring,
+    | "agentRunInteractions"
+    | "nativeHarnessApprovals"
+    | "nativeHarnessQuestions"
+    | "nativeHarnessSessions"
+  > & {
     /** Wired by wireWork; read only after startup. */
     readonly goalLoopService: () => GoalLoopService;
   } & Pick<FoundationsWiring, "workThreadProjection">;
@@ -111,8 +106,8 @@ export function wireHarness(deps: HarnessDependencies) {
     late,
     agentRunAdmission,
     agentRunEligibleTargets,
+    agentRunInteractions,
     agentRunOrchestration,
-    agentRunParentAuthority,
     agentRunPersistence,
     codeOperationRuntime,
     codeSessionAuthority,
@@ -121,7 +116,10 @@ export function wireHarness(deps: HarnessDependencies) {
     externalContentIngestionStore,
     goalLoopService,
     goalService,
+    nativeHarnessApprovals,
     nativeHarnessEndpoints,
+    nativeHarnessQuestions,
+    nativeHarnessSessions,
     persistence,
     providerDataDirectory,
     sideTasks,
@@ -230,66 +228,6 @@ export function wireHarness(deps: HarnessDependencies) {
       }),
   });
   const nativeHarnessRouterLive = nativeHarnessRouter;
-  const nativeHarnessSessions = new NativeHarnessSessionStore({
-    journal: persistence.journal,
-    uuid: randomUUID,
-    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-    clock: () => new Date().toISOString(),
-  });
-  late.nativeHarnessSessions.current = nativeHarnessSessions;
-  const nativeHarnessSessionsLive = nativeHarnessSessions;
-  const nativeHarnessQuestions = new NativeHarnessQuestionStore({
-    sessions: nativeHarnessSessionsLive,
-    uuid: randomUUID,
-    clock: () => new Date().toISOString(),
-    // Code threads already have an inline question surface; the same
-    // question shows there so the answer can come from the thread itself.
-    onAsked: ({ threadId, mode, question }) => {
-      if (mode !== "code" || question.source !== undefined) return;
-      codeOperationRuntime?.raiseHarnessQuestion?.({
-        threadId,
-        questionId: String(question.id),
-        prompt: question.prompt,
-        options: question.options,
-      });
-    },
-    // Settled anywhere (another surface, expiry, cancellation): the inline
-    // copy goes too, so Code never lists or accepts an answer to it.
-    onSettled: (input) => codeOperationRuntime?.withdrawHarnessQuestion?.(input),
-  });
-  late.nativeHarnessQuestions.current = nativeHarnessQuestions;
-  const nativeHarnessQuestionsLive = nativeHarnessQuestions;
-  const nativeHarnessApprovals = new NativeHarnessApprovalStore({
-    sessions: nativeHarnessSessionsLive,
-    uuid: randomUUID,
-    clock: () => new Date().toISOString(),
-    outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
-  });
-  late.nativeHarnessApprovalStore.current = nativeHarnessApprovals;
-  const agentRunInteractions = createAgentRunInteractions({
-    getById: (id) => agentRunPersistence.getById(id),
-    approvals: nativeHarnessApprovals,
-    questions: nativeHarnessQuestionsLive,
-    providerName: (id) => persistence.readProviderInstance(id)?.displayName,
-    parentAuthority: agentRunParentAuthority,
-    parentLead: (run) => {
-      const id = String(run.parentThreadId);
-      const parent =
-        run.routingReceipt.mode === "chat"
-          ? persistence.readChatThread(decodeChatThreadId(id))
-          : run.routingReceipt.mode === "work"
-            ? workThreadProjection.read(decodeWorkThreadId(id))
-            : persistence.readCodeThread(decodeCodeThreadId(id));
-      return parent?.lifecycle === "active"
-        ? {
-            hostId: run.routingReceipt.hostId,
-            providerInstanceId: parent.providerInstanceId,
-            modelId: parent.modelId,
-          }
-        : undefined;
-    },
-  });
-  late.agentRunInteractions.current = agentRunInteractions;
   const nativeHarnessRoutingRoutes = createNativeHarnessRoutingRouteHandler({
     windowAuthorityStore,
     store: nativeHarnessRoutingStore,
@@ -355,8 +293,8 @@ export function wireHarness(deps: HarnessDependencies) {
     store: {
       read: (threadId) => {
         nativeHarnessApprovals.expireOverdue();
-        nativeHarnessQuestionsLive.expireOverdue();
-        const view = nativeHarnessSessionsLive.read(threadId);
+        nativeHarnessQuestions.expireOverdue();
+        const view = nativeHarnessSessions.read(threadId);
         const suggestions = threadFollowUpSuggestions.read(threadId);
         return view === undefined || suggestions === undefined
           ? view
@@ -366,9 +304,9 @@ export function wireHarness(deps: HarnessDependencies) {
               activatedFollowUpIds: suggestions.activatedFollowUpIds,
             };
       },
-      pause: (...args) => nativeHarnessSessionsLive.pause(...args),
-      resume: (...args) => nativeHarnessSessionsLive.resume(...args),
-      turnInFlight: (threadId) => nativeHarnessSessionsLive.turnInFlight(threadId),
+      pause: (...args) => nativeHarnessSessions.pause(...args),
+      resume: (...args) => nativeHarnessSessions.resume(...args),
+      turnInFlight: (threadId) => nativeHarnessSessions.turnInFlight(threadId),
     },
     // A goal loop schedules its own rounds, so a pause must stop it too;
     // it stays paused until a person resumes the loop itself.
@@ -383,7 +321,7 @@ export function wireHarness(deps: HarnessDependencies) {
       if (mode === "code") codeOperationRuntime?.settleCutOffTurns?.(threadId);
     },
     recoveryBlockers: async ({ threadId }) => {
-      const view = nativeHarnessSessionsLive.read(threadId);
+      const view = nativeHarnessSessions.read(threadId);
       if (view === undefined) return [];
       return nativeHarnessRecoveryBlockers(
         {
@@ -411,18 +349,18 @@ export function wireHarness(deps: HarnessDependencies) {
     },
     followUps: followUpActions,
     answerQuestion: ({ threadId, questionId, answer }) =>
-      nativeHarnessQuestionsLive.answer(threadId, questionId, answer),
+      nativeHarnessQuestions.answer(threadId, questionId, answer),
     decideApproval: ({ threadId, approvalId, decision, answer }) =>
       nativeHarnessApprovals.decide(threadId, approvalId, decision, answer),
     steer: ({ threadId, command }) => {
       if (command.kind === "clear") {
-        nativeHarnessSessionsLive.clearSteering(threadId, "all");
+        nativeHarnessSessions.clearSteering(threadId, "all");
         return "cleared";
       }
       if (command.kind === "take") {
-        return { taken: nativeHarnessSessionsLive.takeSteering(threadId) };
+        return { taken: nativeHarnessSessions.takeSteering(threadId) };
       }
-      return nativeHarnessSessionsLive.queueSteering(threadId, {
+      return nativeHarnessSessions.queueSteering(threadId, {
         id: command.noteId ?? randomUUID(),
         text: command.text,
         status: "queued",
@@ -432,7 +370,7 @@ export function wireHarness(deps: HarnessDependencies) {
     authorizeThread: authorizeFollowUpThread,
   });
   const nativeHarnessObserver = new NativeHarnessTurnObserver({
-    sessions: nativeHarnessSessionsLive,
+    sessions: nativeHarnessSessions,
     router: nativeHarnessRouterLive,
     isHarnessProvider: (providerInstanceId) => {
       const instance = persistence.readProviderInstance(providerInstanceId);
@@ -457,7 +395,7 @@ export function wireHarness(deps: HarnessDependencies) {
   late.nativeHarnessObserver.current = nativeHarnessObserver;
   const nativeHarnessLeadFallback = new NativeHarnessLeadFallbackService({
     router: nativeHarnessRouterLive,
-    sessions: nativeHarnessSessionsLive,
+    sessions: nativeHarnessSessions,
     hostId: String(LOCAL_HOST_ID),
     // Building the driver is what registers its endpoint, so a fallback onto an
     // instance no turn has used yet since boot still finds it.
@@ -475,16 +413,16 @@ export function wireHarness(deps: HarnessDependencies) {
   late.nativeHarnessLeadFallback.current = nativeHarnessLeadFallback;
   const nativeHarnessComposition = createNativeHarnessComposition({
     goals: goalService,
-    questions: nativeHarnessQuestionsLive,
+    questions: nativeHarnessQuestions,
     approvals: nativeHarnessApprovals,
-    childInteractions: (run) => agentRunInteractions?.toolsFor(run) ?? {},
-    isChildAuthorityCurrent: (run) => agentRunInteractions?.isCurrent(run) === true,
-    activity: nativeHarnessSessionsLive,
+    childInteractions: (run) => agentRunInteractions.toolsFor(run) ?? {},
+    isChildAuthorityCurrent: (run) => agentRunInteractions.isCurrent(run) === true,
+    activity: nativeHarnessSessions,
     secondOpinion: (scope) =>
       createNativeHarnessSecondOpinionPort(
         {
           router: nativeHarnessRouterLive,
-          sessions: nativeHarnessSessionsLive,
+          sessions: nativeHarnessSessions,
           resolveDriver: (providerInstanceId) => {
             const instance = persistence.readProviderInstance(providerInstanceId);
             if (instance === undefined || !instance.enabled) return undefined;
@@ -510,7 +448,7 @@ export function wireHarness(deps: HarnessDependencies) {
             readThreadExternalContentTaint(persistence.connection, scope.parentThreadId)
               .externalContentIngested,
           router: nativeHarnessRouterLive,
-          sessions: nativeHarnessSessionsLive,
+          sessions: nativeHarnessSessions,
           uuid: randomUUID,
         },
         scope,
@@ -527,7 +465,7 @@ export function wireHarness(deps: HarnessDependencies) {
       const instance = persistence.readProviderInstance(providerInstanceId);
       return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
     },
-    tasks: nativeHarnessSessionsLive,
+    tasks: nativeHarnessSessions,
     shell: createNativeHarnessShell({
       process: harnessProcessPort,
       scriptDirectory: harnessScriptDirectory,
@@ -583,14 +521,11 @@ export function wireHarness(deps: HarnessDependencies) {
   return {
     followUpCreation,
     followUpSuggestionRoutes,
-    nativeHarnessApprovals,
     nativeHarnessComposition,
     nativeHarnessEgressRoutes,
-    nativeHarnessQuestionsLive,
     nativeHarnessRouterLive,
     nativeHarnessRoutingRoutes,
     nativeHarnessSessionRoutes,
-    nativeHarnessSessionsLive,
     researchRouter,
     sideTaskFirstMessage,
     sideTaskRoutes,

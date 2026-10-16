@@ -3,10 +3,6 @@ import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
 import type { AgentRunRouteDependencies } from "../agentRun/agentRunRoutes";
 import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
-import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
-import { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
-import { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
-import { createAgentRunInteractions } from "../agentRun/agentRunInteractions";
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
 import { ZenAssistantTools } from "../zen/zenAssistantTools";
 import type { CanvasAgentToolPort } from "../canvas/canvasAgentTools";
@@ -23,14 +19,8 @@ export interface LateBindings {
   // service exist; every consumer here reads these per turn or per request,
   // long after boot, never at construction.
   readonly nativeHarnessComposition: { current: NativeHarnessComposition | undefined };
-  readonly nativeHarnessSessions: { current: NativeHarnessSessionStore | undefined };
   readonly nativeHarnessObserver: { current: NativeHarnessTurnObserver | undefined };
   readonly nativeHarnessLeadFallback: { current: NativeHarnessLeadFallbackService | undefined };
-  readonly nativeHarnessQuestions: { current: NativeHarnessQuestionStore | undefined };
-  readonly nativeHarnessApprovalStore: { current: NativeHarnessApprovalStore | undefined };
-  readonly agentRunInteractions: {
-    current: ReturnType<typeof createAgentRunInteractions> | undefined;
-  };
   readonly snapshotCanvasImpl: {
     current: NonNullable<AgentRunRouteDependencies["snapshotCanvas"]>;
   };

@@ -30,7 +30,6 @@ import {
 } from "./chat/threadMentionService";
 import { FileMentionService } from "./fileMentionService";
 import { NativeHarnessRouter } from "./harness/nativeHarnessRouter";
-import { NativeHarnessSessionStore } from "./harness/nativeHarnessSessionStore";
 import { type AppleExecutionContext, AppleToolchainService } from "./apple/appleToolchainService";
 import {
   type AndroidExecutionContext,
@@ -56,6 +55,7 @@ import { wireUsage } from "./wiring/usage";
 import { wireComputerUse } from "./wiring/computerUse";
 import { wireWorkspace } from "./wiring/workspace";
 import { wireFoundations } from "./wiring/foundations";
+import { wireHarnessState } from "./wiring/harnessState";
 import { wireWorkRequestState } from "./wiring/workRequestState";
 import { wireCode } from "./wiring/code";
 import { wireBrowser } from "./wiring/browser";
@@ -170,12 +170,8 @@ export function startOctantServer(
     const startedAt = Date.now();
     const late: LateBindings = {
       nativeHarnessComposition: { current: undefined },
-      nativeHarnessSessions: { current: undefined },
       nativeHarnessObserver: { current: undefined },
       nativeHarnessLeadFallback: { current: undefined },
-      nativeHarnessQuestions: { current: undefined },
-      nativeHarnessApprovalStore: { current: undefined },
-      agentRunInteractions: { current: undefined },
       snapshotCanvasImpl: {
         current: () => ({
           kind: "denied",
@@ -224,6 +220,19 @@ export function startOctantServer(
       persistence,
     });
     const {
+      agentRunInteractions,
+      nativeHarnessApprovals,
+      nativeHarnessQuestions,
+      nativeHarnessSessions,
+      onHarnessQuestionAsked,
+      onHarnessQuestionSettled,
+    } = wireHarnessState({
+      agentRunParentAuthority,
+      agentRunPersistence,
+      persistence,
+      workThreadProjection,
+    });
+    const {
       agentRunAdmission,
       agentRunChildWorktree,
       agentRunEligibleTargets,
@@ -254,7 +263,10 @@ export function startOctantServer(
       configuredDriverOptions: (): ConfiguredProviderDriverOptions => configuredDriverOptions,
       isProjectPolicyTargetAllowed,
       nativeHarnessRouterLive: (): NativeHarnessRouter => nativeHarnessRouterLive,
-      nativeHarnessSessionsLive: (): NativeHarnessSessionStore => nativeHarnessSessionsLive,
+      nativeHarnessSessions,
+      nativeHarnessApprovals,
+      nativeHarnessQuestions,
+      agentRunInteractions,
       onAgentRunExecutionAccepted,
       options,
       persistence,
@@ -502,6 +514,8 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      onHarnessQuestionAsked,
+      onHarnessQuestionSettled,
       workRequestRuntime,
       onPullRequestSnapshotRefreshed,
       onWindowRevoked,
@@ -633,20 +647,21 @@ export function startOctantServer(
     const {
       followUpCreation,
       followUpSuggestionRoutes,
-      nativeHarnessApprovals,
       nativeHarnessComposition,
       nativeHarnessEgressRoutes,
-      nativeHarnessQuestionsLive,
       nativeHarnessRouterLive,
       nativeHarnessRoutingRoutes,
       nativeHarnessSessionRoutes,
-      nativeHarnessSessionsLive,
       researchRouter,
       sideTaskFirstMessage,
       sideTaskRoutes,
       threadWork,
     } = wireHarness({
       late,
+      agentRunInteractions,
+      nativeHarnessApprovals,
+      nativeHarnessQuestions,
+      nativeHarnessSessions,
       agentRunAdmission,
       agentRunEligibleTargets,
       agentRunOrchestration,
@@ -953,8 +968,8 @@ export function startOctantServer(
       gitObservationPort,
       goalService,
       nativeHarnessApprovals,
-      nativeHarnessQuestionsLive,
-      nativeHarnessSessionsLive,
+      nativeHarnessQuestions,
+      nativeHarnessSessions,
       persistence,
       projectService,
       providerDataDirectory,

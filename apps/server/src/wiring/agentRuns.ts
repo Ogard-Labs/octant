@@ -79,7 +79,6 @@ import { ExternalContentIngestionStore } from "../context/externalContentIngesti
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
-import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
 import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "../followUps/followUpSuggestionInstructions";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
 import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing";
@@ -97,6 +96,7 @@ import type { ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
+import type { HarnessStateWiring } from "./harnessState";
 
 function authorizeAgentRunCancellation(input: {
   readonly persistence: PersistenceService;
@@ -471,14 +471,10 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
   /** Cells settled by a later wiring call; read per use, never at construction. */
   readonly late: Pick<
     LateBindings,
-    | "agentRunInteractions"
     | "canvasAgentToolPort"
     | "nativeHarnessComposition"
     | "nativeHarnessLeadFallback"
     | "nativeHarnessObserver"
-    | "nativeHarnessApprovalStore"
-    | "nativeHarnessQuestions"
-    | "nativeHarnessSessions"
     | "snapshotCanvasImpl"
   >;
 } & Pick<
@@ -487,6 +483,13 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     | "codeSessionAuthority"
     | "onAgentRunExecutionAccepted"
     | "windowAuthorityStore"
+  > &
+  Pick<
+    HarnessStateWiring,
+    | "agentRunInteractions"
+    | "nativeHarnessApprovals"
+    | "nativeHarnessQuestions"
+    | "nativeHarnessSessions"
   > &
   Pick<
     FoundationsWiring,
@@ -503,21 +506,22 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     readonly configuredDriverOptions: () => ConfiguredProviderDriverOptions;
     /** Wired by wireHarness; read only after startup. */
     readonly nativeHarnessRouterLive: () => NativeHarnessRouter;
-    /** Wired by wireHarness; read only after startup. */
-    readonly nativeHarnessSessionsLive: () => NativeHarnessSessionStore;
   };
 
 export function wireAgentRuns(deps: AgentRunsDependencies) {
   const {
     late,
+    agentRunInteractions,
     agentRunPersistence,
     chatService,
     codeBoardEventStore,
     codeSessionAuthority,
     configuredDriverOptions,
     isProjectPolicyTargetAllowed,
+    nativeHarnessApprovals,
+    nativeHarnessQuestions,
     nativeHarnessRouterLive,
-    nativeHarnessSessionsLive,
+    nativeHarnessSessions,
     onAgentRunExecutionAccepted,
     options,
     persistence,
@@ -532,12 +536,10 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   // go on until a person decides, so every mode's sidebar, board, and Needs you
   // read treats it as parked on the person. Read per request, long after boot.
   const threadAwaitsHarnessApproval = (threadId: string): boolean =>
-    late.nativeHarnessApprovalStore.current !== undefined &&
-    late.nativeHarnessSessions.current !== undefined &&
     awaitsLeadApproval(
       {
-        approvals: late.nativeHarnessApprovalStore.current,
-        sessions: late.nativeHarnessSessions.current,
+        approvals: nativeHarnessApprovals,
+        sessions: nativeHarnessSessions,
       },
       threadId,
     );
@@ -565,7 +567,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   });
   const nativeHarnessHooks = {
     answerQuestion: (threadId: string, questionId: string, answer: string) => {
-      late.nativeHarnessQuestions.current?.answer(threadId, questionId, answer);
+      nativeHarnessQuestions.answer(threadId, questionId, answer);
     },
     contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) => [
       ...(late.nativeHarnessObserver.current?.contextFor(scope) ?? []),
@@ -849,10 +851,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         return observed === undefined ? ("unavailable" as const) : ("unsupported" as const);
       },
       interactions: {
-        approve: (input) =>
-          late.agentRunInteractions.current?.approve(input) ?? Promise.resolve(false),
-        askUser: (input) =>
-          late.agentRunInteractions.current?.askUser(input) ?? Promise.resolve(undefined),
+        approve: (input) => agentRunInteractions.approve(input),
+        askUser: (input) => agentRunInteractions.askUser(input),
       },
       // A Work or Code child answers to the Project its workspace recorded; a
       // missing or retyped Project fails closed rather than lifting the policy.
@@ -973,8 +973,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       // The same rule `delegate` refuses by: a paused session, or one a
       // restart left needing a check, starts no child until it is resumed.
       isHeld: (parentThreadId) => {
-        const status = late.nativeHarnessSessions.current?.read(String(parentThreadId))?.session
-          .status;
+        const status = nativeHarnessSessions.read(String(parentThreadId))?.session.status;
         return (
           status === "paused-by-user" ||
           status === "paused-by-advisor" ||
@@ -1131,7 +1130,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       routing: {
         router: { resolve: (request) => nativeHarnessRouterLive().resolve(request) },
         recordDecision: (parent, decision) => {
-          nativeHarnessSessionsLive().ensure({
+          nativeHarnessSessions.ensure({
             threadId: input.parentThreadId,
             mode: parent.parentMode,
             projectId:
@@ -1148,11 +1147,11 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
                 : { reasoning: parent.parentRoute.reasoning }),
             },
           });
-          nativeHarnessSessionsLive().recordRouteDecision(input.parentThreadId, decision);
+          nativeHarnessSessions.recordRouteDecision(input.parentThreadId, decision);
         },
       },
       isPaused: () => {
-        const status = nativeHarnessSessionsLive().read(input.parentThreadId)?.session.status;
+        const status = nativeHarnessSessions.read(input.parentThreadId)?.session.status;
         return (
           status === "paused-by-user" ||
           status === "paused-by-advisor" ||

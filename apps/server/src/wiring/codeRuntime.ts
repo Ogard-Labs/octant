@@ -79,6 +79,7 @@ import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkspaceWiring } from "./workspace";
 import type { WorkRequestStateWiring } from "./workRequestState";
+import type { HarnessStateWiring } from "./harnessState";
 import type { BrowserWiring } from "./browser";
 
 function withCodeOperationRuntime(
@@ -248,6 +249,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
   Pick<WorkspaceWiring, "codeBoardPlanProgressSource" | "contextHarness" | "projectService"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
+  Pick<HarnessStateWiring, "onHarnessQuestionAsked" | "onHarnessQuestionSettled"> &
   Pick<
     CodeWiring,
     | "canAccessCodeProject"
@@ -360,6 +362,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     liveTurns,
     machineChangeFeed,
     nativeHarnessHooks,
+    onHarnessQuestionAsked,
+    onHarnessQuestionSettled,
     onPullRequestSnapshotRefreshed,
     onWindowRevoked,
     nativeHarnessTranscripts,
@@ -1055,6 +1059,22 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     }
     yield* Effect.promise(
       () => late.codeOperationRuntime.current?.reconcile?.() ?? Promise.resolve(),
+    );
+    // Code threads already have an inline question surface; the same question
+    // shows there so the answer can come from the thread itself.
+    onHarnessQuestionAsked(({ threadId, mode, question }) => {
+      if (mode !== "code" || question.source !== undefined) return;
+      late.codeOperationRuntime.current?.raiseHarnessQuestion?.({
+        threadId,
+        questionId: String(question.id),
+        prompt: question.prompt,
+        options: question.options,
+      });
+    });
+    // Settled anywhere (another surface, expiry, cancellation): the inline
+    // copy goes too, so Code never lists or accepts an answer to it.
+    onHarnessQuestionSettled((input) =>
+      late.codeOperationRuntime.current?.withdrawHarnessQuestion?.(input),
     );
     const baseRouteCodeService: CodeRouteService =
       late.codeOperationRuntime.current === undefined
