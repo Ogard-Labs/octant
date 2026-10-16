@@ -1347,11 +1347,11 @@ describe("ChatTranscript", () => {
       );
       const fork = screen.queryByRole("button", { name: "Fork from here" }) !== null;
       await userEvent.click(screen.getByRole("button", { name: "More actions" }));
-      await screen.findByRole("menuitemradio", { name: "Forget" });
+      await screen.findByRole("menuitem", { name: "Forget" });
       const offered = {
         fork,
-        branch: screen.queryByRole("menuitemradio", { name: "Branch from here" }) !== null,
-        restore: screen.queryByRole("menuitemradio", { name: "Restore from here" }) !== null,
+        branch: screen.queryByRole("menuitem", { name: "Branch from here" }) !== null,
+        restore: screen.queryByRole("menuitem", { name: "Restore from here" }) !== null,
       };
       unmount();
       return offered;
@@ -1386,11 +1386,11 @@ describe("ChatTranscript", () => {
       <ChatTranscript busy onBranchTurn={vi.fn()} onEditTurn={vi.fn()} view={viewFixture()} />,
     );
     await userEvent.click(screen.getByRole("button", { name: "More actions" }));
-    expect(await screen.findByRole("menuitemradio", { name: "Edit" })).toHaveAttribute(
+    expect(await screen.findByRole("menuitem", { name: "Edit" })).toHaveAttribute(
       "aria-disabled",
       "true",
     );
-    expect(screen.getByRole("menuitemradio", { name: "Branch from here" })).toHaveAttribute(
+    expect(screen.getByRole("menuitem", { name: "Branch from here" })).toHaveAttribute(
       "aria-disabled",
       "true",
     );
@@ -1441,9 +1441,9 @@ describe("ChatTranscript", () => {
     expect(screen.queryByText("Completed")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "More actions" }));
-    expect(await screen.findByRole("menuitemradio", { name: "Restore from here" })).toBeVisible();
-    expect(screen.getByRole("menuitemradio", { name: "Forget" })).toBeVisible();
-    expect(screen.queryByRole("menuitemradio", { name: "Checkpoint" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "Restore from here" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Forget" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Checkpoint" })).not.toBeInTheDocument();
   });
 
   it("forgets a marked checkpoint from the turn's action menu", async () => {
@@ -1494,7 +1494,7 @@ describe("ChatTranscript", () => {
     render(<ChatTranscript view={viewFixture()} />);
 
     await userEvent.click(screen.getByRole("button", { name: "More actions" }));
-    expect(screen.queryByRole("menuitemradio", { name: "Checkpoint" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Checkpoint" })).not.toBeInTheDocument();
   });
 
   it("copies the turn's references from the action menu", async () => {
@@ -1760,7 +1760,7 @@ describe("ChatTranscript", () => {
 
 async function chooseTurnAction(name: string) {
   await userEvent.click(screen.getByRole("button", { name: "More actions" }));
-  await userEvent.click(await screen.findByRole("menuitemradio", { name }));
+  await userEvent.click(await screen.findByRole("menuitem", { name }));
 }
 
 function providerGroup(id: string, conversation: "native" | "replayed"): PickerGroup {

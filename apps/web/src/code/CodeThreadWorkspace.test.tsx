@@ -1286,7 +1286,7 @@ describe("CodeThreadWorkspace", () => {
       within(turnArticle("rewrite the parser")).getByRole("button", { name: "More actions" }),
     );
     expect(
-      screen.queryByRole("menuitemradio", { name: "Restore files to this point" }),
+      screen.queryByRole("menuitem", { name: "Restore files to this point" }),
     ).not.toBeInTheDocument();
   });
 
@@ -1310,11 +1310,9 @@ describe("CodeThreadWorkspace", () => {
       within(turnArticle("rewrite the parser")).getByRole("button", { name: "More actions" }),
     );
     expect(
-      await screen.findByRole("menuitemradio", { name: "Restore files to this point" }),
+      await screen.findByRole("menuitem", { name: "Restore files to this point" }),
     ).toBeVisible();
-    expect(
-      screen.queryByRole("menuitemradio", { name: "Restore from here" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Restore from here" })).not.toBeInTheDocument();
   });
 
   it("opens the `#` picker in the Code composer and sends the chip as an id", async () => {
@@ -2511,7 +2509,7 @@ describe("CodeThreadWorkspace", () => {
     await user.click(
       within(turnArticle("The source's reply.")).getByRole("button", { name: "More actions" }),
     );
-    expect(screen.queryByRole("menuitemradio", { name: "Merge back to source" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Merge back to source" })).toBeNull();
     await user.keyboard("{Escape}");
 
     await chooseTurnAction(user, "Merge back to source", "The fork's reply.");
@@ -2547,7 +2545,7 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
     await user.click(within(turnArticle("done")).getByRole("button", { name: "More actions" }));
-    expect(screen.queryByRole("menuitemradio", { name: "Merge back to source" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Merge back to source" })).toBeNull();
   });
 
   it("says on the source's reply what a merged fork carried, what it left out, and that code did not move", () => {
@@ -3526,5 +3524,5 @@ async function chooseTurnAction(
   turnText: string,
 ) {
   await user.click(within(turnArticle(turnText)).getByRole("button", { name: "More actions" }));
-  await user.click(await screen.findByRole("menuitemradio", { name }));
+  await user.click(await screen.findByRole("menuitem", { name }));
 }
