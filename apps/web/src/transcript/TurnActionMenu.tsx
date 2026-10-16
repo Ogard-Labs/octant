@@ -31,6 +31,7 @@ export function TurnActionMenu(props: TurnActionMenuProps) {
           items={props.actions}
           onValueChange={props.onAction}
           trigger={<Ellipsis aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />}
+          selectionMode="action"
           triggerClassName="shell-icon-button"
           triggerLabel="More actions"
           value=""
