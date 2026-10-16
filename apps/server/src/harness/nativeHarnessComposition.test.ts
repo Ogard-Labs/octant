@@ -396,6 +396,7 @@ describe("native harness composition", () => {
           }),
         },
         isHarnessProvider: () => true,
+        tasks: { replaceTasks: (async () => undefined) as never },
         shell: { run: async () => ({ status: "unavailable", output: "", truncated: false }) },
         contextHarness: {
           inspect: (subject) => {
@@ -422,12 +423,14 @@ describe("native harness composition", () => {
     const names = (tools: { readonly definitions: ReadonlyArray<{ readonly name: string }> }) =>
       tools.definitions.map((definition) => definition.name);
 
-    it("offers context-remaining and second-opinion in Chat without any file or shell reach", () => {
+    // The offered tool set per mode is the first item of the Harness parity checklist in
+    // docs/architecture.md; changing it means changing that checklist with it.
+    it("offers the task list, context-remaining and second-opinion in Chat without any file or shell reach", () => {
       const tools = harness().composition.forChat({ thread: chatThread, windowId: "window-1" });
-      expect(names(tools!)).toEqual(["context-remaining", "second-opinion"]);
+      expect(names(tools!)).toEqual(["todo-write", "context-remaining", "second-opinion"]);
     });
 
-    it("offers context-remaining and second-opinion in Work beside its folder tools", () => {
+    it("offers the task list, context-remaining and second-opinion in Work beside its folder tools", () => {
       const tools = harness().composition.forWork({
         thread: workThread,
         projectRoot: "/nonexistent",
@@ -439,12 +442,13 @@ describe("native harness composition", () => {
         "glob",
         "edit",
         "write",
+        "todo-write",
         "context-remaining",
         "second-opinion",
       ]);
     });
 
-    it("offers context-remaining and second-opinion in Code beside its checkout tools", () => {
+    it("offers the task list, context-remaining and second-opinion in Code beside its checkout tools", () => {
       const tools = harness().composition.forCode({
         thread: codeThread,
         checkoutRoot: "/nonexistent",
@@ -457,6 +461,7 @@ describe("native harness composition", () => {
         "bash",
         "edit",
         "write",
+        "todo-write",
         "context-remaining",
         "second-opinion",
       ]);
