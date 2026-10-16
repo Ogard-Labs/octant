@@ -1,5 +1,5 @@
 import { decodeThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadCheckpointControls } from "./ThreadCheckpointControls";
@@ -57,6 +57,32 @@ describe("the checkpoint affordance on a message", () => {
 
     expect(onMark).toHaveBeenCalledWith("Green tests");
     expect(onCancelDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes focus when the naming form opens and gives it back to the turn's menu when the form ends", async () => {
+    const user = userEvent.setup();
+    // The form sits ahead of its turn's menu in the page, as it does in a transcript.
+    render(
+      <div className="turn-action-menu">
+        <ThreadCheckpointControls
+          busy={false}
+          defaultLabel="Message 1"
+          draft="mark"
+          onCancelDraft={vi.fn()}
+          onMark={vi.fn()}
+          onRestore={vi.fn()}
+        />
+        <div className="turn-action-menu__more">
+          <button aria-label="More actions" type="button" />
+        </div>
+      </div>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: "Checkpoint name" })).toHaveFocus(),
+    );
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "More actions" })).toHaveFocus();
   });
 
   it("offers no marking gesture while a checkpoint request is in flight", () => {
