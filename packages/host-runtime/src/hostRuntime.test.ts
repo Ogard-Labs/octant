@@ -1433,40 +1433,66 @@ function acquireAfterAbort(paths: ReturnType<typeof resolveHostRuntimePaths>) {
   });
 }
 
-/** A child that exited but stays unreaped because its parent exec'd into sleep. */
+/** Ask ps for one field of a pid; empty when the process is gone. */
+async function psField(field: "stat" | "args", pid: number): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const ps = spawn("/bin/ps", ["-o", `${field}=`, "-p", String(pid)], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let output = "";
+    ps.stdout?.on("data", (chunk) => (output += String(chunk)));
+    ps.once("error", reject);
+    ps.once("close", () => resolve(output.trim()));
+  });
+}
+
+async function waitFor(description: string, observe: () => Promise<boolean>): Promise<void> {
+  // A loaded runner can take seconds to schedule a process, so wait on the
+  // observable state against a wall-clock deadline rather than a fixed poll count.
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if (await observe()) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`zombie fixture never ${description}`);
+}
+
+/**
+ * A child that was killed but stays unreaped because its parent is now a plain
+ * sleep. The child must die only after the shell has exec'd: a shell reaps any
+ * background job that already exited, so a child that exits on its own races the
+ * exec and, on a loaded runner, is reaped instead of left a zombie.
+ */
 async function spawnZombie(): Promise<{ readonly pid: number; readonly release: () => void }> {
-  const parent = spawn("/bin/sh", ["-c", "sleep 0 & echo $!; exec sleep 30"], {
+  const parent = spawn("/bin/sh", ["-c", "sleep 600 & echo $!; exec sleep 60"], {
     stdio: ["ignore", "pipe", "ignore"],
   });
   const release = () => {
     parent.kill("SIGKILL");
   };
-  const pid = await new Promise<number>((resolve, reject) => {
-    let stdout = "";
-    parent.stdout?.on("data", (chunk) => {
-      stdout += String(chunk);
-      const line = stdout.split("\n")[0];
-      if (stdout.includes("\n") && line !== undefined) resolve(Number(line.trim()));
-    });
-    parent.once("error", reject);
-  });
-  // A loaded runner can take seconds to schedule the exited child, so wait on the
-  // observable state against a wall-clock deadline rather than a fixed poll count.
-  const deadline = Date.now() + 10_000;
-  while (Date.now() < deadline) {
-    const state = await new Promise<string>((resolve) => {
-      const ps = spawn("/bin/ps", ["-o", "stat=", "-p", String(pid)], {
-        stdio: ["ignore", "pipe", "ignore"],
+  try {
+    const pid = await new Promise<number>((resolve, reject) => {
+      let stdout = "";
+      parent.stdout?.on("data", (chunk) => {
+        stdout += String(chunk);
+        const line = stdout.split("\n")[0];
+        if (stdout.includes("\n") && line !== undefined) resolve(Number(line.trim()));
       });
-      let output = "";
-      ps.stdout?.on("data", (chunk) => (output += String(chunk)));
-      ps.once("close", () => resolve(output.trim()));
+      parent.once("error", reject);
+      parent.once("exit", () => reject(new Error("zombie fixture parent exited early")));
     });
-    if (state.startsWith("Z")) return { pid, release };
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    const parentPid = parent.pid;
+    if (parentPid === undefined) throw new Error("zombie fixture parent did not start");
+    await waitFor("exec'd into its parent sleep", async () =>
+      (await psField("args", parentPid)).includes("sleep 60"),
+    );
+    process.kill(pid, "SIGKILL");
+    await waitFor("became a zombie", async () => (await psField("stat", pid)).startsWith("Z"));
+    return { pid, release };
+  } catch (error) {
+    release();
+    throw error;
   }
-  release();
-  throw new Error("zombie fixture never became a zombie");
 }
 
 async function leaveStaleSocket(path: string): Promise<number> {
