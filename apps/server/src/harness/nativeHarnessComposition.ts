@@ -159,6 +159,12 @@ export interface NativeHarnessComposition {
   readonly forChat: (input: {
     readonly thread: ChatThread;
     readonly windowId: string;
+    /**
+     * The thread is a Side Chat sidecar. It is a side conversation about one
+     * source thread, so it gets no task list, goal, question, or delegation:
+     * those belong to the lead of a thread the person is steering.
+     */
+    readonly sideChat?: boolean;
   }) => AppManagedToolSet | undefined;
   readonly forWork: (input: {
     readonly thread: WorkThread;
@@ -438,27 +444,31 @@ export function createNativeHarnessComposition(
   }): Pick<NativeHarnessToolPorts, "delegate"> =>
     options.delegate === undefined ? {} : { delegate: options.delegate(scope) };
   return {
-    forChat: ({ thread, windowId }) => {
+    forChat: ({ thread, windowId, sideChat = false }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
+      const { askUser, ...approvalPorts } = askUserFor({
+        parentThreadId: threadId,
+        mode: "chat",
+        projectId: thread.projectId,
+        lead: leadOf(thread),
+      });
       return compose({
         threadId,
         mode: "chat",
         ports: {
-          ...shared(threadId),
-          ...delegateFor({
-            parentThreadId: threadId,
-            windowId,
-            mode: "chat",
-            projectId: thread.projectId,
-            lead: leadOf(thread),
-          }),
-          ...askUserFor({
-            parentThreadId: threadId,
-            mode: "chat",
-            projectId: thread.projectId,
-            lead: leadOf(thread),
-          }),
+          ...(sideChat ? {} : shared(threadId)),
+          ...(sideChat
+            ? {}
+            : delegateFor({
+                parentThreadId: threadId,
+                windowId,
+                mode: "chat",
+                projectId: thread.projectId,
+                lead: leadOf(thread),
+              })),
+          ...approvalPorts,
+          ...(sideChat || askUser === undefined ? {} : { askUser }),
           // Research is the user's grant for a Chat thread to reach the web,
           // whether by fetching a page or by searching.
           ...(thread.researchEnabled ? webPorts() : {}),

@@ -4135,9 +4135,15 @@ native harness in `apps/server/src/harness`:
      when the host supplies the port: `delegate`, `ask-user`, and `goal`
      (every mode), and `web-fetch` and `web-search` (Work and Code; Chat only
      while its research is on, and `web-search` only with a search
-     endpoint). `nativeHarnessComposition.test.ts` pins the full set per
-     mode with every port supplied, the reduced set without them, and that
-     the composition call site still supplies each port.
+     endpoint). A Side Chat is the exception: a side conversation about
+     another thread is not the lead of a thread the person is steering, so it
+     is offered only `context-remaining`, `second-opinion`, and (while its
+     research is on) the web tools, never `todo-write`, `delegate`,
+     `ask-user`, or `goal`, and not the `octant_agents` child-agent
+     tool either. `nativeHarnessComposition.test.ts` pins the full
+     set per mode with every port supplied, the Side Chat set, the reduced
+     set without them, and that the composition call site still supplies each
+     port.
   2. **Approval attention.** A pending approval raises the same attention as
      a pending question: the thread's state, the Inbox, and the sidebar mark,
      and it shows inline in the thread. Not yet pinned by a test.
@@ -5980,7 +5986,8 @@ mechanisms are:
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,
   `octant_side_chat_search_files` for Code, `octant_side_chat_read_file`)
-  are the only tools it gains. Before every call the host checks that the
+  are the only tools it gains beyond the Harness advice tools of the parity checklist, and
+  it is never offered a task list, goal, question, or delegation tool. Before every call the host checks that the
   sidecar link still exists and that the caller's window can still Open the
   source, and the call then runs through the same host read the Files panel
   uses (Code's checkout listing and search; Work's folder listing and

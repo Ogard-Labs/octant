@@ -335,7 +335,9 @@ child is answered once as well: the terminal prompt, the terminal UI, the
 harness card, and the phone panel offer no session-wide choice for it, and the
 card and the phone panel name that child, its provider, and its model.
 **Deny** tells the lead not to retry. Every approval and decision is
-journaled with the session.
+journaled with the session. When you answer on another surface first, the
+line-mode prompt closes with an "answered elsewhere" note instead of waiting
+for input (with `--json`, an `approval-settled` line).
 
 A Browser call that needs a site you have not allowed waits the same way. The
 terminal UI shows it in a Site approval panel, and line mode asks

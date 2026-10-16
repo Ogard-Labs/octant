@@ -3,6 +3,7 @@ import {
   decodeDecideNativeHarnessApproval,
   decodeSteerNativeHarnessSession,
   type NativeHarnessApprovalDecisionResult,
+  type NativeHarnessSessionView,
   type NativeHarnessSteeringNote,
   type SteerNativeHarnessSession,
   decodeNativeHarnessSessionCommand,
@@ -47,6 +48,15 @@ export interface NativeHarnessSessionRouteDependencies {
   readonly recoveryBlockers?: (input: {
     readonly threadId: string;
   }) => Promise<ReadonlyArray<string>>;
+  /**
+   * Told once a resume has cleared a recovery, after the session settled the
+   * turn the restart cut off, so a surface that keeps its own record of that
+   * turn can settle it too.
+   */
+  readonly onRecoveryLifted?: (input: {
+    readonly threadId: string;
+    readonly mode: NativeHarnessSessionView["session"]["mode"];
+  }) => void;
   /** Stops what would start new work on its own while the session is paused. */
   readonly onPaused?: (input: { readonly threadId: string }) => void;
   readonly decideApproval?: (input: {
@@ -184,7 +194,8 @@ export function createNativeHarnessSessionRouteHandler(
         );
         dependencies.onPaused?.({ threadId });
       } else if (command.kind === "resume-native-harness-session") {
-        if (view.session.status === "recovery-required") {
+        const liftsRecovery = view.session.status === "recovery-required";
+        if (liftsRecovery) {
           const blockers = (await dependencies.recoveryBlockers?.({ threadId })) ?? [];
           if (blockers.length > 0) {
             return json(
@@ -199,6 +210,9 @@ export function createNativeHarnessSessionRouteHandler(
         }
         if (!dependencies.store.resume(threadId)) {
           return json(refusedCommand("not-paused"), 409, origin);
+        }
+        if (liftsRecovery) {
+          dependencies.onRecoveryLifted?.({ threadId, mode: view.session.mode });
         }
       } else {
         dependencies.interruptTurn?.({ threadId, windowId });
