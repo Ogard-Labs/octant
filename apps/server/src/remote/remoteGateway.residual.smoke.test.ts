@@ -14,13 +14,21 @@
 // bypass, or raw-byte scan never turns one of these rows green.
 
 import { execFileSync } from "node:child_process";
-import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, generateKeyPairSync, randomUUID, sign as cryptoSign } from "node:crypto";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import { writeHostInfoFile } from "../../../../packages/cli/src/bridgeSecretFile";
 import { runWebCommand } from "../../../../packages/cli/src/web";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
@@ -528,7 +536,9 @@ describe("Remote-access residual evidence — integrated octant web CLI", () => 
       context.skip("no Chromium executable is available for integrated web rendering evidence");
       return;
     }
-    const directory = mkdtempSync(join(tmpdir(), "octant-490-octant-web-"));
+    // The host runtime refuses a data directory whose path crosses a symbolic
+    // link, and macOS temporary directories do (`/var` is one).
+    const directory = realpathSync(mkdtempSync(join(tmpdir(), "octant-490-octant-web-")));
     directories.push(directory);
     const certificateDir = mkdtempSync(join(tmpdir(), "octant-490-octant-web-cert-"));
     directories.push(certificateDir);
@@ -579,6 +589,19 @@ describe("Remote-access residual evidence — integrated octant web CLI", () => 
           expect(server.remoteListenerError).toBeUndefined();
           expect(server.remoteListener).toBeDefined();
 
+          // The command sends the bridge secret only to the host this OS user's
+          // receipt names; a server the receipt does not name is refused.
+          const bridgeSecretInput = {
+            env: { OCTANT_DATA_DIR: directory },
+            platform: process.platform,
+            home: directory,
+          };
+          yield* Effect.promise(() =>
+            writeHostInfoFile(bridgeSecretInput, {
+              url: server.url.toString(),
+              instanceId: randomUUID(),
+            }),
+          );
           const web = yield* Effect.promise(() =>
             runWebCommand({
               bridgeSecret,
@@ -587,11 +610,7 @@ describe("Remote-access residual evidence — integrated octant web CLI", () => 
               noOpen: true,
               stdout: { write: () => true },
               stderr: { write: () => true },
-              bridgeSecretInput: {
-                env: { OCTANT_DATA_DIR: directory },
-                platform: "linux",
-                home: "/tmp",
-              },
+              bridgeSecretInput,
             }),
           );
           expect(web.kind).toBe("served");
