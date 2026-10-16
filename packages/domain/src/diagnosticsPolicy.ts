@@ -11,6 +11,7 @@ import {
   MAX_DIAGNOSTIC_CORRELATIONS,
   MAX_DIAGNOSTIC_RECOVERY_FACTS,
   MAX_DIAGNOSTIC_VERSIONS,
+  type DiagnosticHostHealth,
   DIAGNOSTICS_PACKET_VERSION,
   decodeDiagnosticEvidencePacket,
   decodeDiagnosticSafeText,
@@ -215,6 +216,7 @@ export interface RawDiagnosticInput {
   }>;
   readonly recovery: ReadonlyArray<{ readonly action: string; readonly automated: boolean }>;
   readonly generatedAt: string;
+  readonly hostHealth?: DiagnosticHostHealth;
   /** When the underlying operation actually succeeded, no failure packet exists. */
   readonly succeeded?: boolean;
 }
@@ -372,6 +374,7 @@ export function buildDiagnosticsPacket(input: RawDiagnosticInput): DiagnosticsPa
     recovery,
     redactions: collectedTags,
     redacted: true as const,
+    ...(input.hostHealth === undefined ? {} : { hostHealth: input.hostHealth }),
     generatedAt: input.generatedAt,
   };
 

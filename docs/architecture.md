@@ -6859,6 +6859,14 @@ bun run dev        # Vite renderer + Electron with hot reload; server spawned fr
 bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint, typecheck, test, build
 ```
 
+- Two stalls are logged once per occurrence so the next one is visible: a
+  SQLite statement slower than `OCTANT_SLOW_STATEMENT_MS` (default 20) logs
+  its SQL shape and duration, never bound values, and an event-loop lag over
+  `OCTANT_EVENT_LOOP_LAG_MS` (default 100) logs the lag. Both log lines are off
+  under tests unless the variable is set. The diagnostics export carries
+  `hostHealth` counters since process start: slow statement count and worst
+  duration, lag event count and worst lag, in milliseconds, with no SQL text or
+  route names.
 - `bun run dev` starts Vite for `apps/web` and launches Electron against it.
   Renderer edits hot-reload; server edits apply on the next relaunch. On
   startup the dev script rebuilds `apps/desktop/dist/main.mjs` whenever

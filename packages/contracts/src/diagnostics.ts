@@ -144,6 +144,19 @@ export const DiagnosticCorrelation = Schema.Struct({
 }).annotations(strict);
 export type DiagnosticCorrelation = typeof DiagnosticCorrelation.Type;
 
+/**
+ * Counts since the host process started: statements and event-loop stalls
+ * that ran over their logging thresholds. Numbers only, so no SQL text or
+ * route name can ride along.
+ */
+export const DiagnosticHostHealth = Schema.Struct({
+  slowStatementCount: Schema.Int.pipe(Schema.nonNegative()),
+  slowStatementWorstMs: Schema.Int.pipe(Schema.nonNegative()),
+  eventLoopLagCount: Schema.Int.pipe(Schema.nonNegative()),
+  eventLoopLagWorstMs: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+export type DiagnosticHostHealth = typeof DiagnosticHostHealth.Type;
+
 /** A single actionable, redacted recovery fact for the reviewer. */
 export const DiagnosticRecoveryFact = Schema.Struct({
   action: DiagnosticSafeText,
@@ -181,6 +194,8 @@ export const DiagnosticEvidencePacket = Schema.Struct({
   ),
   redactions: Schema.Array(DiagnosticRedactionTag).pipe(Schema.maxItems(MAX_DIAGNOSTIC_REDACTIONS)),
   redacted: Schema.Literal(true),
+  /** Absent on packets exported before the host kept these counters. */
+  hostHealth: Schema.optional(DiagnosticHostHealth),
   generatedAt: UtcTimestamp,
 }).annotations(strict);
 export type DiagnosticEvidencePacket = typeof DiagnosticEvidencePacket.Type;

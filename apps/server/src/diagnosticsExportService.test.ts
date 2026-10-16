@@ -117,6 +117,38 @@ describe("exportDiagnosticsEvidence", () => {
     }
   });
 
+  it("carries the host's slow-statement and event-loop-lag counters in the packet", () => {
+    const store = setup();
+    try {
+      recordFailure(store, "00000000-0000-4000-8000-000000000001", "provider");
+      const outcome = exportDiagnosticsEvidence(
+        request({
+          correlationId: "00000000-0000-4000-8000-000000000001",
+          domain: "provider",
+          summary: "Provider stopped responding after retrying twice.",
+        }),
+        {
+          ...deps(store),
+          hostHealth: () => ({
+            slowStatementCount: 3,
+            slowStatementWorstMs: 120,
+            eventLoopLagCount: 1,
+            eventLoopLagWorstMs: 340,
+          }),
+        },
+      );
+      if (outcome.kind !== "exported") throw new Error("expected exported outcome");
+      expect(outcome.packet.hostHealth).toEqual({
+        slowStatementCount: 3,
+        slowStatementWorstMs: 120,
+        eventLoopLagCount: 1,
+        eventLoopLagWorstMs: 340,
+      });
+    } finally {
+      store.connection.close();
+    }
+  });
+
   it("redacts a secret embedded in the user-supplied summary before sealing", () => {
     const store = setup();
     try {

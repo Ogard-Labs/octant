@@ -1,3 +1,5 @@
+import { instrumentSqlite } from "./slowStatementLog";
+
 export interface SqliteRunResult {
   readonly changes: number;
   readonly lastInsertRowid: number | bigint;
@@ -30,5 +32,5 @@ const openRuntimeSqlite =
     : (await import("./sqlitePort.bun.ts")).openBunSqlite;
 
 export function openSqlite(path: string): SqliteConnection {
-  return openRuntimeSqlite(path);
+  return instrumentSqlite(openRuntimeSqlite(path));
 }

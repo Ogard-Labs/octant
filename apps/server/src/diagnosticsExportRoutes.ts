@@ -1,10 +1,16 @@
-import { decodeDiagnosticsExportRequest, type DiagnosticsExportOutcome } from "@octant/contracts";
+import {
+  decodeDiagnosticsExportRequest,
+  type DiagnosticHostHealth,
+  type DiagnosticsExportOutcome,
+} from "@octant/contracts";
 import { authorizeDiagnosticsExportActor } from "@octant/domain";
 import { resolveReportedHostVersion } from "@octant/host-runtime";
 import { isLoopbackHostname } from "./shellRoutes";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import { exportDiagnosticsEvidence } from "./diagnosticsExportService";
+import { readEventLoopLagCounters } from "./eventLoopLag";
+import { slowStatementTally } from "./persistence/slowStatementLog";
 import type { Journal } from "./persistence/journal";
 import type { SqliteConnection } from "./persistence/sqlitePort";
 
@@ -39,6 +45,17 @@ function jsonResponse(body: unknown, status: number, origin: string | null): Res
 
 function failureResponse(message: string, status: number, origin: string | null): Response {
   return jsonResponse({ error: message }, status, origin);
+}
+
+function readHostHealth(): DiagnosticHostHealth {
+  const statements = slowStatementTally.read();
+  const lag = readEventLoopLagCounters();
+  return {
+    slowStatementCount: statements.count,
+    slowStatementWorstMs: statements.worstMs,
+    eventLoopLagCount: lag.count,
+    eventLoopLagWorstMs: lag.worstMs,
+  };
 }
 
 export interface DiagnosticsExportRouteDependencies {
@@ -117,6 +134,7 @@ export function createDiagnosticsExportRouteHandler(
       connection: dependencies.connection,
       journal: dependencies.journal,
       octantVersion: dependencies.octantVersion ?? resolveReportedHostVersion(process.env),
+      hostHealth: readHostHealth,
       clock,
     });
 
