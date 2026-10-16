@@ -347,7 +347,7 @@ an ordinary answer (see
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
 selected tool — never the previous pane's content. Hiding a Browser or Terminal
-tool does not stop its server-owned lifecycle. While an agent's Browser
+tool does not stop its server-owned lifecycle. A terminal never traps the keyboard: it sends Tab, Escape and function keys to its shell, so `Mod+Escape` (next control) and `Mod+Shift+Escape` (previous) move focus out without sending anything, the pane names the chord while it has focus, and the rule is recorded in [DESIGN.md](../../DESIGN.md#accessibility-and-reliability). While an agent's Browser
 session is live and the thread's Browser is out of sight, a small live preview
 of its active page floats over the thread as a small preview (sized by `.browser-pip`), resting in one of
 the four corners of the thread frame (top right by default), draggable between

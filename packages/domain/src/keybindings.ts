@@ -24,13 +24,15 @@ export type OctantKeybindingActionId =
   | "review-complete"
   | "review-send-back"
   | "review-snooze"
-  | "review-mark-seen";
+  | "review-mark-seen"
+  | "terminal-focus-next"
+  | "terminal-focus-previous";
 
 export interface OctantKeybindingAction {
   readonly id: OctantKeybindingActionId;
   readonly label: string;
   /** Where the action lives, so the settings list can group it. */
-  readonly area: "Shell" | "Code" | "Review";
+  readonly area: "Shell" | "Code" | "Review" | "Terminal";
   readonly defaultChord: string;
   /**
    * An action that only means something while one page has focus. Its chord
@@ -38,6 +40,13 @@ export interface OctantKeybindingAction {
    * and when it is a command; every other action must hold Mod or Alt.
    */
   readonly page?: "review";
+  /**
+   * An action that answers only while a terminal holds the keyboard. The
+   * terminal sends every other key to its shell, so the chord must hold Mod
+   * or Alt, and may name Escape: held with a modifier it is not the Escape a
+   * shell or editor reads, which is why it can be the way out.
+   */
+  readonly scope?: "terminal";
 }
 
 /**
@@ -127,6 +136,20 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     defaultChord: "E",
     page: "review",
   },
+  {
+    id: "terminal-focus-next",
+    label: "Move focus out of the terminal to the next control",
+    area: "Terminal",
+    defaultChord: "Mod+Escape",
+    scope: "terminal",
+  },
+  {
+    id: "terminal-focus-previous",
+    label: "Move focus out of the terminal to the previous control",
+    area: "Terminal",
+    defaultChord: "Mod+Shift+Escape",
+    scope: "terminal",
+  },
 ];
 
 export interface OctantChord {
@@ -149,6 +172,12 @@ export interface OctantChord {
 const RESERVED_KEYS = new Set(["tab", "escape", "enter", " "]);
 /** A page's own commands may take Enter, because the page decides when it is typing. */
 const PAGE_RESERVED_KEYS = new Set(["tab", "escape", " "]);
+/**
+ * The terminal's own chords sit on top of a surface that already owns Tab and
+ * Escape, so a chord there may name them with a modifier. Enter and Space stay
+ * reserved: the shell types them.
+ */
+const TERMINAL_RESERVED_KEYS = new Set(["enter", " "]);
 
 export type OctantChordParse =
   | { readonly status: "ok"; readonly chord: OctantChord }
@@ -162,7 +191,7 @@ export type OctantChordParse =
  */
 export function parseChord(
   text: string,
-  options: { readonly page?: boolean } = {},
+  options: { readonly page?: boolean; readonly terminal?: boolean } = {},
 ): OctantChordParse {
   const parts = text
     .split("+")
@@ -193,7 +222,13 @@ export function parseChord(
     key = normalized;
   }
   if (key === undefined) return { status: "invalid", reason: "A chord must name a key." };
-  if ((options.page === true ? PAGE_RESERVED_KEYS : RESERVED_KEYS).has(key)) {
+  const reserved =
+    options.terminal === true
+      ? TERMINAL_RESERVED_KEYS
+      : options.page === true
+        ? PAGE_RESERVED_KEYS
+        : RESERVED_KEYS;
+  if (reserved.has(key)) {
     return { status: "invalid", reason: `${part(key)} is reserved for the platform.` };
   }
   if (!mod && !alt && options.page !== true) {
@@ -203,6 +238,14 @@ export function parseChord(
     };
   }
   return { status: "ok", chord: { mod, shift, alt, key } };
+}
+
+/** How a chord for this action is read: pages allow bare keys, terminals allow Escape. */
+export function chordRulesFor(action: OctantKeybindingAction): {
+  readonly page: boolean;
+  readonly terminal: boolean;
+} {
+  return { page: action.page !== undefined, terminal: action.scope === "terminal" };
 }
 
 function part(key: string): string {
@@ -298,7 +341,7 @@ export function resolveKeybindings(
       rejected.push({ actionId, chord, reason: "No such action." });
       continue;
     }
-    const parsed = parseChord(chord, { page: action.page !== undefined });
+    const parsed = parseChord(chord, chordRulesFor(action));
     if (parsed.status !== "ok") {
       rejected.push({ actionId, chord, reason: parsed.reason });
       continue;
@@ -308,7 +351,7 @@ export function resolveKeybindings(
 
   for (const action of OCTANT_KEYBINDING_ACTIONS) {
     if (bindings.has(action.id)) continue;
-    const fallback = parseChord(action.defaultChord, { page: action.page !== undefined });
+    const fallback = parseChord(action.defaultChord, chordRulesFor(action));
     if (fallback.status === "ok") bindings.set(action.id, fallback.chord);
   }
 
@@ -343,9 +386,9 @@ export function matchKeybinding(
   const chord = chordFromEvent(event, apple);
   if (!chord.mod && !chord.alt) return undefined;
   for (const action of OCTANT_KEYBINDING_ACTIONS) {
-    // A page's commands answer only on that page; the window-level listeners
-    // that call this must never run one from anywhere else.
-    if (action.page !== undefined) continue;
+    // A page's or a terminal's commands answer only there; the window-level
+    // listeners that call this must never run one from anywhere else.
+    if (action.page !== undefined || action.scope !== undefined) continue;
     const bound = keybindings.bindings.get(action.id);
     if (bound !== undefined && sameChord(bound, chord)) return action.id;
   }
@@ -370,6 +413,33 @@ export function matchPageKeybinding(
     if (action.page !== page) continue;
     const bound = keybindings.bindings.get(action.id);
     if (bound !== undefined && sameChord(bound, chord)) return action.id;
+  }
+  return undefined;
+}
+
+/**
+ * Which terminal command a keyboard event runs, if any.
+ *
+ * The terminal calls this from its own key handler, before the key reaches the
+ * shell. A chord that two actions share stays with the one listed first, as
+ * {@link resolveKeybindings} reports, so a terminal command that lost its chord
+ * to a global one does not also run.
+ */
+export function matchTerminalKeybinding(
+  keybindings: OctantKeybindings,
+  event: Parameters<typeof chordFromEvent>[0],
+  apple: boolean,
+): OctantKeybindingActionId | undefined {
+  const chord = chordFromEvent(event, apple);
+  if (!chord.mod && !chord.alt) return undefined;
+  for (const action of OCTANT_KEYBINDING_ACTIONS) {
+    if (action.scope !== "terminal") continue;
+    const bound = keybindings.bindings.get(action.id);
+    if (bound === undefined || !sameChord(bound, chord)) continue;
+    const shadowed = keybindings.conflicts.some((conflict) =>
+      conflict.actionIds.slice(1).includes(action.id),
+    );
+    if (!shadowed) return action.id;
   }
   return undefined;
 }

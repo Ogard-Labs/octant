@@ -26,6 +26,12 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
   const fit = new FitAddon();
   terminal.loadAddon(fit);
   terminal.open(element);
+  // The engine would otherwise turn a claimed key into bytes for the shell;
+  // returning false from its handler is how it is told to send nothing.
+  terminal.attachCustomKeyEventHandler((event) => options.interceptKey?.(event) !== true);
+  if (options.describedBy !== undefined) {
+    terminal.textarea?.setAttribute("aria-describedby", options.describedBy);
+  }
   const renderer = attachGpuRenderer(terminal);
   applyTerminalTypography(terminal, element, typography);
   terminal.write(options.output);

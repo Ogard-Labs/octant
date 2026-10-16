@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  attachCustomKeyEventHandler: vi.fn(),
   dataDispose: vi.fn(),
   fit: vi.fn(),
   loadAddon: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock("@xterm/addon-webgl", () => ({
 vi.mock("@xterm/xterm", () => ({
   Terminal: mocks.terminal.mockImplementation(function TerminalMock() {
     return {
+      attachCustomKeyEventHandler: mocks.attachCustomKeyEventHandler,
       dispose: mocks.terminalDispose,
       focus: mocks.terminalFocus,
       loadAddon: mocks.loadAddon,
