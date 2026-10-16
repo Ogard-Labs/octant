@@ -2,7 +2,7 @@ import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchai
 import type { AppleRuntimeSnapshot } from "@octant/contracts/apple-toolchain";
 import type { AppleSnapshotRequest } from "@octant/contracts/apple-toolchain-rpc";
 import { useEffect, useRef, useState } from "react";
-import { scheduleVisibleInterval } from "../polling/documentVisibility";
+import { scheduleVisibleInterval, waitUntilDocumentVisible } from "../polling/documentVisibility";
 
 /** State and offer reads are not frames, so a few seconds of lag is invisible. */
 const POLL_INTERVAL_MS = 3_000;
@@ -55,7 +55,10 @@ export function useAppleSimulatorPaneOffer(options: {
       }
     };
     if (!watch) {
-      void pull();
+      // A hidden window defers this one read until it is shown again.
+      void waitUntilDocumentVisible(controller.signal).then(() => {
+        if (!controller.signal.aborted) void pull();
+      });
       return () => controller.abort();
     }
     // Visible-only: a hidden window does not poll, and showing it again pulls once.

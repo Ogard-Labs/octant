@@ -129,4 +129,32 @@ describe("useAndroidEmulatorPaneOffer", () => {
     });
     expect(snapshot).toHaveBeenCalledTimes(6);
   });
+
+  it("defers the final read to when the window is shown if the tool finishes while hidden", async () => {
+    const snapshot = vi.fn(async () => ({ paneOpenRequest }));
+    const client = { snapshot } as unknown as AndroidToolchainClient;
+    setVisibility("hidden");
+    const { rerender } = renderHook(
+      (props: { readonly watch: boolean }) =>
+        useAndroidEmulatorPaneOffer({
+          client,
+          enabled: true,
+          watch: props.watch,
+          activityKey: "call-1:finished",
+          snapshotRequest: snapshotRequest("90000000-0000-4000-8000-000000000003"),
+        }),
+      { initialProps: { watch: true } },
+    );
+    rerender({ watch: false });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(snapshot).not.toHaveBeenCalled();
+
+    setVisibility("visible");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(snapshot).toHaveBeenCalledTimes(1);
+  });
 });
