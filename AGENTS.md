@@ -375,20 +375,24 @@ conditions below are met; it does not authorize merging or releasing.
 - Lead the issue description with its current outcome/delivery requirement,
   criterion-to-evidence summary, remaining blockers, and closure decision. An
   issue description holds exactly one dated status block: on every update,
-  replace it in place; never add a newer block above an older one. Move the
-  replaced block to a comment, or to one clearly labeled history section at
-  the end, only when it carries evidence the new block does not restate.
-  Historical statements such as "still In Progress" do not reopen a completed
-  issue. (Stacked status blocks grew one issue past 57,000 characters in
-  October 2026 and hid the current state.)
+  replace it in place; never add a newer block above an older one. When the
+  replaced block carries evidence the new block does not restate, extract
+  only that evidence (the dated fact, the build, the result) into a comment
+  or into one clearly labeled history section at the end; the history section
+  holds evidence lines, not status blocks, so it does not count against the
+  one-block rule. Historical statements such as "still In Progress" do not
+  reopen a completed issue. (Stacked status blocks grew one issue past 57,000
+  characters in October 2026 and hid the current state.)
 - An action only the maintainer can perform (a credential, a billed provider
   turn, a second machine, a signing key, a subjective sign-off) is recorded
-  once on the standing maintainer-actions list: the "Waiting on Henrik"
-  section of the current release project's description in Linear. Each entry
-  names the issue, the exact action, and what it unblocks. The issue itself
-  links to that list instead of restating the action, so a maintainer sitting
-  can run the whole list in one pass and hygiene passes do not repeat it per
-  issue.
+  once, in full, on the standing maintainer-actions list: the "Waiting on
+  Henrik" section of the current release project's description in Linear.
+  Each entry names the issue, the exact action, and what it unblocks. The
+  issue's status block still names the blocker in one line (owner
+  "maintainer", the prerequisite, and a link to the list) so the closeout
+  rule above is met, but the steps live on the list alone, so a maintainer
+  sitting can run the whole list in one pass and hygiene passes do not repeat
+  it per issue.
 - Reopen a closed issue only for a reproduced regression or evidence its closure
   was incorrect. Preserve the closure evidence and explain the reason.
 
