@@ -398,6 +398,18 @@ describe("JournalGrowth", () => {
     expect(() =>
       decodeDiagnosticEvidencePacket({ ...validPacket, journalGrowth: growth }),
     ).toThrow();
+    const hostHealth = {
+      slowStatementCount: 1,
+      slowStatementWorstMs: 40,
+      eventLoopLagCount: 0,
+      eventLoopLagWorstMs: 0,
+    };
+    expect(() => decodeDiagnosticEvidencePacket({ ...validPacket, hostHealth })).toThrow();
+    const v2 = { ...validPacket, packetVersion: 2 };
+    expect(decodeDiagnosticEvidencePacket({ ...v2, hostHealth }).hostHealth).toEqual(hostHealth);
+    expect(
+      decodeDiagnosticEvidencePacket({ ...v2, hostHealth, journalGrowth: growth }).packetVersion,
+    ).toBe(2);
     expect(() => decodeDiagnosticEvidencePacket({ ...validPacket, packetVersion: 3 })).toThrow();
   });
 });

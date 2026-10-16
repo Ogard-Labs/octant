@@ -643,6 +643,7 @@ import { createCodeThreadLocalServerScopeResolver } from "./localServers/localSe
 import { createRunningServiceScopeResolver } from "./localServers/runningServiceScopeResolver";
 import { LocalServerService } from "./localServers/localServerService";
 import { createDiagnosticsExportRouteHandler } from "./diagnosticsExportRoutes";
+import { startEventLoopLagDetector } from "./eventLoopLag";
 import {
   createThreadExportRouteHandler,
   createThreadHandOffRouteHandler,
@@ -8220,8 +8221,10 @@ export function startOctantServer(
         .catch(() => console.error("The message queue could not process a thread change."));
     });
     const messageQueueTimer = setInterval(advanceMessageQueue, 1000);
+    const stopEventLoopLagDetector = startEventLoopLagDetector();
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
+        stopEventLoopLagDetector();
         clearInterval(messageQueueTimer);
         unsubscribeMessageQueue();
         threadMessageQueue.dispose();

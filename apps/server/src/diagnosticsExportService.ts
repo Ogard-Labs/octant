@@ -9,6 +9,7 @@ import {
   type CorrelationId,
   type DiagnosticsExportOutcome,
   type DiagnosticsExportRequest,
+  type DiagnosticHostHealth,
 } from "@octant/contracts";
 import {
   buildDiagnosticsExportReceipt,
@@ -46,6 +47,8 @@ export interface DiagnosticsExportServiceDeps {
   readonly journal: Pick<Journal, "append">;
   /** The concrete Octant server build currently serving this request. */
   readonly octantVersion: string;
+  /** Process counters to include in the packet; omitted by callers outside the host process. */
+  readonly hostHealth?: () => DiagnosticHostHealth;
   /** ISO-8601 UTC clock; defaults to the real wall clock. */
   readonly clock?: () => string;
   /** UUID generator for the packet id; defaults to `randomUUID`. */
@@ -187,6 +190,7 @@ export function exportDiagnosticsEvidence(
     candidateVersions: hostVersions,
     correlations: [{ correlationId: request.correlationId, observedAt: incident.observedAt }],
     recovery: [{ action: defaultDiagnosticsRecoveryAction(request.domain), automated: false }],
+    ...(deps.hostHealth === undefined ? {} : { hostHealth: deps.hostHealth() }),
     generatedAt,
     ...(journalGrowth === undefined ? {} : { journalGrowth }),
   });

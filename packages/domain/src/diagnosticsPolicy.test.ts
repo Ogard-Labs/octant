@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decodeDiagnosticEvidencePacket } from "@octant/contracts";
+import { decodeDiagnosticEvidencePacket, decodeJournalGrowth } from "@octant/contracts";
 import {
   buildDiagnosticsPacket,
   redactDiagnosticText,
   sealDiagnosticsExport,
+  serializeDiagnosticsEvidencePacket,
   type RawDiagnosticInput,
 } from "./diagnosticsPolicy";
 
@@ -95,6 +97,74 @@ describe("redactDiagnosticText", () => {
     const b = redactDiagnosticText("Bearer abcdef123456 then Bearer zzzzzz999999");
     expect(a.tags).toEqual(b.tags);
     expect(a.tags).toEqual([...new Set(a.tags)].sort());
+  });
+});
+
+describe("serializeDiagnosticsEvidencePacket", () => {
+  const health = {
+    slowStatementCount: 3,
+    slowStatementWorstMs: 120,
+    eventLoopLagCount: 1,
+    eventLoopLagWorstMs: 340,
+  };
+  const growth = decodeJournalGrowth({
+    generatedAt: "2026-10-16T09:30:00.000Z",
+    days: Array.from({ length: 14 }, (_, i) => `2026-10-${String(3 + i).padStart(2, "0")}`),
+    kinds: [{ kind: "chat-thread", counts: [1, ...Array.from({ length: 13 }, () => 0)], total: 1 }],
+    journalHead: 1,
+    databaseBytes: 4096,
+  });
+  const build = (extra: Partial<RawDiagnosticInput>) => {
+    const result = buildDiagnosticsPacket({ ...validInput, ...extra });
+    if (result.kind !== "packet") throw new Error("expected a packet");
+    return result.packet;
+  };
+  const digest = (text: string) => createHash("sha256").update(text).digest("hex");
+
+  it("is version 1 and carries neither section when the host reported none", () => {
+    const packet = build({});
+    expect(packet.packetVersion).toBe(1);
+    const parsed = JSON.parse(serializeDiagnosticsEvidencePacket(packet));
+    expect(parsed).not.toHaveProperty("hostHealth");
+    expect(parsed).not.toHaveProperty("journalGrowth");
+  });
+
+  it("is version 2 with host health alone, covered by the digest", () => {
+    const packet = build({ hostHealth: health });
+    expect(packet.packetVersion).toBe(2);
+    const text = serializeDiagnosticsEvidencePacket(packet);
+    expect(JSON.parse(text).hostHealth).toEqual(health);
+    expect(text.indexOf('"hostHealth"')).toBeLessThan(text.indexOf('"generatedAt"'));
+    const changed = serializeDiagnosticsEvidencePacket(
+      build({ hostHealth: { ...health, slowStatementCount: 4 } }),
+    );
+    expect(digest(changed)).not.toBe(digest(text));
+  });
+
+  it("is version 2 with journal growth alone, covered by the digest", () => {
+    const packet = build({ journalGrowth: growth });
+    expect(packet.packetVersion).toBe(2);
+    const text = serializeDiagnosticsEvidencePacket(packet);
+    expect(JSON.parse(text).journalGrowth.journalHead).toBe(1);
+    const changed = serializeDiagnosticsEvidencePacket(
+      build({ journalGrowth: { ...growth, journalHead: 2 } }),
+    );
+    expect(digest(changed)).not.toBe(digest(text));
+  });
+
+  it("carries both sections in one version 2 packet, each covered by the digest", () => {
+    const packet = build({ hostHealth: health, journalGrowth: growth });
+    expect(packet.packetVersion).toBe(2);
+    const text = serializeDiagnosticsEvidencePacket(packet);
+    const parsed = JSON.parse(text);
+    expect(parsed.hostHealth).toEqual(health);
+    expect(parsed.journalGrowth.journalHead).toBe(1);
+    expect(digest(text)).not.toBe(
+      digest(serializeDiagnosticsEvidencePacket(build({ journalGrowth: growth }))),
+    );
+    expect(digest(text)).not.toBe(
+      digest(serializeDiagnosticsEvidencePacket(build({ hostHealth: health }))),
+    );
   });
 });
 

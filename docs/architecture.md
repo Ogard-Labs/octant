@@ -1924,8 +1924,9 @@ flowchart LR
   thread. Detail is in [Browser captures](design/browser-captures.md).
 - **Journal growth.** A diagnostics export carries journal events per aggregate
   kind per day for the last 14 days, the journal head sequence, and the database
-  size (a version 2 packet; version 1 packets stay valid), as kind names and counts only: no payload, identifier, or thread or
-  Project name. One grouped query over the `event_journal_occurred_at` index
+  size, as kind names and counts only: no payload, identifier, or thread or
+  Project name. A packet carrying this section or the `hostHealth` counters
+  (see the development loop) is version 2; a version 1 packet carries neither. One grouped query over the `event_journal_occurred_at` index
   reads it when diagnostics are exported or Settings opens, never on a timer,
   and Settings shows the same table.
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
@@ -6938,6 +6939,14 @@ bun run dev        # Vite renderer + Electron with hot reload; server spawned fr
 bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint, typecheck, test, build
 ```
 
+- Two stalls are logged once per occurrence so the next one is visible: a
+  SQLite statement slower than `OCTANT_SLOW_STATEMENT_MS` (default 20) logs
+  its SQL shape and duration, never bound values, and an event-loop lag over
+  `OCTANT_EVENT_LOOP_LAG_MS` (default 100) logs the lag. Both log lines are off
+  under tests unless the variable is set. The diagnostics export carries
+  `hostHealth` counters (a version 2 packet) since process start: slow statement count and worst
+  duration, lag event count and worst lag, in milliseconds, with no SQL text or
+  route names.
 - `bun run dev` starts Vite for `apps/web` and launches Electron against it.
   Renderer edits hot-reload; server edits apply on the next relaunch. On
   startup the dev script rebuilds `apps/desktop/dist/main.mjs` whenever

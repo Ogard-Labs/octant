@@ -152,6 +152,37 @@ describe("exportDiagnosticsEvidence", () => {
     }
   });
 
+  it("carries the host's counters beside journal growth in one version 2 packet", () => {
+    const store = setup();
+    try {
+      recordFailure(store, "00000000-0000-4000-8000-000000000001", "provider");
+      const health = {
+        slowStatementCount: 3,
+        slowStatementWorstMs: 120,
+        eventLoopLagCount: 1,
+        eventLoopLagWorstMs: 340,
+      };
+      const outcome = exportDiagnosticsEvidence(
+        request({
+          correlationId: "00000000-0000-4000-8000-000000000001",
+          domain: "provider",
+          summary: "Provider stopped responding after retrying twice.",
+        }),
+        { ...deps(store), hostHealth: () => health },
+      );
+      if (outcome.kind !== "exported") throw new Error("expected exported outcome");
+      expect(outcome.packet.packetVersion).toBe(2);
+      expect(outcome.packet.hostHealth).toEqual(health);
+      expect(outcome.packet.journalGrowth).toBeDefined();
+      const serialized = serializeDiagnosticsEvidencePacket(outcome.packet);
+      expect(outcome.receipt.contentDigest).toBe(
+        createHash("sha256").update(serialized).digest("hex"),
+      );
+    } finally {
+      store.connection.close();
+    }
+  });
+
   it("redacts a secret embedded in the user-supplied summary before sealing", () => {
     const store = setup();
     try {

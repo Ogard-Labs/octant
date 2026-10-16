@@ -12,9 +12,9 @@ const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.bran
 export const DIAGNOSTICS_PACKET_VERSION = 1 as const;
 
 /**
- * Version of a packet that carries `journalGrowth`. A version 1 decoder rejects
- * the extra field, so a packet with the section says so; version 1 packets
- * without it stay valid.
+ * Version of a packet that carries `journalGrowth` or `hostHealth`. A version 1
+ * decoder rejects either extra field, so a packet with one says so; version 1
+ * packets with neither stay valid.
  */
 export const DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH = 2 as const;
 
@@ -151,6 +151,19 @@ export const DiagnosticCorrelation = Schema.Struct({
 }).annotations(strict);
 export type DiagnosticCorrelation = typeof DiagnosticCorrelation.Type;
 
+/**
+ * Counts since the host process started: statements and event-loop stalls
+ * that ran over their logging thresholds. Numbers only, so no SQL text or
+ * route name can ride along.
+ */
+export const DiagnosticHostHealth = Schema.Struct({
+  slowStatementCount: Schema.Int.pipe(Schema.nonNegative()),
+  slowStatementWorstMs: Schema.Int.pipe(Schema.nonNegative()),
+  eventLoopLagCount: Schema.Int.pipe(Schema.nonNegative()),
+  eventLoopLagWorstMs: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+export type DiagnosticHostHealth = typeof DiagnosticHostHealth.Type;
+
 /** A single actionable, redacted recovery fact for the reviewer. */
 export const DiagnosticRecoveryFact = Schema.Struct({
   action: DiagnosticSafeText,
@@ -229,13 +242,18 @@ export const DiagnosticEvidencePacket = Schema.Struct({
   ),
   redactions: Schema.Array(DiagnosticRedactionTag).pipe(Schema.maxItems(MAX_DIAGNOSTIC_REDACTIONS)),
   redacted: Schema.Literal(true),
+  /** Version 2 only; absent when the host reports no counters. */
+  hostHealth: Schema.optional(DiagnosticHostHealth),
   generatedAt: UtcTimestamp,
   /** Version 2 only; absent when the host could not read the journal. */
   journalGrowth: Schema.optional(JournalGrowth),
 }).pipe(
-  Schema.filter((packet) => packet.packetVersion === 2 || packet.journalGrowth === undefined, {
-    message: () => "Only a version 2 packet carries journal growth.",
-  }),
+  Schema.filter(
+    (packet) =>
+      packet.packetVersion === 2 ||
+      (packet.journalGrowth === undefined && packet.hostHealth === undefined),
+    { message: () => "Only a version 2 packet carries journal growth or host health." },
+  ),
   Schema.annotations(strict),
 );
 export type DiagnosticEvidencePacket = typeof DiagnosticEvidencePacket.Type;
