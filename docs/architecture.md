@@ -4107,7 +4107,7 @@ native harness in `apps/server/src/harness`:
      while its research is on, and `web-search` only with a search
      endpoint). `nativeHarnessComposition.test.ts` pins the full set per
      mode with every port supplied, the reduced set without them, and that
-     `server.ts` still supplies each port.
+     the composition call site still supplies each port.
   2. **Approval attention.** A pending approval raises the same attention as
      a pending question: the thread's state, the Inbox, and the sidebar mark,
      and it shows inline in the thread. Not yet pinned by a test.
