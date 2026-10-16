@@ -70,6 +70,7 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> & {
   readonly late: Pick<
     LateBindings,
     | "agentRunInteractions"
+    | "codeOperationRuntime"
     | "nativeHarnessApprovalStore"
     | "nativeHarnessComposition"
     | "nativeHarnessLeadFallback"
@@ -377,6 +378,9 @@ export function wireHarness(deps: HarnessDependencies) {
       void goalLoopService()
         .execute({ kind: "pause-goal-loop", threadId, expectedVersion: loop.version })
         .catch(() => undefined);
+    },
+    onRecoveryLifted: ({ threadId, mode }) => {
+      if (mode === "code") late.codeOperationRuntime.current?.settleCutOffTurns?.(threadId);
     },
     recoveryBlockers: async ({ threadId }) => {
       const view = nativeHarnessSessionsLive.read(threadId);
