@@ -12309,7 +12309,7 @@ function resolveHarnessThreadFacts(input: {
       input.mode === "chat"
         ? input.persistence.readChatThread(decodeChatThreadId(input.threadId))
         : input.mode === "work"
-          ? input.workThreadProjection.read(input.threadId as never)
+          ? input.workThreadProjection.read(decodeWorkThreadId(input.threadId))
           : input.persistence.readCodeThread(decodeCodeThreadId(input.threadId));
     if (thread === undefined) return undefined;
     return {

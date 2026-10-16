@@ -1249,14 +1249,6 @@ export class ChatService {
   }
 
   /**
-   * Questions running attempts in this host are parked on, each with what
-   * `answer-chat-turn-question` needs. Only threads the Chat listing shows
-   * qualify — active, not a hidden sidecar, filed under no Project or an
-   * active Chat Project — and only attempts this process still runs, because
-   * an answer to any other is refused and settles the attempt interrupted.
-   * Whether Chat mode is enabled is the caller's check.
-   */
-  /**
    * Whether this thread is one a Needs you row may name: an active, listed
    * thread filed under no Project or an active Chat Project, the same test the
    * pending questions pass. Chat has no per-window authority.
@@ -1276,6 +1268,14 @@ export class ChatService {
     return thread.projectId === undefined || this.#isActiveChatProject(thread.projectId);
   }
 
+  /**
+   * Questions running attempts in this host are parked on, each with what
+   * `answer-chat-turn-question` needs. Only threads the Chat listing shows
+   * qualify — active, not a hidden sidecar, filed under no Project or an
+   * active Chat Project — and only attempts this process still runs, because
+   * an answer to any other is refused and settles the attempt interrupted.
+   * Whether Chat mode is enabled is the caller's check.
+   */
   listPendingQuestions(): ReadonlyArray<PendingRequest> {
     this.#assertReady();
     const hidden = this.#hiddenThreadIds();
