@@ -33,7 +33,8 @@ export const OCTANT_UPDATE_PUBLIC_KEY =
  * rings trust only the stable key, and `scripts/sign-update-feed.ts` refuses to
  * sign a preview feed with a key no install trusts.
  */
-export const OCTANT_UPDATE_PREVIEW_PUBLIC_KEY = "";
+export const OCTANT_UPDATE_PREVIEW_PUBLIC_KEY =
+  "MCowBQYDK2VwAyEAAySanIDCejRkQ3oaFsVukg6T7YS+0MaEfYcsdlrSSHc=";
 
 /**
  * Which keys each ring believes.
