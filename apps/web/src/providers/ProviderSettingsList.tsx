@@ -792,7 +792,7 @@ function ProviderRow(props: ProviderRowProps) {
             onClick={() => props.onMove(props.index, -1)}
             size="icon"
             type="button"
-            variant="ghost"
+            variant="bare"
           >
             <ChevronUp aria-hidden="true" size={14} />
           </OctantButton>
@@ -803,7 +803,7 @@ function ProviderRow(props: ProviderRowProps) {
             onClick={() => props.onMove(props.index, 1)}
             size="icon"
             type="button"
-            variant="ghost"
+            variant="bare"
           >
             <ChevronDown aria-hidden="true" size={14} />
           </OctantButton>

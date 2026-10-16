@@ -103,7 +103,7 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
                   className="mode window-no-drag"
                   onClick={() => selectMode(mode)}
                   type="button"
-                  variant="ghost"
+                  variant="bare"
                 >
                   <span aria-hidden="true" className="mode__icon-frame">
                     <ModeIcon className="icon" size={16} strokeWidth={1.5} />

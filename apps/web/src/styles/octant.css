@@ -973,24 +973,26 @@ h4 {
   min-height: var(--oct-control-height);
   padding-block: 0;
   padding-inline: var(--oct-space-4);
+  font-family: var(--oct-font-body);
+  font-size: var(--oct-text-base);
+}
+/* A text area keeps this layout but takes the field recipe's paint, so only
+   the single-line field and the select carry the system's own face. */
+.input,
+.select {
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-sm);
   background: var(--oct-surface);
   color: var(--oct-fg);
-  font-family: var(--oct-font-body);
-  font-size: var(--oct-text-base);
 }
-.input::placeholder,
-.textarea::placeholder {
+.input::placeholder {
   color: var(--oct-muted);
 }
 .input:hover,
-.textarea:hover,
 .select:hover {
   border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
 }
 .input:focus-visible,
-.textarea:focus-visible,
 .select:focus-visible {
   background: var(--octant-control-hover);
 }
@@ -4559,6 +4561,15 @@ input.switch:checked::after {
   text-align: left;
 }
 
+.composer-row .composer-model-picker__trigger {
+  border-radius: var(--oct-radius-sm);
+}
+
+/* The bare variant draws nothing, so the trigger takes the ghost hover fill itself. */
+.composer-row .composer-model-picker__trigger:hover {
+  background: var(--muted);
+}
+
 /* An unavailable provider is still a toolbar item, not a second outlined
    field inside the raised prompt. The disabled trigger keeps the truthful
    state and settings route while the row keeps one continuous surface. */
@@ -7341,7 +7352,6 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   min-height: var(--oct-control-height-sm);
   padding-inline: var(--oct-space-2);
   border: 0;
-  border-radius: var(--oct-radius-sm);
   background: none;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);

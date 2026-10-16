@@ -1803,7 +1803,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       className="chip-x window-no-drag"
                       onClick={() => extensionDraft.remove(receipt.reference)}
                       type="button"
-                      variant="ghost"
+                      variant="bare"
                     >
                       ×
                     </OctantButton>
@@ -1839,6 +1839,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       disabled={queuePreparing || messageQueue.busy || messageQueue.uncertain}
                       onClick={() => attachments.remove(reference.attachmentId)}
                       type="button"
+                      variant="bare"
                     >
                       <X aria-hidden="true" size={12} strokeWidth={1.8} />
                     </OctantButton>

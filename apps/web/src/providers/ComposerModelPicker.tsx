@@ -192,7 +192,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
             size="sm"
             title="Configure and check a provider in Settings."
             type="button"
-            variant="ghost"
+            variant="bare"
           >
             <span className="composer-model-picker__trigger-label">No provider ready</span>
           </OctantButton>

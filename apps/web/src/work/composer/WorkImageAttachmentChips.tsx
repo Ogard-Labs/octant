@@ -26,6 +26,7 @@ export function WorkImageAttachmentChips(props: { readonly images: WorkComposerI
             className="chip-x window-no-drag"
             onClick={() => images.remove(attachment.id)}
             type="button"
+            variant="bare"
           >
             <X aria-hidden="true" size={12} strokeWidth={1.8} />
           </OctantButton>
