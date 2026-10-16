@@ -140,6 +140,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
   const searchAlwaysShown = props.settings.sidebarSearchPresentation === "field";
   const [searchOpen, setSearchOpen] = useState(false);
   const searchField = useRef<HTMLInputElement>(null);
+  const searchToggle = useRef<HTMLButtonElement>(null);
   const filter = props.threadFilter;
   const filterShown = filter !== undefined && (searchAlwaysShown || searchOpen);
   useEffect(() => {
@@ -148,6 +149,9 @@ export function ShellSidebar(props: ShellSidebarProps) {
   const closeSearch = () => {
     setSearchOpen(false);
     filter?.onQueryChange("");
+    // The field is leaving the page; without a new owner focus falls to the
+    // document body and a keyboard user starts again from the top.
+    searchToggle.current?.focus();
   };
   const activeMode = props.workspace.activeMode;
   const chatReady = activeMode === "chat" && props.chatNavigation !== undefined;
@@ -374,6 +378,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
                       icon={Search}
                       label="Search"
                       onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+                      ref={searchToggle}
                     />
                   )}
                   {newThread === undefined || newThreadLabel === undefined ? null : (

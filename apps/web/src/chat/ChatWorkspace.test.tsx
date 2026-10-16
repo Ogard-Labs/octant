@@ -2954,7 +2954,7 @@ describe("ChatWorkspace", () => {
     // While the server is still creating the branch, a second click must not
     // mint a second thread.
     await user.click(screen.getByRole("button", { name: "More actions" }));
-    const branch = await screen.findByRole("menuitemradio", { name: "Branch from here" });
+    const branch = await screen.findByRole("menuitem", { name: "Branch from here" });
     expect(branch).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(branch);
     expect(execute).toHaveBeenCalledTimes(1);
@@ -2964,9 +2964,10 @@ describe("ChatWorkspace", () => {
     expect(onThreadBranched).toHaveBeenCalledTimes(1);
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "More actions" }));
-    expect(
-      await screen.findByRole("menuitemradio", { name: "Branch from here" }),
-    ).not.toHaveAttribute("aria-disabled", "true");
+    expect(await screen.findByRole("menuitem", { name: "Branch from here" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
   it("copies the conversation as Markdown and names what it could not include", async () => {
@@ -3207,5 +3208,5 @@ function pooledProviderSnapshot(): ProviderRegistrySnapshot {
 
 async function chooseTurnAction(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(screen.getByRole("button", { name: "More actions" }));
-  await user.click(await screen.findByRole("menuitemradio", { name }));
+  await user.click(await screen.findByRole("menuitem", { name }));
 }
