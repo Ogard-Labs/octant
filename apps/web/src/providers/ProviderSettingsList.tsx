@@ -491,7 +491,7 @@ function AgentEligibleModelsControls(props: {
         className="agent-eligible-models__trigger window-no-drag"
         onClick={() => setOpen((current) => !current)}
         type="button"
-        variant="ghost"
+        variant="bare"
       >
         <span>Agent-eligible models</span>
         <span className="agent-eligible-models__count">{selected.length}</span>

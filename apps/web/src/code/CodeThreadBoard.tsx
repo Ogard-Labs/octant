@@ -539,6 +539,7 @@ function CodeBoardCardView(props: {
             })
           }
           type="button"
+          variant="bare"
         >
           {/* the recipe clamps the title to two lines; the attribute keeps
               the full title reachable on hover */}

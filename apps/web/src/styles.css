@@ -1454,11 +1454,6 @@ html[data-octant-reduced-motion="true"] .workspace-cross-context-banner--inline 
   height: 24px;
   min-height: 24px;
   margin-right: var(--oct-space-1);
-  color: var(--octant-text-muted);
-}
-
-.workspace-pane__close:hover {
-  color: var(--oct-fg);
 }
 
 /* The tab sits in the corner the sidebar and the title band make, so it takes
@@ -3081,8 +3076,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .prov-grip-slot .prov-grip:disabled {
   cursor: default;
-  color: var(--oct-meta);
-  background: none;
   opacity: var(--oct-disabled-opacity);
 }
 
@@ -3661,25 +3654,6 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--oct-text-sm);
-}
-
-.folder-picker__item-select,
-.folder-picker__item-open {
-  min-height: 28px;
-  padding: 0 var(--oct-space-3);
-  color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: var(--oct-radius-sm);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-display);
-}
-
-.folder-picker__item-select:hover,
-.folder-picker__item-open:hover {
-  background: var(--octant-control-pressed);
 }
 
 .folder-picker__item-select:disabled {
@@ -5009,6 +4983,14 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   width: 28px;
   height: 28px;
   padding: 0;
+  border-radius: var(--oct-radius-sm);
+}
+
+/* The bare variant draws nothing, so the rail takes the ghost hover fill itself. */
+.composer-model-picker__rail-item:hover,
+.scaffolds__entry-button:hover,
+.folder-picker__item-nav:hover {
+  background: var(--muted);
 }
 
 /* The button recipe sizes every glyph inside a button to 1rem, which drew
@@ -5620,10 +5602,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 
 .scaffolds__input {
   padding: var(--oct-space-2) 8px;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: var(--oct-radius-sm);
-  background: var(--octant-surface-raised);
-  color: var(--octant-text-primary);
   font: inherit;
 }
 
@@ -5679,10 +5657,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .product-feedback__input {
   width: 100%;
   padding: var(--oct-space-2) 8px;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: var(--oct-radius-sm);
-  background: var(--octant-surface-raised);
-  color: var(--octant-text-primary);
   font: inherit;
   resize: vertical;
 }
@@ -5733,10 +5707,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   min-width: 160px;
   flex: 1 1 160px;
   padding: 2px var(--oct-space-2);
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 4px;
-  background: var(--octant-surface-raised);
-  color: var(--octant-text-primary);
   font-size: var(--oct-text-xs);
 }
 
@@ -6845,10 +6815,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   justify-content: flex-end;
   padding-top: var(--oct-space-2);
   border-top: 1px solid var(--oct-border);
-}
-
-.code-board__reset-filters {
-  color: var(--oct-fg-2);
 }
 
 .code-board__view-options {

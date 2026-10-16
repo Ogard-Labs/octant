@@ -58,7 +58,7 @@ export function ScaffoldPicker(props: ScaffoldPickerProps) {
                 disabled={!runnable || props.busy}
                 onClick={() => setSelected(selected === id ? undefined : id)}
                 type="button"
-                variant="ghost"
+                variant="bare"
               >
                 <span className="scaffolds__entry-name">{candidate.displayName}</span>
                 <span className="scaffolds__entry-summary">{candidate.summary}</span>

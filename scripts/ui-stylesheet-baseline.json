@@ -16,7 +16,6 @@
     "apps/web/src/styles/project-threads.css": 3
   },
   "control-repaint": {
-    "apps/web/src/styles.css": 63,
     "apps/web/src/styles/code.css": 36,
     "apps/web/src/styles/octant.css": 43,
     "apps/web/src/styles/project-threads.css": 33,

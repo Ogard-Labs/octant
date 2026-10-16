@@ -470,6 +470,7 @@ function WorkBoardCardView(props: {
             })
           }
           type="button"
+          variant="bare"
         >
           <span
             className={props.layout === "list" ? "issuerow-title" : "board-card-title"}

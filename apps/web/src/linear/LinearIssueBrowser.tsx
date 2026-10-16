@@ -330,6 +330,7 @@ export function LinearIssueBrowser(props: LinearIssueBrowserProps) {
                       className="linear-issues__row"
                       onClick={() => void openIssue(row)}
                       type="button"
+                      variant="bare"
                     >
                       <CircleDot
                         aria-hidden="true"

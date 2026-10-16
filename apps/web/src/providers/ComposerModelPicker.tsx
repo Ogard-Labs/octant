@@ -491,7 +491,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           }}
           title={`${favorited ? "Remove" : "Add"} ${picker.model.displayName} (${group.instance.displayName}) ${favorited ? "from" : "to"} favorites`}
           type="button"
-          variant="ghost"
+          variant="bare"
         >
           <Star
             aria-hidden="true"
@@ -520,7 +520,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           }}
           role="option"
           type="button"
-          variant="ghost"
+          variant="bare"
         >
           <ProviderGlyph
             displayName={group.instance.displayName}
@@ -564,7 +564,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           }}
           role="option"
           type="button"
-          variant="ghost"
+          variant="bare"
         >
           <ProviderGlyph displayName="Octant" driverKind="octant-harness" size={20} />
           <span className="composer-model-picker__rail-label">Octant</span>
@@ -630,7 +630,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               }}
               role="option"
               type="button"
-              variant="ghost"
+              variant="bare"
             >
               <Star aria-hidden="true" fill="currentColor" size={20} strokeWidth={1.75} />
               <span className="composer-model-picker__rail-label">Favorites</span>
@@ -648,7 +648,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               }}
               role="option"
               type="button"
-              variant="ghost"
+              variant="bare"
             >
               <Clock aria-hidden="true" size={20} />
               <span className="composer-model-picker__rail-label">Recent</span>
@@ -674,7 +674,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                 aria-label="Provider settings"
                 className="composer-model-picker__rail-item"
                 onClick={props.onOpenSettings}
-                variant="ghost"
+                variant="bare"
                 type="button"
               >
                 <Plus aria-hidden="true" size={20} />
@@ -731,7 +731,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                 className={`composer-model-picker__catalog${filteringCatalog === undefined ? " composer-model-picker__catalog--on" : ""}`}
                 onClick={() => setCatalogFilter(undefined)}
                 type="button"
-                variant="ghost"
+                variant="bare"
               >
                 All
               </OctantButton>
@@ -742,7 +742,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                   key={catalog}
                   onClick={() => setCatalogFilter(catalog)}
                   type="button"
-                  variant="ghost"
+                  variant="bare"
                 >
                   {catalog}
                 </OctantButton>
