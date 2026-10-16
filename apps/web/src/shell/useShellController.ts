@@ -1084,13 +1084,17 @@ export function useShellController(options: ShellControllerOptions) {
           ratio: resizePreview.ratio,
         }).layouts[authoritative.workspace.activeMode]
       : activeLayout;
-  const presentedLayout = presentationLayout(
-    previewedLayout,
-    authoritative?.workspace.focusedPaneId,
+  const focusedPaneId = authoritative?.workspace.focusedPaneId;
+  const activePaneId =
     authoritative === undefined
       ? undefined
-      : authoritative.workspace.activePaneIds[authoritative.workspace.activeMode],
-    options.isNarrow ?? false,
+      : authoritative.workspace.activePaneIds[authoritative.workspace.activeMode];
+  const isNarrow = options.isNarrow ?? false;
+  // The layout the panes mount from keeps its identity until one of its inputs
+  // moves; rebuilt on every render it re-rendered every pane with the shell.
+  const presentedLayout = useMemo(
+    () => presentationLayout(previewedLayout, focusedPaneId, activePaneId, isNarrow),
+    [activePaneId, focusedPaneId, isNarrow, previewedLayout],
   );
   // Derive the surface catalog from the live workspace context so the launcher
   // reflects context changes (e.g. first Project open) without a full reload.

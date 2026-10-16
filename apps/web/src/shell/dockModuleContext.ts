@@ -14,7 +14,12 @@ import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
 import type { WorkFileListingClient } from "@octant/client-runtime/work-file-listing-client";
-import type { CodeCheckoutId, CodeRelativePath } from "@octant/contracts/code";
+import type {
+  CodeBootstrap,
+  CodeCheckoutId,
+  CodeRelativePath,
+  CodeThreadView,
+} from "@octant/contracts/code";
 import type { ChatThreadId } from "@octant/contracts/chat";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -53,7 +58,16 @@ export interface ThreadUtilityDockContentProps {
   readonly chatClient: ChatClient;
   readonly chatReadCursorStore: ChatReadCursorStore;
   readonly codeClient?: CodeClient;
+  /**
+   * The Code thread's own controller, for the tools built on the Code workspace
+   * tab (Terminal, Tests, iOS Simulator). Every other tool reads the view and
+   * the client, so a streaming turn redraws only the tools that show it.
+   */
   readonly codeController?: CodeController;
+  /** The Code thread as its own controller last read it. */
+  readonly codeThreadView?: CodeThreadView;
+  /** Settings › Code's diff layout, the default while the thread has no stored choice. */
+  readonly codeDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
   readonly codeProviderGroups?: ReadonlyArray<PickerGroup>;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenFile: (relativePath: CodeRelativePath) => void;

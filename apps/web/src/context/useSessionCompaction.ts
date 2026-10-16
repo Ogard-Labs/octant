@@ -6,6 +6,7 @@ import {
 } from "@octant/contracts/context";
 import type { ContextCompactionState } from "@octant/contracts/context-rpc";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRetainedRecord } from "../polling/useRetainedRecord";
 
 export interface SessionCompactionController {
   /** The host's latest answer for this thread; absent until it answers. */
@@ -208,7 +209,8 @@ export function useSessionCompaction(
     await load();
   }, [client, load, newCompactionId, subject]);
 
-  return {
+  // One identity while nothing in it moved; see useRetainedRecord.
+  return useRetainedRecord({
     starting,
     stateUnknown,
     compact,
@@ -216,7 +218,7 @@ export function useSessionCompaction(
     ...(refusal === undefined ? {} : { refusal }),
     ...(errorMessage === undefined ? {} : { errorMessage }),
     ...(settledId === undefined ? {} : { settledId }),
-  };
+  });
 }
 
 function latestId(record: NonNullable<ContextCompactionState["latestCompaction"]>): string {
