@@ -110,7 +110,11 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
   if (jobs.length === 0) return null;
 
   return (
-    <section aria-label="Generated images" className="stack" data-testid="generated-image-list">
+    <section
+      aria-label="Generated images"
+      className="stack generated-image-list"
+      data-testid="generated-image-list"
+    >
       {jobs.map((job) => (
         <div key={String(job.id)}>
           {job.status !== "completed" ? (

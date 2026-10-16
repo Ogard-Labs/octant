@@ -75,7 +75,7 @@ export function GeneratedImageCard(props: GeneratedImageCardProps) {
             chunks: chunks as never,
             ...(message === undefined ? {} : { message }),
           })}
-      <div className="row">
+      <div className="row row-wrap">
         {props.onAttach === undefined ? null : (
           <OctantButton onClick={() => void attach()} size="sm" type="button" variant="secondary">
             Attach
