@@ -115,8 +115,28 @@ export interface AndroidToolchainServiceOptions {
   readonly fetchImpl?: typeof fetch;
   /** Overrides how long an attached serve-avd may take to answer; tests shorten it. */
   readonly streamWaitMs?: Partial<{ readonly headers: number; readonly firstFrame: number }>;
+  /** Overrides how long a shutdown waits for the emulator to leave adb; tests shorten it. */
+  readonly shutdownSettle?: Partial<{
+    readonly timeoutMs: number;
+    readonly pollMs: number;
+    readonly absentMs: number;
+  }>;
 }
 
+/**
+ * How long a shutdown waits, after adb accepted the power-off, for the emulator
+ * to leave adb. Saving the emulator's state kept it running for 10 s to about
+ * 80 s after the power-off was accepted when measured, so the wait sits well
+ * above that.
+ */
+const SHUTDOWN_SETTLE_MS = 180_000;
+const SHUTDOWN_POLL_MS = 1_000;
+/**
+ * How long the serial must stay off adb before the emulator counts as stopped.
+ * Adb dropped a powering-off emulator for about 5 s while it moved from
+ * `device` to `offline`, with the emulator still running for 25 s more.
+ */
+const SHUTDOWN_ABSENT_MS = 15_000;
 const MAX_RECENT = 64;
 const MAX_DIAGNOSTICS = 16;
 const SCREEN_POLL_MS = 400;
@@ -256,6 +276,15 @@ export class AndroidToolchainService {
         continue;
       }
       const serial = await this.#serialForAvd(sdk.adbPath, name, serials, context);
+      const before = beforeDiscovery.get(emulatorId);
+      // The shutdown action owns this state until it has seen the emulator stop.
+      // Adb drops and re-lists a powering-off emulator (and shows it `offline`)
+      // for as long as it takes to save its state, so what adb says now would
+      // call it running or shut down while it is neither.
+      if (before?.state === "shutting-down" && before.serial !== undefined) {
+        emulators.push(before);
+        continue;
+      }
       emulators.push(
         decodeAndroidEmulatorRecord({
           emulatorId,
@@ -277,6 +306,14 @@ export class AndroidToolchainService {
     }
     this.#discoveryCommitted = discovery;
     this.#sdk = sdk;
+    for (const previous of this.#emulators) {
+      if (
+        previous.serial !== undefined &&
+        reconciled.get(previous.emulatorId)?.serial === undefined
+      ) {
+        this.#releaseServeAvd(previous.serial);
+      }
+    }
     this.#emulators = [...reconciled.values()];
     this.#options.observeEmulators?.(this.#emulators);
     this.#sequence += 1;
@@ -656,17 +693,42 @@ export class AndroidToolchainService {
       // adbd can honour `reboot -p` on userdebug images, and a production image
       // that refuses either step reports an honest failure instead of the
       // console's `KO` the state update would mistake for success.
-      await this.#command([adb, "-s", target, "root"], context, 15_000, signal);
-      const result = await this.#command(
-        [adb, "-s", target, "shell", "reboot", "-p"],
-        context,
-        request.timeoutMs,
-        signal,
-      );
-      if (succeeded(result)) {
-        this.#setState(request.emulatorId, "shutdown", true);
+      // The pane shows "Shutting down" from here until the emulator has left adb.
+      this.#setState(request.emulatorId, "shutting-down");
+      // Whatever ends this action leaves the emulator in the state it is really in:
+      // shut down once seen stopped, running otherwise.
+      let settled = false;
+      try {
+        await this.#command([adb, "-s", target, "root"], context, 15_000, signal);
+        const result = await this.#command(
+          [adb, "-s", target, "shell", "reboot", "-p"],
+          context,
+          request.timeoutMs,
+          signal,
+        );
+        // `reboot -p` returns once the power-off is accepted; the emulator takes
+        // seconds more to exit, so "shut down" is only reported once adb agrees.
+        if (succeeded(result) && (await this.#waitUntilStopped(target, context, signal))) {
+          this.#setState(request.emulatorId, "shutdown", true);
+          settled = true;
+          return await this.#fromProcess(request, result, startedAt);
+        }
+        if (!succeeded(result)) return await this.#fromProcess(request, result, startedAt);
+        return await this.#logged(
+          request,
+          signal.aborted ? "cancelled" : "timed-out",
+          startedAt,
+          [
+            {
+              severity: "note",
+              message: "The emulator accepted the power-off but is still running.",
+            },
+          ],
+          "complete",
+        );
+      } finally {
+        if (!settled) this.#setState(request.emulatorId, "booted");
       }
-      return await this.#fromProcess(request, result, startedAt);
     }
     if (request.kind === "screenshot") {
       const bytes = await this.#screencap(adb, serial, context, signal);
@@ -1085,6 +1147,33 @@ export class AndroidToolchainService {
     return false;
   }
 
+  /** Whether the serial stayed off adb, for long enough to mean it, within the settle budget. */
+  async #waitUntilStopped(
+    serial: string,
+    context: AndroidExecutionContext,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const adb = this.#sdk.adbPath;
+    if (adb === undefined) return false;
+    const settle = this.#options.shutdownSettle;
+    const deadline = Date.now() + (settle?.timeoutMs ?? SHUTDOWN_SETTLE_MS);
+    const absentFor = settle?.absentMs ?? SHUTDOWN_ABSENT_MS;
+    let absentSince: number | undefined;
+    for (;;) {
+      const devices = await this.#command([adb, "devices"], context, 10_000, signal);
+      const now = Date.now();
+      // A listing that fails says nothing about the emulator, so it is not "gone".
+      if (succeeded(devices) && !parseAdbListedSerials(text(devices.stdout)).includes(serial)) {
+        absentSince ??= now;
+        if (now - absentSince >= absentFor) return true;
+      } else {
+        absentSince = undefined;
+      }
+      if (now >= deadline || signal.aborted) return false;
+      await sleep(settle?.pollMs ?? SHUTDOWN_POLL_MS, signal);
+    }
+  }
+
   async #watchManaged(
     serial: string,
     signal: AbortSignal,
@@ -1463,12 +1552,25 @@ export class AndroidToolchainService {
     return this.#emulators.find((candidate) => candidate.emulatorId === emulatorId)?.serial;
   }
 
+  /** Stops the serial's serve-avd; one left running would outlive its emulator. */
+  #releaseServeAvd(serial: string): void {
+    const port = this.#options.serveAvd;
+    if (port === undefined) return;
+    void Promise.resolve()
+      .then(() => port.release(serial))
+      .catch(() => undefined);
+  }
+
   #setState(
     emulatorId: AndroidEmulatorRecord["emulatorId"],
     state: AndroidEmulatorRecord["state"],
     clearSerial = false,
     serial?: string,
   ): void {
+    if (clearSerial) {
+      const lost = this.#serialOf(emulatorId);
+      if (lost !== undefined) this.#releaseServeAvd(lost);
+    }
     this.#emulators = this.#emulators.map((emulator) => {
       if (emulator.emulatorId !== emulatorId) return emulator;
       const next: AndroidEmulatorRecord = {
@@ -1571,6 +1673,20 @@ function defaultSdkHomes(): ReadonlyArray<string> {
     "/opt/homebrew/share/android-commandlinetools",
     "/usr/local/share/android-commandlinetools",
   ];
+}
+
+/**
+ * Every emulator serial adb lists, whatever its state. A powering-off emulator
+ * is listed as `offline` for as long as it takes to save its state, which was
+ * over a minute when measured, and it is running until adb drops it.
+ */
+function parseAdbListedSerials(output: string): ReadonlyArray<string> {
+  const serials: string[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const match = /^(emulator-[0-9]+)\s+\S+/.exec(line.trim());
+    if (match?.[1] !== undefined) serials.push(match[1]);
+  }
+  return serials;
 }
 
 function parseAdbDevices(output: string): ReadonlyArray<string> {

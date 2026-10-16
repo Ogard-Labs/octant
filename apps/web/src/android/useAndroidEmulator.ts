@@ -68,6 +68,9 @@ export function useAndroidEmulator(options: UseAndroidEmulatorOptions): AndroidE
     [client, snapshotRequestKey],
   );
 
+  const runtimeRunning = (runtime?.emulators ?? []).some(
+    (emulator) => emulator.state !== "shutdown",
+  );
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
 
   useEffect(() => {
@@ -105,7 +108,13 @@ export function useAndroidEmulator(options: UseAndroidEmulatorOptions): AndroidE
 
   useEffect(() => {
     if (!enabled || status !== "ready") return;
-    const watching = (runtime?.active.length ?? 0) > 0 || runtime?.paneOpenRequest !== undefined;
+    // A pane showing an emulator that is not shut down keeps reading the host: the
+    // emulator can be shut down by an agent, or by a person elsewhere, and nothing
+    // else tells the pane. A pane with nothing running has nothing to learn.
+    const watching =
+      (runtime?.active.length ?? 0) > 0 ||
+      runtime?.paneOpenRequest !== undefined ||
+      (runtime?.emulators ?? []).some((emulator) => emulator.state !== "shutdown");
     if (!watching) return;
     const controller = new AbortController();
     const pull = async () => {
@@ -132,6 +141,7 @@ export function useAndroidEmulator(options: UseAndroidEmulatorOptions): AndroidE
     refreshSnapshot,
     runtime?.active.length,
     runtime?.paneOpenRequest?.requestId,
+    runtimeRunning,
     status,
   ]);
 

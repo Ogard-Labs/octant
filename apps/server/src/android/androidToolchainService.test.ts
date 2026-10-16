@@ -109,10 +109,14 @@ function processResult(stdout: string) {
 }
 
 function discoveryExecutor() {
+  // Powering off takes the emulator off adb, as it does a moment later on a real host.
+  let poweredOff = false;
   return vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
     const argv = input.argv.join(" ");
+    if (argv.includes("reboot")) poweredOff = true;
     if (argv.includes("-list-avds")) return processResult("Pixel_8_API_34\n");
     if (argv.includes("devices")) {
+      if (poweredOff) return processResult("List of devices attached\n");
       return processResult(
         "List of devices attached\nemulator-5554          device product:sdk_gphone64_arm64\n",
       );
@@ -309,7 +313,12 @@ describe("AndroidToolchainService", () => {
     let hold = false;
     const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
       const result = await base(input);
-      if (hold && input.argv.includes("devices")) await gate;
+      // Only the discovery that is being held reads stale devices; the shutdown's own
+      // wait for the emulator to leave adb must not queue behind it.
+      if (hold && input.argv.includes("devices")) {
+        hold = false;
+        await gate;
+      }
       return result;
     });
     const service = new AndroidToolchainService({
@@ -320,6 +329,7 @@ describe("AndroidToolchainService", () => {
       writeArtifact: async () => undefined,
       now: () => "2026-09-18T10:00:00.000Z",
       newId: () => ids.action,
+      shutdownSettle: { absentMs: 0, pollMs: 1 },
     });
     try {
       await service.discover(discoveryRequest, context);
@@ -339,6 +349,148 @@ describe("AndroidToolchainService", () => {
       release();
       await service.close();
     }
+  });
+
+  describe("shutting an emulator down", () => {
+    /**
+     * Adb keeps listing the emulator after the power-off is accepted, as a real one does:
+     * as a device, then not at all for a moment as the transport restarts, then `offline`
+     * while the emulator saves its state, and finally not at all.
+     */
+    function slowExitingEmulator(listedAfterPowerOff: number) {
+      let poweredOff = false;
+      let listings = 0;
+      const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        const argv = input.argv.join(" ");
+        if (argv.includes("-list-avds")) return processResult("Pixel_8_API_34\n");
+        if (argv.includes("devices")) {
+          if (!poweredOff) {
+            return processResult("List of devices attached\nemulator-5554          device\n");
+          }
+          listings += 1;
+          if (listings > listedAfterPowerOff || (listings > 1 && listings <= 3)) {
+            return processResult("List of devices attached\n");
+          }
+          const state = listings === 1 ? "device" : "offline";
+          return processResult(`List of devices attached\nemulator-5554          ${state}\n`);
+        }
+        if (argv.includes("ro.boot.qemu.avd_name")) return processResult("Pixel_8_API_34\n");
+        if (argv.includes("reboot")) poweredOff = true;
+        return processResult("");
+      });
+      return Object.assign(execute, { listings: () => listings });
+    }
+
+    function serviceFor(
+      execute: ReturnType<typeof slowExitingEmulator>,
+      extra: Record<string, unknown> = {},
+    ) {
+      const states: Array<string | undefined> = [];
+      const service = new AndroidToolchainService({
+        execute,
+        access: async () => undefined,
+        realpath: async (path: string) => path,
+        environment: () => ({ ANDROID_HOME: "/sdk" }),
+        writeArtifact: async () => undefined,
+        now: () => "2026-10-16T10:00:00.000Z",
+        newId: () => ids.action,
+        shutdownSettle: { timeoutMs: 5_000, pollMs: 5, absentMs: 150 },
+        observeEmulators: (emulators: ReadonlyArray<{ state: string }>) =>
+          states.push(emulators[0]?.state),
+        ...extra,
+      });
+      return { service, states };
+    }
+
+    it("keeps the emulator shutting down until adb has stayed without it, through a discovery and a brief gap", async () => {
+      const execute = slowExitingEmulator(40);
+      const { service, states } = serviceFor(execute);
+      try {
+        await service.discover(discoveryRequest, context);
+        states.length = 0;
+        const shutdown = service.execute(action("shutdown"), context);
+        await vi.waitFor(() =>
+          expect(service.snapshot(context).emulators[0]).toMatchObject({ state: "shutting-down" }),
+        );
+        // The pane re-reads discovery while the emulator is still running; that must not
+        // bring it back as running, nor call it shut down when adb has dropped it for a moment.
+        const meanwhile = await service.discover(discoveryRequest, context);
+        expect(meanwhile.emulators[0]).toMatchObject({ state: "shutting-down" });
+        expect((await shutdown).outcome).toBe("succeeded");
+        // It was reported stopped only after the last listing, not at the first gap.
+        expect(execute.listings()).toBeGreaterThan(40);
+        expect(service.snapshot(context).emulators[0]).toMatchObject({ state: "shutdown" });
+        expect(service.snapshot(context).emulators[0].serial).toBeUndefined();
+        expect(states).toEqual(["shutting-down", "shutting-down", "shutdown"]);
+      } finally {
+        await service.close();
+      }
+    });
+
+    it("says the emulator is still running when it does not stop in time", async () => {
+      const { service } = serviceFor(slowExitingEmulator(Number.POSITIVE_INFINITY), {
+        shutdownSettle: { timeoutMs: 100, pollMs: 5, absentMs: 150 },
+      });
+      try {
+        await service.discover(discoveryRequest, context);
+        const evidence = await service.execute(action("shutdown"), context);
+        expect(evidence.outcome).toBe("timed-out");
+        expect(service.snapshot(context).emulators[0]).toMatchObject({
+          state: "booted",
+          serial: "emulator-5554",
+        });
+      } finally {
+        await service.close();
+      }
+    });
+
+    it("stops the serial's serve-avd once the emulator has stopped, and not before", async () => {
+      const release = vi.fn(async () => undefined);
+      const { service } = serviceFor(slowExitingEmulator(40), {
+        serveAvd: { open: vi.fn(), release },
+      });
+      try {
+        await service.discover(discoveryRequest, context);
+        const shutdown = service.execute(action("shutdown"), context);
+        await vi.waitFor(() =>
+          expect(service.snapshot(context).emulators[0]).toMatchObject({ state: "shutting-down" }),
+        );
+        expect(release).not.toHaveBeenCalled();
+        await shutdown;
+        expect(release).toHaveBeenCalledExactlyOnceWith("emulator-5554");
+      } finally {
+        await service.close();
+      }
+    });
+
+    it("stops the serial's serve-avd when discovery finds the emulator gone, and keeps it while the emulator stays", async () => {
+      const release = vi.fn(async () => undefined);
+      let listed = true;
+      const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        const argv = input.argv.join(" ");
+        if (argv.includes("-list-avds")) return processResult("Pixel_8_API_34\n");
+        if (argv.includes("devices")) {
+          return processResult(
+            listed
+              ? "List of devices attached\nemulator-5554          device\n"
+              : "List of devices attached\n",
+          );
+        }
+        if (argv.includes("ro.boot.qemu.avd_name")) return processResult("Pixel_8_API_34\n");
+        return processResult("");
+      });
+      const { service } = serviceFor(execute as never, { serveAvd: { open: vi.fn(), release } });
+      try {
+        await service.discover(discoveryRequest, context);
+        await service.discover(discoveryRequest, context);
+        expect(release).not.toHaveBeenCalled();
+        listed = false;
+        await service.discover(discoveryRequest, context);
+        expect(release).toHaveBeenCalledExactlyOnceWith("emulator-5554");
+      } finally {
+        await service.close();
+      }
+    });
   });
 
   it.each([
@@ -710,7 +862,6 @@ describe("AndroidToolchainService", () => {
             });
             return processResult("");
           }
-          if (input.argv.includes("reboot")) return processResult("");
           if (input.argv.includes("cat")) return { ...processResult(""), stdout: video };
           if (input.argv.includes("rm")) return processResult("");
           return await discovery(input);
@@ -728,6 +879,7 @@ describe("AndroidToolchainService", () => {
         realpath: async (path: string) => path,
         now: () => "2026-10-14T20:00:00.000Z",
         newId: () => "30000000-0000-4000-8000-000000000012",
+        shutdownSettle: { absentMs: 0, pollMs: 1 },
       });
       return { service, artifacts, execute };
     }
