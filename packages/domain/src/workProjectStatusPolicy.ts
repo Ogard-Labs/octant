@@ -31,7 +31,15 @@ function sectionHeading(line: string): string | undefined {
   const rest = line.slice(2);
   if (rest.length === rest.trimStart().length) return undefined;
   const title = rest.trim();
-  return title === "" ? undefined : title;
+  if (title !== "") return title;
+  // A whitespace-only heading still starts a section. The old regex captured
+  // the last non-terminator whitespace character after the first one, and
+  // refused `##` or `## ` followed by nothing.
+  for (let index = rest.length - 1; index >= 1; index -= 1) {
+    const char = rest.charAt(index);
+    if (!/[\r\n\u2028\u2029]/.test(char)) return char;
+  }
+  return undefined;
 }
 
 function skipDateSeparators(rest: string): string {
