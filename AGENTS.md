@@ -373,9 +373,22 @@ conditions below are met; it does not authorize merging or releasing.
   for review/merge, and identify validation or access blockers explicitly rather
   than treating them as more implementation work.
 - Lead the issue description with its current outcome/delivery requirement,
-  criterion-to-evidence summary, remaining blockers, and closure decision. Keep
-  old progress in comments or a clearly labeled historical section; historical
-  statements such as "still In Progress" do not reopen a completed issue.
+  criterion-to-evidence summary, remaining blockers, and closure decision. An
+  issue description holds exactly one dated status block: on every update,
+  replace it in place; never add a newer block above an older one. Move the
+  replaced block to a comment, or to one clearly labeled history section at
+  the end, only when it carries evidence the new block does not restate.
+  Historical statements such as "still In Progress" do not reopen a completed
+  issue. (Stacked status blocks grew one issue past 57,000 characters in
+  October 2026 and hid the current state.)
+- An action only the maintainer can perform (a credential, a billed provider
+  turn, a second machine, a signing key, a subjective sign-off) is recorded
+  once on the standing maintainer-actions list: the "Waiting on Henrik"
+  section of the current release project's description in Linear. Each entry
+  names the issue, the exact action, and what it unblocks. The issue itself
+  links to that list instead of restating the action, so a maintainer sitting
+  can run the whole list in one pass and hygiene passes do not repeat it per
+  issue.
 - Reopen a closed issue only for a reproduced regression or evidence its closure
   was incorrect. Preserve the closure evidence and explain the reason.
 
