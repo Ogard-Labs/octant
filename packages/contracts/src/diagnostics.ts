@@ -11,6 +11,13 @@ const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.bran
  */
 export const DIAGNOSTICS_PACKET_VERSION = 1 as const;
 
+/**
+ * Version of a packet that carries `journalGrowth`. A version 1 decoder rejects
+ * the extra field, so a packet with the section says so; version 1 packets
+ * without it stay valid.
+ */
+export const DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH = 2 as const;
+
 /** Upper bounds keep a packet reviewable and deny unbounded store dumps. */
 export const MAX_DIAGNOSTIC_VERSIONS = 32;
 export const MAX_DIAGNOSTIC_RECOVERY_FACTS = 16;
@@ -151,6 +158,44 @@ export const DiagnosticRecoveryFact = Schema.Struct({
 }).annotations(strict);
 export type DiagnosticRecoveryFact = typeof DiagnosticRecoveryFact.Type;
 
+/** Days of journal growth an export reports, today included. */
+export const JOURNAL_GROWTH_WINDOW_DAYS = 14;
+/** Aggregate kinds are a small closed vocabulary; the cap denies an unbounded dump. */
+export const MAX_JOURNAL_GROWTH_KINDS = 128;
+
+/**
+ * One aggregate kind's journal events per day. `counts` lines up with the
+ * report's `days`, oldest first. Only the kind name and counts are
+ * representable: no payload, identifier, or thread or project name.
+ */
+export const JournalGrowthKind = Schema.Struct({
+  kind: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(64),
+    Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+  ),
+  counts: Schema.Array(Schema.NonNegativeInt).pipe(Schema.itemsCount(JOURNAL_GROWTH_WINDOW_DAYS)),
+  total: Schema.NonNegativeInt,
+}).annotations(strict);
+export type JournalGrowthKind = typeof JournalGrowthKind.Type;
+
+/**
+ * Journal growth over the last {@link JOURNAL_GROWTH_WINDOW_DAYS} days, plus
+ * the journal head sequence and the database file size. Journal growth
+ * twice hit a limit before anyone saw it, so the export and Settings show it.
+ */
+export const JournalGrowth = Schema.Struct({
+  generatedAt: UtcTimestamp,
+  /** UTC calendar days, oldest first, as YYYY-MM-DD. */
+  days: Schema.Array(Schema.String.pipe(Schema.pattern(/^\d{4}-\d{2}-\d{2}$/))).pipe(
+    Schema.itemsCount(JOURNAL_GROWTH_WINDOW_DAYS),
+  ),
+  kinds: Schema.Array(JournalGrowthKind).pipe(Schema.maxItems(MAX_JOURNAL_GROWTH_KINDS)),
+  /** Highest journal sequence: O(1) to read, and the row count when nothing was purged. */
+  journalHead: Schema.NonNegativeInt,
+  databaseBytes: Schema.NonNegativeInt,
+}).annotations(strict);
+export type JournalGrowth = typeof JournalGrowth.Type;
+
 /**
  * A supported, fully redacted diagnostics evidence packet. `redacted` is a
  * literal `true` so a packet can never claim it skipped redaction, and no field
@@ -158,7 +203,10 @@ export type DiagnosticRecoveryFact = typeof DiagnosticRecoveryFact.Type;
  * stores, or private thread/file content.
  */
 export const DiagnosticEvidencePacket = Schema.Struct({
-  packetVersion: Schema.Literal(DIAGNOSTICS_PACKET_VERSION),
+  packetVersion: Schema.Literal(
+    DIAGNOSTICS_PACKET_VERSION,
+    DIAGNOSTICS_PACKET_VERSION_WITH_JOURNAL_GROWTH,
+  ),
   packetId: DiagnosticPacketId,
   domain: DiagnosticFailureDomain,
   failureCode: DiagnosticFailureCode,
@@ -182,7 +230,14 @@ export const DiagnosticEvidencePacket = Schema.Struct({
   redactions: Schema.Array(DiagnosticRedactionTag).pipe(Schema.maxItems(MAX_DIAGNOSTIC_REDACTIONS)),
   redacted: Schema.Literal(true),
   generatedAt: UtcTimestamp,
-}).annotations(strict);
+  /** Version 2 only; absent when the host could not read the journal. */
+  journalGrowth: Schema.optional(JournalGrowth),
+}).pipe(
+  Schema.filter((packet) => packet.packetVersion === 2 || packet.journalGrowth === undefined, {
+    message: () => "Only a version 2 packet carries journal growth.",
+  }),
+  Schema.annotations(strict),
+);
 export type DiagnosticEvidencePacket = typeof DiagnosticEvidencePacket.Type;
 
 /**
@@ -332,3 +387,4 @@ export const decodeDiagnosticsExportReceiptRecorded = Schema.decodeUnknownSync(
   DiagnosticsExportReceiptRecorded,
 );
 export const decodeDiagnosticsExportOutcome = Schema.decodeUnknownSync(DiagnosticsExportOutcome);
+export const decodeJournalGrowth = Schema.decodeUnknownSync(JournalGrowth);
