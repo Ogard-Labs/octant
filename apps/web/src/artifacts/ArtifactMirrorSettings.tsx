@@ -135,6 +135,7 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
               onChange={(event) => setFolder(event.target.value)}
               placeholder="/Users/you/Artifacts"
               value={folder}
+              unstyled
             />
           </label>
 
@@ -146,6 +147,7 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
               onChange={(event) => setDirectory(event.target.value)}
               placeholder="docs/artifacts"
               value={directory}
+              unstyled
             />
           </label>
 

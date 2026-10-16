@@ -64,7 +64,7 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
             key={descriptor.id}
             onClick={() => action()}
             type="button"
-            variant="ghost"
+            variant="bare"
           >
             <Folder aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
             <span className="sidebar-label">{descriptor.label}</span>
@@ -105,7 +105,7 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
         // (New chat's prompt) and must not receive the click event as one.
         onClick={() => action()}
         type="button"
-        variant="ghost"
+        variant="bare"
       >
         <Icon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
         <span className="sidebar-label">{descriptor.label}</span>
