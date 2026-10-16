@@ -282,7 +282,7 @@ export function ImageGenerationSheet(props: ImageGenerationSheetProps) {
             Cancel
           </OctantButton>
         ) : (
-          <OctantButton disabled={!canSubmit} type="submit">
+          <OctantButton disabled={!canSubmit} focusableWhenDisabled type="submit">
             Generate
           </OctantButton>
         )}

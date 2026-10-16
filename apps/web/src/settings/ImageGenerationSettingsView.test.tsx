@@ -272,7 +272,7 @@ describe("ImageGenerationSettingsView", () => {
       />,
     );
     expect(screen.getByText('"Recraft" runs Recraft with recraftv3.')).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await user.click(screen.getByRole("button", { name: "Remove Recraft" }));
     expect(onSettingsChange).toHaveBeenCalledWith({ imageGeneration: { customSources: [] } });
   });
 

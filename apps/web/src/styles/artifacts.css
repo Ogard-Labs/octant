@@ -6,6 +6,31 @@
    rem/em so 200% zoom scales the whole page; the grid reflows by available
    width rather than by a device breakpoint. */
 
+/* Chat and Code list a thread's generated images above the transcript, outside
+   its scroller. Unbounded, one image at a wide pane pushed the conversation to a
+   few pixels and clipped the card's actions, so the list keeps a share of the
+   pane and scrolls inside it. Work lists them inside its transcript, which
+   already scrolls. */
+.chat-workspace__conversation > .generated-image-list,
+.code-thread-workspace > .generated-image-list {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: min(50vh, 32rem);
+  overflow-y: auto;
+}
+
+/* An image keeps its own proportions and is bounded in height, so a small image
+   is not stretched to the width of the pane and a large one does not fill it. */
+.generated-image-list .preview-viewer--image {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: min(30vh, 18rem);
+  align-self: center;
+  flex: none;
+  object-fit: contain;
+}
+
 .image-library__note {
   margin: 0;
   padding: var(--oct-space-4) 0;

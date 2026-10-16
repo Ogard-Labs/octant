@@ -138,6 +138,7 @@ export function ImageGenerationSettingsView(props: ImageGenerationSettingsViewPr
                               : `"${resolution.label}" is unavailable: ${resolution.reason}`}
                           </p>
                           <OctantButton
+                            aria-label={`Remove ${resolution.label}`}
                             onClick={() =>
                               apply(
                                 props.settings.customSources.filter(

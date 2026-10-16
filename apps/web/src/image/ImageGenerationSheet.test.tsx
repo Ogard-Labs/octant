@@ -87,6 +87,28 @@ describe("ImageGenerationSheet", () => {
     );
   });
 
+  it("keeps Generate reachable by keyboard while an image is being made, without sending a second request", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(
+      <ImageGenerationSheet
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        open
+        profiles={[openAiProfile()]}
+        submitting
+      />,
+    );
+    await user.type(screen.getByLabelText("Image prompt"), "a lighthouse");
+    const generate = screen.getByRole("button", { name: "Generate" });
+    expect(generate).not.toBeDisabled();
+    expect(generate).toHaveAttribute("aria-disabled", "true");
+    generate.focus();
+    expect(generate).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("shows OpenAI quality and size, not Gemini aspect ratio", () => {
     render(
       <ImageGenerationSheet
