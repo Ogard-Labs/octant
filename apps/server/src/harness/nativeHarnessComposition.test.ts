@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatThread, CodeThread, ToolActionAuthority, WorkThread } from "@octant/contracts";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
@@ -512,8 +513,18 @@ describe("native harness composition", () => {
       });
     });
 
-    it("keeps server.ts supplying every port the offered set depends on", () => {
-      const source = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    it("keeps the composition call site supplying every port the offered set depends on", () => {
+      // The call site moves between files as wiring is extracted, so find it.
+      const root = fileURLToPath(new URL("..", import.meta.url));
+      const callers = (readdirSync(root, { recursive: true, encoding: "utf8" }) as string[])
+        .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file))
+        .filter((file) =>
+          readFileSync(`${root}/${file}`, "utf8").includes("createNativeHarnessComposition({"),
+        );
+      expect(callers, "exactly one file must call createNativeHarnessComposition({").toHaveLength(
+        1,
+      );
+      const source = readFileSync(`${root}/${callers[0]}`, "utf8");
       const start = source.indexOf("createNativeHarnessComposition({");
       const block = source.slice(start, start + 9000);
       for (const port of [
