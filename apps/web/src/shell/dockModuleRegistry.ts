@@ -28,163 +28,143 @@ const SimulatorModule = lazy(() => import("../dockModules/SimulatorModule"));
 const AndroidEmulatorModule = lazy(() => import("../dockModules/AndroidEmulatorModule"));
 const EnvironmentModule = lazy(() => import("../dockModules/EnvironmentModule"));
 
+/**
+ * What each tool reads, declared once. A module gets exactly these props, and
+ * the shell hands the thread's own controller or view to the dock only while a
+ * tool that declares it is on screen (`dockToolReads`), so a tool that shows
+ * nothing of a streaming turn sits still through it.
+ */
+export const dockModuleInputs = {
+  agents: [
+    "agentRunClient",
+    "agentRunSettingsClient",
+    "nativeHarnessClient",
+    "onAgentViewRequestHandled",
+    "requestedAgentView",
+    "onReviewAgentChanges",
+    "subject",
+  ],
+  "side-chat": [
+    "chatClient",
+    "chatReadCursorStore",
+    "onSidecarOpened",
+    "providerController",
+    "serverUrl",
+    "sidecarThreadId",
+    "subject",
+    "windowCapability",
+  ],
+  browser: [
+    "browserAutomationClient",
+    "browserContextId",
+    "hostBridge",
+    "onBrowserContextCreated",
+    "serverUrl",
+    "subject",
+    "utilityTabId",
+    "windowCapability",
+  ],
+  files: ["onOpenFile", "serverUrl", "subject", "windowCapability", "workFileListingClient"],
+  document: ["codeClient", "serverUrl", "subject", "windowCapability", "writtenDocumentPath"],
+  plan: ["planClient", "subject"],
+  delivery: ["shipClient", "subject"],
+  canvas: ["canvasClient", "canvasRevision", "subject", "writtenCanvasId"],
+  review: [
+    "agentRunClient",
+    "requestedAgentReview",
+    "onAgentReviewBack",
+    "codeClient",
+    "codeDiffLayout",
+    "codeThreadView",
+    "hostBridge",
+    "onOpenFile",
+    "serverUrl",
+    "subject",
+    "windowCapability",
+  ],
+  "pull-requests": [
+    "codeClient",
+    "onSelectProjectPullRequest",
+    "selectedProjectPullRequestKey",
+    "subject",
+  ],
+  terminal: [
+    "appleProjectPath",
+    "appleToolchainClient",
+    "codeController",
+    "codeProviderGroups",
+    "hostBridge",
+    "providerController",
+    "serverUrl",
+    "subject",
+    "utilityTabId",
+    "windowCapability",
+  ],
+  tests: [
+    "appleProjectPath",
+    "appleToolchainClient",
+    "codeController",
+    "codeProviderGroups",
+    "hostBridge",
+    "providerController",
+    "serverUrl",
+    "subject",
+    "utilityTabId",
+    "windowCapability",
+  ],
+  "ios-simulator": [
+    "appleProjectPath",
+    "appleToolchainClient",
+    "codeController",
+    "codeProviderGroups",
+    "hostBridge",
+    "providerController",
+    "serverUrl",
+    "subject",
+    "utilityTabId",
+    "windowCapability",
+  ],
+  "android-emulator": [
+    "androidToolchainClient",
+    "codeThreadView",
+    "hostBridge",
+    "subject",
+    "windowCapability",
+  ],
+  environment: [],
+} as const satisfies Readonly<
+  Record<RightUtilityDockSurfaceId, ReadonlyArray<keyof ThreadUtilityDockContentProps>>
+>;
+
+/** Whether the tool for `surface` declares `input` among what it reads. */
+export function dockToolReads(
+  surface: RightUtilityDockSurfaceId,
+  input: keyof ThreadUtilityDockContentProps,
+): boolean {
+  return dockModuleInputs[surface].some((declared) => declared === input);
+}
+
 /** Closed module allowlist. Runtime availability remains owned by the host. */
 export const dockModules: Readonly<
   Record<RightUtilityDockSurfaceId, ComponentType<ThreadUtilityDockContentProps>>
 > = {
-  agents: (props) =>
-    createElement(
-      AgentsModule,
-      inputs(props, [
-        "agentRunClient",
-        "agentRunSettingsClient",
-        "nativeHarnessClient",
-        "onAgentViewRequestHandled",
-        "requestedAgentView",
-        "onReviewAgentChanges",
-        "subject",
-      ]),
-    ),
+  agents: (props) => createElement(AgentsModule, inputs(props, dockModuleInputs.agents)),
   "side-chat": (props) =>
-    createElement(
-      SideChatModule,
-      inputs(props, [
-        "chatClient",
-        "chatReadCursorStore",
-        "onSidecarOpened",
-        "providerController",
-        "serverUrl",
-        "sidecarThreadId",
-        "subject",
-        "windowCapability",
-      ]),
-    ),
-  browser: (props) =>
-    createElement(
-      BrowserModule,
-      inputs(props, [
-        "browserAutomationClient",
-        "browserContextId",
-        "hostBridge",
-        "onBrowserContextCreated",
-        "serverUrl",
-        "subject",
-        "utilityTabId",
-        "windowCapability",
-      ]),
-    ),
-  files: (props) =>
-    createElement(
-      FilesModule,
-      inputs(props, [
-        "onOpenFile",
-        "serverUrl",
-        "subject",
-        "windowCapability",
-        "workFileListingClient",
-      ]),
-    ),
-  document: (props) =>
-    createElement(
-      DocumentModule,
-      inputs(props, [
-        "codeController",
-        "serverUrl",
-        "subject",
-        "windowCapability",
-        "writtenDocumentPath",
-      ]),
-    ),
-  plan: (props) => createElement(PlanModule, inputs(props, ["planClient", "subject"])),
-  delivery: (props) => createElement(DeliveryModule, inputs(props, ["shipClient", "subject"])),
-  canvas: (props) =>
-    createElement(
-      CanvasModule,
-      inputs(props, ["canvasClient", "canvasRevision", "subject", "writtenCanvasId"]),
-    ),
-  review: (props) =>
-    createElement(
-      ReviewModule,
-      inputs(props, [
-        "agentRunClient",
-        "requestedAgentReview",
-        "onAgentReviewBack",
-        "codeController",
-        "hostBridge",
-        "onOpenFile",
-        "serverUrl",
-        "subject",
-        "windowCapability",
-      ]),
-    ),
+    createElement(SideChatModule, inputs(props, dockModuleInputs["side-chat"])),
+  browser: (props) => createElement(BrowserModule, inputs(props, dockModuleInputs.browser)),
+  files: (props) => createElement(FilesModule, inputs(props, dockModuleInputs.files)),
+  document: (props) => createElement(DocumentModule, inputs(props, dockModuleInputs.document)),
+  plan: (props) => createElement(PlanModule, inputs(props, dockModuleInputs.plan)),
+  delivery: (props) => createElement(DeliveryModule, inputs(props, dockModuleInputs.delivery)),
+  canvas: (props) => createElement(CanvasModule, inputs(props, dockModuleInputs.canvas)),
+  review: (props) => createElement(ReviewModule, inputs(props, dockModuleInputs.review)),
   "pull-requests": (props) =>
-    createElement(
-      ProjectPullRequestsModule,
-      inputs(props, [
-        "codeClient",
-        "onSelectProjectPullRequest",
-        "selectedProjectPullRequestKey",
-        "subject",
-      ]),
-    ),
-  terminal: (props) =>
-    createElement(
-      TerminalModule,
-      inputs(props, [
-        "appleProjectPath",
-        "appleToolchainClient",
-        "codeController",
-        "codeProviderGroups",
-        "hostBridge",
-        "providerController",
-        "serverUrl",
-        "subject",
-        "utilityTabId",
-        "windowCapability",
-      ]),
-    ),
-  tests: (props) =>
-    createElement(
-      TestsModule,
-      inputs(props, [
-        "appleProjectPath",
-        "appleToolchainClient",
-        "codeController",
-        "codeProviderGroups",
-        "hostBridge",
-        "providerController",
-        "serverUrl",
-        "subject",
-        "utilityTabId",
-        "windowCapability",
-      ]),
-    ),
+    createElement(ProjectPullRequestsModule, inputs(props, dockModuleInputs["pull-requests"])),
+  terminal: (props) => createElement(TerminalModule, inputs(props, dockModuleInputs.terminal)),
+  tests: (props) => createElement(TestsModule, inputs(props, dockModuleInputs.tests)),
   "ios-simulator": (props) =>
-    createElement(
-      SimulatorModule,
-      inputs(props, [
-        "appleProjectPath",
-        "appleToolchainClient",
-        "codeController",
-        "codeProviderGroups",
-        "hostBridge",
-        "providerController",
-        "serverUrl",
-        "subject",
-        "utilityTabId",
-        "windowCapability",
-      ]),
-    ),
+    createElement(SimulatorModule, inputs(props, dockModuleInputs["ios-simulator"])),
   "android-emulator": (props) =>
-    createElement(
-      AndroidEmulatorModule,
-      inputs(props, [
-        "androidToolchainClient",
-        "codeController",
-        "hostBridge",
-        "subject",
-        "windowCapability",
-      ]),
-    ),
+    createElement(AndroidEmulatorModule, inputs(props, dockModuleInputs["android-emulator"])),
   environment: () => createElement(EnvironmentModule, {}),
 };

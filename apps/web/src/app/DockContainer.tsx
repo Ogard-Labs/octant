@@ -1,5 +1,10 @@
 import type { ChatThreadId } from "@octant/contracts/chat";
-import { decodeCodeThreadId, type CodeCheckoutId } from "@octant/contracts/code";
+import {
+  decodeCodeThreadId,
+  type CodeCheckoutId,
+  type CodeBootstrap,
+  type CodeThreadView,
+} from "@octant/contracts/code";
 import type { CodeProjectPullRequestDetailQuery } from "@octant/contracts";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -114,6 +119,10 @@ export interface DockContainerProps {
    * to read it, and withholding it is what lets the dock sit still.
    */
   readonly codeThreadController?: CodeController;
+  /** Settings › Code's diff layout, for the Review tool's default. */
+  readonly codeDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
+  /** The active Code thread as its controller read it, only while a tool that shows it is open. */
+  readonly codeThreadView?: CodeThreadView;
   readonly contextSnapshot?: ContextInspectorSnapshot;
   readonly displayedDockState: ThreadUtilityDockState;
   readonly dockPresentationWidth: number;
@@ -185,6 +194,8 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     codeNavigationRevision,
     codeProviderGroups,
     codeThreadController,
+    codeDiffLayout,
+    codeThreadView,
     contextSnapshot,
     displayedDockState,
     dockPresentationWidth,
@@ -321,6 +332,8 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         {...(dockThread.mode === "code" && codeThreadController !== undefined
           ? { codeController: codeThreadController }
           : {})}
+        {...(dockThread.mode === "code" && codeThreadView !== undefined ? { codeThreadView } : {})}
+        {...(codeDiffLayout === undefined ? {} : { codeDiffLayout })}
         codeProviderGroups={codeProviderGroups}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         planClient={planClient}

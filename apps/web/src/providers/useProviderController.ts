@@ -50,6 +50,7 @@ import { parseClaudeAccountAccent } from "./configuration/claudeAccountValues";
 import { runProviderOAuthCommand } from "./providerOAuthClient";
 import type { ProviderOAuthCommand } from "./ProviderOAuthSignIn";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRetainedRecord } from "../polling/useRetainedRecord";
 import { failureMessage } from "../lib/failureMessage";
 import {
   getInjectedHostBridge,
@@ -151,6 +152,8 @@ function configurationAuthentication(instance: ProviderInstance): string | undef
 function usesSubscriptionAuthentication(instance: ProviderInstance): boolean {
   return configurationAuthentication(instance) === "subscription";
 }
+
+const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
 
 export function useProviderController(options: ProviderControllerOptions) {
   const hostBridge =
@@ -3268,11 +3271,30 @@ export function useProviderController(options: ProviderControllerOptions) {
     [client, endToolCheck, recordToolCheck],
   );
 
-  return {
+  const readInstances = useCallback(
+    () => authoritative.current?.instances ?? NO_PROVIDER_INSTANCES,
+    [],
+  );
+  const providerOAuth = useCallback(
+    (command: ProviderOAuthCommand) => {
+      if (options.serverUrl === undefined || options.windowCapability === undefined) {
+        return Promise.resolve(undefined);
+      }
+      return runProviderOAuthCommand({
+        baseUrl: options.serverUrl,
+        windowCapability: options.windowCapability,
+        command,
+      }).catch(() => undefined);
+    },
+    [options.serverUrl, options.windowCapability],
+  );
+  // One identity while nothing in it moved, so the surfaces that take the
+  // controller whole can bail out of a render that changed none of it.
+  return useRetainedRecord({
     status,
     snapshot,
-    instances: snapshot?.instances ?? [],
-    readInstances: () => authoritative.current?.instances ?? [],
+    instances: snapshot?.instances ?? NO_PROVIDER_INSTANCES,
+    readInstances,
     defaults: snapshot?.defaults ?? emptyDefaults,
     observedByInstance: observedSnapshot,
     presentationObservedByInstance: presentationObservedSnapshot,
@@ -3342,17 +3364,8 @@ export function useProviderController(options: ProviderControllerOptions) {
     updateProviderOrder,
     updateAgentEligibleModels,
     updateHiddenModels,
-    providerOAuth: (command: ProviderOAuthCommand) => {
-      if (options.serverUrl === undefined || options.windowCapability === undefined) {
-        return Promise.resolve(undefined);
-      }
-      return runProviderOAuthCommand({
-        baseUrl: options.serverUrl,
-        windowCapability: options.windowCapability,
-        command,
-      }).catch(() => undefined);
-    },
-  };
+    providerOAuth,
+  });
 }
 
 export type ProviderController = ReturnType<typeof useProviderController>;

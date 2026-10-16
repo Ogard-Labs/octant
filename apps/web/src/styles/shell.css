@@ -3292,7 +3292,6 @@ form > .work-composer-adapter__attachments {
   place-items: center;
 }
 
-.browser-workspace__history button:hover:not(:disabled),
 .browser-workspace__history button:disabled {
   opacity: 0.32;
 }

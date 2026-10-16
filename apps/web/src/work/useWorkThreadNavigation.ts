@@ -7,6 +7,7 @@ import type {
 } from "@octant/contracts";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRetainedRecord } from "../polling/useRetainedRecord";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 
@@ -191,5 +192,6 @@ export function useWorkThreadNavigation(
     });
   }, []);
 
-  return { applyThread, bootstrap, errorMessage, navigation, refresh, status } as const;
+  // One identity while nothing in it moved; see useRetainedRecord.
+  return useRetainedRecord({ applyThread, bootstrap, errorMessage, navigation, refresh, status });
 }

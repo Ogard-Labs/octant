@@ -6,24 +6,20 @@ import type { ThreadUtilityDockContentProps } from "../shell/dockModuleContext";
 
 export type AndroidEmulatorModuleProps = Pick<
   ThreadUtilityDockContentProps,
-  "androidToolchainClient" | "codeController" | "hostBridge" | "subject" | "windowCapability"
+  "androidToolchainClient" | "codeThreadView" | "hostBridge" | "subject" | "windowCapability"
 >;
 
 export default function AndroidEmulatorModule(props: AndroidEmulatorModuleProps) {
   if (props.subject.mode !== "code")
     return unavailable("Android emulator", "Android emulator opens from a Code thread.");
-  const controller = props.codeController;
+  const view = props.codeThreadView;
   const threadId = decodeCodeThreadId(props.subject.threadId);
-  if (
-    controller?.activeView === undefined ||
-    String(controller.activeView.thread.id) !== String(threadId)
-  ) {
+  if (view === undefined || String(view.thread.id) !== String(threadId)) {
     return loading("Android emulator");
   }
   if (props.androidToolchainClient === undefined) {
     return unavailable("Android emulator", "This window has no Android toolchain connection.");
   }
-  const view = controller.activeView;
   const approvals = nativeCodeWorkspaceApprovals(props.hostBridge, view);
   return (
     <AndroidEmulatorPane

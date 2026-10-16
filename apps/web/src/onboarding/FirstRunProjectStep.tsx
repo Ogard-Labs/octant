@@ -3,6 +3,8 @@ import { FolderPlus } from "lucide-react";
 import { SettingRow } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
+import type { KeyboardEvent } from "react";
 import type { FirstRunHandoffProject, FirstRunTaskMode } from "./firstRunHandoffModel";
 
 export interface FirstRunProjectStepProps {
@@ -27,6 +29,17 @@ const MODE_COPY: Record<FirstRunTaskMode, { readonly label: string; readonly lea
     lead: "Code works inside the folder and asks before it changes a file.",
   },
 };
+
+/**
+ * These toggle groups present as radio groups, and the toggle group's own
+ * arrows only move focus: the choice stayed where it was until Space. Radio
+ * arrows choose, so this takes the keys first and keeps the toggle group's
+ * handler from moving focus a second time.
+ */
+function chooseWithArrows(event: KeyboardEvent<HTMLElement>): void {
+  moveWithinRadioGroup(event);
+  if (event.defaultPrevented) event.stopPropagation();
+}
 
 /**
  * The folder the first task works in.
@@ -67,6 +80,7 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
                     const selected = value[0];
                     if (selected !== undefined) props.onSelectMode(selected);
                   }}
+                  onKeyDownCapture={chooseWithArrows}
                   role="radiogroup"
                   value={[props.mode]}
                 >
@@ -98,6 +112,7 @@ export function FirstRunProjectStep(props: FirstRunProjectStepProps) {
                     );
                     if (selected !== undefined) props.onSelectProject(selected.id);
                   }}
+                  onKeyDownCapture={chooseWithArrows}
                   role="radiogroup"
                   value={
                     props.selectedProjectId === undefined ? [] : [String(props.selectedProjectId)]
