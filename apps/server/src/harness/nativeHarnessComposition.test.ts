@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatThread, CodeThread, ToolActionAuthority, WorkThread } from "@octant/contracts";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
@@ -377,7 +379,7 @@ describe("native harness composition", () => {
       modelId: "harness-model",
     } as unknown as CodeThread;
 
-    const harness = (tainted = false) => {
+    const harness = (tainted = false, extraPorts: Record<string, unknown> = {}) => {
       const asked: Array<{ readonly threadId: string; readonly mode: string }> = [];
       const inspected: Array<unknown> = [];
       const composition = createNativeHarnessComposition({
@@ -396,6 +398,8 @@ describe("native harness composition", () => {
           }),
         },
         isHarnessProvider: () => true,
+        tasks: { replaceTasks: (async () => undefined) as never },
+        ...(extraPorts as object),
         shell: { run: async () => ({ status: "unavailable", output: "", truncated: false }) },
         contextHarness: {
           inspect: (subject) => {
@@ -422,12 +426,14 @@ describe("native harness composition", () => {
     const names = (tools: { readonly definitions: ReadonlyArray<{ readonly name: string }> }) =>
       tools.definitions.map((definition) => definition.name);
 
-    it("offers context-remaining and second-opinion in Chat without any file or shell reach", () => {
+    // The offered tool set per mode is the first item of the Harness parity checklist in
+    // docs/architecture.md; changing it means changing that checklist with it.
+    it("offers the task list, context-remaining and second-opinion in Chat without any file or shell reach", () => {
       const tools = harness().composition.forChat({ thread: chatThread, windowId: "window-1" });
-      expect(names(tools!)).toEqual(["context-remaining", "second-opinion"]);
+      expect(names(tools!)).toEqual(["todo-write", "context-remaining", "second-opinion"]);
     });
 
-    it("offers context-remaining and second-opinion in Work beside its folder tools", () => {
+    it("offers the task list, context-remaining and second-opinion in Work beside its folder tools", () => {
       const tools = harness().composition.forWork({
         thread: workThread,
         projectRoot: "/nonexistent",
@@ -439,12 +445,13 @@ describe("native harness composition", () => {
         "glob",
         "edit",
         "write",
+        "todo-write",
         "context-remaining",
         "second-opinion",
       ]);
     });
 
-    it("offers context-remaining and second-opinion in Code beside its checkout tools", () => {
+    it("offers the task list, context-remaining and second-opinion in Code beside its checkout tools", () => {
       const tools = harness().composition.forCode({
         thread: codeThread,
         checkoutRoot: "/nonexistent",
@@ -457,9 +464,82 @@ describe("native harness composition", () => {
         "bash",
         "edit",
         "write",
+        "todo-write",
         "context-remaining",
         "second-opinion",
       ]);
+    });
+
+    // Ports server.ts also supplies; each one gates a tool the user guide promises.
+    const productionPorts = {
+      goals: { read: async () => undefined, execute: async () => undefined } as never,
+      questions: { ask: async () => undefined } as never,
+      delegate: () => ({}) as never,
+      webFetch: (async () => undefined) as never,
+      resolveWebSearch: () => (async () => undefined) as never,
+    };
+
+    it("offers the full conditional matrix per mode when every production port is supplied", () => {
+      const { composition } = harness(false, productionPorts);
+      const chat = names(composition.forChat({ thread: chatThread, windowId: "window-1" })!);
+      const work = names(
+        composition.forWork({
+          thread: workThread,
+          projectRoot: "/nonexistent",
+          windowId: "window-1",
+        })!,
+      );
+      const code = names(
+        composition.forCode({
+          thread: codeThread,
+          checkoutRoot: "/nonexistent",
+          windowId: "window-1",
+        })!,
+      );
+      // Chat's web tools wait on its research grant, so they are absent here by design.
+      const lead = [
+        "todo-write",
+        "context-remaining",
+        "second-opinion",
+        "delegate",
+        "ask-user",
+        "goal",
+      ];
+      const web = ["web-fetch", "web-search"];
+      expect({ chat, work, code }).toEqual({
+        chat: lead,
+        work: ["read", "grep", "glob", "edit", "write", ...web, ...lead],
+        code: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...lead, "goal-check"],
+      });
+    });
+
+    it("keeps the composition call site supplying every port the offered set depends on", () => {
+      // The call site moves between files as wiring is extracted, so find it.
+      const root = fileURLToPath(new URL("..", import.meta.url));
+      const callers = (readdirSync(root, { recursive: true, encoding: "utf8" }) as string[])
+        .filter((file) => /\.tsx?$/.test(file) && !/\.test\.tsx?$/.test(file))
+        .filter((file) =>
+          readFileSync(`${root}/${file}`, "utf8").includes("createNativeHarnessComposition({"),
+        );
+      expect(callers, "exactly one file must call createNativeHarnessComposition({").toHaveLength(
+        1,
+      );
+      const source = readFileSync(`${root}/${callers[0]}`, "utf8");
+      const start = source.indexOf("createNativeHarnessComposition({");
+      const block = source.slice(start, start + 9000);
+      for (const port of [
+        "tasks:",
+        "goals:",
+        "questions:",
+        "secondOpinion:",
+        "delegate:",
+        "shell:",
+        "resolveWebSearch:",
+        "webFetch:",
+        "contextHarness",
+      ]) {
+        expect(block, port).toContain(port);
+      }
     });
 
     it.each([

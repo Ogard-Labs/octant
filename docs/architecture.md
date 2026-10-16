@@ -4119,6 +4119,35 @@ native harness in `apps/server/src/harness`:
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
 
+- **Parity checklist.** The 2026-10-16 parity run found Harness leads that
+  could not record task progress, were offered `second-opinion` and
+  `context-remaining` in only some modes, raised no attention for a pending
+  approval, and trapped terminal keyboard focus, none of which the Claude and
+  Codex paths did. A Harness lead counts as at parity with those first-class
+  runtimes only while every item below holds in Chat, Work, and Code. Each
+  release's acceptance runs this checklist, and a release does not claim
+  Harness parity while any item is open.
+  1. **Offered tools.** Always offered: `todo-write`, `context-remaining`,
+     and `second-opinion` in every mode; `read`, `grep`, `glob`, `edit`, and
+     `write` in Work and Code; `bash` and `goal-check` in Code only. Offered
+     when the host supplies the port: `delegate`, `ask-user`, and `goal`
+     (every mode), and `web-fetch` and `web-search` (Work and Code; Chat only
+     while its research is on, and `web-search` only with a search
+     endpoint). `nativeHarnessComposition.test.ts` pins the full set per
+     mode with every port supplied, the reduced set without them, and that
+     the composition call site still supplies each port.
+  2. **Approval attention.** A pending approval raises the same attention as
+     a pending question: the thread's state, the Inbox, and the sidebar mark,
+     and it shows inline in the thread. Not yet pinned by a test.
+  3. **Task list.** `todo-write` records pending, in-progress, and done
+     without a plan approval. Not yet pinned at the offered-set level beyond
+     item 1; the progress states are covered by `nativeHarnessTodo.test.ts`.
+  4. **One session everywhere.** The same session state is visible in web,
+     terminal, and phone.
+  5. **Terminal focus escape.** A keyboard user can leave the terminal pane
+     with a documented chord, and the pane says so. Not yet pinned; pinned
+     when the terminal focus escape lands, in the existing xterm tests.
+
 Follow-up suggestions are every provider's, not the harness's
 (`apps/server/src/followUps`). Every Chat, Work, and Code turn, on any
 provider, carries one fixed instructions block that lets the model end a reply

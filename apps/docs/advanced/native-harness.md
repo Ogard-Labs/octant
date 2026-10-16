@@ -57,6 +57,15 @@ When a turn offers Octant's own tools — the built-in browser, Canvas, computer
 use, the terminal, the Apple and Android simulators, helper agents — the model
 also gets one line per tool saying what it is for.
 
+## Parity with Claude Code and Codex
+
+Parity means a thread on the harness behaves like one on Claude Code or Codex
+where you can see it: the same tools for the mode, a pending approval asking
+for your attention the way a question does, a task list that shows progress as
+the lead works, and the same session on web, terminal, and phone. Each release
+checks these before it says the harness is at parity. The checklist is in the
+[architecture](https://github.com/Ogard-Labs/octant/blob/main/docs/architecture.md#native-harness).
+
 ## Network for commands
 
 On a Code thread that is approval-gated or auto-accepts edits, a harness
