@@ -239,6 +239,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "runtimeOutsideContentMarks"
     | "sideTasks"
     | "spendCeiling"
+    | "threadAwaitsHarnessApproval"
   > &
   Pick<
     IntegrationsWiring,
@@ -320,6 +321,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
 export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const {
     late,
+    threadAwaitsHarnessApproval,
     agentMessageService,
     agentRunPersistence,
     agentsManagedToolsFor,
@@ -922,7 +924,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 thread: (threadId) => persistence.readCodeThread(threadId),
                 runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
                 turnAwaitsPerson: (threadId) =>
-                  late.codeOperationRuntime.current?.turnAwaitsPerson?.(String(threadId)) === true,
+                  late.codeOperationRuntime.current?.turnAwaitsPerson?.(String(threadId)) ===
+                    true || threadAwaitsHarnessApproval(String(threadId)),
                 decisionPending: (candidate) =>
                   codeTurnDecisions.forThread(candidate) !== undefined,
                 mentions: {
@@ -1173,7 +1176,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 ...boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
                   turnParkedOnPerson:
                     late.codeOperationRuntime.current?.turnAwaitsPerson?.(String(threadId)) ===
-                    true,
+                      true || threadAwaitsHarnessApproval(String(threadId)),
                 }),
                 decisionPending:
                   thread !== undefined && codeTurnDecisions.forThread(thread) !== undefined,

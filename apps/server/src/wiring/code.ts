@@ -506,7 +506,10 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> & {
     | "machineChangeFeed"
     | "windowAuthorityStore"
   > &
-  Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
+  Pick<
+    AgentRunsWiring,
+    "externalContentIngestionStore" | "managedWorktreeReceipts" | "threadAwaitsHarnessApproval"
+  > &
   Pick<
     IntegrationsWiring,
     "cacheStats" | "githubIssueContextService" | "linearIssueContextService"
@@ -519,6 +522,7 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> & {
 export function wireCode(deps: CodeDependencies) {
   const {
     late,
+    threadAwaitsHarnessApproval,
     bindingReceiptStore,
     cacheStats,
     codeApprovalStore,
@@ -691,6 +695,7 @@ export function wireCode(deps: CodeDependencies) {
       options.codeService ??
       new CodeService({
         liveTurns,
+        awaitsHarnessApproval: threadAwaitsHarnessApproval,
         gitHistory: new GitHistoryPort(),
         persistence,
         access: {

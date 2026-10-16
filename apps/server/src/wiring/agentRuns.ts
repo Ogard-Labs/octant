@@ -34,6 +34,7 @@ import {
 } from "../agentRun/authorizeAgentRunCreation";
 import { ChatService } from "../chat/chatService";
 import { WorkThreadProjection } from "../work/workThreadProjection";
+import { awaitsLeadApproval } from "../harness/leadApprovalAttention";
 import { WorkTurnProjection } from "../work/workTurnProjection";
 import { CodeOperationEventStore } from "../code/codeOperationEventStore";
 import { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
@@ -269,6 +270,35 @@ function resolveAgentRunCenterContext(input: {
   };
 }
 
+/**
+ * A thread's title and Project as its own record holds them now. A harness
+ * session keeps the Project it started under, which a moved Chat thread has
+ * left, so anything that names the thread's Project reads it here.
+ */
+export function resolveHarnessThreadFacts(input: {
+  readonly persistence: PersistenceService;
+  readonly workThreadProjection: WorkThreadProjection;
+  readonly threadId: string;
+  readonly mode: OctantMode;
+}): { readonly title: string; readonly projectId?: ProjectId } | undefined {
+  try {
+    const thread =
+      input.mode === "chat"
+        ? input.persistence.readChatThread(decodeChatThreadId(input.threadId))
+        : input.mode === "work"
+          ? input.workThreadProjection.read(decodeWorkThreadId(input.threadId))
+          : input.persistence.readCodeThread(decodeCodeThreadId(input.threadId));
+    if (thread === undefined) return undefined;
+    return {
+      title: thread.title,
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+    };
+  } catch {
+    // Not a thread id of this mode.
+    return undefined;
+  }
+}
+
 export function resolveAgentRunParentThreadTitle(input: {
   readonly persistence: PersistenceService;
   readonly workThreadProjection: WorkThreadProjection;
@@ -454,6 +484,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     | "nativeHarnessComposition"
     | "nativeHarnessLeadFallback"
     | "nativeHarnessObserver"
+    | "nativeHarnessApprovalStore"
     | "nativeHarnessQuestions"
     | "nativeHarnessSessions"
     | "snapshotCanvasImpl"
@@ -521,6 +552,19 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     workTurnProjection,
   } = deps;
 
+  // The agent's own approval is the same wait a question is: the thread cannot
+  // go on until a person decides, so every mode's sidebar, board, and Needs you
+  // read treats it as parked on the person. Read per request, long after boot.
+  const threadAwaitsHarnessApproval = (threadId: string): boolean =>
+    late.nativeHarnessApprovalStore.current !== undefined &&
+    late.nativeHarnessSessions.current !== undefined &&
+    awaitsLeadApproval(
+      {
+        approvals: late.nativeHarnessApprovalStore.current,
+        sessions: late.nativeHarnessSessions.current,
+      },
+      threadId,
+    );
   // Follow-up suggestions ride the same per-turn hooks as the harness, but
   // on every provider: any model can end a reply with the block, and the
   // chips it becomes are the thread's, not the harness session's.
@@ -1317,6 +1361,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     sideTasks,
     spendCeiling,
     spendCeilingHolder,
+    threadAwaitsHarnessApproval,
     threadFollowUpSuggestions,
     turnMetrics,
   };

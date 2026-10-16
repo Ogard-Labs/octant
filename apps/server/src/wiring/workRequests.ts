@@ -51,7 +51,12 @@ import {
   isAgentRunActiveStatus,
   workProjectKeepsStatusFile,
 } from "@octant/domain";
-import { resolveAgentRunParentThreadTitle } from "./agentRuns";
+import {
+  type AgentRunsWiring,
+  resolveAgentRunParentThreadTitle,
+  resolveHarnessThreadFacts,
+} from "./agentRuns";
+import { listLeadApprovalRequests } from "../harness/leadApprovalAttention";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
@@ -88,6 +93,7 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
     "nativeHarnessApprovals" | "nativeHarnessQuestionsLive" | "nativeHarnessSessionsLive"
   > &
   Pick<ChatWiring, "chatService"> &
+  Pick<AgentRunsWiring, "threadAwaitsHarnessApproval"> &
   Pick<
     WorkWiring,
     | "workArtifactProjection"
@@ -100,6 +106,7 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
 
 export function wireWorkRequests(deps: WorkRequestsDependencies) {
   const {
+    threadAwaitsHarnessApproval,
     late,
     agentRunPersistence,
     baseRouteCodeService,
@@ -234,13 +241,18 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
           .filter((request) => request.status === "pending")
       : [];
     const pendingRequest = pendingRequests.at(0);
+    const leadApprovalWaiting = threadAwaitsHarnessApproval(String(threadId));
     const childRuns = persistence.agentRunProjection.parentSummary(
       decodeAgentRunParentThreadId(String(threadId)),
     );
     return boardRuntimeActivityFromTurnsAndSignals({
       turns: workTurnProjection.listForThread(threadId),
-      pendingRequest: pendingRequest !== undefined,
-      ...(pendingRequest === undefined ? {} : { pendingRequestKind: pendingRequest.detail.kind }),
+      pendingRequest: pendingRequest !== undefined || leadApprovalWaiting,
+      ...(pendingRequest !== undefined
+        ? { pendingRequestKind: pendingRequest.detail.kind }
+        : leadApprovalWaiting
+          ? { pendingRequestKind: "approval" as const }
+          : {}),
       childActive: childRuns.filter(
         (run) => isAgentRunActiveStatus(run.lifecycleStatus) && run.lifecycleStatus !== "waiting",
       ).length,
@@ -261,8 +273,46 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     windowAuthorityStore,
     maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
-  const childPendingForWindow = (windowId: WindowId) =>
-    listChildPendingRequests(
+  // Whether a window may open a Work or Code parent: the project binding, not
+  // the harness session route, which also requires the thread to be the open
+  // surface and would hide the row everywhere except the thread already open.
+  const windowMayOpenWorkOrCodeThread = (input: {
+    readonly threadId: string;
+    readonly windowId: string;
+  }) =>
+    windowMayListChildThread(
+      {
+        purged: (threadId) =>
+          persistence.connection
+            .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
+            .get(threadId) !== undefined,
+        codeThread: (threadId) => {
+          try {
+            return persistence.readCodeThread(decodeCodeThreadId(threadId));
+          } catch {
+            // A Work thread id is not a Code thread id.
+            return undefined;
+          }
+        },
+        workThread: (threadId) => {
+          try {
+            return workThreadProjection.read(decodeWorkThreadId(threadId));
+          } catch {
+            // Neither mode owns this id.
+            return undefined;
+          }
+        },
+        workspace: (windowId) =>
+          persistence.readWindowWorkspace(decodeWindowId(windowId))?.workspace,
+        hasActiveProject: (projectId, mode) => projectService.hasActiveProject(projectId, mode),
+      },
+      input,
+    );
+  // Rows that find a request a thread's agent or subagent is waiting on: the
+  // answer stays on the harness session route, which checks the window and
+  // the principal, so these rows carry no way to answer.
+  const childPendingForWindow = async (windowId: WindowId) => [
+    ...(await listChildPendingRequests(
       {
         approvals: nativeHarnessApprovals,
         questions: nativeHarnessQuestionsLive,
@@ -275,39 +325,24 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
             parentThreadId: run.parentThreadId,
             mode: run.routingReceipt.mode,
           }),
-        authorizeThread: (input) =>
-          windowMayListChildThread(
-            {
-              purged: (threadId) =>
-                persistence.connection
-                  .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
-                  .get(threadId) !== undefined,
-              codeThread: (threadId) => {
-                try {
-                  return persistence.readCodeThread(decodeCodeThreadId(threadId));
-                } catch {
-                  // A Work thread id is not a Code thread id.
-                  return undefined;
-                }
-              },
-              workThread: (threadId) => {
-                try {
-                  return workThreadProjection.read(decodeWorkThreadId(threadId));
-                } catch {
-                  // Neither mode owns this id.
-                  return undefined;
-                }
-              },
-              workspace: (windowId) =>
-                persistence.readWindowWorkspace(decodeWindowId(windowId))?.workspace,
-              hasActiveProject: (projectId, mode) =>
-                projectService.hasActiveProject(projectId, mode),
-            },
-            input,
-          ),
+        authorizeThread: windowMayOpenWorkOrCodeThread,
       },
       String(windowId),
-    );
+    )),
+    ...(await listLeadApprovalRequests(
+      {
+        approvals: nativeHarnessApprovals,
+        sessions: nativeHarnessSessionsLive,
+        threadFacts: ({ threadId, mode }) =>
+          resolveHarnessThreadFacts({ persistence, workThreadProjection, threadId, mode }),
+        authorizeThread: ({ threadId, mode, windowId: asking }) =>
+          mode === "chat"
+            ? chatService.listsActiveThread(threadId)
+            : windowMayOpenWorkOrCodeThread({ threadId, windowId: asking }),
+      },
+      String(windowId),
+    )),
+  ];
   const pendingRequestService = new PendingRequestService({
     readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
     work: async (windowId) => [

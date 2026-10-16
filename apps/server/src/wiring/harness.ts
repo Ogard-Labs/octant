@@ -70,6 +70,7 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> & {
   readonly late: Pick<
     LateBindings,
     | "agentRunInteractions"
+    | "nativeHarnessApprovalStore"
     | "nativeHarnessComposition"
     | "nativeHarnessLeadFallback"
     | "nativeHarnessObserver"
@@ -263,6 +264,7 @@ export function wireHarness(deps: HarnessDependencies) {
     clock: () => new Date().toISOString(),
     outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
   });
+  late.nativeHarnessApprovalStore.current = nativeHarnessApprovals;
   const agentRunInteractions = createAgentRunInteractions({
     getById: (id) => agentRunPersistence.getById(id),
     approvals: nativeHarnessApprovals,

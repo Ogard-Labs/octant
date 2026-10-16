@@ -198,6 +198,7 @@ export function startOctantServer(
       nativeHarnessObserver: { current: undefined },
       nativeHarnessLeadFallback: { current: undefined },
       nativeHarnessQuestions: { current: undefined },
+      nativeHarnessApprovalStore: { current: undefined },
       agentRunInteractions: { current: undefined },
       snapshotCanvasImpl: {
         current: () => ({
@@ -284,6 +285,7 @@ export function startOctantServer(
       sideTasks,
       spendCeiling,
       spendCeilingHolder,
+      threadAwaitsHarnessApproval,
       threadFollowUpSuggestions,
       turnMetrics,
     } = wireAgentRuns({
@@ -448,6 +450,7 @@ export function startOctantServer(
       selectCodeConversation,
       workAttachments,
     } = yield* wireCode({
+      threadAwaitsHarnessApproval,
       late,
       bindingReceiptStore,
       cacheStats,
@@ -544,6 +547,7 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
     } = yield* wireCodeRuntime({
+      threadAwaitsHarnessApproval,
       late,
       agentMessageService,
       agentRunPersistence,
@@ -720,6 +724,7 @@ export function startOctantServer(
       threadMentionService,
       workspacePresetRoutes,
     } = yield* wireChat({
+      threadAwaitsHarnessApproval,
       late,
       agentMessageProjection,
       agentMessageService,
@@ -973,6 +978,7 @@ export function startOctantServer(
       workRequestRoutes,
       workThreadRoutes,
     } = wireWorkRequests({
+      threadAwaitsHarnessApproval,
       late,
       agentRunPersistence,
       baseRouteCodeService,

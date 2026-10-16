@@ -119,6 +119,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     | "runtimeOutsideContentMarks"
     | "sideTasks"
     | "spendCeiling"
+    | "threadAwaitsHarnessApproval"
   > &
   Pick<
     IntegrationsWiring,
@@ -158,6 +159,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
 export function wireChat(deps: ChatDependencies) {
   const {
     late,
+    threadAwaitsHarnessApproval,
     agentMessageProjection,
     agentMessageService,
     agentPluginMcpSessionManager,
@@ -354,6 +356,7 @@ export function wireChat(deps: ChatDependencies) {
     let imageJobService!: ImageJobService;
     const chatService = new ChatService({
       liveTurns,
+      awaitsHarnessApproval: threadAwaitsHarnessApproval,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       outsideContentMarks: runtimeOutsideContentMarks,
       attachmentStore: chatAttachmentStore,

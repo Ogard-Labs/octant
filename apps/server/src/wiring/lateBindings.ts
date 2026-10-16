@@ -29,6 +29,7 @@ import type { NativeHarnessComposition } from "../harness/nativeHarnessCompositi
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
 import { NativeHarnessQuestionStore } from "../harness/nativeHarnessQuestions";
+import { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
 import { createAgentRunInteractions } from "../agentRun/agentRunInteractions";
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
 import { ZenAssistantTools } from "../zen/zenAssistantTools";
@@ -62,6 +63,7 @@ export interface LateBindings {
   readonly nativeHarnessObserver: { current: NativeHarnessTurnObserver | undefined };
   readonly nativeHarnessLeadFallback: { current: NativeHarnessLeadFallbackService | undefined };
   readonly nativeHarnessQuestions: { current: NativeHarnessQuestionStore | undefined };
+  readonly nativeHarnessApprovalStore: { current: NativeHarnessApprovalStore | undefined };
   readonly agentRunInteractions: {
     current: ReturnType<typeof createAgentRunInteractions> | undefined;
   };

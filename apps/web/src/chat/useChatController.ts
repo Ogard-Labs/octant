@@ -264,6 +264,9 @@ export function useChatController(options: ChatControllerOptions) {
   const [executingByThread, setExecutingByThread] = useState<ReadonlyMap<string, boolean>>(
     new Map(),
   );
+  const [awaitingInputByThread, setAwaitingInputByThread] = useState<ReadonlyMap<string, boolean>>(
+    new Map(),
+  );
   const [liveTurnByThread, setLiveTurnByThread] = useState<ReadonlyMap<string, LiveTurnFacts>>(
     new Map(),
   );
@@ -375,6 +378,19 @@ export function useChatController(options: ChatControllerOptions) {
         const key = String(thread.id);
         if (current.get(key) !== thread.executing) {
           next.set(key, thread.executing);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+    setAwaitingInputByThread((current) => {
+      let changed = false;
+      const next = new Map(current);
+      for (const thread of threads) {
+        const key = String(thread.id);
+        const awaiting = thread.awaitingInput === true;
+        if ((current.get(key) ?? false) !== awaiting) {
+          next.set(key, awaiting);
           changed = true;
         }
       }
@@ -801,6 +817,7 @@ export function useChatController(options: ChatControllerOptions) {
       if (thread.lifecycle === "active") {
         items.push({
           ...(executingByThread.get(String(thread.id)) === true ? { executing: true } : {}),
+          ...(awaitingInputByThread.get(String(thread.id)) === true ? { awaitingInput: true } : {}),
           ...liveTurnByThread.get(String(thread.id)),
           ...(followUpByThread.get(String(thread.id)) === undefined
             ? {}
@@ -830,6 +847,7 @@ export function useChatController(options: ChatControllerOptions) {
       markedUnreadThreads.has(item.threadId) ? { ...item, unread: true } : item,
     );
   }, [
+    awaitingInputByThread,
     bootstrap,
     executingByThread,
     followUpByThread,

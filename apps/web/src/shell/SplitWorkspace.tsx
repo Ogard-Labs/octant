@@ -98,6 +98,11 @@ export interface SplitWorkspaceProps {
    */
   readonly runningThreadIds?: ReadonlySet<string>;
   /**
+   * Threads parked on the person: the agent's own approval waits. They are not
+   * running, so the pane says they need the person.
+   */
+  readonly waitingThreadIds?: ReadonlySet<string>;
+  /**
    * Selects a pull request named on a pane tab for the dock's Review pane.
    * Without it the chip is a mark with nowhere to go.
    */
@@ -419,6 +424,11 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
     "threadId" in surface &&
     surface.threadId !== undefined &&
     props.runningThreadIds?.has(String(surface.threadId)) === true;
+  const waiting =
+    environment !== undefined &&
+    "threadId" in surface &&
+    surface.threadId !== undefined &&
+    props.waitingThreadIds?.has(String(surface.threadId)) === true;
   const showHeader = props.layout.kind !== "pane" || props.showSinglePaneHeader !== false;
   const title = workspaceSurfaceTitle(surface, props.liveThreadTitles);
   const activateUnlessClosing = (target: EventTarget | null) => {
@@ -505,6 +515,8 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     <span aria-hidden="true" className="spinner spinner-sm" />
                     Running
                   </span>
+                ) : waiting ? (
+                  <span className="workspace-pane__status">Needs you</span>
                 ) : null}
               </span>
               {showTabs ? (
