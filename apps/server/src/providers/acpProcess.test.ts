@@ -70,7 +70,7 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
   ],
   cline: ["3.0.61", "3.0.60", "cline release 3.0.61 private-noise"],
   qwen: ["0.23.0", "0.22.9", "qwen-code release 0.23.0 private-noise"],
-  fx: ["0.0.10", "0.0.9", "fx release 0.0.10 private-noise"],
+  fx: ["0.0.13", "0.0.12", "fx release 0.0.13 private-noise"],
 };
 const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   opencode: "0.0.0",
@@ -85,7 +85,7 @@ const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   copilot: "1.0.82",
   cline: "3.0.61",
   qwen: "0.23.0",
-  fx: "0.0.10",
+  fx: "0.0.13",
 };
 
 function fixture(profile: AcpProviderProfile, mode = "ready") {
