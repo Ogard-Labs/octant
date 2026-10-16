@@ -6,7 +6,11 @@ import { CircleDot, GitPullRequest, Inbox, ListTodo, RefreshCw } from "lucide-re
 import { useEffect, useState } from "react";
 import type { ThreadAttentionSignal } from "../notifications/threadAttention";
 import { PendingRequestRow } from "../pendingRequests/PendingRequestRow";
-import { isChildPendingRequest, pendingRequestKey } from "../pendingRequests/pendingRequests";
+import {
+  isFindOnlyPendingRequest,
+  isLeadApprovalPendingRequest,
+  pendingRequestKey,
+} from "../pendingRequests/pendingRequests";
 import {
   usePendingRequestRows,
   type PendingRequestRowsSource,
@@ -153,11 +157,11 @@ export function InboxView(props: InboxViewProps) {
   const externalSectionsPresent = loadGithub !== undefined || loadLinear !== undefined;
   const decisions = props.decisions;
   const { rows: requestRows, answer } = usePendingRequestRows(decisions);
-  // Decisions finished turns asked and subagents waiting on the person are the
-  // requests the Inbox lists from this read; its approvals and questions come
-  // from thread attention signals.
+  // Decisions finished turns asked, subagents waiting on the person, and the
+  // agent's own approvals are the requests the Inbox lists from this read; its
+  // other approvals and questions come from thread attention signals.
   const decisionRows = (requestRows ?? []).filter(
-    (entry) => entry.request.kind === "decision" || isChildPendingRequest(entry.request),
+    (entry) => entry.request.kind === "decision" || isFindOnlyPendingRequest(entry.request),
   );
   // A thread whose finished turn asked a decision is listed once, as that
   // decision, rather than again as a turn waiting to be read.
@@ -166,8 +170,17 @@ export function InboxView(props: InboxViewProps) {
       .filter((entry) => entry.request.kind === "decision")
       .map((entry) => String(entry.request.threadId)),
   );
+  // A thread whose agent waits on its own approval is listed once, as that
+  // approval, rather than again as the thread's attention signal for it.
+  const approving = new Set(
+    decisionRows
+      .filter((entry) => isLeadApprovalPendingRequest(entry.request))
+      .map((entry) => String(entry.request.threadId)),
+  );
   const attentionItems = props.attentionItems.filter(
-    (item) => !(item.signal.reason === "turn-finished" && deciding.has(item.signal.threadId)),
+    (item) =>
+      !(item.signal.reason === "turn-finished" && deciding.has(item.signal.threadId)) &&
+      !(item.signal.reason === "approval-required" && approving.has(item.signal.threadId)),
   );
 
   return (

@@ -403,10 +403,11 @@ probe (every 2 s while a window is visible, 10 s otherwise). Every row names its
   per bound window and the menu bar's own window binds no Code Project, so its
   Code rows are the requests and decisions each local window with a persisted
   Code binding could answer; a Code Project no local window binds stays out. A
-  waiting subagent is read the same way. The menu bar's window binds no
-  Project, so its subagent rows are the waits that each saved local window with
-  a Work or Code Project binding could open, whether or not that window is open
-  now; a window bound to no Project adds none. Each parent is one needs-you
+  waiting subagent, and the agent's own approval, are read the same way. The
+  menu bar's window binds no Project, so its Work and Code rows for them are the
+  waits that each saved local window with a Work or Code Project binding could
+  open, whether or not that window is open now; a window bound to no Project
+  adds none. A Chat thread's own approval is listed for any local window. Each parent is one needs-you
   row whose `activitySource` is `session`, and like every fleet row it carries
   the thread title, mode, Project name, state, and time, never the request
   text, the child's task, or its role. A thread that is both waiting and
@@ -4032,7 +4033,28 @@ native harness in `apps/server/src/harness`:
   (including a read of the session view), so one whose timer fired late (a
   busy host, a machine that slept) is never still shown as pending,
   answerable, or holding a slot. A Code thread's inline copy of a question is
-  withdrawn whenever the question settles, however it settled. At most 32
+  withdrawn whenever the question settles, however it settled. The lead's own
+  approval is the same wait a question is: while a turn is blocked on it, the
+  thread reads as parked on the person, not running, in every mode. Work's and
+  Code's boards file it under Waiting with the awaiting-input reason; Work's
+  navigation row carries `awaitingInput` with the `approval` kind, and Chat's and
+  Code's carry `awaitingInput` with `executing` false, so the sidebar mark and
+  the pane header say the thread needs the person (**Needs you**, not
+  **Running**) and the thread's attention signal reads "Waiting for your
+  approval". The pending-requests read lists it as a `lead-approval` row (see
+  [pending requests across modes](#security-and-authority)), and the thread
+  shows the approval as a card above its composer, with the same choices, host
+  ticks, and outside-content note as the Agents tab. The card decides nothing:
+  it posts to `POST /api/native-harness/sessions/:thread/approvals`, so the host
+  checks the window and the principal before anything is decided, and a window
+  or paired device keeps exactly the limits it has there. A decision, expiry, or
+  cancellation from any surface (web, CLI, phone) clears every one of these. A
+  restart takes the call the approval guarded: the journal still holds it as
+  pending in a session that needs resuming (`recovery-required`), so the thread
+  keeps its attention and the row and card say the call did not run and offer
+  only **Resume**. An answer sent to it anyway settles it `cancelled`, never
+  approved, and returns `lost-in-restart`; resuming expires it, and the lead asks
+  again if it still wants the call. At most 32
   questions and 32 approvals wait at once across the whole host, the cap MCP
   and browser tool approvals use; one
   past it is refused at once as `question-too-many-waiting` or
@@ -5272,10 +5294,20 @@ mechanisms are:
   request journaled by a turn that died with the process is left out, because
   answering it settles the turn interrupted. Excluded: Chat approvals (Chat
   declines every provider approval), hidden Side Chats, Work browser tool approvals
-  (`/api/browser/approvals`), Computer Use approvals, extension tool approvals,
-  and a lead native-harness session approval (a request with no `source`); a
-  native-harness question raised on a Code turn is a Code question and is
-  listed. A child agent's approval or question (`source` set) is listed as a
+  (`/api/browser/approvals`), Computer Use approvals, and extension tool
+  approvals. A native-harness question raised on a Code turn is a Code question
+  and is listed. The lead's own native-harness session approval (a request with
+  no `source`) is listed as a `lead-approval` row in any mode: the thread, its
+  title, Project, the approval's summary (cut and redacted like a child's request
+  text: Work text carries no path or URL, Code text keeps the byte bound of a
+  Code approval summary), and `lostInRestart` when the journal holds it as
+  pending although no turn waits on it. Like a child's row it carries no options
+  and no answer handle, so the read adds no answer route; **Review request**
+  opens the thread, whose approval card decides it through the harness session
+  route. It is listed while a turn is blocked on it or, after a restart, while
+  the session awaits resuming, for a window that may open the thread (Work and
+  Code: bound to the parent's project, as for a subagent; Chat: an active,
+  listed thread). A child agent's approval or question (`source` set) is listed as a
   `child-approval` or `child-question` row on a Work or Code parent: it carries
   the parent thread, the child's run, role, task (at most 200 characters, with
   a Work parent's task redacted of paths and URLs as its request text is),
@@ -5300,7 +5332,9 @@ mechanisms are:
   classifier names no action for it, and the route refuses a paired device's
   principal. Freshness rides the Machine change feed: a child agent's approval or
   question asked or settled publishes `work-navigation` and `code-navigation`
-  (a lead's own request publishes nothing new),
+  (a lead's own question publishes nothing new), and any harness approval, the
+  lead's or a child's, asked or settled publishes `chat-navigation`,
+  `work-navigation`, and `code-navigation`,
   a Work request's
   transitions and a Chat attempt's question are journaled, a Code request's ask,
   answer, and turn end are journaled stream events, and a Code browser-origin

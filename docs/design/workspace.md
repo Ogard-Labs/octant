@@ -177,8 +177,9 @@ Code a second chip naming the branch. The chips keep their width (each capped at
 the Project chip is omitted without a Project and the branch chip without a
 branch. While the host projects the thread as executing, a "Running" pill with
 a spinner follows them; it carries no elapsed time because the host does not
-report when the turn began. A surface that is not a thread shows no
-environment mark.
+report when the turn began. A thread whose turn is parked on the agent's own
+approval is not running: the pill reads "Needs you", with no spinner, until
+someone decides. A surface that is not a thread shows no environment mark.
 At phone width (680px and below) the title row drops both chips so the title
 stays readable; the composer's context strip below the thread names the
 Project and branch there.
@@ -483,8 +484,8 @@ The board reads the same host list as the Needs you card (the
 [pending-requests read](host-reads-and-commands.md#pending-requests)) once for the whole board, only while the board is mounted, on the same
 change-feed, settings, and workspace signals, and never on a timer. A card is
 matched to its request by thread and mode. A thread whose live turn waits on an
-approval or a question files under Waiting with the awaiting-input reason, not
-In progress: the provider session stays open while it waits, so the host
+approval or a question, or on the agent's own harness approval, files under
+Waiting with the awaiting-input reason, not In progress: the provider session stays open while it waits, so the host
 reads the wait from the running turn's open approvals and questions (Code) or
 the open request (Work) rather than from the turn's running record. Those are
 the requests the pending-requests read lists, so the board read that follows an

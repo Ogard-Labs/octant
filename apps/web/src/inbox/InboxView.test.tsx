@@ -9,6 +9,7 @@ import {
   codeDecision,
   pendingIds,
   workChildApproval,
+  workLeadApproval,
 } from "../palette/pendingRequests.test-fixtures";
 import type { AssignedLinearIssuesList } from "./loadAssignedLinearIssues";
 import { InboxView, type InboxDecisionSource } from "./InboxView";
@@ -178,6 +179,73 @@ describe("InboxView waiting subagents", () => {
       await screen.findByRole("group", { name: "Fix the parser has a subagent waiting for you" }),
     ).toBeVisible();
     expect(screen.getByText("Finished a turn")).toBeVisible();
+  });
+});
+
+describe("InboxView waiting agent approvals", () => {
+  it("lists the agent's own approval and opens its thread without answering it", async () => {
+    const user = userEvent.setup();
+    const clients = decisionClients();
+    const source = decisionSource(clients, [workLeadApproval()]);
+    render(
+      <InboxView attentionItems={[]} decisions={source} onClose={vi.fn()} onOpenThread={vi.fn()} />,
+    );
+
+    const row = await screen.findByRole("group", { name: "Quarterly report needs your approval" });
+    expect(within(row).getByText("edit: summary.md")).toBeInTheDocument();
+    expect(screen.queryByText("No thread is waiting on you.")).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: /Approve|Deny/ })).toBeNull();
+
+    await user.click(within(row).getByRole("button", { name: "Review request" }));
+    expect(source.onOpenThread).toHaveBeenCalledExactlyOnceWith(workLeadApproval());
+    expect(clients.workRequestClient.execute).not.toHaveBeenCalled();
+  });
+
+  it("lists the approval once, not again as the thread's attention", async () => {
+    render(
+      <InboxView
+        attentionItems={[
+          {
+            signal: {
+              threadId: pendingIds.workThread,
+              reason: "approval-required",
+              title: "Quarterly report",
+              source: "work",
+              detail: "Waiting for your approval.",
+            },
+          },
+        ]}
+        decisions={decisionSource(decisionClients(), [workLeadApproval()])}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("group", { name: "Quarterly report needs your approval" }),
+    ).toBeVisible();
+    expect(screen.queryByText("Waiting for your approval.")).not.toBeInTheDocument();
+  });
+
+  it("keeps the thread's attention row when this window cannot read the list", () => {
+    render(
+      <InboxView
+        attentionItems={[
+          {
+            signal: {
+              threadId: pendingIds.workThread,
+              reason: "approval-required",
+              title: "Quarterly report",
+              source: "work",
+              detail: "Waiting for your approval.",
+            },
+          },
+        ]}
+        onClose={vi.fn()}
+        onOpenThread={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Waiting for your approval.")).toBeVisible();
   });
 });
 

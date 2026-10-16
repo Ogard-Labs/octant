@@ -494,6 +494,7 @@ import type {
 import {
   answerPendingRequest,
   isChildPendingRequest,
+  isFindOnlyPendingRequest,
   type ChildPendingRequest,
 } from "./pendingRequests/pendingRequests";
 import type { InboxDecisionSource } from "./inbox/InboxView";
@@ -551,8 +552,12 @@ export interface AppProps {
 
 const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
 const NO_VOICE_SETTINGS: VoiceSettings = {};
-/** Only Work and Code turns ask decisions; one array, so a read is not redone per render. */
-const DECISION_MODES: ReadonlyArray<OctantMode> = ["work", "code"];
+/**
+ * The Inbox reads the requests it lists from every mode: only Work and Code
+ * turns ask decisions, but the agent's own approval waits in any of the three.
+ * One array, so a read is not redone per render.
+ */
+const DECISION_MODES: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
 
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() =>
@@ -2107,10 +2112,10 @@ function LaunchedShell(
   });
   // The row count mirrors the dock badge: distinct threads waiting, minus the
   // one the user is looking at, whose signal the open thread already answers.
-  // A thread whose subagent waits on the person counts too, once.
-  // Only Work and Code threads have subagent rows, and a subagent's ask or
-  // settle moves both of those topics. Chat navigation moves on every streaming
-  // delta, so following it would re-read pending requests for every token.
+  // A thread whose subagent, or whose agent itself, waits on the person counts
+  // too, once. A subagent's ask or settle and the agent's own approval move the
+  // Work and Code topics. Chat navigation moves on every streaming delta, so
+  // following it would re-read pending requests for every token.
   const subagentWaitRead = usePendingRequestRead(pendingRequestClient, {
     feedRevision: machineChanges.workNavigation + machineChanges.codeNavigation,
     settings: controller.settings,
@@ -2140,7 +2145,7 @@ function LaunchedShell(
     () =>
       subagentWaitRead.status === "ready"
         ? subagentWaitRead.requests
-            .filter(isChildPendingRequest)
+            .filter(isFindOnlyPendingRequest)
             .map((request) => String(request.threadId))
         : [],
     [subagentWaitRead],
@@ -4050,6 +4055,7 @@ function LaunchedShell(
             // said "active" beside almost every thread and told the reader
             // nothing. The status dot carries it instead.
             activity: codeThreadActivity(thread),
+            ...(thread.awaitingInput === true ? { awaitingKind: "approval" as const } : {}),
             ...(thread.turnStartedAt === undefined ? {} : { turnStartedAt: thread.turnStartedAt }),
             ...(thread.liveStep === undefined ? {} : { liveStep: thread.liveStep }),
             ...(thread.checkoutChip === undefined ? {} : { checkoutChip: thread.checkoutChip }),
@@ -4068,6 +4074,7 @@ function LaunchedShell(
             ...threadRest(thread, {
               now: minuteNow,
               awaitingInput:
+                thread.awaitingInput === true ||
                 (codeProviderRequestsByThreadId[String(thread.threadId)]?.length ?? 0) > 0,
             }),
           }))
@@ -4134,14 +4141,22 @@ function LaunchedShell(
     // after a mid-turn snooze does.
     const markedChatNavigation = chatController.navigation.map((thread) => ({
       ...withProviderMark(thread),
-      ...threadRest(thread, { now: minuteNow, awaitingInput: false }),
+      // Chat's durable follow-up never wakes a row, but the agent's own
+      // approval is the host's live signal that the thread needs the person.
+      ...threadRest(thread, { now: minuteNow, awaitingInput: thread.awaitingKind === "approval" }),
     }));
     // The pane header says "Running" for exactly the threads the sidebar's
     // status mark calls working, so the two never disagree.
     const runningThreadIds = new Set<string>();
+    // A thread parked on the agent's own approval is not running: its pane says
+    // it needs the person, and the sidebar's attention mark says the same.
+    const needsPersonThreadIds = new Set<string>();
     for (const rows of [codeProjectThreads, workProjectThreads, markedChatNavigation]) {
       for (const thread of rows) {
         if (thread.activity === "working") runningThreadIds.add(thread.threadId);
+        else if (thread.activity === "attention" && thread.awaitingKind !== undefined) {
+          needsPersonThreadIds.add(thread.threadId);
+        }
       }
     }
     return {
@@ -4151,6 +4166,7 @@ function LaunchedShell(
       markedThreadGroups,
       providerByThreadId,
       runningThreadIds,
+      needsPersonThreadIds,
       withProviderMark,
       workProjectThreads,
     };
@@ -4536,6 +4552,7 @@ function LaunchedShell(
     markedThreadGroups,
     providerByThreadId,
     runningThreadIds,
+    needsPersonThreadIds,
     withProviderMark,
     workProjectThreads,
   } = navigationModel;
@@ -7976,6 +7993,7 @@ function LaunchedShell(
                         liveThreadTitles={liveThreadTitles}
                         providerByThreadId={providerByThreadId}
                         runningThreadIds={runningThreadIds}
+                        waitingThreadIds={needsPersonThreadIds}
                         showProviderIcons={controller.settings.showThreadProviderIcons}
                         environmentNames={environmentNames}
                         {...(projectController.activeProject === undefined

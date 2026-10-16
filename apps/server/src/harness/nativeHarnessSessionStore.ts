@@ -138,6 +138,33 @@ export class NativeHarnessSessionStore {
     });
   }
 
+  /**
+   * The approvals the lead itself asked, not a subagent, that nobody has
+   * settled, oldest first, with the session they belong to. A thread with none,
+   * which is nearly every thread, returns nothing, so a navigation read can ask
+   * once per thread without decoding the session view.
+   */
+  pendingLeadApprovals(threadId: string):
+    | {
+        readonly session: NativeHarnessSession;
+        readonly approvals: ReadonlyArray<NativeHarnessApproval>;
+      }
+    | undefined {
+    const record = this.#records.get(threadId);
+    if (record === undefined) return undefined;
+    const approvals = record.approvals.filter(
+      (entry) => entry.status === "pending" && entry.source === undefined,
+    );
+    return approvals.length === 0 ? undefined : { session: record.session, approvals };
+  }
+
+  /** The threads that hold at least one unsettled lead approval. */
+  threadsWithPendingLeadApprovals(): ReadonlyArray<string> {
+    return [...this.#records.keys()].filter(
+      (threadId) => this.pendingLeadApprovals(threadId) !== undefined,
+    );
+  }
+
   /** Remembers the retry the endpoint just announced, replacing any earlier one. */
   noteRetry(threadId: string, notice: HarnessRetryNotice): void {
     if (this.#records.get(threadId) === undefined) return;

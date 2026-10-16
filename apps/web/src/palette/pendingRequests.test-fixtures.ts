@@ -173,3 +173,17 @@ export function codeChildQuestion(): PendingRequest {
     requestedAt: "2026-10-06T08:07:00.000Z",
   });
 }
+
+/** The agent's own harness approval, found from anywhere and answered in the thread. */
+export function workLeadApproval(lostInRestart = false): PendingRequest {
+  return decodePendingRequest({
+    mode: "work",
+    kind: "lead-approval",
+    projectId: pendingIds.project,
+    threadId: pendingIds.workThread,
+    threadTitle: "Quarterly report",
+    text: "edit: summary.md",
+    ...(lostInRestart ? { lostInRestart: true } : {}),
+    requestedAt: "2026-10-06T08:07:00.000Z",
+  });
+}

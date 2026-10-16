@@ -803,6 +803,7 @@ import { createSideTaskRouteHandler } from "./sideTasks/sideTaskRoutes";
 import { SideTaskStore } from "./sideTasks/sideTaskStore";
 import { createSideTaskTools } from "./sideTasks/sideTaskTools";
 import { NativeHarnessApprovalStore } from "./harness/nativeHarnessApprovals";
+import { awaitsLeadApproval, listLeadApprovalRequests } from "./harness/leadApprovalAttention";
 import { NativeHarnessQuestionStore } from "./harness/nativeHarnessQuestions";
 import { createAgentRunInteractions } from "./agentRun/agentRunInteractions";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
@@ -2074,6 +2075,17 @@ export function startOctantServer(
     let nativeHarnessObserver: NativeHarnessTurnObserver | undefined;
     let nativeHarnessLeadFallback: NativeHarnessLeadFallbackService | undefined;
     let nativeHarnessQuestions: NativeHarnessQuestionStore | undefined;
+    let nativeHarnessApprovalStore: NativeHarnessApprovalStore | undefined;
+    // The agent's own approval is the same wait a question is: the thread cannot
+    // go on until a person decides, so every mode's sidebar, board, and Needs you
+    // read treats it as parked on the person. Read per request, long after boot.
+    const threadAwaitsHarnessApproval = (threadId: string): boolean =>
+      nativeHarnessApprovalStore !== undefined &&
+      nativeHarnessSessions !== undefined &&
+      awaitsLeadApproval(
+        { approvals: nativeHarnessApprovalStore, sessions: nativeHarnessSessions },
+        threadId,
+      );
     let agentRunInteractions: ReturnType<typeof createAgentRunInteractions> | undefined;
     // Follow-up suggestions ride the same per-turn hooks as the harness, but
     // on every provider: any model can end a reply with the block, and the
@@ -3771,6 +3783,7 @@ export function startOctantServer(
       options.codeService ??
       new CodeService({
         liveTurns,
+        awaitsHarnessApproval: threadAwaitsHarnessApproval,
         gitHistory: new GitHistoryPort(),
         persistence,
         access: {
@@ -5544,7 +5557,8 @@ export function startOctantServer(
                 thread: (threadId) => persistence.readCodeThread(threadId),
                 runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
                 turnAwaitsPerson: (threadId) =>
-                  codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true,
+                  codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true ||
+                  threadAwaitsHarnessApproval(String(threadId)),
                 decisionPending: (candidate) =>
                   codeTurnDecisions.forThread(candidate) !== undefined,
                 mentions: {
@@ -5789,7 +5803,8 @@ export function startOctantServer(
               return {
                 ...boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
                   turnParkedOnPerson:
-                    codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true,
+                    codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true ||
+                    threadAwaitsHarnessApproval(String(threadId)),
                 }),
                 decisionPending:
                   thread !== undefined && codeTurnDecisions.forThread(thread) !== undefined,
@@ -6546,6 +6561,7 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       outsideContent: (threadId) => readApprovalOutsideContent(persistence.connection, threadId),
     });
+    nativeHarnessApprovalStore = nativeHarnessApprovals;
     agentRunInteractions = createAgentRunInteractions({
       getById: (id) => agentRunPersistence.getById(id),
       approvals: nativeHarnessApprovals,
@@ -6994,6 +7010,7 @@ export function startOctantServer(
     let purgeQueuedChatMessages: ((threadId: ChatThreadId) => Promise<void>) | undefined;
     const chatService = new ChatService({
       liveTurns,
+      awaitsHarnessApproval: threadAwaitsHarnessApproval,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       outsideContentMarks: runtimeOutsideContentMarks,
       attachmentStore: chatAttachmentStore,
@@ -10656,13 +10673,18 @@ export function startOctantServer(
             .filter((request) => request.status === "pending")
         : [];
       const pendingRequest = pendingRequests.at(0);
+      const leadApprovalWaiting = threadAwaitsHarnessApproval(String(threadId));
       const childRuns = persistence.agentRunProjection.parentSummary(
         decodeAgentRunParentThreadId(String(threadId)),
       );
       return boardRuntimeActivityFromTurnsAndSignals({
         turns: workTurnProjection.listForThread(threadId),
-        pendingRequest: pendingRequest !== undefined,
-        ...(pendingRequest === undefined ? {} : { pendingRequestKind: pendingRequest.detail.kind }),
+        pendingRequest: pendingRequest !== undefined || leadApprovalWaiting,
+        ...(pendingRequest !== undefined
+          ? { pendingRequestKind: pendingRequest.detail.kind }
+          : leadApprovalWaiting
+            ? { pendingRequestKind: "approval" as const }
+            : {}),
         childActive: childRuns.filter(
           (run) => isAgentRunActiveStatus(run.lifecycleStatus) && run.lifecycleStatus !== "waiting",
         ).length,
@@ -10682,8 +10704,46 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
-    const childPendingForWindow = (windowId: WindowId) =>
-      listChildPendingRequests(
+    // Whether a window may open a Work or Code parent: the project binding, not
+    // the harness session route, which also requires the thread to be the open
+    // surface and would hide the row everywhere except the thread already open.
+    const windowMayOpenWorkOrCodeThread = (input: {
+      readonly threadId: string;
+      readonly windowId: string;
+    }) =>
+      windowMayListChildThread(
+        {
+          purged: (threadId) =>
+            persistence.connection
+              .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
+              .get(threadId) !== undefined,
+          codeThread: (threadId) => {
+            try {
+              return persistence.readCodeThread(decodeCodeThreadId(threadId));
+            } catch {
+              // A Work thread id is not a Code thread id.
+              return undefined;
+            }
+          },
+          workThread: (threadId) => {
+            try {
+              return workThreadProjection.read(decodeWorkThreadId(threadId));
+            } catch {
+              // Neither mode owns this id.
+              return undefined;
+            }
+          },
+          workspace: (windowId) =>
+            persistence.readWindowWorkspace(decodeWindowId(windowId))?.workspace,
+          hasActiveProject: (projectId, mode) => projectService.hasActiveProject(projectId, mode),
+        },
+        input,
+      );
+    // Rows that find a request a thread's agent or subagent is waiting on: the
+    // answer stays on the harness session route, which checks the window and
+    // the principal, so these rows carry no way to answer.
+    const childPendingForWindow = async (windowId: WindowId) => [
+      ...(await listChildPendingRequests(
         {
           approvals: nativeHarnessApprovals,
           questions: nativeHarnessQuestionsLive,
@@ -10696,39 +10756,29 @@ export function startOctantServer(
               parentThreadId: run.parentThreadId,
               mode: run.routingReceipt.mode,
             }),
-          authorizeThread: (input) =>
-            windowMayListChildThread(
-              {
-                purged: (threadId) =>
-                  persistence.connection
-                    .prepare("SELECT 1 FROM thread_purge_tombstone WHERE thread_id = ?")
-                    .get(threadId) !== undefined,
-                codeThread: (threadId) => {
-                  try {
-                    return persistence.readCodeThread(decodeCodeThreadId(threadId));
-                  } catch {
-                    // A Work thread id is not a Code thread id.
-                    return undefined;
-                  }
-                },
-                workThread: (threadId) => {
-                  try {
-                    return workThreadProjection.read(decodeWorkThreadId(threadId));
-                  } catch {
-                    // Neither mode owns this id.
-                    return undefined;
-                  }
-                },
-                workspace: (windowId) =>
-                  persistence.readWindowWorkspace(decodeWindowId(windowId))?.workspace,
-                hasActiveProject: (projectId, mode) =>
-                  projectService.hasActiveProject(projectId, mode),
-              },
-              input,
-            ),
+          authorizeThread: windowMayOpenWorkOrCodeThread,
         },
         String(windowId),
-      );
+      )),
+      ...(await listLeadApprovalRequests(
+        {
+          approvals: nativeHarnessApprovals,
+          sessions: nativeHarnessSessionsLive,
+          threadTitle: ({ threadId, mode }) =>
+            resolveAgentRunParentThreadTitle({
+              persistence,
+              workThreadProjection,
+              parentThreadId: decodeAgentRunParentThreadId(threadId),
+              mode,
+            }),
+          authorizeThread: ({ threadId, mode, windowId: asking }) =>
+            mode === "chat"
+              ? chatService.listsActiveThread(threadId)
+              : windowMayOpenWorkOrCodeThread({ threadId, windowId: asking }),
+        },
+        String(windowId),
+      )),
+    ];
     const pendingRequestService = new PendingRequestService({
       readSettings: () => persistence.readShellSettings()?.settings ?? defaultShellSettings(),
       work: async (windowId) => [

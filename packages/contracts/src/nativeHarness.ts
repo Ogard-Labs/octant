@@ -1101,6 +1101,7 @@ export const NativeHarnessApprovalDecisionResult = Schema.Union(
       "already-settled",
       "not-authorized",
       "host-not-offered",
+      "lost-in-restart",
     ),
     message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   }).annotations(strict),
