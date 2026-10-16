@@ -1459,7 +1459,8 @@ async function waitFor(description: string, observe: () => Promise<boolean>): Pr
 
 /**
  * A child that was killed but stays unreaped because its parent is now a plain
- * sleep. The child must die only after the shell has exec'd: a shell reaps any
+ * sleep. Before the exec the parent's arguments are the whole shell command line,
+ * which also contains "sleep 60"; only the exec'd process has exactly "sleep 60". The child must die only after the shell has exec'd: a shell reaps any
  * background job that already exited, so a child that exits on its own races the
  * exec and, on a loaded runner, is reaped instead of left a zombie.
  */
@@ -1483,8 +1484,9 @@ async function spawnZombie(): Promise<{ readonly pid: number; readonly release: 
     });
     const parentPid = parent.pid;
     if (parentPid === undefined) throw new Error("zombie fixture parent did not start");
-    await waitFor("exec'd into its parent sleep", async () =>
-      (await psField("args", parentPid)).includes("sleep 60"),
+    await waitFor(
+      "exec'd into its parent sleep",
+      async () => (await psField("args", parentPid)) === "sleep 60",
     );
     process.kill(pid, "SIGKILL");
     await waitFor("became a zombie", async () => (await psField("stat", pid)).startsWith("Z"));
