@@ -567,9 +567,11 @@ describe("Remote-access residual evidence — integrated octant web CLI", () => 
         Effect.gen(function* () {
           const persistence = yield* Persistence;
           seedHostIdentity(persistence.journal);
+          const hostInstanceId = randomUUID();
           const server = yield* startOctantServer({
             hostname: "127.0.0.1",
             port: 0,
+            instanceId: hostInstanceId,
             desktopBridgeSecret: bridgeSecret,
             webAssetsPath: distPath,
             serve: nodeServe,
@@ -599,7 +601,7 @@ describe("Remote-access residual evidence — integrated octant web CLI", () => 
           yield* Effect.promise(() =>
             writeHostInfoFile(bridgeSecretInput, {
               url: server.url.toString(),
-              instanceId: randomUUID(),
+              instanceId: hostInstanceId,
             }),
           );
           const web = yield* Effect.promise(() =>
