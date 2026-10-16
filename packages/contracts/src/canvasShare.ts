@@ -238,7 +238,7 @@ function extractCandidateUrls(value: string): string[] {
   if (trimmed) candidates.add(trimmed);
   const embedded = value.match(/[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'`<>]+/g) ?? [];
   for (const match of embedded) {
-    candidates.add(match.replace(/[),.;]+$/g, ""));
+    candidates.add(trimTrailingUrlPunctuation(match));
   }
   return [...candidates];
 }
@@ -1166,3 +1166,9 @@ export function decodeCanvasDefinitionForShare(value: unknown): CanvasDefinition
 }
 
 export type { CanvasActor, CanvasBlock, CanvasVersion };
+
+function trimTrailingUrlPunctuation(value: string): string {
+  let end = value.length;
+  while (end > 0 && "),.;".includes(value.charAt(end - 1))) end -= 1;
+  return value.slice(0, end);
+}

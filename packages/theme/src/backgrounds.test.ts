@@ -74,6 +74,16 @@ describe("preset css background validator", () => {
     ).not.toThrow();
   });
 
+  it("accepts rgb() padded with tabs and rejects an unclosed one", () => {
+    const pad = "\t".repeat(100);
+    expect(() =>
+      validatePresetCssBackground(`linear-gradient(90deg, rgb(${pad}26,26,28${pad}), #000000)`),
+    ).not.toThrow();
+    expect(() =>
+      validatePresetCssBackground(`linear-gradient(90deg, rgb(${pad}, #000000)`),
+    ).toThrow(ThemePresetError);
+  });
+
   it("rejects unknown functions", () => {
     expect(() => validatePresetCssBackground("cubic-bezier(0,0,1,1)")).toThrow(ThemePresetError);
     expect(() => validatePresetCssBackground("translateX(10px)")).toThrow(ThemePresetError);

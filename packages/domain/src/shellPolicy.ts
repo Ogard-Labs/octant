@@ -44,6 +44,7 @@ import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR } from "@octant/contracts/us
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { ChatThreadId, CodeEnvironmentObservation } from "@octant/contracts";
+import { trimTrailingSlashes } from "./trimTrailing";
 import { resolveAvailableMode } from "./modePolicy";
 
 export const MAX_LAYOUT_DEPTH = 6;
@@ -551,7 +552,7 @@ export function deriveWorkEnvironmentProjection(
 }
 
 function confinedRootDetail(boundRoot: string): string {
-  const trimmed = boundRoot.replace(/\/+$/, "");
+  const trimmed = trimTrailingSlashes(boundRoot);
   const segments = trimmed.split("/").filter((segment) => segment.length > 0);
   return segments.at(-1) ?? trimmed;
 }

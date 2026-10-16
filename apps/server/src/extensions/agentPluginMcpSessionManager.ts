@@ -746,12 +746,20 @@ function toolQualifiedName(
   // a dynamic tool named `ext_mcp-notes_…` never reached the model while the
   // same tool named `ext_mcp_notes_…` did, because Codex exposes tools to its
   // code mode as identifiers and drops a name that cannot be one.
-  const readable = `${record.componentId}_${toolName}`
-    .replace(/[^A-Za-z0-9_]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 42);
+  const readable = trimUnderscores(
+    `${record.componentId}_${toolName}`.replace(/[^A-Za-z0-9_]+/g, "_"),
+  ).slice(0, 42);
   const digest = createHash("sha256").update(identity).digest("hex").slice(0, 16);
   return `ext_${readable || "tool"}_${digest}`;
+}
+
+// `/^_+|_+$/` is quadratic on a long run of underscores.
+function trimUnderscores(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charAt(start) === "_") start += 1;
+  while (end > start && value.charAt(end - 1) === "_") end -= 1;
+  return value.slice(start, end);
 }
 
 function authorityScopeKey(scope: ExtensionEffectiveSnapshot["scope"]): string {

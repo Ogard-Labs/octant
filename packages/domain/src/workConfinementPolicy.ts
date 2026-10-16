@@ -4,6 +4,7 @@ import type {
   WorkCapabilityReport,
   WorkFidelity,
 } from "@octant/contracts/work-artifacts";
+import { trimTrailingSlashes } from "./trimTrailing";
 import { classifySourceAvailability } from "./previewPolicy";
 
 /**
@@ -111,7 +112,7 @@ export function classifyPathContainment(
   root: string,
   candidateCanonicalAbsolute: string,
 ): WorkPathContainment {
-  const rootNorm = root.replace(/\/+$/, "");
+  const rootNorm = trimTrailingSlashes(root);
   if (rootNorm === "" || rootNorm === "/") return "escapes-root";
   if (candidateCanonicalAbsolute === rootNorm) return "contained";
   return candidateCanonicalAbsolute.startsWith(`${rootNorm}/`) ? "contained" : "escapes-root";
