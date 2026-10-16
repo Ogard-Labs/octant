@@ -20,6 +20,18 @@ describe("a Work Project's STATUS.md", () => {
     expect(decideWorkResumeBrief(parsed, today)).toEqual([]);
   });
 
+  it("reads headings and dated lines padded with long runs of whitespace", () => {
+    const text = [
+      `##${" ".repeat(20000)}Follow-ups${"\t".repeat(20000)}`,
+      `- 2026-09-14${"\t".repeat(20000)}: Call Dana`,
+      "##x",
+    ].join("\n");
+    const parsed = parseWorkStatus(text, today);
+    expect(parsed.followUps).toEqual([
+      { date: "2026-09-14", text: "Call Dana", state: "due-soon" },
+    ]);
+  });
+
   it("reads dated follow-ups and deadlines and judges how near they are", () => {
     const text = [
       "# Acme — status",

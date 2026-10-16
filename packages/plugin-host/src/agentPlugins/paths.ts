@@ -1,6 +1,13 @@
 import { fail, isRecord, asRecord } from "./errors";
 import type { AgentPluginsDiagnostic } from "./constants";
 
+// A `/\/+$/` regex is quadratic on a long run of slashes.
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1;
+  return value.slice(0, end);
+}
+
 /**
  * Resolve a package-relative path against a virtual plugin root of entries.
  * Rejects escapes, empty segments, backslashes, and absolute paths.
@@ -9,7 +16,7 @@ export function normalizePackageRelativePath(value: string): string {
   if (value.length === 0 || value.includes("\\") || value.includes("\0") || value.startsWith("/")) {
     fail("unsafe-path", "Package path is unsafe.");
   }
-  const trimmed = value.replace(/\/+$/, "");
+  const trimmed = trimTrailingSlashes(value);
   const segments = trimmed.split("/");
   if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
     fail("unsafe-path", "Package path escapes the plugin root.");
@@ -26,7 +33,7 @@ export function requirePluginRelativePath(value: string): string {
 }
 
 export function resolveWithinRoot(root: string, relative: string): string {
-  const normalizedRoot = root.replace(/\/+$/, "");
+  const normalizedRoot = trimTrailingSlashes(root);
   const joined = `${normalizedRoot}/${normalizePackageRelativePath(relative)}`;
   if (normalizedRoot.length === 0) fail("unsafe-path", "Plugin root is invalid.");
   if (!joined.startsWith(`${normalizedRoot}/`) && joined !== normalizedRoot) {
@@ -80,7 +87,7 @@ export function resolveStdioCwd(
 }
 
 function assertUnderRoot(path: string, root: string): void {
-  const normalizedRoot = root.replace(/\/+$/, "");
+  const normalizedRoot = trimTrailingSlashes(root);
   if (path !== normalizedRoot && !path.startsWith(`${normalizedRoot}/`)) {
     fail("unsafe-path", "Resolved working directory escapes its permitted root.");
   }

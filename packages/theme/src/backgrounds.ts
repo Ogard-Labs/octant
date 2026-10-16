@@ -77,7 +77,7 @@ function splitFunctionArgs(args: string): string[] {
 function isValidColorToken(token: string): boolean {
   if (HEX_COLOR.test(token)) return true;
   // rgb() or rgba() with bounded content (integers, decimals, percentages, commas, spaces).
-  const fnMatch = /^rgba?\(\s*[\d.,%\s]+\s*\)$/.exec(token);
+  const fnMatch = /^rgba?\([\d.,%\s]+\)$/.exec(token);
   if (fnMatch !== null) return true;
   if (ALLOWED_KEYWORDS.has(token.toLowerCase())) return true;
   return false;

@@ -22,7 +22,23 @@ export const DEFAULT_WORK_STATUS_STALE_AFTER_DAYS = 7;
 export const WORK_STATUS_DUE_SOON_DAYS = 3;
 
 const LAST_UPDATED_PREFIX = "Last updated:";
-const DATED_LINE = /^-\s*(\d{4}-\d{2}-\d{2})\b[\s:–—-]*(.*)$/;
+const DATED_LINE = /^-\s*(\d{4}-\d{2}-\d{2})\b(.*)$/;
+
+// Regexes with adjacent unbounded repeats over overlapping classes backtrack
+// quadratically on long runs of spaces or tabs, so these helpers scan once.
+function sectionHeading(line: string): string | undefined {
+  if (!line.startsWith("##")) return undefined;
+  const rest = line.slice(2);
+  if (rest.length === rest.trimStart().length) return undefined;
+  const title = rest.trim();
+  return title === "" ? undefined : title;
+}
+
+function skipDateSeparators(rest: string): string {
+  let start = 0;
+  while (start < rest.length && /[\s:–—-]/.test(rest.charAt(start))) start += 1;
+  return rest.slice(start);
+}
 
 export function workStatusTemplate(projectName: string, today: WorkStatusDate): string {
   return [
@@ -170,10 +186,10 @@ function splitSections(text: string): ReadonlyMap<string, string> {
     if (current !== undefined) sections.set(current, body.join("\n"));
   };
   for (const line of text.split("\n")) {
-    const heading = /^##\s+(.+?)\s*$/.exec(line);
-    if (heading?.[1] !== undefined) {
+    const heading = sectionHeading(line);
+    if (heading !== undefined) {
       flush();
-      current = heading[1];
+      current = heading;
       body = [];
     } else if (current !== undefined) {
       body.push(line);
@@ -194,7 +210,7 @@ function datedItems(
     const match = DATED_LINE.exec(line);
     const date = match?.[1];
     if (!isWorkStatusDate(date)) continue;
-    const text = (match?.[2] ?? "").trim();
+    const text = skipDateSeparators(match?.[2] ?? "").trim();
     if (text === "") continue;
     items.push({ date, text: text.slice(0, 512), state: dueState(date, today) });
     if (items.length >= MAX_WORK_STATUS_ITEMS) break;
