@@ -15,6 +15,52 @@ function session(
   };
 }
 
+/**
+ * The routes the terminal walks to open an existing Chat thread in its window
+ * before it reads the thread's harness session; undefined for any other route.
+ */
+function chatThreadOpening(
+  threadId: string,
+  request: LocalControlRequest,
+): { status: number; body: unknown } | undefined {
+  if (request.path === "/api/projects/bootstrap") {
+    return { status: 200, body: { active: [], archived: [], availability: [], memory: [] } };
+  }
+  if (request.path === "/api/shell/bootstrap")
+    return { status: 200, body: { workspaceVersion: 1 } };
+  if (request.path === "/api/shell/commands") return { status: 200, body: {} };
+  if (request.path === `/api/chat/threads/${threadId}`) {
+    const now = "2026-10-09T09:00:00.000Z";
+    return {
+      status: 200,
+      body: {
+        thread: {
+          id: threadId,
+          title: "Plain question",
+          lifecycle: "active",
+          providerInstanceId: "50000000-0000-4000-8000-000000000001",
+          modelId: "loopback-model",
+          researchEnabled: false,
+          researchRouting: "automatic",
+          personalityInstructions: "Be brief.",
+          version: 1,
+          createdAt: now,
+          updatedAt: now,
+        },
+        turns: [],
+        lastSequence: 1,
+        contents: [],
+        attachments: [],
+        citations: [],
+        workItems: [],
+        workListVersion: 0,
+        followUpVersion: 0,
+      },
+    };
+  }
+  return undefined;
+}
+
 function sink() {
   const chunks: string[] = [];
   return { write: (chunk: string) => chunks.push(chunk), text: () => chunks.join("") };
@@ -97,17 +143,43 @@ describe("octant agent command line", () => {
     expect(stdout.text()).toContain("lead → default");
   });
 
-  it("reports a thread without a harness session plainly", async () => {
+  it("opens the thread in the terminal's window before it reads the thread's harness session", async () => {
     const stdout = sink();
+    const seen: string[] = [];
+    const threadId = "60000000-0000-4000-8000-000000000001";
     const code = await runAgentCliCommand({
-      command: { action: "harness-session", threadId: "t-1", json: false },
-      session: session(() => ({ status: 200, body: { view: null } })),
+      command: { action: "harness-session", threadId, json: false },
+      session: session((request) => {
+        seen.push(`${request.method} ${request.path}`);
+        return chatThreadOpening(threadId, request) ?? { status: 200, body: { view: null } };
+      }),
       stdin: process.stdin,
       stdout,
       stderr: sink(),
     });
     expect(code).toBe(0);
     expect(stdout.text()).toContain("no native harness session");
+    const opened = seen.indexOf("POST /api/shell/commands");
+    const read = seen.indexOf(`GET /api/native-harness/sessions/${threadId}`);
+    expect(opened).toBeGreaterThan(-1);
+    expect(read).toBeGreaterThan(opened);
+  });
+
+  it("says why when the thread to read is not on this host", async () => {
+    const stderr = sink();
+    const code = await runAgentCliCommand({
+      command: { action: "harness-session", threadId: "missing", json: false },
+      session: session((request) =>
+        request.path === "/api/projects/bootstrap"
+          ? { status: 200, body: { active: [], archived: [], availability: [], memory: [] } }
+          : { status: 404, body: { message: "Thread not found." } },
+      ),
+      stdin: process.stdin,
+      stdout: sink(),
+      stderr,
+    });
+    expect(code).toBe(1);
+    expect(stderr.text()).toContain("Thread not found.");
   });
 
   it("takes a suggested follow-up from the terminal only after a yes and names the created thread", async () => {
@@ -158,6 +230,8 @@ describe("octant agent command line", () => {
       },
       session: session((request) => {
         seen.push(`${request.method} ${request.path}`);
+        const opening = chatThreadOpening(threadId, request);
+        if (opening !== undefined) return opening;
         if (request.path.endsWith("/follow-ups/preview")) {
           return {
             status: 200,
@@ -230,6 +304,8 @@ describe("octant agent command line", () => {
         mode: "chat",
       },
       session: session((request) => {
+        const opening = chatThreadOpening(threadId, request);
+        if (opening !== undefined) return opening;
         if (request.path.startsWith("/api/goals?")) {
           reads += 1;
           // The second read is after another screen revised the goal.

@@ -79,6 +79,25 @@ describe("agent terminal UI model", () => {
     expect((entries[3] as { actions?: unknown }).actions).toBeUndefined();
   });
 
+  it("leaves the follow-up suggestion block out of the reply, since the panel lists those", () => {
+    const withBlock = {
+      ...(thread as unknown as { turns: ReadonlyArray<Record<string, unknown>> }),
+      turns: [
+        {
+          id: "t1",
+          at: "2026-09-05T11:30:00.000Z",
+          prompt: "Fix the parser.",
+          reply:
+            'Done.\n\n```octant-follow-ups\n{"suggestions":[{"title":"Tests","prompt":"Add tests.","target":"new-thread"}]}\n```',
+          replyAt: "2026-09-05T11:30:05.000Z",
+          outcome: "completed",
+        },
+      ],
+    } as never;
+    const entries = transcriptFrom(withBlock, null);
+    expect(entries[1]).toMatchObject({ kind: "lead", text: "Done.\n\n" });
+  });
+
   it("sums the footer from the harness session and takes its colours from the app theme", () => {
     expect(statusLineFrom(thread, session)).toBe(
       "Running · frontier-large · 1 turns · ↑ 1.2k in · ↓ 300 out",

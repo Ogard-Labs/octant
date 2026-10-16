@@ -3,6 +3,7 @@ import {
   parseChatMessageBody,
   parseMarkdownBlocks,
   resolveChatMessageParts,
+  withoutFollowUpBlocks,
 } from "./chatMessageParts";
 
 describe("resolveChatMessageParts", () => {
@@ -106,6 +107,36 @@ describe("parseChatMessageBody with follow-up suggestions", () => {
 
   it("shows nothing rather than raw JSON when the block is the whole reply", () => {
     expect(parseChatMessageBody(block)).toEqual([{ kind: "markdown", text: "" }]);
+  });
+});
+
+describe("withoutFollowUpBlocks for a surface that prints text", () => {
+  const block =
+    '```octant-follow-ups\n{"suggestions":[{"title":"Tests","prompt":"Add tests.","target":"new-thread"}]}\n```';
+
+  it("leaves the suggestion block out and the rest of the reply as it was", () => {
+    expect(withoutFollowUpBlocks(`Done.\n\n${block}\n\nMore.`, { streaming: false })).toBe(
+      "Done.\n\n\n\nMore.",
+    );
+    expect(
+      withoutFollowUpBlocks("No block here.\n```ts\nconst a = 1;\n```", { streaming: false }),
+    ).toBe("No block here.\n```ts\nconst a = 1;\n```");
+  });
+
+  it("never takes back text it has already shown while the block streams in", () => {
+    const reply = `Done.\n\n${block}`;
+    let shown = "";
+    for (let length = 0; length <= reply.length; length += 1) {
+      const next = withoutFollowUpBlocks(reply.slice(0, length), { streaming: true });
+      expect(next.startsWith(shown)).toBe(true);
+      shown = next;
+    }
+    expect(shown).toBe("Done.\n\n");
+  });
+
+  it("keeps a reply that ends in a bare fence once it is no longer streaming", () => {
+    expect(withoutFollowUpBlocks("Run it:\n```", { streaming: false })).toBe("Run it:\n```");
+    expect(withoutFollowUpBlocks("Run it:\n```", { streaming: true })).toBe("Run it:\n");
   });
 });
 

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { CODE_THREAD_TURNS, agentThreadPort, createAgentThread } from "./agentThread";
+import {
+  CODE_THREAD_TURNS,
+  agentThreadPort,
+  createAgentThread,
+  openAgentThreadById,
+} from "./agentThread";
 import { statusLineFrom } from "./agentTuiModel";
 import type { LocalControlRequest, OpenedLocalControlSession } from "./localControl";
 
@@ -177,6 +182,87 @@ describe("starting a Code thread from the terminal", () => {
     expect(fake.created()?.thread).toMatchObject({
       executionPolicy: "approval-gated",
       permissionPersistence: "current-session",
+    });
+  });
+});
+
+const chatThread = {
+  id: "60000000-0000-4000-8000-000000000001",
+  title: "Plain question",
+  lifecycle: "active",
+  providerInstanceId: ids.provider,
+  modelId: "loopback-model",
+  researchEnabled: false,
+  researchRouting: "automatic",
+  personalityInstructions: "Be brief.",
+  version: 1,
+  createdAt: now,
+  updatedAt: now,
+};
+
+/** A host that holds one Chat thread and no Projects, and records the shell commands it is sent. */
+function chatHost() {
+  const shell: Array<{ mode: string; kind: string }> = [];
+  const session: OpenedLocalControlSession = {
+    kind: "opened",
+    windowId: "11111111-1111-4111-8111-111111111111",
+    send: async (request) => {
+      if (request.path === "/api/projects/bootstrap") {
+        return { status: 200, body: { active: [], archived: [], availability: [], memory: [] } };
+      }
+      if (request.path === "/api/shell/bootstrap") {
+        return { status: 200, body: { workspaceVersion: 1 } };
+      }
+      if (request.path === "/api/shell/commands") {
+        const operation = (
+          request.body as { operation: { mode: string; surface: { kind: string } } }
+        ).operation;
+        shell.push({ mode: operation.mode, kind: operation.surface.kind });
+        return { status: 200, body: {} };
+      }
+      if (request.path === "/api/chat/commands") {
+        return { status: 200, body: { kind: "thread-created", thread: chatThread } };
+      }
+      if (request.path === `/api/chat/threads/${chatThread.id}`) {
+        return {
+          status: 200,
+          body: {
+            thread: chatThread,
+            turns: [],
+            lastSequence: 1,
+            contents: [],
+            attachments: [],
+            citations: [],
+            workItems: [],
+            workListVersion: 0,
+            followUpVersion: 0,
+          },
+        };
+      }
+      return { status: 404, body: { message: `Unexpected ${request.path}` } };
+    },
+    close: async () => undefined,
+  };
+  return { session, shell };
+}
+
+describe("a Chat thread in the terminal's window", () => {
+  it("is open in the window once the terminal creates it, so its harness session answers", async () => {
+    const fake = chatHost();
+    const result = await createAgentThread(fake.session, {
+      mode: "chat",
+      title: "Plain question",
+    });
+    expect(result).toMatchObject({ kind: "created", mode: "chat", threadId: chatThread.id });
+    expect(fake.shell).toEqual([{ mode: "chat", kind: "chat-thread" }]);
+  });
+
+  it("is opened for a bare thread id that no Work or Code Project holds", async () => {
+    const fake = chatHost();
+    expect(await openAgentThreadById(fake.session, chatThread.id)).toEqual({ kind: "opened" });
+    expect(fake.shell).toEqual([{ mode: "chat", kind: "chat-thread" }]);
+    expect(await openAgentThreadById(fake.session, "no-such-thread")).toMatchObject({
+      kind: "refused",
     });
   });
 });

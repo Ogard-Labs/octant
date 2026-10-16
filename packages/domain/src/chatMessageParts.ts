@@ -217,6 +217,38 @@ export function parseChatMessageBody(streamed: string): ReadonlyArray<ChatMessag
   return parts;
 }
 
+/**
+ * A reply as a surface that prints plain text shows it: the follow-up
+ * suggestion block is left out, because the surface offers those as a list of
+ * its own. Everything else, reasoning and decision blocks included, is
+ * untouched, and text before a block never moves, so a reader that prints only
+ * what grew since the last call never has to take anything back.
+ *
+ * While the reply is still streaming, an opener that has only partly arrived
+ * ("```octant-fol") is held back too, since it may turn out to be the block.
+ */
+export function withoutFollowUpBlocks(body: string, options: { streaming: boolean }): string {
+  let visible = "";
+  let cursor = 0;
+  for (const match of body.matchAll(FENCE)) {
+    const lang = (match[1] ?? "").trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+    if (lang !== FOLLOW_UP_BLOCK_LANGUAGE) continue;
+    const start = match.index ?? 0;
+    visible += body.slice(cursor, start);
+    cursor = start + match[0].length;
+  }
+  visible += body.slice(cursor);
+  const opener = `\`\`\`${FOLLOW_UP_BLOCK_LANGUAGE}`;
+  const open = visible.lastIndexOf(opener);
+  if (open !== -1 && visible.indexOf("```", open + opener.length) === -1) {
+    return visible.slice(0, open);
+  }
+  if (!options.streaming) return visible;
+  const lineStart = visible.lastIndexOf("\n") + 1;
+  const tail = visible.slice(lineStart);
+  return tail.length >= 1 && opener.startsWith(tail) ? visible.slice(0, lineStart) : visible;
+}
+
 /** A reply cut at a follow-up or decision block whose closing fence has not streamed in yet. */
 function withoutOpenFollowUpBlock(body: string): string {
   const openers = Array.from(

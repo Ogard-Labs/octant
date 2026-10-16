@@ -2112,6 +2112,17 @@ export function startOctantServer(
         nativeHarnessObserver?.turnStarted(scope);
         nativeHarnessLeadFallback?.turnStarted(scope);
       },
+      // The session view carries the retry notice the terminal footer and the
+      // phone panel read; the transcript has its own copy from the turn stream.
+      noteRetry: (
+        scope: Parameters<NativeHarnessTurnObserver["noteRetry"]>[0],
+        notice: Parameters<NativeHarnessTurnObserver["noteRetry"]>[1],
+      ) => {
+        nativeHarnessObserver?.noteRetry(scope, notice);
+      },
+      clearRetry: (scope: Parameters<NativeHarnessTurnObserver["clearRetry"]>[0]) => {
+        nativeHarnessObserver?.clearRetry(scope);
+      },
       turnEnded: (
         scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0],
         turn?: TurnEndSummary,

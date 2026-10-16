@@ -59,6 +59,31 @@ describe("opening a thread in the terminal's window", () => {
     expect(surfaces[1]).toMatchObject({ threadId: "thread-1", mode: "code" });
   });
 
+  it("opens a Chat thread with no Project as the thread alone, and one in a Project after it", async () => {
+    const bare = recordingSession(true);
+    await openAgentWindow(bare.session, {
+      mode: "chat",
+      thread: { id: "chat-1", title: "Plain question" },
+    });
+    const surfaceKinds = (requests: typeof bare.requests) =>
+      requests
+        .filter((request) => request.path === "/api/shell/commands")
+        .map(
+          (request) =>
+            (request.body as { operation: { mode: string; surface: { kind: string } } }).operation,
+        )
+        .map((operation) => `${operation.mode}:${operation.surface.kind}`);
+    expect(surfaceKinds(bare.requests)).toEqual(["chat:chat-thread"]);
+
+    const filed = recordingSession(true);
+    await openAgentWindow(filed.session, {
+      mode: "chat",
+      project: { id: "project-1", name: "Reading" },
+      thread: { id: "chat-2", title: "Filed question" },
+    });
+    expect(surfaceKinds(filed.requests)).toEqual(["chat:project", "chat:chat-thread"]);
+  });
+
   it("keeps a workspace the window already has instead of registering it again", async () => {
     const { session, requests } = recordingSession(true);
     await openAgentWindow(session, { mode: "work", projectId: "p", projectName: "notes" });
