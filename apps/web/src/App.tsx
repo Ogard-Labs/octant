@@ -48,7 +48,8 @@ import {
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import { createLaunchedShellClients } from "./app/createLaunchedShellClients";
 import { DockContainer, type DockOverviewThread } from "./app/DockContainer";
-import { buildHomeStart } from "./app/homeStart";
+import { dockToolReads } from "./shell/dockModuleRegistry";
+import { useHomeStart } from "./app/homeStart";
 import { ReaderPagesContainer } from "./app/ReaderPagesContainer";
 import { SettingsContainer } from "./app/SettingsContainer";
 import type { ShellActions } from "./app/shellActions";
@@ -481,6 +482,8 @@ export interface AppProps {
 const NO_PROVIDER_INSTANCES: ReadonlyArray<ProviderInstance> = [];
 const NO_VOICE_SETTINGS: VoiceSettings = {};
 const NO_IMAGE_PROFILES: ReadonlyArray<never> = [];
+const NO_CODE_THREADS: ReadonlyArray<never> = [];
+const NO_CODE_CHECKOUTS: ReadonlyArray<never> = [];
 
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() =>
@@ -2248,13 +2251,18 @@ function LaunchedShell(
     )
       ? activeProjectId
       : undefined;
+  const promotionTargetCodeProjects = useMemo(
+    () =>
+      projectController.allProjects
+        .filter((project) => project.type === "code" && project.lifecycle === "active")
+        .map((project) => project.id),
+    [projectController.allProjects],
+  );
   const workPromotionController = useWorkPromotionController({
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
     ...(workOriginProjectId === undefined ? {} : { originProjectId: workOriginProjectId }),
-    targetCodeProjects: projectController.allProjects
-      .filter((project) => project.type === "code" && project.lifecycle === "active")
-      .map((project) => project.id),
+    targetCodeProjects: promotionTargetCodeProjects,
   });
   const latestShellActions = useRef({
     startNewThreadDraft,
@@ -4269,21 +4277,31 @@ function LaunchedShell(
   // controller method hands that method over as it is.
   const actions = useStableActions(
     (): ShellActions => ({
+      activateContentTab: controller.activateContentTab,
+      activatePane: controller.activatePane,
       addDockTab,
       addZenBrowser,
       addZenProjectTerminal,
       addZenTerminal,
       archiveCodeThread: codeController.archiveThread,
+      clearFocus: controller.clearFocus,
       closeBottomPanel,
       closeBottomPanelTab,
+      closeContentTab: controller.closeContentTab,
       closeDock,
       closeDockTab,
+      closePane: controller.closePane,
       closeWorkspaceReaders,
+      commitSplitResize: controller.commitSplitResize,
       completeChatThread: chatController.completeThread,
       completeCodeFollowUp: codeController.completeFollowUp,
       completeCodeThread: codeController.completeThread,
       createChat,
+      createProject: projectController.create,
+      dismissCrossContextOffer: controller.dismissCrossContextOffer,
+      ensureDefaultProject: projectController.ensureDefault,
       enterZen: zen.enterZen,
+      focusPane: controller.focusPane,
       handleCreateChatProjectThread,
       handleCreateWorkThread,
       handleDraftCreateCodeThread,
@@ -4311,6 +4329,7 @@ function LaunchedShell(
       openCodeSurface: controller.openCodeSurface,
       openCodeThread: controller.openCodeThread,
       openCreatedFollowUp,
+      openCrossContextInNewWindow: controller.openCrossContextInNewWindow,
       openDockTab,
       openDraftInActiveProject,
       openDraftInProject,
@@ -4335,27 +4354,34 @@ function LaunchedShell(
       openRunningService,
       openSelectedProject,
       openSettings: controller.openSettings,
+      openSideChat: controller.openSideChat,
       openSidebarList,
       openSkillsSettings,
       openSubagent,
       openSubagentRequest,
+      openSurface: controller.openSurface,
       openThreadBoard,
       openThreadSearch,
+      openThreadBrowser: controller.openThreadBrowser,
       openWorkThread: controller.openWorkThread,
       persistBottomPanelPresentation,
       pinChatThreadInPane,
       pinCodeThread: codeController.pinThread,
       pinCodeThreadInPane,
       pinWorkThreadInPane,
+      previewSplitResize: controller.previewSplitResize,
       recoverZen: zen.recoverZen,
       refuseUnlessCreatableDestination,
+      relinkProject: projectController.relink,
       renameCodeThread,
+      renameProject: projectController.rename,
       reopenChatThread: chatController.reopenThread,
       reopenCodeThread: codeController.reopenThread,
       resetNewTaskDraft,
       retryActiveModeThreads,
       retryChat: () => void chatController.retry(),
       retryProjects: () => projectController.retry(),
+      revealBrowserActivity: controller.revealBrowserActivity,
       runWorkRestCommand,
       searchEveryThread,
       selectChatThread,
@@ -4372,6 +4398,7 @@ function LaunchedShell(
       setArtifactLibraryOpen,
       setAutomationCenterOpen,
       setCodeBoardOpen,
+      setCodeNewThreadWorkspace: projectController.setCodeNewThreadWorkspace,
       setCodePullRequestBackgroundRefresh: projectController.setCodePullRequestBackgroundRefresh,
       setCodePullRequestsOpen,
       setDockSidecarsByThread,
@@ -4397,6 +4424,8 @@ function LaunchedShell(
       setPreviewContextWidth,
       setProjectArchived: projectController.setArchived,
       setProjectColor: projectController.setColor,
+      setProjectProviderPolicy: projectController.setProviderPolicy,
+      setProjectWorkStatusFile: projectController.setWorkStatusFile,
       setProjectsListOpen,
       setRailPlaceholder,
       setRequestedAgentReview,
@@ -4411,9 +4440,11 @@ function LaunchedShell(
       snoozeChatThread: chatController.snoozeThread,
       snoozeCodeThread: codeController.snoozeThread,
       spendRevealChatTurn,
+      splitPane: controller.splitPane,
       startNewThreadDraft,
       toggleBottomPanel,
       toggleDock,
+      touchMemoryRevision: projectController.touchMemoryRevision,
       tryWorkRestCommand,
       updateSettings: controller.updateSettings,
       viewAllChatProjectThreads,
@@ -4421,6 +4452,58 @@ function LaunchedShell(
       wakeCodeThread: codeController.wakeThread,
     }),
   );
+
+  // Work and Code start screens share one shape: tiles, then the card area.
+  // Code reads the host's activity line off the board; Work has no board card to
+  // read, so its rows come from the navigation rows that already say a turn is
+  // executing. Work counts its Chat and Work threads together, as its list does.
+  const workingNowHost =
+    props.hostBridge === undefined
+      ? remoteHostLabel(props.launch.serverUrl, localHost?.displayName)
+      : undefined;
+  // What moves the pending-request read: a thread raising or clearing a
+  // question journals on its own mode's navigation topic.
+  const pendingRequestFeedRevision =
+    machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
+  const homeStart = useHomeStart({
+    actions,
+    activeMode,
+    activePaneId,
+    agentRunClient,
+    browserAutomationClient,
+    chatClient,
+    codeCheckouts: codeController.bootstrap?.checkouts ?? NO_CODE_CHECKOUTS,
+    codeClient,
+    codeThreads: codeController.bootstrap?.threads ?? NO_CODE_THREADS,
+    continueCards,
+    feedRevision: pendingRequestFeedRevision,
+    githubPullRequestCapability,
+    hostFederationLifecycle,
+    hostFederationTransports,
+    hostResourceClient,
+    isDesktop: props.hostBridge !== undefined,
+    loadHomePullRequests,
+    navigation: navigationModel,
+    needsYouThreadProviders,
+    now: minuteNow.getTime(),
+    openRunningServiceLive,
+    pendingRequestClient,
+    remoteRunningServicesClient,
+    runningServicesClient,
+    runningServicesRemoteHost,
+    serverUrl: props.launch.serverUrl,
+    settings: controller.settings,
+    sidebarRunningCount: sidebarTileCounts.running,
+    workingNowBoardFacts,
+    workingNowHost,
+    workingNowModes,
+    workingNowProjectNames,
+    workingNowProviders,
+    workingNowThreads,
+    workRequestClient,
+    workTurnClient,
+    workspace: controller.workspace,
+  });
 
   if (controller.status === "loading") {
     return (
@@ -4593,53 +4676,6 @@ function LaunchedShell(
   // Code reads the host's activity line off the board; Work has no board card to
   // read, so its rows come from the navigation rows that already say a turn is
   // executing. Work counts its Chat and Work threads together, as its list does.
-  const workingNowHost =
-    props.hostBridge === undefined
-      ? remoteHostLabel(props.launch.serverUrl, localHost?.displayName)
-      : undefined;
-  // What moves the pending-request read: a thread raising or clearing a
-  // question journals on its own mode's navigation topic.
-  const pendingRequestFeedRevision =
-    machineChanges.chatNavigation + machineChanges.workNavigation + machineChanges.codeNavigation;
-  const homeStart = buildHomeStart({
-    actions,
-    activeMode,
-    activePaneId,
-    agentRunClient,
-    browserAutomationClient,
-    chatClient,
-    codeCheckouts: codeController.bootstrap?.checkouts ?? [],
-    codeClient,
-    codeThreads: codeController.bootstrap?.threads ?? [],
-    continueCards,
-    feedRevision: pendingRequestFeedRevision,
-    githubPullRequestCapability,
-    hostFederationLifecycle,
-    hostFederationTransports,
-    hostResourceClient,
-    isDesktop: props.hostBridge !== undefined,
-    loadHomePullRequests,
-    navigation: navigationModel,
-    needsYouThreadProviders,
-    now: minuteNow.getTime(),
-    openRunningServiceLive,
-    pendingRequestClient,
-    remoteRunningServicesClient,
-    runningServicesClient,
-    runningServicesRemoteHost,
-    serverUrl: props.launch.serverUrl,
-    settings: controller.settings,
-    sidebarRunningCount: sidebarTileCounts.running,
-    workingNowBoardFacts,
-    workingNowHost,
-    workingNowModes,
-    workingNowProjectNames,
-    workingNowProviders,
-    workingNowThreads,
-    workRequestClient,
-    workTurnClient,
-    workspace: controller.workspace,
-  });
 
   // Work has no controller of its own for thread metadata: a rest command
   // goes straight to the client with the version the sidebar last saw, and
@@ -6094,12 +6130,23 @@ function LaunchedShell(
     },
   });
 
-  // A tool that reads the active Code thread's controller is on screen only
-  // while the dock shows a tool tab or the bottom panel is open; otherwise the
-  // dock draws its overview, which reads selected facts instead.
-  const toolsPresented =
-    (dockPresentedOpen && (dockResolution.kind !== "closed" || dockTabs.length > 0)) ||
-    bottomPanelPresentedOpen;
+  // The tools on screen: the dock's tab and the bottom panel's. The thread's own
+  // controller and view reach the dock only while a tool that declares reading
+  // them is open, so a tool that shows nothing of a streaming turn sits still.
+  const presentedToolSurfaces: ReadonlyArray<RightUtilityDockSurfaceId> = [
+    ...(dockPresentedOpen && dockResolution.kind === "surface" ? [dockResolution.surface.id] : []),
+    ...(bottomPanelPresentedOpen && activeBottomSurface !== undefined
+      ? [activeBottomSurface.id]
+      : []),
+  ];
+  const toolsPresented = presentedToolSurfaces.length > 0;
+  const toolsReadCodeController = presentedToolSurfaces.some((surface) =>
+    dockToolReads(surface, "codeController"),
+  );
+  const toolsReadCodeThreadView = presentedToolSurfaces.some((surface) =>
+    dockToolReads(surface, "codeThreadView"),
+  );
+  const codeDiffLayout = codeController.bootstrap?.settings.defaultDiffLayout;
   const workspaceHidden =
     projectsListOpen ||
     railPlaceholder !== undefined ||
@@ -6363,7 +6410,9 @@ function LaunchedShell(
                 contextController={contextController}
                 contextSubject={contextSubject}
                 continueCards={continueCards}
-                controller={controller}
+                canOpenCrossContextInNewWindow={controller.canOpenCrossContextInNewWindow}
+                contentTabs={controller.contentTabs}
+                crossContextOffer={controller.crossContextOffer}
                 createHostId={createHostId}
                 createHostViewScope={createHostViewScope}
                 discoveryController={discoveryController}
@@ -6402,7 +6451,13 @@ function LaunchedShell(
                 {...(pendingDraftPrompt === undefined ? {} : { pendingDraftPrompt })}
                 {...(pendingIssue === undefined ? {} : { pendingIssue })}
                 presentedLayout={controller.presentedLayout}
-                projectController={projectController}
+                activeProject={projectController.activeProject}
+                allProjects={projectController.allProjects}
+                availabilityByProject={projectController.availabilityByProject}
+                memoryRevision={projectController.memoryRevision}
+                projectClient={projectController.client}
+                tabActivation={controller.tabActivation}
+                workspaceVersion={controller.workspaceVersion}
                 providerController={providerController}
                 providerReady={providerReady}
                 {...(revealChatTurn === undefined ? {} : { revealChatTurn })}
@@ -6448,9 +6503,13 @@ function LaunchedShell(
               clients={launchedClients}
               codeNavigationRevision={machineChanges.codeNavigation}
               codeProviderGroups={codeProviderGroups}
-              {...(toolsPresented && activeCodeThreadController !== undefined
+              {...(toolsReadCodeController && activeCodeThreadController !== undefined
                 ? { codeThreadController: activeCodeThreadController }
                 : {})}
+              {...(toolsReadCodeThreadView && activeCodeThreadView !== undefined
+                ? { codeThreadView: activeCodeThreadView }
+                : {})}
+              {...(codeDiffLayout === undefined ? {} : { codeDiffLayout })}
               {...(contextController.snapshot === undefined
                 ? {}
                 : { contextSnapshot: contextController.snapshot })}

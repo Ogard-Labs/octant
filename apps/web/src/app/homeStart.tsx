@@ -10,6 +10,8 @@ import { HostResourceSnapshot } from "@octant/contracts/host-resources";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { PaneId } from "@octant/contracts/shell";
 import { localHostDisplayName, type createLocalServerClient } from "@octant/client-runtime";
+import { useMemo } from "react";
+import { useRetainedRecord } from "../polling/useRetainedRecord";
 import type { useContinueCards } from "../code/useContinueCards";
 import { createCiFailuresCard } from "../home/CiFailuresCard";
 import { currentCodeProjectBranches } from "../home/ciFailures";
@@ -102,7 +104,7 @@ export interface HomeStartInput {
     | { readonly status: "ready"; readonly hostName: string }
     | undefined;
   readonly serverUrl: string;
-  readonly settings: NonNullable<ShellController["settings"]>;
+  readonly settings: ShellController["settings"];
   readonly sidebarRunningCount: number;
   readonly workingNowBoardFacts: WorkingNowCardSource["boardFacts"];
   readonly workingNowHost: string | undefined;
@@ -112,7 +114,18 @@ export interface HomeStartInput {
   readonly workingNowThreads: ReadonlyArray<WorkingNowThread>;
   readonly workRequestClient: LaunchedShellClients["workRequestClient"];
   readonly workTurnClient: WorkTurnClient;
-  readonly workspace: NonNullable<ShellController["workspace"]>;
+  readonly workspace: ShellController["workspace"];
+}
+
+/**
+ * The start screen model for the active mode, rebuilt only when one of its
+ * inputs changes. The thread pane takes it as a prop and bails out of a shell
+ * render that changed none of them, so a list rebuilt per render would undo
+ * that for every pane.
+ */
+export function useHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeStart"] {
+  const retained = useRetainedRecord(input);
+  return useMemo(() => buildHomeStart(retained), [retained]);
 }
 
 /**
@@ -123,7 +136,7 @@ export interface HomeStartInput {
  * call and is cheap: each card's own rows are memoized from the inputs, which
  * keep their identity between renders.
  */
-export function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeStart"] {
+function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeStart"] {
   const {
     actions,
     activeMode,
@@ -163,6 +176,8 @@ export function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps
     workTurnClient,
     workspace,
   } = input;
+  // Before the shell has its settings and workspace there is no start screen to draw.
+  if (settings === undefined || workspace === undefined) return undefined;
   const { codeProjectThreads, workProjectThreads } = navigation;
   const computerSnapshots = hostFederationLifecycle?.list() ?? [];
   const computerLaunchHostId = isDesktop

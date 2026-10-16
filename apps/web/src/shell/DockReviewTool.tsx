@@ -1,18 +1,28 @@
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import type { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "@octant/contracts/code";
+import type {
+  CodeBootstrap,
+  CodeCheckoutId,
+  CodeRelativePath,
+  CodeThreadId,
+  CodeThreadView,
+} from "@octant/contracts/code";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CodeDiffPane, type CodeDiffProjection } from "../code/CodeDiffPane";
 import type { MonacoDiffRuntime } from "../code/MonacoEditorAdapter";
 import { nativeCodeWorkspaceApprovals } from "../code/codeWorkspaceApprovals";
 import { observeCodeThreadDiff } from "../code/observeCodeThreadDiff";
 import { useCodeFileChangeWatch } from "../code/useCodeFileChangeWatch";
-import type { CodeController } from "../code/useCodeController";
 import { ShellState } from "./ShellState";
 import type { OctantHostBridge } from "./hostBridge";
 
 export interface DockReviewToolProps {
-  readonly controller?: CodeController;
+  /** The thread's Code client; without one the tool only says it is loading. */
+  readonly client?: CodeClient;
+  /** The thread as its own controller last read it. */
+  readonly view?: CodeThreadView;
+  /** Settings › Code's diff layout, the default while the thread has no stored choice. */
+  readonly defaultDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
   readonly threadId: CodeThreadId;
   readonly checkoutId?: CodeCheckoutId;
   readonly hostBridge?: OctantHostBridge;
@@ -35,19 +45,21 @@ export interface DockReviewToolProps {
  */
 export function DockReviewTool(props: DockReviewToolProps) {
   const view =
-    props.controller?.activeView !== undefined &&
-    String(props.controller.activeView.thread.id) === String(props.threadId)
-      ? props.controller.activeView
+    props.view !== undefined && String(props.view.thread.id) === String(props.threadId)
+      ? props.view
       : undefined;
   const checkoutId = props.checkoutId ?? view?.checkout.id;
-  if (props.controller === undefined || view === undefined || checkoutId === undefined) {
+  if (props.client === undefined || view === undefined || checkoutId === undefined) {
     return <ShellState state="loading" title="Loading review" />;
   }
   return (
     <BoundReview
       key={`${String(props.threadId)}:${String(checkoutId)}`}
       checkoutId={checkoutId}
-      controller={props.controller}
+      client={props.client}
+      {...(props.defaultDiffLayout === undefined
+        ? {}
+        : { defaultDiffLayout: props.defaultDiffLayout })}
       threadId={props.threadId}
       view={view}
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -65,9 +77,10 @@ export function DockReviewTool(props: DockReviewToolProps) {
 
 function BoundReview(props: {
   readonly checkoutId: CodeCheckoutId;
-  readonly controller: CodeController;
+  readonly client: CodeClient;
+  readonly defaultDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
   readonly threadId: CodeThreadId;
-  readonly view: NonNullable<CodeController["activeView"]>;
+  readonly view: CodeThreadView;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenFile?: (relativePath: CodeRelativePath) => void;
   readonly serverUrl?: string;
@@ -90,8 +103,8 @@ function BoundReview(props: {
   const observe = useCallback(async () => {
     setStale(false);
     setProjection({ state: "loading" });
-    setProjection(await observeCodeThreadDiff(props.controller.client, nextUuid, scope));
-  }, [nextUuid, props.controller.client, scope]);
+    setProjection(await observeCodeThreadDiff(props.client, nextUuid, scope));
+  }, [nextUuid, props.client, scope]);
 
   useEffect(() => {
     // Clear the previous subject's files before the next observation lands.
@@ -112,14 +125,14 @@ function BoundReview(props: {
 
   const refreshingClient = useMemo(
     (): CodeClient => ({
-      ...props.controller.client,
+      ...props.client,
       async executeOperation(command) {
-        const result = await props.controller.client.executeOperation(command);
+        const result = await props.client.executeOperation(command);
         if (result.kind === "git-mutation-state" && result.state === "completed") void observe();
         return result;
       },
     }),
-    [observe, props.controller.client],
+    [observe, props.client],
   );
 
   const approvals = nativeCodeWorkspaceApprovals(props.hostBridge, props.view);
@@ -129,7 +142,7 @@ function BoundReview(props: {
       client={refreshingClient}
       createGitOperationId={() => nextUuid() as never}
       createOperationId={() => nextUuid() as never}
-      defaultLayout={props.controller.bootstrap?.settings.defaultDiffLayout ?? "unified"}
+      defaultLayout={props.defaultDiffLayout ?? "unified"}
       diff={projection}
       executionPolicy={props.view.thread.executionPolicy}
       {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}

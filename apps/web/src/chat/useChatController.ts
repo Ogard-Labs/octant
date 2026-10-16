@@ -26,6 +26,7 @@ import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { MentionableThreadId } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useRetainedRecord } from "../polling/useRetainedRecord";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import { applyChatAttemptFrame } from "./chatStreamFrames";
 import {
@@ -858,236 +859,165 @@ export function useChatController(options: ChatControllerOptions) {
     updatedAtByThread,
   ]);
 
-  async function execute(command: ChatCommand): Promise<ChatCommandResult | undefined> {
-    const commandThreadId = "threadId" in command ? String(command.threadId) : undefined;
-    setErrorMessage(undefined);
-    lastExecuteError.current = undefined;
-    if (command.kind === "update-chat-settings") setSettingsMessage(undefined);
-    try {
-      const result = await client.execute(command);
-      if (!mounted.current) return undefined;
-      if (
-        (result.kind === "deleted" || result.kind === "deletion-requested") &&
-        "threadId" in command
-      ) {
-        composerDraftRef.current.purge(String(command.threadId));
-      }
-      if (result.kind === "follow-up-updated") {
-        recordFollowUp(result.followUp.threadId, result.followUp.state === "open");
-      }
-      if (result.kind === "settings-updated") {
-        settingsVersion.current = result.settings.version;
-        setBootstrap((current) =>
-          current === undefined || result.settings.version < current.settings.version
-            ? current
-            : { ...current, settings: result.settings },
-        );
-        setStatus("ready");
-        return result;
-      }
-      const currentThreadId = activeThreadIdRef.current;
-      if (
-        currentThreadId !== undefined &&
-        "threadId" in command &&
-        String(command.threadId) === String(currentThreadId)
-      ) {
-        const currentView = activeViewRef.current;
+  const execute = useCallback(
+    async (command: ChatCommand): Promise<ChatCommandResult | undefined> => {
+      const commandThreadId = "threadId" in command ? String(command.threadId) : undefined;
+      setErrorMessage(undefined);
+      lastExecuteError.current = undefined;
+      if (command.kind === "update-chat-settings") setSettingsMessage(undefined);
+      try {
+        const result = await client.execute(command);
+        if (!mounted.current) return undefined;
         if (
-          command.kind === "change-chat-provider" &&
-          result.kind === "thread-updated" &&
-          currentView !== undefined &&
-          String(currentView.thread.id) === String(result.thread.id)
+          (result.kind === "deleted" || result.kind === "deletion-requested") &&
+          "threadId" in command
         ) {
-          // The picker waits on this command. Publish its confirmed pairing
-          // before returning; the background snapshot can arrive later.
-          applyAuthoritativeView({ ...currentView, thread: result.thread }, false);
+          composerDraftRef.current.purge(String(command.threadId));
         }
-        // A branch targets the active thread but mints a different one, so
-        // reactivating the target alone would leave this controller's thread
-        // list unaware of the thread the command just created.
-        if (result.kind === "thread-created") void loadBootstrap();
-        void activateThread(currentThreadId);
-      } else {
-        await loadBootstrap();
-      }
-      return result;
-    } catch (error) {
-      if (!mounted.current) return undefined;
-      lastExecuteError.current = failureMessage(error, CHAT_UNAVAILABLE);
-      if (
-        commandThreadId !== undefined &&
-        String(activeThreadIdRef.current ?? "") !== commandThreadId
-      ) {
-        // A command for another thread must not disturb the open one, so
-        // nothing here is shown or reloaded. The reason is still recorded
-        // above, for a caller that has somewhere of its own to report it.
-        return undefined;
-      }
-      if (failureCategory(error) === "stale") {
-        if (command.kind === "update-chat-settings") settingsConflicts.current += 1;
-        setStatus("conflict-reload");
-        const reloaded = await loadBootstrap();
-        if (command.kind === "update-chat-settings") {
-          setSettingsMessage(
-            reloaded
-              ? "Chat defaults changed elsewhere. Current authoritative values were loaded; review them and save again."
-              : "Chat defaults changed elsewhere but could not be reloaded. Reconnect, reload the current values, and try again.",
+        if (result.kind === "follow-up-updated") {
+          recordFollowUp(result.followUp.threadId, result.followUp.state === "open");
+        }
+        if (result.kind === "settings-updated") {
+          settingsVersion.current = result.settings.version;
+          setBootstrap((current) =>
+            current === undefined || result.settings.version < current.settings.version
+              ? current
+              : { ...current, settings: result.settings },
           );
+          setStatus("ready");
+          return result;
         }
         const currentThreadId = activeThreadIdRef.current;
-        if (currentThreadId !== undefined) void activateThread(currentThreadId);
+        if (
+          currentThreadId !== undefined &&
+          "threadId" in command &&
+          String(command.threadId) === String(currentThreadId)
+        ) {
+          const currentView = activeViewRef.current;
+          if (
+            command.kind === "change-chat-provider" &&
+            result.kind === "thread-updated" &&
+            currentView !== undefined &&
+            String(currentView.thread.id) === String(result.thread.id)
+          ) {
+            // The picker waits on this command. Publish its confirmed pairing
+            // before returning; the background snapshot can arrive later.
+            applyAuthoritativeView({ ...currentView, thread: result.thread }, false);
+          }
+          // A branch targets the active thread but mints a different one, so
+          // reactivating the target alone would leave this controller's thread
+          // list unaware of the thread the command just created.
+          if (result.kind === "thread-created") void loadBootstrap();
+          void activateThread(currentThreadId);
+        } else {
+          await loadBootstrap();
+        }
+        return result;
+      } catch (error) {
+        if (!mounted.current) return undefined;
+        lastExecuteError.current = failureMessage(error, CHAT_UNAVAILABLE);
+        if (
+          commandThreadId !== undefined &&
+          String(activeThreadIdRef.current ?? "") !== commandThreadId
+        ) {
+          // A command for another thread must not disturb the open one, so
+          // nothing here is shown or reloaded. The reason is still recorded
+          // above, for a caller that has somewhere of its own to report it.
+          return undefined;
+        }
+        if (failureCategory(error) === "stale") {
+          if (command.kind === "update-chat-settings") settingsConflicts.current += 1;
+          setStatus("conflict-reload");
+          const reloaded = await loadBootstrap();
+          if (command.kind === "update-chat-settings") {
+            setSettingsMessage(
+              reloaded
+                ? "Chat defaults changed elsewhere. Current authoritative values were loaded; review them and save again."
+                : "Chat defaults changed elsewhere but could not be reloaded. Reconnect, reload the current values, and try again.",
+            );
+          }
+          const currentThreadId = activeThreadIdRef.current;
+          if (currentThreadId !== undefined) void activateThread(currentThreadId);
+          return undefined;
+        }
+        setErrorMessage(failureMessage(error, CHAT_UNAVAILABLE));
+        if (command.kind === "update-chat-settings")
+          setSettingsMessage(failureMessage(error, CHAT_UNAVAILABLE));
         return undefined;
       }
-      setErrorMessage(failureMessage(error, CHAT_UNAVAILABLE));
-      if (command.kind === "update-chat-settings")
-        setSettingsMessage(failureMessage(error, CHAT_UNAVAILABLE));
-      return undefined;
-    }
-  }
+    },
+    [activateThread, applyAuthoritativeView, client, loadBootstrap, recordFollowUp],
+  );
 
-  async function sendTurn(
-    prompt: string,
-    attachmentIds: ReadonlyArray<ChatAttachmentId> = [],
-    previewSelections: ReadonlyArray<PreviewContextSelection> = [],
-    canvasSelections: ReadonlyArray<CanvasContextSelection> = [],
-    extensionSelections: ReadonlyArray<ExtensionSelection> = [],
-    /**
-     * `#thread` mentions this turn points at. Ids only: the server resolves
-     * each one against the sender's own authority when the turn runs, so the
-     * mention is context for this turn and never part of the message.
-     */
-    threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
-    /**
-     * The version a caller already knows the thread reached, for a send that
-     * follows another command it issued. This closure holds the view from the
-     * render that made it, so without this the send would present a version
-     * the earlier command has already moved past and be refused as stale.
-     */
-    expectedVersion?: ChatThread["version"],
-    /**
-     * Whether this send consumes the composer's draft. A turn the composer did
-     * not write, such as asking the agent to fill a new Canvas, keeps it: the
-     * person's unsent text is neither cleared on success nor replaced by the
-     * turn's own text on a refusal.
-     */
-    sendOptions: { readonly composerDraft: "consume" | "keep" } = { composerDraft: "consume" },
-  ): Promise<boolean> {
-    if (
-      activeView === undefined ||
-      String(activeView.thread.id) !== String(options.activeThreadId ?? "")
-    ) {
-      return false;
-    }
-    const sendingThreadId = String(activeView.thread.id);
-    // The reply arrives after the newest turn, so a reader looking at an
-    // earlier run is brought back to the newest turns first.
-    jumpToLatest();
-    const submissionKey = submissionIntentKey(
-      sendingThreadId,
-      prompt,
-      attachmentIds,
-      previewSelections,
-      canvasSelections,
-      extensionSelections,
-      threadMentionIds,
-    );
-    const submissionId =
-      pendingSubmissionIds.current.get(submissionKey) ??
-      decodeChatSubmissionId(globalThis.crypto.randomUUID());
-    pendingSubmissionIds.current.set(submissionKey, submissionId);
-    const consumesDraft = sendOptions.composerDraft === "consume";
-    const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
-    if (consumesDraft) composerDraftRef.current.clearFor(sendingThreadId);
-    const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
-    const result = await execute({
-      kind: "send-chat-turn",
-      threadId: activeView.thread.id,
-      expectedVersion: expectedVersion ?? activeView.thread.version,
-      prompt,
-      submissionId,
-      ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
-      ...(previewSelections.length === 0 ? {} : { previewSelections: [...previewSelections] }),
-      ...(canvasSelections.length === 0 ? {} : { canvasSelections: [...canvasSelections] }),
-      ...(extensionSelections.length === 0
-        ? {}
-        : { extensionSelections: [...extensionSelections] }),
-      ...(threadMentionIds.length === 0 ? {} : { threadMentionIds: [...threadMentionIds] }),
-    });
-    if (
-      consumesDraft &&
-      result === undefined &&
-      composerDraftRef.current.revisionFor(sendingThreadId) === revisionAfterClear
-    ) {
-      composerDraftRef.current.restoreFor(sendingThreadId, {
-        text: prompt,
-        caretIndex: previousDraft?.caretIndex ?? prompt.length,
-        stagedDropped: previousDraft?.stagedDropped === true,
-      });
-    }
-    if (result !== undefined) pendingSubmissionIds.current.delete(submissionKey);
-    return result !== undefined;
-  }
+  const updateSettings = useCallback(
+    async (command: Extract<ChatCommand, { kind: "update-chat-settings" }>): Promise<boolean> => {
+      const startedAt = settingsConflicts.current;
+      const started = settingsQueue.current;
+      const write = started
+        .catch(() => undefined)
+        .then(async () => {
+          if (settingsConflicts.current !== startedAt) return false;
+          const expectedVersion = settingsVersion.current ?? command.expectedVersion;
+          const result = await execute({ ...command, expectedVersion });
+          return result?.kind === "settings-updated";
+        });
+      settingsQueue.current = write;
+      return await write;
+    },
+    [execute],
+  );
 
-  async function updateSettings(
-    command: Extract<ChatCommand, { kind: "update-chat-settings" }>,
-  ): Promise<boolean> {
-    const startedAt = settingsConflicts.current;
-    const started = settingsQueue.current;
-    const write = started
-      .catch(() => undefined)
-      .then(async () => {
-        if (settingsConflicts.current !== startedAt) return false;
-        const expectedVersion = settingsVersion.current ?? command.expectedVersion;
-        const result = await execute({ ...command, expectedVersion });
-        return result?.kind === "settings-updated";
-      });
-    settingsQueue.current = write;
-    return await write;
-  }
-
-  async function upload(input: ChatAttachmentUpload) {
-    setErrorMessage(undefined);
-    try {
-      const attachment = await client.upload(input);
-      if (!mounted.current) return attachment;
-      const currentThreadId = activeThreadIdRef.current;
-      if (currentThreadId !== undefined && String(currentThreadId) === String(input.threadId)) {
-        await refreshTail(
-          currentThreadId,
-          () =>
-            mounted.current && String(activeThreadIdRef.current ?? "") === String(currentThreadId),
-        );
+  const upload = useCallback(
+    async (input: ChatAttachmentUpload) => {
+      setErrorMessage(undefined);
+      try {
+        const attachment = await client.upload(input);
+        if (!mounted.current) return attachment;
+        const currentThreadId = activeThreadIdRef.current;
+        if (currentThreadId !== undefined && String(currentThreadId) === String(input.threadId)) {
+          await refreshTail(
+            currentThreadId,
+            () =>
+              mounted.current &&
+              String(activeThreadIdRef.current ?? "") === String(currentThreadId),
+          );
+        }
+        return attachment;
+      } catch (error) {
+        if (!mounted.current) throw error;
+        if (String(activeThreadIdRef.current ?? "") !== String(input.threadId)) throw error;
+        setErrorMessage(failureMessage(error, CHAT_UNAVAILABLE));
+        throw error;
       }
-      return attachment;
-    } catch (error) {
-      if (!mounted.current) throw error;
-      if (String(activeThreadIdRef.current ?? "") !== String(input.threadId)) throw error;
-      setErrorMessage(failureMessage(error, CHAT_UNAVAILABLE));
-      throw error;
-    }
-  }
+    },
+    [client, refreshTail],
+  );
 
-  async function discard(input: ChatAttachmentDiscard) {
-    setErrorMessage(undefined);
-    try {
-      const attachment = await client.discard(input);
-      if (!mounted.current) return attachment;
-      const currentThreadId = activeThreadIdRef.current;
-      if (currentThreadId !== undefined && String(currentThreadId) === String(input.threadId)) {
-        await refreshTail(
-          currentThreadId,
-          () =>
-            mounted.current && String(activeThreadIdRef.current ?? "") === String(currentThreadId),
-        );
+  const discard = useCallback(
+    async (input: ChatAttachmentDiscard) => {
+      setErrorMessage(undefined);
+      try {
+        const attachment = await client.discard(input);
+        if (!mounted.current) return attachment;
+        const currentThreadId = activeThreadIdRef.current;
+        if (currentThreadId !== undefined && String(currentThreadId) === String(input.threadId)) {
+          await refreshTail(
+            currentThreadId,
+            () =>
+              mounted.current &&
+              String(activeThreadIdRef.current ?? "") === String(currentThreadId),
+          );
+        }
+        return attachment;
+      } catch (error) {
+        if (!mounted.current) throw error;
+        if (String(activeThreadIdRef.current ?? "") !== String(input.threadId)) throw error;
+        setErrorMessage(failureMessage(error, CHAT_UNAVAILABLE));
+        throw error;
       }
-      return attachment;
-    } catch (error) {
-      if (!mounted.current) throw error;
-      if (String(activeThreadIdRef.current ?? "") !== String(input.threadId)) throw error;
-      setErrorMessage(failureMessage(error, CHAT_UNAVAILABLE));
-      throw error;
-    }
-  }
+    },
+    [client, refreshTail],
+  );
 
   /**
    * The page before the oldest loaded turn, of the newest turns or of the
@@ -1422,7 +1352,105 @@ export function useChatController(options: ChatControllerOptions) {
       ? transcriptWindow
       : undefined;
 
-  return {
+  // Declared after `jumpToLatest`, which it calls and lists.
+  const sendTurn = useCallback(
+    async (
+      prompt: string,
+      attachmentIds: ReadonlyArray<ChatAttachmentId> = [],
+      previewSelections: ReadonlyArray<PreviewContextSelection> = [],
+      canvasSelections: ReadonlyArray<CanvasContextSelection> = [],
+      extensionSelections: ReadonlyArray<ExtensionSelection> = [],
+      /**
+       * `#thread` mentions this turn points at. Ids only: the server resolves
+       * each one against the sender's own authority when the turn runs, so the
+       * mention is context for this turn and never part of the message.
+       */
+      threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
+      /**
+       * The version a caller already knows the thread reached, for a send that
+       * follows another command it issued. This closure holds the view from the
+       * render that made it, so without this the send would present a version
+       * the earlier command has already moved past and be refused as stale.
+       */
+      expectedVersion?: ChatThread["version"],
+      /**
+       * Whether this send consumes the composer's draft. A turn the composer did
+       * not write, such as asking the agent to fill a new Canvas, keeps it: the
+       * person's unsent text is neither cleared on success nor replaced by the
+       * turn's own text on a refusal.
+       */
+      sendOptions: { readonly composerDraft: "consume" | "keep" } = { composerDraft: "consume" },
+    ): Promise<boolean> => {
+      if (
+        activeView === undefined ||
+        String(activeView.thread.id) !== String(options.activeThreadId ?? "")
+      ) {
+        return false;
+      }
+      const sendingThreadId = String(activeView.thread.id);
+      // The reply arrives after the newest turn, so a reader looking at an
+      // earlier run is brought back to the newest turns first.
+      jumpToLatest();
+      const submissionKey = submissionIntentKey(
+        sendingThreadId,
+        prompt,
+        attachmentIds,
+        previewSelections,
+        canvasSelections,
+        extensionSelections,
+        threadMentionIds,
+      );
+      const submissionId =
+        pendingSubmissionIds.current.get(submissionKey) ??
+        decodeChatSubmissionId(globalThis.crypto.randomUUID());
+      pendingSubmissionIds.current.set(submissionKey, submissionId);
+      const consumesDraft = sendOptions.composerDraft === "consume";
+      const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
+      if (consumesDraft) composerDraftRef.current.clearFor(sendingThreadId);
+      const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
+      const result = await execute({
+        kind: "send-chat-turn",
+        threadId: activeView.thread.id,
+        expectedVersion: expectedVersion ?? activeView.thread.version,
+        prompt,
+        submissionId,
+        ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
+        ...(previewSelections.length === 0 ? {} : { previewSelections: [...previewSelections] }),
+        ...(canvasSelections.length === 0 ? {} : { canvasSelections: [...canvasSelections] }),
+        ...(extensionSelections.length === 0
+          ? {}
+          : { extensionSelections: [...extensionSelections] }),
+        ...(threadMentionIds.length === 0 ? {} : { threadMentionIds: [...threadMentionIds] }),
+      });
+      if (
+        consumesDraft &&
+        result === undefined &&
+        composerDraftRef.current.revisionFor(sendingThreadId) === revisionAfterClear
+      ) {
+        composerDraftRef.current.restoreFor(sendingThreadId, {
+          text: prompt,
+          caretIndex: previousDraft?.caretIndex ?? prompt.length,
+          stagedDropped: previousDraft?.stagedDropped === true,
+        });
+      }
+      if (result !== undefined) pendingSubmissionIds.current.delete(submissionKey);
+      return result !== undefined;
+    },
+    [activeView, execute, jumpToLatest, options.activeThreadId],
+  );
+
+  const retry = useCallback(
+    () =>
+      bootstrapped.current
+        ? options.activeThreadId === undefined
+          ? loadBootstrap()
+          : activateThread(options.activeThreadId)
+        : loadBootstrap(),
+    [activateThread, loadBootstrap, options.activeThreadId],
+  );
+  // One identity while nothing in it moved, so the surfaces that take the
+  // controller whole can bail out of a render that changed none of it.
+  return useRetainedRecord({
     activeView: visibleActiveView,
     /** What else of the open thread is loaded or offered beside `activeView`'s newest turns. */
     transcriptWindow: visibleTranscriptWindow,
@@ -1457,12 +1485,7 @@ export function useChatController(options: ChatControllerOptions) {
      */
     refreshNavigation: loadBootstrap,
     reportError,
-    retry: () =>
-      bootstrapped.current
-        ? options.activeThreadId === undefined
-          ? loadBootstrap()
-          : activateThread(options.activeThreadId)
-        : loadBootstrap(),
+    retry,
     sendTurn,
     sendBackTurn,
     settingsMessage,
@@ -1471,7 +1494,7 @@ export function useChatController(options: ChatControllerOptions) {
     status,
     updateSettings,
     upload,
-  };
+  });
 }
 
 function required(value: string | undefined): string {

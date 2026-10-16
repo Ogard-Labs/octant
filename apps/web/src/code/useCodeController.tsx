@@ -49,6 +49,7 @@ import {
   type ThreadLiveStep,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useRetainedRecord } from "../polling/useRetainedRecord";
 import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { appendReasoning, applyActivityEvent, forgetWrittenPath } from "./transcriptActivity";
@@ -2431,21 +2432,24 @@ export function useCodeController(options: CodeControllerOptions) {
     [client, failCommand, followUps, refreshFollowUp],
   );
 
-  async function updateSettings(input: {
-    readonly defaultExecutionPolicy: CodeThread["executionPolicy"];
-    readonly defaultPermissionPersistence: CodeThread["permissionPersistence"];
-    readonly externalEditor?: CodeExternalEditor;
-    readonly requireGitRepository?: boolean;
-    readonly defaultDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
-  }): Promise<boolean> {
-    if (bootstrap === undefined) return false;
-    const result = await execute({
-      kind: "update-code-settings",
-      expectedVersion: bootstrap.settings.version,
-      ...input,
-    });
-    return result?.kind === "settings-updated";
-  }
+  const updateSettings = useCallback(
+    async (input: {
+      readonly defaultExecutionPolicy: CodeThread["executionPolicy"];
+      readonly defaultPermissionPersistence: CodeThread["permissionPersistence"];
+      readonly externalEditor?: CodeExternalEditor;
+      readonly requireGitRepository?: boolean;
+      readonly defaultDiffLayout?: CodeBootstrap["settings"]["defaultDiffLayout"];
+    }): Promise<boolean> => {
+      if (bootstrap === undefined) return false;
+      const result = await execute({
+        kind: "update-code-settings",
+        expectedVersion: bootstrap.settings.version,
+        ...input,
+      });
+      return result?.kind === "settings-updated";
+    },
+    [bootstrap, execute],
+  );
 
   const sendFollowUp = useCallback(
     async (
@@ -2871,7 +2875,33 @@ export function useCodeController(options: CodeControllerOptions) {
     }
   }, [activeView, client, turnStatus]);
 
-  return {
+  // The Load earlier row's state, or undefined for a thread with nothing earlier.
+  const earlierRow = useMemo(
+    () =>
+      earlierRowState(
+        earlierConversation,
+        conversation,
+        activeView?.thread.id === options.activeThreadId
+          ? activeView?.thread.forkedFrom
+          : undefined,
+      ),
+    [activeView, conversation, earlierConversation, options.activeThreadId],
+  );
+  // A retry issued from a thread view is asking for that thread back, not
+  // only for a fresh thread list: a hydration failure leaves the transcript
+  // in its error state until the thread is activated again, and nothing else
+  // re-activates a tab that is already open.
+  const retry = useCallback(async () => {
+    const reachable = await loadBootstrap("retry");
+    // Fired, not awaited: activation runs the thread's event stream until
+    // the thread is left, so its promise settles far after the retry does.
+    if (reachable && options.activeThreadId !== undefined) {
+      void activateThread(options.activeThreadId);
+    }
+  }, [activateThread, loadBootstrap, options.activeThreadId]);
+  // One identity while nothing in it moved, so the surfaces that take the
+  // controller whole can bail out of a render that changed none of it.
+  return useRetainedRecord({
     activeView: activeView?.thread.id === options.activeThreadId ? activeView : undefined,
     accessNotice,
     setAccessNotice,
@@ -2888,11 +2918,7 @@ export function useCodeController(options: CodeControllerOptions) {
     client,
     conversation,
     /** The Load earlier row's state, or undefined for a thread with nothing earlier. */
-    earlierConversation: earlierRowState(
-      earlierConversation,
-      conversation,
-      activeView?.thread.id === options.activeThreadId ? activeView?.thread.forkedFrom : undefined,
-    ),
+    earlierConversation: earlierRow,
     loadEarlierConversation,
     completeFollowUp,
     errorCategory,
@@ -2928,14 +2954,7 @@ export function useCodeController(options: CodeControllerOptions) {
     // only for a fresh thread list: a hydration failure leaves the transcript
     // in its error state until the thread is activated again, and nothing else
     // re-activates a tab that is already open.
-    retry: async () => {
-      const reachable = await loadBootstrap("retry");
-      // Fired, not awaited: activation runs the thread's event stream until
-      // the thread is left, so its promise settles far after the retry does.
-      if (reachable && options.activeThreadId !== undefined) {
-        void activateThread(options.activeThreadId);
-      }
-    },
+    retry,
     conversationHistory,
     sendFollowUp,
     setPendingDraft,
@@ -2952,7 +2971,7 @@ export function useCodeController(options: CodeControllerOptions) {
     turnUsageLimit,
     latestProviderTurnOperationId,
     updateSettings,
-  };
+  });
 }
 
 type CodeControllerResult = ReturnType<typeof useCodeController>;
