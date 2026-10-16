@@ -7,6 +7,7 @@ import {
 import {
   nativeHarnessSessionHeld,
   nativeHarnessStatusLabel,
+  nativeHarnessTaskLabel,
   sessionStatsInputOf,
   threadStats,
 } from "@octant/domain";
@@ -303,6 +304,21 @@ export function NativeHarnessSessionCard(props: NativeHarnessSessionCardProps) {
           </>
         )}
       </dl>
+      {view.tasks === undefined || view.tasks.length === 0 ? null : (
+        <>
+          <h4>Tasks</h4>
+          <ul className="native-harness-card__list" aria-label="Lead tasks">
+            {view.tasks.map((task, index) => (
+              <li key={index}>
+                <span className="native-harness-steering__status">
+                  {nativeHarnessTaskLabel(task.status)}
+                </span>{" "}
+                {task.title}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {view.routes.length === 0 ? null : (
         <>
           <h4>Routing</h4>

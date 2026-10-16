@@ -233,10 +233,33 @@ describe("agent terminal UI model", () => {
     ).toEqual({
       done: 1,
       total: 3,
+      finished: 1,
       items: [
         { title: "Doing", status: "in-progress" },
         { title: "Later", status: "pending" },
       ],
+      lead: [],
+    });
+  });
+});
+
+describe("tasks panel", () => {
+  it("keeps every task the lead listed, finished ones included, apart from the thread's work items", () => {
+    const lead = [
+      { title: "Read the spec", status: "done" },
+      { title: "Write the fix", status: "in-progress" },
+    ] as const;
+    expect(
+      tasksFrom(
+        { workItems: [{ title: "Person's item", status: "pending", position: 0 }] } as never,
+        { tasks: lead },
+      ),
+    ).toEqual({
+      done: 1,
+      total: 3,
+      finished: 0,
+      items: [{ title: "Person's item", status: "pending" }],
+      lead,
     });
   });
 });

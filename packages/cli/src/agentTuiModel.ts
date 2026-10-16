@@ -138,18 +138,35 @@ export function formatMs(ms: number): string {
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
-/** The thread's work items as the tasks panel shows them: current first, done counted. */
-export function tasksFrom(thread: AgentThreadSnapshot | undefined): {
+/**
+ * The panel's content: the thread's open work items (current first, finished
+ * ones counted in `finished`) and, apart from them, every task the lead listed
+ * with its progress, since a finished lead task is still worth seeing.
+ * `done` and `total` count both lists for the title.
+ */
+export function tasksFrom(
+  thread: AgentThreadSnapshot | undefined,
+  session?: Pick<NativeHarnessSessionView, "tasks"> | null,
+): {
   readonly done: number;
   readonly total: number;
+  readonly finished: number;
   readonly items: ReadonlyArray<TuiTask>;
+  readonly lead: NonNullable<NativeHarnessSessionView["tasks"]>;
 } {
-  const items = [...(thread?.workItems ?? [])]
+  const work: ReadonlyArray<TuiTask> = [...(thread?.workItems ?? [])]
     .sort((a, b) => a.position - b.position)
     .map((item) => ({ title: item.title, status: item.status }));
-  const done = items.filter((item) => item.status === "completed").length;
-  const open = items.filter((item) => item.status !== "completed" && item.status !== "cancelled");
-  return { done, total: items.length, items: open };
+  const lead = session?.tasks ?? [];
+  const finished = work.filter((item) => item.status === "completed").length;
+  const open = work.filter((item) => item.status !== "completed" && item.status !== "cancelled");
+  return {
+    done: finished + lead.filter((task) => task.status === "done").length,
+    total: work.length + lead.length,
+    finished,
+    items: open,
+    lead,
+  };
 }
 
 export type TuiTranscriptEntry =

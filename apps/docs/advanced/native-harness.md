@@ -22,9 +22,18 @@ the set to what it may reach:
 | Work | inside the bound folder | none      | yes                 | yes        |
 | Code | inside the checkout     | sandboxed | yes                 | yes        |
 
+`todo-write` keeps the lead's own task list: pending, in-progress and done
+items that show on the thread's agent card, the phone and the terminal as the
+lead works. It is separate from a plan, so it needs no approval and never
+asks you to review one.
+
 Web means `web-fetch`, plus `web-search` once a SearXNG search endpoint is
 set. A Chat thread gets neither, and cannot open a page, until you turn
 research on for it.
+
+`context-remaining` and `second-opinion` are offered in every mode and reach
+none of those. A thread that has read outside content cannot send a
+`second-opinion` question, since another model would receive it unmarked.
 
 Every call passes the same server authority check as any other tool. A Chat
 thread holds that authority with or without a Project. A thread that can no
@@ -291,7 +300,8 @@ approve anything. Its interventions appear on the harness card. A pause holds th
 prompt is refused with the advisor's reason until you press Resume on the
 harness card, the phone panel, or type `/resume` in the CLI — the decision it
 asked for is yours, not the next prompt's. The lead can also ask it a
-question with `second-opinion`.
+question with `second-opinion` in Chat, Work, and Code; with no advisor model
+chosen, the call is refused and the lead carries on without it.
 
 ## Follow-ups
 

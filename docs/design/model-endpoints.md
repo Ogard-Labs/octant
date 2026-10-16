@@ -29,7 +29,7 @@ polite live region where a refusal shows the host's reason with Try again.
 Next comes the runtime's own Providers & Models card (an endpoint links to its
 Model endpoints page instead). Then come State (Available, Enabled, Signed in,
 and Ready, each in words with its dot), What it can do (Chat, Work, Code, and
-Agent loop in plain sentences), and Package (Bundled with Octant, installed,
+Agent loop in plain sentences, which also say whether Octant's sandbox or the runtime's own confines a runtime, as the confinement matrix in the architecture records it), and Package (Bundled with Octant, installed,
 trusted and by whom it was reviewed, and the driver version). It offers no
 install or trust action, because a bundled driver needs neither. Opening the
 page or a setup runs nothing; at phone width a fact's value moves under its

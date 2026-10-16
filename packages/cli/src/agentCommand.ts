@@ -1,5 +1,9 @@
 import { createInterface } from "node:readline";
-import { nativeHarnessStatusLabel, withoutFollowUpBlocks } from "@octant/domain";
+import {
+  nativeHarnessStatusLabel,
+  nativeHarnessTaskLabel,
+  withoutFollowUpBlocks,
+} from "@octant/domain";
 import {
   NativeHarnessSessionView,
   type OctantMode,
@@ -896,6 +900,9 @@ function printSession(
     `Session ${nativeHarnessStatusLabel(view.session.status)} · lead ${String(view.session.lead.modelId)} on ${String(view.session.leadSlotId)} · ${view.session.turnsRun} turns · ${view.session.cutovers} context cuts\n`,
   );
   if (view.session.detail !== undefined) stdout.write(`  ${view.session.detail}\n`);
+  for (const task of view.tasks ?? []) {
+    stdout.write(`  task [${nativeHarnessTaskLabel(task.status)}] ${task.title}\n`);
+  }
   for (const route of view.routes.slice(-5)) {
     const model = "candidate" in route ? String(route.candidate.modelId) : "—";
     stdout.write(

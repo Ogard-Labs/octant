@@ -16,7 +16,7 @@ again to return to the list. The main navigation sidebar stays the same width.
 | ---- | ---------------------------- | ------------------------------------- |
 | Chat | Virtual (no filesystem root) | Scoped memory only, no shell or files |
 | Work | One OS-confined folder       | Confined filesystem within the root   |
-| Code | One OS-confined folder       | Git, shell, and tools within the root |
+| Code | One folder, sandboxed        | Git, shell, and tools within the root |
 
 Chat Projects are virtual, memory-scoped containers with no implicit filesystem or shell authority. Work Projects bind one selected directory. Code Projects bind one selected directory; Git features light up when that directory is a repository.
 

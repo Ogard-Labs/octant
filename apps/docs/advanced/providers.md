@@ -171,7 +171,9 @@ Octant already knows. It does not scan the host or start a runtime.
 A driver's setup page shows four separate states: **Available** (Octant offers
 the driver on this host), **Enabled** (a provider for it is switched on),
 **Signed in**, and **Ready** (its last connection check passed). It also says
-what the driver can do in Chat, Work, and Code, and who runs the agent loop.
+what the driver can do in Chat, Work, and Code, who runs the agent loop, and
+who sandboxes it: Octant for most runtimes, Octant in Plan only for Claude Code,
+and the runtime's own sandbox for Codex.
 Below that is one guided setup with a single next step:
 
 - **Look on this host** runs the same discovery scan as Providers & Models.

@@ -270,6 +270,28 @@ describe("ProviderCatalogView", () => {
     ).toBeDefined();
   });
 
+  it.each([
+    [
+      /^Codex CLI, /,
+      "Runs its own agent loop under its own sandbox, which Full access turns off. Octant does not confine it",
+    ],
+    [
+      /^Claude Code, /,
+      "Runs its own agent loop. Octant's sandbox confines it in Plan only; elsewhere its own sandbox applies, which Full access turns off",
+    ],
+    [
+      /^Gemini CLI, /,
+      "Runs its own agent loop. Octant's sandbox confines it and approvals gate it, except on Full access",
+    ],
+  ])("says who sandboxes %s as the confinement matrix does", (name, sentence) => {
+    render(<ProviderCatalogView {...props()} />);
+    openSetup(name);
+    const section = screen.getByRole("heading", { name: "What it can do" }).closest("section")!;
+    expect(within(section).getByText("Agent loop").nextSibling?.textContent).toBe(sentence);
+    // Full access runs no sandbox at all, so no runtime's line may promise one there.
+    expect(sentence).toContain("Full access");
+  });
+
   it("returns to the row it opened from on Back and on Escape", () => {
     render(<ProviderCatalogView {...props()} />);
     openSetup(/^Codex CLI, /);

@@ -7413,10 +7413,16 @@ function LaunchedShell(
                     signalProjectId,
                   );
                 }}
-                onOpenBoard={() => {
-                  pluginSidebarDestinationActionContext.closeOverlays();
-                  pluginSidebarDestinationActionContext.openThreadBoard();
-                }}
+                // Chat has no board: asking for one there opens a layer that
+                // hides the workspace and renders nothing in its place.
+                {...(activeMode === "chat"
+                  ? {}
+                  : {
+                      onOpenBoard: () => {
+                        pluginSidebarDestinationActionContext.closeOverlays();
+                        pluginSidebarDestinationActionContext.openThreadBoard();
+                      },
+                    })}
                 {...(githubIssuesReadAvailable ? { loadAssignedGithubWork } : {})}
                 {...(linearIssuesRead
                   ? {

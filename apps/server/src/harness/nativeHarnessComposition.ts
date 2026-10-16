@@ -29,7 +29,6 @@ import type {
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
 import type { GoalService } from "../goal/goalService";
-import type { PlanService } from "../plan/planService";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
@@ -54,7 +53,8 @@ export interface NativeHarnessCompositionOptions {
   readonly authority: NativeHarnessAuthority;
   /** Whether a provider instance is one the harness drives; others get no harness tools. */
   readonly isHarnessProvider: (providerInstanceId: ProviderInstanceId) => boolean;
-  readonly plans?: Pick<PlanService, "read" | "execute">;
+  /** Where the lead's task list is kept; absent, the lead has no `todo-write`. */
+  readonly tasks?: Pick<NativeHarnessSessionStore, "replaceTasks">;
   /** The thread goal a lead reads and checks; absent on a host without goals. */
   readonly goals?: Pick<GoalService, "read" | "execute">;
   /** Code only: the sandboxed shell. */
@@ -90,6 +90,16 @@ export interface NativeHarnessCompositionOptions {
   readonly resolveWebSearch?: () => NativeHarnessToolPorts["webSearch"];
   readonly webFetch?: NativeHarnessToolPorts["webFetch"];
   readonly contextHarness?: Pick<ContextHarnessService, "inspect">;
+  /**
+   * The advisor behind `second-opinion` for a lead thread; absent on a host
+   * that cannot reach one, where the tool is simply not offered.
+   */
+  readonly secondOpinion?: (scope: {
+    readonly threadId: string;
+    readonly mode: OctantMode;
+    readonly projectId?: ProjectId | undefined;
+    readonly lead: NativeHarnessSlotCandidate;
+  }) => NonNullable<NativeHarnessToolPorts["secondOpinion"]>;
   /** Delegation for a lead thread; absent on a host that cannot admit children. */
   readonly delegate?: (scope: {
     readonly parentThreadId: string;
@@ -214,6 +224,44 @@ export function createNativeHarnessComposition(
             return undefined;
           }
         };
+  /**
+   * The advisor sees only the question the lead writes, so a thread that has
+   * taken in outside content cannot send it: the page's own words would reach
+   * another model with nothing to mark them, the rule delegation follows.
+   */
+  const secondOpinion = (scope: {
+    readonly threadId: string;
+    readonly mode: OctantMode;
+    readonly projectId?: ProjectId | undefined;
+    readonly lead: NativeHarnessSlotCandidate;
+  }): Pick<NativeHarnessToolPorts, "secondOpinion"> => {
+    const advisor = options.secondOpinion?.(scope);
+    return advisor === undefined
+      ? {}
+      : {
+          secondOpinion: async (input) =>
+            options.readThreadTaint(scope.threadId)
+              ? {
+                  refused: "second-opinion-tainted",
+                  message:
+                    "This thread has read outside content, so it cannot send a question to another model.",
+                }
+              : advisor(input),
+        };
+  };
+  /** The lead's room left, read from its own thread in whichever mode it runs. */
+  const contextRemainingFor = (
+    aggregateType: "chat-thread" | "work-thread" | "code-thread",
+    threadId: string,
+  ): Pick<NativeHarnessToolPorts, "contextRemaining"> =>
+    contextRemaining === undefined
+      ? {}
+      : {
+          contextRemaining: contextRemaining({
+            aggregateType: aggregateType as never,
+            aggregateId: threadId as never,
+          }),
+        };
   const webPorts = (): Pick<NativeHarnessToolPorts, "webFetch" | "webSearch"> => {
     const webSearch = options.resolveWebSearch?.();
     return {
@@ -222,11 +270,9 @@ export function createNativeHarnessComposition(
     };
   };
   const shared = (threadId: string): NativeHarnessToolPorts => ({
-    ...(options.plans === undefined
+    ...(options.tasks === undefined
       ? {}
-      : {
-          todo: createNativeHarnessTodoPort({ plans: options.plans, threadId, uuid: options.uuid }),
-        }),
+      : { todo: createNativeHarnessTodoPort({ sessions: options.tasks, threadId }) }),
     ...(options.goals === undefined
       ? {}
       : {
@@ -416,14 +462,13 @@ export function createNativeHarnessComposition(
           // Research is the user's grant for a Chat thread to reach the web,
           // whether by fetching a page or by searching.
           ...(thread.researchEnabled ? webPorts() : {}),
-          ...(contextRemaining === undefined
-            ? {}
-            : {
-                contextRemaining: contextRemaining({
-                  aggregateType: "chat-thread" as never,
-                  aggregateId: threadId as never,
-                }),
-              }),
+          ...contextRemainingFor("chat-thread", threadId),
+          ...secondOpinion({
+            threadId,
+            mode: "chat",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
         },
       });
     },
@@ -450,6 +495,13 @@ export function createNativeHarnessComposition(
           }),
           filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
           ...webPorts(),
+          ...contextRemainingFor("work-thread", threadId),
+          ...secondOpinion({
+            threadId,
+            mode: "work",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
         },
       });
     },
@@ -479,6 +531,13 @@ export function createNativeHarnessComposition(
           filesystem: new NativeHarnessFileSystem({ root: checkoutRoot }),
           ...(shell === undefined ? {} : { shell }),
           ...webPorts(),
+          ...contextRemainingFor("code-thread", threadId),
+          ...secondOpinion({
+            threadId,
+            mode: "code",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
         },
       });
     },

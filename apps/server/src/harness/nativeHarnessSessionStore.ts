@@ -34,6 +34,7 @@ import {
   type NativeHarnessApprovalId,
   type NativeHarnessApprovalStatus,
   type NativeHarnessSteeringNote,
+  type NativeHarnessTodoItem,
   type NativeHarnessSlotId,
   type NativeHarnessTurnRecord,
   type OctantMode,
@@ -69,6 +70,7 @@ interface SessionRecord {
   interventions: NativeHarnessAdvisorIntervention[];
   questions: NativeHarnessQuestion[];
   approvals: NativeHarnessApproval[];
+  tasks: ReadonlyArray<NativeHarnessTodoItem>;
   version: number;
 }
 
@@ -132,6 +134,7 @@ export class NativeHarnessSessionStore {
       activatedFollowUpIds: [],
       questions: record.questions,
       approvals: record.approvals,
+      tasks: record.tasks,
       steering: this.#steering.get(threadId) ?? [],
       activeTools: this.#activeTools.get(threadId) ?? [],
       ...(retrying === undefined ? {} : { retrying }),
@@ -223,6 +226,7 @@ export class NativeHarnessSessionStore {
       interventions: [],
       questions: [],
       approvals: [],
+      tasks: [],
       version: 0,
     };
     // Journal first: a record the journal never accepted must not stay in
@@ -323,6 +327,25 @@ export class NativeHarnessSessionStore {
     if (intervention.kind === "pause-run") {
       this.pause(threadId, "paused-by-advisor", intervention.reason);
     }
+  }
+
+  /**
+   * Replaces the lead's task list. A list the lead wrote again unchanged adds
+   * no frame, since a model repeats it every few steps.
+   */
+  replaceTasks(
+    threadId: string,
+    items: ReadonlyArray<NativeHarnessTodoItem>,
+  ): "recorded" | "no-session" {
+    const record = this.#records.get(threadId);
+    if (record === undefined) return "no-session";
+    if (JSON.stringify(record.tasks) === JSON.stringify(items)) return "recorded";
+    this.#append(record, threadId, NATIVE_HARNESS_SESSION_EVENT_NAMES.tasksReplaced, {
+      sessionId: record.session.id,
+      items,
+    });
+    record.tasks = items;
+    return "recorded";
   }
 
   askApproval(threadId: string, approval: NativeHarnessApproval): void {
@@ -664,6 +687,7 @@ export class NativeHarnessSessionStore {
         interventions: [],
         questions: [],
         approvals: [],
+        tasks: [],
         version: 1,
       });
       return;
@@ -699,6 +723,8 @@ export class NativeHarnessSessionStore {
       }
     } else if (eventName === names.advisorIntervened) {
       push(record.interventions, payload as NativeHarnessAdvisorIntervention);
+    } else if (eventName === names.tasksReplaced) {
+      record.tasks = (body as { readonly items: ReadonlyArray<NativeHarnessTodoItem> }).items;
     } else if (eventName === names.approvalAsked) {
       push(record.approvals, payload as NativeHarnessApproval);
     } else if (eventName === names.approvalSettled) {

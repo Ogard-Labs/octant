@@ -43,8 +43,11 @@ describe("the turn action menu", () => {
     await user.keyboard("{Enter}");
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     await waitFor(() =>
-      expect(screen.getByRole("menuitemradio", { name: "Branch from here" })).toHaveFocus(),
+      expect(screen.getByRole("menuitem", { name: "Branch from here" })).toHaveFocus(),
     );
+    // The items are commands, so a screen reader must not announce them as
+    // unchecked radio choices.
+    expect(screen.queryAllByRole("menuitemradio")).toHaveLength(0);
 
     await user.keyboard("{Escape}");
     await waitFor(() => expect(trigger).toHaveFocus());
@@ -58,7 +61,7 @@ describe("the turn action menu", () => {
     const trigger = screen.getByRole("button", { name: "More actions" });
 
     await user.click(trigger);
-    expect(await screen.findByRole("menuitemradio", { name: "Checkpoint" })).toBeVisible();
+    expect(await screen.findByRole("menuitem", { name: "Checkpoint" })).toBeVisible();
     await user.keyboard("{Escape}");
     await waitFor(() => expect(trigger).toHaveFocus());
     expect(onAction).not.toHaveBeenCalled();

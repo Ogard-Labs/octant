@@ -3,6 +3,7 @@ import {
   harnessRetryStatusText,
   nativeHarnessSessionHeld,
   nativeHarnessStatusLabel,
+  nativeHarnessTaskLabel,
   sessionStatsInputOf,
   threadStatsLine,
 } from "@octant/domain";
@@ -301,6 +302,15 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           </View>
         </View>
       )}
+      {(view.tasks ?? []).map((task, index) => (
+        <Text
+          key={index}
+          style={[mobileTypography.caption, { color: colors.textSecondary }]}
+          testID="mobile-native-harness-task"
+        >
+          {nativeHarnessTaskLabel(task.status)}: {task.title}
+        </Text>
+      ))}
       {lastRoute === undefined ? null : (
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
           {lastRoute.job} →{" "}

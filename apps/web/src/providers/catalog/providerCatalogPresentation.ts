@@ -1,6 +1,7 @@
 import type {
   ProviderCatalogAgentLoop,
   ProviderCatalogModeSupport,
+  ProviderCatalogSandbox,
   ProviderCatalogState,
   ProviderCatalogStep,
 } from "@octant/domain/provider-catalog-policy";
@@ -115,10 +116,25 @@ export function modeSupportLabel(support: ProviderCatalogModeSupport): string {
   }
 }
 
-export function agentLoopLabel(loop: ProviderCatalogAgentLoop): string {
+/**
+ * Says who confines a runtime's own tools the way the confinement matrix does:
+ * a runtime Octant does not wrap is never described as inside Octant's sandbox.
+ */
+export function agentLoopLabel(
+  loop: ProviderCatalogAgentLoop,
+  sandbox: ProviderCatalogSandbox,
+): string {
   switch (loop) {
     case "runtime":
-      return "Runs its own agent loop, inside Octant's sandbox and approvals";
+      switch (sandbox) {
+        case "octant":
+          return "Runs its own agent loop. Octant's sandbox confines it and approvals gate it, except on Full access";
+        case "octant-in-plan":
+          return "Runs its own agent loop. Octant's sandbox confines it in Plan only; elsewhere its own sandbox applies, which Full access turns off";
+        case "runtime":
+        case "not-applicable":
+          return "Runs its own agent loop under its own sandbox, which Full access turns off. Octant does not confine it";
+      }
     case "octant-harness":
       return "Octant Harness runs the agent loop and offers every tool";
     case "replies-only":

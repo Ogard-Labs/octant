@@ -92,6 +92,23 @@
   position: relative;
 }
 
+/* Names the chord out of the terminal. It keeps its row so focusing the
+   terminal never moves the output, and is drawn only while the terminal
+   holds the keyboard; it stays in the accessible description either way. */
+.terminal-leave-hint {
+  flex: none;
+  margin: 0;
+  padding: 0 var(--oct-space-4) var(--oct-space-1);
+  background: var(--octant-workspace);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  opacity: 0;
+}
+
+.terminal-leave-hint[data-visible="true"] {
+  opacity: 1;
+}
+
 .code-terminal-pane__actions-menu {
   position: absolute;
   z-index: 3;

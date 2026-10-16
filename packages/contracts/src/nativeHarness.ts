@@ -1337,6 +1337,13 @@ export const NativeHarnessSessionView = Schema.Struct({
   approvals: Schema.optional(
     Schema.Array(NativeHarnessApproval).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_VIEW_ENTRIES)),
   ),
+  /**
+   * The lead's own task list, as `todo-write` last replaced it. It is the
+   * lead's working notes, not a thread plan, and needs no approval.
+   */
+  tasks: Schema.optional(
+    Schema.Array(NativeHarnessTodoItem).pipe(Schema.maxItems(MAX_NATIVE_HARNESS_TODO_ITEMS)),
+  ),
   /** Notes typed during the running turn; not journaled. */
   steering: Schema.optional(
     Schema.Array(NativeHarnessSteeringNote).pipe(
@@ -1368,6 +1375,7 @@ export const NATIVE_HARNESS_SESSION_EVENT_NAMES = {
   advisorIntervened: "native-harness-advisor-intervened@1",
   followUpsSuggested: "native-harness-follow-ups-suggested@1",
   followUpActivated: "native-harness-follow-up-activated@1",
+  tasksReplaced: "native-harness-tasks-replaced@1",
   questionAsked: "native-harness-question-asked@1",
   questionSettled: "native-harness-question-settled@1",
   approvalAsked: "native-harness-approval-asked@1",

@@ -1717,6 +1717,9 @@ request from the person.
 - Pointer targets are at least 24px on desktop and 44px on touch.
 - Keyboard users can reach every primary action, open/dismiss every overlay,
   navigate menus/selects, and recover focus after closing a popover or dialog.
+- A panel a turn's menu opens inline (a checkpoint's name, the question before
+  files are restored) takes focus once the menu has closed, the safe answer
+  first, and hands focus back to that turn's More actions control when it ends.
 - Keyboard focus draws one indicator, declared once in `octant.css`: a 2px
   inset outline in `--oct-focus-edge`, the foreground at 62% so it holds about
   4.5:1 or better against the control's fill and the surface around it in
@@ -1732,6 +1735,20 @@ request from the person.
   edge. Feature CSS never suppresses,
   recolours, or adds a second ring, and the `--octant-focus-ring` theme role is
   never painted as the indicator.
+- A surface that takes Tab and Escape for its own use is never a keyboard trap.
+  The terminal sends every key to its shell, so it has one documented way out:
+  `Mod+Escape` moves focus to the next control and `Mod+Shift+Escape` to the
+  previous one (Command on Apple hardware, Control elsewhere), sending nothing
+  to the shell, and both are remappable under Settings › Keyboard shortcuts.
+  Chosen because a shell reads a bare Escape and Control letters but nothing
+  distinctive from a modified Escape, Command chords never reach a shell on
+  Apple hardware, and no application-menu accelerator claims it; Windows and
+  KDE take Control+Escape and Control+Shift+Escape for the OS, which is why the
+  chord can be rebound. The terminal draws the chord in a muted line under its
+  output only while it holds the keyboard (the row keeps its height, so
+  focusing never moves the output) and always lists it in the terminal's
+  accessible description. Tab, Shift+Tab, a bare Escape and function keys still
+  reach the shell.
 - Every app-owned form declares `noValidate`; Octant owns validation copy,
   field association, focus, and recovery instead of browser-specific bubbles.
 - Loading, unavailable, stale, denied, empty, and error states keep stable
@@ -1753,7 +1770,10 @@ request from the person.
   confirmation when a turn is active or the desktop cannot confirm what the host
   is running, then stop only the
   desktop-owned host and its child resources. Cancellation leaves both app and
-  host running.
+  host running. Once the person confirms, quitting never waits on a person: a
+  failed or stalled window-state save or host stop is logged rather than shown
+  in an alert, and a fixed deadline ends the app (after force-stopping the
+  managed server) if shutdown has not finished.
 
 ## Implementation checklist
 

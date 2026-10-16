@@ -2377,7 +2377,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
-  driver's modes and agent loop, and picks one next step that acts on the
+  driver's modes, agent loop, and sandbox (who confines a runtime, held to the
+  confinement matrix by `providerProcessConfinement.test.ts`), and picks one next step that acts on the
   configured instance when one exists. Opening the catalog starts nothing. A
   scan, connect, enable, or connection check runs only from its step's button,
   and sign-in, Locate binary, and credentials stay on the runtime's own card.
@@ -3787,6 +3788,16 @@ native harness in `apps/server/src/harness`:
   task list, steering notes, questions, or remembered approvals, because each
   of those is keyed to the thread that owns it, and it never inherits running
   state or access.
+- **Task list.** `todo-write` replaces the lead's own task list, which is not
+  a thread plan. It is journaled on the harness session as a
+  `native-harness-tasks-replaced` frame (a list rewritten unchanged adds
+  none), rebuilt on replay, and carried in the session view as `tasks`, so
+  the web card, the phone panel, and the terminal show each item as pending,
+  in progress, or done in every mode. It never proposes, revises, or advances
+  a thread plan and raises no plan review, because the plan's approval policy
+  guards what a person has agreed to run and a lead's working notes would
+  otherwise be refused at their first step. The person-approved plan and its
+  policy are unchanged, and the two lists stay separate.
 - **Tools.** `createNativeHarnessTools` composes the nine working tools and
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the
   closed tool catalog (`harness-*` capability ids). `web-fetch` and
@@ -3794,6 +3805,13 @@ native harness in `apps/server/src/harness`:
   configured SearXNG endpoint). A Chat thread gets them only while its
   research is on, because research is its grant to reach the web; Work and
   Code need no such grant, and a child gets them only with network authority.
+  `context-remaining` and `second-opinion` are offered to the lead in every
+  mode and reach no file, shell, or network of the thread: `context-remaining`
+  reads the thread's own capacity snapshot, and `second-opinion` sends only
+  the lead's written question to the `advisor` slot's model as a one-shot,
+  tool-less request, so it answers nothing while that slot is empty. A thread
+  that has taken in outside content cannot send it (`second-opinion-tainted`),
+  the rule `delegate` follows. A child is offered neither.
   A tool that was not offered refuses as `tool-unavailable` if the model calls
   it anyway. Every call decodes its
   arguments, wraps a `ToolActionRequest` under the thread's current authority,

@@ -127,6 +127,29 @@ describe("NativeHarnessSessionCard", () => {
     expect(screen.getByText(/fell back to spare after rate-limited/)).toBeVisible();
   });
 
+  it("shows the lead's task list with each item's progress", async () => {
+    const client = {
+      session: vi.fn(async () => ({
+        ...view(),
+        tasks: [
+          { title: "Read the spec", status: "done" },
+          { title: "Write the fix", status: "in-progress" },
+          { title: "Run the checks", status: "pending" },
+        ] as const,
+      })),
+      command: vi.fn(),
+      answerQuestion: vi.fn(),
+      decideApproval: vi.fn(),
+    };
+    render(<NativeHarnessSessionCard client={client} threadId={threadId} />);
+    const tasks = await screen.findByRole("list", { name: "Lead tasks" });
+    expect(
+      within(tasks)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Done Read the spec", "In progress Write the fix", "To do Run the checks"]);
+  });
+
   it("names a restart's recovery and says why a resume was refused", async () => {
     const recovering = view();
     const held = {

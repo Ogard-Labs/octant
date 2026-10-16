@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   formatChord,
+  isShadowedKeybinding,
   matchKeybinding,
   matchPageKeybinding,
+  matchTerminalKeybinding,
   parseChord,
   parseKeybindingOverrides,
   resolveKeybindings,
@@ -131,6 +133,57 @@ describe("a page's own commands", () => {
     expect(formatChord(resolved.bindings.get("review-complete")!)).toBe("X");
     // A global action still cannot be a bare key.
     expect(formatChord(resolved.bindings.get("command-palette")!)).toBe("Mod+K");
+  });
+});
+
+describe("the terminal's way out", () => {
+  const bindings = resolveKeybindings();
+
+  it("moves to the next control on Mod+Escape and to the previous one with Shift", () => {
+    expect(matchTerminalKeybinding(bindings, keyEvent("Escape", { meta: true }), true)).toBe(
+      "terminal-focus-next",
+    );
+    expect(
+      matchTerminalKeybinding(bindings, keyEvent("Escape", { meta: true, shift: true }), true),
+    ).toBe("terminal-focus-previous");
+    expect(matchTerminalKeybinding(bindings, keyEvent("Escape", { ctrl: true }), false)).toBe(
+      "terminal-focus-next",
+    );
+  });
+
+  it("leaves a bare Escape, a bare Tab, and Control on Apple hardware to the shell", () => {
+    expect(matchTerminalKeybinding(bindings, keyEvent("Escape"), true)).toBeUndefined();
+    expect(matchTerminalKeybinding(bindings, keyEvent("Tab"), true)).toBeUndefined();
+    expect(
+      matchTerminalKeybinding(bindings, keyEvent("Tab", { shift: true }), true),
+    ).toBeUndefined();
+    expect(
+      matchTerminalKeybinding(bindings, keyEvent("Escape", { ctrl: true }), true),
+    ).toBeUndefined();
+  });
+
+  it("is never run by the window-level matcher", () => {
+    expect(matchKeybinding(bindings, keyEvent("Escape", { meta: true }), true)).toBeUndefined();
+  });
+
+  it("accepts a modified Escape or Tab only for a terminal action", () => {
+    expect(parseChord("Mod+Escape", { terminal: true })).toMatchObject({ status: "ok" });
+    expect(parseChord("Alt+Tab", { terminal: true })).toMatchObject({ status: "ok" });
+    expect(parseChord("Escape", { terminal: true })).toMatchObject({ status: "invalid" });
+    expect(parseChord("Mod+Enter", { terminal: true })).toMatchObject({ status: "invalid" });
+    const resolved = resolveKeybindings({
+      "terminal-focus-next": "Alt+Tab",
+      "command-palette": "Mod+Escape",
+    });
+    expect(formatChord(resolved.bindings.get("terminal-focus-next")!)).toBe("Alt+Tab");
+    expect(formatChord(resolved.bindings.get("command-palette")!)).toBe("Mod+K");
+  });
+
+  it("does not run a terminal command whose chord a global action already holds", () => {
+    const shared = resolveKeybindings({ "terminal-focus-next": "Mod+K" });
+    expect(matchTerminalKeybinding(shared, keyEvent("k", { meta: true }), true)).toBeUndefined();
+    expect(isShadowedKeybinding(shared, "terminal-focus-next")).toBe(true);
+    expect(isShadowedKeybinding(shared, "command-palette")).toBe(false);
   });
 });
 

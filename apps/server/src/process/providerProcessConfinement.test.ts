@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
+import { providerCatalogCapabilities } from "@octant/domain";
 import { describe, expect, it } from "vitest";
 import { CONFINED_CLAUDE_EXECUTION_POLICIES } from "../providers/claudeProcess";
 
@@ -113,5 +114,40 @@ describe("provider runtime confinement", () => {
       (file) => !security.includes(`\`${file}\``),
     );
     expect(unnamed).toEqual([]);
+  });
+
+  it("keeps the provider catalog's sandbox claim for each runtime to the confinement matrix", () => {
+    const architecture = readFileSync(architecturePath, "utf8");
+    const security = architecture.slice(architecture.indexOf("\n## Security and authority\n"));
+    // A row is `| Runtime (`module`, ...) | Plan | Approval-gated, auto-accept-edits | ...`.
+    const postures = (module: string) => {
+      const row = security
+        .split("\n")
+        .find((line) => line.trimStart().startsWith("|") && line.includes(`\`${module}\``));
+      const cells = (row ?? "").split("|").map((cell) => cell.trim());
+      return { plan: cells[2] ?? "", gated: cells[3] ?? "" };
+    };
+    const claimed = (module: string) => {
+      const { plan, gated } = postures(module);
+      const wrapped = (cell: string) => cell.startsWith("Wrapped");
+      return wrapped(plan) && wrapped(gated)
+        ? "octant"
+        : wrapped(plan)
+          ? "octant-in-plan"
+          : "runtime";
+    };
+    expect({
+      codex: providerCatalogCapabilities("codex").sandbox,
+      claude: providerCatalogCapabilities("claude").sandbox,
+      opencode: providerCatalogCapabilities("opencode").sandbox,
+      pi: providerCatalogCapabilities("pi").sandbox,
+      goose: providerCatalogCapabilities("goose").sandbox,
+    }).toEqual({
+      codex: claimed("codexProcess.ts"),
+      claude: claimed("claudeProcess.ts"),
+      opencode: claimed("openCodeProcess.ts"),
+      pi: claimed("piProcess.ts"),
+      goose: claimed("acpProcess.ts"),
+    });
   });
 });

@@ -355,4 +355,165 @@ describe("native harness composition", () => {
       );
     },
   );
+  describe("the advice tools", () => {
+    const providerInstanceId = "00000000-0000-4000-8000-0000000000e2";
+    const projectId = "00000000-0000-4000-8000-0000000000b3";
+    const chatThread = {
+      id: "00000000-0000-4000-8000-000000000021",
+      providerInstanceId,
+      modelId: "harness-model",
+      researchEnabled: false,
+    } as unknown as ChatThread;
+    const workThread = {
+      id: "00000000-0000-4000-8000-000000000022",
+      projectId,
+      providerInstanceId,
+      modelId: "harness-model",
+    } as unknown as WorkThread;
+    const codeThread = {
+      id: "00000000-0000-4000-8000-000000000023",
+      projectId,
+      providerInstanceId,
+      modelId: "harness-model",
+    } as unknown as CodeThread;
+
+    const harness = (tainted = false) => {
+      const asked: Array<{ readonly threadId: string; readonly mode: string }> = [];
+      const inspected: Array<unknown> = [];
+      const composition = createNativeHarnessComposition({
+        isChildAuthorityCurrent: () => true,
+        authority: {
+          resolve: () => authority,
+          service: new ToolCallAuthorityService({
+            resolveGrantedAuthority: () => authority,
+            resolveLiveFacts: () => ({
+              providerAppManagedTools: "supported",
+              host: { computerUseEnabled: false },
+              executionPolicy: "plan",
+              approvalSatisfied: false,
+              externalContentIngested: false,
+            }),
+          }),
+        },
+        isHarnessProvider: () => true,
+        shell: { run: async () => ({ status: "unavailable", output: "", truncated: false }) },
+        contextHarness: {
+          inspect: (subject) => {
+            inspected.push(subject);
+            return {
+              snapshotAt: "2026-10-16T00:00:00.000Z",
+              modelLimits: { source: "runtime-reported", confidence: "high" },
+              next: { plan: { plannedInputTokens: 4_800, safeInputBudget: 100_000 } },
+            } as never;
+          },
+        },
+        secondOpinion: (scope) => async (input) => {
+          asked.push({ threadId: scope.threadId, mode: scope.mode });
+          return `advice on ${input.question}`;
+        },
+        hostId: authority.hostId,
+        readThreadTaint: () => tainted,
+        recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+        uuid: () => "00000000-0000-4000-8000-000000000099",
+        clock: () => "2026-10-16T00:00:00.000Z",
+      });
+      return { composition, asked, inspected };
+    };
+    const names = (tools: { readonly definitions: ReadonlyArray<{ readonly name: string }> }) =>
+      tools.definitions.map((definition) => definition.name);
+
+    it("offers context-remaining and second-opinion in Chat without any file or shell reach", () => {
+      const tools = harness().composition.forChat({ thread: chatThread, windowId: "window-1" });
+      expect(names(tools!)).toEqual(["context-remaining", "second-opinion"]);
+    });
+
+    it("offers context-remaining and second-opinion in Work beside its folder tools", () => {
+      const tools = harness().composition.forWork({
+        thread: workThread,
+        projectRoot: "/nonexistent",
+        windowId: "window-1",
+      });
+      expect(names(tools!)).toEqual([
+        "read",
+        "grep",
+        "glob",
+        "edit",
+        "write",
+        "context-remaining",
+        "second-opinion",
+      ]);
+    });
+
+    it("offers context-remaining and second-opinion in Code beside its checkout tools", () => {
+      const tools = harness().composition.forCode({
+        thread: codeThread,
+        checkoutRoot: "/nonexistent",
+        windowId: "window-1",
+      });
+      expect(names(tools!)).toEqual([
+        "read",
+        "grep",
+        "glob",
+        "bash",
+        "edit",
+        "write",
+        "context-remaining",
+        "second-opinion",
+      ]);
+    });
+
+    it.each([
+      ["chat", "chat-thread"],
+      ["work", "work-thread"],
+      ["code", "code-thread"],
+    ] as const)(
+      "answers both tools from the %s thread's own state",
+      async (mode, aggregateType) => {
+        const { composition, asked, inspected } = harness();
+        const tools =
+          mode === "chat"
+            ? composition.forChat({ thread: chatThread, windowId: "window-1" })
+            : mode === "work"
+              ? composition.forWork({
+                  thread: workThread,
+                  projectRoot: "/nonexistent",
+                  windowId: "window-1",
+                })
+              : composition.forCode({
+                  thread: codeThread,
+                  checkoutRoot: "/nonexistent",
+                  windowId: "window-1",
+                });
+        const signal = new AbortController().signal;
+        expect(
+          await tools?.execute({ name: "context-remaining", inputJson: "{}", signal }),
+        ).toMatchObject({ isError: false, result: { remainingTokens: 95_200 } });
+        expect(inspected).toEqual([expect.objectContaining({ aggregateType })]);
+        expect(
+          await tools?.execute({
+            name: "second-opinion",
+            inputJson: JSON.stringify({ question: "Is this plan sound?" }),
+            signal,
+          }),
+        ).toMatchObject({
+          isError: false,
+          result: { answer: "advice on Is this plan sound?" },
+        });
+        expect(asked).toEqual([expect.objectContaining({ mode })]);
+      },
+    );
+
+    it("refuses a second opinion once the thread has taken in outside content", async () => {
+      const { composition, asked } = harness(true);
+      const tools = composition.forChat({ thread: chatThread, windowId: "window-1" });
+      expect(
+        await tools?.execute({
+          name: "second-opinion",
+          inputJson: JSON.stringify({ question: "Is this plan sound?" }),
+          signal: new AbortController().signal,
+        }),
+      ).toMatchObject({ isError: true, result: { error: "second-opinion-tainted" } });
+      expect(asked).toEqual([]);
+    });
+  });
 });
