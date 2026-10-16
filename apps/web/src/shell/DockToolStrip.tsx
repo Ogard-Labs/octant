@@ -244,7 +244,7 @@ export const DockToolStrip = memo(function DockToolStrip(props: DockToolStripPro
                       setOverflowOpen(false);
                     }}
                     type="button"
-                    variant="ghost"
+                    variant="bare"
                   >
                     <DockToolIcon surface={dockToolSurface(tool)} />
                     <span>{tool.label}</span>

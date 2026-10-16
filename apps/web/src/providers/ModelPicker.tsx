@@ -304,6 +304,7 @@ function SectionView(props: {
                 }
                 role="option"
                 type="button"
+                variant="bare"
               >
                 <span className="model-picker__option-name">{picker.model.displayName}</span>
                 <span className="model-picker__option-id">{String(modelId)}</span>

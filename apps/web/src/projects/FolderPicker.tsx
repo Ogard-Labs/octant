@@ -238,7 +238,7 @@ export function FolderPicker(props: FolderPickerProps) {
                     className="folder-picker__breadcrumb"
                     onClick={() => navigateToBreadcrumb(candidateId)}
                     type="button"
-                    variant="ghost"
+                    variant="bare"
                   >
                     {i === 0 ? <Home aria-hidden="true" size={12} strokeWidth={1.8} /> : null}
                     <span>{crumb.label}</span>
@@ -284,7 +284,7 @@ export function FolderPicker(props: FolderPickerProps) {
                 className="folder-picker__item-nav"
                 onClick={() => navigateInto(candidate)}
                 type="button"
-                variant="ghost"
+                variant="bare"
               >
                 {candidate.isGitRepository ? (
                   <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
@@ -313,7 +313,7 @@ export function FolderPicker(props: FolderPickerProps) {
                   onClick={() => navigateInto(candidate)}
                   size="sm"
                   type="button"
-                  variant="ghost"
+                  variant="outline"
                 >
                   Open
                 </OctantButton>
