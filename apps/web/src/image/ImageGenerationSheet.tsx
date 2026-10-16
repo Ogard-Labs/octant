@@ -283,7 +283,7 @@ export function ImageGenerationSheet(props: ImageGenerationSheetProps) {
           </OctantButton>
         ) : (
           <OctantButton
-            className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
             disabled={!canSubmit}
             focusableWhenDisabled
             type="submit"

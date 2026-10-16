@@ -103,7 +103,7 @@ describe("ImageGenerationSheet", () => {
     const generate = screen.getByRole("button", { name: "Generate" });
     expect(generate).not.toBeDisabled();
     expect(generate).toHaveAttribute("aria-disabled", "true");
-    expect(generate).toHaveClass("aria-disabled:opacity-50", "aria-disabled:cursor-not-allowed");
+    expect(generate).toHaveClass("aria-disabled:opacity-50", "aria-disabled:pointer-events-none");
     generate.focus();
     expect(generate).toHaveFocus();
     await user.keyboard("{Enter}");
