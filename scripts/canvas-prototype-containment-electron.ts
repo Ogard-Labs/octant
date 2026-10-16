@@ -170,9 +170,9 @@ function surfaceFor() {
  */
 async function pointerRun(): Promise<never> {
   const surface = surfaceFor();
-  const prepared = await surface.prepare();
-  if (prepared.status !== "ready") finish({ mode, prepared });
   const recorded = recordingOwner();
+  const prepared = await surface.prepare(recorded.owner);
+  if (prepared.status !== "ready") finish({ mode, prepared });
   const surfaceId = randomUUID();
   const viewport = CANVAS_DESIGN_VIEWPORT.phone;
   const opened = await surface.open(recorded.owner, {
@@ -219,9 +219,9 @@ async function pointerRun(): Promise<never> {
 
 async function containedRun(): Promise<never> {
   const surface = surfaceFor();
-  const prepared = await surface.prepare();
-  if (prepared.status !== "ready") finish({ mode, prepared });
   const recorded = recordingOwner();
+  const prepared = await surface.prepare(recorded.owner);
+  if (prepared.status !== "ready") finish({ mode, prepared });
   // The renderer is not trusted to choose what the host shows: anything but
   // a ticketed design page on this host is refused.
   const refused: Array<string> = [];

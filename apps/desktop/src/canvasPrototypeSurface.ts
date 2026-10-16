@@ -55,6 +55,20 @@ export interface CanvasPrototypeOwner {
   readonly send: (event: CanvasPrototypeSurfaceEvent) => void;
 }
 
+/**
+ * The contents of a window that opens prototypes, as far as its going away
+ * goes. A reload or a new page, a renderer that exits, and destroyed contents
+ * each leave its prototypes without the page that opened them.
+ */
+export interface CanvasPrototypeOwnerContentsPort {
+  readonly id: number;
+  readonly onNavigation: (
+    listener: (navigation: { readonly isMainFrame: boolean; readonly isInPlace: boolean }) => void,
+  ) => void;
+  readonly onRendererGone: (listener: () => void) => void;
+  readonly onDestroyed: (listener: () => void) => void;
+}
+
 /** The running prototype host process. */
 export interface CanvasPrototypeHostConnection {
   readonly send: (command: CanvasPrototypeHostCommand) => void;
@@ -259,10 +273,20 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
   let host: CanvasPrototypeHostConnection | undefined;
   let ready = false;
   let preparing: Promise<CanvasPrototypeSurfacePreparation> | undefined;
+  // Settles a start still waiting on the host as unavailable, when the host is
+  // stopped before it says it is ready.
+  let abandonStart: (() => void) | undefined;
   const owners = new Map<string, CanvasPrototypeOwner>();
   // How many times each window's prototypes were closed. An open that waited
   // on the page across a close belongs to a page that is gone, and is dropped.
   const closings = new Map<number, number>();
+  // The windows that prepared the host or opened a prototype since their page
+  // loaded. The host runs while one of them is still there, and stops when the
+  // last goes, so a window that went while the host started leaves no process.
+  const users = new Set<number>();
+  // Page requests still in flight, by the window that asked, so a window that
+  // goes takes its requests with it.
+  const pendingOpens = new Map<number, Set<AbortController>>();
 
   /** The host is gone: every prototype it drew is gone with it. */
   const forget = () => {
@@ -289,13 +313,17 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (abandonStart === abandon) abandonStart = undefined;
         if (result.status === "ready") ready = true;
         else {
           started?.stop();
-          forget();
+          // A host already stopped and replaced must not take its successor down.
+          if (host === started) forget();
         }
         settle(result);
       };
+      const abandon = () => finish({ status: "unavailable", reason: NOT_STARTED });
+      abandonStart = abandon;
       const timer = setTimeout(
         () => finish({ status: "unavailable", reason: NOT_STARTED }),
         options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
@@ -321,10 +349,10 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
       });
     });
 
-  const fetchPage = async (ticket: string, server: string) => {
+  const fetchPage = async (ticket: string, server: string, signal: AbortSignal) => {
     const page = await options.fetch(
       new URL(`${CANVAS_DESIGN_PAGE_PATH}?ticket=${ticket}`, server),
-      { redirect: "error" },
+      { redirect: "error", signal },
     );
     const headers: Record<string, string> = {};
     for (const name of PAGE_HEADERS) {
@@ -337,6 +365,15 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
   const ownedBy = (owner: CanvasPrototypeOwner, surfaceId: unknown): surfaceId is string =>
     typeof surfaceId === "string" && owners.get(surfaceId)?.id === owner.id;
 
+  const stopHost = () => {
+    const running = host;
+    const abandon = abandonStart;
+    forget();
+    // A host still starting is stopped by settling its start.
+    if (abandon === undefined) running?.stop();
+    else abandon();
+  };
+
   return Object.freeze({
     /**
      * Starts the prototype host and waits for it to read back that its network
@@ -344,7 +381,8 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
      * remembered, so the next try starts over. Nothing opens before this is
      * ready.
      */
-    prepare: (): Promise<CanvasPrototypeSurfacePreparation> => {
+    prepare: (owner: CanvasPrototypeOwner): Promise<CanvasPrototypeSurfacePreparation> => {
+      users.add(owner.id);
       preparing ??= start();
       return preparing;
     },
@@ -370,14 +408,26 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
       }
       const hostAsked = host;
       const closingsAsked = closings.get(owner.id) ?? 0;
+      users.add(owner.id);
+      const pageRequest = new AbortController();
+      const pending = pendingOpens.get(owner.id) ?? new Set<AbortController>();
+      pendingOpens.set(owner.id, pending.add(pageRequest));
       let page;
       try {
-        page = await fetchPage(ticket, server);
+        page = await fetchPage(ticket, server, pageRequest.signal);
       } catch {
-        return { status: "refused", reason: "Octant could not reach the host for the page." };
+        page = undefined;
+      } finally {
+        pending.delete(pageRequest);
+        if (pending.size === 0 && pendingOpens.get(owner.id) === pending) {
+          pendingOpens.delete(owner.id);
+        }
       }
       if ((closings.get(owner.id) ?? 0) !== closingsAsked) {
         return { status: "refused", reason: "The window that asked for the prototype is gone." };
+      }
+      if (page === undefined) {
+        return { status: "refused", reason: "Octant could not reach the host for the page." };
       }
       const current = host;
       if (
@@ -424,26 +474,47 @@ export function createCanvasPrototypeSurface(options: CanvasPrototypeSurfaceOpti
       host?.send({ kind: "close", surfaceId });
     },
 
-    /** Closes every prototype a window opened, as the window goes away. */
+    /**
+     * Closes every prototype a window opened and cancels the ones it is still
+     * waiting on, as the window's page goes away. The host stops when no other
+     * window uses it; the next prepare starts a new one.
+     */
     closeOwnedBy: (ownerId: number): void => {
       closings.set(ownerId, (closings.get(ownerId) ?? 0) + 1);
+      for (const request of pendingOpens.get(ownerId) ?? []) request.abort();
+      pendingOpens.delete(ownerId);
       for (const [surfaceId, owner] of owners) {
         if (owner.id !== ownerId) continue;
         owners.delete(surfaceId);
         host?.send({ kind: "close", surfaceId });
       }
+      users.delete(ownerId);
+      if (users.size === 0) stopHost();
     },
 
     /** Stops the prototype host, as the app quits. */
-    stop: (): void => {
-      const running = host;
-      forget();
-      running?.stop();
-    },
+    stop: stopHost,
   });
 }
 
 export type CanvasPrototypeSurface = ReturnType<typeof createCanvasPrototypeSurface>;
+
+/**
+ * A window's prototypes close with the page that opened them: on a reload or
+ * a new page, when its renderer exits (which leaves the window open with no
+ * page), and when its contents are destroyed.
+ */
+export function closeCanvasPrototypesWith(
+  contents: CanvasPrototypeOwnerContentsPort,
+  surface: () => CanvasPrototypeSurface | undefined,
+): void {
+  const close = () => surface()?.closeOwnedBy(contents.id);
+  contents.onNavigation(({ isMainFrame, isInPlace }) => {
+    if (isMainFrame && !isInPlace) close();
+  });
+  contents.onRendererGone(close);
+  contents.onDestroyed(close);
+}
 
 /**
  * Starts the prototype host as a child of this process, with an IPC channel

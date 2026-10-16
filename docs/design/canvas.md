@@ -728,7 +728,11 @@ answers every name with not-found among them:
 - **The process.** `apps/desktop` starts the host from its own executable with
   a host switch (a packaged app always runs its own entry, so the entry runs
   either the app or the host). It has no Dock icon or windows on screen, a
-  throwaway data directory, and leaves when the app's IPC channel closes.
+  throwaway data directory, and leaves when the app's IPC channel closes. It
+  runs while a window that prepared it or opened a prototype keeps its page:
+  when the last such window closes, loads another page, or its renderer exits,
+  the app stops the host, even one still starting, and the next run starts a
+  new one.
 - **Preparing.** A run is two separate facts: whether it is contained (what the
   person is told) and where it is drawn (the desktop's own surface, or a frame).
   Whatever builds the run, a prototype drawn on the surface is not asked for a
@@ -749,7 +753,7 @@ answers every name with not-found among them:
   prototype belongs to the window that opened it: only that window hears its
   events or may send it input, and its prototypes close when it closes, loads
   another page, or its renderer exits. An open still waiting on the page when
-  that happens is dropped.
+  that happens is dropped and its page request cancelled.
 - **The page.** The main process asks the host for the ticketed design page
   itself and hands the prototype host the page with its content type and
   policy. The host serves it once, under an `octant-prototype:` scheme of its

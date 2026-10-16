@@ -226,9 +226,11 @@ import {
   type CanvasFrameGuardWebContentsPort,
 } from "./canvasFrameGuard";
 import {
+  closeCanvasPrototypesWith,
   createCanvasPrototypeSurface,
   spawnCanvasPrototypeHost,
   type CanvasPrototypeOwner,
+  type CanvasPrototypeOwnerContentsPort,
   type CanvasPrototypeSurface,
 } from "./canvasPrototypeSurface";
 import { CANVAS_PROTOTYPE_HOST_SWITCH } from "./canvasPrototypeHost";
@@ -2316,7 +2318,7 @@ async function createWindow(): Promise<void> {
       installCanvasFrameGuards(canvasFrameGuardWebContents(window), {
         serverUrl: () => activeServerUrl,
       });
-      closeCanvasPrototypesWith(window);
+      closeCanvasPrototypesWith(canvasPrototypeOwnerContents(window), () => canvasPrototypeSurface);
       const stopThermalPerformance = observeThermalPerformance({
         platform: process.platform,
         powerMonitor,
@@ -2569,7 +2571,10 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         installCanvasFrameGuards(canvasFrameGuardWebContents(window), {
           serverUrl: () => activeServerUrl,
         });
-        closeCanvasPrototypesWith(window);
+        closeCanvasPrototypesWith(
+          canvasPrototypeOwnerContents(window),
+          () => canvasPrototypeSurface,
+        );
         window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
           if (!isMainFrame || isInPlace) return;
           menuBarOpenThreads.delete(window.id);
@@ -3500,7 +3505,7 @@ function installIpcHandlers(): void {
   });
   ipcMain.handle(IPC_CHANNELS.canvasPrototypeSurface, async (event) => {
     ownedTopLevelWindowContext(event);
-    return await desktopCanvasPrototypeSurface().prepare();
+    return await desktopCanvasPrototypeSurface().prepare(canvasPrototypeOwner(event.sender));
   });
   ipcMain.handle(IPC_CHANNELS.canvasPrototypeOpen, async (event, request: unknown) => {
     ownedTopLevelWindowContext(event);
@@ -4062,18 +4067,20 @@ function canvasPrototypeOwner(sender: WebContents): CanvasPrototypeOwner {
   };
 }
 
-/** A window's prototypes close with it, and with the page or renderer that opened them. */
-function closeCanvasPrototypesWith(window: BrowserWindow): void {
-  const contentsId = window.webContents.id;
-  const close = () => canvasPrototypeSurface?.closeOwnedBy(contentsId);
-  // A reload is a new page in the same contents: the old page's prototypes go.
-  window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) close();
-  });
-  // A renderer that crashed leaves the window open with no page to own them.
-  window.webContents.on("render-process-gone", close);
-  window.webContents.once("destroyed", close);
-  window.once("closed", close);
+function canvasPrototypeOwnerContents(window: BrowserWindow): CanvasPrototypeOwnerContentsPort {
+  const contents = window.webContents;
+  return {
+    id: contents.id,
+    onNavigation: (listener) =>
+      contents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) =>
+        listener({ isMainFrame, isInPlace }),
+      ),
+    onRendererGone: (listener) => contents.on("render-process-gone", () => listener()),
+    onDestroyed: (listener) => {
+      contents.once("destroyed", listener);
+      window.once("closed", listener);
+    },
+  };
 }
 
 function rendererNavigationWebContents(window: BrowserWindow): RendererNavigationWebContentsPort {

@@ -2,11 +2,13 @@ import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
 import { describe, expect, it, vi } from "vitest";
 import type { CanvasPrototypeHostCommand, CanvasPrototypeHostEvent } from "./canvasPrototypeHost";
 import {
+  closeCanvasPrototypesWith,
   createCanvasPrototypeSurface,
   decodeCanvasPrototypeInput,
   designPageTicket,
   type CanvasPrototypeHostConnection,
   type CanvasPrototypeOwner,
+  type CanvasPrototypeOwnerContentsPort,
   type CanvasPrototypeSurfaceEvent,
 } from "./canvasPrototypeSurface";
 
@@ -68,9 +70,12 @@ function surface(
   return { surface: made, hosts };
 }
 
+/** The window that prepared the host, which stays open unless a test closes it. */
+const preparer = owner(99).port;
+
 async function readySurface(input: Parameters<typeof surface>[0] = {}) {
   const made = surface(input);
-  const preparing = made.surface.prepare();
+  const preparing = made.surface.prepare(preparer);
   made.hosts[0]?.emit({ kind: "ready" });
   await expect(preparing).resolves.toEqual({ status: "ready" });
   const host = made.hosts[0];
@@ -90,10 +95,10 @@ const request = (fields: Record<string, unknown> = {}) => ({
 describe("starting the prototype host", () => {
   it("is ready only once the host reads back that its network and resolver are closed", async () => {
     const { surface: made, hosts } = surface();
-    const preparing = made.prepare();
+    const preparing = made.prepare(preparer);
     expect(hosts).toHaveLength(1);
     // Asked again while it starts, it starts no second host.
-    void made.prepare();
+    void made.prepare(preparer);
     expect(hosts).toHaveLength(1);
     hosts[0]?.emit({ kind: "ready" });
     await expect(preparing).resolves.toEqual({ status: "ready" });
@@ -101,14 +106,14 @@ describe("starting the prototype host", () => {
 
   it("reports the host's refusal, stops it, and starts over on the next try", async () => {
     const { surface: made, hosts } = surface();
-    const preparing = made.prepare();
+    const preparing = made.prepare(preparer);
     hosts[0]?.emit({ kind: "unavailable", reason: "Names still resolve." });
     await expect(preparing).resolves.toEqual({
       status: "unavailable",
       reason: "Names still resolve.",
     });
     expect(hosts[0]?.stop).toHaveBeenCalledOnce();
-    const again = made.prepare();
+    const again = made.prepare(preparer);
     expect(hosts).toHaveLength(2);
     hosts[1]?.emit({ kind: "ready" });
     await expect(again).resolves.toEqual({ status: "ready" });
@@ -116,11 +121,13 @@ describe("starting the prototype host", () => {
 
   it("is unavailable when the host says nothing in time or exits before it is ready", async () => {
     const silent = surface();
-    await expect(silent.surface.prepare()).resolves.toMatchObject({ status: "unavailable" });
+    await expect(silent.surface.prepare(preparer)).resolves.toMatchObject({
+      status: "unavailable",
+    });
     expect(silent.hosts[0]?.stop).toHaveBeenCalledOnce();
 
     const exiting = surface();
-    const preparing = exiting.surface.prepare();
+    const preparing = exiting.surface.prepare(preparer);
     exiting.hosts[0]?.exit();
     await expect(preparing).resolves.toMatchObject({ status: "unavailable" });
   });
@@ -262,8 +269,65 @@ describe("a prototype's window", () => {
   });
 });
 
+function contents(id: number) {
+  let navigate: ((navigation: { isMainFrame: boolean; isInPlace: boolean }) => void) | undefined;
+  let rendererGone: (() => void) | undefined;
+  let destroyed: (() => void) | undefined;
+  const port: CanvasPrototypeOwnerContentsPort = {
+    id,
+    onNavigation: (listener) => {
+      navigate = listener;
+    },
+    onRendererGone: (listener) => {
+      rendererGone = listener;
+    },
+    onDestroyed: (listener) => {
+      destroyed = listener;
+    },
+  };
+  return {
+    port,
+    navigate: (navigation: { isMainFrame: boolean; isInPlace: boolean }) => navigate?.(navigation),
+    rendererGone: () => rendererGone?.(),
+    destroyed: () => destroyed?.(),
+  };
+}
+
+function pendingPages() {
+  const asked: Array<{ deliver: (response: Response) => void; signal: AbortSignal | undefined }> =
+    [];
+  const fetchPage = vi.fn<typeof fetch>(
+    (_url, init) =>
+      new Promise<Response>((resolve, reject) => {
+        const signal = init?.signal ?? undefined;
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+        asked.push({ deliver: resolve, signal });
+      }),
+  );
+  return { fetchPage, asked };
+}
+
 describe("a prototype whose window goes while it opens", () => {
-  it("is not opened once the page arrives, so no prototype outlives the window that asked", async () => {
+  it("is cancelled, and the host stops when no other window uses it", async () => {
+    const { fetchPage, asked } = pendingPages();
+    const { surface: made, hosts } = surface({ fetch: fetchPage });
+    const window = owner(1);
+    const preparing = made.prepare(window.port);
+    hosts[0]?.emit({ kind: "ready" });
+    await expect(preparing).resolves.toEqual({ status: "ready" });
+    const opening = made.open(window.port, request());
+    await vi.waitFor(() => expect(asked).toHaveLength(1));
+    made.closeOwnedBy(1);
+    expect(asked[0]?.signal?.aborted).toBe(true);
+    await expect(opening).resolves.toEqual({
+      status: "refused",
+      reason: "The window that asked for the prototype is gone.",
+    });
+    expect(hosts[0]?.sent).toEqual([]);
+    expect(hosts[0]?.stop).toHaveBeenCalledOnce();
+  });
+
+  it("is not opened once the page arrives, while the host keeps running for another window", async () => {
     let deliver: ((response: Response) => void) | undefined;
     const fetchPage = vi.fn<typeof fetch>(
       () =>
@@ -279,11 +343,77 @@ describe("a prototype whose window goes while it opens", () => {
     deliver?.(new Response("page"));
     await expect(opening).resolves.toMatchObject({ status: "refused" });
     expect(host.sent).toEqual([]);
+    expect(host.stop).not.toHaveBeenCalled();
 
     // A later open from a new page in the same window still works.
     const reopened = made.open(window.port, request({ surfaceId: other }));
     deliver?.(new Response("page"));
     await expect(reopened).resolves.toEqual({ status: "open" });
+  });
+
+  it("stops a host still starting, without taking down the host started after it", async () => {
+    const { surface: made, hosts } = surface();
+    const preparing = made.prepare(owner(1).port);
+    made.closeOwnedBy(1);
+    await expect(preparing).resolves.toMatchObject({ status: "unavailable" });
+    expect(hosts[0]?.stop).toHaveBeenCalledOnce();
+
+    const next = owner(2);
+    const again = made.prepare(next.port);
+    expect(hosts).toHaveLength(2);
+    hosts[1]?.emit({ kind: "ready" });
+    await expect(again).resolves.toEqual({ status: "ready" });
+    // Past the first start's deadline, the new host is still the one in use.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    await expect(made.open(next.port, request())).resolves.toEqual({ status: "open" });
+    expect(hosts[1]?.stop).not.toHaveBeenCalled();
+  });
+});
+
+describe("a window whose renderer exits", () => {
+  it("loses its prototypes, and the host stops when no other window uses it", async () => {
+    const { surface: made, hosts } = surface();
+    const window = owner(1);
+    const page = contents(1);
+    closeCanvasPrototypesWith(page.port, () => made);
+    const preparing = made.prepare(window.port);
+    hosts[0]?.emit({ kind: "ready" });
+    await preparing;
+    await made.open(window.port, request());
+    page.rendererGone();
+    expect(hosts[0]?.sent.at(-1)).toEqual({ kind: "close", surfaceId });
+    expect(hosts[0]?.stop).toHaveBeenCalledOnce();
+    // The window's next page starts a new host.
+    void made.prepare(window.port);
+    expect(hosts).toHaveLength(2);
+  });
+
+  it("leaves another window's prototypes and the host running, and a page that stays is not a new one", async () => {
+    const { surface: made, host } = await readySurface();
+    const first = owner(1);
+    const second = owner(2);
+    const firstPage = contents(1);
+    const secondPage = contents(2);
+    closeCanvasPrototypesWith(firstPage.port, () => made);
+    closeCanvasPrototypesWith(secondPage.port, () => made);
+    await made.open(first.port, request());
+    await made.open(second.port, request({ surfaceId: other }));
+    host.sent.length = 0;
+
+    firstPage.navigate({ isMainFrame: false, isInPlace: false });
+    firstPage.navigate({ isMainFrame: true, isInPlace: true });
+    expect(host.sent).toEqual([]);
+
+    firstPage.rendererGone();
+    expect(host.sent).toEqual([{ kind: "close", surfaceId }]);
+    host.emit({ kind: "cursor", surfaceId: other, cursor: "pointer" });
+    expect(second.heard).toEqual([{ kind: "cursor", surfaceId: other, cursor: "pointer" }]);
+
+    secondPage.destroyed();
+    expect(host.sent.at(-1)).toEqual({ kind: "close", surfaceId: other });
+    expect(host.stop).not.toHaveBeenCalled();
+    made.closeOwnedBy(preparer.id);
+    expect(host.stop).toHaveBeenCalledOnce();
   });
 });
 
