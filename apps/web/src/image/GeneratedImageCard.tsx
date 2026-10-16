@@ -22,10 +22,15 @@ export function GeneratedImageCard(props: GeneratedImageCardProps) {
   const profile = props.profiles.find(
     (candidate) => String(candidate.instanceId) === String(props.job.profileInstanceId),
   );
+  // A provider can hold several custom sources, so the profile's own name
+  // would blur them; the job names the model it ran, which picks its source.
+  const sourceLabel = profile?.sourceLabels?.find(
+    (source) => String(source.modelId) === String(props.job.modelId),
+  )?.label;
   const attribution =
     profile === undefined
       ? String(props.job.modelId)
-      : `${profile.displayName} · ${String(props.job.modelId)}`;
+      : `${sourceLabel ?? profile.displayName} · ${String(props.job.modelId)}`;
 
   useEffect(() => {
     let cancelled = false;

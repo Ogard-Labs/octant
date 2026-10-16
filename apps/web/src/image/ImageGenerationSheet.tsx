@@ -175,7 +175,15 @@ export function ImageGenerationSheet(props: ImageGenerationSheetProps) {
             <OctantSelectField
               aria-label="Image model"
               onValueChange={setModelId}
-              options={models.map((id) => ({ id: String(id), label: String(id) }))}
+              options={models.map((id) => {
+                const sourceLabel = profile?.sourceLabels?.find(
+                  (source) => String(source.modelId) === String(id),
+                )?.label;
+                return {
+                  id: String(id),
+                  label: sourceLabel === undefined ? String(id) : `${sourceLabel} · ${String(id)}`,
+                };
+              })}
               value={selectedModelId}
             />
           </label>

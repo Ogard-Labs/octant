@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
 import { samePollingData } from "../polling/samePollingData";
 import { GeneratedImageCard } from "./GeneratedImageCard";
+import { useImageJobChangeRevision } from "./ImageJobChangeRevision";
 import { ImageGenerationSheet } from "./ImageGenerationSheet";
 import type { ImageGenerationDraft } from "./ImageGenerationSheet";
 
@@ -27,13 +28,14 @@ export interface GeneratedImageListProps {
 
 export function GeneratedImageList(props: GeneratedImageListProps) {
   const workspace = useWorkspaceContentView();
+  const changeRevision = useImageJobChangeRevision();
   const [jobs, setJobs] = useState<ReadonlyArray<ImageJob>>([]);
   const [revise, setRevise] = useState<
     { readonly job: ImageJob; readonly artifact: ImageArtifactRecord } | undefined
   >(undefined);
   const inFlightGeneration = useRef<number | undefined>(undefined);
   const generation = useRef(0);
-  const refreshRef = useRef<() => void>(() => undefined);
+  const refreshRef = useRef<(afterChange?: boolean) => void>(() => undefined);
   const hasPendingJob = jobs.some((job) => job.status === "queued" || job.status === "running");
 
   useEffect(() => {
@@ -41,8 +43,13 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
     const refreshGeneration = ++generation.current;
     setJobs([]);
     setRevise(undefined);
-    const refresh = () => {
-      if (!documentIsVisible() || inFlightGeneration.current === refreshGeneration) {
+    let readAgain = false;
+    const refresh = (afterChange = false) => {
+      if (!documentIsVisible()) return;
+      if (inFlightGeneration.current === refreshGeneration) {
+        // A change the host reported while a read is running may postdate what
+        // that read captured, so it earns one more read once this one settles.
+        if (afterChange) readAgain = true;
         return;
       }
       inFlightGeneration.current = refreshGeneration;
@@ -62,6 +69,10 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
           if (inFlightGeneration.current === refreshGeneration) {
             inFlightGeneration.current = undefined;
           }
+          if (readAgain && !cancelled) {
+            readAgain = false;
+            refresh();
+          }
         });
     };
     refreshRef.current = refresh;
@@ -70,6 +81,12 @@ export function GeneratedImageList(props: GeneratedImageListProps) {
       cancelled = true;
     };
   }, [props.client, props.scopeId, props.threadKind]);
+
+  // The host says when a job is queued or finishes, including the ones the
+  // agent started. The first revision is the mount's own read.
+  useEffect(() => {
+    if (changeRevision > 0) refreshRef.current(true);
+  }, [changeRevision]);
 
   // Fast only while a job is in flight. With nothing pending the list can
   // change only when someone enqueues (which refreshes here) or a turn's
