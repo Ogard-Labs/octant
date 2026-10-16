@@ -87,6 +87,7 @@ export function createManagedToolService(options: {
   let settingsAutomaticUpdates = false;
   let initializing: Promise<void> | undefined;
   let closed = false;
+  const trackedProcesses = new Set<ChildProcess>();
 
   const bundledReleaseFor = (packageName: string) =>
     BUNDLED_MANAGED_TOOL_RELEASES.find((release) => release.packageName === packageName);
@@ -316,10 +317,27 @@ export function createManagedToolService(options: {
       const instance = instances.find((candidate) => candidate.descriptor.tool === tool);
       if (instance === undefined) return;
       instance.state.running += 1;
+      trackedProcesses.add(child);
       child.once("exit", () => {
+        trackedProcesses.delete(child);
         instance.state.running = Math.max(0, instance.state.running - 1);
         void instance.updates.applyWhenIdle();
       });
+    },
+    /**
+     * Ends every tool process this service started, now. `close` waits for a
+     * launch that has not printed its endpoint yet (up to its readiness window)
+     * before it signals the process, so a quit that has run out of time uses
+     * this instead: the process holds a port and would outlive the app.
+     */
+    terminateTrackedProcesses: (): void => {
+      for (const child of trackedProcesses) {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Already gone; the exit handler drops it.
+        }
+      }
     },
     status: async (): Promise<ManagedToolsStatus> => {
       await initialize();

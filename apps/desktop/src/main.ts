@@ -4112,19 +4112,28 @@ function logQuitProblem(message: string): void {
   }
 }
 
-// Ends the app when graceful shutdown stalls. It first kills the managed server
-// the quit started with, because stopping the host clears the module reference
-// to it and an exit would otherwise orphan a child that holds the data directory.
-function forceExitAfterStalledQuit(serverAtQuit: ChildProcess | undefined): () => void {
+// Ends the app when graceful shutdown stalls. It first kills the processes the
+// quit started with: stopping the host clears the module references to them,
+// and a broker's own close can be waiting out a launch, so an exit would
+// otherwise orphan children that hold the data directory or a port.
+function forceExitAfterStalledQuit(owned: {
+  readonly server: ChildProcess | undefined;
+  readonly managedTools: ManagedToolService | undefined;
+}): () => void {
   let exiting = false;
   return () => {
     if (exiting) return;
     exiting = true;
     logQuitProblem("Octant quit did not finish in time; ending the application.");
     try {
-      serverAtQuit?.kill("SIGKILL");
+      owned.server?.kill("SIGKILL");
     } catch {
       // The server already exited or cannot be signalled; the exit proceeds.
+    }
+    try {
+      owned.managedTools?.terminateTrackedProcesses();
+    } catch {
+      // The exit proceeds; the tool processes are the last thing to clean up.
     }
     app.exit(0);
   };
@@ -4147,7 +4156,7 @@ function finishQuit(): void {
   quitPrepared = true;
   preparingQuit = false;
   armQuitDeadline({
-    forceExit: forceExitAfterStalledQuit(undefined),
+    forceExit: forceExitAfterStalledQuit({ server: undefined, managedTools: managedToolService }),
     boundMs: WINDOW_CLOSE_GRACE_MS,
   });
   app.quit();
@@ -4177,7 +4186,9 @@ async function prepareToQuit(): Promise<void> {
   }
   // Armed only once the quit is accepted, so the time a person spends on the
   // confirmation does not count against it.
-  armQuitDeadline({ forceExit: forceExitAfterStalledQuit(server) });
+  armQuitDeadline({
+    forceExit: forceExitAfterStalledQuit({ server, managedTools: managedToolService }),
+  });
   await shutDownForQuit({
     flushWindowState,
     stopHost: stopHostForQuit,
@@ -4189,7 +4200,9 @@ async function prepareToQuit(): Promise<void> {
 async function handleFatalStartup(error: unknown): Promise<void> {
   preparingQuit = true;
   dialog.showErrorBox("Octant could not start", formatDesktopStartupFailure(error));
-  armQuitDeadline({ forceExit: forceExitAfterStalledQuit(server) });
+  armQuitDeadline({
+    forceExit: forceExitAfterStalledQuit({ server, managedTools: managedToolService }),
+  });
   await shutDownForQuit({
     flushWindowState: async () => undefined,
     stopHost: stopHostForQuit,
