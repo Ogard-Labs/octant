@@ -47,7 +47,7 @@ export function readJournalGrowth(connection: SqliteConnection, now: Date): Jour
     const column = days.indexOf(row.day);
     // A future-dated row (clock skew) falls outside the window.
     if (column < 0) continue;
-    const counts = byKind.get(row.kind) ?? new Array<number>(days.length).fill(0);
+    const counts = byKind.get(row.kind) ?? Array.from({ length: days.length }, () => 0);
     counts[column] = (counts[column] ?? 0) + row.events;
     byKind.set(row.kind, counts);
   }

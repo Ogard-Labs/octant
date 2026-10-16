@@ -359,7 +359,7 @@ describe("JournalGrowth", () => {
   const growth = {
     generatedAt: "2026-10-16T09:30:00.000Z",
     days,
-    kinds: [{ kind: "chat-thread", counts: [1, ...new Array(13).fill(0)], total: 1 }],
+    kinds: [{ kind: "chat-thread", counts: [1, ...Array.from({ length: 13 }, () => 0)], total: 1 }],
     totalRows: 1,
     databaseBytes: 4096,
   };

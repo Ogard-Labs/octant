@@ -138,7 +138,7 @@ describe("createDiagnosticsExportClient", () => {
     const growth = {
       generatedAt: "2026-10-16T09:30:00.000Z",
       days,
-      kinds: [{ kind: "chat-thread", counts: new Array(14).fill(1), total: 14 }],
+      kinds: [{ kind: "chat-thread", counts: Array.from({ length: 14 }, () => 1), total: 14 }],
       totalRows: 14,
       databaseBytes: 8192,
     };

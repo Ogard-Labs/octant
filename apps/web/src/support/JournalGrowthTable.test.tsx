@@ -23,7 +23,11 @@ describe("JournalGrowthTable", () => {
         days,
         kinds: [
           { kind: "chat-thread", counts: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 3], total: 9 },
-          { kind: "automation", counts: new Array(14).fill(0).with(13, 1), total: 1 },
+          {
+            kind: "automation",
+            counts: Array.from({ length: 14 }, (_, index) => (index === 13 ? 1 : 0)),
+            total: 1,
+          },
         ],
         totalRows: 123_456,
         databaseBytes: 5 * 1_024 * 1_024,
