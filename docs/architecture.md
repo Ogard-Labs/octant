@@ -6866,6 +6866,16 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   `apps/desktop/src` is newer, so `apps/desktop/src` edits need only a
   restart of `bun run dev` rather than a manual
   `bun run --cwd apps/desktop build`.
+- The server is composed by a root in `apps/server/src/server.ts` that calls
+  the per-area wiring modules under `apps/server/src/wiring/` in a fixed
+  order. Each module declares the reach it has as a `Pick` of the upstream
+  modules' wiring types. A dependency a later module creates is passed as a
+  getter and read per use. A value one module assigns after another has
+  captured it, or writes at runtime (the remote gateway and its listener),
+  lives in a `late` cell the root creates, written at the original point and
+  read per call. This keeps the startup side-effect order identical to the
+  single closure it replaced, and each cell marks a dependency cycle still to
+  be removed.
 - A headless Linux station: `octant server run`, then `octant web` (or
   `octant web --dev` for Vite), run as the OS user that started the host so
   it can read the bridge secret and mint the browser's launch link. Linux requires `bubblewrap` and Git 2.36 or
