@@ -458,7 +458,11 @@ export function wireChat(deps: ChatDependencies) {
         combineAppManagedToolSets(
           taintAppManagedToolResults({
             tools: combineAppManagedToolSets(
-              nativeHarnessComposition?.forChat({ thread, windowId }),
+              nativeHarnessComposition?.forChat({
+                thread,
+                windowId,
+                sideChat: sideChatSidecars.findBySidecarThread(thread.id) !== undefined,
+              }),
               late.zenAssistantTools.current?.forThread(windowId, thread),
               sideChatFileTools(windowId, thread.id),
               threadDialogueService?.forThread({

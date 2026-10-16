@@ -513,6 +513,21 @@ describe("native harness composition", () => {
       });
     });
 
+    it("offers a Side Chat only the advice tools and the web, never a task list, goal, question or delegation", () => {
+      const { composition } = harness(false, productionPorts);
+      const sideChat = composition.forChat({
+        thread: { ...chatThread, researchEnabled: true } as ChatThread,
+        windowId: "window-1",
+        sideChat: true,
+      });
+      expect(names(sideChat!)).toEqual([
+        "web-fetch",
+        "web-search",
+        "context-remaining",
+        "second-opinion",
+      ]);
+    });
+
     it("keeps the composition call site supplying every port the offered set depends on", () => {
       // The call site moves between files as wiring is extracted, so find it.
       const root = fileURLToPath(new URL("..", import.meta.url));
