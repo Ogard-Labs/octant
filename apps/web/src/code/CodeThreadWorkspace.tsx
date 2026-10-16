@@ -105,6 +105,7 @@ import { UsageLimitNotice } from "../transcript/UsageLimitNotice";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { LoadEarlierMessages } from "../transcript/LoadEarlierMessages";
 import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
+import { turnMenuTrigger, useFocusAfterTurnMenuCloses } from "../transcript/turnPanelFocus";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { boundsInsideViewport } from "../browser/useNativeBrowserSurface";
 import { observeComposerPlacement } from "./codeWorkspaceApprovals";
@@ -1629,25 +1630,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     message.checkpoint !== undefined &&
                     mayRestore &&
                     confirmingRestore === message.id ? (
-                      <footer className="code-thread-workspace__restore">
-                        <span>Put the files back the way they were before this message?</span>
-                        <OctantButton
-                          disabled={restoring}
-                          onClick={() => void restoreCheckpoint(message)}
-                          size="sm"
-                          variant="destructive"
-                        >
-                          Restore files
-                        </OctantButton>
-                        <OctantButton
-                          disabled={restoring}
-                          onClick={() => setConfirmingRestore(undefined)}
-                          size="sm"
-                          variant="ghost"
-                        >
-                          Keep current files
-                        </OctantButton>
-                      </footer>
+                      <RestoreFilesConfirm
+                        onKeep={() => setConfirmingRestore(undefined)}
+                        onRestore={() => void restoreCheckpoint(message)}
+                        restoring={restoring}
+                      />
                     ) : null}
                   </TurnActionMenu>
                 </article>
@@ -2138,6 +2125,47 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         }
       />
     </section>
+  );
+}
+
+/**
+ * The question that guards overwriting the checkout's files. It opens ahead of
+ * the turn's menu in tab order, so it takes focus itself: the safe answer
+ * first, as every destructive confirmation here does, and either answer hands
+ * focus back to the menu that opened it rather than to the page body.
+ */
+function RestoreFilesConfirm(props: {
+  readonly onKeep: () => void;
+  readonly onRestore: () => void;
+  readonly restoring: boolean;
+}) {
+  const root = useRef<HTMLElement>(null);
+  useFocusAfterTurnMenuCloses(root, "[data-safe-answer]", true);
+  const answer = (decide: () => void) => () => {
+    turnMenuTrigger(root.current)?.focus();
+    decide();
+  };
+  return (
+    <footer className="code-thread-workspace__restore" ref={root}>
+      <span>Put the files back the way they were before this message?</span>
+      <OctantButton
+        disabled={props.restoring}
+        onClick={answer(props.onRestore)}
+        size="sm"
+        variant="destructive"
+      >
+        Restore files
+      </OctantButton>
+      <OctantButton
+        data-safe-answer=""
+        disabled={props.restoring}
+        onClick={answer(props.onKeep)}
+        size="sm"
+        variant="ghost"
+      >
+        Keep current files
+      </OctantButton>
+    </footer>
   );
 }
 
