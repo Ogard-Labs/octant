@@ -1,7 +1,8 @@
 // The desktop's half of opening a dev server that runs on another paired
 // computer: the loopback forwarder's lifecycle and recorded port, the signing
 // round trip to the Octant window that holds the grant, the transport to the
-// paired host's listener, and where the page is shown.
+// paired host's listener (for requests and WebSocket upgrades), and where the
+// page is shown.
 //
 // The forwarder holds no key. Each request a page sends is signed by the
 // window that opened it, which signs only for a grant it holds; with that
@@ -10,7 +11,7 @@
 // here is testable without it.
 
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { request as httpRequest } from "node:http";
+import { request as httpRequest, type IncomingMessage } from "node:http";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
 import { Schema } from "effect";
@@ -21,6 +22,8 @@ import {
   type RemoteServerForwarderSignRequest,
   type RemoteServerForwarderSigning,
   type RemoteServerHostRequest,
+  type RemoteServerHostUpgrade,
+  type RemoteServerHostUpgradeRequest,
 } from "@octant/client-runtime/remote-server-forwarder";
 import { connectListener } from "@octant/client-runtime/remote-listener-tls-node";
 import {
@@ -29,7 +32,7 @@ import {
   type ListenerOriginTrust,
   type ListenerTrustRefusal,
 } from "@octant/client-runtime/remote-listener-trust";
-import { REMOTE_SERVER_PAGE_ACCESS_HEADER } from "@octant/domain";
+import { REMOTE_SERVER_PAGE_ACCESS_HEADER, type RemoteServerRelayHeader } from "@octant/domain";
 import { clearRemotePageStorage, type PageStoragePort } from "./pairedComputers";
 
 export type RemoteServerPageMode = "octant-browser" | "default-browser";
@@ -164,6 +167,11 @@ export interface RemoteServerPagesPorts {
     target: { readonly listenerOrigin: string; readonly trust: ListenerOriginTrust },
     request: RemoteServerHostRequest,
   ) => Promise<Response>;
+  /** The upgrade transport to a paired host's listener; production uses {@link upgradeThroughListener}. */
+  readonly upgradeToHost?: (
+    target: { readonly listenerOrigin: string; readonly trust: ListenerOriginTrust },
+    request: RemoteServerHostUpgradeRequest,
+  ) => Promise<RemoteServerHostUpgrade>;
   readonly signTimeoutMs?: number;
   readonly randomId?: () => string;
   /** Test seams for the forwarder's ports and addresses. */
@@ -204,6 +212,7 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
   const signTimeoutMs = ports.signTimeoutMs ?? SIGN_TIMEOUT_MS;
   const randomId = ports.randomId ?? (() => globalThis.crypto.randomUUID());
   const sendToHost = ports.sendToHost ?? sendThroughListener;
+  const upgradeToHost = ports.upgradeToHost ?? upgradeThroughListener;
   // Which window holds each grant, and the trust each host's listener is held to.
   const signerByGrant = new Map<string, number>();
   const trustByHost = new Map<string, ListenerOriginTrust>();
@@ -299,6 +308,11 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
         const trust = trustByHost.get(target.hostId);
         if (trust === undefined) return Promise.reject(new Error("No trust for this host."));
         return sendToHost({ listenerOrigin: target.listenerOrigin, trust }, request);
+      },
+      upgradeToHost: (target, request) => {
+        const trust = trustByHost.get(target.hostId);
+        if (trust === undefined) return Promise.reject(new Error("No trust for this host."));
+        return upgradeToHost({ listenerOrigin: target.listenerOrigin, trust }, request);
       },
     });
     const started = await created.start();
@@ -469,7 +483,9 @@ export async function recordForwarderPort(directory: string, port: number): Prom
 
 /**
  * Whether Octant's browser adds the page's secret to a request: only for the
- * page's exact origin, so no other port or name ever sees it.
+ * page's exact origin, so no other port or name ever sees it. A WebSocket to
+ * the page's own name and port (`ws:`) counts as the page's origin, so its
+ * live-reload socket carries the secret too.
  */
 export function pageAccessHeader(
   url: string,
@@ -478,7 +494,9 @@ export function pageAccessHeader(
 ): { readonly name: string; readonly value: string } | undefined {
   let origin: string;
   try {
-    origin = new URL(url).origin;
+    const target = new URL(url);
+    if (target.protocol === "ws:") target.protocol = "http:";
+    origin = target.origin;
   } catch {
     return undefined;
   }
@@ -541,39 +559,11 @@ export async function sendThroughListener(
         signal: request.signal,
       },
       (incoming) => {
-        const answered = new Headers();
-        for (let index = 0; index + 1 < incoming.rawHeaders.length; index += 2) {
-          const name = incoming.rawHeaders[index];
-          const value = incoming.rawHeaders[index + 1];
-          if (name !== undefined && value !== undefined) answered.append(name, value);
-        }
-        const status = incoming.statusCode ?? 502;
-        // Null-body statuses: a Response refuses a body for any of them.
-        const bodiless =
-          request.method === "HEAD" || status === 204 || status === 205 || status === 304;
-        if (bodiless) incoming.resume();
-        const chunks = incoming[Symbol.asyncIterator]();
-        const body = bodiless
-          ? null
-          : new ReadableStream<Uint8Array>({
-              pull: async (controller) => {
-                try {
-                  const next = (await chunks.next()) as IteratorResult<Buffer>;
-                  if (next.done === true) controller.close();
-                  else controller.enqueue(new Uint8Array(next.value));
-                } catch (error) {
-                  controller.error(error);
-                }
-              },
-              cancel: () => {
-                incoming.destroy();
-              },
-            });
         // Constructing the answer runs in Node's response callback, where a
         // throw would escape as an uncaught main-process error rather than
         // reach the forwarder; refuse the request instead.
         try {
-          resolve(new Response(body, { status, headers: answered }));
+          resolve(answerFrom(incoming, request.method));
         } catch (error) {
           incoming.destroy();
           reject(error);
@@ -583,4 +573,89 @@ export async function sendThroughListener(
     outgoing.on("error", reject);
     outgoing.end(request.body === undefined ? undefined : Buffer.from(request.body));
   });
+}
+
+/**
+ * Sends a page's WebSocket upgrade to a paired host's listener over a
+ * connection judged as {@link sendThroughListener} judges one. The host either
+ * switches protocols, and the connection is handed back for the forwarder to
+ * pass bytes through, or answers as it does to refuse.
+ */
+export async function upgradeThroughListener(
+  target: { readonly listenerOrigin: string; readonly trust: ListenerOriginTrust },
+  request: RemoteServerHostUpgradeRequest,
+  connect: ListenerConnect = connectListener,
+): Promise<RemoteServerHostUpgrade> {
+  const connection = await connect({ origin: target.listenerOrigin, trust: target.trust });
+  if (connection.status === "refused") {
+    throw new Error(LISTENER_TRUST_REFUSAL_COPY[connection.reason]);
+  }
+  if (connection.status === "failed") throw new Error("The host could not be reached.");
+  const socket = connection.socket;
+  const headers: Record<string, string> = { host: new URL(target.listenerOrigin).host };
+  for (const [name, value] of request.headers) headers[name] = value;
+  return new Promise<RemoteServerHostUpgrade>((resolve, reject) => {
+    const outgoing = httpRequest({
+      method: "GET",
+      path: request.pathQuery,
+      headers,
+      createConnection: () => socket,
+    });
+    outgoing.on("upgrade", (incoming: IncomingMessage, switched: Duplex, head: Buffer) => {
+      resolve({
+        status: "switched",
+        headers: rawHeaderPairs(incoming),
+        socket: switched,
+        head: new Uint8Array(head),
+      });
+    });
+    outgoing.on("response", (incoming) => {
+      try {
+        resolve({ status: "answered", response: answerFrom(incoming, "GET") });
+      } catch (error) {
+        incoming.destroy();
+        reject(error);
+      }
+    });
+    outgoing.on("error", reject);
+    outgoing.end();
+  });
+}
+
+function rawHeaderPairs(incoming: IncomingMessage): ReadonlyArray<RemoteServerRelayHeader> {
+  const pairs: RemoteServerRelayHeader[] = [];
+  for (let index = 0; index + 1 < incoming.rawHeaders.length; index += 2) {
+    const name = incoming.rawHeaders[index];
+    const value = incoming.rawHeaders[index + 1];
+    if (name !== undefined && value !== undefined) pairs.push([name, value]);
+  }
+  return pairs;
+}
+
+/** The host's answer as a fetch `Response`, its body streamed from the connection. */
+function answerFrom(incoming: IncomingMessage, method: string): Response {
+  const answered = new Headers();
+  for (const [name, value] of rawHeaderPairs(incoming)) answered.append(name, value);
+  const status = incoming.statusCode ?? 502;
+  // Null-body statuses: a Response refuses a body for any of them.
+  const bodiless = method === "HEAD" || status === 204 || status === 205 || status === 304;
+  if (bodiless) incoming.resume();
+  const chunks = incoming[Symbol.asyncIterator]();
+  const body = bodiless
+    ? null
+    : new ReadableStream<Uint8Array>({
+        pull: async (controller) => {
+          try {
+            const next = (await chunks.next()) as IteratorResult<Buffer>;
+            if (next.done === true) controller.close();
+            else controller.enqueue(new Uint8Array(next.value));
+          } catch (error) {
+            controller.error(error);
+          }
+        },
+        cancel: () => {
+          incoming.destroy();
+        },
+      });
+  return new Response(body, { status, headers: answered });
 }
