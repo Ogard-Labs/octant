@@ -3793,6 +3793,13 @@ native harness in `apps/server/src/harness`:
   configured SearXNG endpoint). A Chat thread gets them only while its
   research is on, because research is its grant to reach the web; Work and
   Code need no such grant, and a child gets them only with network authority.
+  `context-remaining` and `second-opinion` are offered to the lead in every
+  mode and reach no file, shell, or network of the thread: `context-remaining`
+  reads the thread's own capacity snapshot, and `second-opinion` sends only
+  the lead's written question to the `advisor` slot's model as a one-shot,
+  tool-less request, so it answers nothing while that slot is empty. A thread
+  that has taken in outside content cannot send it (`second-opinion-tainted`),
+  the rule `delegate` follows. A child is offered neither.
   A tool that was not offered refuses as `tool-unavailable` if the model calls
   it anyway. Every call decodes its
   arguments, wraps a `ToolActionRequest` under the thread's current authority,
