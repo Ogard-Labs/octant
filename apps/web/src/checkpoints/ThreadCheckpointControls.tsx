@@ -1,7 +1,8 @@
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { Flag } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { turnMenuTrigger, useFocusAfterTurnMenuCloses } from "../transcript/turnPanelFocus";
 import { OctantInput } from "../ui/base/OctantInput";
 
 export interface ThreadCheckpointControlsProps {
@@ -29,11 +30,16 @@ export interface ThreadCheckpointControlsProps {
 export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
   const [label, setLabel] = useState(props.defaultLabel);
   const [title, setTitle] = useState("");
+  const root = useRef<HTMLDivElement>(null);
+  useFocusAfterTurnMenuCloses(root, "input", props.draft !== undefined);
+  // The form unmounts when it ends; without a new owner focus would fall to
+  // the document body, so it goes back to the turn's menu that opened it.
+  const leaveForm = () => turnMenuTrigger(root.current)?.focus();
 
   if (props.checkpoint === undefined) {
     if (props.draft !== "mark") return null;
     return (
-      <div className="thread-checkpoints" role="group" aria-label="Mark a checkpoint">
+      <div className="thread-checkpoints" ref={root} role="group" aria-label="Mark a checkpoint">
         <OctantInput
           aria-label="Checkpoint name"
           className="thread-checkpoints__input"
@@ -44,6 +50,7 @@ export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
         <OctantButton
           disabled={props.busy || label.trim().length === 0}
           onClick={() => {
+            leaveForm();
             props.onMark(label.trim());
             props.onCancelDraft();
           }}
@@ -56,6 +63,7 @@ export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
         <OctantButton
           disabled={props.busy}
           onClick={() => {
+            leaveForm();
             setLabel(props.defaultLabel);
             props.onCancelDraft();
           }}
@@ -71,7 +79,7 @@ export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
 
   const checkpoint = props.checkpoint;
   return (
-    <div className="thread-checkpoints" role="group" aria-label="Checkpoint">
+    <div className="thread-checkpoints" ref={root} role="group" aria-label="Checkpoint">
       <span className="thread-checkpoints__label">
         <Flag aria-hidden="true" size={12} strokeWidth={1.8} />
         {checkpoint.label}
@@ -92,6 +100,7 @@ export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
           <OctantButton
             disabled={props.busy}
             onClick={() => {
+              leaveForm();
               props.onRestore(title.trim().length === 0 ? checkpoint.label : title.trim());
               setTitle("");
               props.onCancelDraft();
@@ -105,6 +114,7 @@ export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
           <OctantButton
             disabled={props.busy}
             onClick={() => {
+              leaveForm();
               setTitle("");
               props.onCancelDraft();
             }}

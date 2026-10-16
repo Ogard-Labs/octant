@@ -997,6 +997,39 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Files restored to this point.")).toBeVisible();
   });
 
+  it("puts focus on keeping the files when the restore question opens, and hands it back to the turn's menu", async () => {
+    const user = userEvent.setup();
+    const executeOperation = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+            { id: "turn-1:assistant", role: "assistant" as const, text: "done" },
+          ],
+        } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation } as never}
+        requestApproval={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    await chooseTurnAction(user, "Restore files to this point", "rewrite the parser");
+    // The question sits ahead of the menu in tab order, so without a move of
+    // its own a keyboard user lands back on the menu with the question behind.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Keep current files" })).toHaveFocus(),
+    );
+
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("button", { name: "Restore files" })).not.toBeInTheDocument();
+    expect(
+      within(turnArticle("rewrite the parser")).getByRole("button", { name: "More actions" }),
+    ).toHaveFocus();
+    expect(executeOperation).not.toHaveBeenCalled();
+  });
+
   it("keeps the checkpoint a restore replaced reachable after a tab switch unmounts this surface", async () => {
     const user = userEvent.setup();
     const undo = { worktree: "e".repeat(40), index: "f".repeat(40) };
@@ -1286,7 +1319,7 @@ describe("CodeThreadWorkspace", () => {
       within(turnArticle("rewrite the parser")).getByRole("button", { name: "More actions" }),
     );
     expect(
-      screen.queryByRole("menuitemradio", { name: "Restore files to this point" }),
+      screen.queryByRole("menuitem", { name: "Restore files to this point" }),
     ).not.toBeInTheDocument();
   });
 
@@ -1310,11 +1343,9 @@ describe("CodeThreadWorkspace", () => {
       within(turnArticle("rewrite the parser")).getByRole("button", { name: "More actions" }),
     );
     expect(
-      await screen.findByRole("menuitemradio", { name: "Restore files to this point" }),
+      await screen.findByRole("menuitem", { name: "Restore files to this point" }),
     ).toBeVisible();
-    expect(
-      screen.queryByRole("menuitemradio", { name: "Restore from here" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Restore from here" })).not.toBeInTheDocument();
   });
 
   it("opens the `#` picker in the Code composer and sends the chip as an id", async () => {
@@ -2511,7 +2542,7 @@ describe("CodeThreadWorkspace", () => {
     await user.click(
       within(turnArticle("The source's reply.")).getByRole("button", { name: "More actions" }),
     );
-    expect(screen.queryByRole("menuitemradio", { name: "Merge back to source" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Merge back to source" })).toBeNull();
     await user.keyboard("{Escape}");
 
     await chooseTurnAction(user, "Merge back to source", "The fork's reply.");
@@ -2547,7 +2578,7 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
     await user.click(within(turnArticle("done")).getByRole("button", { name: "More actions" }));
-    expect(screen.queryByRole("menuitemradio", { name: "Merge back to source" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Merge back to source" })).toBeNull();
   });
 
   it("says on the source's reply what a merged fork carried, what it left out, and that code did not move", () => {
@@ -3526,5 +3557,5 @@ async function chooseTurnAction(
   turnText: string,
 ) {
   await user.click(within(turnArticle(turnText)).getByRole("button", { name: "More actions" }));
-  await user.click(await screen.findByRole("menuitemradio", { name }));
+  await user.click(await screen.findByRole("menuitem", { name }));
 }

@@ -1716,6 +1716,9 @@ request from the person.
 - Pointer targets are at least 24px on desktop and 44px on touch.
 - Keyboard users can reach every primary action, open/dismiss every overlay,
   navigate menus/selects, and recover focus after closing a popover or dialog.
+- A panel a turn's menu opens inline (a checkpoint's name, the question before
+  files are restored) takes focus once the menu has closed, the safe answer
+  first, and hands focus back to that turn's More actions control when it ends.
 - Keyboard focus draws one indicator, declared once in `octant.css`: a 2px
   inset outline in `--oct-focus-edge`, the foreground at 62% so it holds about
   4.5:1 or better against the control's fill and the surface around it in
