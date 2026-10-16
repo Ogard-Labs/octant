@@ -20,7 +20,7 @@ import type {
 } from "@octant/contracts";
 import type { OpenInApplicationId } from "@octant/contracts/shell";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   FolderOpen,
   GitCommitHorizontal,
@@ -186,6 +186,19 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   const [serversOpen, setServersOpen] = useState<boolean>();
   const workingDirectory = readyObservation?.workingDirectory;
   const threadVersion = readyObservation?.threadVersion;
+  // Applying a working folder re-reads the checkout without the old facts, so
+  // the field, its group, and the button that held focus are all unmounted
+  // before the new reading lands. The Working folder row is what comes back,
+  // and takes the keyboard.
+  const workingFolderRow = useRef<HTMLButtonElement>(null);
+  const returnToWorkingFolder = useRef(false);
+  useEffect(() => {
+    if (!returnToWorkingFolder.current) return;
+    if (controller.status === "error") returnToWorkingFolder.current = false;
+    if (workingDirectory === undefined) return;
+    returnToWorkingFolder.current = false;
+    workingFolderRow.current?.focus();
+  }, [controller.status, workingDirectory]);
 
   return (
     <div className="code-thread-environment">
@@ -353,6 +366,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             threadVersion === undefined ||
             props.onExecute === undefined ? null : (
               <EnvironmentGroup
+                headerRef={workingFolderRow}
                 icon={FolderOpen}
                 summary={workingFolderLabel(workingDirectory)}
                 title="Working folder"
@@ -373,6 +387,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                     ) {
                       throw new Error("Code working directory was not updated.");
                     }
+                    returnToWorkingFolder.current = true;
                     await controller.refresh();
                   }}
                 />

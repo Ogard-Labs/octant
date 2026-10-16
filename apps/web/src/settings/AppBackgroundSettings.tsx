@@ -14,6 +14,7 @@ import { SettingRow } from "./primitives";
 import { SliderField } from "./SliderField";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
+import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 
 /** The host's shared background image library, read through the window's authority. */
 export interface BackgroundImageLibrary {
@@ -263,6 +264,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 <div
                   aria-label={`${GROUP_TITLES[group]} built-in backgrounds`}
                   className="settings-app-background__preset-grid"
+                  onKeyDown={moveWithinRadioGroup}
                   role="radiogroup"
                 >
                   {presets.map((preset) => (
@@ -346,6 +348,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                   <div
                     aria-label="Photos on this host"
                     className="settings-app-background__grid"
+                    onKeyDown={moveWithinRadioGroup}
                     role="radiogroup"
                   >
                     {photos.map((photo) => (

@@ -174,7 +174,6 @@ export function ShellFrame(props: ShellFrameProps) {
         ) : (
           <>
             {props.backdrop}
-            {props.chrome}
             {props.sidebarCollapsed && props.sidebarRail !== true ? null : props.sidebar}
             {props.sidebarResizable && !props.sidebarCollapsed ? (
               <ShellResizeHandle
@@ -188,6 +187,13 @@ export function ShellFrame(props: ShellFrameProps) {
                 value={props.sidebarWidth}
               />
             ) : null}
+            {/*
+              The chrome is placed by the grid and stacked by z-index, so where
+              it sits in the document only decides tab order. After the sidebar,
+              the first Tab stop on load is the left-hand navigation rather than
+              the window controls at the right edge.
+            */}
+            {props.chrome}
             <div
               ref={setWorkspaceLayer}
               className={`workspace-layer${

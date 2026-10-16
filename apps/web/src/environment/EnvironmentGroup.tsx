@@ -1,5 +1,5 @@
 import { ChevronRight, type LucideIcon } from "lucide-react";
-import { useId, useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode, type Ref } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
 /**
@@ -57,6 +57,8 @@ export interface EnvironmentGroupProps {
    * nested inside a button is not reachable as its own control.
    */
   readonly action?: ReactNode;
+  /** The disclosure button, for a parent that returns keyboard focus to this row. */
+  readonly headerRef?: Ref<HTMLButtonElement>;
   readonly children: ReactNode;
 }
 
@@ -84,6 +86,7 @@ export function EnvironmentGroup(props: EnvironmentGroupProps) {
           }
           className="environment-group__header window-no-drag"
           onClick={toggle}
+          ref={props.headerRef}
           type="button"
           variant="bare"
         >

@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 
 export interface ProviderQuestionCardProps {
   readonly prompt: string;
@@ -49,7 +50,11 @@ export function ProviderQuestionCard(props: ProviderQuestionCardProps) {
       {count > 1 ? (
         <p className="provider-question-card__progress">{`Question ${String(index)} of ${String(count)}`}</p>
       ) : null}
-      <div className="provider-question-card__choices" role="radiogroup">
+      <div
+        className="provider-question-card__choices"
+        onKeyDown={moveWithinRadioGroup}
+        role="radiogroup"
+      >
         {props.options.map((option) => (
           <div
             className="provider-question-card__choice"

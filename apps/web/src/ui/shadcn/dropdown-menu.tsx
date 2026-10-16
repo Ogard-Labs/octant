@@ -1,10 +1,38 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { Check, ChevronRight } from "lucide-react";
-import type { ComponentProps } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  type ComponentProps,
+  type MutableRefObject,
+} from "react";
 import { cn } from "./utils";
 
-export function DropdownMenu(props: ComponentProps<typeof MenuPrimitive.Root>) {
-  return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
+/** Whether the open in progress came from the keyboard, set by the root, read by the popup. */
+const OpenedByKeyboard = createContext<MutableRefObject<boolean> | undefined>(undefined);
+
+export function DropdownMenu({
+  onOpenChange,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.Root>) {
+  const openedByKeyboard = useRef(false);
+  return (
+    <OpenedByKeyboard.Provider value={openedByKeyboard}>
+      <MenuPrimitive.Root
+        data-slot="dropdown-menu"
+        onOpenChange={(open, details) => {
+          const event = details.event;
+          openedByKeyboard.current =
+            open &&
+            (event instanceof KeyboardEvent || (event instanceof MouseEvent && event.detail === 0));
+          onOpenChange?.(open, details);
+        }}
+        {...props}
+      />
+    </OpenedByKeyboard.Provider>
+  );
 }
 
 export function DropdownMenuTrigger({
@@ -23,12 +51,57 @@ export function DropdownMenuTrigger({
   );
 }
 
+/**
+ * A menu opened from the keyboard lands on its first item. When the menu leads
+ * with a choice, the current one is where a person expects to start (a select
+ * does), so move there. ArrowUp opens on the last item on purpose and stays there.
+ */
+function useStartOnCheckedItem(popup: MutableRefObject<HTMLDivElement | null>) {
+  const openedByKeyboard = useContext(OpenedByKeyboard);
+  useEffect(() => {
+    if (openedByKeyboard?.current !== true) return;
+    let frame = 0;
+    let tries = 0;
+    const settle = () => {
+      const root = popup.current;
+      if (root === null) return;
+      const items = Array.from(root.querySelectorAll<HTMLElement>('[role^="menuitem"]')).filter(
+        (item) => !item.hasAttribute("data-disabled"),
+      );
+      // Only a menu that leads with its choices. A menu of filters or actions
+      // that happens to hold a checked radio further down opens on its first item.
+      if (items[0]?.getAttribute("role") !== "menuitemradio") return;
+      const checked = items.find(
+        (item) =>
+          item.getAttribute("role") === "menuitemradio" &&
+          item.getAttribute("aria-checked") === "true",
+      );
+      if (checked === undefined || document.activeElement === checked) return;
+      if (document.activeElement === items[0]) {
+        checked.focus();
+        return;
+      }
+      if (tries++ < 10) frame = requestAnimationFrame(settle);
+    };
+    frame = requestAnimationFrame(settle);
+    return () => cancelAnimationFrame(frame);
+  }, [openedByKeyboard, popup]);
+}
+
 export function DropdownMenuPopup({
   className,
+  ref,
   ...props
 }: ComponentProps<typeof MenuPrimitive.Popup>) {
+  const popup = useRef<HTMLDivElement | null>(null);
+  useStartOnCheckedItem(popup);
   return (
     <MenuPrimitive.Popup
+      ref={(node) => {
+        popup.current = node;
+        if (typeof ref === "function") ref(node);
+        else if (ref !== null && ref !== undefined) ref.current = node;
+      }}
       className={cn(
         "z-50 min-w-48 rounded-xl bg-popover p-1 text-popover-foreground shadow-[var(--octant-shadow-overlay)] outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
         className,
@@ -178,7 +251,10 @@ export function DropdownMenuSubPopup({
         side="right"
         sideOffset={0}
       >
-        <DropdownMenuPopup className={cn("window-no-drag", className)} {...props} />
+        {/* A submenu opens on its first item whatever opened the root menu. */}
+        <OpenedByKeyboard.Provider value={undefined}>
+          <DropdownMenuPopup className={cn("window-no-drag", className)} {...props} />
+        </OpenedByKeyboard.Provider>
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>
   );

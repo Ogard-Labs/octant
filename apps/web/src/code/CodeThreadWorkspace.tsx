@@ -2089,6 +2089,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             {restoreMessage === undefined && restoreUndo === undefined ? null : (
               <span className="code-thread-workspace__hint" role="status">
                 {restoreMessage ?? "Files were restored to an earlier point."}
+                {restoreUndo === undefined ? null : " "}
                 {restoreUndo === undefined ? null : (
                   <OctantButton
                     disabled={restoring}

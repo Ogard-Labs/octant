@@ -17,6 +17,7 @@ import {
   importAvatarFromGravatar,
   type AvatarImageEnvironment,
 } from "./avatarImage";
+import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";
 import "./profile.css";
 
 export interface ProfileEditorProps {
@@ -339,7 +340,11 @@ export function ProfileEditor(props: ProfileEditorProps) {
           disabled={props.disabled === true}
         >
           <legend className="profile-editor__label">Avatar colour</legend>
-          <div className="profile-editor__accents" role="radiogroup">
+          <div
+            className="profile-editor__accents"
+            onKeyDown={moveWithinRadioGroup}
+            role="radiogroup"
+          >
             {AVATAR_ACCENTS.map((accent) => (
               <OctantButton
                 aria-checked={props.profile.accent === accent}

@@ -98,6 +98,18 @@ describe("ShellResizeHandle", () => {
     expect(onCommit).toHaveBeenNthCalledWith(2, 228);
   });
 
+  it("jumps to the minimum width on Home and the maximum on End", () => {
+    const { onCommit, onPreview, separator } = renderHandle();
+
+    fireEvent.keyDown(separator, { key: "Home" });
+    expect(onPreview).toHaveBeenLastCalledWith(220);
+    expect(onCommit).toHaveBeenLastCalledWith(220);
+
+    fireEvent.keyDown(separator, { key: "End" });
+    expect(onPreview).toHaveBeenLastCalledWith(420);
+    expect(onCommit).toHaveBeenLastCalledWith(420);
+  });
+
   it("reverses horizontal keyboard and pointer direction for a leading edge", () => {
     const { onCommit, onPreview, separator } = renderHandle({ edge: "leading", value: 360 });
 

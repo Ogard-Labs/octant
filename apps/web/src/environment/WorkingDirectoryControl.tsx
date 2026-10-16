@@ -14,10 +14,24 @@ export function ChangeWorkingFolder(props: {
   readonly onApply: (workingDirectory: ThreadWorkingDirectory) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
+  const opener = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
+  // Applying or cancelling unmounts the field the person was in. Hand focus
+  // back to the control that opened it rather than letting it fall to the page.
+  useEffect(() => {
+    if (editing || !returnFocus.current) return;
+    returnFocus.current = false;
+    opener.current?.focus();
+  }, [editing]);
+  const finishEditing = () => {
+    returnFocus.current = true;
+    setEditing(false);
+  };
   if (!editing) {
     return (
       <OctantButton
         className="environment-group__action"
+        ref={opener}
         onClick={() => setEditing(true)}
         type="button"
         variant="ghost"
@@ -32,11 +46,11 @@ export function ChangeWorkingFolder(props: {
         {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
         onApply={async (workingDirectory) => {
           await props.onApply(workingDirectory);
-          setEditing(false);
+          finishEditing();
         }}
         value={props.value}
       />
-      <OctantButton onClick={() => setEditing(false)} type="button" variant="ghost">
+      <OctantButton onClick={finishEditing} type="button" variant="ghost">
         Cancel
       </OctantButton>
     </div>
