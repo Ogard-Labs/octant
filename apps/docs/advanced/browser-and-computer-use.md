@@ -108,20 +108,50 @@ existing page.
 
 The host supplies the tool transport automatically for supported runtimes:
 
-| Runtime          | Transport and current boundary                                             |
-| ---------------- | -------------------------------------------------------------------------- |
-| Codex            | App-server dynamic tools                                                   |
-| Claude Code      | Agent SDK in-process MCP server                                            |
-| OpenCode         | Private MCP profile, verified on 1.18.21 and 2.0.22 with macOS confinement |
-| ACP runtimes     | HTTP MCP when the runtime advertises and accepts it                        |
-| Pi               | Owned extension and verified CLI catalogue on 0.85.1                       |
-| Direct endpoints | Only models with verified tool support                                     |
+| Runtime                    | Transport and current boundary                                                                                  |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Codex                      | App-server dynamic tools                                                                                        |
+| Claude Code                | Agent SDK in-process MCP server                                                                                 |
+| OpenCode                   | Private MCP profile on macOS, only on the releases whose isolation Octant verified: 1.18.21 and 2.0.22, exactly |
+| ACP runtimes               | HTTP MCP on macOS, when the runtime advertises and accepts it                                                   |
+| Pi                         | Owned extension and verified CLI catalogue, only on the verified release 0.85.1                                 |
+| Direct endpoints           | Only models whose tool use you verified                                                                         |
+| A CLI in a thread terminal | `octant mcp`, Browser only; see [Browser for a CLI in a terminal](/advanced/terminal-browser)                   |
 
 A supported transport is checked before it is advertised. It does not require
 editing a user's global MCP configuration or granting Full access. A runtime
 or platform that cannot carry the tool within its confinement policy stays
 unavailable; Linux OpenCode/ACP/Pi bridge support is not inferred from a macOS
 check. Oh My Pi remains unavailable where its driver is probe-only.
+
+Support follows the exact release, not the runtime's name. An OpenCode or Pi
+release Octant has not verified still lists its models, but it reports Octant
+tools as unavailable and the composers do not offer `@Browser`: an OpenCode
+2.0.27 found on your `PATH` is one such release. A runtime whose connection
+check cannot confirm its transport, or an ACP agent that does not advertise
+HTTP MCP, is treated the same way. Nothing is routed to another model or
+provider in its place.
+
+### When a Browser call does not go through
+
+Each of these is a named, visible result; none of them leaves the agent
+waiting or the page half-open.
+
+- **You decline a site.** The call is refused as `browser-approval-denied`.
+  Nothing loads, and the turn continues so the agent can say it could not open
+  the page.
+- **You stop the task while a site ask is waiting.** The ask is withdrawn, the
+  page is never requested, and the task's Browser grant is released.
+- **Octant restarts.** Browser contexts end with the host. The thread's next
+  turn can use the Browser again, and asks again for any site you did not
+  choose **Always allow** for.
+- **You chose Always allow for a site.** It opens without asking, in Work and
+  Code, until you forget it under **Settings → Data & privacy → Remembered
+  websites**. Switching the thread's model still asks, because the remembered
+  site covers the page, not who drives it.
+- **The provider cannot carry the tool.** The composer does not offer
+  `@Browser`. If you type it anyway, the turn is refused, or ends with a
+  message that the Browser is unavailable for that provider.
 
 ## Computer use
 
