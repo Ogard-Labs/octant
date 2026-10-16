@@ -105,6 +105,7 @@ export function CodeBranchSelector(props: CodeBranchSelectorProps) {
                 }}
                 role="option"
                 type="button"
+                variant="bare"
               >
                 <span className="code-branch-selector__option-name">{ref.name}</span>
                 <span className="code-branch-selector__option-meta">

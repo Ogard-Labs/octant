@@ -1427,7 +1427,7 @@ function ActivityThreadButton(props: {
       data-thread-id={props.thread.threadId}
       onClick={() => props.onSelectThread(props.thread.navigationId)}
       type="button"
-      variant="ghost"
+      variant="bare"
     >
       <SidebarThreadRowContent
         {...(age === undefined ? {} : { age })}

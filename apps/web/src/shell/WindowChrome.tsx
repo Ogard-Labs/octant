@@ -108,7 +108,7 @@ export function WindowChrome(props: WindowChromeProps) {
               className="window-chrome__text-button"
               onClick={recoverZen}
               type="button"
-              variant="ghost"
+              variant="bare"
             >
               Recover Zen
             </OctantButton>
@@ -271,7 +271,7 @@ function DisclosureAction(props: {
       data-dock-opener={props.logicalTarget === "dock" ? "true" : undefined}
       onClick={props.onClick}
       type="button"
-      variant="ghost"
+      variant="bare"
     >
       {props.label}
     </OctantButton>

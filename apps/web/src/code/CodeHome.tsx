@@ -383,7 +383,7 @@ function HomeCard(props: {
       disabled={props.disabled === true}
       onClick={props.onClick}
       type="button"
-      variant="ghost"
+      variant="bare"
     >
       <span className="code-home__card-head">
         <span className="code-home__badge" data-tone={props.tone ?? "plain"}>
