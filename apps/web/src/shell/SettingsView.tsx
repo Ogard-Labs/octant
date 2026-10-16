@@ -556,7 +556,7 @@ export function SettingsView(props: SettingsViewProps) {
             <div className="settings-view__mobile-titlebar window-drag-region">
               {props.onBack === undefined ? null : (
                 <OctantButton
-                  className="settings-view__mobile-back window-no-drag"
+                  className="settings-view__mobile-back window-no-drag text-muted-foreground"
                   onClick={props.onBack}
                   type="button"
                   variant="ghost"
@@ -569,7 +569,7 @@ export function SettingsView(props: SettingsViewProps) {
               <OctantButton
                 aria-expanded={navigationOpen}
                 aria-haspopup="dialog"
-                className="settings-view__mobile-sections window-no-drag"
+                className="settings-view__mobile-sections window-no-drag text-muted-foreground"
                 onClick={() => setNavigationOpen(true)}
                 ref={navigationTrigger}
                 size="sm"
