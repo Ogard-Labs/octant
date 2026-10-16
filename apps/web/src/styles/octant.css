@@ -209,6 +209,10 @@
   --oct-title-rail-h: 38px;
   --oct-rail-tab-h: 30px;
   --oct-rail-button-h: 28px;
+  /* The bottom edge of a rail head: the 4px step less the hairline, so a 30px
+     field between 4px above and this below still closes a 38px rail with its
+     1px border. A plain 4px made the Files head 39px. */
+  --oct-rail-pad-end: calc(var(--oct-space-1) - 1px);
   --oct-nav-head-h: 40px;
   --oct-nav-row-h: 32px;
   --oct-nav-inset: 12px;
