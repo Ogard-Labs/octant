@@ -154,6 +154,8 @@ export function useAndroidEmulatorLiveScreen(options: {
                 painted = true;
                 everLive = true;
                 shown = facing;
+                // A stream that attached has earned a fresh retry budget for its next drop.
+                if (watch.transport?.kind === "stream") streamRetries = 0;
                 clearTimeout(noPicture);
                 setState({
                   status: "live",

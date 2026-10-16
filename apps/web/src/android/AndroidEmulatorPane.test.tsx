@@ -492,6 +492,63 @@ describe("AndroidEmulatorPane", () => {
     }
   });
 
+  it("gives a later slow attach its retries again after the stream has been live", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ width: 1080, height: 2400, close: () => undefined })),
+    );
+    const slow = { kind: "screencap", reason: "timed-out" };
+    async function* livePicture() {
+      yield Uint8Array.of(0xff, 0xd8, 0xff, 0xd9);
+    }
+    const view = (transport: unknown, signal: AbortSignal, ends: boolean) => ({
+      status: "watching",
+      screen: { width: 1080, height: 2400 },
+      frames: ends ? livePicture() : endsWith(signal),
+      transport,
+    });
+    // Two slow attaches use the budget, the third reaches the stream and then
+    // drops, and the next attach is slow again.
+    const watchScreen = vi
+      .fn()
+      .mockImplementationOnce(async (_r: unknown, signal: AbortSignal) => view(slow, signal, false))
+      .mockImplementationOnce(async (_r: unknown, signal: AbortSignal) => view(slow, signal, false))
+      .mockImplementationOnce(async (_r: unknown, signal: AbortSignal) =>
+        view({ kind: "stream" }, signal, true),
+      )
+      .mockImplementationOnce(async (_r: unknown, signal: AbortSignal) => view(slow, signal, false))
+      .mockImplementation(async (_r: unknown, signal: AbortSignal) =>
+        view({ kind: "stream" }, signal, false),
+      );
+    try {
+      render(
+        <AndroidEmulatorPane
+          checkoutId={ids.checkout as never}
+          client={client({ watchScreen }) as never}
+          createUuid={uuidFactory()}
+          hostBridge={
+            {
+              getHostCapabilities: () => ({
+                sidebarVibrancySupported: false,
+                liveAndroidFrameSupported: true,
+              }),
+            } as never
+          }
+          thread={thread as never}
+        />,
+      );
+      await screen.findByText(/Snapshots, live stream unavailable/);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await screen.findByText("Live stream")).toBeVisible();
+      // Attach 4 was slow and still got its retry (attach 5).
+      expect(watchScreen.mock.calls.length).toBeGreaterThanOrEqual(5);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("stops asking for the stream after two retries when it never attaches in time", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.stubGlobal(

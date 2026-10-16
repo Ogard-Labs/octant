@@ -1321,11 +1321,14 @@ describe("AndroidToolchainService", () => {
             return new Response(JSON.stringify({ width: 1080, height: 1920 }));
           }
           if (!url.endsWith("/stream.mjpeg")) return new Response("no", { status: 404 });
+          let timer: ReturnType<typeof setTimeout> | undefined;
           return new Response(
             new ReadableStream<Uint8Array>({
               start: (controller) => {
-                setTimeout(() => controller.enqueue(part), delayMs);
+                timer = setTimeout(() => controller.enqueue(part), delayMs);
               },
+              // A reader that gave up must not meet a late picture.
+              cancel: () => clearTimeout(timer),
             }),
           );
         },
