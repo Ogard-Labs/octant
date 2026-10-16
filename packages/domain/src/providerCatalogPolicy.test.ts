@@ -262,18 +262,24 @@ describe("provider catalog state", () => {
     expect(providerCatalogCapabilities("claude")).toEqual({
       modes: { chat: "yes", work: "checked-models", code: "checked-models" },
       agentLoop: "runtime",
+      sandbox: "octant-in-plan",
     });
+    expect(providerCatalogCapabilities("codex").sandbox).toBe("runtime");
+    expect(providerCatalogCapabilities("opencode").sandbox).toBe("octant");
     expect(providerCatalogCapabilities("openai-compatible")).toEqual({
       modes: { chat: "yes", work: "verified-models", code: "verified-models" },
       agentLoop: "octant-harness",
+      sandbox: "not-applicable",
     });
     expect(providerCatalogCapabilities("ollama")).toEqual({
       modes: { chat: "yes", work: "no", code: "no" },
       agentLoop: "replies-only",
+      sandbox: "not-applicable",
     });
     expect(providerCatalogCapabilities("oh-my-pi")).toEqual({
       modes: { chat: "no", work: "no", code: "no" },
       agentLoop: "none",
+      sandbox: "not-applicable",
     });
   });
 });

@@ -270,6 +270,23 @@ describe("ProviderCatalogView", () => {
     ).toBeDefined();
   });
 
+  it.each([
+    [/^Codex CLI, /, "Runs its own agent loop in its own sandbox. Octant does not confine it"],
+    [
+      /^Claude Code, /,
+      "Runs its own agent loop. Octant's sandbox confines it in Plan only; otherwise its own sandbox applies",
+    ],
+    [
+      /^Gemini CLI, /,
+      "Runs its own agent loop. Octant's sandbox confines it and approvals gate it, except on Full access",
+    ],
+  ])("says who sandboxes %s as the confinement matrix does", (name, sentence) => {
+    render(<ProviderCatalogView {...props()} />);
+    openSetup(name);
+    const section = screen.getByRole("heading", { name: "What it can do" }).closest("section")!;
+    expect(within(section).getByText("Agent loop").nextSibling?.textContent).toBe(sentence);
+  });
+
   it("returns to the row it opened from on Back and on Escape", () => {
     render(<ProviderCatalogView {...props()} />);
     openSetup(/^Codex CLI, /);
