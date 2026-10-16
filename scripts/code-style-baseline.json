@@ -85,7 +85,6 @@
     "apps/server/src/workTurnRoutes.ts": 4,
     "apps/server/src/zen/zenBackgroundStore.ts": 1,
     "apps/server/src/zen/zenService.ts": 1,
-    "apps/web/src/App.tsx": 2,
     "apps/web/src/apple/AppleWorkbenchPane.tsx": 4,
     "apps/web/src/automation/automationCenterModel.ts": 3,
     "apps/web/src/automation/automationEditorCatalog.ts": 45,
