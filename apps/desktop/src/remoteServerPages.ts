@@ -33,6 +33,7 @@ import {
   type ListenerTrustRefusal,
 } from "@octant/client-runtime/remote-listener-trust";
 import { REMOTE_SERVER_PAGE_ACCESS_HEADER, type RemoteServerRelayHeader } from "@octant/domain";
+import { clearRemotePageStorage, type PageStoragePort } from "./pairedComputers";
 
 export type RemoteServerPageMode = "octant-browser" | "default-browser";
 
@@ -124,7 +125,29 @@ export function decodeRemoteServerSigning(value: unknown): RemoteServerForwarder
   return { status: "refused", reason: "refused" };
 }
 
+/** A page of another computer's server that Octant's browser keeps storage for. */
+export interface RemoteServerPageRecord {
+  readonly name: string;
+  readonly hostId: string;
+  readonly listenerOrigin: string;
+}
+
+export type ForgetRemoteServerPagesOutcome =
+  | { readonly status: "forgotten" }
+  | { readonly status: "incomplete"; readonly message: string };
+
 export interface RemoteServerPagesPorts {
+  /** The pages whose storage Octant's browser keeps, from the app's data folder. */
+  readonly readPageRecords: () => Promise<ReadonlyArray<RemoteServerPageRecord>>;
+  readonly writePageRecords: (records: ReadonlyArray<RemoteServerPageRecord>) => Promise<void>;
+  /** Closes the Octant-browser window of a page, without waiting on the page. */
+  readonly closePageWindow: (name: string) => void;
+  /**
+   * The page's persistent partition. The partition holds nothing but that
+   * page, so clearing it ignores the origin: the forwarder's port may have
+   * moved since the page stored what it did.
+   */
+  readonly pageStorage: (name: string) => PageStoragePort;
   readonly readRecordedPort: () => Promise<number | undefined>;
   readonly recordPort: (port: number) => Promise<void>;
   /** Asks one window to sign; `false` when that window is gone. Its answer arrives through `answer`. */
@@ -168,6 +191,14 @@ export interface RemoteServerPages {
   readonly accessFor: (origin: string) => string | undefined;
   /** A window closed: its pending signatures fail now rather than at the timeout. */
   readonly windowClosed: (windowId: number) => void;
+  /**
+   * Forgets every page of one paired host: its windows close, its partitions
+   * are cleared, and its page names are dropped. A name whose storage could
+   * not be cleared is kept, so the next forget retries it.
+   */
+  readonly forgetHost: (hostId: string) => Promise<ForgetRemoteServerPagesOutcome>;
+  /** The same for every page served from one listener, when a paired computer is forgotten. */
+  readonly forgetListener: (listenerOrigin: string) => Promise<ForgetRemoteServerPagesOutcome>;
   readonly stop: () => Promise<void>;
 }
 
@@ -196,6 +227,54 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
   let forwarder: RemoteServerForwarder | undefined;
   let starting: Promise<ForwarderReadiness> | undefined;
   let noticeGiven = false;
+  let records: Map<string, RemoteServerPageRecord> | undefined;
+  // Page changes run one at a time so a forget never races an open's write.
+  let recordsQueue: Promise<unknown> = Promise.resolve();
+  const exclusive = <T>(work: () => Promise<T>): Promise<T> => {
+    const run = recordsQueue.then(work, work);
+    recordsQueue = run.catch(() => undefined);
+    return run;
+  };
+  const loadRecords = async (): Promise<Map<string, RemoteServerPageRecord>> => {
+    records ??= new Map((await ports.readPageRecords()).map((record) => [record.name, record]));
+    return records;
+  };
+  const forgetPages = (
+    matches: (record: RemoteServerPageRecord) => boolean,
+    hostIds: ReadonlyArray<string> = [],
+  ): Promise<ForgetRemoteServerPagesOutcome> =>
+    exclusive(async () => {
+      const held = await loadRecords();
+      const doomed = [...held.values()].filter(matches);
+      for (const record of doomed) ports.closePageWindow(record.name);
+      for (const hostId of new Set([...hostIds, ...doomed.map((record) => record.hostId)])) {
+        forwarder?.closeHost(hostId);
+        trustByHost.delete(hostId);
+      }
+      let failed = 0;
+      for (const record of doomed) {
+        try {
+          await clearRemotePageStorage(ports.pageStorage(record.name), `http://${record.name}`);
+          held.delete(record.name);
+        } catch {
+          failed += 1;
+        }
+      }
+      if (doomed.length > 0) {
+        try {
+          await ports.writePageRecords([...held.values()]);
+        } catch {
+          failed += 1;
+        }
+      }
+      return failed === 0
+        ? { status: "forgotten" }
+        : {
+            status: "incomplete",
+            message:
+              "Octant forgot that computer, but couldn't clear everything its pages stored. Remove it again to retry.",
+          };
+    });
 
   const sign = (
     request: RemoteServerForwarderSignRequest,
@@ -267,6 +346,26 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
         grant: request.grant,
       });
       if (request.mode === "octant-browser") {
+        // Recorded before the window shows, so no partition exists that a
+        // later forget could not find.
+        await exclusive(async () => {
+          const held = await loadRecords();
+          const previous = held.get(page.name);
+          if (
+            previous?.hostId === request.hostId &&
+            previous.listenerOrigin === request.listenerOrigin
+          ) {
+            return;
+          }
+          // A host paired again at another address keeps its page names, so
+          // the record follows the listener it is served from now.
+          const next = [
+            ...[...held.values()].filter((record) => record.name !== page.name),
+            { name: page.name, hostId: request.hostId, listenerOrigin: request.listenerOrigin },
+          ];
+          await ports.writePageRecords(next);
+          held.set(page.name, next[next.length - 1] as RemoteServerPageRecord);
+        });
         ports.showInOctantBrowser({ name: page.name, pageOrigin: page.pageOrigin });
       } else {
         await ports.openExternal(page.claimUrl());
@@ -297,6 +396,9 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
         if (signer === windowId) signerByGrant.delete(grantId);
       }
     },
+    forgetHost: (hostId) => forgetPages((record) => record.hostId === hostId, [hostId]),
+    forgetListener: (listenerOrigin) =>
+      forgetPages((record) => record.listenerOrigin === listenerOrigin),
     stop: async () => {
       for (const waiting of pending.values()) clearTimeout(waiting.timer);
       pending.clear();
@@ -304,6 +406,50 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
       forwarder = undefined;
     },
   };
+}
+
+const PAGE_RECORDS_FILE = "remote-server-pages.json";
+
+/**
+ * The pages Octant's browser keeps storage for, from the app's data folder.
+ * Page names are derived, so without this record a partition left by an
+ * earlier launch would have no name to clear it by.
+ */
+export async function readRecordedRemotePages(
+  directory: string,
+): Promise<ReadonlyArray<RemoteServerPageRecord>> {
+  try {
+    const parsed = JSON.parse(await readFile(join(directory, PAGE_RECORDS_FILE), "utf8")) as {
+      readonly pages?: unknown;
+    };
+    if (!Array.isArray(parsed.pages)) return [];
+    const pages: RemoteServerPageRecord[] = [];
+    for (const entry of parsed.pages) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const { name, hostId, listenerOrigin } = entry as Record<string, unknown>;
+      if (
+        typeof name === "string" &&
+        typeof hostId === "string" &&
+        typeof listenerOrigin === "string"
+      ) {
+        pages.push({ name, hostId, listenerOrigin });
+      }
+    }
+    return pages;
+  } catch {
+    return [];
+  }
+}
+
+export async function recordRemotePages(
+  directory: string,
+  pages: ReadonlyArray<RemoteServerPageRecord>,
+): Promise<void> {
+  await mkdir(directory, { recursive: true });
+  const path = join(directory, PAGE_RECORDS_FILE);
+  const staged = `${path}.${String(process.pid)}.tmp`;
+  await writeFile(staged, `${JSON.stringify({ version: 1, pages })}\n`, { mode: 0o600 });
+  await rename(staged, path);
 }
 
 const FORWARDER_PORT_FILE = "remote-server-forwarder.json";

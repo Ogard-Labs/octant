@@ -20,6 +20,7 @@ import {
   sendThroughListener,
   upgradeThroughListener,
   validateRemoteServerPageOpenRequest,
+  type RemoteServerPageRecord,
   type RemoteServerPages,
   type RemoteServerPagesPorts,
 } from "./remoteServerPages";
@@ -69,6 +70,9 @@ interface Harness {
   readonly asked: Array<{ readonly windowId: number; readonly requestId: string }>;
   readonly sent: RemoteServerHostRequest[];
   readonly recorded: number[];
+  readonly pageRecords: RemoteServerPageRecord[];
+  readonly events: string[];
+  readonly failClearing: Set<string>;
 }
 
 async function harness(overrides: Partial<RemoteServerPagesPorts> = {}): Promise<Harness> {
@@ -78,7 +82,23 @@ async function harness(overrides: Partial<RemoteServerPagesPorts> = {}): Promise
   const asked: Harness["asked"] = [];
   const sent: RemoteServerHostRequest[] = [];
   const recorded: number[] = [];
+  const pageRecords: RemoteServerPageRecord[] = [];
+  const events: string[] = [];
+  const failClearing = new Set<string>();
   const pages = createRemoteServerPages({
+    readPageRecords: async () => [...pageRecords],
+    writePageRecords: async (next) => {
+      pageRecords.splice(0, pageRecords.length, ...next);
+    },
+    closePageWindow: (name) => events.push(`close ${name}`),
+    pageStorage: (name) => ({
+      clearStorageData: async () => {
+        if (failClearing.has(name)) throw new Error("busy");
+        events.push(`clear ${name}`);
+      },
+      clearCache: async () => undefined,
+      clearAuthCache: async () => undefined,
+    }),
     readRecordedPort: async () => undefined,
     recordPort: async (port) => {
       recorded.push(port);
@@ -101,7 +121,7 @@ async function harness(overrides: Partial<RemoteServerPagesPorts> = {}): Promise
     ...overrides,
   });
   cleanups.push(() => pages.stop());
-  return { pages, shown, external, asked, sent, recorded };
+  return { pages, shown, external, asked, sent, recorded, pageRecords, events, failClearing };
 }
 
 function pageRequest(
@@ -222,6 +242,110 @@ describe("opening a page of another computer", () => {
     expect(await pages.open(7, validateRemoteServerPageOpenRequest(OPEN))).toEqual({
       kind: "opened",
     });
+  });
+});
+
+describe("forgetting a host's pages", () => {
+  const OTHER_HOST = "22222222-2222-4222-8222-222222222222";
+  const OTHER_LISTENER = "https://192.168.1.21:9443";
+
+  async function openBoth(h: Awaited<ReturnType<typeof harness>>) {
+    await h.pages.open(7, validateRemoteServerPageOpenRequest(OPEN));
+    await h.pages.open(
+      7,
+      validateRemoteServerPageOpenRequest({
+        ...OPEN,
+        hostId: OTHER_HOST,
+        listenerOrigin: OTHER_LISTENER,
+        grant: { ...OPEN.grant, port: 3000 },
+      }),
+    );
+  }
+
+  it("closes the host's windows, then clears its partitions and forgets their names, leaving other hosts alone", async () => {
+    const h = await harness();
+    await openBoth(h);
+    const [mine, theirs] = h.shown.map((page) => page.name);
+    h.events.length = 0;
+
+    expect(await h.pages.forgetHost(HOST_ID)).toEqual({ status: "forgotten" });
+
+    expect(h.events).toEqual([`close ${mine}`, `clear ${mine}`]);
+    expect(h.pageRecords.map((record) => record.name)).toEqual([theirs]);
+    // The forwarder no longer serves the forgotten name.
+    const page = h.shown[0];
+    expect((await pageRequest(page?.pageOrigin ?? "", "x")).status).not.toBe(200);
+  });
+
+  it("clears partitions a past launch left, which this launch never opened", async () => {
+    const h = await harness();
+    h.pageRecords.push({ name: "old-page", hostId: HOST_ID, listenerOrigin: LISTENER });
+
+    await h.pages.forgetHost(HOST_ID);
+
+    expect(h.events).toEqual(["close old-page", "clear old-page"]);
+    expect(h.pageRecords).toEqual([]);
+  });
+
+  it("forgets every page of one listener when a paired computer is forgotten", async () => {
+    const h = await harness();
+    await openBoth(h);
+    const theirs = h.shown[1]?.name;
+    h.events.length = 0;
+
+    expect(await h.pages.forgetListener(LISTENER)).toEqual({ status: "forgotten" });
+
+    expect(h.pageRecords.map((record) => record.name)).toEqual([theirs]);
+  });
+
+  it("keeps a name whose storage could not be cleared so a later forget retries it", async () => {
+    const h = await harness();
+    await openBoth(h);
+    const mine = h.shown[0]?.name ?? "";
+    h.failClearing.add(mine);
+
+    const outcome = await h.pages.forgetHost(HOST_ID);
+
+    expect(outcome.status).toBe("incomplete");
+    expect(h.pageRecords.map((record) => record.name)).toContain(mine);
+
+    h.failClearing.clear();
+    expect(await h.pages.forgetHost(HOST_ID)).toEqual({ status: "forgotten" });
+    expect(h.pageRecords.map((record) => record.name)).not.toContain(mine);
+  });
+
+  it("follows a host paired again at another address, so forgetting the new address clears the page", async () => {
+    const h = await harness();
+    await h.pages.open(7, validateRemoteServerPageOpenRequest(OPEN));
+    await h.pages.open(
+      7,
+      validateRemoteServerPageOpenRequest({ ...OPEN, listenerOrigin: OTHER_LISTENER }),
+    );
+
+    expect(h.pageRecords.map((record) => record.listenerOrigin)).toEqual([OTHER_LISTENER]);
+    expect(await h.pages.forgetListener(OTHER_LISTENER)).toEqual({ status: "forgotten" });
+    expect(h.pageRecords).toEqual([]);
+  });
+
+  it("retries recording a page after a write failed instead of trusting the failed entry", async () => {
+    let failWrites = true;
+    const h = await harness({
+      writePageRecords: async (next) => {
+        if (failWrites) throw new Error("disk busy");
+        h.pageRecords.splice(0, h.pageRecords.length, ...next);
+      },
+    });
+    await expect(h.pages.open(7, validateRemoteServerPageOpenRequest(OPEN))).rejects.toThrow();
+    failWrites = false;
+    await h.pages.open(7, validateRemoteServerPageOpenRequest(OPEN));
+
+    expect(h.pageRecords.map((record) => record.hostId)).toEqual([HOST_ID]);
+  });
+
+  it("does nothing for a host with no pages", async () => {
+    const h = await harness();
+    expect(await h.pages.forgetHost(HOST_ID)).toEqual({ status: "forgotten" });
+    expect(h.events).toEqual([]);
   });
 });
 

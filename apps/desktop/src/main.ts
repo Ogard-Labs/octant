@@ -219,6 +219,7 @@ import {
 } from "./remoteDeviceControls";
 import {
   installPairedComputerIpcHandlers,
+  type PageStoragePort,
   PAIRED_COMPUTER_PARTITION,
   PairedComputerPins,
 } from "./pairedComputers";
@@ -242,7 +243,9 @@ import {
   pageAccessHeader,
   pageNavigation,
   readRecordedForwarderPort,
+  readRecordedRemotePages,
   recordForwarderPort,
+  recordRemotePages,
   validateRemoteServerPageOpenRequest,
   type RemoteServerPages,
 } from "./remoteServerPages";
@@ -329,6 +332,7 @@ const IPC_CHANNELS = {
   remoteServerPageOpen: "octant:remote-server-page:open",
   remoteServerPageSign: "octant:remote-server-page:sign",
   remoteServerPageSigned: "octant:remote-server-page:signed",
+  remoteServerPageForgetHost: "octant:remote-server-page:forget-host",
 } as const;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -3083,6 +3087,7 @@ function installIpcHandlers(): void {
     pins: pairedComputerPins,
     windows: { open: openPairedComputerWindow, closeAll: closePairedComputerWindows },
     storage: pairedComputerSession(),
+    serverPages: { forgetListener: (origin) => remoteServerPages().forgetListener(origin) },
     webBuildVersion: app.getVersion(),
   });
   installNativeMenuIpcHandlers({
@@ -3482,6 +3487,13 @@ function installIpcHandlers(): void {
     }
     return await remoteServerPages().open(signer.id, request);
   });
+  ipcMain.handle(IPC_CHANNELS.remoteServerPageForgetHost, async (event, hostId: unknown) => {
+    ownedTopLevelWindowContext(event);
+    if (typeof hostId !== "string" || !UUID_PATTERN.test(hostId)) {
+      throw new Error("Octant rejected an invalid request to forget a host's pages.");
+    }
+    return await remoteServerPages().forgetHost(hostId);
+  });
   ipcMain.handle(IPC_CHANNELS.remoteServerPageSigned, (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
     if (typeof value !== "object" || value === null) return;
@@ -3853,10 +3865,35 @@ function remoteServerPages(): RemoteServerPages {
       signer.send(IPC_CHANNELS.remoteServerPageSign, { requestId, request });
       return true;
     },
+    readPageRecords: () => readRecordedRemotePages(app.getPath("userData")),
+    writePageRecords: (pages) => recordRemotePages(app.getPath("userData"), pages),
+    closePageWindow: closeRemoteServerPageWindow,
+    pageStorage: remoteServerPageStorage,
     showInOctantBrowser: showRemoteServerPage,
     openExternal: (url) => shell.openExternal(url),
   });
   return remoteServerPagesInstance;
+}
+
+function remoteServerPagePartition(name: string): string {
+  return `persist:octant-remote-page-${name}`;
+}
+
+function closeRemoteServerPageWindow(name: string): void {
+  const window = remoteServerPageWindows.get(name);
+  remoteServerPageWindows.delete(name);
+  remoteServerPageOrigins.delete(name);
+  if (window !== undefined && !window.isDestroyed()) window.destroy();
+}
+
+function remoteServerPageStorage(name: string): PageStoragePort {
+  const pageSession = session.fromPartition(remoteServerPagePartition(name));
+  return {
+    // The whole partition, not one origin: the forwarder's port may have moved.
+    clearStorageData: () => pageSession.clearStorageData(),
+    clearCache: () => pageSession.clearCache(),
+    clearAuthCache: () => pageSession.clearAuthCache(),
+  };
 }
 
 /**
@@ -3874,7 +3911,7 @@ function showRemoteServerPage(page: { readonly name: string; readonly pageOrigin
     existing.focus();
     return;
   }
-  const partition = `persist:octant-remote-page-${page.name}`;
+  const partition = remoteServerPagePartition(page.name);
   const pageSession = session.fromPartition(partition);
   const currentOrigin = () => remoteServerPageOrigins.get(page.name) ?? page.pageOrigin;
   pageSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));

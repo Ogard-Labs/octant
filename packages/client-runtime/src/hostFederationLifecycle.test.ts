@@ -136,7 +136,10 @@ async function seedDeviceKey(
   return keyId;
 }
 
-async function seedTwoRemotes(input?: { readonly deviceKeyStore?: RemoteDeviceKeyStore }): Promise<{
+async function seedTwoRemotes(input?: {
+  readonly deviceKeyStore?: RemoteDeviceKeyStore;
+  readonly onHostCleared?: (hostId: string) => Promise<void>;
+}): Promise<{
   readonly registry: ReturnType<typeof createClientHostRegistry>;
   readonly deviceKeyStore: RemoteDeviceKeyStore;
   readonly bridges: Map<string, ReturnType<typeof createControllableBridge>>;
@@ -240,6 +243,7 @@ async function seedTwoRemotes(input?: { readonly deviceKeyStore?: RemoteDeviceKe
     transports,
     deviceKeyStore,
     cache,
+    ...(input?.onHostCleared === undefined ? {} : { onHostCleared: input.onHostCleared }),
   });
   await lifecycle.sync();
 
@@ -528,6 +532,27 @@ describe("HostFederationLifecycle (Post-preview B6)", () => {
     expect(cache.get(HOST_B)).toBeUndefined();
     expect(cache.get(HOST_A)?.freshness).toBe("ready");
     expect(lifecycle.list().map((entry) => entry.hostId)).toEqual([LOCAL_HOST_ID, HOST_A]);
+  });
+
+  it("tells its owner which host was cleared, after revoke and after removal, and survives the owner failing", async () => {
+    const cleared: string[] = [];
+    const { lifecycle, registry } = await seedTwoRemotes({
+      onHostCleared: async (hostId) => {
+        cleared.push(hostId);
+        throw new Error("page storage busy");
+      },
+    });
+
+    const removed = await lifecycle.removeLocal(HOST_B);
+    const revoked = await lifecycle.revoke(HOST_A, {
+      revokeSelf: async () => ({ localCredentialRemoved: true }),
+    });
+
+    expect(removed.warning).toBe("page storage busy");
+    expect(revoked.warning).toBe("page storage busy");
+    expect(cleared).toEqual([HOST_B, HOST_A]);
+    expect(await registry.get(HOST_A)).toBeUndefined();
+    expect(await registry.get(HOST_B)).toBeUndefined();
   });
 
   it("never queues mutations for expired/revoked/stale hosts during partial outage", async () => {

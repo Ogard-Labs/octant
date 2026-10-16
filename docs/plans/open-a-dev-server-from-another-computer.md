@@ -561,6 +561,22 @@ dark; slice 5 makes the feature reachable.
      partition, sandboxed, with every permission refused. It stays on the
      page's origin; a link or new window to another origin opens in the
      default browser. No agent can reach it: it is not a Browser tab.
+   - **Forgetting a host's pages (decision 8).** Each page Octant's browser
+     shows is recorded by name, host, and listener in the app's data folder
+     before its window opens, because names are derived and a partition a past
+     launch left would otherwise have no name to clear it by. Removing a host
+     or revoking this device from it (the federation lifecycle's local clear)
+     asks the desktop to forget that host's pages, and forgetting a paired
+     computer forgets the pages of its listener. In order: the pages' windows
+     close, the forwarder stops serving the names, every persistent partition
+     for those names is cleared whole (not one origin, since the forwarder's
+     port may have moved) through `clearRemotePageStorage`, and the names are
+     dropped. A name whose clearing failed stays recorded and is retried by the
+     next forget for that host or listener; removing a host says so in its
+     result's warning, and a paired computer's forget in its refusal copy. A host
+     the other computer revoked on its own is not cleared until the person
+     removes it here. Open in browser pages live in the default browser's
+     storage, which Octant does not clear.
    - **Transport.** The forwarder reaches the host through the listener trust
      rule (private address, pinned or platform certificate) with plain Node
      HTTP and no cookie jar. A trust refusal sends nothing and the page says
@@ -584,8 +600,7 @@ dark; slice 5 makes the feature reachable.
      cookies on `http://*.localhost` is part of the live check.
 
    **Not built in this slice:** a Local servers row's Open (its listing carries
-   no ownership), the live-updates indicator, clearing a page's
-   partition when its host is removed or the device unpaired (decision 8),
+   no ownership), the live-updates indicator,
    and signing when the opening window has closed. The stopped-or-changed
    copy names Running services, since Local servers does not offer Open yet;
    four refusals the table lacked use the copy below.

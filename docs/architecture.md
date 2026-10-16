@@ -6650,7 +6650,10 @@ mechanisms are:
     becomes a failure page in the plan's copy. Octant's browser is a sandboxed
     window per name in a persistent partition, with every permission refused,
     kept on the page's origin, and not a Browser tab, so no agent can drive
-    it. A page's WebSocket upgrade (live reload) takes the same admission,
+    it. Removing a host, revoking this device from it, or forgetting a paired
+    computer closes that computer's page windows, clears every persistent
+    partition for its recorded page names through `clearRemotePageStorage`, and
+    forgets the names; a name that could not be cleared stays for a retry. A page's WebSocket upgrade (live reload) takes the same admission,
     secret, and window signature as any request, signed as a `GET` with an
     empty body, and goes to the proxy route through the same listener trust.
     Once the host switches protocols with the accept value for the page's own
