@@ -364,6 +364,15 @@ as indented JSON over several lines, and the broker reads the whole object. Its
 `stream.mjpeg` carries JPEG parts, or PNG parts when the emulator image cannot
 encode `screencap -j`; the server cuts parts by `Content-Length` and passes
 either image type to the pane.
+The broker waits up to 30 s for `serve-avd` to print its ready state, because
+the bundled tool needed 5 to 17 s to attach on a Mac under heavy load; a launch
+still starting when a request ends keeps going and the next request joins it.
+The server then allows 20 s for the stream's response and for its first
+picture. A stream that still misses those limits leaves the pane on snapshots
+with the reason `timed-out` or `no-frames`, and the pane asks for the stream
+again after 4 s and after a further 8 s, keeping the last snapshot on screen,
+and stops after that. A person sees "Live stream" without reloading when the
+tool only needed more time.
 When the tool is missing, exits, or does not attach in time, the broker
 answers with that reason. Every Android screen stream names its transport in
 `x-octant-android-transport`: `stream`, or `screencap` with the reason the
@@ -372,6 +381,16 @@ timed out, desktop unreachable, or no frames). The pane shows it as a quiet
 "Live stream" or "Snapshots, live stream unavailable: …" line, and an input
 sent through `serve-avd` says so in its evidence. An agent must not launch
 Simulator.app, `serve-sim`, or `serve-avd`.
+
+### Shut down from the Android pane
+
+Shut down is an approval-gated action like Boot: the pane raises the in-app
+approval card for the whole request and, until the person answers, says on one
+line that it is waiting for that approval, so a pane that is only waiting never
+looks stuck. A declined or lapsed card runs nothing and says so; an approved one
+sends the power-off through `adb` and the server records evidence for it,
+including `timed-out` or `failed` when the emulator does not power off. No
+native dialog is involved.
 
 ## Verification
 

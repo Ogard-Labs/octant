@@ -106,11 +106,22 @@ export interface AndroidToolchainServiceOptions {
   /** Managed serve-avd for an already booted emulator serial. Absent means adb. */
   readonly serveAvd?: ServeAvdPort;
   readonly fetchImpl?: typeof fetch;
+  /** Overrides how long an attached serve-avd may take to answer; tests shorten it. */
+  readonly streamWaitMs?: Partial<{ readonly headers: number; readonly firstFrame: number }>;
 }
 
 const MAX_RECENT = 64;
 const MAX_DIAGNOSTICS = 16;
 const SCREEN_POLL_MS = 400;
+/**
+ * How long an attached serve-avd may take to answer the stream request and to
+ * send its first picture. On a Mac under heavy load the tool needed up to
+ * about 17 s to come up, so the limits sit above that. Past them the pane
+ * falls back to snapshots and tries the stream again on its own.
+ */
+const STREAM_CONFIG_MS = 10_000;
+const STREAM_HEADERS_MS = 20_000;
+const STREAM_FIRST_FRAME_MS = 20_000;
 const MAXIMUM_FRAME_BYTES = 8 * 1024 * 1024;
 /** The artifact store's own bound; a recording it would refuse is a failed recording with a reason. */
 const MAXIMUM_RECORDING_BYTES = 16 * 1024 * 1024;
@@ -1065,7 +1076,10 @@ export class AndroidToolchainService {
     const fetchImpl = this.#options.fetchImpl ?? fetch;
     const screen = await readServeAvdScreen(fetchImpl, attachment, serial, signal);
     if (screen === undefined || signal.aborted) return noFrames;
-    const headers = headerDeadline(signal, 5_000);
+    const headers = headerDeadline(
+      signal,
+      this.#options.streamWaitMs?.headers ?? STREAM_HEADERS_MS,
+    );
     let response: Response;
     try {
       response = await fetchImpl(attachment.streamUrl, {
@@ -1083,7 +1097,11 @@ export class AndroidToolchainService {
       return noFrames;
     }
     const reader = response.body.getReader();
-    const first = await readFirstFrames(reader, signal, 5_000);
+    const first = await readFirstFrames(
+      reader,
+      signal,
+      this.#options.streamWaitMs?.firstFrame ?? STREAM_FIRST_FRAME_MS,
+    );
     if (first === undefined) {
       await reader.cancel().catch(() => undefined);
       return noFrames;
@@ -1891,7 +1909,7 @@ async function readServeAvdScreen(
     response = await fetchImpl(`${attachment.origin}/helper/${encodeURIComponent(serial)}/config`, {
       redirect: "error",
       credentials: "omit",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(5_000)]),
+      signal: AbortSignal.any([signal, AbortSignal.timeout(STREAM_CONFIG_MS)]),
     });
   } catch {
     return undefined;

@@ -59,6 +59,15 @@ function client(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** One picture, then silence until the view is given up, as a real stream behaves. */
+async function* endsWith(signal: AbortSignal) {
+  yield Uint8Array.of(0xff, 0xd8, 0xff, 0xd9);
+  await new Promise<void>((resolve) => {
+    if (signal.aborted) resolve();
+    else signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
 describe("AndroidEmulatorPane", () => {
   it("asks once to allow input, then Home runs without another confirmation", async () => {
     let resolveApproval: ((id: string | undefined) => void) | undefined;
@@ -431,5 +440,172 @@ describe("AndroidEmulatorPane", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+  it("moves from snapshots to the live stream by itself after a slow first attach", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ width: 1080, height: 2400, close: () => undefined })),
+    );
+    const watching = (transport: unknown, signal: AbortSignal) => ({
+      status: "watching",
+      screen: { width: 1080, height: 2400 },
+      frames: endsWith(signal),
+      transport,
+    });
+    const watchScreen = vi
+      .fn()
+      .mockImplementationOnce(async (_request: unknown, signal: AbortSignal) =>
+        watching({ kind: "screencap", reason: "timed-out" }, signal),
+      )
+      .mockImplementation(async (_request: unknown, signal: AbortSignal) =>
+        watching({ kind: "stream" }, signal),
+      );
+    try {
+      render(
+        <AndroidEmulatorPane
+          checkoutId={ids.checkout as never}
+          client={client({ watchScreen }) as never}
+          createUuid={uuidFactory()}
+          hostBridge={
+            {
+              getHostCapabilities: () => ({
+                sidebarVibrancySupported: false,
+                liveAndroidFrameSupported: true,
+              }),
+            } as never
+          }
+          thread={thread as never}
+        />,
+      );
+      expect(
+        await screen.findByText(
+          "Snapshots, live stream unavailable: serve-avd did not attach in time.",
+        ),
+      ).toBeVisible();
+      await vi.advanceTimersByTimeAsync(4_500);
+      expect(await screen.findByText("Live stream")).toBeVisible();
+      expect(watchScreen).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("stops asking for the stream after two retries when it never attaches in time", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ width: 1080, height: 2400, close: () => undefined })),
+    );
+    const watchScreen = vi.fn(async (_request: unknown, signal: AbortSignal) => ({
+      status: "watching",
+      screen: { width: 1080, height: 2400 },
+      frames: endsWith(signal),
+      transport: { kind: "screencap", reason: "no-frames" },
+    }));
+    try {
+      render(
+        <AndroidEmulatorPane
+          checkoutId={ids.checkout as never}
+          client={client({ watchScreen }) as never}
+          createUuid={uuidFactory()}
+          hostBridge={
+            {
+              getHostCapabilities: () => ({
+                sidebarVibrancySupported: false,
+                liveAndroidFrameSupported: true,
+              }),
+            } as never
+          }
+          thread={thread as never}
+        />,
+      );
+      await screen.findByText(/Snapshots, live stream unavailable/);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(watchScreen).toHaveBeenCalledTimes(3);
+      expect(screen.getByText(/Snapshots, live stream unavailable/)).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+  describe("Shut down from the More menu", () => {
+    async function shutDown(options: {
+      readonly requestApproval: () => Promise<string | undefined>;
+      readonly execute: () => Promise<unknown>;
+    }) {
+      const userEvent = (await import("@testing-library/user-event")).default;
+      const user = userEvent.setup();
+      const execute = vi.fn(options.execute);
+      const requestApproval = vi.fn(options.requestApproval);
+      render(
+        <AndroidEmulatorPane
+          checkoutId={ids.checkout as never}
+          client={client({ execute }) as never}
+          createUuid={uuidFactory()}
+          hostBridge={
+            {
+              getHostCapabilities: () => ({
+                sidebarVibrancySupported: false,
+                liveAndroidFrameSupported: true,
+              }),
+            } as never
+          }
+          requestApproval={requestApproval}
+          thread={thread as never}
+        />,
+      );
+      await screen.findByRole("button", { name: "Home" });
+      screen.getByRole("button", { name: "More" }).focus();
+      await user.keyboard("{Enter}");
+      await user.click(await screen.findByRole("menuitem", { name: "Shut down Pixel 8" }));
+      return { execute, requestApproval };
+    }
+
+    it("asks through the approval surface first, then shuts down with that approval", async () => {
+      const { execute, requestApproval } = await shutDown({
+        requestApproval: async () => ids.approval,
+        execute: async () => ({ outcome: "succeeded" }),
+      });
+      await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+      expect(requestApproval).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ kind: "shutdown" }),
+      );
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "shutdown",
+          approval: { kind: "approved", approvalId: ids.approval },
+        }),
+      );
+    });
+
+    it("runs nothing and says so when the person declines or the approval lapses", async () => {
+      const { execute, requestApproval } = await shutDown({
+        requestApproval: async () => undefined,
+        execute: async () => ({ outcome: "succeeded" }),
+      });
+      expect(await screen.findByText("Nothing ran, because it wasn't approved.")).toBeVisible();
+      expect(requestApproval).toHaveBeenCalledTimes(1);
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it("names the outcome when the emulator did not power off in time", async () => {
+      await shutDown({
+        requestApproval: async () => ids.approval,
+        execute: async () => ({ outcome: "timed-out" }),
+      });
+      expect(await screen.findByText("Pixel 8 didn't shut down in time.")).toBeVisible();
+    });
+
+    it("says the action is waiting for confirmation instead of going quiet while the card is open", async () => {
+      await shutDown({
+        requestApproval: () => new Promise<string | undefined>(() => undefined),
+        execute: async () => ({ outcome: "succeeded" }),
+      });
+      expect(
+        await screen.findByText("Waiting for your approval to shut down the emulator."),
+      ).toBeVisible();
+    });
   });
 });

@@ -28,6 +28,14 @@ interface DecodedFrame {
 const RECONNECT_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 const HEALTHY_VIEW_MS = 10_000;
 const FIRST_PICTURE_MS = 5_000;
+/**
+ * A stream that was slow to attach leaves the pane on snapshots. The pane asks
+ * for the stream again after each of these waits, then stays on snapshots, so
+ * a busy machine reaches "Live stream" without a reload and a broken one does
+ * not retry forever.
+ */
+const STREAM_RETRY_DELAYS_MS = [4_000, 8_000] as const;
+const SLOW_STREAM_REASONS: ReadonlyArray<string> = ["timed-out", "no-frames"];
 
 export function useAndroidEmulatorLiveScreen(options: {
   readonly client: AndroidToolchainClient;
@@ -79,6 +87,7 @@ export function useAndroidEmulatorLiveScreen(options: {
     void (async () => {
       let failures = 0;
       let everLive = false;
+      let streamRetries = 0;
       let stopped = "The live emulator view stopped.";
       while (!signal.aborted) {
         const view = new AbortController();
@@ -87,6 +96,8 @@ export function useAndroidEmulatorLiveScreen(options: {
         const watch = await client.watchScreen(request, view.signal);
         if (signal.aborted) return;
         let painted = false;
+        let retryStream: ReturnType<typeof setTimeout> | undefined;
+        let retryingStream = false;
         let shown: { readonly width: number; readonly height: number } | undefined;
         const startedAt = Date.now();
         if (watch.status === "failed") {
@@ -100,6 +111,17 @@ export function useAndroidEmulatorLiveScreen(options: {
             stopped = "The live emulator view showed no picture.";
             endView();
           }, FIRST_PICTURE_MS);
+          const retryDelay = STREAM_RETRY_DELAYS_MS[streamRetries];
+          if (
+            watch.transport?.kind === "screencap" &&
+            SLOW_STREAM_REASONS.includes(watch.transport.reason) &&
+            retryDelay !== undefined
+          ) {
+            retryStream = setTimeout(() => {
+              retryingStream = true;
+              endView();
+            }, retryDelay);
+          }
           const givenUp = new Promise<undefined>((resolve) => {
             view.signal.addEventListener("abort", () => resolve(undefined), { once: true });
           });
@@ -142,11 +164,17 @@ export function useAndroidEmulatorLiveScreen(options: {
             }
           } finally {
             clearTimeout(noPicture);
+            clearTimeout(retryStream);
           }
         }
         signal.removeEventListener("abort", endView);
         endView();
         if (signal.aborted) return;
+        if (retryingStream && painted) {
+          // The last snapshot stays on screen while the stream is asked for again.
+          streamRetries += 1;
+          continue;
+        }
         if (Date.now() - startedAt >= HEALTHY_VIEW_MS) failures = 0;
         const delay = RECONNECT_DELAYS_MS[failures];
         if (delay === undefined) {

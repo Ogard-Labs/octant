@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startServeAvdBroker, type ServeAvdBroker } from "./serveAvdBroker";
+import { SERVE_AVD_READY_MS, startServeAvdBroker, type ServeAvdBroker } from "./serveAvdBroker";
 
 const script = `
 const serial = process.argv[process.argv.length - 1];
@@ -174,6 +174,50 @@ describe("serve-avd broker", () => {
       sdkRoot: join(tmpdir(), "octant-no-such-sdk"),
     });
     expect(empty.status).toBe(400);
+  });
+
+  it("waits for a slow tool and shares one launch with a retry after the first request gave up", async () => {
+    // A heavily loaded Mac took 5 to 17 s to attach. The first request is
+    // abandoned while the tool is still starting; the retry must join that
+    // launch instead of starting another, and must still get the endpoint.
+    const slow = `
+const serial = process.argv[process.argv.length - 1];
+setTimeout(() => {
+  console.log(JSON.stringify({
+    device: serial,
+    url: "http://127.0.0.1:9",
+    streamUrl: "http://127.0.0.1:9/helper/" + serial + "/stream.mjpeg",
+  }));
+}, 700);
+setInterval(() => {}, 1000);
+`;
+    const managed = tools(slow);
+    const broker = await startServeAvdBroker(managed, { readyMs: 10_000 });
+    openBrokers.push(broker);
+    const giveUp = new AbortController();
+    const abandoned = fetch(broker.url, {
+      method: "POST",
+      signal: giveUp.signal,
+      headers: {
+        "content-type": "application/json",
+        "x-octant-managed-device-token": broker.token,
+      },
+      body: JSON.stringify({ serial: "emulator-5554" }),
+    });
+    abandoned.catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    giveUp.abort();
+    const retry = await post(broker, { serial: "emulator-5554" });
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({
+      origin: "http://127.0.0.1:9",
+      streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+    });
+    expect(managed.launches).toHaveLength(1);
+  });
+
+  it("waits longer by default than the slowest attach seen under load", () => {
+    expect(SERVE_AVD_READY_MS).toBeGreaterThan(17_000);
   });
 
   it("says why serve-avd did not attach", async () => {

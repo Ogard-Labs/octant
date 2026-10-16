@@ -1272,6 +1272,117 @@ describe("AndroidToolchainService", () => {
     await service.close();
   });
 
+  describe("a serve-avd that is slow to send its first picture", () => {
+    const png = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xd9);
+    const part = new Uint8Array([
+      ...new TextEncoder().encode(
+        `--frame\r\nContent-Type: image/png\r\nContent-Length: ${png.length}\r\n\r\n`,
+      ),
+      ...png,
+      0x0d,
+      0x0a,
+    ]);
+
+    function slowService(delayMs: number, streamWaitMs?: { firstFrame: number }) {
+      const discovery = discoveryExecutor();
+      const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        if (!input.argv.includes("screencap")) return discovery(input);
+        const shot = new Uint8Array(24);
+        shot.set([0x89, 0x50, 0x4e, 0x47]);
+        new DataView(shot.buffer).setUint32(16, 100);
+        new DataView(shot.buffer).setUint32(20, 200);
+        return { ...processResult(""), stdout: shot };
+      });
+      const service = new AndroidToolchainService({
+        execute,
+        access: async () => undefined,
+        environment: () => ({ ANDROID_HOME: "/sdk" }),
+        writeArtifact: async () => undefined,
+        readArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-09-20T20:00:00.000Z",
+        newId: () => ids.action,
+        ...(streamWaitMs === undefined ? {} : { streamWaitMs }),
+        serveAvd: {
+          open: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+            return {
+              status: "attached" as const,
+              attachment: {
+                origin: "http://127.0.0.1:9",
+                streamUrl: "http://127.0.0.1:9/helper/emulator-5554/stream.mjpeg",
+              },
+            };
+          },
+        },
+        fetchImpl: async (input: RequestInfo | URL) => {
+          const url = String(input);
+          if (url.endsWith("/config")) {
+            return new Response(JSON.stringify({ width: 1080, height: 1920 }));
+          }
+          if (!url.endsWith("/stream.mjpeg")) return new Response("no", { status: 404 });
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start: (controller) => {
+                setTimeout(() => controller.enqueue(part), delayMs);
+              },
+            }),
+          );
+        },
+      });
+      return { service, execute };
+    }
+
+    it("still reaches the live stream when the first picture comes after the old five seconds budget", async () => {
+      const { service } = slowService(400, { firstFrame: 5_000 });
+      await service.discover(discoveryRequest, context);
+      const watch = await service.watchScreen(
+        "Pixel_8_API_34",
+        context,
+        new AbortController().signal,
+      );
+      if (watch.kind !== "watching") throw new Error("expected a managed stream");
+      expect(watch.transport).toEqual({ kind: "stream" });
+      await watch.frames.cancel();
+      await service.close();
+    });
+
+    it("waits past the old five seconds by default when the stream attaches slowly under load", async () => {
+      vi.useFakeTimers();
+      try {
+        const { service } = slowService(12_000);
+        await service.discover(discoveryRequest, context);
+        const watching = service.watchScreen(
+          "Pixel_8_API_34",
+          context,
+          new AbortController().signal,
+        );
+        await vi.advanceTimersByTimeAsync(12_500);
+        const watch = await watching;
+        if (watch.kind !== "watching") throw new Error("expected a managed stream");
+        expect(watch.transport).toEqual({ kind: "stream" });
+        await watch.frames.cancel();
+        await service.close();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("falls back to snapshots, saying no frames came, when the picture never arrives in time", async () => {
+      const { service } = slowService(5_000, { firstFrame: 150 });
+      await service.discover(discoveryRequest, context);
+      const watch = await service.watchScreen(
+        "Pixel_8_API_34",
+        context,
+        new AbortController().signal,
+      );
+      if (watch.kind !== "watching") throw new Error("expected snapshots");
+      expect(watch.transport).toEqual({ kind: "screencap", reason: "no-frames" });
+      await watch.frames.cancel();
+      await service.close();
+    });
+  });
+
   it("says why it falls back to screencap when serve-avd does not attach", async () => {
     const discovery = discoveryExecutor();
     let captures = 0;
