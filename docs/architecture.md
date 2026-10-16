@@ -4033,7 +4033,15 @@ native harness in `apps/server/src/harness`:
   cannot both send them. A person redirects running work only through these
   ordered notes and through goal revisions checked against the goal's
   version (a stale one is refused, never merged); Side Chat is a separate
-  read-only Chat and can do neither. A turn's start is journaled
+  read-only Chat and can do neither. The terminal and the web queue notes
+  through the same `steering` route: the web shows its note input beside
+  the composer in every mode, only while a turn runs (a note reaches the lead inside a tool result,
+  so between turns the composer sends an ordinary message), mints each note's
+  id once per send so a retry lands once, and labels a queued note the lead
+  never reached as not reached, with a way to discard them. Only the terminal
+  sends unreached notes as the next prompt; the route allows exactly the
+  windows and paired devices that may already answer the thread's questions,
+  and the web adds no authority to it. A turn's start is journaled
   (`native-harness-turn-started`) and closed by its completed record or a
   `native-harness-turn-settled` frame, which every mode's turn path writes
   however the turn ended. A person's pause drains: the running turn and the
