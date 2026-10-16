@@ -4565,11 +4565,6 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-sm);
 }
 
-/* The bare variant draws nothing, so the trigger takes the ghost hover fill itself. */
-.composer-row .composer-model-picker__trigger:hover {
-  background: var(--muted);
-}
-
 /* An unavailable provider is still a toolbar item, not a second outlined
    field inside the raised prompt. The disabled trigger keeps the truthful
    state and settings route while the row keeps one continuous surface. */

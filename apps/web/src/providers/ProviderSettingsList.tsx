@@ -787,7 +787,7 @@ function ProviderRow(props: ProviderRowProps) {
         <span className="prov-grip-slot">
           <OctantButton
             aria-label={`Move ${name} up`}
-            className="prov-grip window-no-drag"
+            className="prov-grip window-no-drag rounded-lg"
             disabled={props.busy || props.index === 0}
             onClick={() => props.onMove(props.index, -1)}
             size="icon"
@@ -798,7 +798,7 @@ function ProviderRow(props: ProviderRowProps) {
           </OctantButton>
           <OctantButton
             aria-label={`Move ${name} down`}
-            className="prov-grip window-no-drag"
+            className="prov-grip window-no-drag rounded-lg"
             disabled={props.busy || props.index === props.count - 1}
             onClick={() => props.onMove(props.index, 1)}
             size="icon"
