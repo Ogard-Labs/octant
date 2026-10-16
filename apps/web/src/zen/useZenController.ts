@@ -25,6 +25,7 @@ import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contr
 import type { ProjectId } from "@octant/contracts/projects";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRetainedRecord } from "../polling/useRetainedRecord";
 
 export const ZEN_PRESENTATION_STORAGE_PREFIX = "octant:zen-presentation:";
 
@@ -1531,7 +1532,8 @@ export function useZenController(options: UseZenControllerOptions) {
     })();
   }, [client, markActive, setBarCollapsedState, storage, windowId]);
 
-  return {
+  // One identity while nothing in it moved; see useRetainedRecord.
+  return useRetainedRecord({
     active,
     space,
     pinTerminal,
@@ -1586,7 +1588,7 @@ export function useZenController(options: UseZenControllerOptions) {
     setChecklistItemCompleted,
     reorderChecklistItem,
     removeChecklistItem,
-  };
+  });
 }
 
 function isZenStaleConflict(error: unknown): boolean {

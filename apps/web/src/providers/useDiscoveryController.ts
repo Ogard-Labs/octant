@@ -4,6 +4,7 @@ import {
   type DiscoveryClient,
 } from "@octant/client-runtime/discovery-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRetainedRecord } from "../polling/useRetainedRecord";
 
 export interface DiscoveryControllerOptions {
   readonly serverUrl?: string;
@@ -151,7 +152,8 @@ export function useDiscoveryController(options: DiscoveryControllerOptions) {
     [client],
   );
 
-  return {
+  // One identity while nothing in it moved; see useRetainedRecord.
+  return useRetainedRecord({
     snapshot,
     scanning,
     connectingPaths,
@@ -159,7 +161,7 @@ export function useDiscoveryController(options: DiscoveryControllerOptions) {
     scan,
     connect,
     locateBinary,
-  };
+  });
 }
 
 export type DiscoveryController = ReturnType<typeof useDiscoveryController>;

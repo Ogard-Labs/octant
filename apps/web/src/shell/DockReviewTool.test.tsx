@@ -4,7 +4,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MonacoDiffRuntime } from "../code/MonacoEditorAdapter";
-import type { CodeController } from "../code/useCodeController";
+import type { CodeThreadView } from "@octant/contracts/code";
 import { DockReviewTool } from "./DockReviewTool";
 
 const DIFF = [
@@ -153,7 +153,7 @@ describe("Review beside the active thread", () => {
 
     let resolveNext: (value: CodeOperationResult) => void = () => undefined;
     const secondClient = {
-      ...first.controller.client,
+      ...first.client,
       executeOperation: vi.fn(
         async () =>
           new Promise<CodeOperationResult>((resolve) => {
@@ -165,7 +165,7 @@ describe("Review beside the active thread", () => {
       <DockReviewTool
         {...first}
         checkoutId={ids.otherCheckout as never}
-        controller={controller(ids.otherThread, secondClient as never)}
+        {...review(ids.otherThread, secondClient as never)}
         loadRuntime={runtime().loadRuntime}
         threadId={ids.otherThread as never}
       />,
@@ -247,9 +247,7 @@ describe("Review beside the active thread", () => {
   });
 
   it("does not keep a previous thread's Review when this thread is still loading", () => {
-    render(
-      <DockReviewTool controller={controller(ids.otherThread)} threadId={ids.thread as never} />,
-    );
+    render(<DockReviewTool {...review(ids.otherThread)} threadId={ids.thread as never} />);
     expect(screen.getByRole("heading", { name: "Loading review" })).toBeVisible();
     expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
   });
@@ -269,29 +267,30 @@ function bound(
   client: Partial<CodeClient> = {},
   executionPolicy: "plan" | "approval-gated" | "full-access" = "full-access",
 ): {
-  readonly controller: CodeController;
+  readonly client: CodeClient;
+  readonly view: CodeThreadView;
   readonly threadId: never;
   readonly checkoutId: never;
 } {
   return {
-    controller: controller(ids.thread, client, executionPolicy),
+    ...review(ids.thread, client, executionPolicy),
     threadId: ids.thread as never,
     checkoutId: ids.checkout as never,
   };
 }
 
-function controller(
+function review(
   threadId: string,
   client: Partial<CodeClient> = {},
   executionPolicy: "plan" | "approval-gated" | "full-access" = "full-access",
-): CodeController {
+): { readonly client: CodeClient; readonly view: CodeThreadView } {
   const executeOperation =
     client.executeOperation ??
     vi.fn(async (command) =>
       command.kind === "observe-git" ? dirtyObservation(command.operationId) : failed(command),
     );
   return {
-    activeView: {
+    view: {
       checkout: { id: threadId === ids.thread ? ids.checkout : ids.otherCheckout },
       thread: { id: threadId, executionPolicy },
     },

@@ -54,12 +54,23 @@ import type { ShellActions } from "./shellActions";
 import type { ShellNavigationModel } from "./shellNavigationModel";
 
 type ShellController = ReturnType<typeof useShellController>;
+type ProjectController = ReturnType<typeof useProjectController>;
 
 export interface ThreadPaneContainerProps {
   readonly actions: Pick<
     ShellActions,
+    | "activateContentTab"
+    | "activatePane"
+    | "clearFocus"
+    | "closeContentTab"
+    | "closePane"
     | "closeWorkspaceReaders"
     | "createChat"
+    | "commitSplitResize"
+    | "createProject"
+    | "dismissCrossContextOffer"
+    | "ensureDefaultProject"
+    | "focusPane"
     | "handleCreateChatProjectThread"
     | "handleCreateWorkThread"
     | "handleDraftCreateCodeThread"
@@ -69,9 +80,24 @@ export interface ThreadPaneContainerProps {
     | "noteHandedOffDocument"
     | "onComputerUseSessionChange"
     | "openCanvasInSidebar"
+    | "openCanvas"
+    | "openChatThread"
+    | "openCodeSurface"
+    | "openCodeThread"
     | "openCreatedFollowUp"
+    | "openCrossContextInNewWindow"
+    | "openDraftThread"
     | "openDraftInProject"
     | "openInbox"
+    | "openSettings"
+    | "openSideChat"
+    | "openSurface"
+    | "openThreadBrowser"
+    | "openWorkThread"
+    | "previewSplitResize"
+    | "relinkProject"
+    | "renameProject"
+    | "revealBrowserActivity"
     | "openLinkInApp"
     | "openProjectCreate"
     | "openReviewForThread"
@@ -79,6 +105,7 @@ export interface ThreadPaneContainerProps {
     | "refuseUnlessCreatableDestination"
     | "resetNewTaskDraft"
     | "selectProjectPullRequestIdentity"
+    | "setCodeNewThreadWorkspace"
     | "setCodePullRequestsOpen"
     | "setDraftError"
     | "setDraftExecutionPolicy"
@@ -92,19 +119,29 @@ export interface ThreadPaneContainerProps {
     | "setPendingDraftPrompt"
     | "setPendingIssue"
     | "setPendingUsageFilter"
+    | "setProjectArchived"
+    | "setProjectColor"
+    | "setProjectProviderPolicy"
+    | "setProjectWorkStatusFile"
     | "setThreadStatsVisible"
     | "setUsageOpen"
     | "setWorkComposerSelection"
     | "spendRevealChatTurn"
+    | "splitPane"
+    | "touchMemoryRevision"
     | "viewAllChatProjectThreads"
   >;
   readonly activeCodeThreadUsageFallback: Parameters<
     typeof ComposerContextMeterProvider
   >[0]["fallback"];
+  readonly activeProject: ProjectController["activeProject"];
   readonly activeMode: OctantMode;
   readonly agentProfiles: ReturnType<typeof useAgentProfiles>;
+  readonly allProjects: ProjectController["allProjects"];
+  readonly availabilityByProject: ProjectController["availabilityByProject"];
   /** The dock's thread while a pane shows its shared Browser tool, else absent. */
   readonly browserToolThreadId?: string;
+  readonly canOpenCrossContextInNewWindow: boolean;
   readonly chatController: ChatController;
   readonly chatReadCursorStore: ReturnType<typeof createChatReadCursorStore>;
   readonly clients: ReturnType<typeof createLaunchedShellClients>;
@@ -115,10 +152,11 @@ export interface ThreadPaneContainerProps {
   readonly codeProviderGroups: ReturnType<typeof buildModelPickerGroups>;
   readonly codeThreadControllers: CodeThreadControllerRegistry;
   readonly composerCompaction: ComposerCompaction;
+  readonly contentTabs: ShellController["contentTabs"];
   readonly contextController: ReturnType<typeof useContextController>;
   readonly contextSubject: Parameters<typeof useContextController>[0]["subject"];
   readonly continueCards: ReturnType<typeof useContinueCards>;
-  readonly controller: ShellController;
+  readonly crossContextOffer: ShellController["crossContextOffer"];
   readonly createHostId: HostId;
   readonly createHostViewScope: CreateHostViewScope;
   readonly discoveryController: ReturnType<typeof useDiscoveryController>;
@@ -152,17 +190,19 @@ export interface ThreadPaneContainerProps {
     NonNullable<WorkspaceViewProps["codeHome"]>["loadOpenLinearIssues"]
   >;
   readonly machineChanges: ReturnType<typeof useMachineChangeFeed>;
+  readonly memoryRevision: number;
   readonly navigation: ShellNavigationModel;
   readonly pendingDraftBranch?: string;
   readonly pendingDraftPrompt?: string;
   readonly pendingIssue?: RepositoryIssueRow;
   readonly presentedLayout: NonNullable<ShellController["presentedLayout"]>;
-  readonly projectController: ReturnType<typeof useProjectController>;
+  readonly projectClient: ProjectController["client"];
   readonly providerController: ProviderController;
   readonly providerReady: boolean;
   readonly revealChatTurn?: { readonly threadId: ChatThreadId; readonly turnId: ChatTurnId };
   readonly serverUrl: string;
   readonly settings: NonNullable<ShellController["settings"]>;
+  readonly tabActivation: ShellController["tabActivation"];
   readonly threadStatsSummary: ReturnType<typeof useThreadTurnMetrics>;
   readonly welcomeBackdrop?: ReactNode;
   readonly windowCapability: string;
@@ -171,6 +211,7 @@ export interface ThreadPaneContainerProps {
   readonly workPromotionController: ReturnType<typeof useWorkPromotionController>;
   readonly workProviderGroups: ReturnType<typeof buildModelPickerGroups>;
   readonly workspace: NonNullable<ShellController["workspace"]>;
+  readonly workspaceVersion: ShellController["workspaceVersion"];
   readonly workspaceDrag: ReturnType<typeof useWorkspaceSurfaceDrag>;
   readonly zen: ReturnType<typeof useZenController>;
 }
@@ -194,8 +235,12 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     actions,
     activeCodeThreadUsageFallback,
     activeMode,
+    activeProject,
     agentProfiles,
+    allProjects,
+    availabilityByProject,
     browserToolThreadId,
+    canOpenCrossContextInNewWindow,
     chatController,
     chatReadCursorStore,
     codeBoardProjects,
@@ -205,10 +250,11 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     codeProviderGroups,
     codeThreadControllers,
     composerCompaction,
+    contentTabs,
     contextController,
     contextSubject,
     continueCards,
-    controller,
+    crossContextOffer,
     createHostId,
     createHostViewScope,
     discoveryController,
@@ -237,17 +283,19 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     loadAssignedLinearIssues,
     loadOpenLinearIssues,
     machineChanges,
+    memoryRevision,
     navigation,
     pendingDraftBranch,
     pendingDraftPrompt,
     pendingIssue,
     presentedLayout,
-    projectController,
+    projectClient,
     providerController,
     providerReady,
     revealChatTurn,
     serverUrl,
     settings,
+    tabActivation,
     threadStatsSummary,
     welcomeBackdrop,
     windowCapability,
@@ -257,11 +305,22 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     workProviderGroups,
     workspace,
     workspaceDrag,
+    workspaceVersion,
     zen,
   } = props;
   const {
+    activateContentTab,
+    activatePane,
+    clearFocus,
+    closeContentTab,
+    closePane,
     closeWorkspaceReaders,
+    commitSplitResize,
     createChat,
+    createProject,
+    dismissCrossContextOffer,
+    ensureDefaultProject,
+    focusPane,
     handleCreateChatProjectThread,
     handleCreateWorkThread,
     handleDraftCreateCodeThread,
@@ -270,17 +329,33 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     noteCanvasReferences,
     noteHandedOffDocument,
     onComputerUseSessionChange,
+    openCanvas,
     openCanvasInSidebar,
+    openChatThread,
+    openCodeSurface,
+    openCodeThread,
     openCreatedFollowUp,
+    openCrossContextInNewWindow,
     openDraftInProject,
+    openDraftThread,
     openInbox,
     openLinkInApp,
     openProjectCreate,
     openReviewForThread,
+    openSettings,
+    openSideChat,
     openSubagent,
+    openSurface,
+    openThreadBrowser,
+    openWorkThread,
+    previewSplitResize,
     refuseUnlessCreatableDestination,
+    relinkProject,
+    renameProject,
     resetNewTaskDraft,
+    revealBrowserActivity,
     selectProjectPullRequestIdentity,
+    setCodeNewThreadWorkspace,
     setCodePullRequestsOpen,
     setDraftError,
     setDraftExecutionPolicy,
@@ -294,10 +369,16 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setPendingDraftPrompt,
     setPendingIssue,
     setPendingUsageFilter,
+    setProjectArchived,
+    setProjectColor,
+    setProjectProviderPolicy,
+    setProjectWorkStatusFile,
     setThreadStatsVisible,
     setUsageOpen,
     setWorkComposerSelection,
     spendRevealChatTurn,
+    splitPane,
+    touchMemoryRevision,
     viewAllChatProjectThreads,
   } = actions;
   const {
@@ -349,7 +430,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
           <ComposerContextMeterProvider
             busy={contextController.status === "updating"}
             compaction={composerCompaction}
-            onOpenUsage={() => void controller.openSettings({ section: "usage" })}
+            onOpenUsage={() => void openSettings({ section: "usage" })}
             onRebuild={() => void contextController.rebuild()}
             onSetExcluded={(entryId, excluded) =>
               void contextController.setExcluded(entryId, excluded)
@@ -388,7 +469,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 // persisted workspace does not name. Re-opening the draft
                 // with the Project records it on the surface the server
                 // reads.
-                const binding = controller.openDraftThread(mode, projectId).then((accepted) => {
+                const binding = openDraftThread(mode, projectId).then((accepted) => {
                   if (accepted) {
                     if (mode === "code") {
                       setDraftPermissionPersistence(undefined);
@@ -407,13 +488,13 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               }}
               onDraftSelectUnfiled={(mode) => {
                 if (mode !== "chat") return;
-                const binding = controller
-                  .openDraftThread("chat", undefined, { unfiled: true })
-                  .then((accepted) => {
+                const binding = openDraftThread("chat", undefined, { unfiled: true }).then(
+                  (accepted) => {
                     if (accepted) {
                       setDraftProjectSelection(({ chat: _drop, ...rest }) => rest);
                     }
-                  });
+                  },
+                );
                 draftProjectBinding.current = binding;
                 void binding.catch(() => undefined);
               }}
@@ -436,7 +517,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 setDraftPendingMessage(undefined);
                 resetNewTaskDraft(request.mode);
                 setPendingDraftPrompt(request.prompt);
-                void controller.openDraftThread(request.mode, request.projectId);
+                void openDraftThread(request.mode, request.projectId);
               }}
               {...(pendingDraftPrompt === undefined
                 ? {}
@@ -469,25 +550,23 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 : { focusedPaneId: workspace.focusedPaneId })}
               drag={workspaceDrag}
               layout={presentedLayout}
-              memoryRevision={projectController.memoryRevision}
-              onMemoryChanged={projectController.touchMemoryRevision}
-              availabilityByProject={projectController.availabilityByProject}
+              memoryRevision={memoryRevision}
+              onMemoryChanged={touchMemoryRevision}
+              availabilityByProject={availabilityByProject}
               {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
               folderBrowseClient={folderBrowseClient}
               githubClient={githubClient}
               githubCloneClient={githubCloneClient}
               hostId={createHostId}
               hidden={hidden}
-              onActivatePane={(paneId) => void controller.activatePane(paneId)}
-              tabActivation={controller.tabActivation}
-              onClearFocus={() => void controller.clearFocus()}
-              contentTabs={controller.contentTabs}
-              onActivateContentTab={(paneId, tabId) =>
-                void controller.activateContentTab(paneId, tabId)
-              }
-              onCloseContentTab={(paneId, tabId) => void controller.closeContentTab(paneId, tabId)}
-              onClosePane={controller.closePane}
-              onCommitResize={controller.commitSplitResize}
+              onActivatePane={(paneId) => void activatePane(paneId)}
+              tabActivation={tabActivation}
+              onClearFocus={() => void clearFocus()}
+              contentTabs={contentTabs}
+              onActivateContentTab={(paneId, tabId) => void activateContentTab(paneId, tabId)}
+              onCloseContentTab={(paneId, tabId) => void closeContentTab(paneId, tabId)}
+              onClosePane={closePane}
+              onCommitResize={commitSplitResize}
               onCreateChat={createChat}
               onCreateChatProjectThread={handleCreateChatProjectThread}
               onOpenChatThread={(threadId, title, projectId) => {
@@ -498,10 +577,10 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 if (!chatController.navigation.some((item) => item.threadId === String(threadId))) {
                   void chatController.refreshNavigation();
                 }
-                void controller.openChatThread(threadId, title, projectId);
+                void openChatThread(threadId, title, projectId);
               }}
               onViewAllChatProjectThreads={viewAllChatProjectThreads}
-              onOpenSideChat={(sidecar) => void controller.openSideChat(sidecar)}
+              onOpenSideChat={(sidecar) => void openSideChat(sidecar)}
               {...(activeMode === "chat" && draftCreating ? { chatWelcomeCreating: true } : {})}
               {...(activeMode === "chat" && draftError !== undefined
                 ? { chatWelcomeError: draftError }
@@ -510,7 +589,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               {...(discoveryController.message === undefined
                 ? {}
                 : { providerBootstrapMessage: discoveryController.message })}
-              onOpenDraftThread={(mode) => void controller.openDraftThread(mode)}
+              onOpenDraftThread={(mode) => void openDraftThread(mode)}
               workCreateThreadAvailable={workCreateThreadAvailable}
               workMutationClient={workMutationClient}
               workThreadClient={workThreadClient}
@@ -525,7 +604,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               goalLoopClient={goalLoopClient}
               planClient={planClient}
               onOpenCodeFile={({ threadId, relativePath }) => {
-                void controller.openCodeSurface({
+                void openCodeSurface({
                   kind: "code-file",
                   threadId,
                   title: relativePath,
@@ -542,7 +621,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               computerUseClient={computerUseClient}
               onComputerUseSessionChange={onComputerUseSessionChange}
               isNarrow={isNarrow}
-              onFocus={(paneId) => void controller.focusPane(paneId)}
+              onFocus={(paneId) => void focusPane(paneId)}
               onCreateWorkThread={(projectId, draft, images, modelOptionValues) =>
                 handleCreateWorkThread(projectId, draft, images, undefined, modelOptionValues)
               }
@@ -550,22 +629,17 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 const thread = workNavigation.navigation.find(
                   (candidate) => candidate.threadId === String(threadId),
                 );
-                void controller.openWorkThread(
-                  threadId,
-                  thread?.title ?? "Task",
-                  undefined,
-                  projectId,
-                );
+                void openWorkThread(threadId, thread?.title ?? "Task", undefined, projectId);
               }}
-              onArchiveProject={(projectId) => void projectController.setArchived(projectId, true)}
+              onArchiveProject={(projectId) => void setProjectArchived(projectId, true)}
               onOpenCodeThread={(threadId, title, projectId) =>
-                void controller.openCodeThread(threadId, title, undefined, projectId)
+                void openCodeThread(threadId, title, undefined, projectId)
               }
               onOpenReview={(threadId) => openReviewForThread(String(threadId))}
               onSelectPullRequest={selectProjectPullRequestIdentity}
               onOpenPullRequests={() => setCodePullRequestsOpen(true)}
               onOpenCodeSurface={(kind, threadId, title, terminalId) =>
-                void controller.openCodeSurface(
+                void openCodeSurface(
                   kind === "code-terminal"
                     ? {
                         kind,
@@ -576,47 +650,45 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                     : { kind, threadId, title },
                 )
               }
-              onPreviewResize={controller.previewSplitResize}
-              onRelinkProject={projectController.relink}
-              onRenameProject={projectController.rename}
-              onProjectColorChange={projectController.setColor}
-              onProviderPolicyChange={projectController.setProviderPolicy}
+              onPreviewResize={previewSplitResize}
+              onRelinkProject={relinkProject}
+              onRenameProject={renameProject}
+              onProjectColorChange={setProjectColor}
+              onProviderPolicyChange={setProjectProviderPolicy}
               onWorkStatusFileChange={(projectId, enabled) =>
-                projectController.setWorkStatusFile(projectId, enabled ? "enabled" : "disabled")
+                setProjectWorkStatusFile(projectId, enabled ? "enabled" : "disabled")
               }
               onSplitPane={(paneId, orientation, placement) =>
-                void controller.splitPane(paneId, orientation, placement)
+                void splitPane(paneId, orientation, placement)
               }
-              projects={projectController.allProjects}
+              projects={allProjects}
               providerController={providerController}
               workspace={workspace}
-              {...(controller.workspaceVersion === undefined
-                ? {}
-                : { workspaceVersion: controller.workspaceVersion })}
+              {...(workspaceVersion === undefined ? {} : { workspaceVersion: workspaceVersion })}
               mode={workspace.activeMode}
-              {...(controller.crossContextOffer === undefined
+              {...(crossContextOffer === undefined
                 ? {}
                 : {
                     crossContextOffer: {
-                      message: controller.crossContextOffer.message,
+                      message: crossContextOffer.message,
                       canOpenInNewWindow:
-                        controller.crossContextOffer.newWindowProjectId !== undefined &&
-                        controller.canOpenCrossContextInNewWindow,
+                        crossContextOffer.newWindowProjectId !== undefined &&
+                        canOpenCrossContextInNewWindow,
                     },
                   })}
               onOpenSurface={(surface, paneId, browserContextId) =>
-                controller.openSurface(surface, paneId, browserContextId)
+                openSurface(surface, paneId, browserContextId)
               }
-              onRevealBrowserActivity={(input) => controller.revealBrowserActivity(input)}
-              onOpenThreadBrowser={(input) => controller.openThreadBrowser(input)}
+              onRevealBrowserActivity={(input) => revealBrowserActivity(input)}
+              onOpenThreadBrowser={(input) => openThreadBrowser(input)}
               {...(browserToolThreadId === undefined ? {} : { browserToolThreadId })}
               {...(browserAutomationClient === undefined
                 ? {}
                 : { onOpenLink: (request) => void openLinkInApp(request) })}
               environmentDockOpen={dockOpen && dockSurface === "environment"}
-              onDismissCrossContextOffer={controller.dismissCrossContextOffer}
-              onOpenCrossContextInNewWindow={() => void controller.openCrossContextInNewWindow()}
-              projectClient={projectController.client}
+              onDismissCrossContextOffer={dismissCrossContextOffer}
+              onOpenCrossContextInNewWindow={() => void openCrossContextInNewWindow()}
+              projectClient={projectClient}
               projectServerUrl={serverUrl}
               projectWindowCapability={windowCapability}
               previewClient={previewClient}
@@ -627,7 +699,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               onOpenCanvasReference={(card) => {
                 const projectId = card.scope.workspace.projectId;
                 if (projectId === null) return;
-                void controller.openCanvas({
+                void openCanvas({
                   mode: card.scope.mode,
                   title: card.title,
                   canvasId: card.canvasId,
@@ -641,7 +713,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 }
               }}
               onOpenCanvas={(entry) =>
-                void controller.openCanvas({
+                void openCanvas({
                   mode: entry.mode,
                   title: entry.title,
                   canvasId: entry.canvasId,
@@ -657,9 +729,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               waitingThreadIds={needsPersonThreadIds}
               showProviderIcons={settings.showThreadProviderIcons}
               environmentNames={environmentNames}
-              {...(projectController.activeProject === undefined
-                ? {}
-                : { draftProjectName: projectController.activeProject.name })}
+              {...(activeProject === undefined ? {} : { draftProjectName: activeProject.name })}
               {...(pendingDraftBranch === undefined ? {} : { draftBranchName: pendingDraftBranch })}
               {...(effectiveDraftProviderInstanceId === undefined
                 ? {}
@@ -713,7 +783,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                   const thread = codeController.bootstrap?.threads.find(
                     (candidate) => String(candidate.id) === String(target.threadId),
                   );
-                  void controller.openCodeThread(
+                  void openCodeThread(
                     target.threadId,
                     thread?.title ?? "Code thread",
                     undefined,
@@ -725,7 +795,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               }}
               linearPluginEnabled={FIRST_PARTY_PLUGINS_EFFECTIVE.get("linear-integration") === true}
               onDraftCreateCodeThread={handleDraftCreateCodeThread}
-              onChangeCodeNewThreadWorkspace={projectController.setCodeNewThreadWorkspace}
+              onChangeCodeNewThreadWorkspace={setCodeNewThreadWorkspace}
               draftCodeExecute={codeController.execute}
               onCreateProject={(mode, name, receiptId, initializeGit) => {
                 const destinationHostId = refuseUnlessCreatableDestination({
@@ -736,13 +806,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 if (destinationHostId === undefined) {
                   return Promise.resolve(undefined);
                 }
-                return projectController.create(
-                  mode,
-                  name,
-                  receiptId,
-                  destinationHostId,
-                  initializeGit,
-                );
+                return createProject(mode, name, receiptId, destinationHostId, initializeGit);
               }}
               {...(settings.defaultFolder === undefined
                 ? {}
@@ -759,7 +823,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 if (destinationHostId === undefined) {
                   return Promise.resolve(undefined);
                 }
-                return projectController.ensureDefault(mode, destinationHostId);
+                return ensureDefaultProject(mode, destinationHostId);
               }}
               {...(draftCreating ? { onDraftCreating: true } : {})}
               {...(draftError === undefined ? {} : { onDraftError: draftError })}
@@ -768,13 +832,13 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 : { onDraftPendingMessage: draftPendingMessage })}
               onAttachFolder={() => openProjectCreate()}
               onOpenCodeSettings={() =>
-                void controller.openSettings({
+                void openSettings({
                   section: "code",
                   setting: "code-require-git",
                 })
               }
-              onOpenProviderSettings={() => void controller.openSettings({ section: "providers" })}
-              onOpenSettings={() => void controller.openSettings()}
+              onOpenProviderSettings={() => void openSettings({ section: "providers" })}
+              onOpenSettings={() => void openSettings()}
             />
           </ComposerContextMeterProvider>
         </OutputLimitContinueProvider>

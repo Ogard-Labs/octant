@@ -2,6 +2,7 @@ import { ContextClientFailure, type ContextClient } from "@octant/client-runtime
 import type { ContextEntryId, ContextSubjectRef } from "@octant/contracts/context";
 import type { ContextCommand, ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRetainedRecord } from "../polling/useRetainedRecord";
 
 export type ContextControllerStatus =
   | "idle"
@@ -205,23 +206,35 @@ export function useContextController(options: UseContextControllerOptions): Cont
     [execute, subject],
   );
 
-  return {
+  const retry = useCallback(() => reload(snapshotRef.current?.sequence), [reload]);
+  const rebuild = useCallback(async () => {
+    const current = snapshotRef.current;
+    if (current === undefined || subject === undefined) return;
+    await execute({
+      kind: "rebuild-context-plan",
+      subject,
+      expectedManifestId: current.next.manifest.id,
+    });
+  }, [execute, subject]);
+  const setPinned = useCallback(
+    (entryId: ContextEntryId, pinned: boolean) => updateOverrides(entryId, "pin", pinned),
+    [updateOverrides],
+  );
+  const setExcluded = useCallback(
+    (entryId: ContextEntryId, excluded: boolean) => updateOverrides(entryId, "exclude", excluded),
+    [updateOverrides],
+  );
+  // One identity while nothing in it moved, so the composer meter scope that
+  // takes the controller whole can bail out of a render that changed none of it.
+  return useRetainedRecord({
     status,
     ...(snapshot === undefined ? {} : { snapshot }),
     ...(errorMessage === undefined ? {} : { errorMessage }),
-    retry: () => reload(snapshotRef.current?.sequence),
-    rebuild: async () => {
-      const current = snapshotRef.current;
-      if (current === undefined || subject === undefined) return;
-      await execute({
-        kind: "rebuild-context-plan",
-        subject,
-        expectedManifestId: current.next.manifest.id,
-      });
-    },
-    setPinned: (entryId, pinned) => updateOverrides(entryId, "pin", pinned),
-    setExcluded: (entryId, excluded) => updateOverrides(entryId, "exclude", excluded),
-  };
+    retry,
+    rebuild,
+    setPinned,
+    setExcluded,
+  });
 }
 
 const MIN_CONTEXT_RETRY_MS = 100;
