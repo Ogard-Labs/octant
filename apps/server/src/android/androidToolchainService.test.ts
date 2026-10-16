@@ -915,7 +915,7 @@ describe("AndroidToolchainService", () => {
     });
     const spawnDetached = vi.fn(async () => {
       attached = true;
-      return { kind: "spawned" as const };
+      return { kind: "spawned" as const, stop: async () => "stopped" as const };
     });
     const service = new AndroidToolchainService({
       execute,
@@ -936,10 +936,60 @@ describe("AndroidToolchainService", () => {
     const evidence = await service.execute(action("boot", { timeoutMs: 5_000 }), context);
     expect(spawnDetached).toHaveBeenCalledWith(
       expect.objectContaining({
-        argv: expect.arrayContaining(["-avd", "Pixel_8_API_34", "-no-window", "-no-audio"]),
+        argv: expect.arrayContaining([
+          "-avd",
+          "Pixel_8_API_34",
+          "-no-window",
+          "-no-audio",
+          "-no-snapshot",
+        ]),
       }),
     );
     expect(evidence.outcome).toBe("succeeded");
+  });
+
+  describe("an emulator that never comes online", () => {
+    async function bootNeverReady(stop: () => Promise<"stopped" | "still-running">) {
+      const execute = vi.fn(async (input: { readonly argv: ReadonlyArray<string> }) => {
+        const argv = input.argv.join(" ");
+        if (argv.includes("-list-avds")) return processResult("Pixel_8_API_34\n");
+        // adb sees the emulator, but it stays offline and never reports a device.
+        if (argv.includes("devices")) {
+          return processResult("List of devices attached\nemulator-5554          offline\n");
+        }
+        return processResult("");
+      });
+      const spawnDetached = vi.fn(async () => ({ kind: "spawned" as const, stop }));
+      const service = new AndroidToolchainService({
+        execute,
+        spawnDetached,
+        access: async () => undefined,
+        environment: () => ({ ANDROID_HOME: "/sdk" }),
+        writeArtifact: async () => undefined,
+        readArtifact: async () => undefined,
+        realpath: async (path: string) => path,
+        now: () => "2026-09-20T20:00:00.000Z",
+        newId: () => "30000000-0000-4000-8000-000000000012",
+      });
+      await service.discover(discoveryRequest, context);
+      const evidence = await service.execute(action("boot", { timeoutMs: 1_200 }), context);
+      return { evidence, state: service.snapshot(context).emulators[0]?.state };
+    }
+
+    it("stops the emulator it started and reports a complete cleanup", async () => {
+      const stop = vi.fn(async () => "stopped" as const);
+      const { evidence, state } = await bootNeverReady(stop);
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(evidence.outcome).toBe("timed-out");
+      expect(evidence.cleanup).toBe("complete");
+      expect(state).toBe("shutdown");
+    });
+
+    it("does not claim a complete cleanup when the emulator would not stop", async () => {
+      const { evidence } = await bootNeverReady(async () => "still-running");
+      expect(evidence.outcome).toBe("interrupted");
+      expect(evidence.cleanup).toBe("uncertain");
+    });
   });
 
   it("stamps a pane-open request for the bound thread", async () => {
