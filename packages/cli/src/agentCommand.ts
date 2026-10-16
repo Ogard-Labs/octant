@@ -138,11 +138,16 @@ export function resolveAgentCliCommand(
 
 /** One reader over stdin shared by the prompt loop and the questions a turn asks. */
 interface LineSource {
-  readonly next: () => Promise<string | undefined>;
+  /**
+   * The next line, or undefined once stdin has ended. With a signal, aborting
+   * it also resolves undefined and takes the wait back, so the line typed
+   * afterwards is the next caller's and not swallowed by an abandoned prompt.
+   */
+  readonly next: (signal?: AbortSignal) => Promise<string | undefined>;
   readonly close: () => void;
 }
 
-function lineSource(stdin: NodeJS.ReadableStream): LineSource {
+export function lineSource(stdin: NodeJS.ReadableStream): LineSource {
   const lines = createInterface({ input: stdin, terminal: false });
   const queue: string[] = [];
   const waiters: Array<(line: string | undefined) => void> = [];
@@ -157,12 +162,24 @@ function lineSource(stdin: NodeJS.ReadableStream): LineSource {
     for (const waiter of waiters.splice(0)) waiter(undefined);
   });
   return {
-    next: () =>
+    next: (signal) =>
       new Promise((resolve) => {
         const queued = queue.shift();
         if (queued !== undefined) resolve(queued);
-        else if (closed) resolve(undefined);
-        else waiters.push(resolve);
+        else if (closed || signal?.aborted === true) resolve(undefined);
+        else {
+          const waiter = (line: string | undefined) => {
+            signal?.removeEventListener("abort", withdraw);
+            resolve(line);
+          };
+          const withdraw = () => {
+            const at = waiters.indexOf(waiter);
+            if (at >= 0) waiters.splice(at, 1);
+            resolve(undefined);
+          };
+          signal?.addEventListener("abort", withdraw, { once: true });
+          waiters.push(waiter);
+        }
       }),
     close: () => lines.close(),
   };
@@ -556,7 +573,7 @@ async function takeFollowUp(
  * `y none` none; a list naming a number it does not have refuses the call.
  */
 export async function decidePendingApproval(
-  input: Pick<RunAgentCliCommandInput, "session" | "stdout"> & {
+  input: Pick<RunAgentCliCommandInput, "session" | "stdout" | "pollIntervalMs"> & {
     readonly command: { readonly json: boolean };
   },
   threadId: string,
@@ -582,7 +599,26 @@ export async function decidePendingApproval(
       `\n! ${approval.toolName} wants to ${approval.summary} (${approval.approvalClass})\n${outside}  allow? [y]es / ${mayRemember ? "[a]lways this session / " : ""}[n]o > `,
     );
   }
-  const line = (await lines.next())?.trim().toLowerCase() ?? "";
+  // The same approval can be answered on the web or the phone while this
+  // prompt waits. Once it has settled there is nothing left to decide here, and
+  // an open prompt would swallow the next line typed.
+  const answeredElsewhere = new AbortController();
+  const stopWatching = watchApprovalSettled(input, threadId, approval, () =>
+    answeredElsewhere.abort(),
+  );
+  const typed = await lines.next(answeredElsewhere.signal);
+  stopWatching();
+  if (typed === undefined && answeredElsewhere.signal.aborted) {
+    if (input.command.json) {
+      input.stdout.write(
+        `${JSON.stringify({ kind: "approval-settled", approvalId: String(approval.id) })}\n`,
+      );
+    } else {
+      input.stdout.write("\n(answered elsewhere)\n");
+    }
+    return;
+  }
+  const line = typed?.trim().toLowerCase() ?? "";
   const [word = "", ...rest] = line.split(/\s+/);
   const named = rest.join(" ");
   const approves = word === "y" || word === "yes" || word === "approve";
@@ -610,6 +646,42 @@ export async function decidePendingApproval(
       ticked === undefined ? [] : chosenCommandHosts(approval, ticked),
     ),
   });
+}
+
+/**
+ * Calls `onSettled` once the session no longer lists the approval as pending,
+ * which is how an answer given on another surface reaches this terminal. A
+ * session that cannot be read keeps the prompt open. Returns the way to stop.
+ */
+function watchApprovalSettled(
+  input: Pick<RunAgentCliCommandInput, "session" | "pollIntervalMs">,
+  threadId: string,
+  approval: NonNullable<NativeHarnessSessionView["approvals"]>[number],
+  onSettled: () => void,
+): () => void {
+  const interval = input.pollIntervalMs ?? 1_000;
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const check = async () => {
+    const view = await readSession(input, threadId, true).catch(() => "unavailable" as const);
+    if (stopped) return;
+    if (
+      view !== null &&
+      view !== "unavailable" &&
+      !(view.approvals ?? []).some(
+        (entry) => String(entry.id) === String(approval.id) && entry.status === "pending",
+      )
+    ) {
+      onSettled();
+      return;
+    }
+    timer = setTimeout(() => void check(), interval);
+  };
+  timer = setTimeout(() => void check(), interval);
+  return () => {
+    stopped = true;
+    if (timer !== undefined) clearTimeout(timer);
+  };
 }
 
 /**
@@ -645,7 +717,8 @@ async function answerPendingQuestion(
 }
 
 async function readSession(
-  input: RunAgentCliCommandInput,
+  input: Pick<RunAgentCliCommandInput, "session"> &
+    Partial<Pick<RunAgentCliCommandInput, "stderr">>,
   threadId: string,
   quiet = false,
 ): Promise<NativeHarnessSessionView | null | "unavailable"> {
@@ -655,7 +728,7 @@ async function readSession(
   });
   if (response.status !== 200) {
     if (!quiet) {
-      input.stderr.write(`${failureMessage(response, "The harness session is unavailable.")}\n`);
+      input.stderr?.write(`${failureMessage(response, "The harness session is unavailable.")}\n`);
     }
     return "unavailable";
   }

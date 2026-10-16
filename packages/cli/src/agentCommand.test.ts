@@ -1,8 +1,13 @@
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import type { LocalControlRequest, OpenedLocalControlSession } from "./localControl";
 import { NativeHarnessApproval, decodeHostAnswer } from "@octant/contracts";
-import { decidePendingApproval, resolveAgentCliCommand, runAgentCliCommand } from "./agentCommand";
+import {
+  decidePendingApproval,
+  lineSource,
+  resolveAgentCliCommand,
+  runAgentCliCommand,
+} from "./agentCommand";
 
 function session(
   answer: (request: LocalControlRequest) => { status: number; body: unknown },
@@ -496,6 +501,71 @@ describe("octant agent approval prompt", () => {
     );
     return { prompt: stdout.text(), sent };
   }
+
+  it("closes the prompt with a note when the web answers first, and keeps the next typed line", async () => {
+    const stdout = sink();
+    const sent: LocalControlRequest[] = [];
+    const stdin = new PassThrough();
+    const lines = lineSource(stdin);
+    let settled = false;
+    const view = () => ({
+      session: {
+        id: "00000000-0000-4000-8000-000000000010",
+        threadId,
+        mode: "code",
+        leadSlotId: "default",
+        lead: {
+          hostId: "00000000-0000-4000-8000-0000000000aa",
+          providerInstanceId: "00000000-0000-4000-8000-000000000001",
+          modelId: "frontier-large",
+        },
+        status: "idle",
+        turnsRun: 1,
+        cutovers: 0,
+        startedAt: "2026-10-13T12:00:00.000Z",
+        updatedAt: "2026-10-13T12:00:00.000Z",
+        version: 2,
+      },
+      routes: [],
+      turns: [],
+      reductions: [],
+      interventions: [],
+      activatedFollowUpIds: [],
+      questions: [],
+      approvals: [
+        settled
+          ? { ...leadRequest, status: "approved", settledAt: "2026-10-13T12:07:00.000Z" }
+          : leadRequest,
+      ],
+    });
+    try {
+      const deciding = decidePendingApproval(
+        {
+          command: { json: false },
+          stdout,
+          pollIntervalMs: 5,
+          session: session((request) => {
+            sent.push(request);
+            return { status: 200, body: { view: view() } };
+          }),
+        },
+        threadId,
+        decodeHostAnswer(NativeHarnessApproval)(leadRequest),
+        lines,
+      );
+      settled = true;
+      await deciding;
+
+      expect(stdout.text()).toContain("allow? [y]es");
+      expect(stdout.text()).toContain("(answered elsewhere)");
+      // The decision stays with the web: nothing is posted from here.
+      expect(sent.filter((request) => request.method === "POST")).toEqual([]);
+      stdin.write("next prompt\n");
+      await expect(lines.next()).resolves.toBe("next prompt");
+    } finally {
+      lines.close();
+    }
+  });
 
   it("offers a lead's request an answer for the whole session and sends it", async () => {
     const { prompt, sent } = await answer(leadRequest, "a");

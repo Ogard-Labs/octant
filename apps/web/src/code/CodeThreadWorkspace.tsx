@@ -646,6 +646,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     messageQueue.snapshot?.paused === true ||
     messageQueue.snapshot?.holdReason !== undefined;
   const providerTurnOperationId = props.controller.latestProviderTurnOperationId;
+  // A waiting turn tells its error in its own status row. A terminal turn is
+  // already in the transcript with its reason, so a second notice above it said
+  // the same thing louder; the callout stays for a history the host cannot
+  // read, where the retry offer lives, and for a send the host refused before
+  // any turn existed to carry the reason.
+  const turnErrorCallout =
+    props.controller.turnStatus !== "waiting" &&
+    props.controller.turnError !== undefined &&
+    !(
+      (props.controller.turnStatus === "failed" || props.controller.turnStatus === "interrupted") &&
+      props.controller.turnErrorInTranscript &&
+      props.controller.conversationHistory !== "unavailable"
+    );
   // The resume opt-in rides the ordinary serialized command path; the host
   // re-checks the whole premise before it schedules, so a stale offer here is
   // refused honestly rather than firing on an older turn.
@@ -1177,7 +1190,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           right-click menu. Live subagents, the last thing it held, now sit in
           the composer's tray. */}
 
-      {props.controller.errorMessage === undefined ? null : (
+      {props.controller.errorMessage === undefined ||
+      (turnErrorCallout && props.controller.errorMessage === props.controller.turnError) ? null : (
+        // A refused send sets both messages from one failure; the turn callout
+        // below already says it, so this one does not repeat the sentence.
         <OctantAlert className="thread-column code-thread-workspace__callout" tone="warning">
           <p>{props.controller.errorMessage}</p>
         </OctantAlert>
@@ -1213,16 +1229,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             />
           </div>
         )
-      ) : props.controller.turnError === undefined ||
-        ((props.controller.turnStatus === "failed" ||
-          props.controller.turnStatus === "interrupted") &&
-          props.controller.turnErrorInTranscript &&
-          props.controller.conversationHistory !== "unavailable") ? null : (
-        // A terminal turn is already in the transcript with its reason; a
-        // second notice above it said the same thing louder. The callout stays
-        // for a history the host cannot read, where the retry offer lives, and
-        // for a send the host refused before any turn existed to carry the
-        // reason.
+      ) : !turnErrorCallout ? null : (
         <OctantAlert
           action={
             props.controller.conversationHistory === "unavailable" ? (
