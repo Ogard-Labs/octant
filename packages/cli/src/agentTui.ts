@@ -622,7 +622,7 @@ class AgentScreen {
       for (const entry of entries) this.#transcript.add(this.#entryBox(entry, spinner));
     }
 
-    const tasks = tasksFrom(this.#thread);
+    const tasks = tasksFrom(this.#thread, session);
     if (tasks.total > 0) {
       this.#tasks.title = ` Tasks ${tasks.done}/${tasks.total} `;
       this.#tasksText.content = this.#tasksLines(tasks);

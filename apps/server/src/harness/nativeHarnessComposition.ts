@@ -29,7 +29,6 @@ import type {
   RecordExternalContentIngestionInput,
 } from "../context/externalContentIngestionStore";
 import type { GoalService } from "../goal/goalService";
-import type { PlanService } from "../plan/planService";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
@@ -54,7 +53,8 @@ export interface NativeHarnessCompositionOptions {
   readonly authority: NativeHarnessAuthority;
   /** Whether a provider instance is one the harness drives; others get no harness tools. */
   readonly isHarnessProvider: (providerInstanceId: ProviderInstanceId) => boolean;
-  readonly plans?: Pick<PlanService, "read" | "execute">;
+  /** Where the lead's task list is kept; absent, the lead has no `todo-write`. */
+  readonly tasks?: Pick<NativeHarnessSessionStore, "replaceTasks">;
   /** The thread goal a lead reads and checks; absent on a host without goals. */
   readonly goals?: Pick<GoalService, "read" | "execute">;
   /** Code only: the sandboxed shell. */
@@ -222,11 +222,9 @@ export function createNativeHarnessComposition(
     };
   };
   const shared = (threadId: string): NativeHarnessToolPorts => ({
-    ...(options.plans === undefined
+    ...(options.tasks === undefined
       ? {}
-      : {
-          todo: createNativeHarnessTodoPort({ plans: options.plans, threadId, uuid: options.uuid }),
-        }),
+      : { todo: createNativeHarnessTodoPort({ sessions: options.tasks, threadId }) }),
     ...(options.goals === undefined
       ? {}
       : {

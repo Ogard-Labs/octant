@@ -22,6 +22,11 @@ the set to what it may reach:
 | Work | inside the bound folder | none      | yes                 | yes        |
 | Code | inside the checkout     | sandboxed | yes                 | yes        |
 
+`todo-write` keeps the lead's own task list: pending, in-progress and done
+items that show on the thread's agent card, the phone and the terminal as the
+lead works. It is separate from a plan, so it needs no approval and never
+asks you to review one.
+
 Web means `web-fetch`, plus `web-search` once a SearXNG search endpoint is
 set. A Chat thread gets neither, and cannot open a page, until you turn
 research on for it.

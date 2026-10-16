@@ -6787,7 +6787,7 @@ export function startOctantServer(
         const instance = persistence.readProviderInstance(providerInstanceId);
         return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
       },
-      plans: planService,
+      tasks: nativeHarnessSessionsLive,
       shell: createNativeHarnessShell({
         process: harnessProcessPort,
         scriptDirectory: harnessScriptDirectory,

@@ -3786,6 +3786,16 @@ native harness in `apps/server/src/harness`:
   task list, steering notes, questions, or remembered approvals, because each
   of those is keyed to the thread that owns it, and it never inherits running
   state or access.
+- **Task list.** `todo-write` replaces the lead's own task list, which is not
+  a thread plan. It is journaled on the harness session as a
+  `native-harness-tasks-replaced` frame (a list rewritten unchanged adds
+  none), rebuilt on replay, and carried in the session view as `tasks`, so
+  the web card, the phone panel, and the terminal show each item as pending,
+  in progress, or done in every mode. It never proposes, revises, or advances
+  a thread plan and raises no plan review, because the plan's approval policy
+  guards what a person has agreed to run and a lead's working notes would
+  otherwise be refused at their first step. The person-approved plan and its
+  policy are unchanged, and the two lists stay separate.
 - **Tools.** `createNativeHarnessTools` composes the nine working tools and
   the harness reads as one `AppManagedToolSet`, trimmed by mode through the
   closed tool catalog (`harness-*` capability ids). `web-fetch` and

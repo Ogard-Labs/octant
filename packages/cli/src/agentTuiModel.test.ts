@@ -241,6 +241,29 @@ describe("agent terminal UI model", () => {
   });
 });
 
+describe("tasks panel", () => {
+  it("lists the lead's own task list after the thread's work items", () => {
+    expect(
+      tasksFrom(
+        { workItems: [{ title: "Person's item", status: "pending", position: 0 }] } as never,
+        {
+          tasks: [
+            { title: "Read the spec", status: "done" },
+            { title: "Write the fix", status: "in-progress" },
+          ],
+        },
+      ),
+    ).toEqual({
+      done: 1,
+      total: 3,
+      items: [
+        { title: "Person's item", status: "pending" },
+        { title: "Write the fix", status: "in-progress" },
+      ],
+    });
+  });
+});
+
 describe("approval panel outside content", () => {
   const source = (sourceLabel: string) => ({
     sourceLabel,

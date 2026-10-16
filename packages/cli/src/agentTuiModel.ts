@@ -138,15 +138,27 @@ export function formatMs(ms: number): string {
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
-/** The thread's work items as the tasks panel shows them: current first, done counted. */
-export function tasksFrom(thread: AgentThreadSnapshot | undefined): {
+/**
+ * The thread's work items, then the lead's own task list, as the tasks panel
+ * shows them: current first, done counted.
+ */
+export function tasksFrom(
+  thread: AgentThreadSnapshot | undefined,
+  session?: Pick<NativeHarnessSessionView, "tasks"> | null,
+): {
   readonly done: number;
   readonly total: number;
   readonly items: ReadonlyArray<TuiTask>;
 } {
-  const items = [...(thread?.workItems ?? [])]
-    .sort((a, b) => a.position - b.position)
-    .map((item) => ({ title: item.title, status: item.status }));
+  const items: ReadonlyArray<TuiTask> = [
+    ...[...(thread?.workItems ?? [])]
+      .sort((a, b) => a.position - b.position)
+      .map((item) => ({ title: item.title, status: item.status })),
+    ...(session?.tasks ?? []).map((task) => ({
+      title: task.title,
+      status: task.status === "done" ? ("completed" as const) : task.status,
+    })),
+  ];
   const done = items.filter((item) => item.status === "completed").length;
   const open = items.filter((item) => item.status !== "completed" && item.status !== "cancelled");
   return { done, total: items.length, items: open };
