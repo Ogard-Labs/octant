@@ -167,8 +167,8 @@
 
 .extensions-settings__installed-filter input {
   width: 100%;
-  padding-right: 34px;
-  padding-left: 30px;
+  padding-right: 36px;
+  padding-left: var(--oct-space-8);
 }
 
 .extensions-settings__show-all {

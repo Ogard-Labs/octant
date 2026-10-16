@@ -35,7 +35,7 @@
 
 .remote-pairing__form {
   display: grid;
-  gap: 10px;
+  gap: var(--oct-space-2);
 }
 
 .remote-pairing__label {
@@ -71,7 +71,7 @@
 .remote-pairing__fact {
   display: grid;
   grid-template-columns: 120px 1fr;
-  gap: 10px;
+  gap: var(--oct-space-2);
   align-items: center;
   min-width: 0;
 }
@@ -96,7 +96,7 @@
 
 .remote-pairing__comparison {
   display: grid;
-  gap: 6px;
+  gap: var(--oct-space-1);
   padding: var(--oct-space-5);
   text-align: center;
   background: var(--oct-success-soft);

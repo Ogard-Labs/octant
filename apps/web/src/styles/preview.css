@@ -78,7 +78,7 @@
 .preview-nav {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
   margin-left: auto;
 }
 
@@ -128,7 +128,7 @@
 }
 
 .preview-table caption {
-  padding: 6px var(--oct-space-3);
+  padding: var(--oct-space-2) var(--oct-space-3);
   caption-side: top;
   text-align: left;
   color: var(--oct-muted);
@@ -246,7 +246,7 @@ html[data-octant-increased-contrast="true"] .preview-slides__slide {
 @media (max-width: 600px) {
   .preview-viewer__chrome {
     gap: var(--oct-space-2);
-    padding: 6px var(--oct-space-2);
+    padding: var(--oct-space-2) var(--oct-space-2);
   }
   .preview-viewer__title {
     max-width: 20ch;

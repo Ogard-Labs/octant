@@ -509,7 +509,7 @@
   min-height: 24px;
   align-items: center;
   gap: 4px;
-  padding: 2px 6px;
+  padding: 2px var(--oct-space-2);
   font-size: var(--oct-text-xs);
 }
 
@@ -537,7 +537,7 @@
 
 .context-inspector__header {
   min-height: 48px;
-  padding: 6px 10px 6px 12px;
+  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-2) 12px;
   border-bottom: 1px solid var(--octant-border);
 }
 
@@ -594,8 +594,8 @@
 }
 
 .context-inspector__section + .context-inspector__section {
-  padding-top: 14px;
-  margin-top: 14px;
+  padding-top: var(--oct-space-4);
+  margin-top: var(--oct-space-3);
   border-top: 1px solid var(--octant-border);
 }
 
@@ -604,7 +604,7 @@
 }
 
 .context-inspector__section h4 {
-  margin-top: 10px;
+  margin-top: var(--oct-space-2);
   font-size: var(--oct-text-xs);
 }
 
@@ -652,8 +652,8 @@
 
 .context-latest-sent__entries {
   display: grid;
-  gap: 6px;
-  margin-top: 10px;
+  gap: var(--oct-space-1);
+  margin-top: var(--oct-space-2);
 }
 
 .context-latest-sent__entries article {

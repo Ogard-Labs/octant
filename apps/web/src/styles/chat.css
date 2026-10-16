@@ -43,7 +43,7 @@
   display: grid;
   width: min(100% - 40px, 420px);
   justify-items: start;
-  gap: 10px;
+  gap: var(--oct-space-2);
   margin: auto;
 }
 
@@ -100,8 +100,8 @@
 
 .chat-workspace__error {
   width: min(100% - 40px, 720px);
-  margin: 10px auto 0;
-  padding: 8px 10px;
+  margin: var(--oct-space-2) auto 0;
+  padding: 8px var(--oct-space-3);
   color: var(--oct-danger-fg);
   background: color-mix(in srgb, var(--oct-danger-fg) 10%, var(--oct-bg));
   border: 1px solid color-mix(in srgb, var(--oct-danger-fg) 32%, var(--oct-border));
@@ -407,14 +407,14 @@
   height: 22px;
   min-height: 22px;
   margin-inline-start: auto;
-  padding-inline: 6px;
+  padding-inline: var(--oct-space-2);
   gap: 4px;
   font-size: var(--oct-text-xs);
 }
 
 .code-block__pre {
   margin: 0;
-  padding: 10px 12px;
+  padding: var(--oct-space-3) 12px;
   overflow: auto;
   color: var(--oct-fg);
   font-family: var(--oct-font-mono);
@@ -513,7 +513,7 @@
   min-height: 36px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--oct-space-2);
 }
 
 .thread-work-shelf__toggle,
@@ -521,8 +521,8 @@
   display: inline-flex;
   min-height: 28px;
   align-items: center;
-  gap: 6px;
-  padding: 0 6px;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-2);
   cursor: pointer;
   font-size: var(--oct-text-xs);
   text-align: left;
@@ -544,7 +544,7 @@
 
 .thread-work-shelf__follow-up {
   max-width: min(52%, 360px);
-  padding: 3px 6px;
+  padding: var(--oct-space-1) var(--oct-space-2);
   margin: 0;
   overflow: hidden;
   color: var(--oct-warn-fg);
@@ -555,7 +555,7 @@
 
 .thread-work-shelf__content {
   max-height: min(34vh, 280px);
-  padding: 0 0 10px;
+  padding: 0 0 var(--oct-space-3);
   overflow: auto;
 }
 
@@ -564,7 +564,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 6px;
+  padding: 8px var(--oct-space-2);
   border-top: 1px solid var(--oct-border);
 }
 
@@ -658,7 +658,7 @@
 .thread-work-shelf__history ol {
   display: grid;
   gap: 4px;
-  padding: 6px 6px 2px;
+  padding: var(--oct-space-2) var(--oct-space-2) 2px;
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
@@ -870,7 +870,7 @@
 .thread-mention__option > button {
   width: 100%;
   justify-content: flex-start;
-  gap: 6px;
+  gap: var(--oct-space-1);
 }
 
 .thread-mention__meta {
@@ -946,7 +946,7 @@
 
   .thread-work-shelf__follow-up {
     max-width: 100%;
-    padding-left: 6px;
+    padding-left: var(--oct-space-2);
   }
 
   .thread-work-shelf__current-items > li {
@@ -1005,7 +1005,7 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 .side-chat__title {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
   margin: 0;
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
@@ -1040,10 +1040,10 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 .tracker-reference-chip {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--oct-space-1);
   max-width: 100%;
   margin: 0 1px;
-  padding: 0 6px;
+  padding: 0 var(--oct-space-2);
   color: var(--oct-fg);
   background: color-mix(in oklab, var(--oct-selection) 55%, transparent);
   border: 1px solid var(--oct-border);
@@ -1168,7 +1168,7 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
 }
 .chat-rich-text th,
 .chat-rich-text td {
-  padding: 6px 10px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   border: 1px solid var(--oct-border);
   text-align: start;
   vertical-align: top;
@@ -1191,7 +1191,7 @@ html[data-octant-increased-contrast="true"] .thread-work-shelf form button {
   margin-left: -20px;
 }
 .chat-rich-text li > input[type="checkbox"] {
-  margin-inline-end: 6px;
+  margin-inline-end: var(--oct-space-1);
 }
 
 /* An image is named rather than loaded, so it reads as a placeholder instead

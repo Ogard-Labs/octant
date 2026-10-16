@@ -315,7 +315,7 @@ html[data-octant-native-host="true"]
   flex: 0 0 auto;
   height: 100%;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
   padding-right: 4px;
   pointer-events: auto;
 }
@@ -481,7 +481,7 @@ html[data-octant-native-host="true"]
 }
 
 .window-chrome__disclosure-action {
-  padding: var(--oct-space-2) 10px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   color: var(--oct-muted);
   background: transparent;
   border: 0;
@@ -516,8 +516,8 @@ html[data-octant-native-host="true"]
   height: var(--oct-title-rail-h);
   flex: 0 0 var(--oct-title-rail-h);
   align-items: center;
-  gap: 6px;
-  padding: 0 10px;
+  gap: var(--oct-space-1);
+  padding: 0 var(--oct-space-3);
 }
 
 .sidebar__traffic-light-space {
@@ -956,7 +956,7 @@ html[data-octant-native-host="true"]
 .sidebar-navigation__threads {
   display: grid;
   gap: 2px;
-  margin-top: 6px;
+  margin-top: var(--oct-space-1);
 }
 
 .sidebar-navigation__thread {
@@ -1073,7 +1073,7 @@ html[data-octant-native-host="true"]
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   line-height: 1.3;
@@ -1267,14 +1267,14 @@ html[data-octant-native-host="true"]
 
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
   .sidebar-navigation__thread-status {
-  margin-inline-start: 22px;
+  margin-inline-start: var(--oct-space-5);
 }
 
 /* A view that hides the status leaves no slot to stand beside, so the room is
    kept at the row's end instead. */
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage)
   > .sidebar-navigation__thread:not(:has(.sidebar-navigation__thread-status)) {
-  padding-inline-end: calc(var(--oct-nav-inset) + 22px);
+  padding-inline-end: calc(var(--oct-nav-inset) + var(--oct-space-6));
 }
 
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-lineage):not(
@@ -1290,7 +1290,7 @@ html[data-octant-native-host="true"]
     .sidebar-navigation__thread-lineage
   ):is(:hover, :focus-within, :has([aria-expanded="true"]), :has([data-popup-open]))
   > .sidebar-navigation__thread {
-  padding-inline-end: 78px;
+  padding-inline-end: 80px;
 }
 
 .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions):is(
@@ -1329,12 +1329,12 @@ html[data-octant-native-host="true"]
 .thread-lineage__entry {
   width: 100%;
   min-height: 26px;
-  padding-inline: 6px;
+  padding-inline: var(--oct-space-2);
   text-align: left;
 }
 
 .thread-lineage__unavailable {
-  padding-inline: 6px;
+  padding-inline: var(--oct-space-2);
   font-size: var(--oct-text-xs);
 }
 
@@ -1479,7 +1479,7 @@ html[data-octant-native-host="true"]
       .sidebar-navigation__thread-lineage
     ):is(*, :hover, :focus-within, :has([aria-expanded="true"]), :has([data-popup-open]))
     > .sidebar-navigation__thread:not(:has(.sidebar-navigation__thread-status)) {
-    padding-inline-end: 54px;
+    padding-inline-end: 56px;
   }
 
   .sidebar-navigation__thread-row:has(.sidebar-navigation__thread-actions)
@@ -1615,7 +1615,7 @@ html[data-octant-native-host="true"]
   min-width: 0;
   height: auto;
   min-height: 0;
-  padding: 4px 6px;
+  padding: 4px var(--oct-space-2);
   text-align: left;
   font-weight: 400;
 }
@@ -1656,7 +1656,7 @@ html[data-octant-native-host="true"]
 }
 
 .thread-row-info-card__pr-more {
-  padding: 2px 6px;
+  padding: 2px var(--oct-space-2);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
@@ -1734,7 +1734,7 @@ html[data-octant-native-host="true"]
 .sidebar-navigation__thread-filter {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
   padding: 2px 8px;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
@@ -2409,7 +2409,7 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   min-height: 100%;
   padding-block: min(16vh, 148px) 48px;
   margin: 0 auto;
-  gap: 10px;
+  gap: var(--oct-space-2);
 }
 
 .draft-thread__welcome {
@@ -2492,7 +2492,7 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   flex-direction: column;
   align-items: flex-start;
   gap: 1px;
-  padding: 7px 10px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   border-radius: var(--oct-radius-md);
   font-weight: 400;
   text-align: left;
@@ -2535,7 +2535,7 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
+  gap: var(--oct-space-1) 12px;
   padding: 0 2px;
 }
 
@@ -2561,8 +2561,8 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   display: grid;
   width: min(24rem, calc(100vw - 2rem));
   max-height: min(28rem, 64vh);
-  gap: 6px;
-  padding: 6px;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2);
   overflow: auto;
   background: var(--octant-surface-raised, var(--octant-surface));
   border: 1px solid var(--octant-border-strong);
@@ -2581,7 +2581,7 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   display: flex;
   align-items: center;
   gap: var(--oct-space-1);
-  padding-bottom: 6px;
+  padding-bottom: var(--oct-space-2);
   border-bottom: 1px solid var(--oct-hairline);
 }
 
@@ -2602,7 +2602,7 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
 
 .composer-folder-selector__group {
   margin: 0;
-  padding: 6px 8px 2px;
+  padding: var(--oct-space-2) 8px 2px;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
@@ -2717,7 +2717,7 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
 /* Outside a composer frame (the Work overview quick-start form) the chips row
    aligns with the field instead of taking a frame gutter it does not have. */
 form > .work-composer-adapter__attachments {
-  padding: 0 0 6px;
+  padding: 0 0 var(--oct-space-2);
 }
 
 .work-composer-adapter__attachment-thumb {
@@ -2746,7 +2746,7 @@ form > .work-composer-adapter__attachments {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
 }
 
 .create-from-issue-control__popup {
@@ -2905,11 +2905,11 @@ form > .work-composer-adapter__attachments {
   justify-content: flex-start;
   padding-block: min(16vh, 148px) 48px;
   margin: 0 auto;
-  gap: 10px;
+  gap: var(--oct-space-2);
 }
 
 .work-composer-adapter__attach-btn {
-  margin-left: 6px;
+  margin-left: var(--oct-space-1);
   font-size: var(--oct-text-detail);
   text-decoration: underline;
 }
@@ -2924,7 +2924,7 @@ form > .work-composer-adapter__attachments {
 .work-thread-workspace__transcript {
   display: grid;
   width: min(100% - 40px, var(--oct-thread-measure));
-  gap: 18px;
+  gap: var(--oct-space-4);
   padding: clamp(20px, 3vh, 36px) 0 28px;
   margin: 0 auto;
 }
@@ -3079,7 +3079,7 @@ form > .work-composer-adapter__attachments {
   flex-direction: column;
   gap: 2px;
   max-height: min(180px, 30vh);
-  padding: 6px;
+  padding: var(--oct-space-2);
   overflow: auto;
 }
 
@@ -3118,7 +3118,7 @@ form > .work-composer-adapter__attachments {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-1);
   color: var(--octant-text-muted);
 }
 
@@ -3133,7 +3133,7 @@ form > .work-composer-adapter__attachments {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: var(--oct-space-2);
   padding: 8px 12px;
   color: var(--octant-text-secondary);
   border-top: 1px solid var(--octant-border);
@@ -3150,7 +3150,7 @@ form > .work-composer-adapter__attachments {
    access control read as an outlined box sitting inside the prompt. Spacing
    separates it from the model picker; a drawn edge is not needed for that. */
 .code-composer-adapter__composer-bar .code-composer-choice__trigger {
-  margin-inline-start: 6px;
+  margin-inline-start: var(--oct-space-1);
   padding-inline-start: 8px;
   border-inline-start: 0;
 }
@@ -3176,7 +3176,7 @@ form > .work-composer-adapter__attachments {
 .code-worktree-source__row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--oct-space-2);
 }
 
 .code-worktree-source__labels {
@@ -3199,7 +3199,7 @@ form > .work-composer-adapter__attachments {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--oct-space-1);
   margin: 0;
   font-size: var(--oct-text-detail);
 }
@@ -3535,7 +3535,7 @@ form > .work-composer-adapter__attachments {
   justify-content: start;
   justify-items: start;
   gap: 4px;
-  padding: 12px 14px;
+  padding: 12px var(--oct-space-4);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   color: var(--oct-fg);
@@ -3625,7 +3625,7 @@ form > .work-composer-adapter__attachments {
 
 .code-home__panel {
   display: grid;
-  padding: 12px 14px;
+  padding: 12px var(--oct-space-4);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   background: var(--octant-card);
@@ -3633,8 +3633,8 @@ form > .work-composer-adapter__attachments {
 
 .code-home__empty {
   justify-items: center;
-  gap: 6px;
-  padding: 28px 14px;
+  gap: var(--oct-space-1);
+  padding: 28px var(--oct-space-4);
   color: var(--oct-muted);
   text-align: center;
 }
@@ -3673,8 +3673,8 @@ form > .work-composer-adapter__attachments {
   align-content: start;
   justify-content: stretch;
   justify-items: start;
-  gap: 6px;
-  padding: 12px 14px;
+  gap: var(--oct-space-1);
+  padding: 12px var(--oct-space-4);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   background: var(--octant-card);
@@ -3793,7 +3793,7 @@ form > .work-composer-adapter__attachments {
 .code-home__row .code-home__facts {
   grid-column: 1;
   grid-row: 2;
-  gap: 2px 10px;
+  gap: 2px var(--oct-space-2);
   color: var(--oct-meta);
 }
 

@@ -283,7 +283,7 @@ describe("CodeFileExplorer", () => {
     // the bare 30px search field: that is what lost its padding and hairline.
     const head = ruleBody(codeStylesheet, ".code-file-explorer__head");
     expect(head).toMatch(/min-height:\s*44px/);
-    expect(head).toMatch(/padding:\s*7px 12px/);
+    expect(head).toMatch(/padding:\s*var\(--oct-space-2\) 12px/);
     expect(head).toMatch(/border-bottom:\s*1px solid var\(--oct-border\)/);
   });
 });
