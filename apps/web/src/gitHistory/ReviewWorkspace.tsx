@@ -34,7 +34,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
       />
     );
   }
-  const checkoutId = props.checkoutId ?? props.controller?.activeView?.checkout.id;
+  const checkoutId = props.checkoutId ?? props.view?.checkout.id;
   return (
     <BoundReview
       key={`${props.threadId}:${checkoutId ?? ""}:${props.serverUrl ?? ""}`}

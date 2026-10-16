@@ -1,5 +1,6 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Profiler, createElement, type ComponentType } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -19,7 +20,10 @@ import {
 /**
  * Commits per surface, counted by a `Profiler` wrapped around each surface's
  * module export. A surface that re-rendered in a commit counts once for that
- * commit; a surface whose container bailed out does not appear in it.
+ * commit; a surface whose container bailed out does not appear in it. A
+ * Profiler also fires for its descendants, so the pane region (which holds
+ * the transcript) counts the transcript's commits, while the pane header and
+ * the dock's open tool are siblings of it and count only their own.
  */
 const commits = vi.hoisted(() => ({
   shell: 0,
@@ -27,8 +31,10 @@ const commits = vi.hoisted(() => ({
   chrome: 0,
   readers: 0,
   threadPane: 0,
+  paneHeader: 0,
   transcript: 0,
   dock: 0,
+  dockTool: 0,
 }));
 
 type Region = keyof typeof commits;
@@ -77,6 +83,14 @@ vi.mock("./code/CodeThreadWorkspace", async (importOriginal) => {
 vi.mock("./shell/RightUtilityDock", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./shell/RightUtilityDock")>();
   return { ...actual, RightUtilityDock: profiled(actual.RightUtilityDock, "dock") };
+});
+vi.mock("./shell/EnvironmentMark", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./shell/EnvironmentMark")>();
+  return { ...actual, EnvironmentMark: profiled(actual.EnvironmentMark, "paneHeader") };
+});
+vi.mock("./dockModules/EnvironmentModule", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./dockModules/EnvironmentModule")>();
+  return { ...actual, default: profiled(actual.default, "dockTool") };
 });
 
 const STREAMED_EVENTS = 8;
@@ -146,7 +160,7 @@ function perEvent(before: Record<Region, number>, after: Record<Region, number>)
 }
 
 describe("render fan-out of a streaming Code turn", () => {
-  it("re-renders the thread pane for a streamed event but not the sidebar, chrome, readers or dock", async () => {
+  it("commits only the transcript for a streamed event: not the sidebar, chrome, readers, pane header, dock or its open tool", async () => {
     const { api, release } = streamingCodes();
     render(
       <Profiler
@@ -174,6 +188,13 @@ describe("render fan-out of a streaming Code turn", () => {
     expect(
       await screen.findByRole("complementary", { name: "Right Utility Dock" }, { timeout: 5000 }),
     ).toBeVisible();
+    // A tool that reads nothing of the thread, open in the dock: the dock
+    // follows the thread only while a tool that shows the turn is open.
+    const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
+    await userEvent.click(within(dock).getByRole("button", { name: "Environment" }));
+    await waitFor(() =>
+      expect(document.querySelector("[data-octant-environment-dock]")).not.toBeNull(),
+    );
     await waitFor(() => expect(api.subscribe).toHaveBeenCalled());
     await waitFor(() => expect(api.conversation).toHaveBeenCalled());
     // Let the first load's own reads land before the burst is measured.
@@ -199,6 +220,11 @@ describe("render fan-out of a streaming Code turn", () => {
     expect(fanOut.sidebar).toBe(0);
     expect(fanOut.chrome).toBe(0);
     expect(fanOut.readers).toBe(0);
+    expect(fanOut.paneHeader).toBe(0);
+    // The pane region holds the transcript, so a Profiler around it fires with
+    // every transcript commit; the pane itself adds no commit of its own.
+    expect(fanOut.threadPane).toBe(fanOut.transcript);
     expect(fanOut.dock).toBe(0);
+    expect(fanOut.dockTool).toBe(0);
   });
 });

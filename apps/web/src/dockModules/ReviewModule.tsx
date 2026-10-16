@@ -7,7 +7,9 @@ import { ShellState } from "../shell/ShellState";
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
-  | "codeController"
+  | "codeClient"
+  | "codeDiffLayout"
+  | "codeThreadView"
   | "hostBridge"
   | "onOpenFile"
   | "serverUrl"
@@ -32,7 +34,9 @@ export default function ReviewModule(props: Props) {
         {...(props.onAgentReviewBack === undefined
           ? {}
           : { onAgentReviewBack: props.onAgentReviewBack })}
-        {...(props.codeController === undefined ? {} : { controller: props.codeController })}
+        {...(props.codeClient === undefined ? {} : { client: props.codeClient })}
+        {...(props.codeDiffLayout === undefined ? {} : { defaultDiffLayout: props.codeDiffLayout })}
+        {...(props.codeThreadView === undefined ? {} : { view: props.codeThreadView })}
         threadId={decodeCodeThreadId(props.subject.threadId)}
         {...(props.subject.checkoutId === undefined
           ? {}

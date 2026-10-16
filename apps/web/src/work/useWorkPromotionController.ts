@@ -14,6 +14,7 @@ import {
   type ProviderModelId,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRetainedRecord } from "../polling/useRetainedRecord";
 
 export interface WorkPromotionControllerOptions {
   readonly client?: WorkPromotionClient;
@@ -58,7 +59,12 @@ export function useWorkPromotionController(
       }),
     [options.client, options.serverUrl, options.windowCapability],
   );
-  const uuid = options.uuid ?? globalThis.crypto.randomUUID.bind(globalThis.crypto);
+  // Bound once: a fresh binding per render made every method that mints an id a
+  // new function per render, and the retained record below could never hold.
+  const uuid = useMemo(
+    () => options.uuid ?? globalThis.crypto.randomUUID.bind(globalThis.crypto),
+    [options.uuid],
+  );
   const [pendingProposals, setPendingProposals] = useState<ReadonlyArray<WorkPromotionProposal>>(
     [],
   );
@@ -178,7 +184,8 @@ export function useWorkPromotionController(
     [client, reload],
   );
 
-  return {
+  // One identity while nothing in it moved; see useRetainedRecord.
+  return useRetainedRecord({
     pendingProposals,
     availableArtifactRefs,
     deliveryTargetsByProject,
@@ -188,7 +195,7 @@ export function useWorkPromotionController(
     approve,
     dismiss,
     ...(errorMessage === undefined ? {} : { errorMessage }),
-  };
+  });
 }
 
 function readFailureMessage(error: unknown): string {

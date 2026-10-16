@@ -4583,11 +4583,16 @@ where it was or narrows it:
   listens on `127.0.0.1:3128` in the private namespace and exits 125 without
   running the command when it cannot listen. A proxied capsule refuses a
   process-deny filter, because the forwarder starts the command.
-- _What is unverified._ The Linux native probes have not run: no CI job has
-  `bwrap`, and the hostile suite's native cases run only on macOS or on a
-  Linux host with `/usr/bin/bwrap`. The forwarder's relay and exit behaviour
-  run on every host as plain Node. The bubblewrap arguments are checked as
-  strings.
+- _Linux native probes._ They ran on 2026-10-16 on arm64 Ubuntu 24.04 with
+  bubblewrap 0.9.0 and passed. All 11 `commands on proxied network` cases ran,
+  none skipped. The capsule is load-bearing: with a broken `bwrap`, 9 of the 11
+  fail, and with an injected `--share-net`, the direct-connect case fails. The
+  product capsule hosted by the Electron runtime had only loopback, relayed to
+  the host proxy, and refused direct connects, host loopback ports and name
+  lookups.
+- _Accepted limit._ x64 Linux and the packaged AppImage's in-capsule forwarder
+  are unverified until there is an x64 Linux host or a CI job with bubblewrap
+  and a signed feed.
 - _The tainted thread's command confirmation._ When a lead's `bash` or
   `goal-check` on a tainted Code thread will run on `proxied`, its single-use
   approval lists the hosts the thread's live thread and Project rules name,

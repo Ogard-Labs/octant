@@ -60,16 +60,22 @@ type ThreadUtilityPresentation = ReturnType<typeof useThreadUtilityPresentation>
  * them, because the surfaces do not know the controllers.
  */
 export type ShellActions = {
+  readonly activateContentTab: ShellController["activateContentTab"];
+  readonly activatePane: ShellController["activatePane"];
   readonly addDockTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly addZenBrowser: (sourceContext: ZenSourceContext) => void;
   readonly addZenProjectTerminal: (projectId: ProjectId) => Promise<void>;
   readonly addZenTerminal: (sourceContext: ZenSourceContext) => Promise<void>;
   readonly archiveCodeThread: CodeController["archiveThread"];
+  readonly clearFocus: ShellController["clearFocus"];
   readonly closeBottomPanel: (restoreFocus?: boolean) => void;
   readonly closeBottomPanelTab: (surface: RightUtilityDockSurfaceId) => void;
+  readonly closeContentTab: ShellController["closeContentTab"];
   readonly closeDock: () => void;
   readonly closeDockTab: (tabId: string) => void;
+  readonly closePane: ShellController["closePane"];
   readonly closeWorkspaceReaders: () => void;
+  readonly commitSplitResize: ShellController["commitSplitResize"];
   readonly completeChatThread: ChatController["completeThread"];
   readonly completeCodeFollowUp: CodeController["completeFollowUp"];
   readonly completeCodeThread: CodeController["completeThread"];
@@ -78,7 +84,11 @@ export type ShellActions = {
     modelOptionValues?: ProviderModelOptionValues,
     paneId?: PaneId,
   ) => void;
+  readonly createProject: ProjectController["create"];
+  readonly dismissCrossContextOffer: ShellController["dismissCrossContextOffer"];
+  readonly ensureDefaultProject: ProjectController["ensureDefault"];
   readonly enterZen: ZenController["enterZen"];
+  readonly focusPane: ShellController["focusPane"];
   readonly handleCreateChatProjectThread: NonNullable<
     WorkspaceViewProps["onCreateChatProjectThread"]
   >;
@@ -121,6 +131,7 @@ export type ShellActions = {
   readonly openCreatedFollowUp: NonNullable<
     NonNullable<WorkspaceViewProps["followUpSuggestions"]>["onCreated"]
   >;
+  readonly openCrossContextInNewWindow: ShellController["openCrossContextInNewWindow"];
   readonly openDockTab: (surface: RightUtilityDockSurfaceId, opener?: HTMLElement) => void;
   readonly openDraftInActiveProject: (mode: "work" | "code") => void;
   readonly openDraftInProject: (projectId: ProjectId) => Promise<void>;
@@ -153,18 +164,22 @@ export type ShellActions = {
   ) => Promise<void>;
   readonly openSelectedProject: (project: ProjectSummary) => Promise<void>;
   readonly openSettings: ShellController["openSettings"];
+  readonly openSideChat: ShellController["openSideChat"];
   readonly openSidebarList: (view: "activity" | "completed") => void;
   readonly openSkillsSettings: () => void;
   readonly openSubagent: NonNullable<WorkspaceViewProps["onOpenSubagent"]>;
   readonly openSubagentRequest: (request: ChildPendingRequest) => void;
+  readonly openSurface: ShellController["openSurface"];
   readonly openThreadBoard: () => void;
   readonly openThreadSearch: () => void;
+  readonly openThreadBrowser: ShellController["openThreadBrowser"];
   readonly openWorkThread: ShellController["openWorkThread"];
   readonly persistBottomPanelPresentation: ThreadUtilityPresentation["persistBottomPanelPresentation"];
   readonly pinChatThreadInPane: (threadId: string) => void;
   readonly pinCodeThread: CodeController["pinThread"];
   readonly pinCodeThreadInPane: (threadId: string) => void;
   readonly pinWorkThreadInPane: (threadId: string) => void;
+  readonly previewSplitResize: ShellController["previewSplitResize"];
   readonly recoverZen: ZenController["recoverZen"];
   readonly refuseUnlessCreatableDestination: (input: {
     readonly action: string;
@@ -172,13 +187,16 @@ export type ShellActions = {
     readonly projectHostId?: HostId;
     readonly onRefuse: (reason: string) => void;
   }) => HostId | undefined;
+  readonly relinkProject: ProjectController["relink"];
   readonly renameCodeThread: (threadId: string, title: string) => void;
+  readonly renameProject: ProjectController["rename"];
   readonly reopenChatThread: ChatController["reopenThread"];
   readonly reopenCodeThread: CodeController["reopenThread"];
   readonly resetNewTaskDraft: (mode: OctantMode, paneId?: PaneId) => void;
   readonly retryActiveModeThreads: () => void;
   readonly retryChat: () => void;
   readonly retryProjects: () => void;
+  readonly revealBrowserActivity: ShellController["revealBrowserActivity"];
   readonly runWorkRestCommand: (
     threadId: string,
     command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,
@@ -198,6 +216,7 @@ export type ShellActions = {
   readonly setArtifactLibraryOpen: Dispatch<SetStateAction<boolean>>;
   readonly setAutomationCenterOpen: Dispatch<SetStateAction<boolean>>;
   readonly setCodeBoardOpen: Dispatch<SetStateAction<boolean>>;
+  readonly setCodeNewThreadWorkspace: ProjectController["setCodeNewThreadWorkspace"];
   readonly setCodePullRequestBackgroundRefresh: ProjectController["setCodePullRequestBackgroundRefresh"];
   readonly setCodePullRequestsOpen: Dispatch<SetStateAction<boolean>>;
   readonly setDockSidecarsByThread: Dispatch<
@@ -229,6 +248,8 @@ export type ShellActions = {
   readonly setPreviewContextWidth: Dispatch<SetStateAction<number | undefined>>;
   readonly setProjectArchived: ProjectController["setArchived"];
   readonly setProjectColor: ProjectController["setColor"];
+  readonly setProjectProviderPolicy: ProjectController["setProviderPolicy"];
+  readonly setProjectWorkStatusFile: ProjectController["setWorkStatusFile"];
   readonly setProjectsListOpen: Dispatch<SetStateAction<boolean>>;
   readonly setRailPlaceholder: Dispatch<
     SetStateAction<{ readonly title: string; readonly message: string } | undefined>
@@ -258,9 +279,11 @@ export type ShellActions = {
   readonly snoozeChatThread: ChatController["snoozeThread"];
   readonly snoozeCodeThread: CodeController["snoozeThread"];
   readonly spendRevealChatTurn: () => void;
+  readonly splitPane: ShellController["splitPane"];
   readonly startNewThreadDraft: (mode: OctantMode) => void;
   readonly toggleBottomPanel: (opener: HTMLElement) => void;
   readonly toggleDock: (opener: HTMLElement) => void;
+  readonly touchMemoryRevision: ProjectController["touchMemoryRevision"];
   readonly tryWorkRestCommand: (
     threadId: string,
     command: (expectedVersion: WorkThread["version"]) => WorkThreadCommand,

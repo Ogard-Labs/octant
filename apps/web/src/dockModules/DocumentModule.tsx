@@ -5,11 +5,11 @@ import { decodeCodeThreadId } from "@octant/contracts";
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
-  "codeController" | "serverUrl" | "subject" | "windowCapability" | "writtenDocumentPath"
+  "codeClient" | "serverUrl" | "subject" | "windowCapability" | "writtenDocumentPath"
 >;
 
 export default function DocumentModule(props: Props) {
-  if (props.subject.mode !== "code" || props.codeController === undefined) {
+  if (props.subject.mode !== "code" || props.codeClient === undefined) {
     return unavailable("Document", "Document opens from a Code thread.");
   }
   if (props.writtenDocumentPath === undefined) {
@@ -18,7 +18,7 @@ export default function DocumentModule(props: Props) {
   return (
     <DockDocumentTool
       {...(props.subject.checkoutId === undefined ? {} : { checkoutId: props.subject.checkoutId })}
-      client={props.codeController.client}
+      client={props.codeClient}
       path={props.writtenDocumentPath}
       {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
       threadId={decodeCodeThreadId(props.subject.threadId)}
