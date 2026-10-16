@@ -131,10 +131,11 @@ decision opens a slice. Each remaining item needs its own design before work
 starts.
 
 - **Windows desktop confinement, credentials, and packaging** — the identical
-  desktop app (0058) sequences Windows after Linux + macOS parity; packaging
-  stays outside the first release until the Out of scope preconditions in 0058
-  hold; Work/Code stay `incompatible` until an approved Windows confinement design is
-  documented in the architecture.
+  desktop app (0058) sequences Windows after the macOS technical preview and
+  Linux self-update evidence on a real image, per the
+  [release boundary](architecture.md#current-release-boundary); no Windows
+  work starts before both exist; Work/Code stay `incompatible` until an
+  approved Windows confinement design is documented in the architecture.
 - **Mobile maturity after internal TestFlight** — Android device builds, live
   push notifications, native capture, voice input, and public store
   distribution for the Expo client. Design:
