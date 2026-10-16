@@ -84,7 +84,12 @@ export interface HomeStartInput {
   /** The sum of every mode's navigation revision: when a turn starts or ends. */
   readonly feedRevision: number;
   readonly githubPullRequestCapability: PullRequestCardCapability;
-  readonly hostFederationLifecycle: HostFederation["lifecycle"] | undefined;
+  /**
+   * The paired computers as the federation lifecycle last listed them, read by
+   * the shell on each lifecycle change so the Computers card re-derives then
+   * and not on the next unrelated input.
+   */
+  readonly computerSnapshots: ReturnType<HostFederation["lifecycle"]["list"]>;
   readonly hostFederationTransports: HostFederation["transports"] | undefined;
   readonly hostResourceClient: LaunchedShellClients["hostResourceClient"];
   /** A desktop window reads this computer; a browser window names its host. */
@@ -150,7 +155,7 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     continueCards,
     feedRevision,
     githubPullRequestCapability,
-    hostFederationLifecycle,
+    computerSnapshots,
     hostFederationTransports,
     hostResourceClient,
     isDesktop,
@@ -179,7 +184,6 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
   // Before the shell has its settings and workspace there is no start screen to draw.
   if (settings === undefined || workspace === undefined) return undefined;
   const { codeProjectThreads, workProjectThreads } = navigation;
-  const computerSnapshots = hostFederationLifecycle?.list() ?? [];
   const computerLaunchHostId = isDesktop
     ? String(LOCAL_HOST_ID)
     : String(

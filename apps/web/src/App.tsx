@@ -484,6 +484,7 @@ const NO_VOICE_SETTINGS: VoiceSettings = {};
 const NO_IMAGE_PROFILES: ReadonlyArray<never> = [];
 const NO_CODE_THREADS: ReadonlyArray<never> = [];
 const NO_CODE_CHECKOUTS: ReadonlyArray<never> = [];
+const NO_COMPUTER_SNAPSHOTS: ReadonlyArray<never> = [];
 
 export function App(props: AppProps) {
   const [locationLaunch] = useState(() =>
@@ -1758,6 +1759,13 @@ function LaunchedShell(
   );
   const federatedHostStates = useMemo(
     () => hostFederationLifecycle?.toFederatedHostStates() ?? [],
+    [hostFederationLifecycle, federationRevision],
+  );
+  // The start screen's Computers card reads this list; a paired computer joining,
+  // leaving or changing state re-reads it, so the card does not wait for an
+  // unrelated input to move. The lifecycle changes in place; the revision says when.
+  const computerSnapshots = useMemo(
+    () => hostFederationLifecycle?.list() ?? NO_COMPUTER_SNAPSHOTS,
     [hostFederationLifecycle, federationRevision],
   );
   const [environmentSelection, setEnvironmentSelection] =
@@ -4477,8 +4485,8 @@ function LaunchedShell(
     codeThreads: codeController.bootstrap?.threads ?? NO_CODE_THREADS,
     continueCards,
     feedRevision: pendingRequestFeedRevision,
+    computerSnapshots,
     githubPullRequestCapability,
-    hostFederationLifecycle,
     hostFederationTransports,
     hostResourceClient,
     isDesktop: props.hostBridge !== undefined,
