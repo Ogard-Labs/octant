@@ -6,6 +6,7 @@ import type {
 import {
   childDetailLines,
   childListLines,
+  childrenAfterRead,
   childQuestion,
   listAgentChildren,
   pickAgentChild,
@@ -495,6 +496,8 @@ class AgentScreen {
     this.#follow(mode);
     this.#drawn = "";
     this.#listing = undefined;
+    this.#children = [];
+    this.#childLines = [];
     this.#pendingFollowUp = undefined;
     for (const child of this.#transcript.getChildren()) child.destroyRecursively();
     await this.refresh();
@@ -1085,7 +1088,11 @@ class AgentScreen {
       return;
     }
     if (text === "/agents") {
-      await this.#loadChildren();
+      if (!(await this.#loadChildren())) {
+        this.#listing = undefined;
+        this.#draw();
+        return;
+      }
       this.#listing = this.#listing === "agents" ? undefined : "agents";
       this.#draw();
       return;
@@ -1426,10 +1433,14 @@ class AgentScreen {
     );
   }
 
-  async #loadChildren(): Promise<void> {
-    const listed = await listAgentChildren(this.#input.session, this.#threadId);
-    if (listed.kind === "refused") this.#note = listed.message;
-    else this.#children = listed.children;
+  /** Reads the thread's helpers; a refusal clears the list so another thread's are never offered. */
+  async #loadChildren(): Promise<boolean> {
+    const read = childrenAfterRead(await listAgentChildren(this.#input.session, this.#threadId));
+    this.#children = read.children;
+    if (read.refusal === undefined) return true;
+    this.#childLines = [];
+    this.#note = read.refusal;
+    return false;
   }
 
   /** The helpers whose question is waiting on the person, by run id. */
@@ -1450,7 +1461,10 @@ class AgentScreen {
     }
     const [reference = ""] = argument.split(/\s+/);
     const message = argument.slice(reference.length).trim();
-    await this.#loadChildren();
+    if (!(await this.#loadChildren())) {
+      this.#draw();
+      return;
+    }
     const child = pickAgentChild(this.#children, reference);
     if (child === undefined) {
       this.#note = "Pick a helper by number from /agents: /agent 1";

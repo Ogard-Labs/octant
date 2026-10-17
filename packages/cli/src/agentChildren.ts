@@ -20,6 +20,9 @@ import type { OpenedLocalControlSession } from "./localControl";
 
 export type AgentChild = AgentRunCenterSummary;
 
+/** A thread cannot hold more helpers than the host keeps; this only stops a host that never ends its pages. */
+const MAX_CENTER_PAGES = 50;
+
 /** The most a conversation read shows of one child, so a long run stays readable. */
 const MAX_REPLY_CHARACTERS = 4_000;
 
@@ -30,21 +33,47 @@ export async function listAgentChildren(
 ): Promise<
   HostRefusal | { readonly kind: "listed"; readonly children: ReadonlyArray<AgentChild> }
 > {
-  const response = await session.send({
-    path: `/api/agent-runs/center?status=all&mode=all&parentThreadId=${encodeURIComponent(threadId)}`,
-    method: "GET",
-  });
-  if (response.status !== 200) {
-    return {
-      kind: "refused",
-      message: refusalMessage(response, "The helper agents could not be read."),
-    };
+  // The host pages the list (newest first, at most a hundred a page). Numbers
+  // mean the same child only if every page is read before sorting and numbering.
+  const items: AgentChild[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_CENTER_PAGES; page += 1) {
+    const response = await session.send({
+      path: `/api/agent-runs/center?status=all&mode=all&parentThreadId=${encodeURIComponent(threadId)}${
+        cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`
+      }`,
+      method: "GET",
+    });
+    if (response.status !== 200) {
+      return {
+        kind: "refused",
+        message: refusalMessage(response, "The helper agents could not be read."),
+      };
+    }
+    const decoded = decodeHostAnswer(AgentRunCenterResponse)(response.body);
+    items.push(...decoded.items);
+    cursor = decoded.nextCursor;
+    if (cursor === undefined) break;
   }
-  const items = decodeHostAnswer(AgentRunCenterResponse)(response.body).items;
   return {
     kind: "listed",
-    children: [...items].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    children: items.sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
   };
+}
+
+/**
+ * What a screen keeps after reading a thread's helpers: the list when it was
+ * read, and nothing when the host refused, so a reload that fails after a
+ * thread switch never leaves the previous thread's helpers to be listed or
+ * picked.
+ */
+export function childrenAfterRead(read: Awaited<ReturnType<typeof listAgentChildren>>): {
+  readonly children: ReadonlyArray<AgentChild>;
+  readonly refusal?: string;
+} {
+  return read.kind === "listed"
+    ? { children: read.children }
+    : { children: [], refusal: read.message };
 }
 
 /** One child by its list number or the start of its id; undefined when none or several match. */

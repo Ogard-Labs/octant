@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   childDetailLines,
+  childrenAfterRead,
   childListLines,
   childQuestion,
   listAgentChildren,
@@ -101,6 +102,40 @@ describe("a thread's helper agents in the terminal", () => {
       "Find where the lexer handles escapes",
       "Review the escape handling",
     ]);
+  });
+
+  it("follows every page of the list before numbering, so older helpers keep their numbers", async () => {
+    const older = childRow({
+      runId: "72000000-0000-4000-8000-000000000009",
+      task: "Oldest helper",
+      createdAt: "2026-10-16T08:00:00.000Z",
+    });
+    const fake = host((request) =>
+      request.path.includes("cursor=page-2")
+        ? { status: 200, body: { items: [older] } }
+        : { status: 200, body: { items: [second, first], nextCursor: "page-2" } },
+    );
+    const listed = await listAgentChildren(fake.session, threadId);
+    expect(fake.sent.map((request) => request.path)).toEqual([
+      `/api/agent-runs/center?status=all&mode=all&parentThreadId=${threadId}`,
+      `/api/agent-runs/center?status=all&mode=all&parentThreadId=${threadId}&cursor=page-2`,
+    ]);
+    expect(listed.kind === "listed" && listed.children.map((child) => child.task)).toEqual([
+      "Oldest helper",
+      "Find where the lexer handles escapes",
+      "Review the escape handling",
+    ]);
+  });
+
+  it("keeps no helpers after a refused read, so another thread's are never listed or picked", async () => {
+    const kept = await children([first]);
+    expect(childrenAfterRead({ kind: "listed", children: kept })).toEqual({ children: kept });
+    const refused = childrenAfterRead({
+      kind: "refused",
+      message: "AgentRun request is unauthorized.",
+    });
+    expect(refused).toEqual({ children: [], refusal: "AgentRun request is unauthorized." });
+    expect(pickAgentChild(refused.children, "1")).toBeUndefined();
   });
 
   it("says why the host would not list them", async () => {
