@@ -165,10 +165,11 @@ describe("useWorkThreadNavigation", () => {
   });
 
   it("reads the thread list again when a replacement client arrives after a refused first read", async () => {
-    const refused = vi.fn(async () => {
-      throw new Error("Work thread request is unauthorized.");
-    });
     const accepted = vi.fn(async () => decodeWorkThreadBootstrap({ threads: [workThread()] }));
+    const refused = vi.fn(
+      (): ReturnType<typeof accepted> =>
+        Promise.reject(new Error("Work thread request is unauthorized.")),
+    );
     const navigation = vi.fn(async () => ({ threads: [workThread()], runtime: [] }));
     const { result, rerender } = renderHook(
       ({ bootstrap }) => useWorkThreadNavigation({ bootstrap, navigation }),
