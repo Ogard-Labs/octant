@@ -39,7 +39,6 @@ import {
   createPairingDeviceKeyAdapter,
   createRemoteProductFetch,
   isRemotePairingOrigin,
-  PLATFORM_LISTENER_TRUST,
   localHostDisplayName,
   readPairingFragment,
   type AgentProfileClient,
@@ -412,8 +411,12 @@ import {
   type WorkingNowThread,
 } from "./home/workingNow";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
-import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
+import {
+  HostFederationStackContext,
+  useHostFederationLifecycle,
+} from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
+import { createPairedComputerFetch } from "./host/pairedComputerFetch";
 import { NeedsYouProvider, OctantCommandProvider } from "./palette/CommandRegistry";
 import {
   buildOctantCommands,
@@ -1860,6 +1863,14 @@ function LaunchedShell(
             }),
     [runningServicesRemoteHost],
   );
+  const requestPairedComputer = props.hostBridge?.requestPairedComputer;
+  const pairedComputerFetch = useMemo(
+    () =>
+      requestPairedComputer === undefined
+        ? undefined
+        : createPairedComputerFetch({ requestPairedComputer }),
+    [requestPairedComputer],
+  );
   const openRunningServiceLive = useMemo(() => {
     const host = runningServicesRemoteHost;
     const opener = remoteServerLiveOpener;
@@ -1882,15 +1893,20 @@ function LaunchedShell(
           hostId: host.hostId,
           hostName: host.hostName,
           origin: host.origin,
-          listenerTrust: credential.listenerTrust ?? PLATFORM_LISTENER_TRUST,
           issueSession: () => connection.issueServerProxySession(),
           sign: (payload) => deviceKey.sign(payload),
+          // A computer paired through Other computers is reached through the
+          // desktop; the grant request would otherwise meet this window's
+          // loopback-only page policy.
+          ...(pairedComputerFetch === undefined || !isRemotePairingOrigin(host.origin)
+            ? {}
+            : { fetch: pairedComputerFetch }),
         },
         service,
         mode,
       );
     };
-  }, [runningServicesRemoteHost, remoteServerLiveOpener, federation]);
+  }, [runningServicesRemoteHost, remoteServerLiveOpener, federation, pairedComputerFetch]);
   useEffect(() => {
     if (hosts.length === 0) return;
     const result = preselectCreateHost({
@@ -6778,7 +6794,9 @@ function LaunchedShell(
                             <ModelToolVerificationContext.Provider
                               value={providerController.verifyModelTools}
                             >
-                              {shell}
+                              <HostFederationStackContext.Provider value={federation}>
+                                {shell}
+                              </HostFederationStackContext.Provider>
                             </ModelToolVerificationContext.Provider>
                           </WorkKindChoiceContext.Provider>
                         </MarkdownLinkActionsContext.Provider>

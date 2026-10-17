@@ -27,7 +27,6 @@ import {
 } from "@octant/client-runtime/remote-server-forwarder";
 import { connectListener } from "@octant/client-runtime/remote-listener-tls-node";
 import {
-  decodeListenerOriginTrust,
   LISTENER_TRUST_REFUSAL_COPY,
   type ListenerOriginTrust,
   type ListenerTrustRefusal,
@@ -42,7 +41,6 @@ export interface RemoteServerPageOpenRequest {
   readonly hostId: string;
   readonly hostName: string;
   readonly listenerOrigin: string;
-  readonly listenerTrust: ListenerOriginTrust;
   readonly grant: RemoteServerGrant;
   readonly mode: RemoteServerPageMode;
 }
@@ -73,15 +71,13 @@ export function validateRemoteServerPageOpenRequest(value: unknown): RemoteServe
   }
   if (typeof listenerOrigin !== "string" || !isHttpsOrigin(listenerOrigin)) throw invalidOpen();
   if (mode !== "octant-browser" && mode !== "default-browser") throw invalidOpen();
-  const listenerTrust = decodeListenerOriginTrust(record.listenerTrust);
-  if (listenerTrust === undefined) throw invalidOpen();
   let grant: RemoteServerGrant;
   try {
     grant = decodeGrant(record.grant);
   } catch {
     throw invalidOpen();
   }
-  return { hostId, hostName: hostName.trim(), listenerOrigin, listenerTrust, grant, mode };
+  return { hostId, hostName: hostName.trim(), listenerOrigin, grant, mode };
 }
 
 function invalidOpen(): Error {
@@ -162,6 +158,13 @@ export interface RemoteServerPagesPorts {
     readonly pageOrigin: string;
   }) => void;
   readonly openExternal: (url: string) => Promise<void>;
+  /**
+   * The trust a paired computer's listener is held to: the pin the desktop
+   * recorded for it, read again for every request, so a forgotten computer
+   * stops answering at once. `undefined` for an origin that is not paired. A
+   * window never names the trust; it names only the origin.
+   */
+  readonly pairedTrust: (listenerOrigin: string) => ListenerOriginTrust | undefined;
   /** The transport to a paired host's listener; production uses {@link sendThroughListener}. */
   readonly sendToHost?: (
     target: { readonly listenerOrigin: string; readonly trust: ListenerOriginTrust },
@@ -213,9 +216,8 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
   const randomId = ports.randomId ?? (() => globalThis.crypto.randomUUID());
   const sendToHost = ports.sendToHost ?? sendThroughListener;
   const upgradeToHost = ports.upgradeToHost ?? upgradeThroughListener;
-  // Which window holds each grant, and the trust each host's listener is held to.
+  // Which window holds each grant.
   const signerByGrant = new Map<string, number>();
-  const trustByHost = new Map<string, ListenerOriginTrust>();
   const pending = new Map<
     string,
     {
@@ -249,7 +251,6 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
       for (const record of doomed) ports.closePageWindow(record.name);
       for (const hostId of new Set([...hostIds, ...doomed.map((record) => record.hostId)])) {
         forwarder?.closeHost(hostId);
-        trustByHost.delete(hostId);
       }
       let failed = 0;
       for (const record of doomed) {
@@ -305,12 +306,12 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
       ...(ports.forwarderAddresses === undefined ? {} : { addresses: ports.forwarderAddresses }),
       sign,
       sendToHost: (target, request) => {
-        const trust = trustByHost.get(target.hostId);
+        const trust = ports.pairedTrust(target.listenerOrigin);
         if (trust === undefined) return Promise.reject(new Error("No trust for this host."));
         return sendToHost({ listenerOrigin: target.listenerOrigin, trust }, request);
       },
       upgradeToHost: (target, request) => {
-        const trust = trustByHost.get(target.hostId);
+        const trust = ports.pairedTrust(target.listenerOrigin);
         if (trust === undefined) return Promise.reject(new Error("No trust for this host."));
         return upgradeToHost({ listenerOrigin: target.listenerOrigin, trust }, request);
       },
@@ -329,6 +330,11 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
 
   return {
     open: async (windowId, request) => {
+      // The trust comes from the desktop's own pins, never from the window: a
+      // listener that is not a paired computer is not opened at all.
+      if (ports.pairedTrust(request.listenerOrigin) === undefined) {
+        return { kind: "refused", message: "Octant isn't paired with that computer." };
+      }
       starting ??= ensureListening().finally(() => {
         starting = undefined;
       });
@@ -337,7 +343,6 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
       const active = forwarder;
       if (active === undefined)
         return { kind: "refused", message: "Octant could not open this server." };
-      trustByHost.set(request.hostId, request.listenerTrust);
       signerByGrant.set(String(request.grant.grantId), windowId);
       const page = active.open({
         hostId: request.hostId,
@@ -397,8 +402,13 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
       }
     },
     forgetHost: (hostId) => forgetPages((record) => record.hostId === hostId, [hostId]),
-    forgetListener: (listenerOrigin) =>
-      forgetPages((record) => record.listenerOrigin === listenerOrigin),
+    // Every page served from the listener stops with it, even one with no page
+    // record (a page opened in the default browser keeps none), so no open page
+    // or WebSocket outlives the pin.
+    forgetListener: (listenerOrigin) => {
+      forwarder?.closeListener(listenerOrigin);
+      return forgetPages((record) => record.listenerOrigin === listenerOrigin);
+    },
     stop: async () => {
       for (const waiting of pending.values()) clearTimeout(waiting.timer);
       pending.clear();

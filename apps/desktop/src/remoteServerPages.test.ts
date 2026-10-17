@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RemoteServerHostRequest } from "@octant/client-runtime/remote-server-forwarder";
+import type { ListenerOriginTrust } from "@octant/client-runtime/remote-listener-trust";
 import {
   createRemoteServerPages,
   decodeRemoteServerSigning,
@@ -32,7 +33,6 @@ const OPEN = {
   hostId: HOST_ID,
   hostName: "Studio Mac",
   listenerOrigin: LISTENER,
-  listenerTrust: { current: { kind: "platform" } },
   grant: { grantId: GRANT_ID, threadId: "77777777-7777-4777-8777-777777777777", port: 5173 },
   mode: "octant-browser",
 } as const;
@@ -73,6 +73,10 @@ interface Harness {
   readonly pageRecords: RemoteServerPageRecord[];
   readonly events: string[];
   readonly failClearing: Set<string>;
+  /** The origins the desktop holds a pin for. */
+  readonly pairedOrigins: Set<string>;
+  /** The trust each relayed request was held to. */
+  readonly trusts: ListenerOriginTrust[];
 }
 
 async function harness(overrides: Partial<RemoteServerPagesPorts> = {}): Promise<Harness> {
@@ -85,6 +89,8 @@ async function harness(overrides: Partial<RemoteServerPagesPorts> = {}): Promise
   const pageRecords: RemoteServerPageRecord[] = [];
   const events: string[] = [];
   const failClearing = new Set<string>();
+  const pairedOrigins = new Set([LISTENER, "https://192.168.1.21:9443"]);
+  const trusts: ListenerOriginTrust[] = [];
   const pages = createRemoteServerPages({
     readPageRecords: async () => [...pageRecords],
     writePageRecords: async (next) => {
@@ -111,7 +117,10 @@ async function harness(overrides: Partial<RemoteServerPagesPorts> = {}): Promise
     openExternal: async (url) => {
       external.push(url);
     },
-    sendToHost: async (_target, request) => {
+    pairedTrust: (origin) =>
+      pairedOrigins.has(origin) ? { current: { kind: "pinned", pin: "sha256-paired" } } : undefined,
+    sendToHost: async (target, request) => {
+      trusts.push(target.trust);
       sent.push(request);
       return new Response("relayed page", { headers: { "x-octant-server-proxy": "relayed" } });
     },
@@ -121,7 +130,19 @@ async function harness(overrides: Partial<RemoteServerPagesPorts> = {}): Promise
     ...overrides,
   });
   cleanups.push(() => pages.stop());
-  return { pages, shown, external, asked, sent, recorded, pageRecords, events, failClearing };
+  return {
+    pages,
+    shown,
+    external,
+    asked,
+    sent,
+    recorded,
+    pageRecords,
+    events,
+    failClearing,
+    pairedOrigins,
+    trusts,
+  };
 }
 
 function pageRequest(
@@ -171,7 +192,6 @@ describe("what a window may ask the desktop to open", () => {
       { ...OPEN, grant: { ...OPEN.grant, grantId: "rsg_short" } },
       { ...OPEN, grant: { ...OPEN.grant, url: "http://127.0.0.1:5173" } },
       { ...OPEN, mode: "agent-browser" },
-      { ...OPEN, listenerTrust: { current: { kind: "anything" } } },
       { ...OPEN, hostId: "../../etc" },
     ]) {
       expect(() => validateRemoteServerPageOpenRequest(bad)).toThrow(
@@ -346,6 +366,107 @@ describe("forgetting a host's pages", () => {
     const h = await harness();
     expect(await h.pages.forgetHost(HOST_ID)).toEqual({ status: "forgotten" });
     expect(h.events).toEqual([]);
+  });
+});
+
+describe("which listeners the forwarder will reach", () => {
+  it("holds a paired computer to the pin the desktop recorded, whatever trust the window names", async () => {
+    const { pages, shown, asked, trusts } = await harness();
+    await pages.open(
+      7,
+      validateRemoteServerPageOpenRequest({
+        ...OPEN,
+        listenerTrust: { current: { kind: "platform" } },
+      }),
+    );
+    const pageOrigin = shown[0]?.pageOrigin ?? "";
+    const reply = pageRequest(pageOrigin, pages.accessFor(pageOrigin) ?? "");
+    const question = await waitFor(() => asked[0]);
+    pages.answer(7, question.requestId, { status: "signed", headers: { cookie: "c=1" } });
+    await reply;
+
+    expect(trusts).toEqual([{ current: { kind: "pinned", pin: "sha256-paired" } }]);
+  });
+
+  it("refuses an origin the desktop holds no pin for, and listens and records nothing", async () => {
+    const { pages, shown, recorded, pageRecords, external } = await harness();
+
+    for (const mode of ["octant-browser", "default-browser"] as const) {
+      expect(
+        await pages.open(
+          7,
+          validateRemoteServerPageOpenRequest({
+            ...OPEN,
+            mode,
+            listenerOrigin: "https://10.0.0.9:8443",
+          }),
+        ),
+      ).toEqual({ kind: "refused", message: "Octant isn't paired with that computer." });
+    }
+    expect(shown).toEqual([]);
+    expect(external).toEqual([]);
+    expect(recorded).toEqual([]);
+    expect(pageRecords).toEqual([]);
+  });
+
+  it("stops relaying for a computer forgotten after its page opened, in either browser", async () => {
+    for (const mode of ["octant-browser", "default-browser"] as const) {
+      const h = await harness();
+      await h.pages.open(7, validateRemoteServerPageOpenRequest({ ...OPEN, mode }));
+      const pageOrigin =
+        mode === "octant-browser"
+          ? (h.shown[0]?.pageOrigin ?? "")
+          : new URL(h.external[0] ?? "http://x").origin;
+      const access = h.pages.accessFor(pageOrigin) ?? "";
+      // While the computer is paired the page is served.
+      const served = pageRequest(pageOrigin, access);
+      const question = await waitFor(() => h.asked[0]);
+      h.pages.answer(7, question.requestId, { status: "signed", headers: { cookie: "c=1" } });
+      expect((await served).status).toBe(200);
+      h.sent.length = 0;
+      h.pairedOrigins.delete(LISTENER);
+
+      await h.pages.forgetListener(LISTENER);
+
+      expect((await pageRequest(pageOrigin, access)).status).not.toBe(200);
+      expect(h.sent).toEqual([]);
+    }
+  });
+});
+
+describe("forgetting one of two listeners a host was opened from", () => {
+  it("stops the forgotten listener's page and leaves the other's up, whichever opened last", async () => {
+    const h = await harness();
+    const OTHER = "https://192.168.1.21:9443";
+    await h.pages.open(
+      7,
+      validateRemoteServerPageOpenRequest({ ...OPEN, mode: "default-browser" }),
+    );
+    await h.pages.open(
+      7,
+      validateRemoteServerPageOpenRequest({
+        ...OPEN,
+        mode: "default-browser",
+        listenerOrigin: OTHER,
+        grant: { ...OPEN.grant, port: 3000 },
+      }),
+    );
+    const [first, second] = h.external.map((url) => new URL(url).origin);
+    const served = async (origin: string) => {
+      const reply = pageRequest(origin, h.pages.accessFor(origin) ?? "");
+      const question = await waitFor(() => h.asked.find((entry) => !answered.has(entry.requestId)));
+      answered.add(question.requestId);
+      h.pages.answer(7, question.requestId, { status: "signed", headers: { cookie: "c=1" } });
+      return (await reply).status;
+    };
+    const answered = new Set<string>();
+    h.pairedOrigins.delete(LISTENER);
+
+    await h.pages.forgetListener(LISTENER);
+
+    expect((await pageRequest(first ?? "", "x")).status).not.toBe(200);
+    expect(h.pages.accessFor(first ?? "")).toBeUndefined();
+    expect(await served(second ?? "")).toBe(200);
   });
 });
 

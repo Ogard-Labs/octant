@@ -7,16 +7,16 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ListenerTrustRefused } from "@octant/client-runtime/remote-listener-trust";
 import { buildHostHelloSignaturePayload, buildPairingCode } from "@octant/domain";
 import {
-  CERTIFICATE_ACCEPTED,
-  CERTIFICATE_REFUSED,
   clearRemotePageStorage,
   forgetPairedComputer,
   installPairedComputerIpcHandlers,
-  openPairedComputer,
   PAIRED_COMPUTER_CHANNELS,
   pairFromPairingCode,
   PairedComputerPins,
+  settlePairedComputer,
+  STAGED_PIN_MS,
 } from "./pairedComputers";
+import { requestPairedComputer } from "./pairedComputerRequests";
 import { IPC_CHANNELS } from "./preload";
 
 const ORIGIN = "https://100.101.102.103:8443";
@@ -25,7 +25,6 @@ const TICKET = {
   ticketId: "3f6c1d2e-8a4b-4c5d-9e6f-7a8b9c0d1e2f",
   ticketProof: Buffer.alloc(32, 7).toString("base64url"),
 };
-const NOW = Date.parse("2026-10-15T12:00:00.000Z");
 
 let directory: string;
 let listenerCert: string;
@@ -120,18 +119,6 @@ async function hostFetch(): Promise<typeof globalThis.fetch> {
 }
 
 describe("the pins the desktop keeps for paired computers", () => {
-  it("passes only the pinned key for a pinned name, and refuses every other name", () => {
-    const pins = freshPins();
-    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
-
-    expect(pins.judgeCertificate("100.101.102.103", listenerCert, NOW)).toBe(CERTIFICATE_ACCEPTED);
-    expect(pins.judgeCertificate("100.101.102.103", otherCert, NOW)).toBe(CERTIFICATE_REFUSED);
-    expect(pins.judgeCertificate("100.101.102.104", listenerCert, NOW)).toBe(CERTIFICATE_REFUSED);
-    expect(pins.judgeCertificate("100.101.102.103", "not a certificate", NOW)).toBe(
-      CERTIFICATE_REFUSED,
-    );
-  });
-
   it("never pins a public name or address", () => {
     const pins = freshPins();
     for (const origin of ["https://example.com", "https://203.0.113.7:8443"]) {
@@ -165,48 +152,43 @@ describe("the pins the desktop keeps for paired computers", () => {
         computers: [{ origin: "https://203.0.113.7", displayName: "x", pin: pinOf(otherCert) }],
       }),
     );
-    expect(new PairedComputerPins(path).judgeCertificate("203.0.113.7", otherCert, NOW)).toBe(
-      CERTIFICATE_REFUSED,
-    );
+    expect(new PairedComputerPins(path).pinFor("https://203.0.113.7")).toBeUndefined();
   });
 });
 
 describe("pairing with another computer from its code", () => {
-  it("records the pin and opens that computer's pairing page only after its hello verifies", async () => {
+  it("stages the pin and hands back the ticket only after its hello verifies", async () => {
     const pins = freshPins();
-    const open = vi.fn();
     const fetchFor = vi.fn(await hostFetch().then((fetch) => () => fetch));
 
     const outcome = await pairFromPairingCode({
       code: pairingCode(pinOf(listenerCert)),
       pins,
-      windows: { open, closeAll: vi.fn() },
       webBuildVersion: "0.1.0",
       fetchFor,
     });
 
     expect(outcome).toEqual({
-      status: "opened",
+      status: "verified",
       computer: { origin: ORIGIN, displayName: "Studio Mac" },
+      ticket: TICKET,
+      pin: pinOf(listenerCert),
     });
     expect(fetchFor).toHaveBeenCalledWith(ORIGIN, {
       current: { kind: "pinned", pin: pinOf(listenerCert) },
     });
-    expect(pins.pinFor(ORIGIN)).toBe(pinOf(listenerCert));
-    expect(open).toHaveBeenCalledWith({
-      origin: ORIGIN,
-      url: `${ORIGIN}/#ticketId=${TICKET.ticketId}&ticketProof=${TICKET.ticketProof}`,
-    });
+    // Staged, not recorded: nothing persists until the other computer approves.
+    expect(pins.pinFor(ORIGIN)).toBeUndefined();
+    expect(pins.list()).toEqual([]);
+    expect(pins.reachPinFor(ORIGIN, true)).toBe(pinOf(listenerCert));
   });
 
-  it("records nothing and opens nothing when the computer serves another key", async () => {
+  it("records nothing when the computer serves another key", async () => {
     const pins = freshPins();
-    const open = vi.fn();
 
     const outcome = await pairFromPairingCode({
       code: pairingCode(pinOf(listenerCert)),
       pins,
-      windows: { open, closeAll: vi.fn() },
       webBuildVersion: "0.1.0",
       fetchFor: () => async () => {
         throw new ListenerTrustRefused("pin-mismatch");
@@ -219,50 +201,24 @@ describe("pairing with another computer from its code", () => {
         "This isn't the computer you paired with: its security key has changed. Octant stopped before sending anything. If its key was replaced on purpose, pair again from that computer.",
     });
     expect(pins.list()).toEqual([]);
-    expect(open).not.toHaveBeenCalled();
   });
 
   it("refuses a tampered or public code without connecting", async () => {
     const fetchFor = vi.fn();
     const pins = freshPins();
-    const open = vi.fn();
     const code = pairingCode(pinOf(listenerCert));
 
     for (const text of [`${code}A`, 42, code.replace("octant-pair-1.", "octant-pair-2.")]) {
       const outcome = await pairFromPairingCode({
         code: text,
         pins,
-        windows: { open, closeAll: vi.fn() },
         webBuildVersion: "0.1.0",
         fetchFor,
       });
       expect(outcome.status).toBe("refused");
     }
     expect(fetchFor).not.toHaveBeenCalled();
-    expect(open).not.toHaveBeenCalled();
-  });
-
-  it("opens a paired computer again only after its key matches the pin", async () => {
-    const pins = freshPins();
-    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
-    const open = vi.fn();
-
-    await expect(
-      openPairedComputer({
-        origin: ORIGIN,
-        pins,
-        windows: { open, closeAll: vi.fn() },
-        connect: async () => ({ status: "refused", reason: "pin-mismatch" }),
-      }),
-    ).resolves.toMatchObject({ status: "refused" });
-    await expect(
-      openPairedComputer({
-        origin: "https://100.101.102.104:8443",
-        pins,
-        windows: { open, closeAll: vi.fn() },
-      }),
-    ).resolves.toEqual({ status: "refused", message: "Octant isn't paired with that computer." });
-    expect(open).not.toHaveBeenCalled();
+    expect(pins.list()).toEqual([]);
   });
 
   it("answers only a trusted local window, on the channels the preload uses", async () => {
@@ -273,69 +229,188 @@ describe("pairing with another computer from its code", () => {
         throw new Error("not an Octant window");
       },
       pins: freshPins,
-      windows: { open: vi.fn(), closeAll: vi.fn() },
-      storage: storagePort(),
       webBuildVersion: "0.1.0",
     });
 
     expect([...handlers.keys()]).toEqual([
       IPC_CHANNELS.pairedComputerPair,
       IPC_CHANNELS.pairedComputerList,
-      IPC_CHANNELS.pairedComputerOpen,
       IPC_CHANNELS.pairedComputerForget,
+      IPC_CHANNELS.pairedComputerSettle,
+      IPC_CHANNELS.pairedComputerRequest,
     ]);
     expect(Object.values(PAIRED_COMPUTER_CHANNELS)).toEqual([...handlers.keys()]);
-    await expect(
-      Promise.resolve().then(() => handlers.get(PAIRED_COMPUTER_CHANNELS.list)?.({})),
-    ).rejects.toThrow("Octant rejected an unauthorized paired-computer request.");
+    for (const channel of handlers.keys()) {
+      await expect(
+        Promise.resolve().then(() => handlers.get(channel)?.({}, "octant-pair-1.x")),
+      ).rejects.toThrow("Octant rejected an unauthorized paired-computer request.");
+    }
+  });
+});
+
+describe("settling a pairing", () => {
+  const pairing = async (pins: PairedComputerPins, certificate: string) =>
+    pairFromPairingCode({
+      code: pairingCode(pinOf(certificate)),
+      pins,
+      webBuildVersion: "0.1.0",
+      fetchFor: await hostFetch().then((fetch) => () => fetch),
+    });
+
+  it("records the pin only when the other computer approved, and keeps it after a restart", async () => {
+    const path = join(mkdtempSync(join(directory, "pins-")), "pins.json");
+    const pins = new PairedComputerPins(path);
+    await pairing(pins, listenerCert);
+    expect(new PairedComputerPins(path).list()).toEqual([]);
+
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins })).toEqual({
+      status: "settled",
+    });
+
+    expect(new PairedComputerPins(path).pinFor(ORIGIN)).toBe(pinOf(listenerCert));
+  });
+
+  it("drops an abandoned pairing and leaves nothing recorded", async () => {
+    const pins = freshPins();
+    await pairing(pins, listenerCert);
+
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "abandoned", pins }).status).toBe(
+      "settled",
+    );
+
+    expect(pins.reachPinFor(ORIGIN, true)).toBeUndefined();
+    expect(pins.list()).toEqual([]);
+  });
+
+  it("leaves a completed pairing alone when a fresh code for the same computer is abandoned", async () => {
+    const path = join(mkdtempSync(join(directory, "pins-")), "pins.json");
+    const pins = new PairedComputerPins(path);
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
+
+    await expect(pairing(pins, listenerCert)).resolves.toMatchObject({ status: "verified" });
+    settlePairedComputer({ origin: ORIGIN, outcome: "abandoned", pins });
+
+    expect(pins.pinFor(ORIGIN)).toBe(pinOf(listenerCert));
+    expect(new PairedComputerPins(path).pinFor(ORIGIN)).toBe(pinOf(listenerCert));
+    await expect(forgetPairedComputer({ origin: ORIGIN, pins })).resolves.toEqual({
+      status: "forgotten",
+    });
+  });
+
+  it("refuses a code whose key differs from the one recorded, and changes nothing", async () => {
+    const pins = freshPins();
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
+
+    const outcome = await pairing(pins, otherCert);
+
+    expect(outcome.status).toBe("refused");
+    expect(pins.reachPinFor(ORIGIN, true)).toBe(pinOf(listenerCert));
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins }).status).toBe(
+      "refused",
+    );
+    expect(pins.pinFor(ORIGIN)).toBe(pinOf(listenerCert));
+  });
+
+  it("keeps a computer already recorded on its recorded pin, so a live session's hello is never redirected", () => {
+    const pins = freshPins();
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: "sha256-recorded" });
+    pins.stage({ origin: ORIGIN, displayName: "Studio Mac", pin: "sha256-staged" });
+
+    for (const pairingRoute of [true, false]) {
+      expect(pins.reachPinFor(ORIGIN, pairingRoute)).toBe("sha256-recorded");
+    }
+  });
+
+  it("refreshes the recorded name when a fresh code for the same key is approved", async () => {
+    const pins = freshPins();
+    pins.record({ origin: ORIGIN, displayName: "Old name", pin: pinOf(listenerCert) });
+
+    await pairing(pins, listenerCert);
+    settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins });
+
+    expect(pins.list()).toEqual([{ origin: ORIGIN, displayName: "Studio Mac" }]);
+  });
+
+  it("lets a pairing that was never settled lapse, and refuses to approve one that lapsed", async () => {
+    let now = 1_000_000;
+    const pins = new PairedComputerPins(
+      join(mkdtempSync(join(directory, "pins-")), "pins.json"),
+      () => now,
+    );
+    await pairing(pins, listenerCert);
+    now += STAGED_PIN_MS + 1;
+
+    expect(pins.reachPinFor(ORIGIN, true)).toBeUndefined();
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins }).status).toBe(
+      "refused",
+    );
+    expect(pins.list()).toEqual([]);
+  });
+
+  it("refuses approval when no pairing is open, and an outcome it does not know", () => {
+    const pins = freshPins();
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins }).status).toBe(
+      "refused",
+    );
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "forgotten", pins }).status).toBe(
+      "refused",
+    );
+    expect(settlePairedComputer({ origin: 42, outcome: "approved", pins }).status).toBe("refused");
+  });
+
+  it("forgetting a computer also drops a pairing open for it, so a later approval records nothing", async () => {
+    const pins = freshPins();
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
+    await pairing(pins, listenerCert);
+
+    await forgetPairedComputer({ origin: ORIGIN, pins });
+
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins }).status).toBe(
+      "refused",
+    );
+    expect(pins.pinFor(ORIGIN)).toBeUndefined();
+  });
+
+  it("forgets a pairing that was never recorded, so it cannot be approved afterwards", async () => {
+    const pins = freshPins();
+    await pairing(pins, listenerCert);
+
+    await expect(forgetPairedComputer({ origin: ORIGIN, pins })).resolves.toEqual({
+      status: "forgotten",
+    });
+
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins }).status).toBe(
+      "refused",
+    );
+    expect(pins.pinFor(ORIGIN)).toBeUndefined();
+    expect(pins.reachPinFor(ORIGIN, true)).toBeUndefined();
   });
 });
 
 describe("forgetting a paired computer", () => {
-  it("closes its windows, drops its pin so its key is trusted by nothing, and clears its page storage", async () => {
+  it("drops its pin so nothing can reach it, and keeps the pins of other computers", async () => {
     const path = join(mkdtempSync(join(directory, "pins-")), "pins.json");
     const pins = new PairedComputerPins(path);
     pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
     const other = "https://100.101.102.104:8443";
     pins.record({ origin: other, displayName: "Laptop", pin: pinOf(otherCert) });
-    const storage = storagePort();
-    const closeAll = vi.fn();
 
-    const outcome = await forgetPairedComputer({
-      origin: ORIGIN,
-      pins,
-      windows: { open: vi.fn(), closeAll },
-      storage,
-    });
+    const outcome = await forgetPairedComputer({ origin: ORIGIN, pins });
 
     expect(outcome).toEqual({ status: "forgotten" });
-    expect(closeAll).toHaveBeenCalledWith(ORIGIN);
-    expect(pins.judgeCertificate("100.101.102.103", listenerCert, NOW)).toBe(CERTIFICATE_REFUSED);
     expect(new PairedComputerPins(path).list()).toEqual([{ origin: other, displayName: "Laptop" }]);
-    expect(storage.clearStorageData).toHaveBeenCalledWith({ origin: ORIGIN });
-    expect(storage.clearCache).toHaveBeenCalledOnce();
-    expect(storage.clearAuthCache).toHaveBeenCalledOnce();
+    await expect(
+      requestPairedComputer({
+        request: { origin: ORIGIN, method: "GET", path: "/api/remote/hello" },
+        pins,
+        fetchFor: () => {
+          throw new Error("a forgotten computer must not be dialled");
+        },
+      }),
+    ).resolves.toEqual({ status: "refused", message: "Octant isn't paired with that computer." });
   });
 
-  it("forgets the pages of that computer's servers too, and says so when they could not be cleared", async () => {
-    const pins = freshPins();
-    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
-    const forgetListener = vi.fn().mockResolvedValue({ status: "incomplete" });
-
-    const outcome = await forgetPairedComputer({
-      origin: ORIGIN,
-      pins,
-      windows: { open: vi.fn(), closeAll: vi.fn() },
-      storage: storagePort(),
-      serverPages: { forgetListener },
-    });
-
-    expect(forgetListener).toHaveBeenCalledWith(ORIGIN);
-    expect(outcome.status).toBe("refused");
-    expect(pins.list()).toEqual([]);
-  });
-
-  it("still forgets the server pages when the session storage cannot be cleared", async () => {
+  it("forgets the pages of that computer's servers too", async () => {
     const pins = freshPins();
     pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
     const forgetListener = vi.fn().mockResolvedValue({ status: "forgotten" });
@@ -343,46 +418,43 @@ describe("forgetting a paired computer", () => {
     const outcome = await forgetPairedComputer({
       origin: ORIGIN,
       pins,
-      windows: { open: vi.fn(), closeAll: vi.fn() },
-      storage: { ...storagePort(), clearCache: vi.fn().mockRejectedValue(new Error("x")) },
       serverPages: { forgetListener },
     });
 
     expect(forgetListener).toHaveBeenCalledWith(ORIGIN);
-    expect(outcome.status).toBe("refused");
+    expect(outcome).toEqual({ status: "forgotten" });
+  });
+
+  it("forgets the computer and says so when its server pages could not be cleared", async () => {
+    for (const forgetListener of [
+      vi.fn().mockResolvedValue({ status: "incomplete" }),
+      vi.fn().mockRejectedValue(new Error("x")),
+    ]) {
+      const pins = freshPins();
+      pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
+
+      const outcome = await forgetPairedComputer({
+        origin: ORIGIN,
+        pins,
+        serverPages: { forgetListener },
+      });
+
+      expect(outcome.status).toBe("forgotten");
+      expect(outcome).toHaveProperty("warning");
+      expect(pins.list()).toEqual([]);
+    }
   });
 
   it("refuses a computer it isn't paired with and touches nothing", async () => {
     const pins = freshPins();
-    const storage = storagePort();
-    const closeAll = vi.fn();
+    const forgetListener = vi.fn();
 
     for (const origin of [ORIGIN, 42]) {
       await expect(
-        forgetPairedComputer({ origin, pins, windows: { open: vi.fn(), closeAll }, storage }),
+        forgetPairedComputer({ origin, pins, serverPages: { forgetListener } }),
       ).resolves.toEqual({ status: "refused", message: "Octant isn't paired with that computer." });
     }
-    expect(closeAll).not.toHaveBeenCalled();
-    expect(storage.clearStorageData).not.toHaveBeenCalled();
-  });
-
-  it("still forgets the pin and says so when the page storage cannot be cleared", async () => {
-    const pins = freshPins();
-    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
-    const storage = {
-      ...storagePort(),
-      clearStorageData: vi.fn().mockRejectedValue(new Error("x")),
-    };
-
-    const outcome = await forgetPairedComputer({
-      origin: ORIGIN,
-      pins,
-      windows: { open: vi.fn(), closeAll: vi.fn() },
-      storage,
-    });
-
-    expect(outcome.status).toBe("refused");
-    expect(pins.list()).toEqual([]);
+    expect(forgetListener).not.toHaveBeenCalled();
   });
 
   it("attempts every clearing step even when an earlier one fails", async () => {
@@ -394,25 +466,6 @@ describe("forgetting a paired computer", () => {
     await expect(clearRemotePageStorage(storage, ORIGIN)).rejects.toThrow("x");
     expect(storage.clearCache).toHaveBeenCalledOnce();
     expect(storage.clearAuthCache).toHaveBeenCalledOnce();
-  });
-
-  it("opens no window for an Open still connecting when the computer is forgotten", async () => {
-    const pins = freshPins();
-    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
-    const open = vi.fn();
-
-    const outcome = await openPairedComputer({
-      origin: ORIGIN,
-      pins,
-      windows: { open, closeAll: vi.fn() },
-      connect: async () => {
-        pins.forget(ORIGIN);
-        return { status: "connected", socket: { destroy: vi.fn() } } as never;
-      },
-    });
-
-    expect(outcome.status).toBe("refused");
-    expect(open).not.toHaveBeenCalled();
   });
 
   it("clears one origin's page storage through the helper any unpair path can call", async () => {

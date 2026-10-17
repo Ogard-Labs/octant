@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { RunningService } from "@octant/contracts";
 import { LocalServerClientFailure, type LocalServerClient } from "@octant/client-runtime";
 import type { RemoteSessionFacts } from "@octant/client-runtime";
-import type { ListenerOriginTrust } from "@octant/client-runtime/remote-listener-trust";
 import {
   createRemoteServerProxyClient,
   type RemoteServerProxyClient,
@@ -27,11 +26,16 @@ export interface RemoteServerLiveHost {
   readonly hostId: string;
   readonly hostName: string;
   readonly origin: string;
-  readonly listenerTrust: ListenerOriginTrust;
   /** Mints a proxy session with this device's key. */
   readonly issueSession: () => Promise<RemoteSessionFacts>;
   /** Signs with this device's non-extractable key for that host. */
   readonly sign: (payload: string) => Promise<string>;
+  /**
+   * How requests to this host travel, when the window's own fetch cannot reach
+   * it: a computer paired through Other computers is reached through the
+   * desktop, because the window's page policy allows loopback only.
+   */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 export interface RemoteServerLiveOpener {
@@ -69,7 +73,7 @@ export function createRemoteServerLiveOpener(
         client = createRemoteServerProxyClient({
           origin: host.origin,
           hostName: host.hostName,
-          fetch,
+          fetch: host.fetch ?? fetch,
           issueSession: host.issueSession,
           sign: host.sign,
         });
@@ -84,7 +88,6 @@ export function createRemoteServerLiveOpener(
         hostId: host.hostId,
         hostName: host.hostName,
         listenerOrigin: host.origin,
-        listenerTrust: host.listenerTrust,
         grant: opening.grant,
         mode,
       });
