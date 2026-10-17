@@ -1,10 +1,11 @@
 import { observedRpcLatency, slowRequestRoute, withServerTiming } from "../latencyStatsProjection";
 import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
 import { compareRemoteForwardListToClassifier } from "../remoteForwardListClassifierGate";
-import { createReplicaSyncStatusRouteHandler } from "../replica/replicaMembershipRoutes";
-import { createSyncedArtifactRouteHandler } from "../replica/syncedArtifactRoutes";
+import { readHostIdentity } from "../persistence/remoteAccessProjection";
 import { createHostResourceRouteHandler } from "../hostResourceRoutes";
 import type { ServerStart } from "./serverShape";
+import type { ReplicaWiring } from "./replica";
+import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { UsageWiring } from "./usage";
@@ -25,7 +26,7 @@ import type { CanvasWiring } from "./canvas";
 import type { AutomationWiring } from "./automation";
 import type { WorkRequestsWiring } from "./workRequests";
 
-export type RoutesDependencies = Pick<ServerStart, "latencyStats"> &
+export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence"> &
   Pick<AgentRunsWiring, "agentRunRoutes" | "agentRunSettingsRoutes"> &
   Pick<IntegrationsWiring, "githubRoutes" | "integrationRoutes"> &
   Pick<
@@ -39,7 +40,6 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats"> &
   Pick<ComputerUseWiring, "computerUseRoutes" | "launchSessionRoutes" | "machineChangeRoutes"> &
   Pick<
     WorkspaceWiring,
-    | "agentMessageRoutes"
     | "githubCloneRoutes"
     | "goalRoutes"
     | "planRoutes"
@@ -97,7 +97,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats"> &
     ZenWiring,
     "navigatorAssistantRoutes" | "workTurnRoutes" | "zenBackgroundRoutes" | "zenRoutes"
   > &
-  Pick<ContextWiring, "browserAutomationRoutes" | "contextRoutes"> &
+  Pick<ContextWiring, "agentMessageRoutes" | "browserAutomationRoutes" | "contextRoutes"> &
   Pick<
     WorkFilesWiring,
     | "imageRoutes"
@@ -122,14 +122,9 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats"> &
     | "workPromotionRoutes"
     | "workRequestRoutes"
     | "workThreadRoutes"
-  > & {
-    /** Wired by wireRemote; read only after startup. */
-    readonly hostResourceRoutes: () => ReturnType<typeof createHostResourceRouteHandler>;
-    /** Wired by wireRemote; read only after startup. */
-    readonly replicaSyncStatusRoutes: () => ReturnType<typeof createReplicaSyncStatusRouteHandler>;
-    /** Wired by wireRemote; read only after startup. */
-    readonly syncedArtifactRoutes: () => ReturnType<typeof createSyncedArtifactRouteHandler>;
-  };
+  > &
+  Pick<ReplicaWiring, "replicaSyncStatusRoutes" | "syncedArtifactRoutes"> &
+  Pick<AuthorityWiring, "windowAuthorityStore">;
 
 export function wireRoutes(deps: RoutesDependencies) {
   const {
@@ -164,7 +159,6 @@ export function wireRoutes(deps: RoutesDependencies) {
     githubRoutes,
     goalLoopRoutes,
     goalRoutes,
-    hostResourceRoutes,
     imageRoutes,
     integrationRoutes,
     latencyStats,
@@ -217,15 +211,22 @@ export function wireRoutes(deps: RoutesDependencies) {
     workTurnRoutes,
     zenBackgroundRoutes,
     zenRoutes,
+    persistence,
+    windowAuthorityStore,
   } = deps;
+  const hostResourceRoutes = createHostResourceRouteHandler({
+    windowAuthorityStore,
+    dataDirectory: persistence.dataDirectory,
+    hostId: () => readHostIdentity(persistence.connection)?.host_id,
+  });
 
   // One route chain is shared by the loopback listener and the authenticated
   // remote gateway. The remote dispatcher binds the verified principal and
   // gives this chain a loopback-shaped internal request; individual handlers
   // resolve the bound context through principalRouteContext before effects.
   const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
-    (await hostResourceRoutes()(request)) ??
-    (await replicaSyncStatusRoutes()(request)) ??
+    (await hostResourceRoutes(request)) ??
+    (await replicaSyncStatusRoutes(request)) ??
     (await projectBindingRoutes(request)) ??
     (await launchSessionRoutes(request)) ??
     (await machineChangeRoutes(request)) ??
@@ -272,7 +273,7 @@ export function wireRoutes(deps: RoutesDependencies) {
     (await speechRoutes(request)) ??
     (await artifactLibraryRoutes(request)) ??
     (await artifactMirrorRoutes(request)) ??
-    (await syncedArtifactRoutes()(request)) ??
+    (await syncedArtifactRoutes(request)) ??
     (await automationRoutes(request)) ??
     (await automationNotificationRoutes(request)) ??
     (await workPromotionRoutes(request)) ??

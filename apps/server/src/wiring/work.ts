@@ -2,7 +2,7 @@ import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import { lstat } from "node:fs/promises";
 import {
-  type ChatThreadId,
+  decodeAgentRunParentThreadId,
   decodeChatThreadId,
   decodeCodeOperationId,
   decodeCodeThreadId,
@@ -16,8 +16,8 @@ import {
   LOCAL_HOST_ID,
   type ProjectId,
   ReplayCursor,
-  type WindowId,
   type WorkAccess,
+  type WorkThreadId,
   type WorkStatusDatedItem,
 } from "@octant/contracts";
 import { Effect, Schema } from "effect";
@@ -30,10 +30,6 @@ import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnFileObserver } from "../work/workTurnFileObserver";
 import { WorkArtifactProjection } from "../work/workArtifactProjection";
 import { WorkThreadService } from "../work/workThreadService";
-import {
-  hydrateWorkTurnProjectionFromJournal,
-  WorkTurnProjection,
-} from "../work/workTurnProjection";
 import { WorkTurnService } from "../work/workTurnService";
 import { withWorkflowLifecycle } from "../work/workThreadWorkflowHook";
 import { WorkflowEventStore } from "../work/workflowEventStore";
@@ -61,8 +57,13 @@ import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import {
   defaultShellSettings,
   enabledModes,
+  isAgentRunActiveStatus,
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
+import {
+  boardRuntimeActivityFromTurnsAndSignals,
+  type WorkBoardRuntimeActivity,
+} from "../work/workThreadBoardService";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { requireJournalHydration } from "../persistence/journalHydration";
@@ -70,6 +71,7 @@ import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers"
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
@@ -79,19 +81,11 @@ import type { BrowserWiring } from "./browser";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessWiring } from "./harness";
 import type { ChatWiring } from "./chat";
+import type { WorkRequestStateWiring } from "./workRequestState";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<
-    LateBindings,
-    | "canvasAgentToolPort"
-    | "observeWorkThreadRuntime"
-    | "purgeQueuedChatMessages"
-    | "revokeQueuedMessages"
-    | "runningWorkTurnAccess"
-    | "workRequestRuntime"
-    | "workRequestService"
-  >;
+  readonly late: Pick<LateBindings, "canvasAgentToolPort" | "runningWorkTurnAccess">;
 } & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
@@ -99,8 +93,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "browserModelBindings"
     | "codeSessionAuthority"
     | "liveTurns"
-    | "requireBrowserAutomationService"
-    | "requireBrowserToolApprovalService"
+    | "onWindowRevoked"
     | "windowAuthorityStore"
   > &
   Pick<
@@ -112,7 +105,9 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "runtimeOutsideContentMarks"
     | "sideTasks"
     | "spendCeiling"
+    | "threadAwaitsHarnessApproval"
   > &
+  Pick<WorkRequestStateWiring, "workRequestRuntime" | "workRequestService"> &
   Pick<
     IntegrationsWiring,
     | "consumeCreateFromIssueFramed"
@@ -130,7 +125,6 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "projectService"
     | "workProjectStatusFiles"
     | "workProjectStatusReader"
-    | "workThreadProjection"
   > &
   Pick<
     CodeWiring,
@@ -146,14 +140,23 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "chatAttachmentStore"
     | "configuredDriverOptions"
     | "probeProviderForThreads"
-    | "providerRuntimeRegistry"
     | "refreshStandaloneSkills"
     | "resolveSelectedExtensions"
   > &
-  Pick<BrowserWiring, "browserAuthority" | "windowHoldsProject"> &
+  Pick<
+    BrowserWiring,
+    "browserAutomationService" | "browserToolApprovalService" | "windowHoldsProject"
+  > &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<HarnessWiring, "followUpCreation" | "nativeHarnessComposition" | "sideTaskFirstMessage"> &
-  Pick<ChatWiring, "chatService" | "imageJobService" | "threadMentionService">;
+  Pick<
+    ChatWiring,
+    "chatService" | "guardChatAttachmentPurge" | "imageJobService" | "threadMentionService"
+  > &
+  Pick<
+    FoundationsWiring,
+    "browserAuthority" | "providerRuntimeRegistry" | "workThreadProjection" | "workTurnProjection"
+  >;
 
 export function wireWork(deps: WorkDependencies) {
   const {
@@ -162,11 +165,14 @@ export function wireWork(deps: WorkDependencies) {
     agentsManagedToolsFor,
     authorizeWorkThreadForWindow,
     browserAuthority,
+    browserAutomationService,
     browserCaptures,
     browserModelBindings,
+    browserToolApprovalService,
     canAccessCodeProject,
     chatAttachmentStore,
     chatService,
+    guardChatAttachmentPurge,
     codeAttachments,
     codeService,
     codeSessionAuthority,
@@ -186,14 +192,13 @@ export function wireWork(deps: WorkDependencies) {
     managedWorktreeReceipts,
     nativeHarnessComposition,
     nativeHarnessHooks,
+    onWindowRevoked,
     peekCreateFromIssueFramed,
     persistence,
     probeProviderForThreads,
     projectService,
     providerRuntimeRegistry,
     refreshStandaloneSkills,
-    requireBrowserAutomationService,
-    requireBrowserToolApprovalService,
     resolveSelectedExtensions,
     roots,
     routeCodeService,
@@ -201,6 +206,7 @@ export function wireWork(deps: WorkDependencies) {
     sideTaskFirstMessage,
     sideTasks,
     spendCeiling,
+    threadAwaitsHarnessApproval,
     threadMentionService,
     threadOutsideContentMarks,
     windowAuthorityStore,
@@ -208,7 +214,10 @@ export function wireWork(deps: WorkDependencies) {
     workAttachments,
     workProjectStatusFiles,
     workProjectStatusReader,
+    workRequestRuntime,
+    workRequestService,
     workThreadProjection,
+    workTurnProjection,
   } = deps;
   return Effect.gen(function* () {
     const workArtifactProjection = new WorkArtifactProjection();
@@ -226,23 +235,7 @@ export function wireWork(deps: WorkDependencies) {
       }),
       "Work artifact",
     );
-    const workTurnProjection = new WorkTurnProjection();
     const workTurnUsageStore = new WorkTurnUsageStore();
-    requireJournalHydration(
-      hydrateWorkTurnProjectionFromJournal({
-        replay: (cursor) =>
-          persistence.journal.replayAggregateType({
-            ...Schema.decodeUnknownSync(ReplayCursor)({
-              afterSequence: cursor.afterSequence,
-              limit: cursor.limit,
-            }),
-            aggregateType: cursor.aggregateType ?? "work-turn",
-          }),
-        projection: workTurnProjection,
-      }),
-      "Work turn",
-    );
-    workTurnProjection.markInterruptedOnRestart(new Date().toISOString());
     // The navigation poll runs about once a second while a date in STATUS.md
     // moves at day granularity, so each Project's file is re-read at most this
     // often; the inbox reminder freshens within the same window.
@@ -262,6 +255,32 @@ export function wireWork(deps: WorkDependencies) {
       workDueReminderCache.set(key, { at: now, item });
       return item;
     };
+    const observeWorkThreadRuntime = (threadId: WorkThreadId): WorkBoardRuntimeActivity => {
+      const thread = workThreadProjection.read(threadId);
+      const pendingRequests = thread
+        ? workRequestService
+            .listForThread(thread.projectId, threadId)
+            .filter((request) => request.status === "pending")
+        : [];
+      const pendingRequest = pendingRequests.at(0);
+      const leadApprovalWaiting = threadAwaitsHarnessApproval(String(threadId));
+      const childRuns = persistence.agentRunProjection.parentSummary(
+        decodeAgentRunParentThreadId(String(threadId)),
+      );
+      return boardRuntimeActivityFromTurnsAndSignals({
+        turns: workTurnProjection.listForThread(threadId),
+        pendingRequest: pendingRequest !== undefined || leadApprovalWaiting,
+        ...(pendingRequest !== undefined
+          ? { pendingRequestKind: pendingRequest.detail.kind }
+          : leadApprovalWaiting
+            ? { pendingRequestKind: "approval" as const }
+            : {}),
+        childActive: childRuns.filter(
+          (run) => isAgentRunActiveStatus(run.lifecycleStatus) && run.lifecycleStatus !== "waiting",
+        ).length,
+        childWaiting: childRuns.filter((run) => run.lifecycleStatus === "waiting").length,
+      });
+    };
     const workThreadService = new WorkThreadService({
       persistence,
       recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
@@ -274,7 +293,7 @@ export function wireWork(deps: WorkDependencies) {
       onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
       probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
       observeRuntime: (threadId) => ({
-        ...(late.observeWorkThreadRuntime.current?.(threadId) ?? { executing: false }),
+        ...observeWorkThreadRuntime(threadId),
         ...liveTurns.read(String(threadId)),
       }),
       projectDueReminder,
@@ -294,8 +313,7 @@ export function wireWork(deps: WorkDependencies) {
       resolveSelectedExtensions,
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
-      onRequestSettled: (input, release) =>
-        late.workRequestService.current?.onSettled(input, release) ?? (() => undefined),
+      onRequestSettled: (input, release) => workRequestService.onSettled(input, release),
       persistence: {
         ...persistence,
         readProviderModel: (providerInstanceId, modelId) =>
@@ -327,13 +345,13 @@ export function wireWork(deps: WorkDependencies) {
               resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
               browser: {
                 inspectThread: (ownerWindowId, threadId) =>
-                  requireBrowserAutomationService().inspectThread(ownerWindowId, threadId),
-                create: (command) => requireBrowserAutomationService().create(command),
-                act: (command) => requireBrowserAutomationService().act(command),
+                  browserAutomationService.inspectThread(ownerWindowId, threadId),
+                create: (command) => browserAutomationService.create(command),
+                act: (command) => browserAutomationService.act(command),
                 releaseThread: (ownerWindowId, threadId) =>
-                  requireBrowserAutomationService().releaseThread(ownerWindowId, threadId),
+                  browserAutomationService.releaseThread(ownerWindowId, threadId),
               },
-              approvals: requireBrowserToolApprovalService(),
+              approvals: browserToolApprovalService,
               uuid: randomUUID,
             });
         const sideTaskTools = !browserSupported
@@ -415,7 +433,7 @@ export function wireWork(deps: WorkDependencies) {
         if (instance === undefined) return undefined;
         return attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, configuredDriverOptions),
-          () => late.workRequestRuntime.current,
+          () => workRequestRuntime,
         );
       },
       attachments: workAttachments,
@@ -959,19 +977,18 @@ export function wireWork(deps: WorkDependencies) {
       }),
     });
     yield* Effect.promise(() => threadMessageQueue.recover());
-    const revokeQueuedMessages: ((windowId: WindowId) => Promise<void>) | undefined = (windowId) =>
-      threadMessageQueue.revokeWindow(windowId);
-    late.revokeQueuedMessages.current = revokeQueuedMessages;
-    const purgeQueuedChatMessages: ((threadId: ChatThreadId) => Promise<void>) | undefined = async (
-      threadId,
-    ) => {
+    onWindowRevoked((windowId) => {
+      void threadMessageQueue
+        .revokeWindow(windowId)
+        .catch(() => console.error("Queued message authority could not be revoked."));
+    });
+    guardChatAttachmentPurge(async (threadId) => {
       const result = await threadMessageQueue.purgeThread(
         decodeThreadMessageQueueScope({ mode: "chat", threadId }),
       );
       if (result.status !== "released")
         throw new Error("Queued attachments could not be released.");
-    };
-    late.purgeQueuedChatMessages.current = purgeQueuedChatMessages;
+    });
     yield* Effect.promise(() => chatService.recoverPendingDeletions());
     // Accepted queue items retain images before draft recovery removes uploads
     // whose composer disappeared during the previous host process.
@@ -1014,8 +1031,8 @@ export function wireWork(deps: WorkDependencies) {
       threadMessageQueueRoutes,
       workArtifactProjection,
       workThreadService,
+      observeWorkThreadRuntime,
       workThreadServiceWithWorkflows,
-      workTurnProjection,
       workTurnService,
       workflowService,
     };

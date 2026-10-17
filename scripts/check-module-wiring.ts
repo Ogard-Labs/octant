@@ -18,6 +18,9 @@ import { fileURLToPath } from "node:url";
  * Rule D: no package module is used only by its own barrel.
  * Rule E: no module that exports runtime values is referenced only by type imports.
  * Rule F: no KNOWN_ISLANDS entry names a module that is reachable after all.
+ * Rule G: the server's wiring modules carry no more forward references (late
+ * cells and getters read per use) than {@link WIRING_CYCLE_CEILING} allows, and
+ * the ceiling is tightened whenever a reference is removed.
  *
  * Rule B recognizes real non-import entry points (HTML scripts, dynamic
  * `import()`, package `exports` subpaths, binaries) rather than listing them by
@@ -697,6 +700,63 @@ export function findUncalledEndpoints(
     }));
 }
 
+/**
+ * What the server's wiring modules still read before the value exists: values
+ * one module assigns after another has captured them (`LateBindings` cells)
+ * and getters a dependency type carries for a value a later module creates.
+ * Each is a cycle between areas. The ceiling only goes down: removing a
+ * reference without lowering it fails Rule G, so the debt cannot creep back.
+ */
+export const WIRING_CYCLE_CEILING = { lateCells: 7, forwardGetters: 9 } as const;
+
+const LATE_BINDINGS_PATH = "apps/server/src/wiring/lateBindings.ts";
+const LATE_CELL_PATTERN = /^ {2}readonly \w+:/gm;
+const FORWARD_GETTER_PATTERN =
+  /\/\*\* Wired by \w+; read only after startup\. \*\/\s*readonly \w+: \(\)\s*=>/g;
+
+export function countWiringCycleDebt(files: ReadonlyArray<ScannedFile>): {
+  readonly lateCells: number;
+  readonly forwardGetters: number;
+} {
+  let lateCells = 0;
+  let forwardGetters = 0;
+  for (const file of files) {
+    if (file.path === LATE_BINDINGS_PATH) {
+      const start = file.content.indexOf("export interface LateBindings");
+      lateCells =
+        start === -1 ? 0 : (file.content.slice(start).match(LATE_CELL_PATTERN) ?? []).length;
+    } else if (file.path.startsWith(SERVER_WIRING_PREFIX) && !isTestPath(file.path)) {
+      forwardGetters += (file.content.match(FORWARD_GETTER_PATTERN) ?? []).length;
+    }
+  }
+  return { lateCells, forwardGetters };
+}
+
+export function findWiringCycleDebt(
+  files: ReadonlyArray<ScannedFile>,
+  ceiling: { readonly lateCells: number; readonly forwardGetters: number } = WIRING_CYCLE_CEILING,
+): ReadonlyArray<WiringViolation> {
+  if (!files.some((file) => file.path === SERVER_ROOT_PATH)) return [];
+  const counted = countWiringCycleDebt(files);
+  const violations: WiringViolation[] = [];
+  const check = (name: string, found: number, allowed: number, path: string) => {
+    if (found > allowed) {
+      violations.push({
+        path,
+        reason: `${found} ${name} exceed the ceiling of ${allowed}; build the value before the module that reads it instead of adding a forward reference`,
+      });
+    } else if (found < allowed) {
+      violations.push({
+        path,
+        reason: `${found} ${name} remain but the ceiling is ${allowed}; lower WIRING_CYCLE_CEILING in scripts/check-module-wiring.ts`,
+      });
+    }
+  };
+  check("late cells", counted.lateCells, ceiling.lateCells, LATE_BINDINGS_PATH);
+  check("forward getters", counted.forwardGetters, ceiling.forwardGetters, SERVER_WIRING_PREFIX);
+  return violations;
+}
+
 export function findWiringViolations(
   files: ReadonlyArray<ScannedFile>,
 ): ReadonlyArray<WiringViolation> {
@@ -707,6 +767,7 @@ export function findWiringViolations(
     ...findUncalledEndpoints(files),
     ...findBarrelOnlyModules(files),
     ...findStaleIslandExemptions(files),
+    ...findWiringCycleDebt(files),
   ];
 }
 
