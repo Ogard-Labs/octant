@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { access } from "node:fs/promises";
+import { access, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join, relative } from "node:path";
 import type {
@@ -641,6 +641,35 @@ async function resolveApprovedExecutable(command: string, approvedPath: string |
   throw new Error(`MCP stdio executable ${command} is unavailable on the approved host path.`);
 }
 
+/**
+ * The sandbox grants read access around the file it launches, not around the
+ * interpreter a `#!` line hands it to, so a server declared as a script inside
+ * the plugin exits right after it starts. It is refused before spawn instead,
+ * with the fix. Only a command under the plugin's own directory is checked; a
+ * launcher found on the host path or at an absolute path outside it is left to
+ * the normal start path, as is a command that cannot be opened.
+ */
+async function startsWithShebang(command: string): Promise<boolean> {
+  let handle;
+  try {
+    handle = await open(command, "r");
+    const { bytesRead, buffer } = await handle.read(Buffer.alloc(2), 0, 2, 0);
+    return bytesRead === 2 && buffer[0] === 0x23 && buffer[1] === 0x21;
+  } catch {
+    return false;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+function shebangCommandRefusal(serverName: string): string {
+  return (
+    `MCP server ${serverName} runs a script from the plugin that starts with a #! line, which the sandbox cannot run. ` +
+    'Declare the interpreter as the command instead, for example "command": "node", ' +
+    '"args": ["${PLUGIN_ROOT}/server.mjs"].'
+  );
+}
+
 function supervisedStdioProcessPort(input: {
   readonly supervisor: Pick<ExtensionSupervisor, "startInteractive">;
   readonly target: AgentPluginMcpSessionKey;
@@ -659,6 +688,12 @@ function supervisedStdioProcessPort(input: {
         !isAbsolute(pluginData)
       ) {
         throw new Error("MCP stdio sandbox roots are unavailable.");
+      }
+      if (
+        isContainedPath(pluginRoot, launch.command) &&
+        (await startsWithShebang(launch.command))
+      ) {
+        throw new Error(shebangCommandRefusal(launch.name));
       }
       const runtime: ExtensionRuntimeStartInput = {
         extensionId: input.target.extensionId,
