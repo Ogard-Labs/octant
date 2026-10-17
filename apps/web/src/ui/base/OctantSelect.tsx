@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../shadcn/select";
+import { fieldPaint } from "../shadcn/field-paint";
 import { cn } from "../shadcn/utils";
 import { ChevronDown } from "lucide-react";
 import {
@@ -132,7 +133,8 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
             id={props.id}
             disabled={props.disabled}
             className={cn(
-              "flex h-8 w-full items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm text-foreground whitespace-nowrap disabled:opacity-50 window-no-drag",
+              fieldPaint,
+              "flex h-8 w-full items-center justify-between gap-2 px-2.5 py-1 text-sm text-foreground whitespace-nowrap disabled:opacity-50 window-no-drag",
               props.triggerClassName,
               props.className,
             )}

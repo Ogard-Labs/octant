@@ -1,4 +1,5 @@
 import { forwardRef, type ComponentProps } from "react";
+import { fieldPaint } from "./field-paint";
 import { cn } from "./utils";
 
 export type TextareaProps = ComponentProps<"textarea"> & {
@@ -10,8 +11,10 @@ export type TextareaProps = ComponentProps<"textarea"> & {
  * `field-sizing-content` grows the box with what is typed instead of holding a
  * fixed height, so `min-h` is a floor rather than the size.
  */
-const fieldRecipe =
-  "flex field-sizing-content min-h-16 w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 md:text-sm";
+const fieldRecipe = cn(
+  "flex field-sizing-content min-h-16 w-full px-2.5 py-2 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 md:text-sm",
+  fieldPaint,
+);
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
   { className, unstyled, ...props },
