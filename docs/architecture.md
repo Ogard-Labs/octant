@@ -4191,7 +4191,14 @@ native harness in `apps/server/src/harness`:
   Work, and for Code the `/api/pending-requests` approvals that carry
   `browserOrigin` (answered with `answer-provider-approval`). A Code
   approval without `browserOrigin` is a provider's own tool approval and is
-  never offered as a site ask. A terminal whose stdin has ended denies the
+  never offered as a site ask. A Chat lead's question is not in the harness
+  session: Chat parks the turn on it and journals it on the attempt, so the
+  Chat thread port reads it from the thread (`pendingQuestion` on the snapshot)
+  and answers it with `answer-chat-turn-question` against the thread's current
+  version, the command the transcript card sends. Line mode prompts for it and
+  closes the prompt with a note when the app answers first; the terminal UI
+  shows it in its question panel. Work and Code questions still come from the
+  harness session. A terminal whose stdin has ended denies the
   ask instead of leaving the turn waiting.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
