@@ -37,7 +37,6 @@ import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { WorkspaceWiring } from "./workspace";
-import type { CodeWiring } from "./code";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
@@ -46,8 +45,7 @@ export type AutomationDependencies = Pick<ServerStart, "persistence"> &
   Pick<AuthorityWiring, "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "capacityScheduler"> &
   Pick<WorkspaceWiring, "projectService"> &
-  Pick<CodeWiring, "codeCompletedThreadSource"> &
-  Pick<CodeRuntimeWiring, "routeCodeService"> &
+  Pick<CodeRuntimeWiring, "codeCompletedThreadSource" | "routeCodeService"> &
   Pick<ChatWiring, "chatService"> &
   Pick<WorkWiring, "workThreadService" | "workThreadServiceWithWorkflows" | "workTurnService"> &
   Pick<FoundationsWiring, "workThreadProjection">;

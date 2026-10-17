@@ -16,6 +16,11 @@ import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
 import { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { CodeOperationApprovalStore } from "../code/codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStore";
+import {
+  type CodeActiveTurns,
+  type CodeOperationRuntime,
+  threadWithActiveTurnPosture,
+} from "../code/codeOperationRuntime";
 import { ProcessAuthorityClock } from "../processAuthorityClock";
 import { readDeviceRegistration } from "../persistence/remoteAccessProjection";
 import { AgentRunEventStore } from "../agentRun/agentRunEventStore";
@@ -35,16 +40,29 @@ import { BrowserCaptureStore } from "../browser/browserCaptureStore";
 import { SimulatorInputGrants } from "../apple/simulatorInputGrants";
 import type { ServerStart } from "./serverShape";
 import type { FoundationsWiring } from "./foundations";
-import type { LateBindings } from "./lateBindings";
 
-export type AuthorityDependencies = Pick<ServerStart, "persistence"> &
-  Pick<FoundationsWiring, "browserAuthority"> & {
-    /** Cells settled by a later wiring call; read per use, never at construction. */
-    readonly late: Pick<LateBindings, "codeOperationRuntime">;
-  };
+/**
+ * Where a Code thread's running-turn posture is read from. A runtime the host
+ * was started with never sees the host's registry, so it answers for its own
+ * turns; otherwise the registry is the one the host-built runtime keeps its
+ * running turns in. Either way one source answers, so a turn narrowed to Plan
+ * stays Plan for every child admitted or resumed under it.
+ */
+export function codeParentActiveTurnFrom(
+  startedRuntime: Pick<CodeOperationRuntime, "threadWithActiveTurnPosture"> | undefined,
+  activeTurns: CodeActiveTurns,
+): CodeParentActiveTurn {
+  if (startedRuntime !== undefined) {
+    return (thread) => startedRuntime.threadWithActiveTurnPosture?.(thread) ?? thread;
+  }
+  return (thread) => threadWithActiveTurnPosture(thread, activeTurns);
+}
+
+export type AuthorityDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<FoundationsWiring, "browserAuthority">;
 
 export function wireAuthority(deps: AuthorityDependencies) {
-  const { browserAuthority, late, persistence } = deps;
+  const { browserAuthority, options, persistence } = deps;
 
   const bindingReceiptStore = new DurableBindingReceiptStore(persistence.connection);
   const processAuthorityClock = new ProcessAuthorityClock();
@@ -145,9 +163,14 @@ export function wireAuthority(deps: AuthorityDependencies) {
     });
   };
   // A child is admitted under the posture its parent's running turn holds, so
-  // a turn narrowed to Plan cannot hand a child the thread's wider grant.
-  const codeParentActiveTurn: CodeParentActiveTurn = (thread) =>
-    late.codeOperationRuntime.current?.threadWithActiveTurnPosture?.(thread) ?? thread;
+  // a turn narrowed to Plan cannot hand a child the thread's wider grant. The
+  // Code runtime, built much later, keeps its running turns here; this area
+  // only reads a turn's posture from them.
+  const codeActiveTurns: CodeActiveTurns = new Map();
+  const codeParentActiveTurn = codeParentActiveTurnFrom(
+    options.codeOperationRuntime,
+    codeActiveTurns,
+  );
   const agentRunParentAuthority = (run: AgentRun) =>
     boundAgentRunLiveAuthority({
       persistence,
@@ -213,6 +236,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     browserCaptureStore,
     browserCaptures,
     browserModelBindings,
+    codeActiveTurns,
     codeApprovalStore,
     codeParentActiveTurn,
     codeSessionAuthority,

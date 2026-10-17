@@ -130,7 +130,6 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     CodeWiring,
     | "canAccessCodeProject"
     | "codeAttachments"
-    | "codeService"
     | "codeWorkingDirectoryProbePath"
     | "roots"
     | "workAttachments"
@@ -148,7 +147,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     BrowserWiring,
     "browserAutomationService" | "browserToolApprovalService" | "windowHoldsProject"
   > &
-  Pick<CodeRuntimeWiring, "routeCodeService"> &
+  Pick<CodeRuntimeWiring, "codeService" | "routeCodeService"> &
   Pick<
     HarnessWiring,
     | "followUpCreation"

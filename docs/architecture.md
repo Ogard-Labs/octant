@@ -7361,9 +7361,16 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   Work goal loop, Chat's attachment purge and tools) instead of holding it.
   A value written at runtime has one owned holder with a read-only accessor:
   the access each running Work turn holds is recorded in `workRequestState`,
-  written by the Work turn service and read by the native harness. The
-  gateway and listener the remote area rebuilds at runtime live in that area
-  behind `remoteHost`. Canvas is built right after
+  written by the Work turn service and read by the native harness, and the
+  Code runtime's running turns are kept in a registry the authority area
+  builds and reads a running turn's posture from. The gateway and listener
+  the remote area rebuilds at runtime live in that area behind `remoteHost`.
+  The Code runtime is built from the Code and device areas, which also need
+  it: the Code area hands over a builder for the Code service, which asks the
+  runtime for fork points and merge-backs, and the device area hands over a
+  binder for its context resolvers and routes, which ask the runtime to check
+  a device action's approval. The runtime's area calls both once the runtime
+  exists, so every approval and fork answer still comes from the runtime. Canvas is built right after
   the Code area, from the Work artifact projection (a foundation) and the
   image jobs the providers area owns, so Chat, Work, and the Code runtime
   take its agent tool port as a value. Agent runs come before it: Canvas adds
@@ -7376,9 +7383,10 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   module assigns after another has captured them, and dependency getters
   marked "Wired by wireX; read only after startup", which read a value a
   later module creates per use. Each marks a cycle between areas that needs a
-  seam of its own to remove (the native harness against agent runs and
-  providers, Chat against Work, and the Code runtime against the Code
-  service); lower the ceiling in
+  seam of its own to remove (the native harness against agent runs,
+  providers, and the Code runtime; Chat and the Code runtime against Work and
+  Chat's mention services; agent runs against Chat and the provider driver
+  options); lower the ceiling in
   `scripts/check-module-wiring.ts` in the change that removes one.
 - A headless Linux station: `octant server run`, then `octant web` (or
   `octant web --dev` for Vite), run as the OS user that started the host so

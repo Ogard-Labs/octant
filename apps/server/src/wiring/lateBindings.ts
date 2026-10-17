@@ -1,4 +1,3 @@
-import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
 import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
@@ -23,8 +22,4 @@ export interface LateBindings {
   readonly nativeHarnessComposition: { current: NativeHarnessComposition | undefined };
   readonly nativeHarnessObserver: { current: NativeHarnessTurnObserver | undefined };
   readonly nativeHarnessLeadFallback: { current: NativeHarnessLeadFallbackService | undefined };
-  // The Code service and the device workbench ask the Code runtime for fork
-  // points and approval checks, and the runtime needs the Code service to
-  // note the provider turns it launches.
-  readonly codeOperationRuntime: { current: CodeOperationRuntime | undefined };
 }

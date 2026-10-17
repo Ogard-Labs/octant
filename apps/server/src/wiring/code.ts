@@ -67,8 +67,8 @@ import { createFolderBrowseRouteHandler } from "../folderBrowseRoutes";
 import { FolderBrowseService } from "../folderBrowseService";
 import { ProjectService } from "../projectService";
 import { CodeProjectAccess } from "../codeProjectAccess";
+import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
@@ -476,10 +476,8 @@ function createProjectPullRequestPorts(ghExecutable: string | undefined): {
   }
 }
 
-export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "codeOperationRuntime">;
-} & Pick<
+export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<
     AuthorityWiring,
     | "bindingReceiptStore"
     | "codeApprovalStore"
@@ -522,7 +520,6 @@ export type CodeDependencies = Pick<ServerStart, "options" | "persistence"> & {
 
 export function wireCode(deps: CodeDependencies) {
   const {
-    late,
     threadAwaitsHarnessApproval,
     bindingReceiptStore,
     cacheStats,
@@ -685,106 +682,107 @@ export function wireCode(deps: CodeDependencies) {
       if (project?.type !== "code") return false;
       return isProjectPolicyTargetAllowed(project, input.providerInstanceId, input.modelId);
     };
-    const codeService =
-      options.codeService ??
-      new CodeService({
-        liveTurns,
-        awaitsHarnessApproval: threadAwaitsHarnessApproval,
-        gitHistory: new GitHistoryPort(),
-        persistence,
-        access: {
-          canBrowseProject: (projectId) => projectService.hasActiveProject(projectId, "code"),
-          canAccessProject: canAccessCodeProject,
-        },
-        checkouts,
-        roots,
-        files: codeFiles,
-        tests: codeTestDiscovery,
-        watcher: codeFileWatch,
-        searcher: codeFileSearch,
-        content: codeContent,
-        evidence: codeEvidence,
-        attachments: codeAttachments,
-        uuid: randomUUID,
-        clock: () => new Date().toISOString(),
-        approvals: codeApprovalStore,
-        sessionAuthority: codeSessionAuthority,
-        worktreeSourcePreview: {
-          preview: (input, signal) => managedWorktreeSourcePreview(input, signal),
-        },
-        worktreeRefs: {
-          list: (input, signal) => managedWorktreeRefsList(input, signal),
-        },
-        // Late-bound: the operation runtime that reads a thread's turns and
-        // checkout is constructed after this service.
-        forkPoints: {
-          resolve: async (windowId, source, throughOperationId) =>
-            late.codeOperationRuntime.current === undefined
-              ? { status: "refused", reason: "unavailable" }
-              : late.codeOperationRuntime.current.forkPoint(windowId, source, throughOperationId),
-        },
-        // A fork is created only when the conversation it carries over can be
-        // read now, through the same selector its first turn uses.
-        forkConversation: ({ source, throughOperationId }) =>
-          selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
-        recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
-        // Late-bound for the same reason: the runtime owns the journal a merge
-        // is recorded in and the turns that carry it.
-        forkMergeBack: {
-          merge: async (windowId, forkThreadId, throughOperationId) =>
-            late.codeOperationRuntime.current?.mergeForkContext === undefined
-              ? { status: "refused", reason: "unsupported" }
-              : late.codeOperationRuntime.current.mergeForkContext(
-                  windowId,
-                  forkThreadId,
-                  throughOperationId,
-                ),
-        },
-        managedThreadCreation: {
-          prepare: (input, signal) => managedCodeThreadCreation.prepare(input, signal),
-          commit: (input, preparation, signal) =>
-            managedCodeThreadCreation.commit(input, preparation, signal),
-          cleanup: (input, signal) => managedCodeThreadCreation.cleanup(input, signal),
-        },
-        workingDirectories: {
-          resolve: async (windowId, thread, checkout, workingDirectory) => {
-            const root = await roots.resolve(
-              windowId,
-              thread,
-              checkout,
-              codeWorkingDirectoryProbePath,
-            );
-            return root === undefined
-              ? undefined
-              : resolveThreadWorkingDirectory(root.rootPath, workingDirectory);
+    // The Code runtime is built from this area and answers a fork's point and
+    // merge-back, so the runtime's area builds the service once the runtime
+    // exists; everything else the service reads is this area's.
+    const buildCodeService = (codeOperationRuntime: CodeOperationRuntime | undefined) => {
+      const codeService =
+        options.codeService ??
+        new CodeService({
+          liveTurns,
+          awaitsHarnessApproval: threadAwaitsHarnessApproval,
+          gitHistory: new GitHistoryPort(),
+          persistence,
+          access: {
+            canBrowseProject: (projectId) => projectService.hasActiveProject(projectId, "code"),
+            canAccessProject: canAccessCodeProject,
           },
-        },
-        onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
-        waitForThreadChange: (signal) => machineChangeFeed.waitFor("code-navigation", signal),
-        probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
-        isProviderModelAllowed: isCodeProviderModelAllowed,
-        issueContext: githubIssueContextService,
-        linearIssueContext: linearIssueContextService,
-        // Resolved lazily: the pull-request service is constructed after this
-        // one, and a navigation read is the first thing that needs it.
-        pullRequests: {
-          snapshot: (windowId) => projectPullRequestService.navigationSnapshot(windowId),
-        },
-      });
-    // Revocation is wired at construction, before any window can hold a watch.
-    onWindowRevoked((windowId) => codeService.revokeWindow?.(windowId));
-    // What the Code service lends the host's completed-thread timer. Only the
-    // in-process service can archive on the host's behalf; an injected route
-    // service is a test double and lends nothing.
-    const codeCompletedThreadSource =
-      codeService instanceof CodeService
-        ? {
-            mode: "code" as const,
-            threads: () => persistence.readCodeThreads(),
-            archive: (threadId: string, input: CompletedThreadArchiveInput) =>
-              codeService.archiveCompletedThread(decodeCodeThreadId(threadId), input),
-          }
-        : undefined;
+          checkouts,
+          roots,
+          files: codeFiles,
+          tests: codeTestDiscovery,
+          watcher: codeFileWatch,
+          searcher: codeFileSearch,
+          content: codeContent,
+          evidence: codeEvidence,
+          attachments: codeAttachments,
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+          approvals: codeApprovalStore,
+          sessionAuthority: codeSessionAuthority,
+          worktreeSourcePreview: {
+            preview: (input, signal) => managedWorktreeSourcePreview(input, signal),
+          },
+          worktreeRefs: {
+            list: (input, signal) => managedWorktreeRefsList(input, signal),
+          },
+          // The operation runtime reads a thread's turns and checkout.
+          forkPoints: {
+            resolve: async (windowId, source, throughOperationId) =>
+              codeOperationRuntime === undefined
+                ? { status: "refused", reason: "unavailable" }
+                : codeOperationRuntime.forkPoint(windowId, source, throughOperationId),
+          },
+          // A fork is created only when the conversation it carries over can be
+          // read now, through the same selector its first turn uses.
+          forkConversation: ({ source, throughOperationId }) =>
+            selectCodeConversation(source.id, { purpose: "fork", throughOperationId }),
+          recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+          // The runtime owns the journal a merge is recorded in and the turns
+          // that carry it.
+          forkMergeBack: {
+            merge: async (windowId, forkThreadId, throughOperationId) =>
+              codeOperationRuntime?.mergeForkContext === undefined
+                ? { status: "refused", reason: "unsupported" }
+                : codeOperationRuntime.mergeForkContext(windowId, forkThreadId, throughOperationId),
+          },
+          managedThreadCreation: {
+            prepare: (input, signal) => managedCodeThreadCreation.prepare(input, signal),
+            commit: (input, preparation, signal) =>
+              managedCodeThreadCreation.commit(input, preparation, signal),
+            cleanup: (input, signal) => managedCodeThreadCreation.cleanup(input, signal),
+          },
+          workingDirectories: {
+            resolve: async (windowId, thread, checkout, workingDirectory) => {
+              const root = await roots.resolve(
+                windowId,
+                thread,
+                checkout,
+                codeWorkingDirectoryProbePath,
+              );
+              return root === undefined
+                ? undefined
+                : resolveThreadWorkingDirectory(root.rootPath, workingDirectory);
+            },
+          },
+          onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
+          waitForThreadChange: (signal) => machineChangeFeed.waitFor("code-navigation", signal),
+          probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
+          isProviderModelAllowed: isCodeProviderModelAllowed,
+          issueContext: githubIssueContextService,
+          linearIssueContext: linearIssueContextService,
+          // Resolved lazily: the pull-request service is constructed after this
+          // one, and a navigation read is the first thing that needs it.
+          pullRequests: {
+            snapshot: (windowId) => projectPullRequestService.navigationSnapshot(windowId),
+          },
+        });
+      // Revocation is wired at construction, before any window can hold a watch.
+      onWindowRevoked((windowId) => codeService.revokeWindow?.(windowId));
+      // What the Code service lends the host's completed-thread timer. Only the
+      // in-process service can archive on the host's behalf; an injected route
+      // service is a test double and lends nothing.
+      const codeCompletedThreadSource =
+        codeService instanceof CodeService
+          ? {
+              mode: "code" as const,
+              threads: () => persistence.readCodeThreads(),
+              archive: (threadId: string, input: CompletedThreadArchiveInput) =>
+                codeService.archiveCompletedThread(decodeCodeThreadId(threadId), input),
+            }
+          : undefined;
+      return { codeCompletedThreadSource, codeService };
+    };
     const projectPullRequestPorts = createProjectPullRequestPorts(options.ghExecutable);
     // Host-wide on purpose: the snapshot cache is shared across windows, so
     // linked-thread facts must come from every persisted Code thread, not from
@@ -894,11 +892,10 @@ export function wireCode(deps: CodeDependencies) {
     projectPullRequestCadence.start();
     return {
       agentProfileRoutes,
+      buildCodeService,
       canAccessCodeProject,
       codeAttachments,
-      codeCompletedThreadSource,
       codeProjectAccess,
-      codeService,
       codeTestDiscovery,
       codeWorkingDirectoryProbePath,
       environmentService,
