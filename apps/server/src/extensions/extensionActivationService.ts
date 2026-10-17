@@ -180,7 +180,19 @@ function deriveCatalogEpoch(input: {
       components: components.map(({ componentState, policy }) => ({
         componentId: componentState.component.id,
         activation: componentState.activation,
-        policy,
+        // A selection is bound to what the policy allows, never to how many
+        // times the thread or Project changed. Sending a turn, renaming a
+        // thread, or editing a Project bumps its version without changing
+        // what any extension may do, and hashing that version refused every
+        // selection the moment the send that carried it was journaled.
+        policy: {
+          revision: policy.revision,
+          hostAllowed: policy.hostAllowed,
+          modeAllowed: policy.modeAllowed,
+          projectAllowed: policy.projectAllowed,
+          threadAllowed: policy.threadAllowed,
+          policyAllowed: policy.policyAllowed,
+        },
       })),
     })),
   };

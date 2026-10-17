@@ -104,6 +104,7 @@ import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
 import type { PersistenceService } from "../persistence/persistenceService";
 import { ExtensionActivationService } from "../extensions/extensionActivationService";
+import { createPersistedExtensionActivationPolicy } from "../extensions/persistedExtensionActivationPolicy";
 import {
   createExtensionChatResolver,
   createStoredExtensionMaterialLoader,
@@ -3941,6 +3942,155 @@ describe("ChatService", () => {
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
     expect(readVerifiedComponentText).not.toHaveBeenCalled();
     expect(fakeDriver.sentTurns).toHaveLength(0);
+  });
+
+  it("keeps a resolved extension selection through the send that journals the thread and through a rename, but not through a move or an archive", async () => {
+    const snapshot = authoritativeExtensionSnapshot(true, "mcp-tool");
+    const records: { current?: PersistenceService } = {};
+    const persisted = () => {
+      if (records.current === undefined) throw new Error("Fixture is not open yet.");
+      return records.current;
+    };
+    // The host's own policy over the fixture's real Project and thread
+    // projections: nothing here fakes what a send does to the thread's version.
+    const activation = new ExtensionActivationService({
+      policy: createPersistedExtensionActivationPolicy({
+        readProject: (projectId) => persisted().readProject(projectId),
+        readChatThread: (threadId) => persisted().readChatThread(threadId),
+        readWorkThread: () => undefined,
+        readCodeThread: () => undefined,
+      }),
+      catalogStatus: () => "available",
+    });
+    const resolveExtensionSelectionContext = createExtensionChatResolver({
+      snapshot: () => snapshot,
+      resolveEffectiveState: (current, query) => activation.resolve(current, query),
+      providerFamily: () => "openai-compatible" as never,
+      materialLoader: {
+        load: async () => ({
+          tools: [
+            {
+              name: "build_project",
+              inputSchema: { type: "object", properties: {}, required: [] },
+            },
+          ],
+        }),
+      },
+      toolExecution: {
+        availability: () => "available",
+        execute: async () => ({ result: { status: "built" } }),
+      },
+    });
+    const { service, fakeDriver, persistence } = openFixture({ resolveExtensionSelectionContext });
+    records.current = persistence;
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Extension survives the send",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const chipEpoch = activation.resolve(snapshot, {
+      scope: {
+        hostId: "local",
+        mode: "chat",
+        projectId: null,
+        threadId: created.thread.id,
+        providerFamily: "openai-compatible",
+      },
+    } as never).catalogEpoch;
+    const selection = {
+      kind: "plugin" as const,
+      extensionId: "30000000-0000-4000-8000-000000000001" as never,
+      packageId: "31000000-0000-4000-8000-000000000001" as never,
+      componentId: "execute" as never,
+      packageVersion: "1.2.3" as never,
+      packageDigest: `sha256:${"a".repeat(64)}` as never,
+      catalogEpoch: chipEpoch,
+      origin: { kind: "draft" as const, reference: "survives-draft" },
+    };
+    const sendWithSelection = async (prompt: string) => {
+      const current = service.read(created.thread.id);
+      const sent = await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: current.thread.version,
+        prompt,
+        extensionSelections: [selection],
+      });
+      expect(sent.kind).toBe("turn-created");
+      await until(
+        () => service.read(created.thread.id).turns.at(-1)?.attempts.at(-1)?.outcome !== undefined,
+      );
+      return service.read(created.thread.id).turns.at(-1)?.attempts.at(-1);
+    };
+
+    const first = await sendWithSelection("Build once");
+
+    // The send journals the thread again; the chip was resolved before that.
+    expect(Number(service.read(created.thread.id).thread.version)).toBeGreaterThan(
+      Number(created.thread.version),
+    );
+    expect(first?.outcome).toBe("completed");
+    expect(fakeDriver.sentTurns[0]?.tools.map(({ name }) => name)).toContain("build_project");
+
+    const renamed = await service.execute({
+      kind: "rename-chat-thread",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      title: "Renamed after the chip was resolved",
+    });
+    expect(renamed.kind).toBe("thread-updated");
+    const second = await sendWithSelection("Build again");
+    expect(second?.outcome).toBe("completed");
+    expect(fakeDriver.sentTurns[1]?.tools.map(({ name }) => name)).toContain("build_project");
+
+    const handoff = () =>
+      resolveExtensionSelectionContext({
+        phase: "provider-handoff",
+        thread: service.read(created.thread.id).thread,
+        selections: [selection],
+      });
+    await expect(handoff()).resolves.toMatchObject({ selections: [selection] });
+
+    await service.execute({
+      kind: "move-chat-thread",
+      threadId: created.thread.id,
+      expectedVersion: service.read(created.thread.id).thread.version,
+      projectId: ids.project as never,
+    });
+    await expect(handoff()).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    const other = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Archived after the chip was resolved",
+    });
+    if (other.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const otherSelection = {
+      ...selection,
+      catalogEpoch: activation.resolve(snapshot, {
+        scope: {
+          hostId: "local",
+          mode: "chat",
+          projectId: null,
+          threadId: other.thread.id,
+          providerFamily: "openai-compatible",
+        },
+      } as never).catalogEpoch,
+    };
+    const otherHandoff = () =>
+      resolveExtensionSelectionContext({
+        phase: "provider-handoff",
+        thread: service.read(other.thread.id).thread,
+        selections: [otherSelection],
+      });
+    await expect(otherHandoff()).resolves.toMatchObject({ selections: [otherSelection] });
+    await service.execute({
+      kind: "change-chat-thread-lifecycle",
+      threadId: other.thread.id,
+      expectedVersion: service.read(other.thread.id).thread.version,
+      lifecycle: "archived",
+    });
+    await expect(otherHandoff()).rejects.toMatchObject({ failure: { category: "unavailable" } });
   });
 
   it("rejects an overlapping send while the accepted attempt owns the thread scratch", async () => {
