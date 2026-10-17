@@ -423,7 +423,7 @@ function ProjectGroup(props: {
                       className="code-project-pull-requests__row"
                       onClick={() => props.onSelectRow?.(row)}
                       type="button"
-                      variant="ghost"
+                      variant="bare"
                     >
                       <GitPullRequest
                         aria-hidden="true"
