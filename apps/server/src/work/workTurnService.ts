@@ -401,7 +401,19 @@ export interface WorkTurnServiceDependencies {
   readonly agentRuns?: {
     readonly getById: (runId: AgentRunId) => AgentRun | undefined;
   };
+  /**
+   * Where the service records the access each running turn holds. The host
+   * passes one it built before the native harness, which reads it; absent,
+   * the service keeps its own.
+   */
+  readonly runningAccess?: RunningWorkTurnAccess;
 }
+
+/** The access each running Work turn holds, by thread, as the turn service records it. */
+export type RunningWorkTurnAccess = Map<
+  string,
+  { readonly requestId: string; readonly access: WorkAccess }
+>;
 
 export class WorkTurnService {
   /** Turns being prepared, per thread, until they are accepted or refused. */
@@ -411,10 +423,7 @@ export class WorkTurnService {
    * edits against this rather than the thread's own access, so a goal-loop
    * round held ask-first stays ask-first for every provider.
    */
-  readonly #runningAccess = new Map<
-    string,
-    { readonly requestId: string; readonly access: WorkAccess }
-  >();
+  readonly #runningAccess: RunningWorkTurnAccess;
   readonly #resolveSelectedExtensions: SelectedExtensionResolver | undefined;
   readonly #persistence: WorkTurnServiceDependencies["persistence"];
   readonly #threads: WorkTurnServiceDependencies["threads"];
@@ -461,6 +470,7 @@ export class WorkTurnService {
   readonly #liveToolSteps = new Map<string, ThreadToolSteps>();
 
   constructor(dependencies: WorkTurnServiceDependencies) {
+    this.#runningAccess = dependencies.runningAccess ?? new Map();
     this.#contextHarness = dependencies.contextHarness;
     this.#resolveSelectedExtensions = dependencies.resolveSelectedExtensions;
     this.#persistence = dependencies.persistence;

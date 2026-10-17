@@ -1,4 +1,3 @@
-import type { WorkAccess } from "@octant/contracts";
 import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
 import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
@@ -28,9 +27,4 @@ export interface LateBindings {
   // points and approval checks, and the runtime needs the Code service to
   // note the provider turns it launches.
   readonly codeOperationRuntime: { current: CodeOperationRuntime | undefined };
-  // The harness asks the Work turn service for a running turn's access, and
-  // the Work turn service takes the harness composition.
-  readonly runningWorkTurnAccess: {
-    current: ((threadId: string) => WorkAccess | undefined) | undefined;
-  };
 }

@@ -60,6 +60,7 @@ import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnProjection } from "./workTurnProjection";
 import {
   WORK_THREAD_MARKED_DONE_TURN_REFUSAL,
+  type RunningWorkTurnAccess,
   WorkTurnService,
   WorkTurnServiceError,
   type WorkTurnServiceDependencies,
@@ -232,26 +233,34 @@ describe("WorkTurnService", () => {
     for (const holdAskFirst of [true, false]) {
       const release = deferred<void>();
       const seen: Array<string | undefined> = [];
+      // The host hands the service the record the native harness reads.
+      const runningAccess: RunningWorkTurnAccess = new Map();
       const fixture = serviceFixture({
         threadAccess: "auto-accept-edits",
+        runningAccess,
         turnRuntime: {
           run: async (input) => {
-            seen.push(input.access, fixture.service.runningTurnAccess(String(ids.thread)));
+            seen.push(
+              input.access,
+              fixture.service.runningTurnAccess(String(ids.thread)),
+              runningAccess.get(String(ids.thread))?.access,
+            );
             await release.promise;
             return { kind: "completed", response: "Done" };
           },
         },
       });
       await fixture.service.startFirstTurn(ids.window, startCommand(), { holdAskFirst });
-      await vi.waitFor(() => expect(seen).toHaveLength(2));
+      await vi.waitFor(() => expect(seen).toHaveLength(3));
       release.resolve();
       await fixture.waitForIdle();
 
       const expected = holdAskFirst ? "ask-first" : "auto-accept-edits";
       // The provider session and the native harness's edit check both answer
       // to the round, not the thread.
-      expect(seen).toEqual([expected, expected]);
+      expect(seen).toEqual([expected, expected, expected]);
       expect(fixture.service.runningTurnAccess(String(ids.thread))).toBeUndefined();
+      expect(runningAccess.has(String(ids.thread))).toBe(false);
     }
   });
 
@@ -3403,6 +3412,7 @@ function serviceFixture(
     readonly threadAccess?: "ask-first" | "auto-accept-edits";
     readonly onTurnRequested?: WorkTurnServiceDependencies["onTurnRequested"];
     readonly agentRuns?: WorkTurnServiceDependencies["agentRuns"];
+    readonly runningAccess?: RunningWorkTurnAccess;
     /** Read on every thread read, so a test can mark and reactivate between turns. */
     readonly completionConfirmed?: () => boolean;
     /** Replaces the host's selection of a conversation to hand to a new provider session. */
@@ -3591,6 +3601,7 @@ function serviceFixture(
       : { turnFileObserver: options.turnFileObserver }),
     ...(options.onTurnRequested === undefined ? {} : { onTurnRequested: options.onTurnRequested }),
     ...(options.agentRuns === undefined ? {} : { agentRuns: options.agentRuns }),
+    ...(options.runningAccess === undefined ? {} : { runningAccess: options.runningAccess }),
     uuid: (() => {
       let n = 0;
       return () => {

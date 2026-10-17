@@ -8,7 +8,6 @@ import { ChatService } from "./chat/chatService";
 import { WorkFileListingService } from "./work/workFileListingService";
 import { WorkThreadService } from "./work/workThreadService";
 import { WorkTurnService } from "./work/workTurnService";
-import { GoalLoopService } from "./goal/goalLoopService";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
 import { healthResponse } from "./health";
@@ -164,7 +163,6 @@ export function startOctantServer(
       nativeHarnessObserver: { current: undefined },
       nativeHarnessLeadFallback: { current: undefined },
       codeOperationRuntime: { current: options.codeOperationRuntime },
-      runningWorkTurnAccess: { current: undefined },
     };
 
     const {
@@ -368,10 +366,11 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
-    const { workRequestRuntime, workRequestService } = wireWorkRequestState({
-      persistence,
-      workThreadProjection,
-    });
+    const { runningWorkTurnAccess, runningWorkTurns, workRequestRuntime, workRequestService } =
+      wireWorkRequestState({
+        persistence,
+        workThreadProjection,
+      });
     const {
       agentPluginMcpSessionManager,
       chatAttachmentStore,
@@ -654,6 +653,7 @@ export function startOctantServer(
       nativeHarnessEgressRoutes,
       nativeHarnessRoutingRoutes,
       nativeHarnessSessionRoutes,
+      onHarnessPausedByPerson,
       researchRouter,
       sideTaskFirstMessage,
       sideTaskRoutes,
@@ -676,11 +676,11 @@ export function startOctantServer(
       configuredDriverOptions,
       contextHarness,
       externalContentIngestionStore,
-      goalLoopService: (): GoalLoopService => goalLoopService,
       goalService,
       nativeHarnessEndpoints,
       persistence,
       providerDataDirectory,
+      runningWorkTurnAccess,
       sideTasks,
       threadFollowUpSuggestions,
       toolEgressRules,
@@ -752,7 +752,6 @@ export function startOctantServer(
       fileMentionRoutes,
       fileMentionService,
       goalLoopRoutes,
-      goalLoopService,
       threadExportRoutes,
       threadExportService,
       threadHandOffRoutes,
@@ -770,7 +769,8 @@ export function startOctantServer(
       workRequestRuntime,
       workRequestService,
       onWindowRevoked,
-      late,
+      onHarnessPausedByPerson,
+      runningWorkTurns,
       agentRunPersistence,
       agentsManagedToolsFor,
       authorizeWorkThreadForWindow,

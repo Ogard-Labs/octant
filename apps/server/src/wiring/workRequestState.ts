@@ -3,6 +3,8 @@ import { WorkRequestEventStore } from "../work/workRequestEventStore";
 import { WorkRequestProjection } from "../work/workRequestProjection";
 import { WorkRequestRuntime } from "../work/workRequestRuntime";
 import { WorkRequestService } from "../work/workRequestService";
+import type { RunningWorkTurnAccess } from "../work/workTurnService";
+import type { WorkAccess } from "@octant/contracts";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { FoundationsWiring } from "./foundations";
 import type { ServerStart } from "./serverShape";
@@ -13,6 +15,10 @@ export type WorkRequestStateDependencies = Pick<ServerStart, "persistence"> &
 /**
  * Pending Work requests and the runtime that answers them. Provider drivers in
  * every mode report requests here, so the pair is built before any driver is.
+ *
+ * It also holds the access each running Work turn holds. The Work turn service
+ * records it and the native harness checks edits against it, and the harness
+ * is built before Work, so the record lives here and the harness only reads.
  */
 export function wireWorkRequestState(deps: WorkRequestStateDependencies) {
   const { persistence, workThreadProjection } = deps;
@@ -59,7 +65,10 @@ export function wireWorkRequestState(deps: WorkRequestStateDependencies) {
   workRequestService.hydrate();
   workRequestService.interruptOnRestart();
   workRequestService.reconcileUnavailableRequests();
-  return { workRequestRuntime, workRequestService };
+  const runningWorkTurns: RunningWorkTurnAccess = new Map();
+  const runningWorkTurnAccess = (threadId: string): WorkAccess | undefined =>
+    runningWorkTurns.get(threadId)?.access;
+  return { runningWorkTurnAccess, runningWorkTurns, workRequestRuntime, workRequestService };
 }
 
 export type WorkRequestStateWiring = ReturnType<typeof wireWorkRequestState>;
