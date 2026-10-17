@@ -223,7 +223,9 @@ describe("vendored runtime dependencies", () => {
         continue;
       }
       const source = readFileSync(join(sourceDirectory, name), "utf8");
-      for (const match of source.matchAll(/^import[^"']*from "([^"]+)";/gm)) {
+      // Static imports, re-exports, side-effect imports and `import("pkg")` calls:
+      // the agent screen loads its terminal toolkit that way, on demand.
+      for (const match of source.matchAll(/(?:\bfrom|\bimport\s*\(?)\s*"([^"\s]+)"/g)) {
         const specifier = match[1] ?? "";
         if (
           specifier.startsWith(".") ||
