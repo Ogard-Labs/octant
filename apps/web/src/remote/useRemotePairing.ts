@@ -295,6 +295,9 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
   }, [screen, pollStatus, stopPolling]);
 
   useEffect(() => {
+    // A development double mount runs this cleanup and then the setup again;
+    // without this the second mount would ignore every answer.
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       stopPolling();

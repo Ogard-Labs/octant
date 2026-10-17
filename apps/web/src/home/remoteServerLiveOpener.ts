@@ -32,6 +32,12 @@ export interface RemoteServerLiveHost {
   readonly issueSession: () => Promise<RemoteSessionFacts>;
   /** Signs with this device's non-extractable key for that host. */
   readonly sign: (payload: string) => Promise<string>;
+  /**
+   * How requests to this host travel, when the window's own fetch cannot reach
+   * it: a computer paired through Other computers is reached through the
+   * desktop, because the window's page policy allows loopback only.
+   */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 export interface RemoteServerLiveOpener {
@@ -69,7 +75,7 @@ export function createRemoteServerLiveOpener(
         client = createRemoteServerProxyClient({
           origin: host.origin,
           hostName: host.hostName,
-          fetch,
+          fetch: host.fetch ?? fetch,
           issueSession: host.issueSession,
           sign: host.sign,
         });

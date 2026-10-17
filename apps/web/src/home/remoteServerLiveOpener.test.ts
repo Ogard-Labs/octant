@@ -73,6 +73,21 @@ describe("opening another computer's server live from this window", () => {
     expect(signing.status).toBe("signed");
   });
 
+  it("asks for the grant over the host's own transport, so a computer reached through the desktop never meets the page's fetch", async () => {
+    const desktop = bridge();
+    const pageFetch = vi.fn(async () => granted());
+    const hostFetch = vi.fn<typeof globalThis.fetch>(async () => granted());
+    const opener = createRemoteServerLiveOpener(desktop, pageFetch);
+
+    expect(await opener.openLive({ ...HOST, fetch: hostFetch }, SERVICE, "octant-browser")).toEqual(
+      { kind: "opened" },
+    );
+
+    expect(hostFetch).toHaveBeenCalledOnce();
+    expect(String(hostFetch.mock.calls[0]?.[0])).toBe(`${HOST.origin}/api/server-proxy/grants`);
+    expect(pageFetch).not.toHaveBeenCalled();
+  });
+
   it("shows the host's refusal and asks the desktop for nothing", async () => {
     const desktop = bridge();
     const opener = createRemoteServerLiveOpener(desktop, async () =>

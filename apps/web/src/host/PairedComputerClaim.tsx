@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createRemotePairingClient, type RemotePairingClient } from "@octant/client-runtime";
 import { useRemotePairing, REMOTE_WEB_BUILD_VERSION } from "../remote/useRemotePairing";
 import { SettingsFactList, SettingsState } from "../settings/primitives";
@@ -26,7 +26,7 @@ const NO_REPLACEMENT = (): void => {};
  * connects it like any other host.
  */
 export function PairedComputerClaim(props: {
-  readonly bridge: Pick<PairedComputersBridge, "requestPairedComputer">;
+  readonly bridge: Pick<PairedComputersBridge, "requestPairedComputer" | "forgetPairedComputer">;
   readonly federation: HostFederationStack;
   readonly pairing: PairedComputerPairing;
   /** Replaces the transport-backed client; only tests do. */
@@ -50,6 +50,9 @@ export function PairedComputerClaim(props: {
     [bridge, federation.deviceKeyStore, pairing.computer.origin, pairing.pin, props.client],
   );
   const [connecting, setConnecting] = useState<"idle" | "connecting" | "missing">("idle");
+  // Once the host approved, or the person left, the pin is no longer this
+  // component's to drop.
+  const settledRef = useRef(false);
   const flow = useRemotePairing({
     baseUrl: pairing.computer.origin,
     ticket: pairing.ticket,
@@ -57,10 +60,41 @@ export function PairedComputerClaim(props: {
     hostRegistry: federation.registry,
     deviceKeyStore: federation.deviceKeyStore,
     replaceFragment: NO_REPLACEMENT,
-    onApproved: () => setConnecting("connecting"),
+    onApproved: () => {
+      settledRef.current = true;
+      setConnecting("connecting");
+    },
   });
-  const { onFinished } = props;
+  // Main persisted the pin when it verified the code. Closing Settings, or
+  // moving to another section, before the host approves must not leave a
+  // computer trusted that was never paired. The forget waits a tick so a
+  // development double mount, which unmounts and remounts at once, cancels it.
+  const forgetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const { forgetPairedComputer } = bridge;
+  const pairedOrigin = pairing.computer.origin;
+  useEffect(() => {
+    if (forgetTimer.current !== undefined) {
+      clearTimeout(forgetTimer.current);
+      forgetTimer.current = undefined;
+    }
+    return () => {
+      forgetTimer.current = setTimeout(() => {
+        forgetTimer.current = undefined;
+        if (settledRef.current) return;
+        settledRef.current = true;
+        void forgetPairedComputer(pairedOrigin).catch(() => undefined);
+      }, 0);
+    };
+  }, [forgetPairedComputer, pairedOrigin]);
   const { lifecycle } = federation;
+  const { onFinished: finish } = props;
+  const onFinished = useCallback(
+    (outcome: "paired" | "left"): void => {
+      settledRef.current = true;
+      finish(outcome);
+    },
+    [finish],
+  );
   useEffect(() => {
     if (connecting !== "connecting") return;
     let cancelled = false;
