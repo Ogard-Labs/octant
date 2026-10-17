@@ -115,7 +115,7 @@ threads**. Archiving keeps every thread; only a confirmed purge deletes.
 
 ## Export
 
-**Export thread** downloads a portable JSON cut of this Work thread: the
+**Export…** downloads a portable JSON cut of this Work thread: the
 transcript, Canvas artifacts it originated, any note recorded when the thread
 was marked Done, and provenance. The file says when it was cut. Secrets
 and filesystem paths never appear.

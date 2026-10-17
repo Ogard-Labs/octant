@@ -57,7 +57,7 @@ where it was typed. It never enters the journal, diagnostics, or a provider
 request until you send it. Deleting or purging the thread removes that
 client's draft as well.
 
-**Export thread** is a host-authoritative read of one thread you can already
+**Export…** is a host-authoritative read of one thread you can already
 open. The JSON bundle carries transcript, evidence, and provenance, and
 names the instant it was cut. Credentials, OAuth tokens, raw provider
 payloads, resume cursors, and host filesystem paths never enter the file.

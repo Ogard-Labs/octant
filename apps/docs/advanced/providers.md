@@ -270,11 +270,11 @@ or `~/.qwen`). It does not copy the binary, create a second login, or read
 credentials from another desktop app. Run the provider's login command in a
 terminal, then use **Check connection** in Octant. Explicit API-key mode remains
 available for profiles that support it. Mistral Vibe from Octant requires a
-Mistral API key entered in **Settings → Providers** because its confined launch
+Mistral API key entered in **Settings → Providers & Models** because its confined launch
 does not read the macOS Keychain.
 
 You can add more than one Claude account. Each account is its own provider
-in **Settings → Providers**: give it a name and an accent color so the model
+in **Settings → Providers & Models**: give it a name and an accent color so the model
 picker can tell them apart. Octant assigns the first subscription account
 Claude's default directory (`~/.claude`). Each additional account, and every
 API-key account, gets its own directory under `~/.claude-accounts/`. A
