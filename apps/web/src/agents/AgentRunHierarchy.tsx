@@ -50,6 +50,7 @@ export function AgentRunHierarchy(props: {
   const observations = currentRead?.observations ?? [];
   const [status, setStatus] = useState<"loading" | "ready" | "refreshing" | "error">("loading");
   const [errorMessage, setErrorMessage] = useState<string>();
+  const [steeredRunId, setSteeredRunId] = useState<string>();
   const [summaryReconnecting, setSummaryReconnecting] = useState(false);
   const [posture, setPosture] = useState<AgentRunCreationPosture | undefined>(
     props.creationPosture,
@@ -68,6 +69,7 @@ export function AgentRunHierarchy(props: {
   }, [props.requestedView]);
   const leaveSelectedRun = () => {
     setSelectedRunId(undefined);
+    setSteeredRunId(undefined);
     if (props.requestedView !== undefined) onRequestedViewHandled.current?.();
   };
   // Only an identity resolved from the managed list may open a conversation.
@@ -293,7 +295,16 @@ export function AgentRunHierarchy(props: {
             : { onReviewChanges: props.onReviewChanges })}
           onAcknowledge={(input) => void acknowledge(input)}
           onCancel={(input) => void cancel(input)}
-          onSteer={(input) => void controls.steer(input).then(setErrorMessage)}
+          onSteer={(input) => {
+            setSteeredRunId(undefined);
+            void controls.steer(input).then((message) => {
+              setErrorMessage(message);
+              if (message === undefined) setSteeredRunId(input.runId);
+            });
+          }}
+          {...(steeredRunId === selectedRow.runId
+            ? { steerNotice: "Steering note sent. The subagent picks it up at its next step." }
+            : {})}
           onRetry={(input) => void controls.retry(input).then(setErrorMessage)}
           onResume={(input) => void controls.resume(input).then(setErrorMessage)}
           onFollowUp={controls.resume}

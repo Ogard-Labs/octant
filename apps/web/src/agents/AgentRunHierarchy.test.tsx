@@ -704,6 +704,53 @@ describe("AgentRunHierarchy", () => {
       expectedVersion: 3,
       message: "Stay on the failing test.",
     });
+    // The form closes on send, so the page itself says the note was accepted.
+    expect(
+      await screen.findByText("Steering note sent. The subagent picks it up at its next step."),
+    ).toBeVisible();
+  });
+
+  it("says why a steering note was refused and does not claim it was sent", async () => {
+    const user = userEvent.setup();
+    const steer = vi.fn(async () => ({
+      kind: "run-command-failed" as const,
+      reason: "unsupported-transition" as const,
+      message: "This provider cannot take a steering note.",
+    }));
+    const client = emptyClient({
+      steer: steer as never,
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [
+          {
+            runId,
+            requestId: "request-1",
+            parentThreadId,
+            role: "research",
+            task: "Draft the release notes",
+            lifecycleStatus: "running",
+            executionKind: "octant-managed",
+            usageQuality: "provider-reported",
+            resultAcknowledgement: { required: false, acknowledged: false },
+            version: 3,
+            updatedAt: "2026-08-01T15:01:00.000Z",
+          },
+        ],
+      })),
+    });
+    render(
+      <AgentRunHierarchy
+        client={client}
+        parentThreadId={parentThreadId}
+        creationPosture="automatic"
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: /Draft the release notes/ }));
+    await user.click(screen.getByRole("button", { name: "Steer Draft the release notes" }));
+    await user.type(screen.getByLabelText("Steering instruction"), "Stay on the failing test.");
+    await user.click(screen.getByRole("button", { name: "Send steering" }));
+    expect(await screen.findByText("This provider cannot take a steering note.")).toBeVisible();
+    expect(screen.queryByText(/Steering note sent/)).toBeNull();
   });
 
   it("fetches the server-authoritative posture from an injected settings client", async () => {
