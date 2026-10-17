@@ -4241,10 +4241,18 @@ native harness in `apps/server/src/harness`:
      is offered only `context-remaining`, `second-opinion`, and (while its
      research is on) the web tools, never `todo-write`, `delegate`,
      `ask-user`, or `goal`, and not the `octant_agents` child-agent
-     tool either. `nativeHarnessComposition.test.ts` pins the full
-     set per mode with every port supplied, the Side Chat set, the reduced
-     set without them, and that the composition call site still supplies each
-     port.
+     tool either. A Code thread in Plan is offered only what Plan allows:
+     `read`, `grep`, and `glob`, the web tools, and the rest of the lead
+     set above, with no `edit`, `write`, `bash`, or `goal-check`. Plan does
+     not refuse `web-fetch` (a tainted thread still confirms it afresh), so
+     it stays. A thread stored as Plan, or a turn narrowed to Plan, composes
+     that set; a posture moved to Plan after the tools were composed still
+     has its write or command refused as `plan-mode-denied`, the server-side
+     backstop. A managed child admitted in Plan is offered the same reduced
+     set. `nativeHarnessComposition.test.ts` pins the full
+     set per mode with every port supplied, the Code set under each access
+     posture, the Side Chat set, the reduced set without them, and that the
+     composition call site still supplies each port.
   2. **Approval attention.** A pending approval raises the same attention as
      a pending question: the thread's state, the Inbox, and the sidebar mark,
      and it shows inline in the thread. Not yet pinned by a test.
