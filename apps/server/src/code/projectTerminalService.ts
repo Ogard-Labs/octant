@@ -26,6 +26,8 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
+import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
+import { ProcessConfinementError } from "../process/seatbeltProfile";
 import type { TerminalService, TerminalSnapshot } from "./terminalService";
 import { defaultTerminalShell } from "./terminalShell";
 
@@ -265,7 +267,14 @@ export class ProjectTerminalService {
       console.warn(
         `Octant Project terminal could not start: ${error instanceof Error ? error.message : String(error)}`,
       );
-      return refused("unavailable", "The terminal could not start.");
+      // The person can fix a host without bubblewrap, so they get that reason;
+      // any other confinement message may carry paths and stays in the log.
+      return refused(
+        "unavailable",
+        error instanceof ProcessConfinementError && error.userFixable === "linux-bubblewrap-missing"
+          ? LINUX_BUBBLEWRAP_MISSING_NOTICE
+          : "The terminal could not start.",
+      );
     }
     const owner: Owner = {
       terminalId: command.terminalId,
