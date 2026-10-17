@@ -118,6 +118,11 @@ describe("Code operation contracts", () => {
       afterCharacters: 12,
     } as const;
     expect(decodeCodeTerminalLiveRequest(request)).toEqual(request);
+    expect(decodeCodeTerminalLiveRequest({ ...request, operationId: ids.operation })).toEqual({
+      ...request,
+      operationId: ids.operation,
+    });
+    expect(() => decodeCodeTerminalLiveRequest({ ...request, operationId: "x" })).toThrow();
     expect(() => decodeCodeTerminalLiveRequest({ ...request, afterCharacters: -1 })).toThrow();
     expect(() => decodeCodeTerminalLiveRequest({ ...request, windowId: ids.operation })).toThrow();
 

@@ -931,6 +931,7 @@ describe("code client", () => {
         checkoutId: ids.checkout,
         terminalId: ids.terminal,
         afterCharacters: 3,
+        operationId: ids.operation,
       } as never,
       new AbortController().signal,
     ) ?? []) {
@@ -939,7 +940,7 @@ describe("code client", () => {
 
     expect(received).toEqual(["hello\n", "more"]);
     expect(fetch).toHaveBeenCalledWith(
-      `${baseUrl}/api/code/terminals/live?threadId=${ids.thread}&checkoutId=${ids.checkout}&terminalId=${ids.terminal}&afterCharacters=3`,
+      `${baseUrl}/api/code/terminals/live?threadId=${ids.thread}&checkoutId=${ids.checkout}&terminalId=${ids.terminal}&afterCharacters=3&operationId=${ids.operation}`,
       expect.objectContaining({
         method: "GET",
         headers: expect.objectContaining({ "x-octant-window-capability": capability }),

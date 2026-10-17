@@ -380,7 +380,7 @@ describe("Code routes", () => {
 
     const response = await route(
       request(
-        `/api/code/terminals/live?threadId=${threadId}&checkoutId=${checkoutId}&terminalId=${terminalId}&afterCharacters=3`,
+        `/api/code/terminals/live?threadId=${threadId}&checkoutId=${checkoutId}&terminalId=${terminalId}&afterCharacters=3&operationId=00000000-0000-4000-8000-000000000912`,
       ),
     );
 
@@ -393,9 +393,45 @@ describe("Code routes", () => {
     ]);
     expect(watchTerminal).toHaveBeenCalledWith(
       windowId,
-      expect.objectContaining({ threadId, checkoutId, terminalId, afterCharacters: 3 }),
+      expect.objectContaining({
+        threadId,
+        checkoutId,
+        terminalId,
+        afterCharacters: 3,
+        operationId: "00000000-0000-4000-8000-000000000912",
+      }),
     );
     expect(executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("lets go of the frame source when the client leaves or the stream breaks", async () => {
+    const terminalId = "00000000-0000-4000-8000-000000000911";
+    const query = `threadId=${threadId}&checkoutId=${checkoutId}&terminalId=${terminalId}`;
+    const source = (frames: () => Promise<IteratorResult<unknown>>) => {
+      const returned = vi.fn(async () => ({ done: true as const, value: undefined }));
+      const iterable = {
+        [Symbol.asyncIterator]: () => ({ next: frames, return: returned }),
+      };
+      return { iterable, returned };
+    };
+
+    // The client has gone before the first pull.
+    const gone = source(async () => ({ done: true, value: undefined }));
+    const controller = new AbortController();
+    controller.abort();
+    const left = await routeFixture({ watchTerminal: vi.fn(async () => gone.iterable) })(
+      request(`/api/code/terminals/live?${query}`, { signal: controller.signal }),
+    );
+    await left!.text();
+    expect(gone.returned).toHaveBeenCalled();
+
+    // A frame that cannot be encoded breaks the stream.
+    const broken = source(async () => ({ done: false, value: { not: "a frame" } }));
+    const failed = await routeFixture({ watchTerminal: vi.fn(async () => broken.iterable) })(
+      request(`/api/code/terminals/live?${query}`),
+    );
+    await failed!.text();
+    expect(broken.returned).toHaveBeenCalled();
   });
 
   it("answers a refused terminal stream with a status, never an empty stream", async () => {

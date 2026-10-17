@@ -271,6 +271,7 @@ export interface CodeOperationRuntimeOptions {
      * judged when each check inside runs, never a request's admission.
      */
     readonly standingAuthority: <T>(run: () => T) => T;
+    readonly retainProjectAccess?: CodeOperationAuthorityPort["retainProjectAccess"];
   };
   readonly resolveCheckoutRoot: CodeOperationAuthorityPort["resolveCheckoutRoot"];
   readonly resolveProviderDriver: (thread: CodeThread) => Awaitable<ProviderDriver | undefined>;
@@ -782,6 +783,9 @@ export function createCodeOperationRuntime(
       options.sessionAuthority?.effectiveThread(windowId, thread) ?? thread,
     readCheckout: (checkoutId) => options.persistence.readCodeCheckout(checkoutId),
     canAccessProject: options.windowAccess.canAccessProject,
+    ...(options.windowAccess.retainProjectAccess === undefined
+      ? {}
+      : { retainProjectAccess: options.windowAccess.retainProjectAccess }),
     approvalContextDigest: async (_windowId, command, thread, checkout) => {
       const context = await approvalContext(options, command, thread, checkout);
       return context === undefined ? undefined : approvalContextDigest(context);

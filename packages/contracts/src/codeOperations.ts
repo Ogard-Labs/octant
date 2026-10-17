@@ -153,6 +153,13 @@ export const CodeTerminalLiveRequest = Schema.Struct({
   checkoutId: CodeCheckoutId,
   terminalId: CodeTerminalId,
   afterCharacters: Schema.optional(Schema.Int.pipe(Schema.greaterThanOrEqualTo(0))),
+  /**
+   * The operation whose journal the window also follows this terminal through.
+   * A window reading live stops reading that journal, and the host collects the
+   * journals nobody reads; naming it keeps a window that is on screen from
+   * being collected. It grants nothing and is never trusted for authority.
+   */
+  operationId: Schema.optional(CodeOperationId),
 }).annotations(strict);
 export type CodeTerminalLiveRequest = typeof CodeTerminalLiveRequest.Type;
 

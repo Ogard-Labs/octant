@@ -82,6 +82,13 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   const wakeReplay = useRef<(() => void) | undefined>(undefined);
   /** The transcript the journal handed this pane, which the journal path resumes from. */
   const replayText = useRef("");
+  /**
+   * Where that transcript ends in the terminal's own offsets, so the live stream
+   * continues it instead of replacing it. Unknown once the host truncated it:
+   * the offset of its first character is then not the pane's to know.
+   */
+  const replayOffset = useRef<number | undefined>(0);
+  const replayTruncated = result.transcript?.truncated === true;
   const interactive = props.executionPolicy !== "plan" && result.state === "running";
   const replayReady = loadedReplayKey === replayKey;
   // Read from the host's last answer about this shell, never from having asked:
@@ -100,6 +107,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     let active = true;
     setOutput("");
     replayText.current = "";
+    replayOffset.current = replayTruncated ? undefined : 0;
     if (replayContentId === undefined) {
       setLoadedReplayKey(replayKey);
       return () => void (active = false);
@@ -111,6 +119,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         if (!active) return;
         const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
         replayText.current = text;
+        replayOffset.current = replayTruncated ? undefined : text.length;
         setOutput(text);
         setLoadedReplayKey(replayKey);
       })
@@ -121,7 +130,14 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         }
       });
     return () => void (active = false);
-  }, [props.client, props.scope.threadId, replayContentId, replayKey, result.operationId]);
+  }, [
+    props.client,
+    props.scope.threadId,
+    replayContentId,
+    replayKey,
+    replayTruncated,
+    result.operationId,
+  ]);
 
   useEffect(() => {
     if (!replayReady || result.state !== "running") return;
@@ -137,7 +153,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     const followLive = async (
       watch: NonNullable<typeof watchTerminal>,
     ): Promise<"settled" | "unavailable"> => {
-      let offset: number | undefined;
+      let offset = replayOffset.current;
       let reconnecting = false;
       let barren = 0;
       while (!controller.signal.aborted) {
@@ -148,6 +164,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
               threadId: props.scope.threadId,
               checkoutId: props.scope.checkoutId,
               terminalId: result.terminalId,
+              operationId: result.operationId,
               ...(offset === undefined ? {} : { afterCharacters: offset }),
             },
             controller.signal,

@@ -585,10 +585,7 @@ describe("CodeTerminalPane", () => {
 
   it("paints output from the live stream without reading the journal", async () => {
     const client = codeClient({ evidence: "ready\n" });
-    const frames = [
-      { text: "ready\n", replace: true, characters: 6, state: "running" },
-      { text: "TERMINAL_OK\n", replace: false, characters: 18, state: "running" },
-    ];
+    const frames = [{ text: "TERMINAL_OK\n", replace: false, characters: 18, state: "running" }];
     (client.watchTerminal as ReturnType<typeof vi.fn>).mockImplementation(async function* (
       _request: unknown,
       signal: AbortSignal,
@@ -612,11 +609,51 @@ describe("CodeTerminalPane", () => {
     );
 
     await waitFor(() => expect(runtime.setOutput).toHaveBeenCalledWith("ready\nTERMINAL_OK\n"));
+    // It continues the replay the pane already holds, so scrollback is not replaced.
     expect(client.watchTerminal).toHaveBeenCalledWith(
-      { threadId: scope.threadId, checkoutId: scope.checkoutId, terminalId: ids.terminal },
+      {
+        threadId: scope.threadId,
+        checkoutId: scope.checkoutId,
+        terminalId: ids.terminal,
+        operationId: terminalResult.operationId,
+        afterCharacters: 6,
+      },
       expect.any(AbortSignal),
     );
     expect(client.subscribeOperation).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("asks for the current output when the replay it holds was truncated by the host", async () => {
+    const client = codeClient({ evidence: "tail only\n" });
+    const requests: unknown[] = [];
+    (client.watchTerminal as ReturnType<typeof vi.fn>).mockImplementation(async function* (
+      request: unknown,
+      signal: AbortSignal,
+    ) {
+      requests.push(request);
+      await new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+    });
+    const runtime = xtermRuntime();
+
+    const { unmount } = render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={runtime.loadRuntime}
+        result={{
+          ...terminalResult,
+          transcript: { ...terminalResult.transcript!, truncated: true },
+        }}
+        scope={scope}
+      />,
+    );
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]).not.toHaveProperty("afterCharacters");
     unmount();
   });
 
@@ -665,6 +702,7 @@ describe("CodeTerminalPane", () => {
     );
 
     await waitFor(() => expect(runtime.setOutput).toHaveBeenCalledWith("one\ntwo\n"));
+    expect(requests[0]).toMatchObject({ afterCharacters: 0 });
     expect(requests[1]).toMatchObject({ afterCharacters: 4 });
     unmount();
   });

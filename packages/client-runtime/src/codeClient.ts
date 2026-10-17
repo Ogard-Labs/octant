@@ -394,6 +394,9 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       if (validated.afterCharacters !== undefined) {
         url.searchParams.set("afterCharacters", String(validated.afterCharacters));
       }
+      if (validated.operationId !== undefined) {
+        url.searchParams.set("operationId", String(validated.operationId));
+      }
       return parseTerminalLiveFrames(
         requestRaw(fetch, url.toString(), { method: "GET", headers, signal }),
         validated.terminalId,

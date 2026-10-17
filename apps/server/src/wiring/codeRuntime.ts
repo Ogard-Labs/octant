@@ -552,6 +552,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         windowAccess: {
           canAccessProject: canAccessCodeProject,
           standingAuthority: (run) => codeProjectAccess.standingAuthority(run),
+          retainProjectAccess: (windowId) => codeProjectAccess.retain(windowId),
         },
         resolveCheckoutRoot: async (windowId, thread, checkout) => {
           const root = await roots.resolve(windowId, thread, checkout, rootProbePath);

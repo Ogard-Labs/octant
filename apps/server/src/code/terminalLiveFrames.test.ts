@@ -66,6 +66,26 @@ describe("live terminal frames", () => {
     expect(frames[0]).not.toHaveProperty("exitCode");
   });
 
+  it("does not count the truncation notice it prepends toward the offsets", () => {
+    const notice = "[Octant terminal output truncated]\n";
+    const real = "界".repeat(50_000);
+    const end = 5_000_000;
+
+    const frames = liveFramesOf({
+      terminalId,
+      text: notice + real,
+      replace: true,
+      characters: end,
+      state: "running",
+    });
+
+    // The notice is not the terminal's output, so the first frame has consumed
+    // only the real characters it carries.
+    const consumed = (frames[0]?.text.length ?? 0) - notice.length;
+    expect(frames[0]?.characters).toBe(end - real.length + consumed);
+    expect(frames.at(-1)?.characters).toBe(end);
+  });
+
   it("still sends one frame for a publish that carries only a state change", () => {
     expect(
       liveFramesOf({ terminalId, text: "", replace: false, characters: 9, state: "interrupted" }),

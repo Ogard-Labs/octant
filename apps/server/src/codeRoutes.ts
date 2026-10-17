@@ -1940,7 +1940,8 @@ function decodeFileWatchQuery(url: URL): Omit<CodeFileWatchInput, "signal"> {
 /** Decode a live terminal query: the terminal's scope and, to resume, how far the window has read. */
 function decodeTerminalLiveQuery(url: URL): CodeTerminalLiveRequest {
   const afterCharacters = url.searchParams.get("afterCharacters");
-  const allowed = afterCharacters === null ? 3 : 4;
+  const operationId = url.searchParams.get("operationId");
+  const allowed = 3 + (afterCharacters === null ? 0 : 1) + (operationId === null ? 0 : 1);
   if (url.searchParams.size !== allowed) {
     throw new CodeRouteRejected("Code terminal live query is invalid.", 400);
   }
@@ -1950,6 +1951,7 @@ function decodeTerminalLiveQuery(url: URL): CodeTerminalLiveRequest {
       checkoutId: url.searchParams.get("checkoutId"),
       terminalId: url.searchParams.get("terminalId"),
       ...(afterCharacters === null ? {} : { afterCharacters: Number(afterCharacters) }),
+      ...(operationId === null ? {} : { operationId }),
     });
   } catch {
     throw new CodeRouteRejected("Code terminal live query is invalid.", 400);
@@ -2177,6 +2179,7 @@ function terminalLiveResponse(
       try {
         if (signal.aborted) {
           controller.close();
+          await iterator.return?.(undefined);
           return;
         }
         const next = await iterator.next();
@@ -2193,6 +2196,9 @@ function terminalLiveResponse(
         controller.enqueue(encoder.encode(line));
       } catch {
         controller.close();
+        // The source may be the thing that failed, so letting go of it cannot
+        // be allowed to fail the close.
+        await Promise.resolve(iterator.return?.(undefined)).catch(() => undefined);
       }
     },
     async cancel() {
