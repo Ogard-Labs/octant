@@ -4669,9 +4669,18 @@ input.switch:checked::after {
   min-width: 0;
   flex: 1 1 auto;
 }
+/* The status strip is one scrolling line, but a notice is an instruction the
+   person must read in full before acting (a paused thread says what to do
+   next), so it wraps. In a half-width pane the unwrapped line ran past the
+   frame and its last half, the next step, was off screen. */
+.thread-composer__feedback > .composer-status:has(> .composer-status__notice) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .composer-status__notice {
   min-width: 0;
   color: var(--oct-danger-fg);
+  white-space: normal;
 }
 /* an attachment, a mentioned file, a scoped folder */
 .chip {
