@@ -244,6 +244,12 @@ export interface CodeOperationRuntimeOptions {
   /** Where a running turn's start time and latest step are kept for the navigation read. */
   readonly liveTurns?: LiveTurnRegistry;
   /**
+   * Where the runtime keeps its running turns. The host passes one it built
+   * before its window authority, which reads a running turn's posture from it
+   * with {@link threadWithActiveTurnPosture}; absent, the runtime keeps its own.
+   */
+  readonly activeTurns?: CodeActiveTurns;
+  /**
    * Told when a pending request ends without a journal event: a browser-origin
    * approval that expires or whose tool call is abandoned leaves nothing in the
    * stream, so the change feed would otherwise never say it is gone.
@@ -1930,6 +1936,27 @@ type PendingHandoffRecord = HandoffAttached extends infer Record
     : Record
   : never;
 
+/** The running Code turns, by thread id. */
+export type CodeActiveTurns = Map<string, ActiveTurn>;
+
+/**
+ * The durable thread as its running turn may use it. A one-shot overlay is
+ * the requested ceiling and the current grant still clamps it, so app-managed
+ * tools cannot exceed either the turn or a later lower grant.
+ */
+export function threadWithActiveTurnPosture(
+  thread: CodeThread,
+  activeTurns: ReadonlyMap<string, Pick<ActiveTurn, "thread">>,
+): CodeThread {
+  const active = activeTurns.get(String(thread.id));
+  if (active === undefined) return thread;
+  const executionPolicy = clampTurnAccessPosture({
+    requested: active.thread.executionPolicy,
+    thread: thread.executionPolicy,
+  });
+  return executionPolicy === thread.executionPolicy ? thread : { ...thread, executionPolicy };
+}
+
 interface ActiveTurn {
   /**
    * A provider-switch or fork handoff this turn selected and has not
@@ -2115,7 +2142,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     string,
     Extract<CodeOperationCommand, { kind: "start-provider-turn" }>
   >();
-  readonly #active = new Map<string, ActiveTurn>();
+  readonly #active: CodeActiveTurns;
   readonly #approvedBrowserContexts = new Set<string>();
 
   readonly #spendReservations: Map<string, ReturnType<typeof decodeSpendCeilingReservationId>>;
@@ -2133,6 +2160,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     approvalStore: CodeOperationApprovalStore | undefined;
   }) {
     this.#options = input.options;
+    this.#active = input.options.activeTurns ?? new Map();
     this.#approvalStore = input.approvalStore;
     this.#spendReservations = input.spendReservations;
     this.#events = input.events;
@@ -3749,19 +3777,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       });
   }
 
-  /**
-   * The durable thread as this running turn may use it. A one-shot overlay is
-   * the requested ceiling and the current grant still clamps it, so app-managed
-   * tools cannot exceed either the turn or a later lower grant.
-   */
+  /** The durable thread as its running turn may use it, from this runtime's own turns. */
   threadWithActiveTurnPosture(thread: CodeThread): CodeThread {
-    const active = this.#active.get(String(thread.id));
-    if (active === undefined) return thread;
-    const executionPolicy = clampTurnAccessPosture({
-      requested: active.thread.executionPolicy,
-      thread: thread.executionPolicy,
-    });
-    return executionPolicy === thread.executionPolicy ? thread : { ...thread, executionPolicy };
+    return threadWithActiveTurnPosture(thread, this.#active);
   }
 
   #effectiveThread(windowId: WindowId, threadId: CodeThreadId): CodeThread | undefined {

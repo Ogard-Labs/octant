@@ -217,7 +217,7 @@ not an upload channel.
 
 These are product behavior, not a future promise.
 
-**Export one thread.** **Export thread** is a host-authoritative read of
+**Export one thread.** **Export…** is a host-authoritative read of
 one thread you can already open. The JSON bundle (`octant.thread-bundle/1`)
 carries transcript, evidence, and provenance, and names the instant it was
 cut. Secrets, raw provider payloads, resume cursors, and filesystem paths

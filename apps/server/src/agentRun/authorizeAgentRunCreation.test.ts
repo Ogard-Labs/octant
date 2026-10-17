@@ -33,6 +33,7 @@ import { describe, expect, it, vi } from "vitest";
 import { WINDOW_AUTHORITY_TTL_MS, WindowAuthorityStore } from "../windowAuthorityStore";
 import { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStore";
 import { createNativeHarnessComposition } from "../harness/nativeHarnessComposition";
+import { codeParentActiveTurnFrom } from "../wiring/authority";
 import { resolveAgentRunControlFacts } from "./agentRunControlService";
 import {
   authorizeAgentRunCreation,
@@ -592,6 +593,30 @@ describe("a Code parent whose running turn is narrower than its thread", () => {
         },
       });
       expect(child.authority).toMatchObject(planOnly);
+    },
+  );
+
+  it.each(["approval-gated", "full-access"] as const)(
+    "gives a child Plan on a %s thread when a runtime the host was started with runs the turn in Plan",
+    (stored) => {
+      // Such a runtime keeps its own running turns, so the host's registry is empty.
+      const activeTurn = codeParentActiveTurnFrom(
+        { threadWithActiveTurnPosture: turnHolding("plan") },
+        new Map(),
+      );
+      expect(admit(stored, activeTurn)?.liveAuthority).toMatchObject(planOnly);
+      expect(
+        scheduledAgentRunLiveAuthority({
+          persistence: { readCodeThread: () => codeThread(stored) } as never,
+          run: { parentThreadId: parentId(ids.code), routingReceipt: { mode: "code" } } as never,
+          activeTurn,
+        }),
+      ).toMatchObject(planOnly);
+      // With no running turn anywhere, the thread's own posture stands.
+      expect(
+        admit(stored, codeParentActiveTurnFrom(undefined, new Map()))?.liveAuthority
+          .executionPolicy,
+      ).toBe(stored);
     },
   );
 
