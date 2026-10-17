@@ -72,6 +72,11 @@ but they do not own a second palette or visual language.
   that already is. Weights follow the one ladder in [Scale](#scale).
 - **Sentence case everywhere**: titles, labels, buttons, tabs, menu items.
   Product nouns keep their capital (Project, Chat, Work, Code, Environment).
+- **Say what happens.** A posture name never promises more than the runtime
+  does. Where a session-only Full access leaves Octant Harness asking, the
+  access control and the dock's Access fact read "Full access · asks first",
+  and the control's tooltip says "Full access this session. Octant Harness
+  still asks before writes and commands."
 - **One sentence of help.** A subtitle or row description is one sentence
   that says what the thing does. Longer explanations move to the docs.
 - **Vocabulary.** `Project`, `thread`, `checkout`, `worktree`, `base branch`,

@@ -50,6 +50,8 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
+import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
+import { codeTurnExecutionPolicyReader } from "./codeTurnExecutionPolicy";
 import { ProductFeedbackService } from "../browser/productFeedbackService";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import {
@@ -1693,6 +1695,58 @@ describe("CodeOperationRuntime", () => {
       }
     },
   );
+
+  it.each([
+    ["full-access", "plan"],
+    ["auto-accept-edits", "plan"],
+    ["full-access", "approval-gated"],
+  ] as const)(
+    "reads a %s thread's running turn as %s through the harness's own reader",
+    async (threadPolicy, turnPolicy) => {
+      const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+      const provider = providerConnection(queue);
+      const fixture = runtimeFixture({ provider: providerDriver(provider) });
+      const stored = decodeCodeThread({ ...thread(), executionPolicy: threadPolicy });
+      fixture.setThread(stored);
+      const sessions = new CodeSessionAuthorityStore();
+      const readPosture = codeTurnExecutionPolicyReader({
+        readCodeThread: () => stored,
+        codeSessionAuthority: sessions,
+        codeOperationRuntime: fixture.runtime,
+      });
+      try {
+        expect(readPosture(threadId, windowId)).toBe(threadPolicy);
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(95),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+          executionPolicy: turnPolicy,
+        });
+        await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+        expect(readPosture(threadId, windowId)).toBe(turnPolicy);
+        // A session grant never lifts the narrowed turn.
+        sessions.grantFullAccess(windowId, stored.id);
+        expect(readPosture(threadId, windowId)).toBe(turnPolicy);
+      } finally {
+        await fixture.runtime.close();
+        fixture.close();
+      }
+    },
+  );
+
+  it("reads a posture it cannot resolve as Plan", () => {
+    const readPosture = codeTurnExecutionPolicyReader({
+      readCodeThread: () => {
+        throw new Error("store unavailable");
+      },
+      codeSessionAuthority: new CodeSessionAuthorityStore(),
+      codeOperationRuntime: undefined,
+    });
+    expect(readPosture(threadId)).toBe("plan");
+  });
 
   it.each([true, false])(
     "resumes without replay when a replacement cursor is returned: %s",

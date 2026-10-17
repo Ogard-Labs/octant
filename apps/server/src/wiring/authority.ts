@@ -6,7 +6,10 @@ import {
   decodeWindowId,
   type WindowId,
 } from "@octant/contracts";
-import { boundAgentRunLiveAuthority } from "../agentRun/authorizeAgentRunCreation";
+import {
+  boundAgentRunLiveAuthority,
+  type CodeParentActiveTurn,
+} from "../agentRun/authorizeAgentRunCreation";
 import { DurableBindingReceiptStore } from "../bindingReceiptStore";
 import { MachineChangeFeed } from "../machineChangeFeed";
 import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
@@ -32,12 +35,16 @@ import { BrowserCaptureStore } from "../browser/browserCaptureStore";
 import { SimulatorInputGrants } from "../apple/simulatorInputGrants";
 import type { ServerStart } from "./serverShape";
 import type { FoundationsWiring } from "./foundations";
+import type { LateBindings } from "./lateBindings";
 
 export type AuthorityDependencies = Pick<ServerStart, "persistence"> &
-  Pick<FoundationsWiring, "browserAuthority">;
+  Pick<FoundationsWiring, "browserAuthority"> & {
+    /** Cells settled by a later wiring call; read per use, never at construction. */
+    readonly late: Pick<LateBindings, "codeOperationRuntime">;
+  };
 
 export function wireAuthority(deps: AuthorityDependencies) {
-  const { browserAuthority, persistence } = deps;
+  const { browserAuthority, late, persistence } = deps;
 
   const bindingReceiptStore = new DurableBindingReceiptStore(persistence.connection);
   const processAuthorityClock = new ProcessAuthorityClock();
@@ -137,10 +144,15 @@ export function wireAuthority(deps: AuthorityDependencies) {
       parentThreadId: run.parentThreadId,
     });
   };
+  // A child is admitted under the posture its parent's running turn holds, so
+  // a turn narrowed to Plan cannot hand a child the thread's wider grant.
+  const codeParentActiveTurn: CodeParentActiveTurn = (thread) =>
+    late.codeOperationRuntime.current?.threadWithActiveTurnPosture?.(thread) ?? thread;
   const agentRunParentAuthority = (run: AgentRun) =>
     boundAgentRunLiveAuthority({
       persistence,
       run,
+      activeTurn: codeParentActiveTurn,
       executionWindows: agentRunExecutionWindows,
       codeSessionAuthority,
       windowAuthorityStore,
@@ -202,6 +214,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     browserCaptures,
     browserModelBindings,
     codeApprovalStore,
+    codeParentActiveTurn,
     codeSessionAuthority,
     extensionToolApprovalService,
     isPairedDeviceScope,

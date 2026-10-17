@@ -1969,6 +1969,16 @@ flowchart LR
   repeated startup does not append duplicate recovery events. A follow-up resumes
   the retained native identity under the ordinary current-authority checks.
 
+  A Work turn the journal still reads as accepted, running, or waiting after a
+  restart has no runtime left to finish it. The projection settles it as failed
+  with the `interrupted` category, so the header reads Interrupted, the Board
+  keeps the thread under Waiting with the interrupted reason, and the thread
+  takes its next message. The settlement is derived on every start and not
+  journaled, so rebuilding twice reads the same. A turn waiting on a provider
+  usage limit keeps waiting for the reset. An approval the lead was blocked on
+  stays `lost-in-restart` in the harness session: only Resume is offered, and
+  the call it guarded never runs.
+
 - **Fast thread reads.** A thread paints from an authoritative snapshot before
   auxiliary Files, Git, Browser, or Computer Use observations begin. Code
   conversation evidence is read in bounded batches and page results paint as
@@ -4301,10 +4311,23 @@ native harness in `apps/server/src/harness`:
      set above, with no `edit`, `write`, `bash`, or `goal-check`. Plan does
      not refuse `web-fetch` (a tainted thread still confirms it afresh), so
      it stays. A thread stored as Plan, or a turn narrowed to Plan, composes
-     that set; a posture moved to Plan after the tools were composed still
-     has its write or command refused as `plan-mode-denied`, the server-side
-     backstop. A managed child admitted in Plan is offered the same reduced
-     set. `nativeHarnessComposition.test.ts` pins the full
+     that set. The offered set is not the boundary: every call is judged by
+     the narrower of the thread's stored posture and the posture the running
+     turn holds when the call arrives, so a turn narrowed to Plan on a thread
+     stored as approval-gated, auto-accept-edits, or Full access has its
+     write, edit, command, or check refused as `plan-mode-denied`, including
+     a call from tools composed before the narrowing. A turn's posture only
+     narrows the thread's, never widens it. Work and Chat have no Plan
+     posture (a Work turn is ask-first or auto-accept-edits; Chat is
+     approval-gated), so no narrowed turn reaches them. A child agent
+     is admitted, and a scheduled resume is granted, under the same narrower
+     posture: the parent's live grant is its thread (with the window's session
+     grant) clamped to the posture its running turn holds, so a turn narrowed to
+     Plan delegates only Plan children, and a turn narrowed to approval-gated
+     only approval-gated ones, whichever route starts them (`delegate` or the
+     `agents` tool). A posture that cannot be read counts as Plan. A managed
+     child admitted in Plan is offered the same reduced set.
+     `nativeHarnessComposition.test.ts` pins the full
      set per mode with every port supplied, the Code set under each access
      posture, the Side Chat set, the reduced set without them, and that the
      composition call site still supplies each port.
@@ -5512,6 +5535,19 @@ mechanisms are:
   The access picker also offers "Lower thread" to durably return a thread to
   approval-gated and revoke a session-only Full-access grant for that window
   without confirmation.
+  A session-only grant of Full access is honoured by provider runtimes and not
+  by Octant Harness. The grant lives in the window's memory and the journaled
+  thread stays approval-gated; a provider turn receives the window's grant, but
+  the harness decides each tool call from the journaled thread
+  (`createNativeHarnessAuthority`), so it still asks before a write or a
+  command. Decision of 2026-10-17: the harness is not loosened, and the
+  access surfaces say so instead: for a thread on a native harness
+  driver whose Full access is session-only (`harnessAsksUnderSessionFullAccess`
+  in `packages/domain/src/codePolicy.ts`), the access picker and the
+  dock's Access fact read "Full access · asks first", and the picker's tooltip
+  says "Full access this session. Octant Harness still asks before writes and
+  commands." A remembered Full access is journaled and honoured, and reads as
+  plain Full access. The tool-call taint rule is unchanged.
   On a host with no native confirmation surface — a headless Linux station
   has none — session-only Full access cannot be raised from any client: the
   access picker refuses the raise and names the remembered route, so Full

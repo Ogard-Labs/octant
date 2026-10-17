@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveServerRunOptions, runServerRunCommand, type ServerRunSpawnSpec } from "./serverRun";
 
 describe("runServerRunCommand", () => {
-  it("uses an absolute runtime for the default nested server invocation", async () => {
+  it("starts the checkout server with the absolute runtime and no PATH lookup of the runtime", async () => {
     let captured: { readonly command: string; readonly args: readonly string[] } | undefined;
     await runServerRunCommand({
       env: {},
@@ -25,7 +25,7 @@ describe("runServerRunCommand", () => {
       "run",
       "--cwd",
       expect.stringMatching(/\/apps\/server$/),
-      "start",
+      "src/main.ts",
     ]);
   });
 

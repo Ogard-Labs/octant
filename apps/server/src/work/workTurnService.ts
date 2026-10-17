@@ -857,9 +857,15 @@ export class WorkTurnService {
               // The session cursor is recorded when the session starts, before
               // the provider is sent anything, so a turn that carried a
               // handoff and did not complete may never have delivered it.
-              ...(previous.handoff === undefined || previous.status === "completed"
-                ? {}
-                : { undeliveredHandoff: previous.handoff.reason }),
+              ...(previous.handoff !== undefined && previous.status !== "completed"
+                ? { undeliveredHandoff: previous.handoff.reason }
+                : // A restart that cut the turn off before its session recorded a
+                  // cursor left no session of the provider's to resume, so the
+                  // conversation goes to a fresh one as text.
+                  previous.failure?.category === "interrupted" &&
+                    previous.resumeCursor === undefined
+                  ? { undeliveredHandoff: "provider-switch" as const }
+                  : {}),
             },
           }),
       handoff: "allowed",

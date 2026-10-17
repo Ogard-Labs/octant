@@ -1144,6 +1144,47 @@ describe("WorkThreadWorkspace", () => {
     expect(await screen.findByText("Claude message stream failed.")).toBeVisible();
   });
 
+  it("reads a turn a host restart cut off as interrupted, not as a wait for approval", async () => {
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({
+        threadId,
+        turns: [
+          workTurn({
+            status: "failed",
+            transcript: [
+              { role: "user", text: "Summarize the brief" },
+              { role: "assistant", text: "Half a sent", status: "interrupted" },
+            ],
+            failure: {
+              category: "interrupted",
+              message: "Octant restarted while this turn was running, so it did not finish.",
+            },
+          }),
+        ],
+      })),
+    };
+    const requestClient = { list: vi.fn(async () => ({ requests: [] })) };
+
+    render(
+      <WorkThreadWorkspace
+        requestClient={requestClient as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    expect(await screen.findByText("Interrupted")).toBeVisible();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Waiting for approval")).not.toBeInTheDocument();
+    expect(screen.getByText(/Octant restarted while this turn was running/)).toBeVisible();
+  });
+
   it("shows a delivered subagent result as its own labelled entry, not as the person's message", async () => {
     const delivered = [
       "A subagent you delegated has finished.",

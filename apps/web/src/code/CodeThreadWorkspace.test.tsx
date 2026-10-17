@@ -1914,6 +1914,46 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledWith("just look", [], [], [], "plan");
   });
 
+  it.each([
+    ["openai-compatible", "full-access", "current-session", "Full access · asks first"],
+    ["anthropic-compatible", "full-access", "current-session", "Full access · asks first"],
+    ["claude", "full-access", "current-session", "Full access"],
+    ["codex", "full-access", "current-session", "Full access"],
+    ["openai-compatible", "full-access", "project-default", "Full access"],
+    ["openai-compatible", "approval-gated", "current-session", "Ask"],
+  ] as const)(
+    "reads %s under %s kept for %s as %s",
+    (driverKind, executionPolicy, permissionPersistence, label) => {
+      const base = controller();
+      render(
+        <CodeThreadWorkspace
+          controller={{
+            ...base,
+            activeView: {
+              ...base.activeView!,
+              thread: { ...base.activeView!.thread, executionPolicy, permissionPersistence },
+            },
+          }}
+          providerGroups={[
+            {
+              ...providerGroup(),
+              instance: { ...providerGroup().instance, driverKind },
+            } as never,
+          ]}
+          threadId={threadId}
+        />,
+      );
+
+      const access = screen.getByRole("button", { name: "Next turn access" });
+      expect(access).toHaveTextContent(label);
+      if (label.endsWith("asks first")) {
+        expect(access).toHaveAttribute("title", expect.stringContaining("still asks before"));
+      } else {
+        expect(access).not.toHaveAttribute("title", expect.stringContaining("still asks before"));
+      }
+    },
+  );
+
   it("keeps a selected Plan posture when the thread lowers to approval-gated access", async () => {
     const user = userEvent.setup();
     const initial = controller();

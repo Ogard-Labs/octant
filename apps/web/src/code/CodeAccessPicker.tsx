@@ -30,6 +30,15 @@ export const CODE_ACCESS_POSTURE_LABEL: Record<ProviderExecutionPolicy, string> 
   "full-access": "Full access",
 };
 
+/**
+ * What a session-only grant of Full access means on Octant Harness: the grant
+ * lives in the window, and the harness decides each tool call from the stored
+ * thread, so it still asks. Provider runtimes honour the grant and need no note.
+ */
+export const HARNESS_SESSION_FULL_ACCESS_LABEL = "Full access · asks first";
+export const HARNESS_SESSION_FULL_ACCESS_NOTE =
+  "Full access this session. Octant Harness still asks before writes and commands.";
+
 const ACCESS_TRIGGER_LABEL: Readonly<Record<ProviderExecutionPolicy, string>> = {
   plan: "Plan",
   "approval-gated": "Ask",
@@ -44,6 +53,12 @@ export interface CodeAccessPickerProps {
   };
   readonly profileName?: string;
   readonly disabled?: boolean;
+  /**
+   * The thread runs on Octant Harness under a session-only grant of Full
+   * access, which that runtime does not honour. Full access then names what
+   * still happens instead of promising what does not.
+   */
+  readonly harnessAsksUnderFullAccess?: boolean;
   /**
    * The thread's grant. The next turn may sit at or below this. Postures
    * above it raise the thread rather than running as a one-shot.
@@ -103,6 +118,7 @@ export function CodeAccessPicker(props: CodeAccessPickerProps) {
         : {}),
     })),
   ];
+  const harnessAsks = props.harnessAsksUnderFullAccess === true && props.value === "full-access";
   const reviewAvailable =
     props.autoApprove !== undefined &&
     (props.value === "approval-gated" || props.value === "auto-accept-edits");
@@ -110,15 +126,21 @@ export function CodeAccessPicker(props: CodeAccessPickerProps) {
     <OctantMenuRoot>
       <OctantMenuTrigger
         aria-label="Next turn access"
-        aria-description={CODE_ACCESS_POSTURE_LABEL[props.value]}
-        title={CODE_ACCESS_POSTURE_LABEL[props.value]}
+        aria-description={
+          harnessAsks ? HARNESS_SESSION_FULL_ACCESS_NOTE : CODE_ACCESS_POSTURE_LABEL[props.value]
+        }
+        title={
+          harnessAsks ? HARNESS_SESSION_FULL_ACCESS_NOTE : CODE_ACCESS_POSTURE_LABEL[props.value]
+        }
         disabled={props.disabled === true}
         render={<OctantButton size="sm" variant="ghost" />}
       >
         <span>
           {reviewAvailable && props.autoApprove?.checked
             ? "Approve for me"
-            : ACCESS_TRIGGER_LABEL[props.value]}
+            : harnessAsks
+              ? HARNESS_SESSION_FULL_ACCESS_LABEL
+              : ACCESS_TRIGGER_LABEL[props.value]}
         </span>
         <ChevronDown aria-hidden="true" />
       </OctantMenuTrigger>
