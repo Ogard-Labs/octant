@@ -197,9 +197,12 @@ The workflows publish signed feed files to GitHub, not to a server of ours.
 Each ring has one fixed mailbox release, tagged `feed-preview`,
 `feed-candidate` or `feed-stable`: a prerelease that holds only that ring's
 feed JSON files and never a build. `scripts/publish-update-feed.sh` creates it
-on first use and uploads with `gh release upload --clobber` using the job's own
-`GITHUB_TOKEN` (`contents: write`). Each matrix job writes distinct file names,
-so replacing a file never touches another job's. The `feed-*` tags do not start
+on first use and uploads with the job's own `GITHUB_TOKEN` (`contents: write`).
+A file is never replaced in place: the new bytes go up under a temporary name,
+are checked for size, and only then does the old asset give way and the
+temporary one take its name, so a failed upload leaves the live file serving
+and a rerun is safe. Each matrix job writes distinct file names, so a swap never
+touches another job's. The `feed-*` tags do not start
 with `v`, so neither the stable-tag trigger nor a protection rule on `v*` tags
 applies to them.
 
