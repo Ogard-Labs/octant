@@ -16,6 +16,24 @@ describe("turn activity", () => {
     ).toBe("4 tool calls · 2 files edited");
   });
 
+  it("counts only the edits that happened, not a write the person denied", () => {
+    expect(
+      settledTurnActivitySummary({
+        reasoning: "",
+        rows: [
+          { kind: "tool", id: "1", toolName: "Write", state: "failed" },
+          { kind: "tool", id: "2", toolName: "Edit", state: "completed" },
+        ],
+      }),
+    ).toBe("2 tool calls · 1 file edited");
+    expect(
+      settledTurnActivitySummary({
+        reasoning: "",
+        rows: [{ kind: "tool", id: "1", toolName: "Write", state: "failed" }],
+      }),
+    ).toBe("1 tool call");
+  });
+
   it("keeps waiting rows outside the settled fold", () => {
     const activity = {
       reasoning: "",
