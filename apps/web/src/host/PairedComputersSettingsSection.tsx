@@ -93,9 +93,11 @@ export function PairedComputersSettingsSection({
         void refresh();
         return;
       }
-      // Leaving before the host approved keeps nothing: the pin goes, so that
-      // computer cannot be reached from this app until it is paired again.
-      void bridge.forgetPairedComputer(finished.computer.origin).finally(() => void refresh());
+      // Leaving before the host approved keeps nothing: main drops the pin it
+      // staged for this code and leaves any earlier pairing of that computer alone.
+      void bridge
+        .settlePairedComputer(finished.computer.origin, "abandoned")
+        .finally(() => void refresh());
     },
     [bridge, claiming, refresh],
   );

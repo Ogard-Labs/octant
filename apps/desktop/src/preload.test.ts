@@ -143,6 +143,27 @@ describe("desktop preload bridge", () => {
     expect(answer).toMatchObject({ status: "answered", httpStatus: 200 });
   });
 
+  it("settles a pairing on its own channel and refuses an answer it does not know", async () => {
+    const invoke = vi.fn().mockResolvedValue({ status: "settled" });
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+    );
+
+    await expect(
+      bridge.settlePairedComputer?.("https://100.101.102.103:8443", "abandoned"),
+    ).resolves.toEqual({ status: "settled" });
+    expect(invoke).toHaveBeenCalledWith(
+      IPC_CHANNELS.pairedComputerSettle,
+      "https://100.101.102.103:8443",
+      "abandoned",
+    );
+    await expect(
+      bridge.settlePairedComputer?.("https://x", "forgotten" as never),
+    ).resolves.toMatchObject({ status: "refused" });
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+
   it("refuses a paired-computer answer that is not in the agreed shape", async () => {
     for (const reply of [
       { status: "answered", httpStatus: 200, headers: [["set-cookie"]], body: new Uint8Array() },
@@ -300,6 +321,7 @@ describe("desktop preload bridge", () => {
       "setProviderCredential",
       "setSidebarMaterialPreference",
       "setSidebarVibrancyMode",
+      "settlePairedComputer",
       "subscribeAppUpdateState",
       "subscribeBrowserSurfaceState",
       "subscribeCanvasPrototypeEvents",

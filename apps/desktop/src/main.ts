@@ -3831,6 +3831,10 @@ function remoteServerPages(): RemoteServerPages {
     pageStorage: remoteServerPageStorage,
     showInOctantBrowser: showRemoteServerPage,
     openExternal: (url) => shell.openExternal(url),
+    pairedTrust: (listenerOrigin) => {
+      const pin = pairedComputerPins().pinFor(listenerOrigin);
+      return pin === undefined ? undefined : { current: { kind: "pinned", pin } };
+    },
   });
   return remoteServerPagesInstance;
 }

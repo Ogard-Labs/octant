@@ -39,7 +39,6 @@ import {
   createPairingDeviceKeyAdapter,
   createRemoteProductFetch,
   isRemotePairingOrigin,
-  PLATFORM_LISTENER_TRUST,
   localHostDisplayName,
   readPairingFragment,
   type AgentProfileClient,
@@ -1894,7 +1893,6 @@ function LaunchedShell(
           hostId: host.hostId,
           hostName: host.hostName,
           origin: host.origin,
-          listenerTrust: credential.listenerTrust ?? PLATFORM_LISTENER_TRUST,
           issueSession: () => connection.issueServerProxySession(),
           sign: (payload) => deviceKey.sign(payload),
           // A computer paired through Other computers is reached through the

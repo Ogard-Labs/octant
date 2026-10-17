@@ -96,7 +96,7 @@ function client(approves: boolean): RemotePairingClient {
 function bridge() {
   return {
     requestPairedComputer: vi.fn(),
-    forgetPairedComputer: vi.fn(async () => ({ status: "forgotten" as const })),
+    settlePairedComputer: vi.fn(async () => ({ status: "settled" as const })),
   };
 }
 
@@ -106,7 +106,7 @@ async function reachWaiting() {
 }
 
 describe("leaving a pairing that main already recorded a pin for", () => {
-  it("forgets the pin when the window unmounts before the other computer approves", async () => {
+  it("abandons the pairing when the window unmounts before the other computer approves", async () => {
     const desktop = bridge();
     const view = render(
       <PairedComputerClaim
@@ -122,9 +122,53 @@ describe("leaving a pairing that main already recorded a pin for", () => {
     view.unmount();
 
     await waitFor(() =>
-      expect(desktop.forgetPairedComputer).toHaveBeenCalledWith(pairing.computer.origin),
+      expect(desktop.settlePairedComputer).toHaveBeenCalledWith(
+        pairing.computer.origin,
+        "abandoned",
+      ),
     );
-    expect(desktop.forgetPairedComputer).toHaveBeenCalledOnce();
+    expect(desktop.settlePairedComputer).toHaveBeenCalledOnce();
+  });
+
+  it("tells the desktop to keep the pin once the other computer approved", async () => {
+    const desktop = bridge();
+    const onFinished = vi.fn();
+    render(
+      <PairedComputerClaim
+        bridge={desktop}
+        client={client(true)}
+        federation={stack()}
+        onFinished={onFinished}
+        pairing={pairing}
+      />,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Ask Studio Mac to approve" }));
+    await waitFor(() => expect(onFinished).toHaveBeenCalledWith("paired"));
+
+    expect(desktop.settlePairedComputer).toHaveBeenCalledWith(pairing.computer.origin, "approved");
+    expect(desktop.settlePairedComputer).toHaveBeenCalledOnce();
+  });
+
+  it("says so, and does not connect, when the desktop no longer has the pairing open", async () => {
+    const desktop = bridge();
+    desktop.settlePairedComputer.mockResolvedValue({
+      status: "refused" as never,
+      message: "That pairing is no longer open.",
+    } as never);
+    const onFinished = vi.fn();
+    render(
+      <PairedComputerClaim
+        bridge={desktop}
+        client={client(true)}
+        federation={stack()}
+        onFinished={onFinished}
+        pairing={pairing}
+      />,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Ask Studio Mac to approve" }));
+
+    expect(await screen.findByText(/couldn't finish saving it/)).toBeTruthy();
+    expect(onFinished).not.toHaveBeenCalled();
   });
 
   it("keeps the pin when the window unmounts after the computer was paired", async () => {
@@ -145,7 +189,10 @@ describe("leaving a pairing that main already recorded a pin for", () => {
     view.unmount();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(desktop.forgetPairedComputer).not.toHaveBeenCalled();
+    expect(desktop.settlePairedComputer).not.toHaveBeenCalledWith(
+      pairing.computer.origin,
+      "abandoned",
+    );
   });
 
   it("keeps the pin when it is unmounted once approved but before the host is saved", async () => {
@@ -171,10 +218,13 @@ describe("leaving a pairing that main already recorded a pin for", () => {
     view.unmount();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(desktop.forgetPairedComputer).not.toHaveBeenCalled();
+    expect(desktop.settlePairedComputer).not.toHaveBeenCalledWith(
+      pairing.computer.origin,
+      "abandoned",
+    );
   });
 
-  it("does not forget the pin of a pairing that a development double mount remounted", async () => {
+  it("does not abandon a pairing that a development double mount remounted", async () => {
     const desktop = bridge();
     const view = render(
       <StrictMode>
@@ -190,8 +240,11 @@ describe("leaving a pairing that main already recorded a pin for", () => {
     await reachWaiting();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
-    expect(desktop.forgetPairedComputer).not.toHaveBeenCalled();
+    expect(desktop.settlePairedComputer).not.toHaveBeenCalledWith(
+      pairing.computer.origin,
+      "abandoned",
+    );
     view.unmount();
-    await waitFor(() => expect(desktop.forgetPairedComputer).toHaveBeenCalledOnce());
+    await waitFor(() => expect(desktop.settlePairedComputer).toHaveBeenCalledOnce());
   });
 });

@@ -1,8 +1,9 @@
 // The desktop app's side of pairing with another computer from its app
 // pairing code. Main reads the code, reaches the listener only through the
 // Node transport held to the code's pin, verifies the host hello, and only
-// then records the pin and hands the ticket back to the window that pasted the
-// code, which claims it with its own device key. From then on that window
+// then stages the pin and hands the ticket back to the window that pasted the
+// code, which claims it with its own device key; the pin is kept only once the
+// window reports the other computer approved. From then on that window
 // reaches the computer only through `requestPairedComputer`, over the same
 // pinned transport. The renderer hands over the pasted text and nothing else:
 // it cannot name a pin or an origin to trust.
@@ -49,19 +50,67 @@ export type PairedComputerOutcome =
     }
   | { readonly status: "refused"; readonly message: string };
 
+/** How long a pin staged from a pairing code is reachable before the pairing is settled. */
+export const STAGED_PIN_MS = 10 * 60 * 1_000;
+
+export type SettleOutcome = "approved" | "abandoned";
+
 /**
  * The pins main keeps, one per paired origin, in an owner-only file under the
  * app's data. A file that cannot be read holds no pins, so nothing is
  * trusted rather than something wrongly. An origin is reachable from a window
- * only while it is listed here.
+ * only while it is listed here, or while a pairing code's pin for it is staged.
+ *
+ * A pairing code's pin is staged in memory, not written: the window may reach
+ * the origin through it so it can claim the ticket, but it replaces nothing
+ * recorded until the pairing is approved. Abandoning the pairing, or letting it
+ * lapse, therefore never touches a computer that was already paired.
  */
 export class PairedComputerPins {
   readonly #path: string;
+  readonly #now: () => number;
+  readonly #staged = new Map<string, { readonly record: PinRecord; readonly expiresAt: number }>();
   #records: ReadonlyArray<PinRecord>;
 
-  constructor(path: string) {
+  constructor(path: string, now: () => number = Date.now) {
     this.#path = path;
+    this.#now = now;
     this.#records = readPinRecords(path);
+  }
+
+  /**
+   * The pin a request to this origin is held to. A request that belongs to a
+   * pairing (`pairing`) is held to the staged pin while one is open, so the
+   * ticket can be claimed; every other request is held to the recorded pin
+   * alone, so a code pasted for a computer already paired never redirects the
+   * session that computer already has.
+   */
+  reachPinFor(origin: string, pairing: boolean): string | undefined {
+    const staged = this.#staged.get(origin);
+    if (pairing && staged !== undefined && staged.expiresAt > this.#now()) {
+      return staged.record.pin;
+    }
+    return this.pinFor(origin);
+  }
+
+  /** Holds a pairing code's pin for the claim, without recording it. */
+  stage(input: PinRecord): void {
+    if (!isPrivateListenerOrigin(input.origin)) {
+      throw new Error("Octant pins only a private network or Tailscale address.");
+    }
+    this.#staged.set(input.origin, { record: input, expiresAt: this.#now() + STAGED_PIN_MS });
+  }
+
+  /**
+   * Ends an open pairing. Approved records the staged pin; abandoned drops it.
+   * Returns whether a pairing was open (and unexpired).
+   */
+  settle(origin: string, outcome: SettleOutcome): boolean {
+    const staged = this.#staged.get(origin);
+    this.#staged.delete(origin);
+    if (staged === undefined || staged.expiresAt <= this.#now()) return false;
+    if (outcome === "approved") this.record(staged.record);
+    return true;
   }
 
   list(): ReadonlyArray<PairedComputer> {
@@ -91,6 +140,7 @@ export class PairedComputerPins {
 
   /** Drops an origin's pin. Returns whether there was one. */
   forget(origin: string): boolean {
+    this.#staged.delete(origin);
     const next = this.#records.filter((record) => record.origin !== origin);
     if (next.length === this.#records.length) return false;
     writePinRecords(this.#path, next);
@@ -175,10 +225,10 @@ export async function forgetPairedComputer(input: {
 
 /**
  * Pairs with the computer a pasted code names: verifies its host hello over a
- * connection held to the code's pin, records the pin, and hands back the
+ * connection held to the code's pin, stages the pin, and hands back the
  * ticket. The window then claims the ticket with its own device key through
- * `requestPairedComputer`, and the person compares the codes and approves on
- * the other computer.
+ * `requestPairedComputer`, the person compares the codes and approves on the
+ * other computer, and the window settles the pairing.
  */
 export async function pairFromPairingCode(input: {
   readonly code: unknown;
@@ -202,7 +252,7 @@ export async function pairFromPairingCode(input: {
   }
   const computer = { origin: opened.origin, displayName: opened.hostHello.displayName };
   try {
-    input.pins.record({ ...computer, pin: opened.listenerTrust.pin });
+    input.pins.stage({ ...computer, pin: opened.listenerTrust.pin });
   } catch {
     return {
       status: "refused",
@@ -215,6 +265,36 @@ export async function pairFromPairingCode(input: {
     ticket: { ticketId: opened.ticket.ticketId, ticketProof: opened.ticket.ticketProof },
     pin: opened.listenerTrust.pin,
   };
+}
+
+export type SettleResult =
+  | { readonly status: "settled" }
+  | { readonly status: "refused"; readonly message: string };
+
+/**
+ * Ends the pairing open for an origin. Abandoning one touches only what the
+ * pairing staged, never a computer already paired; approving one needs the
+ * pairing to still be open.
+ */
+export function settlePairedComputer(input: {
+  readonly origin: unknown;
+  readonly outcome: unknown;
+  readonly pins: PairedComputerPins;
+}): SettleResult {
+  if (typeof input.origin !== "string") {
+    return { status: "refused", message: "Octant isn't pairing with that computer." };
+  }
+  if (input.outcome !== "approved" && input.outcome !== "abandoned") {
+    return { status: "refused", message: "Octant refused that pairing answer." };
+  }
+  const open = input.pins.settle(input.origin, input.outcome);
+  if (input.outcome === "approved" && !open) {
+    return {
+      status: "refused",
+      message: "That pairing is no longer open. Forget the computer and pair again.",
+    };
+  }
+  return { status: "settled" };
 }
 
 function hostOf(origin: string): string {
@@ -278,6 +358,7 @@ export const PAIRED_COMPUTER_CHANNELS = {
   pair: "octant:paired-computers:pair",
   list: "octant:paired-computers:list",
   forget: "octant:paired-computers:forget",
+  settle: "octant:paired-computers:settle",
   request: "octant:paired-computers:request",
 } as const;
 
@@ -325,6 +406,10 @@ export function installPairedComputerIpcHandlers(options: {
       pins: options.pins(),
       ...(options.serverPages === undefined ? {} : { serverPages: options.serverPages }),
     });
+  });
+  options.handle(PAIRED_COMPUTER_CHANNELS.settle, (event, origin, outcome) => {
+    authorize(event);
+    return settlePairedComputer({ origin, outcome, pins: options.pins() });
   });
   options.handle(PAIRED_COMPUTER_CHANNELS.request, async (event, request) => {
     authorize(event);

@@ -342,6 +342,10 @@ export type ForgetPairedComputerOutcome =
   | { readonly status: "forgotten"; readonly warning?: string }
   | { readonly status: "refused"; readonly message: string };
 
+export type SettlePairedComputerOutcome =
+  | { readonly status: "settled" }
+  | { readonly status: "refused"; readonly message: string };
+
 export type PairedComputerOutcome =
   | {
       readonly status: "verified";
@@ -382,6 +386,16 @@ export interface PairedComputersBridge {
   readonly pairWithPairingCode: (code: string) => Promise<PairedComputerOutcome>;
   readonly listPairedComputers: () => Promise<ReadonlyArray<PairedComputer>>;
   readonly forgetPairedComputer: (origin: string) => Promise<ForgetPairedComputerOutcome>;
+  /**
+   * Ends the pairing the desktop has open for a computer. `approved` once the
+   * computer approved this window's device, which makes the desktop keep its
+   * pin; `abandoned` when the person leaves first, which drops only what that
+   * pairing staged and never a computer already paired.
+   */
+  readonly settlePairedComputer: (
+    origin: string,
+    outcome: "approved" | "abandoned",
+  ) => Promise<SettlePairedComputerOutcome>;
   readonly requestPairedComputer: (request: PairedComputerRequest) => Promise<PairedComputerAnswer>;
 }
 
@@ -393,6 +407,7 @@ export function pairedComputersOf(
     bridge?.pairWithPairingCode === undefined ||
     bridge.listPairedComputers === undefined ||
     bridge.forgetPairedComputer === undefined ||
+    bridge.settlePairedComputer === undefined ||
     bridge.requestPairedComputer === undefined
   ) {
     return undefined;
@@ -401,6 +416,7 @@ export function pairedComputersOf(
     pairWithPairingCode: bridge.pairWithPairingCode,
     listPairedComputers: bridge.listPairedComputers,
     forgetPairedComputer: bridge.forgetPairedComputer,
+    settlePairedComputer: bridge.settlePairedComputer,
     requestPairedComputer: bridge.requestPairedComputer,
   };
 }

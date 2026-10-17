@@ -96,6 +96,7 @@ export const IPC_CHANNELS = {
   pairedComputerPair: "octant:paired-computers:pair",
   pairedComputerList: "octant:paired-computers:list",
   pairedComputerForget: "octant:paired-computers:forget",
+  pairedComputerSettle: "octant:paired-computers:settle",
   pairedComputerRequest: "octant:paired-computers:request",
   remoteServerPageOpen: "octant:remote-server-page:open",
   remoteServerPageSign: "octant:remote-server-page:sign",
@@ -334,6 +335,10 @@ export type PairedComputerOutcome =
       readonly ticket: { readonly ticketId: string; readonly ticketProof: string };
       readonly pin: string;
     }
+  | { readonly status: "refused"; readonly message: string };
+
+export type SettlePairedComputerOutcome =
+  | { readonly status: "settled" }
   | { readonly status: "refused"; readonly message: string };
 
 /** One request to a listed paired computer; main checks the origin, method, path, and headers. */
@@ -616,6 +621,16 @@ export interface OctantHostBridge {
   readonly pairWithPairingCode: (code: string) => Promise<PairedComputerOutcome>;
   readonly listPairedComputers: () => Promise<ReadonlyArray<PairedComputer>>;
   readonly forgetPairedComputer: (origin: string) => Promise<ForgetPairedComputerOutcome>;
+  /**
+   * Ends the pairing main has open for an origin: `approved` once the other
+   * computer approved this window's device, which records the pin; `abandoned`
+   * when the person leaves first, which drops only what that pairing staged and
+   * never a computer already paired.
+   */
+  readonly settlePairedComputer: (
+    origin: string,
+    outcome: "approved" | "abandoned",
+  ) => Promise<SettlePairedComputerOutcome>;
   /**
    * Sends one request to a listed paired computer over the transport main
    * holds to that computer's pin. The window signs its own requests; main
@@ -1317,6 +1332,17 @@ export function createHostBridge(
       decodeForgetPairedComputerOutcome(
         await ipc.invoke(IPC_CHANNELS.pairedComputerForget, origin),
       ),
+    settlePairedComputer: async (
+      origin: string,
+      outcome: "approved" | "abandoned",
+    ): Promise<SettlePairedComputerOutcome> => {
+      if (typeof origin !== "string" || (outcome !== "approved" && outcome !== "abandoned")) {
+        return { status: "refused", message: "Octant refused that pairing answer." };
+      }
+      return decodeSettlePairedComputerOutcome(
+        await ipc.invoke(IPC_CHANNELS.pairedComputerSettle, origin, outcome),
+      );
+    },
     requestPairedComputer: async (request: PairedComputerRequest) =>
       decodePairedComputerAnswer(
         await ipc.invoke(IPC_CHANNELS.pairedComputerRequest, pairedComputerRequestOf(request)),
@@ -1349,6 +1375,17 @@ function decodeForgetPairedComputerOutcome(value: unknown): ForgetPairedComputer
       }
       return Object.freeze({ status: "forgotten" });
     }
+    if (outcome.status === "refused" && typeof outcome.message === "string") {
+      return Object.freeze({ status: "refused", message: outcome.message });
+    }
+  }
+  throw new Error("Octant returned an invalid paired-computer answer.");
+}
+
+function decodeSettlePairedComputerOutcome(value: unknown): SettlePairedComputerOutcome {
+  if (typeof value === "object" && value !== null) {
+    const outcome = value as Record<string, unknown>;
+    if (outcome.status === "settled") return Object.freeze({ status: "settled" });
     if (outcome.status === "refused" && typeof outcome.message === "string") {
       return Object.freeze({ status: "refused", message: outcome.message });
     }

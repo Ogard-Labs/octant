@@ -9,6 +9,7 @@ import {
   PairedComputerPins,
 } from "./pairedComputers";
 import {
+  PAIRED_COMPUTER_ALLOWED_REQUESTS,
   PAIRED_COMPUTER_REQUEST_LIMITS,
   requestPairedComputer,
   type PairedComputerAnswer,
@@ -145,6 +146,12 @@ describe("a window's request to a paired computer", () => {
       { path: "/api/remote/../auth/sign-out" },
       { path: "/api/remote/%2e%2e/x" },
       { path: "/api/remote/" },
+      { path: "/api/remote/auth/push-token", method: "POST" },
+      { path: "/api/remote/hello/extra" },
+      { path: "/api/remote/auth/session" },
+      { path: "/api/remote/hello", method: "POST" },
+      { path: "/api/code/local-servers/other", method: "POST" },
+      { path: "/api/remote/auth/device", method: "POST" },
       { path: "/api/remote/hello#fragment" },
       { path: "/api/remote\\hello" },
       { path: "/api/remote/hello\r\nHost: evil" },
@@ -166,17 +173,33 @@ describe("a window's request to a paired computer", () => {
       expect(answer.status, JSON.stringify(change)).toBe("refused");
       expect(fetchFor).not.toHaveBeenCalled();
     }
-    for (const path of [
-      "/api/remote/hello?clientNonce=abc",
-      "/api/remote/auth/session",
-      "/api/remote/pairing/status",
-      "/api/server-proxy/grants",
-      "/api/host/resources",
-      "/api/code/local-servers/commands",
-    ]) {
-      const { answer } = await ask({ ...hello, method: "POST", path, body: "{}" });
-      expect(answer.status, path).toBe("answered");
+    for (const { method, path } of PAIRED_COMPUTER_ALLOWED_REQUESTS) {
+      const { answer } = await ask({
+        ...hello,
+        method,
+        path: path === "/api/remote/hello" ? `${path}?clientNonce=abc` : path,
+        ...(method === "POST" ? { body: "{}" } : {}),
+      });
+      expect(answer.status, `${method} ${path}`).toBe("answered");
     }
+    expect(PAIRED_COMPUTER_ALLOWED_REQUESTS.map(({ method, path }) => `${method} ${path}`)).toEqual(
+      [
+        "GET /api/remote/hello",
+        "POST /api/remote/pairing",
+        "POST /api/remote/pairing/status",
+        "POST /api/remote/negotiate",
+        "POST /api/remote/auth/challenge",
+        "POST /api/remote/auth/session",
+        "POST /api/remote/auth/server-proxy-session",
+        "GET /api/remote/auth/device",
+        "POST /api/remote/auth/sign-out",
+        "POST /api/remote/auth/rotate-key",
+        "POST /api/remote/auth/revoke-self",
+        "POST /api/server-proxy/grants",
+        "GET /api/host/resources",
+        "POST /api/code/local-servers/commands",
+      ],
+    );
   });
 
   it("refuses a header a signed request does not carry, a foreign cookie, and a body on GET", async () => {
@@ -279,6 +302,57 @@ describe("a window's request to a paired computer", () => {
     const declared = new Response("small", { headers: { "content-length": "99999999999" } });
     const second = await ask(hello, { answer: () => declared });
     expect(second.answer.status).toBe("unreachable");
+  });
+});
+
+describe("a pairing that is open for a computer", () => {
+  function staged(origins: ReadonlyArray<string> = []) {
+    const pins = pinsWith(origins);
+    pins.stage({ origin: OTHER_ORIGIN, displayName: "Laptop", pin: "sha256-staged" });
+    return pins;
+  }
+
+  it("reaches a computer not yet recorded on the pairing routes alone, held to the staged pin", async () => {
+    const pins = staged();
+    const claim = { origin: OTHER_ORIGIN, method: "POST", path: "/api/remote/pairing", body: "{}" };
+    const { answer, fetchFor } = await ask(claim, { pins });
+    expect(answer.status).toBe("answered");
+    expect(fetchFor).toHaveBeenCalledWith(OTHER_ORIGIN, {
+      current: { kind: "pinned", pin: "sha256-staged" },
+    });
+
+    for (const route of ["/api/remote/auth/session", "/api/host/resources"]) {
+      const refused = await ask(
+        { ...claim, path: route, method: route.endsWith("resources") ? "GET" : "POST" },
+        { pins },
+      );
+      expect(refused.answer, route).toEqual({
+        status: "refused",
+        message: "Octant isn't paired with that computer.",
+      });
+      expect(refused.fetchFor).not.toHaveBeenCalled();
+    }
+  });
+
+  it("keeps a computer already paired on its recorded pin for every route but its pairing's own", async () => {
+    const pins = pinsWith([OTHER_ORIGIN]);
+    pins.stage({ origin: OTHER_ORIGIN, displayName: "Laptop", pin: "sha256-staged" });
+
+    const session = await ask(
+      { origin: OTHER_ORIGIN, method: "POST", path: "/api/remote/auth/session", body: "{}" },
+      { pins },
+    );
+    const claim = await ask(
+      { origin: OTHER_ORIGIN, method: "POST", path: "/api/remote/pairing", body: "{}" },
+      { pins },
+    );
+
+    expect(session.fetchFor).toHaveBeenCalledWith(OTHER_ORIGIN, {
+      current: { kind: "pinned", pin: PIN },
+    });
+    expect(claim.fetchFor).toHaveBeenCalledWith(OTHER_ORIGIN, {
+      current: { kind: "pinned", pin: "sha256-staged" },
+    });
   });
 });
 

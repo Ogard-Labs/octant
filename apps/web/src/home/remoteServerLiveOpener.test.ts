@@ -10,7 +10,6 @@ const HOST: RemoteServerLiveHost = {
   hostId: "11111111-1111-4111-8111-111111111111",
   hostName: "Studio Mac",
   origin: "https://192.168.1.20:9443",
-  listenerTrust: { current: { kind: "platform" } },
   issueSession: async () => ({
     hostId: "11111111-1111-4111-8111-111111111111",
     deviceId: "22222222-2222-4222-8222-222222222222",
@@ -59,7 +58,6 @@ describe("opening another computer's server live from this window", () => {
       hostId: HOST.hostId,
       hostName: "Studio Mac",
       listenerOrigin: HOST.origin,
-      listenerTrust: HOST.listenerTrust,
       grant: { grantId: GRANT_ID, threadId: THREAD_ID, port: 5173 },
       mode: "octant-browser",
     });

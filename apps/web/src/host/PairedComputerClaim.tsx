@@ -26,7 +26,7 @@ const NO_REPLACEMENT = (): void => {};
  * connects it like any other host.
  */
 export function PairedComputerClaim(props: {
-  readonly bridge: Pick<PairedComputersBridge, "requestPairedComputer" | "forgetPairedComputer">;
+  readonly bridge: Pick<PairedComputersBridge, "requestPairedComputer" | "settlePairedComputer">;
   readonly federation: HostFederationStack;
   readonly pairing: PairedComputerPairing;
   /** Replaces the transport-backed client; only tests do. */
@@ -50,6 +50,7 @@ export function PairedComputerClaim(props: {
     [bridge, federation.deviceKeyStore, pairing.computer.origin, pairing.pin, props.client],
   );
   const [connecting, setConnecting] = useState<"idle" | "connecting" | "missing">("idle");
+  const { settlePairedComputer } = bridge;
   // Once the host approved, or the person left, the pin is no longer this
   // component's to drop.
   const settledRef = useRef(false);
@@ -62,15 +63,20 @@ export function PairedComputerClaim(props: {
     replaceFragment: NO_REPLACEMENT,
     onApproved: () => {
       settledRef.current = true;
-      setConnecting("connecting");
+      // The desktop keeps its pin only now; until then it held the code's pin
+      // for the claim alone.
+      void settlePairedComputer(pairing.computer.origin, "approved").then(
+        (settled) => setConnecting(settled.status === "settled" ? "connecting" : "missing"),
+        () => setConnecting("missing"),
+      );
     },
   });
-  // Main persisted the pin when it verified the code. Closing Settings, or
-  // moving to another section, before the host approves must not leave a
-  // computer trusted that was never paired. The forget waits a tick so a
-  // development double mount, which unmounts and remounts at once, cancels it.
+  // Main staged the code's pin when it verified the code. Closing Settings, or
+  // moving to another section, before the host approves abandons that pairing:
+  // main drops only what it staged, so a computer already paired is untouched.
+  // The abandon waits a tick so a development double mount, which unmounts and
+  // remounts at once, cancels it.
   const forgetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const { forgetPairedComputer } = bridge;
   const pairedOrigin = pairing.computer.origin;
   useEffect(() => {
     if (forgetTimer.current !== undefined) {
@@ -82,10 +88,10 @@ export function PairedComputerClaim(props: {
         forgetTimer.current = undefined;
         if (settledRef.current) return;
         settledRef.current = true;
-        void forgetPairedComputer(pairedOrigin).catch(() => undefined);
+        void settlePairedComputer(pairedOrigin, "abandoned").catch(() => undefined);
       }, 0);
     };
-  }, [forgetPairedComputer, pairedOrigin]);
+  }, [settlePairedComputer, pairedOrigin]);
   const { lifecycle } = federation;
   const { onFinished: finish } = props;
   const onFinished = useCallback(
@@ -122,7 +128,8 @@ export function PairedComputerClaim(props: {
   if (connecting === "missing") {
     return (
       <SettingsState kind="error">
-        {name} approved this computer, but Octant couldn't save it. Forget it and pair again.
+        {name} approved this computer, but Octant couldn't finish saving it. Forget it and pair
+        again.
       </SettingsState>
     );
   }

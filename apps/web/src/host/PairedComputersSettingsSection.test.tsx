@@ -31,6 +31,7 @@ function bridgeWith(overrides: Partial<PairedComputersBridge> = {}): PairedCompu
     })),
     listPairedComputers: vi.fn(async () => []),
     forgetPairedComputer: vi.fn(async () => ({ status: "forgotten" as const })),
+    settlePairedComputer: vi.fn(async () => ({ status: "settled" as const })),
     requestPairedComputer: vi.fn(async () => ({
       status: "refused" as const,
       message: "unused in this test",
@@ -206,7 +207,7 @@ describe("pairing this desktop app with another computer", () => {
     ).toBeTruthy();
   });
 
-  it("forgets the pin and the pairing when the person cancels before the other computer approves", async () => {
+  it("abandons the pairing, and forgets no computer, when the person cancels before the other computer approves", async () => {
     const { stack } = federationStack();
     await stack.lifecycle.sync();
     const client = approvingClient(stack.deviceKeyStore);
@@ -221,7 +222,10 @@ describe("pairing this desktop app with another computer", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Ask Studio Mac to approve" }));
     await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
-    await waitFor(() => expect(bridge.forgetPairedComputer).toHaveBeenCalledWith(studio.origin));
+    await waitFor(() =>
+      expect(bridge.settlePairedComputer).toHaveBeenCalledWith(studio.origin, "abandoned"),
+    );
+    expect(bridge.forgetPairedComputer).not.toHaveBeenCalled();
     expect(await stack.registry.get(HOST_ID)).toBeUndefined();
   });
 

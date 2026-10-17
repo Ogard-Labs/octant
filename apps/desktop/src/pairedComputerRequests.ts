@@ -34,17 +34,40 @@ export const PAIRED_COMPUTER_REQUEST_LIMITS = {
 } as const;
 
 /**
- * What a window may ask a paired computer for. Pairing and session routes under
- * `/api/remote/`, one dev-server grant route, and the two product reads the main
- * window makes of a paired computer: its resources and its running servers.
- * Anything else, including the relay under `/api/server-proxy/` that the desktop's
- * own forwarder drives, is refused.
+ * What a window may ask a paired computer for, as exact method and path pairs
+ * (the query is free): the host hello, pairing, and the session and
+ * device-service routes the client runtime calls; the one dev-server grant
+ * route; and the two product calls the main window makes of a paired
+ * computer, its resources and its running servers. Anything else, including
+ * the relay under `/api/server-proxy/<grant>/`, which the desktop's own
+ * forwarder drives, is refused.
  */
-export const PAIRED_COMPUTER_ALLOWED_REQUESTS = {
-  methods: ["GET", "POST"],
-  pathPrefixes: ["/api/remote/", "/api/code/local-servers/"],
-  paths: ["/api/server-proxy/grants", "/api/host/resources"],
-} as const;
+export const PAIRED_COMPUTER_ALLOWED_REQUESTS: ReadonlyArray<{
+  readonly method: "GET" | "POST";
+  readonly path: string;
+}> = [
+  { method: "GET", path: "/api/remote/hello" },
+  { method: "POST", path: "/api/remote/pairing" },
+  { method: "POST", path: "/api/remote/pairing/status" },
+  { method: "POST", path: "/api/remote/negotiate" },
+  { method: "POST", path: "/api/remote/auth/challenge" },
+  { method: "POST", path: "/api/remote/auth/session" },
+  { method: "POST", path: "/api/remote/auth/server-proxy-session" },
+  { method: "GET", path: "/api/remote/auth/device" },
+  { method: "POST", path: "/api/remote/auth/sign-out" },
+  { method: "POST", path: "/api/remote/auth/rotate-key" },
+  { method: "POST", path: "/api/remote/auth/revoke-self" },
+  { method: "POST", path: "/api/server-proxy/grants" },
+  { method: "GET", path: "/api/host/resources" },
+  { method: "POST", path: "/api/code/local-servers/commands" },
+];
+
+/** The routes a pairing uses; only these may be held to a pin that is staged and not yet recorded. */
+const PAIRING_PATHS: ReadonlySet<string> = new Set([
+  "/api/remote/hello",
+  "/api/remote/pairing",
+  "/api/remote/pairing/status",
+]);
 
 /** The headers a signed request carries; every other name is refused, not dropped. */
 const ALLOWED_REQUEST_HEADERS: ReadonlySet<string> = new Set([
@@ -92,7 +115,8 @@ export async function requestPairedComputer(input: {
   const decoded = decodeRequest(input.request, input.pins);
   if (decoded.status === "refused") return decoded;
   const { origin, method, path, headers, body } = decoded;
-  const pin = input.pins.pinFor(origin);
+  const pairing = PAIRING_PATHS.has(new URL(path, origin).pathname);
+  const pin = input.pins.reachPinFor(origin, pairing);
   if (pin === undefined) return { status: "refused", message: NOT_PAIRED };
 
   const trust: ListenerOriginTrust = { current: { kind: "pinned", pin } };
@@ -116,7 +140,8 @@ export async function requestPairedComputer(input: {
   const read = await readBounded(response, signal);
   // A computer forgotten (or re-paired under another key) while this request
   // was out answers nothing, whatever it sent back.
-  if (input.pins.pinFor(origin) !== pin) return { status: "refused", message: NOT_PAIRED };
+  if (input.pins.reachPinFor(origin, pairing) !== pin)
+    return { status: "refused", message: NOT_PAIRED };
   if (read === undefined) {
     return { status: "unreachable", message: "That computer's answer was too large or too slow." };
   }
@@ -145,12 +170,18 @@ function decodeRequest(value: unknown, pins: PairedComputerPins): DecodedRequest
   });
   if (typeof value !== "object" || value === null) return refuse("Octant refused that request.");
   const { origin, method, path, headers, body } = value as Record<string, unknown>;
-  if (typeof origin !== "string" || pins.pinFor(origin) === undefined) return refuse(NOT_PAIRED);
-  if (typeof method !== "string" || !isAllowedMethod(method)) {
-    return refuse("Octant doesn't send that kind of request to another computer.");
+  if (typeof origin !== "string" || pins.reachPinFor(origin, true) === undefined) {
+    return refuse(NOT_PAIRED);
   }
-  if (!isAllowedPath(origin, path)) {
+  if (typeof method !== "string" || !isAllowedRequest(origin, path, method)) {
     return refuse("Octant doesn't send that request to another computer.");
+  }
+  // Held to the recorded pin unless this is a pairing route.
+  if (
+    pins.reachPinFor(origin, PAIRING_PATHS.has(new URL(path as string, origin).pathname)) ===
+    undefined
+  ) {
+    return refuse(NOT_PAIRED);
   }
   const decodedHeaders = decodeHeaders(headers, origin);
   if (decodedHeaders === undefined) return refuse("Octant refused that request's headers.");
@@ -177,17 +208,13 @@ function decodeRequest(value: unknown, pins: PairedComputerPins): DecodedRequest
   };
 }
 
-function isAllowedMethod(method: string): boolean {
-  return (PAIRED_COMPUTER_ALLOWED_REQUESTS.methods as ReadonlyArray<string>).includes(method);
-}
-
 /**
  * The path and query as sent on the wire: it must already be in the form a URL
  * parser would give it, so the request line, the signed path, and the allow
  * list all see the same string. Dot segments, a second slash, a scheme or
  * authority, and control characters never pass.
  */
-function isAllowedPath(origin: string, path: unknown): boolean {
+function isAllowedRequest(origin: string, path: unknown, method: string): boolean {
   if (typeof path !== "string" || path.length === 0) return false;
   if (path.length > PAIRED_COMPUTER_REQUEST_LIMITS.pathChars) return false;
   if (!path.startsWith("/") || path.startsWith("//") || /[\\#]/.test(path)) return false;
@@ -199,13 +226,8 @@ function isAllowedPath(origin: string, path: unknown): boolean {
     return false;
   }
   if (url.origin !== origin || `${url.pathname}${url.search}` !== path) return false;
-  const { paths, pathPrefixes } = PAIRED_COMPUTER_ALLOWED_REQUESTS;
-  const pathname = url.pathname;
-  return (
-    (paths as ReadonlyArray<string>).includes(pathname) ||
-    (pathPrefixes as ReadonlyArray<string>).some(
-      (prefix) => pathname.startsWith(prefix) && pathname.length > prefix.length,
-    )
+  return PAIRED_COMPUTER_ALLOWED_REQUESTS.some(
+    (allowed) => allowed.method === method && allowed.path === url.pathname,
   );
 }
 

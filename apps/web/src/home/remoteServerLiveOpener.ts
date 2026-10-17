@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { RunningService } from "@octant/contracts";
 import { LocalServerClientFailure, type LocalServerClient } from "@octant/client-runtime";
 import type { RemoteSessionFacts } from "@octant/client-runtime";
-import type { ListenerOriginTrust } from "@octant/client-runtime/remote-listener-trust";
 import {
   createRemoteServerProxyClient,
   type RemoteServerProxyClient,
@@ -27,7 +26,6 @@ export interface RemoteServerLiveHost {
   readonly hostId: string;
   readonly hostName: string;
   readonly origin: string;
-  readonly listenerTrust: ListenerOriginTrust;
   /** Mints a proxy session with this device's key. */
   readonly issueSession: () => Promise<RemoteSessionFacts>;
   /** Signs with this device's non-extractable key for that host. */
@@ -90,7 +88,6 @@ export function createRemoteServerLiveOpener(
         hostId: host.hostId,
         hostName: host.hostName,
         listenerOrigin: host.origin,
-        listenerTrust: host.listenerTrust,
         grant: opening.grant,
         mode,
       });

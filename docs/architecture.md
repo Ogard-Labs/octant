@@ -6610,10 +6610,16 @@ mechanisms are:
       it, then claim the ticket through that hello. The approved device
       records the pinned trust with its key.
     - **Desktop.** The renderer hands main the pasted text and nothing else.
-      Main runs the flow above over the Node transport, then records the
-      origin's pin in an owner-only file under the app's data
-      (`paired-computer-pins.json`, written whole and renamed into place) and
-      hands the code's ticket and the pin back to the window that pasted it.
+      Main runs the flow above over the Node transport, then stages the
+      origin's pin in memory (ten minutes) and hands the code's ticket and the
+      pin back to the window that pasted it. The pin is written to an owner-only
+      file under the app's data (`paired-computer-pins.json`, written whole and
+      renamed into place) only when the window reports the other computer
+      approved, through `octant:paired-computers:settle`. A staged pin is
+      reachable only on the three pairing routes (hello, pairing, pairing
+      status), and every other request to a computer already paired stays on its
+      recorded pin; abandoning the pairing, or letting it lapse, drops what was
+      staged and never touches a computer already paired.
       Main pins only an origin the listener address classifier calls private
       LAN or Tailscale, and a pin file it cannot read holds no pins. The
       window claims the ticket itself, through the client runtime's pairing
@@ -6635,12 +6641,17 @@ mechanisms are:
       requests. Main refuses a request unless the origin is exactly a listed
       paired computer (an unlisted, forgotten, or re-paired origin is refused,
       and an answer that arrives after the computer was forgotten is dropped),
-      the method is `GET` or `POST`, and the path and query are already in
-      canonical form (no scheme, authority, second slash, dot segment,
-      backslash, control character, or fragment) and are `/api/remote/…`
-      (hello, negotiate, pairing, and the session routes),
-      `/api/server-proxy/grants`, `/api/host/resources`, or
-      `/api/code/local-servers/…`. Anything else, including the relay under
+      the method and path are exactly one of these pairs, the path and query
+      being already in canonical form (no scheme, authority, second slash, dot
+      segment, backslash, control character, or fragment): `GET
+/api/remote/hello`; `POST` `/api/remote/pairing`,
+      `/api/remote/pairing/status`, `/api/remote/negotiate`,
+      `/api/remote/auth/challenge`, `/api/remote/auth/session`,
+      `/api/remote/auth/server-proxy-session`, `/api/remote/auth/sign-out`,
+      `/api/remote/auth/rotate-key`, `/api/remote/auth/revoke-self`;
+      `GET /api/remote/auth/device`; `POST /api/server-proxy/grants`;
+      `GET /api/host/resources`; `POST /api/code/local-servers/commands`.
+      Anything else, including the relay under
       `/api/server-proxy/<grant>/`, which the desktop's forwarder drives with
       its own signing, is refused. A request carries only the headers a signed
       request has (`accept`, `content-type`, `cookie` naming only the
@@ -6654,14 +6665,18 @@ mechanisms are:
       30 seconds fails, and replies arrive whole, so the channel carries
       requests and short reads, not streams. Settings → Remote access lists
       paired computers with a Forget action and says which are not connected in
-      this window (a pin with no record here, as after an interrupted pairing
-      or from the earlier version, which must be forgotten and paired again).
+      this window (a pin with no record here, as the earlier version left, which
+      must be forgotten and paired again).
+      The desktop's forwarder takes no trust from the window either: Open names
+      only the listener origin, which must be a recorded paired computer, and
+      every relayed request and upgrade is held to the pin read from the pin file
+      at that moment, so forgetting the computer stops its open pages at once
+      (their forwarder hosts close with it, in either browser).
       Forget asks first, then removes the window's host record and device key
       through the federation lifecycle, whose clearing step asks main to drop
       the pin (so nothing can reach that computer) and to close the pages of its
       servers Octant's browser opened; removing the host anywhere else in the
-      lifecycle does the same. Leaving the pairing before the other computer
-      approves also drops the pin. Forget ends only this app's side: the other
+      lifecycle does the same. Forget ends only this app's side: the other
       computer keeps listing the device until it is revoked there. The shared
       helper `clearRemotePageStorage` stays the one way a remote page's data is
       cleared.

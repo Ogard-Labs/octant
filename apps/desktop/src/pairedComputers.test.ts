@@ -13,6 +13,8 @@ import {
   PAIRED_COMPUTER_CHANNELS,
   pairFromPairingCode,
   PairedComputerPins,
+  settlePairedComputer,
+  STAGED_PIN_MS,
 } from "./pairedComputers";
 import { requestPairedComputer } from "./pairedComputerRequests";
 import { IPC_CHANNELS } from "./preload";
@@ -155,7 +157,7 @@ describe("the pins the desktop keeps for paired computers", () => {
 });
 
 describe("pairing with another computer from its code", () => {
-  it("records the pin and hands back the ticket only after its hello verifies", async () => {
+  it("stages the pin and hands back the ticket only after its hello verifies", async () => {
     const pins = freshPins();
     const fetchFor = vi.fn(await hostFetch().then((fetch) => () => fetch));
 
@@ -175,7 +177,10 @@ describe("pairing with another computer from its code", () => {
     expect(fetchFor).toHaveBeenCalledWith(ORIGIN, {
       current: { kind: "pinned", pin: pinOf(listenerCert) },
     });
-    expect(pins.pinFor(ORIGIN)).toBe(pinOf(listenerCert));
+    // Staged, not recorded: nothing persists until the other computer approves.
+    expect(pins.pinFor(ORIGIN)).toBeUndefined();
+    expect(pins.list()).toEqual([]);
+    expect(pins.reachPinFor(ORIGIN, true)).toBe(pinOf(listenerCert));
   });
 
   it("records nothing when the computer serves another key", async () => {
@@ -231,6 +236,7 @@ describe("pairing with another computer from its code", () => {
       IPC_CHANNELS.pairedComputerPair,
       IPC_CHANNELS.pairedComputerList,
       IPC_CHANNELS.pairedComputerForget,
+      IPC_CHANNELS.pairedComputerSettle,
       IPC_CHANNELS.pairedComputerRequest,
     ]);
     expect(Object.values(PAIRED_COMPUTER_CHANNELS)).toEqual([...handlers.keys()]);
@@ -239,6 +245,107 @@ describe("pairing with another computer from its code", () => {
         Promise.resolve().then(() => handlers.get(channel)?.({}, "octant-pair-1.x")),
       ).rejects.toThrow("Octant rejected an unauthorized paired-computer request.");
     }
+  });
+});
+
+describe("settling a pairing", () => {
+  const pairing = async (pins: PairedComputerPins, certificate: string) =>
+    pairFromPairingCode({
+      code: pairingCode(pinOf(certificate)),
+      pins,
+      webBuildVersion: "0.1.0",
+      fetchFor: await hostFetch().then((fetch) => () => fetch),
+    });
+
+  it("records the pin only when the other computer approved, and keeps it after a restart", async () => {
+    const path = join(mkdtempSync(join(directory, "pins-")), "pins.json");
+    const pins = new PairedComputerPins(path);
+    await pairing(pins, listenerCert);
+    expect(new PairedComputerPins(path).list()).toEqual([]);
+
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins })).toEqual({
+      status: "settled",
+    });
+
+    expect(new PairedComputerPins(path).pinFor(ORIGIN)).toBe(pinOf(listenerCert));
+  });
+
+  it("drops an abandoned pairing and leaves nothing recorded", async () => {
+    const pins = freshPins();
+    await pairing(pins, listenerCert);
+
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "abandoned", pins }).status).toBe(
+      "settled",
+    );
+
+    expect(pins.reachPinFor(ORIGIN, true)).toBeUndefined();
+    expect(pins.list()).toEqual([]);
+  });
+
+  it("leaves a completed pairing alone when a fresh code for the same computer is abandoned", async () => {
+    const path = join(mkdtempSync(join(directory, "pins-")), "pins.json");
+    const pins = new PairedComputerPins(path);
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
+
+    await pairing(pins, otherCert);
+    // While the second pairing is open, only its own routes use the new pin.
+    expect(pins.reachPinFor(ORIGIN, true)).toBe(pinOf(otherCert));
+    expect(pins.reachPinFor(ORIGIN, false)).toBe(pinOf(listenerCert));
+    settlePairedComputer({ origin: ORIGIN, outcome: "abandoned", pins });
+
+    expect(pins.pinFor(ORIGIN)).toBe(pinOf(listenerCert));
+    expect(pins.reachPinFor(ORIGIN, true)).toBe(pinOf(listenerCert));
+    expect(new PairedComputerPins(path).pinFor(ORIGIN)).toBe(pinOf(listenerCert));
+    await expect(forgetPairedComputer({ origin: ORIGIN, pins })).resolves.toEqual({
+      status: "forgotten",
+    });
+  });
+
+  it("replaces the recorded pin when the fresh code is approved", async () => {
+    const pins = freshPins();
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
+
+    await pairing(pins, otherCert);
+    settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins });
+
+    expect(pins.pinFor(ORIGIN)).toBe(pinOf(otherCert));
+  });
+
+  it("lets a pairing that was never settled lapse, and refuses to approve one that lapsed", async () => {
+    let now = 1_000_000;
+    const pins = new PairedComputerPins(
+      join(mkdtempSync(join(directory, "pins-")), "pins.json"),
+      () => now,
+    );
+    await pairing(pins, listenerCert);
+    now += STAGED_PIN_MS + 1;
+
+    expect(pins.reachPinFor(ORIGIN, true)).toBeUndefined();
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins }).status).toBe(
+      "refused",
+    );
+    expect(pins.list()).toEqual([]);
+  });
+
+  it("refuses approval when no pairing is open, and an outcome it does not know", () => {
+    const pins = freshPins();
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins }).status).toBe(
+      "refused",
+    );
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "forgotten", pins }).status).toBe(
+      "refused",
+    );
+    expect(settlePairedComputer({ origin: 42, outcome: "approved", pins }).status).toBe("refused");
+  });
+
+  it("forgetting a computer also drops a pairing open for it", async () => {
+    const pins = freshPins();
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
+    await pairing(pins, otherCert);
+
+    await forgetPairedComputer({ origin: ORIGIN, pins });
+
+    expect(pins.reachPinFor(ORIGIN, true)).toBeUndefined();
   });
 });
 
