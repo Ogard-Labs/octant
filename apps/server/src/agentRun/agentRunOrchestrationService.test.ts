@@ -16,6 +16,10 @@ import {
   decodeAgentRunId,
   decodeAgentRunParentThreadId,
   decodeAgentRunRequestId,
+  decodeCapacityReservationId,
+  decodeContextSubjectRef,
+  decodeProviderInstanceId,
+  decodeProviderModelId,
   decodeNativeHarnessSlotCandidate,
   type AgentRunAuthority,
   type AgentRunCommand,
@@ -52,7 +56,11 @@ import { AgentRunDependencyScheduler } from "./agentRunDependencyScheduler";
 import { AgentRunSessionError, type AgentRunSessionOutcome } from "./agentRunSessionPort";
 import { AgentRunSessionSupervisor } from "./agentRunSessionSupervisor";
 import { createAgentRunSessionRuntime } from "./agentRunSessionRuntime";
-import { makeProviderCapacityScheduler } from "../context/contextRuntime";
+import {
+  makeProviderCapacityScheduler,
+  makeUnobservedProviderCapacityFacts,
+} from "../context/contextRuntime";
+import { unavailableProviderServiceLimits } from "@octant/provider-sdk/context-facts";
 
 const directories: string[] = [];
 const now = "2026-08-01T14:00:00.000Z";
@@ -1470,6 +1478,96 @@ describe("AgentRun run slots", () => {
     expect(second().status).toBe("queued");
     limits = { perThread: 4, onHost: 8 };
     expect(second().status).toBe("reserved");
+  });
+});
+
+describe("managed child start refusal", () => {
+  it("ends a Chat child the provider has no free slot for as Interrupted with that reason, then starts it on Retry once a slot frees", async () => {
+    const scheduler = makeProviderCapacityScheduler({
+      now: () => Date.parse(now),
+      random: () => 0,
+      maxRetryJitterMs: 0,
+      ambiguousReservationTtlMs: 1000,
+    });
+    const providerInstanceId = decodeProviderInstanceId(ids.provider);
+    scheduler.updateProviderFacts({
+      limits: unavailableProviderServiceLimits(
+        providerInstanceId,
+        now as never,
+        "provider-discovery",
+      ),
+      enforcement: { kind: "observable-api", maxObservableConcurrency: 2 },
+    });
+    // Two Chat turns of other threads already use every request the provider
+    // takes at once, as an unanswered question in one of them can for a long time.
+    const otherTurns = ["a", "b"].map((suffix) => {
+      const reservationId = decodeCapacityReservationId(
+        `bbbbbbbb-bbbb-4bbb-8bbb-${suffix.repeat(12)}`,
+      );
+      const submission = scheduler.submit({
+        reservationId,
+        subject: decodeContextSubjectRef({
+          aggregateType: "chat-thread",
+          aggregateId: `cccccccc-cccc-4ccc-8ccc-${suffix.repeat(12)}`,
+        }),
+        providerInstanceId,
+        modelId: decodeProviderModelId("gpt-4o"),
+        estimatedTokens: 10,
+        requests: 1,
+        origin: "thread",
+      });
+      expect(submission.status).toBe("dispatched");
+      scheduler.markRunning(reservationId);
+      return reservationId;
+    });
+    const acquire = vi.fn(() => Effect.never);
+    const runtime = createAgentRunSessionRuntime({
+      capacityScheduler: scheduler,
+      resolveDriver: () => ({ kind: "codex", probe: () => Effect.never, acquire }),
+      sessionStore: { read: () => undefined, write: () => true },
+      context: { resolve: () => [] },
+      scratchRoot: () => "/scratch",
+      uuid: randomUUID,
+      serviceLimits: makeUnobservedProviderCapacityFacts({
+        scheduler,
+        now: () => now as never,
+      }),
+    });
+    const supervisor = new AgentRunSessionSupervisor({ port: runtime });
+    const { orchestration, persistence } = createHarness(
+      createInMemoryCapacityPort(),
+      true,
+      supervisor,
+    );
+    const admitted = orchestration.admit({
+      command: {
+        ...requestCommand(),
+        requestedAuthority: { ...authority, network: false, subagents: false },
+      },
+      parentAuthority: authority,
+      confirmed: true,
+      liveAuthority: authority,
+    });
+    if (admitted.kind !== "run-accepted") throw new Error("Expected an admitted child");
+
+    const started = orchestration.start(admitted.run.id, admitted.run.version, authority);
+
+    expect(started).toMatchObject({
+      kind: "run-updated",
+      run: { lifecycleStatus: "interrupted" },
+    });
+    const refused = persistence.getById(admitted.run.id);
+    expect(refused?.recoveryReason).toMatch(/^capacity-unavailable: .*every request/);
+    expect(refused?.recoveryReason).not.toBe("provider-process-death");
+    expect(acquire).not.toHaveBeenCalled();
+    expect(supervisor.activeRunIds()).toEqual([]);
+
+    scheduler.recordTerminal({ reservationId: otherTurns[0]!, outcome: "completed" });
+    const retried = orchestration.retry(admitted.run.id, refused!.version, authority);
+
+    expect(retried).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "starting" } });
+    await vi.waitFor(() => expect(acquire).toHaveBeenCalledOnce());
+    await supervisor.stop(admitted.run.id);
   });
 });
 

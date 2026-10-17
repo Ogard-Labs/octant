@@ -2732,6 +2732,15 @@ capacity answers: the turn fails or parks with its own cause and the next turn
 runs. A turn the scheduler refuses ends Interrupted with `capacity-unavailable`
 and a sentence that names what is full and, when known, how long until it frees
 ("The provider rate-limited this endpoint. Try this turn again in 15 seconds.").
+A managed child the scheduler refuses ends the same way: Interrupted, with the
+`capacity-unavailable` reason and that sentence, never as a provider process
+death, and Retry starts it again once a slot frees. Only a Chat lead holds a
+slot while it works, so a Chat helper counts against the two-request limit
+together with its lead and any other Chat turn, such as one waiting for a
+person's answer; a Work or Code lead holds none. Every typed start refusal of a
+child (capacity, spend ceiling, workspace, provider, context) is recorded as
+Interrupted under its own reason for the same cause: a process death is
+recorded only for a failure nothing typed.
 
 **What fills a provider-run window.** A usage report may carry
 `contextBreakdown` (`ProviderContextBreakdown` in `@octant/contracts`): a closed
