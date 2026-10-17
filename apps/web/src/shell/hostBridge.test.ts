@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { getInjectedHostBridge, type OctantHostBridge } from "./hostBridge";
+import { getInjectedHostBridge, pairedComputersOf, type OctantHostBridge } from "./hostBridge";
 
 function bridge(): OctantHostBridge {
   return {
@@ -72,5 +72,31 @@ describe("getInjectedHostBridge", () => {
     expect(injected).not.toHaveProperty("getProviderCredential");
     expect(injected).not.toHaveProperty("resolveProviderCredential");
     expect(JSON.stringify(injected)).not.toContain("private-value");
+  });
+});
+
+describe("pairedComputersOf", () => {
+  function withPairedComputers(): OctantHostBridge {
+    return {
+      ...bridge(),
+      pairWithPairingCode: vi.fn(),
+      listPairedComputers: vi.fn(),
+      forgetPairedComputer: vi.fn(),
+      settlePairedComputer: vi.fn(),
+      requestPairedComputer: vi.fn(),
+    };
+  }
+
+  it("returns the same object for the same host bridge, so a pairing keeps one identity", () => {
+    const injected = withPairedComputers();
+
+    expect(pairedComputersOf(injected)).toBeDefined();
+    expect(pairedComputersOf(injected)).toBe(pairedComputersOf(injected));
+    expect(pairedComputersOf(withPairedComputers())).not.toBe(pairedComputersOf(injected));
+  });
+
+  it("offers nothing when a part is missing or there is no bridge", () => {
+    expect(pairedComputersOf(undefined)).toBeUndefined();
+    expect(pairedComputersOf(bridge())).toBeUndefined();
   });
 });
