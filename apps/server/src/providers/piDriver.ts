@@ -156,7 +156,10 @@ const PROBE_TOOL_BRIDGE = {
   url: "http://127.0.0.1:1/octant/probe",
   token: "octant-probe",
 } as const;
-const PI_APP_MANAGED_TOOLS_VERSION = "0.85.1";
+/** The releases whose tool attestation, approval bridge and confinement Octant verified. */
+const PI_APP_MANAGED_TOOLS_VERSIONS: ReadonlySet<string> = new Set(["0.85.1", "1.1.0"]);
+/** The one release whose settled process Octant verified for warm reuse; others cold-resume. */
+const PI_WARM_REUSE_VERSION = "0.85.1";
 
 function capabilitiesFor(appManagedTools: "supported" | "unsupported") {
   return { ...capabilities, appManagedTools } as const;
@@ -302,7 +305,7 @@ export function makePiDriver(options: PiDriverOptions): ProviderDriver {
           rpc.request("get_commands", { expected: "octant-tool-attestation" }),
         );
         appManagedToolsVerified =
-          connection.version === PI_APP_MANAGED_TOOLS_VERSION &&
+          PI_APP_MANAGED_TOOLS_VERSIONS.has(connection.version) &&
           hasToolAttestation(attestation, [probeTool]);
         const models = normalizeModels(modelResponse);
         const observedAt = clock();
@@ -685,6 +688,17 @@ function makeConnection(
       if (event.type === "agent_settled") {
         if (!state.promptActive)
           return protocolFailure(state, "Pi settled without an active turn.");
+        // Pi 1.1.0 says a run settled because it was aborted; reporting that as
+        // completed would present a cut-off turn as a finished one. Releases
+        // that predate the field never set it.
+        if (event.aborted === true) {
+          if (state.usage !== undefined && !state.usageIncomplete) emit(state, state.usage);
+          state.promptActive = false;
+          state.terminal = true;
+          cancelPendingTools(state);
+          emit(state, { kind: "interrupted", message: "Pi turn was aborted." });
+          return;
+        }
         if (state.usage !== undefined && !state.usageIncomplete)
           emit(state, {
             ...state.usage,
@@ -832,7 +846,7 @@ function makeConnection(
                   })
                   .pipe(Effect.provideService(Scope.Scope, scope)),
               );
-              if (tools.length > 0 && processConnection.version !== PI_APP_MANAGED_TOOLS_VERSION)
+              if (tools.length > 0 && !PI_APP_MANAGED_TOOLS_VERSIONS.has(processConnection.version))
                 throw failure(
                   "unsupported",
                   `Pi ${processConnection.version} is not verified for app-managed tools.`,
@@ -1094,7 +1108,7 @@ function makeConnection(
               }
               if (
                 state.completed &&
-                state.runtime.version === PI_APP_MANAGED_TOOLS_VERSION &&
+                state.runtime.version === PI_WARM_REUSE_VERSION &&
                 state.approvals.size === 0 &&
                 state.pendingTools.size === 0 &&
                 [...state.tools.values()].every((tool) => tool.terminal) &&

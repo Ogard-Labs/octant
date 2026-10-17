@@ -114,6 +114,7 @@ describe("Pi process boundary", () => {
       "AZURE_OPENAI_BASE_URL",
       "AZURE_OPENAI_RESOURCE_NAME",
     ]);
+    expect(credentialsFor("azure")).toEqual(credentialsFor("azure-openai-responses"));
     expect(credentialsFor("openrouter")).toEqual(["OPENROUTER_API_KEY"]);
     expect(sanitizePiEnvironment(host, "/managed", "enabled", "xai")).toMatchObject({
       PATH: "/usr/bin",

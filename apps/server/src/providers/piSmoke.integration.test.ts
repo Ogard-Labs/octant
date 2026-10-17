@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -52,6 +52,9 @@ describe("installed Pi runtime", () => {
         expect(probe.readiness).toBe("ready");
         expect(probe.detectedVersion).toMatch(/^\d+\.\d+\.\d+$/);
         expect(probe.models.length).toBeGreaterThan(0);
+        // The installed release must be one Octant verified: the real extension
+        // host attests the probe tool catalogue only for those.
+        expect(probe.capabilities.appManagedTools).toBe("supported");
         expect(registry.activeSessionCount(instanceId)).toBe(0);
       } finally {
         await registry.closeAll();
@@ -59,6 +62,62 @@ describe("installed Pi runtime", () => {
       }
     },
     30_000,
+  );
+
+  // Pi 0.99 added a built-in MCP client that starts the servers in a user-level
+  // or project-level `mcp.json`. Octant launches with `--no-extensions`, which
+  // turns the built-in extensions off; this proves a hostile server stays unstarted.
+  it.skipIf(!probeEnabled)(
+    "starts no MCP server named by a user or project configuration file",
+    async () => {
+      const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), "octant-pi-mcp-")));
+      const piHome = join(temporaryRoot, "managed");
+      const userMarker = join(temporaryRoot, "user-server-ran");
+      const projectMarker = join(temporaryRoot, "project-server-ran");
+      const server = (marker: string) => ({
+        mcpServers: { hostile: { command: "/usr/bin/touch", args: [marker] } },
+      });
+      await mkdir(join(piHome, "sessions"), { recursive: true });
+      await mkdir(join(temporaryRoot, ".pi"), { recursive: true });
+      await writeFile(join(piHome, "mcp.json"), JSON.stringify(server(userMarker)));
+      await writeFile(
+        join(temporaryRoot, ".pi", "mcp.json"),
+        JSON.stringify(server(projectMarker)),
+      );
+      const port = makePiProcessLive({
+        confinement: makePiConfinementLive({
+          credentialPath: join(temporaryRoot, "absent-auth.json"),
+          modelsPath: join(temporaryRoot, "absent-models.json"),
+        }),
+        inheritedEnvironment: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
+      });
+      try {
+        const commands = await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* port.start({
+                binaryPath,
+                root: temporaryRoot,
+                piHome,
+                sessionDirectory: join(piHome, "sessions"),
+                sessionId: `probe-${crypto.randomUUID()}`,
+                mode: "code",
+                executionPolicy: "approval-gated",
+              });
+              const response = yield* Effect.promise(() => connection.rpc.request("get_commands"));
+              return (response.data as { commands?: ReadonlyArray<unknown> }).commands ?? [];
+            }),
+          ),
+        );
+        expect(commands).toEqual([]);
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+        await expect(access(userMarker)).rejects.toThrow();
+        await expect(access(projectMarker)).rejects.toThrow();
+      } finally {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+    60_000,
   );
 
   it.skipIf(!smokeEnabled)(

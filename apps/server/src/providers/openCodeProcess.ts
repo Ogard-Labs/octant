@@ -137,8 +137,11 @@ const VERSION_TIMEOUT_MS = 5_000;
 const PROJECTED_CONFIG_LIMIT = 2 * 1024 * 1024;
 const PROJECTED_CONFIG_DEPTH_LIMIT = 8;
 const ISOLATED_OPEN_CODE_VERSION = [1, 18, 21] as const;
-/** The 2.x release the hostile fixture was repeated against, as its version probe prints it. */
-const ISOLATED_OPEN_CODE_2_VERSION = "opencode v2.0.22";
+/** The 2.x releases the hostile fixture was repeated against, as the version probe prints them. */
+const ISOLATED_OPEN_CODE_2_VERSIONS: ReadonlySet<string> = new Set([
+  "opencode v2.0.22",
+  "opencode v2.0.27",
+]);
 const LEGACY_VERSION_PATTERN = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 // 2.0.x declares both the opencode and opencode2 bins and prints the bare
 // name for --version, where the earlier beta line printed opencode2 v0.0.0-beta.
@@ -566,10 +569,11 @@ function versionNumbers(version: string): readonly [number, number, number] | un
 
 /** Isolation guards are attested only for the runtime version verified by the hostile fixture. */
 export function supportsOpenCodeIsolation(version: string): boolean {
-  // 2.0.22 has no `--pure`; the private profile and guards alone kept the
+  // 2.0.x has no `--pure`; the private profile and guards alone kept the
   // hostile project, global, and home plugins, MCP servers, and skills out of
-  // its confined launch, so this exact 2.x release is attested as well.
-  if (version === ISOLATED_OPEN_CODE_2_VERSION) return true;
+  // a confined launch of each listed 2.x release, so those exact releases are
+  // attested as well.
+  if (ISOLATED_OPEN_CODE_2_VERSIONS.has(version)) return true;
   if (version !== "1.18.21") return false;
   const numbers = versionNumbers(version);
   if (numbers === undefined) return false;
