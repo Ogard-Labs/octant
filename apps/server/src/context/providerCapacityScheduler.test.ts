@@ -409,6 +409,34 @@ describe("ProviderCapacityScheduler", () => {
     expect(scheduler.snapshot(providerA).allocated.concurrency).toBe(0);
   });
 
+  it("tells a listener each time work that held a slot ends, and stops once it unsubscribes", () => {
+    const { scheduler } = fixture();
+    scheduler.updateProviderFacts({
+      limits: providerLimits(providerA, {}),
+      enforcement: { kind: "observable-api", maxObservableConcurrency: 2 },
+    });
+    let freed = 0;
+    const providers: Array<string> = [];
+    const unsubscribe = scheduler.onCapacityFreed((providerInstanceId) => {
+      freed++;
+      providers.push(providerInstanceId);
+    });
+    expect(scheduler.submit(work(90)).status).toBe("dispatched");
+    expect(freed).toBe(0);
+    scheduler.markRunning(id(90));
+    scheduler.recordTerminal({ reservationId: id(90), outcome: "completed", actualTokens: 10 });
+    expect(freed).toBe(1);
+    expect(scheduler.submit(work(91)).status).toBe("dispatched");
+    scheduler.releaseUnstarted(id(91));
+    expect(freed).toBe(2);
+
+    expect(providers).toEqual([providerA, providerA]);
+    unsubscribe();
+    expect(scheduler.submit(work(92)).status).toBe("dispatched");
+    scheduler.recordTerminal({ reservationId: id(92), outcome: "interrupted" });
+    expect(freed).toBe(2);
+  });
+
   it("backs a provider off for its own wait after a capacity signal and admits work again once it passes", () => {
     const state = fixture();
     state.scheduler.updateProviderFacts({

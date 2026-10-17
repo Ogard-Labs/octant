@@ -95,6 +95,20 @@ export class AgentRunSessionSupervisor implements AgentRunProcessSupervisorPort 
     return this.#start(run, input ?? {});
   }
 
+  prepareStart(run: AgentRun): AgentRunPreparedResume | undefined {
+    if (this.#sessions.has(run.id))
+      throw new AgentRunSessionError(
+        "provider-unavailable",
+        "This child already owns a live session.",
+      );
+    const prepared = this.#port.prepareStart?.(run);
+    if (prepared === undefined) return undefined;
+    return {
+      start: (started) => this.#start(started, undefined, prepared),
+      release: prepared.release,
+    };
+  }
+
   prepareResume(
     run: AgentRun,
     input?: { readonly message?: string },

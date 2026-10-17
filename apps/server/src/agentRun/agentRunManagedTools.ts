@@ -27,7 +27,7 @@ export type { AgentsToolTarget } from "./agentRunDelegation";
 export interface AgentsManagedToolsOptions {
   readonly admission: AgentRunControlAdmissionDependencies;
   readonly orchestration: Pick<AgentRunOrchestrationService, "start" | "cancelLeafFirst"> &
-    Partial<Pick<AgentRunOrchestrationService, "resume">>;
+    Partial<Pick<AgentRunOrchestrationService, "resume" | "waitsForProviderSlot">>;
   readonly persistence: Pick<
     AgentRunPersistenceService,
     "parentSummary" | "getById" | "resultText"
@@ -316,7 +316,13 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
           boundedAgentRunChildren(
             children.map((entry) => {
               const run = options.persistence.getById(entry.runId);
-              const reason = run === undefined ? undefined : agentRunStopReason(run);
+              const reason =
+                run === undefined
+                  ? undefined
+                  : (agentRunStopReason(run) ??
+                    (options.orchestration.waitsForProviderSlot?.(run) === true
+                      ? run.recoveryReason
+                      : undefined));
               return {
                 runId: String(entry.runId),
                 role: entry.role,
@@ -408,6 +414,22 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
               ...(run.usageResume === undefined
                 ? {}
                 : { usageResume: { status: run.usageResume.status } }),
+            });
+          }
+          // A child waiting for a provider slot starts by itself when one frees,
+          // and the slot that may be holding it up is this parent's own while its
+          // turn runs. Blocking here until the deadline would pin that slot and
+          // keep the child from ever starting, so the parent is told at once and
+          // can end its turn; the child's result is delivered when it completes.
+          if (options.orchestration.waitsForProviderSlot?.(run) === true) {
+            return answer({
+              status: "waiting",
+              lifecycleStatus: run.lifecycleStatus,
+              runId: String(run.id),
+              version: run.version,
+              reason: run.recoveryReason,
+              message:
+                "This helper starts by itself when the provider has a free request slot, and its result is delivered to you when it completes. Do not wait for it inside this turn: finish your turn or continue other work.",
             });
           }
           const remaining = deadline - Date.now();

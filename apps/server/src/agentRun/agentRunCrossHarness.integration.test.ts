@@ -748,7 +748,11 @@ it("keeps a completed child's reply and generation when spend admission refuses 
     .fn()
     .mockReturnValue({ status: "admitted", reservedTokens: 100, reservations: [] });
   const settle = vi.fn();
-  const subject = fixture("provider harness", "provider harness", { admit, settle });
+  const subject = fixture("provider harness", "provider harness", {
+    admit,
+    settle,
+    abandon: vi.fn(),
+  });
   try {
     await subject.delegate("Remember the original result");
     subject.release();
@@ -794,7 +798,12 @@ it.each(["stale-version", "journal-failure"] as const)(
       .fn()
       .mockReturnValue({ status: "admitted", reservedTokens: 100, reservations: [] });
     const settle = vi.fn();
-    const subject = fixture("provider harness", "provider harness", { admit, settle });
+    const abandon = vi.fn();
+    const subject = fixture("provider harness", "provider harness", {
+      admit,
+      settle,
+      abandon,
+    });
     try {
       await subject.delegate("Retain this first reply");
       subject.release();
@@ -814,6 +823,7 @@ it.each(["stale-version", "journal-failure"] as const)(
       const rows = subject.journalRows();
       const capacity = subject.providerCapacity.snapshot(ids.provider);
       const beforeSettled = settle.mock.calls.length;
+      const beforeAbandoned = abandon.mock.calls.length;
       const message = "Follow-up preserved for retry";
       vi.spyOn(subject.persistence, "applyCommand").mockImplementationOnce(() => {
         if (failure === "journal-failure") throw new Error("Journal unavailable");
@@ -839,7 +849,10 @@ it.each(["stale-version", "journal-failure"] as const)(
       expect(subject.persistence.getById(completed.id)).toEqual(consumed.run);
       expect(subject.journalRows()).toEqual(rows);
       expect(subject.providerCapacity.snapshot(ids.provider)).toEqual(capacity);
-      expect(settle).toHaveBeenCalledTimes(beforeSettled + 1);
+      // The follow-up never started, so its spend reservation is dropped and no
+      // turn is recorded for it.
+      expect(abandon).toHaveBeenCalledTimes(beforeAbandoned + 1);
+      expect(settle).toHaveBeenCalledTimes(beforeSettled);
       expect(subject.provider.acquired).toHaveLength(1);
       const response = await subject.resume(completed.id, consumed.run.version, message);
       expect(response?.status).toBe(200);
