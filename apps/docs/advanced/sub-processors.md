@@ -76,9 +76,10 @@ makes on its own, or because you asked, are different relationships:
 
 - **Update checks** go to the feed host (under `https://octant.sh/updates` by
   default, or an HTTPS base you set). That host can see IP address, version,
-  platform, architecture, and which release ring you follow. Release archives
-  are hosted on GitHub, so downloading an update also discloses your IP address
-  to GitHub. See [Installation](/guide/installation#updates).
+  platform, architecture, and which release ring you follow. The default feed
+  address forwards to feed files hosted on GitHub, and release archives are
+  hosted there too, so checking for and downloading an update also discloses
+  your IP address to GitHub. See [Installation](/guide/installation#updates).
 - **Marketplace search, inspect, and install** contact skills.sh, the npm
   registry, and GitHub when you search, inspect, or install. Catalog search
   reaches the network when marketplace fetches are on; off means no request

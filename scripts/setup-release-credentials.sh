@@ -247,7 +247,7 @@ if ! gh api "repos/${REPO}" --jq '.permissions.admin' | grep -q true; then
   warn "This account is not an admin of ${REPO}, so it cannot write environment secrets."
   exit 1
 fi
-for tool in bun ssh-keygen security base64; do
+for tool in bun security base64; do
   command -v "$tool" >/dev/null 2>&1 || { warn "missing required tool: $tool"; exit 1; }
 done
 say "GitHub CLI is authenticated and this account administers ${REPO}."
@@ -398,44 +398,31 @@ if [[ "$WRITE_FEED_SOURCE" == true ]]; then
 fi
 
 # ──────────────────────────────────────────────────────────────────────────
-stage "octant.sh: a deploy key for publishing the feed"
-say "The workflow copies one signed JSON file per ring to your server. It needs"
-say "an SSH key that can write only that directory."
-ask FEED_SSH_USER "SSH user on octant.sh:"
-ask FEED_REMOTE_PATH "Directory the feed is served from (e.g. /home/henrik/octant-updates):"
-ask FEED_SSH_HOST "SSH host (octant.sh):"
-ask FEED_SSH_KNOWN_HOSTS "Pinned known_hosts line for that host:"
-set_repo_var OCTANT_FEED_SSH_USER "$FEED_SSH_USER"
-set_repo_var OCTANT_FEED_REMOTE_PATH "$FEED_REMOTE_PATH"
-set_repo_var OCTANT_FEED_SSH_HOST "$FEED_SSH_HOST"
-set_repo_var OCTANT_FEED_SSH_KNOWN_HOSTS "$FEED_SSH_KNOWN_HOSTS"
-DEPLOY_KEY_DIR=$(mktemp -d)
-chmod 700 "$DEPLOY_KEY_DIR"
-ssh-keygen -t ed25519 -N "" -C "octant-release-feed" -f "${DEPLOY_KEY_DIR}/id" -q
+stage "octant.sh: send the feed addresses to GitHub"
+say "The workflows publish each signed feed file to a GitHub release of its own,"
+say "using the job's token, so there is no publish key to create. The first"
+say "publish creates the releases feed-preview, feed-candidate and feed-stable."
 say ""
-say "Add this public key to ${FEED_SSH_USER}@octant.sh in ~/.ssh/authorized_keys:"
+say "The app keeps asking https://octant.sh/updates/<ring>/<file>. Add one"
+say "redirect on octant.sh that sends that path on to the release:"
 say ""
-say "  $(cat "${DEPLOY_KEY_DIR}/id.pub")"
+say "  /updates/<ring>/<file>  ->  https://github.com/${REPO}/releases/download/feed-<ring>/<file>"
 say ""
-note "Worth restricting: prefix the line with 'restrict,' so the key cannot"
-note "open a shell, and if you want it narrowed to one directory, rrsync"
-note "(shipped with rsync) is the tool built for that."
-pause "Press Enter once the key is installed on the server."
-set_env_secret OCTANT_FEED_SSH_KEY "$(cat "${DEPLOY_KEY_DIR}/id")"
-rm -rf "$DEPLOY_KEY_DIR"
+note "A temporary (302) redirect, with the query string dropped. The app follows it"
+note "and trusts the signature inside the file, not the host that served it."
+pause "Press Enter once the redirect is in place."
 
 # ──────────────────────────────────────────────────────────────────────────
 stage "Prove it before trusting it"
 say "Everything is in place. Two things are worth checking now rather than"
 say "during a release."
 say ""
-step "Confirm the host key GitHub will pin matches your server. On octant.sh run:"
-step "  ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"
-step "and compare it with:"
-say "  $(gh variable get OCTANT_FEED_SSH_KNOWN_HOSTS --repo "$REPO" 2>/dev/null | ssh-keygen -lf /dev/stdin 2>/dev/null || echo 'set OCTANT_FEED_SSH_KNOWN_HOSTS first')"
-say ""
-step "Then run a preview build by hand and watch it through:"
+step "Run a preview build by hand and watch it through:"
 step "  gh workflow run 'Release (preview)' --repo ${REPO} -f force=true"
+say ""
+step "When it has published, confirm the public address answers:"
+step "  curl -sIL https://octant.sh/updates/preview/darwin-arm64.preview-key.json"
+step "It should end at a 200 from GitHub's download host."
 say ""
 note "A stable release is a tag: bump the version in scripts/package-desktop.ts,"
 note "then push v<that version>. It waits for your approval before it signs."

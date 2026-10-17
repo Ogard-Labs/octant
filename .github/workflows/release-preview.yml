@@ -82,9 +82,10 @@ jobs:
     needs: decide
     if: needs.decide.outputs.build == 'true'
     # Holds the Developer ID, the notary profile, the preview feed signing key
-    # (never the stable one: unreviewed main runs here and could read it), and the
-    # SSH key that publishes the feed. Scoping them to an environment keeps them
-    # off every other workflow in the repository.
+    # (never the stable one: unreviewed main runs here and could read it).
+    # Scoping them to an environment keeps them off every other workflow in the
+    # repository. The feed is published with the job's own token, so no
+    # separate publish credential lives here.
     environment: preview
     strategy:
       fail-fast: false
@@ -116,9 +117,8 @@ jobs:
       - run: bun run --cwd apps/desktop build
 
       # Values that are not credentials are repository variables rather than
-      # secrets: the team id and the identity appear in the signature, the
-      # known-hosts entry is a public key, and a path is a path. Keeping them
-      # out of the secret store means the secrets that remain are all things
+      # secrets: the team id and the identity appear in the signature.
+      # Keeping them out of the secret store means the secrets that remain are all things
       # whose disclosure would actually matter.
       - name: Import the Developer ID certificate
         if: matrix.apple_signing
@@ -248,26 +248,7 @@ jobs:
       - name: Publish the feed
         if: steps.feed.outputs.signed == 'true'
         env:
-          SSH_KEY: ${{ secrets.OCTANT_FEED_SSH_KEY }}
-          SSH_HOST: ${{ vars.OCTANT_FEED_SSH_HOST }}
-          SSH_USER: ${{ vars.OCTANT_FEED_SSH_USER }}
-          SSH_KNOWN_HOSTS: ${{ vars.OCTANT_FEED_SSH_KNOWN_HOSTS }}
-          REMOTE_PATH: ${{ vars.OCTANT_FEED_REMOTE_PATH }}
+          GH_TOKEN: ${{ github.token }}
           RING: ${{ needs.decide.outputs.ring }}
-        run: |
-          set -euo pipefail
-          umask 077
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/octant_feed
-          # Pinned rather than accepted on first use: a feed pushed to whatever
-          # answers on that address is a feed published to an unknown host.
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/octant_feed ~/.ssh/known_hosts
-          # GNU rsync understands --chmod; the macOS runner ships the BSD
-          # client, which rejects that flag. Permissions are already set on the
-          # destination directory, so archive+compress is enough. No --delete:
-          # each matrix arch owns one file under the ring directory.
-          rsync --archive --compress \
-            --rsh "ssh -i ~/.ssh/octant_feed -o IdentitiesOnly=yes" \
-            "${RUNNER_TEMP}/feed/${RING}" \
-            "${SSH_USER}@${SSH_HOST}:${REMOTE_PATH}/"
+          TARGET: ${{ matrix.target }}
+        run: scripts/publish-update-feed.sh "$RING" "${RUNNER_TEMP}/feed/${RING}/${TARGET}.preview-key.json"

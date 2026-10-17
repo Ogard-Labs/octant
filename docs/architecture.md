@@ -7226,6 +7226,19 @@ mechanisms are:
   follows. The feed's publish credential is not part of this trust: a writer
   that can replace a feed file can withhold a ring's updates, never install
   something no trusted key signed.
+- **The feed is published to GitHub releases.** Each ring has one fixed
+  mailbox release, `feed-preview`, `feed-candidate` or `feed-stable`, a
+  prerelease that holds only that ring's feed JSON files. The release workflows
+  upload with the job's own token (`contents: write`) through
+  `scripts/publish-update-feed.sh`; no server credential exists. The app keeps
+  its compiled base `https://octant.sh/updates` and requests
+  `<ring>/<file>`; octant.sh redirects that path to
+  `https://github.com/Ogard-Labs/octant/releases/download/feed-<ring>/<file>`.
+  The updater follows that cross-host redirect, and the signature and artifact
+  hash checks never depend on the host that served the bytes. The mailbox tags
+  do not start with `v`, so no rule scoped to version tags reaches them. Whoever
+  can write release assets in the repository can withhold a ring's updates, and
+  nothing more, for the reason above.
 
 **Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
 would not mint, store, or inject a Claude setup or OAuth token. Claude
