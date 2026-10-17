@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { createHash } from "node:crypto";
-import { constants, createReadStream } from "node:fs";
+import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
 import { createInterface } from "node:readline";
@@ -454,9 +454,12 @@ async function readLocalUsageHistoryImpl(
       let lastLineBytes = 0;
       let lastLineValid = false;
       processedFile = true;
-      const stream = createReadStream(resolvedFilePath, {
+      // The handle owns the descriptor, so the stream closes it through the
+      // handle. A stream given the bare descriptor number closes it on destroy
+      // whatever `autoClose` says, and the handle's own close then closes that
+      // number a second time, which can be a file opened in between.
+      const stream = handle.createReadStream({
         encoding: "utf8",
-        fd: handle.fd,
         autoClose: false,
         start: startOffset,
         end: streamEndOffset,
