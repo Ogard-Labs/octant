@@ -1968,6 +1968,16 @@ flowchart LR
   repeated startup does not append duplicate recovery events. A follow-up resumes
   the retained native identity under the ordinary current-authority checks.
 
+  A Work turn the journal still reads as accepted, running, or waiting after a
+  restart has no runtime left to finish it. The projection settles it as failed
+  with the `interrupted` category, so the header reads Interrupted, the Board
+  keeps the thread under Waiting with the interrupted reason, and the thread
+  takes its next message. The settlement is derived on every start and not
+  journaled, so rebuilding twice reads the same. A turn waiting on a provider
+  usage limit keeps waiting for the reset. An approval the lead was blocked on
+  stays `lost-in-restart` in the harness session: only Resume is offered, and
+  the call it guarded never runs.
+
 - **Fast thread reads.** A thread paints from an authoritative snapshot before
   auxiliary Files, Git, Browser, or Computer Use observations begin. Code
   conversation evidence is read in bounded batches and page results paint as

@@ -500,4 +500,20 @@ describe("boardRuntimeActivityFromTurnsAndSignals", () => {
     expect(activity.awaitingInput).toBe(false);
     expect(activity.blockingReason).toBe("The last agent turn was interrupted.");
   });
+
+  it("holds Waiting from a turn a host restart cut off and settled as failed", () => {
+    const activity = boardRuntimeActivityFromTurnsAndSignals({
+      turns: [
+        turn("failed", {
+          category: "interrupted",
+          message: "Octant restarted while this turn was running, so it did not finish.",
+        }),
+      ],
+      pendingRequest: false,
+      childActive: 0,
+      childWaiting: 0,
+    });
+    expect(activity).toMatchObject({ executing: false, interrupted: true, awaitingInput: false });
+    expect(activity.blockingReason).toBe("The last agent turn was interrupted.");
+  });
 });
