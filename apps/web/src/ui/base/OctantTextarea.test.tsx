@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { OctantInput } from "./OctantInput";
 import { OctantTextarea } from "./OctantTextarea";
 
 describe("OctantTextarea", () => {
@@ -25,5 +26,23 @@ describe("OctantTextarea", () => {
     const field = screen.getByRole("textbox", { name: "Notes" });
     expect(field.className).not.toContain("focus-visible:ring");
     expect(field.className).not.toContain("focus-visible:border");
+  });
+
+  it("rests, hovers and takes focus like a single-line input", () => {
+    render(
+      <>
+        <OctantInput aria-label="Name" />
+        <OctantTextarea aria-label="Notes" />
+      </>,
+    );
+    const paint = (name: string) =>
+      screen
+        .getByRole("textbox", { name })
+        .className.split(/\s+/)
+        .filter((token) => /^(hover:|focus-visible:|border|bg-|rounded)/.test(token))
+        .sort();
+    expect(paint("Notes")).toEqual(paint("Name"));
+    expect(paint("Notes")).toContain("hover:border-muted-foreground");
+    expect(paint("Notes")).toContain("focus-visible:bg-accent");
   });
 });
