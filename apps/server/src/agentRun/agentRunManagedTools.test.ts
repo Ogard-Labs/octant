@@ -254,7 +254,11 @@ describe("agents managed tools", () => {
   it("refuses to delegate from a thread carrying untrusted content", async () => {
     const { set, calls } = tool({ tainted: true });
     const outcome = await call(set, { operation: "delegate", task: "Look" });
-    expect(outcome.result).toMatchObject({ status: "error", error: "delegate-tainted" });
+    expect(outcome.result).toMatchObject({
+      status: "error",
+      error: "delegate-tainted",
+      message: expect.stringContaining("clear that from the notice above the composer"),
+    });
     expect(calls).toEqual([]);
   });
 

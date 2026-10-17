@@ -99,6 +99,15 @@ export type AgentRunDelegationResult =
     }
   | { readonly status: "refused"; readonly reason: string; readonly message?: string };
 
+/**
+ * A tainted parent cannot start helpers, and a helper's own reply taints its
+ * parent, so a lead that delegated once and took the result in meets this on
+ * its next delegation. The bare reason code left the model and the person with
+ * nothing to act on.
+ */
+const TAINTED_DELEGATION_MESSAGE =
+  "This thread has taken in outside content (a helper's reply counts), so it cannot start more helpers. A person can review what it read and clear that from the notice above the composer, or the work can continue in a new thread.";
+
 export function agentRunDelegationCapabilities(options: AgentRunDelegationOptions) {
   const posture = options.admission.settings.current().creationPosture;
   const tainted = options.isTainted?.() === true;
@@ -136,7 +145,8 @@ export async function startAgentRunDelegation(
       reason: "creation-posture-off",
       message: "Subagents are turned off in Settings → Octant Harness → Helper agents.",
     };
-  if (options.isTainted?.()) return { status: "refused", reason: "delegate-tainted" };
+  if (options.isTainted?.())
+    return { status: "refused", reason: "delegate-tainted", message: TAINTED_DELEGATION_MESSAGE };
   if (options.isPaused?.())
     return {
       status: "refused",
@@ -419,7 +429,8 @@ export async function followUpAgentRunDelegation(
   if (request.message === undefined) return { status: "refused", reason: "invalid-follow-up" };
   if (options.admission.settings.current().creationPosture !== "automatic")
     return { status: "refused", reason: "creation-posture-off" };
-  if (options.isTainted?.()) return { status: "refused", reason: "delegate-tainted" };
+  if (options.isTainted?.())
+    return { status: "refused", reason: "delegate-tainted", message: TAINTED_DELEGATION_MESSAGE };
   if (options.isPaused?.()) return { status: "refused", reason: "session-paused" };
   const run = options.persistence.getById(request.runId);
   if (run === undefined || String(run.parentThreadId) !== options.parentThreadId)

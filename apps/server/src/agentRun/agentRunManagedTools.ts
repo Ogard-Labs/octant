@@ -356,7 +356,7 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
           result.status === "refused" &&
           (result.reason === "delegate-tainted" || result.reason === "delegate-target-unavailable")
         )
-          return failure(result.reason);
+          return failure(result.reason, result.message);
         return answer(result);
       }
 
