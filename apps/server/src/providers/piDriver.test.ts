@@ -88,6 +88,9 @@ class FakeClient implements PiClientPort {
   }
 }
 
+/** The Pi releases Octant verified for app-managed tools. */
+const VERIFIED_PI_VERSIONS = ["0.85.1", "1.1.0"] as const;
+
 function fixture(version = "0.80.10", registry = new ProviderRuntimeRegistry()) {
   const client = new FakeClient();
   const starts: Array<Record<string, unknown>> = [];
@@ -275,6 +278,27 @@ describe("Pi provider driver", () => {
     },
   );
 
+  it("reports a run Pi settled because it was aborted as interrupted, not completed", async () => {
+    const { driver, client } = fixture("1.1.0");
+    const scope = Effect.runSync(Scope.make());
+    const connection = await Effect.runPromise(
+      driver.acquire({ instanceId, projectRoot: root, mode: "code" }).pipe(Scope.extend(scope)),
+    );
+    await Effect.runPromise(
+      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+    await Effect.runPromise(
+      connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+    );
+    client.emit({ type: "agent_settled", aborted: true });
+    const events = await collected;
+    expect(events.at(-1)).toMatchObject({ kind: "interrupted" });
+    expect(events.some((event) => event.kind === "completed")).toBe(false);
+    await Effect.runPromise(connection.stop(sessionId));
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
   it("records a length stop on the completed event", async () => {
     const { driver, client } = fixture();
     const scope = Effect.runSync(Scope.make());
@@ -396,6 +420,32 @@ describe("Pi provider driver", () => {
       await f.registry.closeAll();
     }
     expect(f.active()).toBe(0);
+  });
+
+  it("closes a settled Pi 1.1.0 process instead of retaining it, because warm reuse is verified only on 0.85.1", async () => {
+    const f = fixture("1.1.0");
+    try {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* f.driver.acquire({
+              instanceId,
+              projectRoot: root,
+              mode: "code",
+            });
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            const collected = terminal(yield* connection.subscribe);
+            yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+            f.client.emit({ type: "agent_settled" });
+            expect((yield* Effect.promise(() => collected)).at(-1)?.kind).toBe("completed");
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+      expect(f.active()).toBe(0);
+    } finally {
+      await f.registry.closeAll();
+    }
   });
 
   it.each(["authority", "catalogue"] as const)(
@@ -679,10 +729,39 @@ describe("Pi provider driver", () => {
     expect(result.capabilities.appManagedTools).toBe("unsupported");
   });
 
-  it("keeps app-managed tools unsupported for an older Pi runtime", async () => {
-    const { driver } = fixture("0.80.10");
+  it.each([
+    ["0.85.1", "supported"],
+    ["1.1.0", "supported"],
+    ["0.80.10", "unsupported"],
+    ["1.0.4", "unsupported"],
+    ["1.1.1", "unsupported"],
+  ] as const)("reports app-managed tools for Pi %s as %s", async (version, expected) => {
+    const { driver } = fixture(version);
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-    expect(result.capabilities.appManagedTools).toBe("unsupported");
+    expect(result.detectedVersion).toBe(version);
+    expect(result.capabilities.appManagedTools).toBe(expected);
+  });
+
+  it("starts an app-managed session on a verified Pi release and refuses it on a neighbouring one", async () => {
+    const tools = [{ name: "octant_browser", inputSchema: { type: "object", properties: {} } }];
+    for (const [version, accepted] of [
+      ["1.1.0", true],
+      ["1.1.1", false],
+    ] as const) {
+      const { driver } = fixture(version);
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        driver
+          .acquire({ instanceId, projectRoot: root, mode: "code" })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      const started = Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools }),
+      );
+      if (accepted) await expect(started).resolves.toBeDefined();
+      else await expect(started).rejects.toThrow(/not verified/);
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    }
   });
 
   it("refuses an app-managed session on an unverified Pi runtime", async () => {
@@ -753,275 +832,292 @@ describe("Pi provider driver", () => {
     });
   });
 
-  it("streams ordered events and correlates approval answers", async () => {
-    const { driver, client, starts } = fixture("0.85.1");
-    const scope = await Effect.runPromise(Scope.make());
-    const connection = await Effect.runPromise(
-      driver
-        .acquire({ instanceId, projectRoot: root, mode: "code" })
-        .pipe(Effect.provideService(Scope.Scope, scope)),
-    );
-    const handle = await Effect.runPromise(
-      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
-    );
-    expect(starts[0]).toMatchObject({ onProcessStarted: expect.any(Function) });
-    expect(handle.resumeCursor).toEqual({
-      driverKind: "pi",
-      value: sessionId,
-      binding: { instanceId, sessionId, projectRoot: root, mode: "code", modelId },
-    });
-    expect(starts.at(-1)).toMatchObject({
-      root,
-      sessionId,
-      executionPolicy: "approval-gated",
-      modelProvider: "anthropic",
-    });
-
-    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
-    await Effect.runPromise(
-      connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
-    );
-    client.emit({
-      type: "message_update",
-      assistantMessageEvent: { type: "text_delta", delta: "hello" },
-    });
-    client.emit({
-      type: "message_update",
-      assistantMessageEvent: { type: "thinking_delta", delta: "think" },
-    });
-    client.emit({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "write" });
-    client.emit({
-      type: "extension_ui_request",
-      id: "pi-ui-1",
-      method: "confirm",
-      title: "Octant approval:tool-1:write",
-      message: "Allow?",
-    });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    await Effect.runPromise(
-      connection.answerApproval({ sessionId, requestId: "approval-1", approved: true }),
-    );
-    client.emit({
-      type: "tool_execution_end",
-      toolCallId: "tool-1",
-      toolName: "write",
-      isError: false,
-      result: {},
-    });
-    client.emit({
-      type: "message_end",
-      message: {
-        role: "assistant",
-        usage: {
-          input: 93,
-          output: 3,
-          cacheRead: 3712,
-          cacheWrite: 0,
-          cost: { total: 0.00019168 },
-        },
-      },
-    });
-    client.emit({ type: "agent_settled" });
-    const events = await collected;
-    expect(events.find((event) => event.kind === "usage")).toMatchObject({
-      inputTokens: 3805,
-      outputTokens: 3,
-      cacheReadInputTokens: 3712,
-      cacheWriteInputTokens: 0,
-      costUsd: 0.00019168,
-    });
-    expect(events.map((event) => event.kind)).toEqual([
-      "text-delta",
-      "reasoning-delta",
-      "tool-start",
-      "approval-request",
-      "tool-success",
-      "usage",
-      "completed",
-    ]);
-    expect(client.responses).toEqual([{ id: "pi-ui-1", response: { confirmed: true } }]);
-    await Effect.runPromise(connection.stop(sessionId));
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-  });
-
-  it("round-trips an app-managed tool and carries its catalogue across resume", async () => {
-    const { driver, client, starts, lifecycle } = fixture("0.85.1");
-    const tool: ProviderToolDefinition = {
-      name: "octant_browser",
-      description: "Use the Octant Browser session.",
-      inputSchema: { type: "object", properties: { action: { type: "string" } } },
-    };
-    const scope = await Effect.runPromise(Scope.make());
-    const connection = await Effect.runPromise(
-      driver
-        .acquire({ instanceId, projectRoot: root, mode: "code" })
-        .pipe(Effect.provideService(Scope.Scope, scope)),
-    );
-    const handle = await Effect.runPromise(
-      connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools: [tool] }),
-    );
-    const bridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
-    expect(bridge).toBeDefined();
-    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
-    await Effect.runPromise(
-      connection.send({ sessionId, prompt: "use the browser", attachments: [], tools: [tool] }),
-    );
-    client.emit({ type: "tool_execution_start", toolCallId: "browser-call", toolName: tool.name });
-    const response = fetch(bridge!.url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-octant-pi-token": bridge!.token,
-      },
-      body: JSON.stringify({
-        toolCallId: "browser-call",
-        name: tool.name,
-        input: { action: "navigate" },
-      }),
-    });
-    let answered = false;
-    await vi.waitFor(async () => {
-      if (answered) return;
-      try {
-        await Effect.runPromise(
-          connection.answerTool({
-            sessionId,
-            requestId: "approval-1",
-            resultJson: JSON.stringify({ ok: true }),
-            isError: false,
-          }),
-        );
-        answered = true;
-      } catch {
-        // The loopback request has not reached the driver yet.
-      }
-      expect(answered).toBe(true);
-    });
-    await expect(response).resolves.toMatchObject({ status: 200 });
-    const body = await (await response).json();
-    expect(body).toEqual({ resultJson: JSON.stringify({ ok: true }), isError: false });
-    const duplicate = await fetch(bridge!.url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-octant-pi-token": bridge!.token,
-      },
-      body: JSON.stringify({
-        toolCallId: "browser-call",
-        name: tool.name,
-        input: { action: "navigate" },
-      }),
-    });
-    expect(duplicate.status).toBe(200);
-    await expect(duplicate.json()).resolves.toEqual({
-      resultJson: JSON.stringify({ error: "tool-unavailable" }),
-      isError: true,
-    });
-    client.emit({
-      type: "tool_execution_end",
-      toolCallId: "browser-call",
-      toolName: tool.name,
-      isError: false,
-    });
-    client.emit({ type: "agent_settled" });
-    await expect(collected).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: "tool-request", toolName: tool.name }),
-        expect.objectContaining({ kind: "tool-success", toolCallId: "browser-call" }),
-        expect.objectContaining({ kind: "completed" }),
-      ]),
-    );
-
-    await Effect.runPromise(
-      connection.resume({
+  it.each(VERIFIED_PI_VERSIONS)(
+    "streams ordered events and correlates approval answers (Pi %s)",
+    async (version) => {
+      const { driver, client, starts } = fixture(version);
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        driver
+          .acquire({ instanceId, projectRoot: root, mode: "code" })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      const handle = await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      expect(starts[0]).toMatchObject({ onProcessStarted: expect.any(Function) });
+      expect(handle.resumeCursor).toEqual({
+        driverKind: "pi",
+        value: sessionId,
+        binding: { instanceId, sessionId, projectRoot: root, mode: "code", modelId },
+      });
+      expect(starts.at(-1)).toMatchObject({
+        root,
         sessionId,
-        resumeCursor: handle.resumeCursor!,
         executionPolicy: "approval-gated",
-      }),
-    );
-    expect(lifecycle.indexOf("process-release")).toBeLessThan(lifecycle.indexOf("bridge-close"));
-    expect(lifecycle.indexOf("process-release")).toBeLessThan(
-      lifecycle.lastIndexOf("process-start"),
-    );
-    expect(starts.at(-1)?.tools).toEqual([tool]);
-    const resumedBridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
-    expect(resumedBridge).toBeDefined();
-    const replay = await fetch(resumedBridge!.url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-octant-pi-token": resumedBridge!.token,
-      },
-      body: JSON.stringify({
-        toolCallId: "browser-call",
-        name: tool.name,
-        input: { action: "navigate" },
-      }),
-    });
-    expect(replay.status).toBe(200);
-    await expect(replay.json()).resolves.toEqual({
-      resultJson: JSON.stringify({ error: "tool-unavailable" }),
-      isError: true,
-    });
-    await Effect.runPromise(
-      connection.resume({
-        sessionId,
-        resumeCursor: handle.resumeCursor!,
-        executionPolicy: "plan",
-      }),
-    );
-    expect(starts.at(-1)?.tools).toBeUndefined();
-    await Effect.runPromise(connection.stop(sessionId));
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-  });
+        modelProvider: "anthropic",
+      });
 
-  it("cancels a pending app-managed tool when the Pi turn is interrupted", async () => {
-    const { driver, client, starts } = fixture("0.85.1");
-    const tool: ProviderToolDefinition = {
-      name: "octant_browser",
-      inputSchema: { type: "object", properties: {} },
-    };
-    const scope = await Effect.runPromise(Scope.make());
-    const connection = await Effect.runPromise(
-      driver
-        .acquire({ instanceId, projectRoot: root, mode: "code" })
-        .pipe(Effect.provideService(Scope.Scope, scope)),
-    );
-    await Effect.runPromise(
-      connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools: [tool] }),
-    );
-    const bridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
-    expect(bridge).toBeDefined();
-    const collected = terminal(Stream.unwrapScoped(connection.subscribe));
-    await Effect.runPromise(
-      connection.send({ sessionId, prompt: "use the browser", attachments: [], tools: [tool] }),
-    );
-    client.emit({ type: "tool_execution_start", toolCallId: "browser-call", toolName: tool.name });
-    const response = fetch(bridge!.url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-octant-pi-token": bridge!.token,
-      },
-      body: JSON.stringify({ toolCallId: "browser-call", name: tool.name, input: {} }),
-    });
-    await vi.waitFor(() =>
-      expect(connection.toolRequestSignal?.({ sessionId, requestId: "approval-1" }).aborted).toBe(
-        false,
-      ),
-    );
-    await Effect.runPromise(connection.interrupt(sessionId));
-    await expect(response).resolves.toMatchObject({ status: 200 });
-    await expect((await response).json()).resolves.toEqual({
-      resultJson: JSON.stringify({ error: "tool-interrupted" }),
-      isError: true,
-    });
-    await expect(collected).resolves.toEqual(
-      expect.arrayContaining([expect.objectContaining({ kind: "interrupted" })]),
-    );
-    await Effect.runPromise(connection.stop(sessionId));
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-  });
+      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      await Effect.runPromise(
+        connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] }),
+      );
+      client.emit({
+        type: "message_update",
+        assistantMessageEvent: { type: "text_delta", delta: "hello" },
+      });
+      client.emit({
+        type: "message_update",
+        assistantMessageEvent: { type: "thinking_delta", delta: "think" },
+      });
+      client.emit({ type: "tool_execution_start", toolCallId: "tool-1", toolName: "write" });
+      client.emit({
+        type: "extension_ui_request",
+        id: "pi-ui-1",
+        method: "confirm",
+        title: "Octant approval:tool-1:write",
+        message: "Allow?",
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await Effect.runPromise(
+        connection.answerApproval({ sessionId, requestId: "approval-1", approved: true }),
+      );
+      client.emit({
+        type: "tool_execution_end",
+        toolCallId: "tool-1",
+        toolName: "write",
+        isError: false,
+        result: {},
+      });
+      client.emit({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          usage: {
+            input: 93,
+            output: 3,
+            cacheRead: 3712,
+            cacheWrite: 0,
+            cost: { total: 0.00019168 },
+          },
+        },
+      });
+      client.emit({ type: "agent_settled" });
+      const events = await collected;
+      expect(events.find((event) => event.kind === "usage")).toMatchObject({
+        inputTokens: 3805,
+        outputTokens: 3,
+        cacheReadInputTokens: 3712,
+        cacheWriteInputTokens: 0,
+        costUsd: 0.00019168,
+      });
+      expect(events.map((event) => event.kind)).toEqual([
+        "text-delta",
+        "reasoning-delta",
+        "tool-start",
+        "approval-request",
+        "tool-success",
+        "usage",
+        "completed",
+      ]);
+      expect(client.responses).toEqual([{ id: "pi-ui-1", response: { confirmed: true } }]);
+      await Effect.runPromise(connection.stop(sessionId));
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    },
+  );
+
+  it.each(VERIFIED_PI_VERSIONS)(
+    "round-trips an app-managed tool and carries its catalogue across resume (Pi %s)",
+    async (version) => {
+      const { driver, client, starts, lifecycle } = fixture(version);
+      const tool: ProviderToolDefinition = {
+        name: "octant_browser",
+        description: "Use the Octant Browser session.",
+        inputSchema: { type: "object", properties: { action: { type: "string" } } },
+      };
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        driver
+          .acquire({ instanceId, projectRoot: root, mode: "code" })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      const handle = await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools: [tool] }),
+      );
+      const bridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
+      expect(bridge).toBeDefined();
+      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      await Effect.runPromise(
+        connection.send({ sessionId, prompt: "use the browser", attachments: [], tools: [tool] }),
+      );
+      client.emit({
+        type: "tool_execution_start",
+        toolCallId: "browser-call",
+        toolName: tool.name,
+      });
+      const response = fetch(bridge!.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-pi-token": bridge!.token,
+        },
+        body: JSON.stringify({
+          toolCallId: "browser-call",
+          name: tool.name,
+          input: { action: "navigate" },
+        }),
+      });
+      let answered = false;
+      await vi.waitFor(async () => {
+        if (answered) return;
+        try {
+          await Effect.runPromise(
+            connection.answerTool({
+              sessionId,
+              requestId: "approval-1",
+              resultJson: JSON.stringify({ ok: true }),
+              isError: false,
+            }),
+          );
+          answered = true;
+        } catch {
+          // The loopback request has not reached the driver yet.
+        }
+        expect(answered).toBe(true);
+      });
+      await expect(response).resolves.toMatchObject({ status: 200 });
+      const body = await (await response).json();
+      expect(body).toEqual({ resultJson: JSON.stringify({ ok: true }), isError: false });
+      const duplicate = await fetch(bridge!.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-pi-token": bridge!.token,
+        },
+        body: JSON.stringify({
+          toolCallId: "browser-call",
+          name: tool.name,
+          input: { action: "navigate" },
+        }),
+      });
+      expect(duplicate.status).toBe(200);
+      await expect(duplicate.json()).resolves.toEqual({
+        resultJson: JSON.stringify({ error: "tool-unavailable" }),
+        isError: true,
+      });
+      client.emit({
+        type: "tool_execution_end",
+        toolCallId: "browser-call",
+        toolName: tool.name,
+        isError: false,
+      });
+      client.emit({ type: "agent_settled" });
+      await expect(collected).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "tool-request", toolName: tool.name }),
+          expect.objectContaining({ kind: "tool-success", toolCallId: "browser-call" }),
+          expect.objectContaining({ kind: "completed" }),
+        ]),
+      );
+
+      await Effect.runPromise(
+        connection.resume({
+          sessionId,
+          resumeCursor: handle.resumeCursor!,
+          executionPolicy: "approval-gated",
+        }),
+      );
+      expect(lifecycle.indexOf("process-release")).toBeLessThan(lifecycle.indexOf("bridge-close"));
+      expect(lifecycle.indexOf("process-release")).toBeLessThan(
+        lifecycle.lastIndexOf("process-start"),
+      );
+      expect(starts.at(-1)?.tools).toEqual([tool]);
+      const resumedBridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
+      expect(resumedBridge).toBeDefined();
+      const replay = await fetch(resumedBridge!.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-pi-token": resumedBridge!.token,
+        },
+        body: JSON.stringify({
+          toolCallId: "browser-call",
+          name: tool.name,
+          input: { action: "navigate" },
+        }),
+      });
+      expect(replay.status).toBe(200);
+      await expect(replay.json()).resolves.toEqual({
+        resultJson: JSON.stringify({ error: "tool-unavailable" }),
+        isError: true,
+      });
+      await Effect.runPromise(
+        connection.resume({
+          sessionId,
+          resumeCursor: handle.resumeCursor!,
+          executionPolicy: "plan",
+        }),
+      );
+      expect(starts.at(-1)?.tools).toBeUndefined();
+      await Effect.runPromise(connection.stop(sessionId));
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    },
+  );
+
+  it.each(VERIFIED_PI_VERSIONS)(
+    "cancels a pending app-managed tool when the Pi turn is interrupted (Pi %s)",
+    async (version) => {
+      const { driver, client, starts } = fixture(version);
+      const tool: ProviderToolDefinition = {
+        name: "octant_browser",
+        inputSchema: { type: "object", properties: {} },
+      };
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        driver
+          .acquire({ instanceId, projectRoot: root, mode: "code" })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated", tools: [tool] }),
+      );
+      const bridge = starts.at(-1)?.toolBridge as { url: string; token: string } | undefined;
+      expect(bridge).toBeDefined();
+      const collected = terminal(Stream.unwrapScoped(connection.subscribe));
+      await Effect.runPromise(
+        connection.send({ sessionId, prompt: "use the browser", attachments: [], tools: [tool] }),
+      );
+      client.emit({
+        type: "tool_execution_start",
+        toolCallId: "browser-call",
+        toolName: tool.name,
+      });
+      const response = fetch(bridge!.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-pi-token": bridge!.token,
+        },
+        body: JSON.stringify({ toolCallId: "browser-call", name: tool.name, input: {} }),
+      });
+      await vi.waitFor(() =>
+        expect(connection.toolRequestSignal?.({ sessionId, requestId: "approval-1" }).aborted).toBe(
+          false,
+        ),
+      );
+      await Effect.runPromise(connection.interrupt(sessionId));
+      await expect(response).resolves.toMatchObject({ status: 200 });
+      await expect((await response).json()).resolves.toEqual({
+        resultJson: JSON.stringify({ error: "tool-interrupted" }),
+        isError: true,
+      });
+      await expect(collected).resolves.toEqual(
+        expect.arrayContaining([expect.objectContaining({ kind: "interrupted" })]),
+      );
+      await Effect.runPromise(connection.stop(sessionId));
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+    },
+  );
 
   it("rejects stale resumes, unknown answers, and Plan approvals", async () => {
     const { driver, client } = fixture();

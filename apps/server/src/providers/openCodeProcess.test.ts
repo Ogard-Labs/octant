@@ -198,6 +198,12 @@ describe("probeOpenCodeBinary", () => {
     expect(supportsOpenCodeIsolation("opencode v2.0.22")).toBe(true);
     expect(supportsOpenCodeIsolation("opencode v2.0.21")).toBe(false);
     expect(supportsOpenCodeIsolation("opencode v2.0.23")).toBe(false);
+    expect(supportsOpenCodeIsolation("opencode v2.0.27")).toBe(true);
+    expect(supportsOpenCodeIsolation("opencode v2.0.26")).toBe(false);
+    expect(supportsOpenCodeIsolation("opencode v2.0.28")).toBe(false);
+    expect(supportsOpenCodeIsolation("opencode v2.0.27-custom")).toBe(false);
+    expect(supportsOpenCodeIsolation("opencode2 v2.0.27")).toBe(false);
+    expect(supportsOpenCodeIsolation("2.0.27")).toBe(false);
     expect(supportsOpenCodeIsolation("opencode2 v2.0.22")).toBe(false);
     expect(supportsOpenCodeIsolation("2.0.22")).toBe(false);
   });
@@ -208,7 +214,7 @@ describe("probeOpenCodeBinary", () => {
   it.skipIf(process.env.OCTANT_OPENCODE_PROFILE_SMOKE !== "1")(
     "keeps hostile project and global plugin fixtures out of the installed runtime",
     async () => {
-      const binaryPath = "/opt/homebrew/bin/opencode";
+      const binaryPath = process.env.OCTANT_OPENCODE_BINARY ?? "/opt/homebrew/bin/opencode";
       expect(() => accessSync(binaryPath)).not.toThrow();
       const root = mkdtempSync(join(tmpdir(), "octant-opencode-isolation-smoke-"));
       const markerPath = join(root, "hostile-plugin-loaded");
