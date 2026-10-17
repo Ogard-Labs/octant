@@ -5,6 +5,7 @@ import {
   accessPosturesAtOrBelow,
   authorizeCodeOperation,
   clampTurnAccessPosture,
+  harnessAsksUnderSessionFullAccess,
   harnessAutoReviewEffective,
   inPlaceRestoreRefusalText,
   turnBlocksInPlaceRestore,
@@ -237,6 +238,46 @@ describe("Code authority policy", () => {
       "request-local-confirmation",
     );
     expect(decision("remote-client", "full-access", "pr-mutation")).toBe("deny");
+  });
+});
+
+describe("harnessAsksUnderSessionFullAccess", () => {
+  const sessionFullAccess = {
+    executionPolicy: "full-access",
+    permissionPersistence: "current-session",
+  } as const;
+
+  it("says Octant's own agent still asks under a session-only grant of Full access", () => {
+    for (const driverKind of [
+      "openai-compatible",
+      "anthropic-compatible",
+      "azure-foundry",
+    ] as const) {
+      expect(harnessAsksUnderSessionFullAccess({ ...sessionFullAccess, driverKind })).toBe(true);
+    }
+  });
+
+  it("says nothing when a provider runtime honours the grant, the grant is remembered, or there is no Full access", () => {
+    expect(harnessAsksUnderSessionFullAccess({ ...sessionFullAccess, driverKind: "codex" })).toBe(
+      false,
+    );
+    expect(harnessAsksUnderSessionFullAccess({ ...sessionFullAccess, driverKind: "claude" })).toBe(
+      false,
+    );
+    expect(
+      harnessAsksUnderSessionFullAccess({
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+        driverKind: "openai-compatible",
+      }),
+    ).toBe(false);
+    expect(
+      harnessAsksUnderSessionFullAccess({
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+        driverKind: "openai-compatible",
+      }),
+    ).toBe(false);
   });
 });
 

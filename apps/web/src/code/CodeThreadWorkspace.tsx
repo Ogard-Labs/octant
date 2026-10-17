@@ -21,6 +21,7 @@ import {
   ACCESS_POSTURE_RANK,
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
+  harnessAsksUnderSessionFullAccess,
   pickerGroupCarriesAppManagedTools,
   startedCodeThreadPickerGroups,
   type PickerGroup,
@@ -702,6 +703,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     !messageQueue.uncertain &&
     (!queueFollowUp || messageQueue.available);
   const providerGroups = props.providerGroups ?? [];
+  const threadDriverKind = providerGroups.find(
+    (group) => String(group.instance.id) === String(thread.providerInstanceId),
+  )?.instance.driverKind;
+  const harnessAsksUnderFullAccess =
+    threadDriverKind !== undefined &&
+    harnessAsksUnderSessionFullAccess({
+      executionPolicy: thread.executionPolicy,
+      permissionPersistence: thread.permissionPersistence,
+      driverKind: threadDriverKind,
+    });
   const messages = props.controller.conversation;
   // The host only binds a thread to its provider once a provider session
   // exists, and a completed reply is the renderer's proof of one. A thread
@@ -2050,6 +2061,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               {...(profileName === undefined ? {} : { profileName })}
               ceiling={thread.executionPolicy}
               disabled={accessChanging}
+              harnessAsksUnderFullAccess={harnessAsksUnderFullAccess}
               nativeConfirmationAvailable={
                 props.requestFullAccessApproval !== undefined ||
                 props.projectRemembersFullAccess === true

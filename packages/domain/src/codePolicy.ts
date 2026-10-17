@@ -1,4 +1,9 @@
-import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import type {
+  PermissionPersistence,
+  ProviderDriverKind,
+  ProviderExecutionPolicy,
+} from "@octant/contracts/providers";
+import { isNativeHarnessDriverKind } from "./providerPolicy";
 
 export type CodeActor = "local-user" | "agent" | "remote-client";
 export type CodeOperation =
@@ -113,6 +118,29 @@ export function accessPosturesAbove(
  */
 export function decidesCodeEffectsByApproval(posture: ProviderExecutionPolicy): boolean {
   return posture === "approval-gated" || posture === "auto-accept-edits";
+}
+
+/**
+ * Whether a Code thread shown as Full access still has its approvals asked.
+ *
+ * A session-only grant of Full access lives in the window's memory; the
+ * journaled thread stays approval-gated. Provider runtimes receive the
+ * window's grant with each turn, but Octant's own agent decides every tool
+ * call from the journaled thread, so under a session-only grant it still
+ * asks before it writes or runs a command. A remembered grant is journaled
+ * as Full access and is honoured. Surfaces that print the posture read this
+ * so the words match what happens.
+ */
+export function harnessAsksUnderSessionFullAccess(input: {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly permissionPersistence: PermissionPersistence;
+  readonly driverKind: ProviderDriverKind;
+}): boolean {
+  return (
+    input.executionPolicy === "full-access" &&
+    input.permissionPersistence === "current-session" &&
+    isNativeHarnessDriverKind(input.driverKind)
+  );
 }
 
 /**
