@@ -514,6 +514,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   className="chip-x window-no-drag"
                   onClick={() => props.onRemoveAttachment?.(attachmentSelection.id)}
                   type="button"
+                  variant="bare"
                 >
                   <X aria-hidden="true" size={12} strokeWidth={1.8} />
                 </OctantButton>
@@ -536,6 +537,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   className="chip-x window-no-drag"
                   onClick={() => props.onRemovePreviewSelection?.(selection.id)}
                   type="button"
+                  variant="bare"
                 >
                   <X aria-hidden="true" size={12} strokeWidth={1.8} />
                 </OctantButton>
@@ -558,6 +560,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   className="chip-x window-no-drag"
                   onClick={() => props.onRemoveCanvasSelection?.(selection.id)}
                   type="button"
+                  variant="bare"
                 >
                   <X aria-hidden="true" size={12} strokeWidth={1.8} />
                 </OctantButton>
@@ -579,6 +582,7 @@ export function ChatComposer(props: ChatComposerProps) {
                     className="chip-x window-no-drag"
                     onClick={() => props.onRemoveQuote?.(quote.id)}
                     type="button"
+                    variant="bare"
                   >
                     <X aria-hidden="true" size={12} strokeWidth={1.8} />
                   </OctantButton>
@@ -604,6 +608,7 @@ export function ChatComposer(props: ChatComposerProps) {
                   className="chip-x window-no-drag"
                   onClick={() => props.onRemoveExtensionSelection?.(item.reference)}
                   type="button"
+                  variant="bare"
                 >
                   <X aria-hidden="true" size={12} strokeWidth={1.8} />
                 </OctantButton>

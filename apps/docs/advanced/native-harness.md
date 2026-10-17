@@ -182,6 +182,13 @@ shell command does, and the approval shows the whole command (a check command
 is at most 200 characters; put a longer one in a script). A criterion without a
 check command is one you confirm.
 
+Each surface shows the same ledger: every criterion with its check command,
+the last thing that check observed (met or not), and whether it holds. Open
+**Environment** on a Code thread, or **Keep working on this unattended** on a
+Work thread, and the criteria are listed under the objective. A Code thread
+shows its goal there only once it has one, and only to read; `/goal` in the
+terminal lists the same criteria.
+
 The goal completes only when every criterion's check has passed — never
 because the model says it is finished. That is also the model's signal to
 stop. When the budget runs out first, the model is told to summarize where
@@ -363,8 +370,8 @@ running turn; `Ctrl+C` stops it too, and a second press right after quits.
 `/side <question>` asks the thread's Side Chat — the same one the app's Side
 Chat panel shows — without stopping or adding to the running turn. Side Chat
 reads the thread and cannot change it; in the terminal UI, `/back` returns to
-the thread. `/goal` shows the thread's goal, and `/goal revise <objective>`
-changes its objective. If another screen changed the goal first, nothing is
+the thread. `/goal` shows the thread's goal with each criterion's check, latest evidence and
+whether it is met, and `/goal revise <objective>` changes its objective. If another screen changed the goal first, nothing is
 overwritten: the terminal says so and shows the newer goal.
 
 `/fork` forks the thread at its last finished reply — a Code fork on its own

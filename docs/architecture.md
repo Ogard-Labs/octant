@@ -3967,7 +3967,12 @@ native harness in `apps/server/src/harness`:
   zero exit. When the last criterion is met the goal completes on that
   evidence (0025); a model saying it is done completes nothing. A goal loop
   treats a goal with criteria as complete only when all are met, and a round
-  whose own checks completed the goal takes no further spend.
+  whose own checks completed the goal takes no further spend. Every surface
+  reads the same goal from the journal-backed goal routes and lists each
+  criterion with its check, its latest evidence, and its state: the Work
+  Goal panel, a read-only Goal row in a Code thread's Environment that appears
+  once a goal exists, and `/goal` in the terminal. The ledger is a view; it
+  adds no write path and no authority.
 - **Routing.** `NativeHarnessRoutingStore` journals a host default and
   Project overrides of slot tables; `resolveNativeHarnessRoute` in
   `@octant/domain` is the pure resolver; `NativeHarnessRouter` adds cooldowns

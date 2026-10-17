@@ -275,6 +275,89 @@ describe("octant agent command line", () => {
     expect(stdout.text()).toContain("Created chat thread 00000000-0000-4000-8000-000000000077");
   });
 
+  it("lists the goal's criteria with their check, evidence and state, not only a count", async () => {
+    const stdout = sink();
+    const threadId = "00000000-0000-4000-8000-000000000020";
+    const goal = {
+      id: "00000000-0000-4000-8000-000000000051",
+      threadId,
+      revisionId: "00000000-0000-4000-8000-000000000052",
+      objective: "Ship the parser",
+      status: "active",
+      budget: {},
+      usage: { tokensUsed: 0, elapsedMs: 0, turnsUsed: 0 },
+      evidence: [],
+      criteria: [
+        {
+          id: "c1",
+          text: "Tests pass",
+          check: "bun run test",
+          status: "met",
+          evidence: {
+            kind: "test",
+            referenceId: "goal-check:c1",
+            summary: "Exited 0 after 41 passing tests",
+            observedAt: "2026-10-02T12:30:00.000Z",
+          },
+        },
+        { id: "c2", text: "Docs updated", status: "unmet" },
+        {
+          id: "c3",
+          text: "Build is clean",
+          check: "bun run build",
+          status: "unmet",
+          evidence: {
+            kind: "test",
+            referenceId: "goal-check:c3",
+            summary: "Exited 1: type error in lexer.ts",
+            observedAt: "2026-10-02T12:40:00.000Z",
+          },
+        },
+      ],
+      createdAt: "2026-10-02T12:00:00.000Z",
+      updatedAt: "2026-10-02T12:00:00.000Z",
+      version: 3,
+    };
+    const commands: unknown[] = [];
+    const code = await runAgentCliCommand({
+      command: {
+        action: "agent",
+        threadId,
+        json: false,
+        plain: true,
+        last: false,
+        quiet: false,
+        mode: "chat",
+      },
+      session: session((request) => {
+        const opening = chatThreadOpening(threadId, request);
+        if (opening !== undefined) return opening;
+        if (request.path.startsWith("/api/goals?")) {
+          return { status: 200, body: { goal, history: [] } };
+        }
+        if (request.path === "/api/goals/commands") commands.push(request.body);
+        return { status: 404, body: {} };
+      }),
+      stdin: Readable.from(["/goal\n", "/quit\n"]),
+      stdout,
+      stderr: sink(),
+    });
+    expect(code).toBe(0);
+    expect(stdout.text()).toContain("Goal (active): Ship the parser · 1 of 3 criteria met");
+    expect(stdout.text()).toMatch(/met\s+c1\s+Tests pass\n\s+check: bun run test\n/);
+    expect(stdout.text()).toContain(
+      "evidence (test, 2026-10-02T12:30:00.000Z): Exited 0 after 41 passing tests",
+    );
+    expect(stdout.text()).toMatch(
+      /unmet\s+c2\s+Docs updated\n\s+check: confirmed by a person\n\s+evidence: none yet/,
+    );
+    expect(stdout.text()).toContain(
+      "evidence (test, 2026-10-02T12:40:00.000Z): Exited 1: type error in lexer.ts",
+    );
+    // Reading the ledger sends no command.
+    expect(commands).toEqual([]);
+  });
+
   it("refuses to overwrite a goal another screen revised first and shows the newer one", async () => {
     const stdout = sink();
     const stderr = sink();
