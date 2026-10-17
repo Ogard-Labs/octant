@@ -182,12 +182,18 @@ argument, with the script's absolute path or `${PLUGIN_ROOT}`:
 ```
 
 A `command` that is itself a script, either one shipped in the plugin or a
-launcher such as `npx` or `npm`, is refused before it starts, with this fix in
+launcher such as `npx`, `npm`, or `uvx`, is refused before it starts, with this fix in
 the message, and the server is never shown as ready. The server reads only the
 plugin's own folder, so a package installed globally on the Mac is out of reach.
 Put the package inside the plugin when you build it, for example
 `npm install --prefix "${PLUGIN_ROOT}" <package>`, and point `node` at
-`${PLUGIN_ROOT}/node_modules/<package>/<entry>.js`.
+`${PLUGIN_ROOT}/node_modules/<package>/<entry>.js`. `uvx` and `uv tool run` /
+`uv run` are refused the same way. For Python, build a virtual environment
+inside the plugin, for example
+`uv venv "${PLUGIN_ROOT}/.venv"` and `uv pip install --python "${PLUGIN_ROOT}/.venv/bin/python" <package>`,
+and set `"command": "${PLUGIN_ROOT}/.venv/bin/python"` with the package's script
+or `["-m", "<module>"]` as `args`. A virtual environment built from Homebrew
+Python runs under the sandbox.
 
 ### Structured references
 

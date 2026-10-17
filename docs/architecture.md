@@ -5200,7 +5200,11 @@ same. This holds in Chat, Work, and Code.
   under the profile) is refused as well, with the form to declare instead:
   `node` as the command and a script from a package installed inside the
   plugin's own folder (`${PLUGIN_ROOT}/node_modules/...`) as an argument; the
-  profile reads that folder and not a global install. Extension processes have no Linux confinement, so no other host
+  profile reads that folder and not a global install. `uvx`, and `uv` run
+  as `tool` or `run`, are native binaries that fail under the profile for a
+  different reason (they read `uv` beside them through a Homebrew link), so
+  they are refused by name; the working form is a virtual environment inside the
+  plugin with its `.venv/bin/python` as the command. Extension processes have no Linux confinement, so no other host
   starts one in the first place.
 
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with

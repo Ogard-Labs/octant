@@ -685,6 +685,25 @@ function launcherCommandRefusal(serverName: string, command: string): string {
   );
 }
 
+/**
+ * `uvx` and `uv tool run` / `uv run` are native binaries, not scripts: they
+ * fail under the profile because they read `uv` beside them through a link it
+ * does not allow. Matched by name, narrowly; every other binary starts as before.
+ */
+function isSandboxedPythonLauncher(command: string, args: ReadonlyArray<string>): boolean {
+  const name = basename(command);
+  return name === "uvx" || (name === "uv" && (args[0] === "tool" || args[0] === "run"));
+}
+
+function pythonLauncherRefusal(serverName: string, command: string): string {
+  return (
+    `MCP server ${serverName} starts ${basename(command)}, a launcher that the sandbox cannot run, ` +
+    "and it reads only the plugin's own folder. Put the server's package inside the plugin, for example " +
+    '`uv venv "${PLUGIN_ROOT}/.venv"` and `uv pip install --python "${PLUGIN_ROOT}/.venv/bin/python" <package>` ' +
+    'when building it, then set "command" to "${PLUGIN_ROOT}/.venv/bin/python" and "args" to the package\'s script or ["-m", "<module>"].'
+  );
+}
+
 function supervisedStdioProcessPort(input: {
   readonly supervisor: Pick<ExtensionSupervisor, "startInteractive">;
   readonly target: AgentPluginMcpSessionKey;
@@ -704,6 +723,9 @@ function supervisedStdioProcessPort(input: {
         !isAbsolute(pluginData)
       ) {
         throw new Error("MCP stdio sandbox roots are unavailable.");
+      }
+      if (input.platform === "darwin" && isSandboxedPythonLauncher(launch.command, launch.args)) {
+        throw new Error(pythonLauncherRefusal(launch.name, launch.command));
       }
       const insidePlugin = isContainedPath(pluginRoot, launch.command);
       if (
